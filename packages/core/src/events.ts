@@ -23,7 +23,7 @@ export class EventBus {
   lastSeq(): number { return this.db.get<{ s: number }>('SELECT COALESCE(MAX(seq),0) s FROM events WHERE workspace_id = ?', [this.workspaceId])?.s ?? 0; }
 }
 
-export interface Actor { kind: 'human' | 'agent' | 'system'; id: string | null; runId?: string | null }
+import type { Actor } from './api.js';
 export function recordActivity(db: Db, workspaceId: string, actor: Actor, action: string, entityType: string, entityId: string, details: Record<string, unknown> = {}, ticketId: string | null = null): void {
   db.run('INSERT INTO activity (id, workspace_id, actor_kind, actor_id, run_id, action, entity_type, entity_id, ticket_id, details_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [newId(), workspaceId, actor.kind, actor.id, actor.runId ?? null, action, entityType, entityId, ticketId, JSON.stringify(details), nowIso()]);
 }

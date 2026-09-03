@@ -1,0 +1,8 @@
+packages:
+  - packages/*
+  - packages/runtimes/*
+  - packages/channels/*
+  - packages/surfaces/*
+allowBuilds:
+  esbuild: true
+verifyDepsBeforeRun: false

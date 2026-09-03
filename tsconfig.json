@@ -1,0 +1,71 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/shared"
+    },
+    {
+      "path": "./packages/db"
+    },
+    {
+      "path": "./packages/runtime-sdk"
+    },
+    {
+      "path": "./packages/channel-sdk"
+    },
+    {
+      "path": "./packages/surface-sdk"
+    },
+    {
+      "path": "./packages/plugin-sdk"
+    },
+    {
+      "path": "./packages/render"
+    },
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/server"
+    },
+    {
+      "path": "./packages/cli"
+    },
+    {
+      "path": "./packages/tui"
+    },
+    {
+      "path": "./packages/runtimes/claude"
+    },
+    {
+      "path": "./packages/runtimes/codex"
+    },
+    {
+      "path": "./packages/runtimes/opencode"
+    },
+    {
+      "path": "./packages/runtimes/gemini"
+    },
+    {
+      "path": "./packages/channels/web"
+    },
+    {
+      "path": "./packages/channels/cli"
+    },
+    {
+      "path": "./packages/channels/telegram"
+    },
+    {
+      "path": "./packages/surfaces/headless"
+    },
+    {
+      "path": "./packages/surfaces/tmux"
+    },
+    {
+      "path": "./packages/surfaces/herdr"
+    },
+    {
+      "path": "./packages/surfaces/hyprland"
+    }
+  ]
+}

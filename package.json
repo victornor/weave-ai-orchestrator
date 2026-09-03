@@ -1,0 +1,24 @@
+{
+  "name": "openconductor",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.25.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' run build",
+    "typecheck": "tsc -b tsconfig.json",
+    "test": "vitest run",
+    "lint": "node scripts/guard-boundaries.mjs && node scripts/guard-console.mjs",
+    "dev": "pnpm --filter @openconductor/server run dev",
+    "oc": "node packages/cli/dist/bin.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4",
+    "tsx": "^4.20.5",
+    "@types/node": "^24.5.2"
+  }
+}

@@ -1,0 +1,1 @@
+{ "extends": "../../tsconfig.base.json", "compilerOptions": { "rootDir": "src", "outDir": "dist", "tsBuildInfoFile": "dist/.tsbuildinfo" }, "include": ["src"], "references": [{ "path": "../shared" }, { "path": "../surface-sdk" }, { "path": "../surfaces/headless" }, { "path": "../surfaces/tmux" }, { "path": "../surfaces/herdr" }, { "path": "../surfaces/hyprland" }] }

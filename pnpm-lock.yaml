@@ -153,6 +153,30 @@ importers:
         specifier: workspace:*
         version: link:../surface-sdk
 
+  packages/presenter:
+    dependencies:
+      '@openconductor/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@openconductor/surface-headless':
+        specifier: workspace:*
+        version: link:../surfaces/headless
+      '@openconductor/surface-herdr':
+        specifier: workspace:*
+        version: link:../surfaces/herdr
+      '@openconductor/surface-hyprland':
+        specifier: workspace:*
+        version: link:../surfaces/hyprland
+      '@openconductor/surface-sdk':
+        specifier: workspace:*
+        version: link:../surface-sdk
+      '@openconductor/surface-tmux':
+        specifier: workspace:*
+        version: link:../surfaces/tmux
+      eventsource:
+        specifier: ^4.0.0
+        version: 4.1.1
+
   packages/render:
     dependencies:
       '@openconductor/shared':

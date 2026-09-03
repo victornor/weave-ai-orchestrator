@@ -66,6 +66,9 @@
     },
     {
       "path": "./packages/surfaces/hyprland"
+    },
+    {
+      "path": "./packages/presenter"
     }
   ]
 }

@@ -251,9 +251,18 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.18.1
         version: 1.30.0(zod@3.25.76)
+      '@openconductor/channel-cli':
+        specifier: workspace:*
+        version: link:../channels/cli
       '@openconductor/channel-sdk':
         specifier: workspace:*
         version: link:../channel-sdk
+      '@openconductor/channel-telegram':
+        specifier: workspace:*
+        version: link:../channels/telegram
+      '@openconductor/channel-web':
+        specifier: workspace:*
+        version: link:../channels/web
       '@openconductor/core':
         specifier: workspace:*
         version: link:../core
@@ -263,21 +272,42 @@ importers:
       '@openconductor/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk
+      '@openconductor/runtime-claude':
+        specifier: workspace:*
+        version: link:../runtimes/claude
+      '@openconductor/runtime-codex':
+        specifier: workspace:*
+        version: link:../runtimes/codex
+      '@openconductor/runtime-gemini':
+        specifier: workspace:*
+        version: link:../runtimes/gemini
+      '@openconductor/runtime-opencode':
+        specifier: workspace:*
+        version: link:../runtimes/opencode
       '@openconductor/runtime-sdk':
         specifier: workspace:*
         version: link:../runtime-sdk
       '@openconductor/shared':
         specifier: workspace:*
         version: link:../shared
+      '@openconductor/surface-sdk':
+        specifier: workspace:*
+        version: link:../surface-sdk
       hono:
         specifier: ^4.9.6
         version: 4.13.5
+      jose:
+        specifier: ^6.0.13
+        version: 6.2.10
       pino:
         specifier: ^9.9.0
         version: 9.14.0
       selfsigned:
         specifier: ^2.4.1
         version: 2.4.1
+      ulid:
+        specifier: ^3.0.1
+        version: 3.0.2
       ws:
         specifier: ^8.18.3
         version: 8.21.3
@@ -287,6 +317,9 @@ importers:
       zod:
         specifier: ^3.25.76
         version: 3.25.76
+      zod-to-json-schema:
+        specifier: ^3.24.5
+        version: 3.25.2(zod@3.25.76)
     devDependencies:
       '@types/ws':
         specifier: ^8.18.1

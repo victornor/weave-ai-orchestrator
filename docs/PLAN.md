@@ -133,7 +133,7 @@ OpenConductor turns a directory into a **workspace**: a virtual business made of
 | Monorepo | pnpm workspaces + turbo | Standard. |
 | HTTP | Hono | Small, typed, runs on Node; easy to embed an MCP transport. Two listeners: public (auth required, TLS-terminated by the daemon or a proxy) and loopback/socket (run tokens, presenter on the same host). |
 | MCP | `@modelcontextprotocol/sdk` (Streamable HTTP) | All four CLIs support MCP over HTTP. |
-| DB | SQLite via `better-sqlite3` + Drizzle ORM; WAL mode; one file per workspace at `.openconductor/db.sqlite` | Local-first, zero-config, single writer (the daemon). Postgres is explicitly out of scope for v1; keep SQL portable (no SQLite-only JSON tricks in business logic). |
+| DB | SQLite via Node's built-in `node:sqlite` with hand-written SQL migrations (ADR 0001); WAL mode; one file per workspace at `.openconductor/db.sqlite` | Local-first, zero-config, no native build, single writer (the daemon). Postgres is out of scope for v1. |
 | Validation | Zod, single source of truth; JSON Schemas generated for config files (draft-07) with a CI drift check | Synapse pattern. |
 | Process control | `child_process.spawn` with `detached: true` process groups, kill by group | Needed to reap CLI subprocess trees. |
 | Logging | pino, closed `domain` enum, `trace_id` in body | Synapse pattern; guard script bans bare `console.*` in `packages/*/src`. |

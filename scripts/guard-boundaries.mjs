@@ -2,7 +2,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 const rules = [
-  { pkg: 'packages/core', forbid: ['@openconductor/server', '@openconductor/cli', '@openconductor/runtime-', '@openconductor/channel-', '@openconductor/surface-', '@openconductor/tui', '@openconductor/ui'] },
+  { pkg: 'packages/core', forbid: ['@openconductor/server', '@openconductor/cli', '@openconductor/runtime-claude', '@openconductor/runtime-codex', '@openconductor/runtime-opencode', '@openconductor/runtime-gemini', '@openconductor/channel-web', '@openconductor/channel-cli', '@openconductor/channel-telegram', '@openconductor/surface-headless', '@openconductor/surface-tmux', '@openconductor/surface-herdr', '@openconductor/surface-hyprland', '@openconductor/tui', '@openconductor/ui', '@openconductor/presenter'] },
   { pkg: 'packages/shared', forbid: ['@openconductor/'] },
   { pkg: 'packages/runtime-sdk', forbid: ['@openconductor/core', '@openconductor/db', '@openconductor/server'] },
   { pkg: 'packages/channel-sdk', forbid: ['@openconductor/core', '@openconductor/db', '@openconductor/server'] },

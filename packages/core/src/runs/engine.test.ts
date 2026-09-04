@@ -156,7 +156,7 @@ describe('run engine', () => {
   });
 
   it('puts the agent in error after a non-retryable failure', async () => {
-    runtime.queue.push({ error: { code: 'auth', family: 'auth', message: 'not logged in' }, exitCode: 1 });
+    runtime.queue.push({ error: { code: 'refused', family: 'model_refusal', message: 'refused' }, exitCode: 1 });
     h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
     const run = await runOnce();
     expect(run.status).toBe('failed');

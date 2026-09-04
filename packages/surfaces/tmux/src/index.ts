@@ -44,6 +44,8 @@ export function createTmuxSurface(): SurfaceAdapter {
         if (/duplicate session/.test(created.stderr)) return session;
         throw new Error(`tmux: could not create session ${session}: ${created.stderr.trim()}`);
       }
+      // Keep panes open after their command exits so a failed `oc attach` stays readable instead of collapsing the session.
+      await tmux(['set-option', '-t', session, 'remain-on-exit', 'on']);
       const windows = await listWindows(session);
       const first = windows[0];
       if (first) await tmux(setAgentOptionArgs(first.windowId, CONDUCTOR_AGENT_ID));

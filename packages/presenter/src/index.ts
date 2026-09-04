@@ -31,6 +31,8 @@ export interface StartPresenterOptions {
   /** Override the surface from the workspace config. */
   surface?: string;
   presenterId?: string;
+  /** How to invoke the oc CLI on this machine (default ['oc']); the CLI passes its own executable so source checkouts work. */
+  ocCommand?: string[];
   log: LogFn;
   keepClosedForMs?: number;
   sweepIntervalMs?: number;
@@ -63,6 +65,7 @@ export function pickSurfaceKind(config: DesiredPresentation['config'], override?
 }
 
 export interface BuildContextOptions {
+  ocCommand?: string[];
   workspaceId: string;
   apiUrl: string;
   token: string;
@@ -79,13 +82,14 @@ export function buildSurfaceContext(opts: BuildContextOptions): SurfaceContext &
   const configured = typeof opts.block.terminal === 'string' ? opts.block.terminal : null;
   const terminal = opts.terminal !== undefined ? opts.terminal : resolveTerminal({ configured });
   const env = { OC_API_URL: opts.apiUrl, OC_TOKEN: opts.token, OC_WORKSPACE: opts.workspaceId };
-  const base = (agentId: string): string[] => ['oc', 'attach', agentId, '--workspace', opts.workspaceId, '--url', opts.apiUrl];
+  const oc = opts.ocCommand && opts.ocCommand.length ? opts.ocCommand : ['oc'];
+  const base = (agentId: string): string[] => [...oc, 'attach', agentId, '--workspace', opts.workspaceId, '--url', opts.apiUrl];
   return {
     workspaceId: opts.workspaceId,
     daemonUrl: opts.apiUrl,
     env,
     attachCommand: (agentId: string) => base(agentId),
-    chatCommand: () => ['oc', 'chat', '--workspace', opts.workspaceId, '--url', opts.apiUrl],
+    chatCommand: () => [...oc, 'chat', '--workspace', opts.workspaceId, '--url', opts.apiUrl],
     terminal: () => terminal,
     log: opts.log,
   };
@@ -108,7 +112,7 @@ export async function startPresenter(opts: StartPresenterOptions): Promise<Runni
   const store = opts.store ?? createFileHandleStore(defaultHandleStorePath(opts.workspaceId, presenterId));
 
   const block: PresentationBlockView = desired.config.workers ?? desired.config.conductor ?? {};
-  const ctx = buildSurfaceContext({ workspaceId: opts.workspaceId, apiUrl: opts.apiUrl, token: opts.token, block, log });
+  const ctx = buildSurfaceContext({ workspaceId: opts.workspaceId, apiUrl: opts.apiUrl, token: opts.token, block, log, ocCommand: opts.ocCommand });
   if (!ctx.terminal() && (surfaceKind === 'hyprland' || block.terminal)) {
     log('warn', 'no terminal emulator resolved; set presentation.<block>.terminal, $TERMINAL, or install xdg-terminal-exec', { surface: surfaceKind });
   }
@@ -130,7 +134,8 @@ export async function startPresenter(opts: StartPresenterOptions): Promise<Runni
     onChange: persist,
   });
 
-  await reconciler.restore(await store.load());
+  const liveAgentIds = new Set<string>([...desired.workers.filter((w) => w.status !== 'retired').map((w) => w.agentId), ...(desired.conductor ? [desired.conductor.agentId] : [])]);
+  await reconciler.restore((await store.load()).filter((h) => liveAgentIds.has(h.agentId)));
   await reconciler.sync(desired);
 
   const onEvent = (ev: WorkspaceEvent): void => {

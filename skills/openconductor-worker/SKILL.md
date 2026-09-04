@@ -26,7 +26,7 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 | `merging` | The merge procedure (`references/delivery.md`). | `oc_ticket_merge_done` |
 | `todo` (`task`) | Implement, test, deliver. | `in_review` |
 | `todo` (`scout`) | Investigate; write the report document. Load `openconductor-scout`. | `done` |
-| `todo` (`question`) | Answer as a ticket comment with evidence. | `done` |
+| `todo` (`question`) | Answer as a ticket comment with evidence, then `oc_report` with `state: done` — that report closes a question ticket for you. | `done` |
 | `blocked` | Only if the blocker cleared. Otherwise idle. | the status the work resumes in |
 
 For `change` tickets also load `openconductor-openspec` — it holds the propose/apply mapping and what never to do.

@@ -120,9 +120,13 @@ export function register(program: Command): void {
       }
       await mod.startPresenter({
         client,
+        apiUrl: client.baseUrl,
+        token: client.token ?? '',
         workspaceId: client.workspace,
         surface: typeof opts['surface'] === 'string' ? opts['surface'] : undefined,
+        once: opts['once'] === true,
         options: { once: opts['once'] === true },
+        log: (level: string, msg: string, data?: Record<string, unknown>) => { if (level !== 'debug') process.stderr.write(`[presenter] ${msg}${data ? ' ' + JSON.stringify(data) : ''}\n`); },
       });
     }));
 }

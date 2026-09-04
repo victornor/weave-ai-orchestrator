@@ -21,7 +21,8 @@
     "zod": "^3.25.76",
     "chalk": "^5.6.2",
     "open": "^10.2.0",
-    "@openconductor/tui": "workspace:*"
+    "@openconductor/tui": "workspace:*",
+    "@openconductor/presenter": "workspace:*"
   },
   "devDependencies": {},
   "bin": {

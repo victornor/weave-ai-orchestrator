@@ -618,6 +618,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         return updated;
       });
       propagateTerminal(next, actor);
+      if (t.projectId) { const pid = t.projectId; setTimeout(() => { deps().specs.index(pid).catch((e) => log.debug({ err: String(e) }, 'spec reindex after merge failed')); }, 100).unref(); }
       log.info({ ticketId: t.id, archivedAs, skipped }, 'ticket merged');
       return next;
     },

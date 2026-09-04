@@ -24,7 +24,7 @@ export interface ProjectRow { id: string; clonePath: string; defaultBranch: stri
 /** The project row read straight from the db (camelCased, `policies_json` decoded). */
 export function projectRow(db: Db, projectId: string | null | undefined): ProjectRow | undefined {
   if (!projectId) return undefined;
-  return db.get<ProjectRow>('SELECT id, clone_path, default_branch, openspec_enabled, policies_json FROM projects WHERE id = ?', [projectId]);
+  return db.get<ProjectRow>('SELECT id, clone_path, default_branch, openspec_enabled, policies_json FROM projects WHERE id = ? OR slug = ?', [projectId, projectId]);
 }
 
 /** The live worker's worktree for a ticket, when it exists on disk. */

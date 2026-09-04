@@ -166,6 +166,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       const fastForwarded = merged.ok && before.stdout.trim() !== head;
       ctx.db.update('projects', project.id, { lastFetchedAt: nowIso(), updatedAt: nowIso() });
       if (!merged.ok) log.warn({ project: project.slug, stderr: merged.stderr.trim().slice(0, 200) }, 'primary clone could not be fast-forwarded');
+      if (fastForwarded) { try { await deps().specs.index(project.id); } catch (e) { log.debug({ err: String(e) }, 'spec reindex after fetch failed'); } }
       return { head, fastForwarded };
     },
 

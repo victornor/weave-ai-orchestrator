@@ -1,0 +1,188 @@
+/**
+ * In-memory doubles for the app-level tests: a real sqlite db + EventBus (so SSE, channels and
+ * push exercise real SQL) with hand-written service fakes in front of them.
+ */
+import { Db } from '@openconductor/db';
+import { EventBus, createRegistries, getLogger, initLogger } from '@openconductor/core';
+import type { Actor, CoreServices, WorkspaceContext } from '@openconductor/core';
+import type { AuthService } from '@openconductor/core';
+import {
+  DaemonConfigSchema, OcError, WorkspaceConfigSchema,
+  type Briefing, type Decision, type Ticket, type TicketComment, type Wakeup,
+} from '@openconductor/shared';
+import type { AppDeps, WorkspaceRuntime } from '../src/types.js';
+
+initLogger(process.env.OC_LOG_LEVEL ?? 'silent');
+
+export interface Call { service: string; method: string; args: unknown[] }
+
+/** Any service method that a test has not stubbed fails loudly instead of returning undefined. */
+function unimplemented<T extends object>(service: string, calls: Call[], impl: Partial<T> = {}): T {
+  return new Proxy({} as T, {
+    get(_t, prop: string | symbol) {
+      if (typeof prop !== 'string') return undefined;
+      if (prop in impl) {
+        const fn = (impl as Record<string, unknown>)[prop];
+        if (typeof fn !== 'function') return fn;
+        return (...args: unknown[]) => { calls.push({ service, method: prop, args }); return (fn as (...a: unknown[]) => unknown)(...args); };
+      }
+      return (...args: unknown[]) => { calls.push({ service, method: prop, args }); throw new OcError('internal', `${service}.${prop} is not stubbed in this test`); };
+    },
+  });
+}
+
+export function ticket(over: Partial<Ticket> = {}): Ticket {
+  return {
+    id: 'tk_1', workspaceId: 'ws1', projectId: 'proj1', number: 42, identifier: 'ACME-42', kind: 'change',
+    title: 'Add dark mode', description: '', status: 'in_progress', priority: 'medium', autoMerge: false,
+    assigneeRoleId: null, workerId: null, assigneeHuman: false, parentId: null, createdByKind: 'human', createdById: null,
+    originKind: null, originFingerprint: null, checkoutRunId: null, executionRunId: null, openspecChangeName: null,
+    openspecState: null, delivery: null, unblock: null, monitorNextCheckAt: null, blockedTransitionAt: null,
+    startedAt: null, completedAt: null, cancelledAt: null, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
+    ...over,
+  };
+}
+
+export function decision(over: Partial<Decision> = {}): Decision {
+  return {
+    id: 'dec_1', workspaceId: 'ws1', ticketId: 'tk_1', kind: 'question', owner: 'human', askedByAgentId: null, askedInRunId: null,
+    title: 'CSS variables or Tailwind?', context: 'Dark mode needs a token strategy.', options: [{ key: 'vars', label: 'CSS variables', recommended: true }, { key: 'tw', label: 'Tailwind' }],
+    allowFreeText: true, recommendation: 'CSS variables', status: 'open', answerKey: null, answerText: null, answeredByKind: null,
+    answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null, createdAt: '2026-09-01T00:00:00.000Z',
+    ...over,
+  };
+}
+
+export function wakeup(over: Partial<Wakeup> = {}): Wakeup {
+  return {
+    id: 'wk_1', workspaceId: 'ws1', agentId: 'ag_1', source: 'human_message', reason: 'Add dark mode', payload: { threadId: 'th_1' },
+    idempotencyKey: null, status: 'claimed', coalescedIntoId: null, skipReason: null, runId: 'run_1', requestedByKind: 'human',
+    requestedById: null, notBefore: null, createdAt: '2026-09-01T00:00:00.000Z', claimedAt: null, finishedAt: null,
+    ...over,
+  };
+}
+
+export interface Harness {
+  runtime: WorkspaceRuntime;
+  deps: AppDeps;
+  db: Db;
+  bus: EventBus;
+  calls: Call[];
+  tickets: Map<string, Ticket>;
+  comments: TicketComment[];
+  tokens: Map<string, { sessionId: string; operatorId: string; kind: 'web' | 'cli' | 'presenter' }>;
+  /** Live method tables behind the service proxies: mutate to stub a method mid-test. */
+  impls: Record<string, Record<string, unknown>>;
+  close(): void;
+}
+
+export function makeHarness(options: { listener?: 'public' | 'loopback'; workspaceId?: string; hasOperator?: boolean } = {}): Harness {
+  const workspaceId = options.workspaceId ?? 'ws1';
+  const calls: Call[] = [];
+  const db = new Db(':memory:');
+  db.migrate();
+  db.run('INSERT INTO workspaces (id, slug, name, ticket_prefix, status, root_path, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
+    [workspaceId, workspaceId, 'Test workspace', 'ACME', 'active', '/tmp/ws', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z']);
+  const bus = new EventBus(db, workspaceId);
+
+  const tickets = new Map<string, Ticket>([['tk_1', ticket()]]);
+  const comments: TicketComment[] = [];
+  const decisions = new Map<string, Decision>([['dec_1', decision()]]);
+
+  const getTicket = (id: string): Ticket => {
+    const found = [...tickets.values()].find((t) => t.id === id || t.identifier === id);
+    if (!found) throw new OcError('not_found', `ticket ${id} not found`);
+    return found;
+  };
+
+  const impls: Record<string, Record<string, unknown>> = {};
+  const impl = <T extends object>(name: string, methods: Partial<T>): T => { impls[name] = methods as Record<string, unknown>; return unimplemented<T>(name, calls, methods); };
+
+  const services = {
+    tickets: impl('tickets', {
+      get: getTicket,
+      list: () => ({ items: [...tickets.values()], total: tickets.size }),
+      blockers: () => [], children: () => [], workProducts: () => [],
+      comments: () => comments,
+      create: (_actor: Actor, input: { title: string; kind: Ticket['kind']; projectId?: string | null }) => {
+        const created = ticket({ id: `tk_${tickets.size + 1}`, identifier: `ACME-${43 + tickets.size}`, title: input.title, kind: input.kind, projectId: input.projectId ?? null, status: 'backlog' });
+        tickets.set(created.id, created);
+        bus.emit('ticket.created', 'ticket', created.id, created);
+        return created;
+      },
+      comment: (actor: Actor, id: string, body: string, kind = 'comment') => {
+        const c: TicketComment = { id: `c_${comments.length + 1}`, ticketId: getTicket(id).id, authorKind: actor.kind, authorId: actor.id, runId: actor.runId ?? null, body, kind: kind as TicketComment['kind'], sourceTrust: 'agent', createdAt: new Date().toISOString() };
+        comments.push(c);
+        bus.emit('ticket.comment', 'ticket', c.ticketId, c);
+        return c;
+      },
+      transition: (_actor: Actor, id: string, input: { to: Ticket['status'] }) => {
+        const next = { ...getTicket(id), status: input.to };
+        tickets.set(next.id, next);
+        return next;
+      },
+    }),
+    decisions: impl('decisions', {
+      get: (id: string) => { const d = decisions.get(id); if (!d) throw new OcError('not_found', `decision ${id} not found`); return d; },
+      list: () => [...decisions.values()],
+      create: (_actor: Actor, input: { title: string; kind: Decision['kind']; owner?: Decision['owner'] }) => {
+        const d = decision({ id: `dec_${decisions.size + 1}`, title: input.title, kind: input.kind, owner: input.owner ?? 'human' });
+        decisions.set(d.id, d);
+        bus.emit('decision.created', 'decision', d.id, d);
+        return d;
+      },
+      answer: (_actor: Actor, id: string, answer: { key?: string; text?: string }) => {
+        const d = { ...decisions.get(id)!, status: 'answered' as const, answerKey: answer.key ?? null, answerText: answer.text ?? null };
+        decisions.set(id, d);
+        return d;
+      },
+    }),
+    wake: impl('wake', { listForAgent: () => [wakeup()] }),
+    runs: impl('runs', { get: () => ({ wakeupIds: ['wk_1'] }), list: () => ({ items: [], total: 0 }), events: () => [], onEvent: () => () => undefined }),
+    briefing: impl('briefing', { snapshot: (): Briefing => ({ needsYou: [], landed: [], underway: [], queued: [], warnings: [], generatedAt: '2026-09-01T00:00:00.000Z' }) }),
+    workers: impl('workers', { list: () => [], conductor: () => ({ id: 'ag_conductor', kind: 'conductor' }) }),
+    dispatcher: impl('dispatcher', { start: () => undefined, stop: async () => undefined, running: () => 0 }),
+    supervisor: impl('supervisor', { start: () => undefined, stop: () => undefined }),
+    projects: impl('projects', { list: () => [] }),
+    roles: impl('roles', { list: () => [] }),
+    knowledge: impl('knowledge', { lint: () => [] }),
+    specs: impl('specs', {}),
+    openspec: impl('openspec', { statusFor: async () => null }),
+    usage: impl('usage', {}),
+    threads: impl('threads', { list: () => [], primaryThread: () => null }),
+  } as unknown as CoreServices;
+
+  const ctx = {
+    workspaceId,
+    config: WorkspaceConfigSchema.parse({ version: 1, id: workspaceId, name: 'Test workspace', ticketPrefix: 'ACME' }),
+    daemon: DaemonConfigSchema.parse({}),
+    paths: { root: '/tmp/ws', state: '/tmp/ws/.openconductor', db: ':memory:', runs: '', conductor: '', roles: '', workers: '', archive: '', projects: '', knowledge: '', runtimesHome: '', wtConfig: '' },
+    db, events: bus, registries: createRegistries(),
+    log: (domain: Parameters<typeof getLogger>[0]) => getLogger(domain),
+    loopbackUrl: 'http://127.0.0.1:0', skillsDir: '/tmp/skills', templatesDir: '/tmp/templates',
+    saveConfig: async () => undefined,
+  } as unknown as WorkspaceContext;
+
+  const runtime: WorkspaceRuntime = { id: workspaceId, ctx, services, channels: null };
+
+  const tokens = new Map<string, { sessionId: string; operatorId: string; kind: 'web' | 'cli' | 'presenter' }>([
+    ['sess-token', { sessionId: 'sess1', operatorId: 'op1', kind: 'cli' }],
+  ]);
+  const auth = unimplemented<AuthService>('auth', calls, {
+    hasOperator: () => options.hasOperator ?? true,
+    verify: (token: string) => tokens.get(token) ?? null,
+    totpEnabled: () => false,
+    sessions: () => [...tokens.values()].map((t) => ({ id: t.sessionId, kind: t.kind, deviceName: null, createdAt: '', lastSeenAt: '', expiresAt: '', ip: null, revokedAt: null })),
+    logout: () => undefined,
+  });
+
+  const deps: AppDeps = {
+    auth, daemon: DaemonConfigSchema.parse({}), workspaces: new Map([[workspaceId, runtime]]),
+    registries: createRegistries(), listener: options.listener ?? 'public',
+    publicUrl: 'http://127.0.0.1:7433', version: '0.1.0-test', uiDir: null,
+  };
+
+  return { runtime, deps, db, bus, calls, tickets, comments, tokens, impls, close: () => db.close() };
+}
+
+export const authed = (extra: Record<string, string> = {}): Record<string, string> => ({ authorization: 'Bearer sess-token', ...extra });

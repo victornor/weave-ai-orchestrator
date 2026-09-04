@@ -1,0 +1,30 @@
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { ProjectConfigSchema } from '@openconductor/shared';
+import type { AppEnv } from '../types.js';
+import { body } from '../http.js';
+
+const AddSchema = z.object({
+  url: z.string().min(1), id: z.string().optional(), name: z.string().optional(), runtime: z.string().optional(),
+  defaultBranch: z.string().optional(), maxWorkers: z.number().int().min(1).max(32).optional(), setupCommand: z.string().optional(),
+});
+
+export function projectRoutes(): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+  app.get('/', (c) => c.json(c.get('ws').services.projects.list()));
+  app.get('/:id', (c) => c.json(c.get('ws').services.projects.get(c.req.param('id'))));
+  app.post('/', async (c) => {
+    const input = await body(c, AddSchema);
+    const cfg = ProjectConfigSchema.parse({ ...input, id: input.id ?? slugFromUrl(input.url) });
+    return c.json(await c.get('ws').services.projects.add(c.get('actor'), cfg), 201);
+  });
+  app.patch('/:id', async (c) => c.json(await c.get('ws').services.projects.update(c.get('actor'), c.req.param('id'), await body(c, ProjectConfigSchema.partial()))));
+  app.delete('/:id', async (c) => { await c.get('ws').services.projects.remove(c.get('actor'), c.req.param('id')); return c.json({ ok: true }); });
+  app.post('/:id/fetch', async (c) => c.json(await c.get('ws').services.projects.fetch(c.req.param('id'))));
+  return app;
+}
+
+function slugFromUrl(url: string): string {
+  const tail = url.replace(/\.git$/, '').split(/[/:]/).pop() ?? 'project';
+  return tail.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '') || 'project';
+}

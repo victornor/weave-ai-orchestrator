@@ -8,6 +8,12 @@ import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { checkTransition, openspecChangeName, type GuardFacts } from './guards.js';
 import { tx } from './tx.js';
+import { landDelivery, type LandResult } from './land.js';
+
+function ticketBranchFor(t: { identifier: string; title: string }): string {
+  const slug = t.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+  return `oc/${t.identifier.toLowerCase()}-${slug}`;
+}
 
 interface ProjectRow { id: string; slug: string; clonePath: string; openspecEnabled: number; policies: Record<string, unknown> | null }
 
@@ -563,6 +569,15 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     async mergeDone(actor, id, info) {
       const t = get(id);
       if (t.status !== 'merging') throw new OcError('wrong_status', `${t.identifier} is ${t.status}, not merging`);
+      // Land the delivery into the primary clone first (ff for local-branch; verify containment for pr). Not landed → the worker keeps the ticket in merging.
+      let landInfo: LandResult | null = null;
+      if (t.projectId) {
+        const project = deps().projects.get(t.projectId);
+        const wt = db.get<{ branch: string }>('SELECT branch FROM worktrees WHERE ticket_id = ? AND status != ? ORDER BY created_at DESC LIMIT 1', [t.id, 'removed']);
+        const branch = wt?.branch ?? ticketBranchFor(t);
+        landInfo = await landDelivery(ctx.config, project, t, branch);
+        recordActivity(db, ws, actor, 'ticket.delivery_landed', 'ticket', t.id, { ...landInfo }, t.id);
+      }
       let archivedAs: string | null = null;
       let skipped: string | null = null;
       try {
@@ -589,7 +604,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
             metadataJson: { method: info.method ?? null }, createdAt: nowIso(), updatedAt: nowIso(),
           });
         }
-        const delivery = { ...(t.delivery ?? {}), merged: true, mergeCommit: info.mergeCommit ?? null, method: info.method ?? null, archivedAs };
+        const delivery = { ...(t.delivery ?? {}), merged: true, mergeCommit: info.mergeCommit ?? landInfo?.head ?? null, method: info.method ?? landInfo?.mode ?? null, archivedAs, landed: landInfo?.detail ?? null };
         const updated = touch(t.id, { status: 'done', completedAt: nowIso(), deliveryJson: delivery, unblockJson: null });
         recordActivity(db, ws, actor, 'ticket.merged', 'ticket', t.id, { mergeCommit: info.mergeCommit ?? null, archivedAs, skipped }, t.id);
         ctx.events.emit('ticket.merged', 'ticket', t.id, { ticketId: t.id, mergeCommit: info.mergeCommit ?? null, archivedAs, skipped });

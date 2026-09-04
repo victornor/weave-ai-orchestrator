@@ -22,7 +22,8 @@ export interface TicketsService {
   children(id: string): S.Ticket[];
   checkout(actor: Actor, id: string, runId: string, agentId: string): S.Ticket;
   release(actor: Actor, id: string, runId: string, note?: string): S.Ticket;
-  transition(actor: Actor, id: string, input: TransitionInput): S.Ticket;
+  /** Async: the `proposed` gate shells out to the OpenSpec CLI (PLAN §12.2). */
+  transition(actor: Actor, id: string, input: TransitionInput): Promise<S.Ticket>;
   cancel(actor: Actor, id: string, reason: string): S.Ticket;
   comment(actor: Actor, id: string, body: string, kind?: S.CommentKind, sourceTrust?: S.SourceTrust): S.TicketComment;
   comments(id: string, after?: string): S.TicketComment[];
@@ -31,7 +32,8 @@ export interface TicketsService {
   documentRevisions(id: string, key: string): Array<{ revision: number; authorKind: string; createdAt: string }>;
   addWorkProduct(actor: Actor, id: string, wp: { type: S.WorkProductType; url?: string; title?: string; state?: string; provider?: string; externalId?: string; isPrimary?: boolean; metadata?: Record<string, unknown> }): { id: string };
   workProducts(id: string): Array<Record<string, unknown>>;
-  mergeDone(actor: Actor, id: string, info: { mergeCommit?: string; method?: string }): S.Ticket;
+  /** Async: archives the OpenSpec change after the merge is verified (PLAN §12.2). */
+  mergeDone(actor: Actor, id: string, info: { mergeCommit?: string; method?: string }): Promise<S.Ticket>;
   /** Liveness scan helper: tickets in active statuses without an action path. */
   livenessViolations(): S.Ticket[];
   nextIdentifier(): string;
@@ -43,10 +45,11 @@ export interface DecisionsService {
   create(actor: Actor, input: DecisionCreateInput): S.Decision;
   get(id: string): S.Decision;
   list(filter?: { status?: S.DecisionStatus[]; owner?: S.DecisionOwner; ticketId?: string; limit?: number }): S.Decision[];
-  answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean }): S.Decision;
+  /** Async: side effects drive ticket transitions and role activation. */
+  answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean }): Promise<S.Decision>;
   withdraw(actor: Actor, id: string, reason: string): S.Decision;
   supersedeForTarget(actor: Actor, ticketId: string, correlationKey: string): number;
-  expireDue(): S.Decision[];
+  expireDue(): Promise<S.Decision[]>;
 }
 
 // ---------- projects / roles / agents ----------

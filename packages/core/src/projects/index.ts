@@ -130,6 +130,15 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
           description: `Investigate the \`${cfg.id}\` repository and write the project knowledge base: overview, stack and commands (run, test, lint, build), conventions the repo docs do not state, current focus, landmines.\n\n## Acceptance criteria\n- \`knowledge/projects/${cfg.id}/PROJECT.md\` filled in through \`ac_knowledge_note\`\n- a \`report\` document on this ticket summarising what you found`,
           priority: 'medium', originKind: 'project_describe', originFingerprint: `project_describe:${cfg.id}`,
         });
+        // A new project is news the conductor must act on now (hire a role, assign the scout), not at the next digest.
+        try {
+          const conductor = deps().workers.conductor();
+          deps().wake.enqueue(conductor.id, {
+            source: 'system', reason: `project ${cfg.id} was added; its scout ticket is unassigned — hire a role for it or assign one`,
+            payload: { kind: 'project_added', projectId: project.id, projectSlug: project.slug },
+            idempotencyKey: `project_added:${project.id}`, requestedBy: { kind: 'system', id: null },
+          });
+        } catch (e) { log.debug({ err: String(e) }, 'conductor wake after project add skipped'); }
       } catch (e) { log.warn({ err: String(e), project: cfg.id }, 'could not create the project description ticket'); }
 
       recordActivity(ctx.db, ctx.workspaceId, actor, 'project.add', 'project', id, { slug: cfg.id, url: cfg.url });

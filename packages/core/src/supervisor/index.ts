@@ -22,7 +22,7 @@ const RETENTION_EVERY_MS = DAY_MS;
 
 const SYSTEM: Actor = { kind: 'system', id: null };
 
-const DIGEST_EVENT_TYPES = new Set(['ticket.status', 'ticket.merged', 'decision.created', 'decision.expired', 'worker.stalled', 'worker.retired', 'run.finished']);
+const DIGEST_EVENT_TYPES = new Set(['ticket.created', 'project.added', 'ticket.status', 'ticket.merged', 'decision.created', 'decision.expired', 'worker.stalled', 'worker.retired', 'run.finished']);
 
 function processAlive(pid: number | null): boolean {
   if (!pid) return false;
@@ -205,6 +205,28 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     }
   }
 
+  /**
+   * A workspace whose conductor has never taken a turn but already has unassigned open tickets
+   * (projects added before the wake-on-add existed, or a restored export) gets one nudge per boot.
+   */
+  function nudgeIdleConductor(): void {
+    let conductor: Agent;
+    try { conductor = deps().workers.conductor(); } catch { return; }
+    const turns = ctx.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM runs WHERE agent_id = ?', [conductor.id])?.n ?? 0;
+    if (turns > 0) return;
+    const waiting = ctx.db.all<{ identifier: string }>(
+      "SELECT identifier FROM tickets WHERE workspace_id = ? AND status IN ('backlog','todo') AND assignee_role_id IS NULL AND worker_id IS NULL ORDER BY created_at LIMIT 10",
+      [ctx.workspaceId],
+    );
+    if (!waiting.length) return;
+    deps().wake.enqueue(conductor.id, {
+      source: 'system',
+      reason: `${waiting.length} open ticket(s) have nobody assigned (${waiting.map((t) => t.identifier).join(', ')}); hire roles or assign them`,
+      payload: { kind: 'unassigned_tickets', tickets: waiting.map((t) => t.identifier) },
+      idempotencyKey: `unassigned_nudge:${new Date().toISOString().slice(0, 10)}`, requestedBy: { kind: 'system', id: null },
+    });
+  }
+
   function conductorDigest(): void {
     const interval = (ctx.config.defaults.conductorDigestIntervalSec ?? 120) * 1000;
     if (Date.now() - lastDigestAt < interval) return;
@@ -228,6 +250,8 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         const status = String(p.status ?? (p.ticket as { status?: string } | undefined)?.status ?? '');
         return !ROUTINE_TICKET_STATUSES.has(status);
       }
+      // Tickets the conductor filed itself are not news; anything a human or the system created is.
+      if (e.type === 'ticket.created') return String(p.createdByKind ?? (p.ticket as { createdByKind?: string } | undefined)?.createdByKind ?? 'human') !== 'agent';
       // Decisions the conductor itself asked the human are not news to it either.
       if (e.type === 'decision.created') return String(p.owner ?? (p.decision as { owner?: string } | undefined)?.owner ?? '') !== 'human' || p.askedInRunId == null;
       return true;
@@ -407,7 +431,11 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       if (ticking) return;
       ticking = true;
       try {
-        if (!bootRecovered) { bootRecovered = true; await bootRecovery().catch((e) => log.error({ err: String(e) }, 'boot recovery failed')); }
+        if (!bootRecovered) {
+          bootRecovered = true;
+          await bootRecovery().catch((e) => log.error({ err: String(e) }, 'boot recovery failed'));
+          try { nudgeIdleConductor(); } catch (e) { log.warn({ err: String(e) }, 'idle conductor nudge failed'); }
+        }
         await watchdog().catch((e) => log.error({ err: String(e) }, 'watchdog failed'));
         await spawnPending().catch((e) => log.error({ err: String(e) }, 'spawn pass failed'));
         { const sweep = deps().tickets.autoMergeSweep; if (typeof sweep === 'function') await sweep.call(deps().tickets).catch((e: unknown) => log.error({ err: String(e) }, 'auto-merge sweep failed')); }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearch } from '@tanstack/react-router';
 import type { Ticket, TicketStatus } from '@agent-conductor/shared';
 import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
@@ -26,6 +26,8 @@ export function BoardRoute(): React.ReactElement {
   const search = useSearch({ strict: false }) as Record<string, string | undefined>;
   const [view, setView] = useState<View>('kanban');
   const [project, setProject] = useState<string | undefined>(search['project']);
+  // The sidebar links to /board?project=…; a second click on another project must re-filter, not be ignored.
+  useEffect(() => { setProject(search['project']); }, [search['project']]);
   const [role, setRole] = useState<string | undefined>();
   const [kind, setKind] = useState<string | undefined>();
   const [priority, setPriority] = useState<string | undefined>();

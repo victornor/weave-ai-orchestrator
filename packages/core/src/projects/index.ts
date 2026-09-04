@@ -69,7 +69,15 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       else {
         const commit = await git(['-c', 'user.name=AgentConductor', '-c', 'user.email=agent-conductor@localhost', 'commit', '-q', '-m', 'chore: adopt OpenSpec'], project.clonePath, 30_000);
         if (!commit.ok && !/nothing to commit/.test(commit.stderr + commit.stdout)) log.warn({ project: project.slug, stderr: commit.stderr.slice(0, 200) }, 'could not commit the OpenSpec init');
-        else if (commit.ok) { const push = await git(['push'], project.clonePath, 120_000); if (!push.ok) log.info({ project: project.slug }, 'OpenSpec init committed locally (push skipped or refused)'); }
+        else if (commit.ok) {
+          const push = await git(['push'], project.clonePath, 120_000);
+          if (!push.ok) {
+            // Never leave the primary clone ahead of origin (fetch could no longer fast-forward): undo the
+            // commit, keep the files, and let the human commit the scaffold through their own flow.
+            await git(['reset', '-q', '--mixed', 'HEAD~1'], project.clonePath, 30_000);
+            log.warn({ project: project.slug, stderr: push.stderr.slice(0, 200) }, 'OpenSpec init could not be pushed; left uncommitted in the primary clone — commit `openspec/` (and the tool dirs) to the default branch yourself');
+          }
+        }
       }
     }
   }

@@ -1,7 +1,9 @@
 /** Turns global flags + environment + contexts file into a ready `ApiClient`. */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { OC_ENV } from '@openconductor/shared';
 import { ApiClient, ApiError } from './api.js';
-import { currentContext, resolveWorkspaceId, DEFAULT_URL, type ContextEntry } from './contexts.js';
+import { configHome, currentContext, resolveWorkspaceId, DEFAULT_URL, type ContextEntry } from './contexts.js';
 import { applyCertPin } from './tls.js';
 
 export interface GlobalOptions {
@@ -48,7 +50,7 @@ export async function resolveSession(options: GlobalOptions, resolveOptions: Res
     const ctx = resolveOptions.anonymous ? { name: null, entry: null } : currentContext(options.context ?? null);
     contextName = ctx.name;
     entry = ctx.entry;
-    url = entry?.url ?? process.env[OC_ENV.API_URL] ?? DEFAULT_URL;
+    url = entry?.url ?? process.env[OC_ENV.API_URL] ?? localDaemonUrl() ?? DEFAULT_URL;
     token = options.token ?? process.env['OC_TOKEN'] ?? entry?.token ?? null;
   }
 
@@ -80,6 +82,22 @@ async function soleWorkspace(client: ApiClient): Promise<string | null> {
     const health = await client.get<{ workspaces?: Array<{ id?: string }> }>('/api/health');
     const list = Array.isArray(health?.workspaces) ? health.workspaces : [];
     return list.length === 1 && typeof list[0]?.id === 'string' ? list[0]!.id! : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * No context, no `--url`: talk to the daemon started on this machine over its loopback listener
+ * (`daemon.json`), which is what makes `oc daemon set-password` and `oc daemon status` work before
+ * the first login — and while the public listener is held for lack of an operator password.
+ */
+function localDaemonUrl(): string | null {
+  try {
+    const j = JSON.parse(readFileSync(join(configHome(), 'daemon.json'), 'utf8')) as { pid?: number; loopbackUrl?: string };
+    if (!j.pid || !j.loopbackUrl || !j.loopbackUrl.startsWith('http://')) return null;
+    process.kill(j.pid, 0);
+    return j.loopbackUrl;
   } catch {
     return null;
   }

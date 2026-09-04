@@ -29,6 +29,7 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
     workspaces: uniqueWorkspaces(deps).map((w) => ({ id: w.id, name: w.ctx.config.name, status: 'active' })),
     operatorConfigured: deps.auth.hasOperator(),
     tlsMode: deps.daemon.http.tls.mode,
+    publicUrl: deps.publicUrl,
     host: { platform: process.platform, hostname: hostname(), tools: await detectHostToolsCached() },
   }));
 

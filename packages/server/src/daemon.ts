@@ -70,9 +70,13 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
 
   // The loopback listener must exist before workspaces load: its URL goes into every run's env.
   const loopback = await startLoopbackListener();
+  // Assigned once the listeners are decided below; the loopback app copies `deps` now, so the hook
+  // has to exist before that copy is taken.
+  let onOperatorConfigured: (() => void) | null = null;
   const deps: AppDeps = {
     auth, daemon: daemonCfg, workspaces, registries, listener: 'public',
     publicUrl, version: VERSION, uiDir: opts.uiDir ?? defaultUiDir(),
+    onOperatorConfigured: () => onOperatorConfigured?.(),
   };
   loopback.setDeps({ ...deps, listener: 'loopback' });
 
@@ -83,17 +87,32 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     catch (e) { log.error({ err: e, workspace: entry.id, path: entry.path }, 'workspace failed to load'); }
   }
 
-  guardPublicListener(daemonCfg, auth, host);
   const app = createApp(deps, admin);
-  const publicServer = await listen(app.fetch as never, { host, port, tls: await tlsOptions(daemonCfg, configDir) });
-  if (port === 0) {
-    const bound = publicServer.address();
-    if (typeof bound === 'object' && bound) deps.publicUrl = publicUrl.replace(/:0$/, `:${bound.port}`);
-  }
-  log.info({ url: deps.publicUrl, loopback: loopback.url, workspaces: [...new Set([...workspaces.values()].map((w) => w.id))] }, 'daemon listening');
-
   const pidFile = join(configDir, 'daemon.json');
-  await writeFile(pidFile, JSON.stringify({ pid: process.pid, publicUrl: deps.publicUrl, loopbackUrl: loopback.url, startedAt: new Date().toISOString() }, null, 2));
+  let publicServer: ServerType | null = null;
+  const writePidFile = () => writeFile(pidFile, JSON.stringify({
+    pid: process.pid, publicUrl: deps.publicUrl, loopbackUrl: loopback.url, setupRequired: publicServer === null, startedAt: new Date().toISOString(),
+  }, null, 2));
+  const startPublic = async (): Promise<void> => {
+    if (publicServer) return;
+    publicServer = await listen(app.fetch as never, { host, port, tls: await tlsOptions(daemonCfg, configDir) });
+    if (port === 0) {
+      const bound = publicServer.address();
+      if (typeof bound === 'object' && bound) deps.publicUrl = publicUrl.replace(/:0$/, `:${bound.port}`);
+    }
+    log.info({ url: deps.publicUrl, loopback: loopback.url, workspaces: [...new Set([...workspaces.values()].map((w) => w.id))] }, 'daemon listening');
+    await writePidFile();
+  };
+
+  if (publicListenerAllowed(daemonCfg, auth, host)) {
+    await startPublic();
+  } else {
+    // PLAN §4.4: never expose an unauthenticated daemon. Hold the public listener; the loopback
+    // listener still serves `POST /api/auth/setup`, and `oc daemon set-password` on this host opens it.
+    log.warn({ host, loopback: loopback.url }, 'public listener held until an operator password is set: run `oc daemon set-password` on this host');
+    onOperatorConfigured = () => { startPublic().catch((e: unknown) => log.error({ err: e }, 'public listener failed to start after setup')); };
+    await writePidFile();
+  }
 
   let stopping: Promise<void> | null = null;
   const stop = (reason = 'shutdown'): Promise<void> => (stopping ??= shutdown(reason));
@@ -107,7 +126,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
       try { ws.services.supervisor.stop(); } catch (e) { log.warn({ err: e, ws: ws.id }, 'supervisor stop failed'); }
       await cancelRunningRuns(ws);
     }
-    await Promise.all([close(publicServer), close(loopback.server)]);
+    await Promise.all([publicServer ? close(publicServer) : Promise.resolve(), close(loopback.server)]);
     for (const ws of new Set(workspaces.values())) { try { ws.ctx.db.close(); } catch (e) { log.warn({ err: e }, 'db close failed'); } }
     try { daemonDb.close(); } catch (e) { log.warn({ err: e }, 'daemon db close failed'); }
     await rm(pidFile, { force: true }).catch(() => undefined);
@@ -352,15 +371,9 @@ function close(server: ServerType): Promise<void> {
 }
 
 /** PLAN §4.4: the public listener never starts unauthenticated on a non-loopback bind. */
-function guardPublicListener(cfg: DaemonConfig, auth: AuthService, host: string): void {
+function publicListenerAllowed(cfg: DaemonConfig, auth: AuthService, host: string): boolean {
   const loopbackBind = host === '127.0.0.1' || host === '::1' || host === 'localhost';
-  if (loopbackBind) return;
-  if (auth.hasOperator()) return;
-  if (cfg.auth.loopbackTrusted) return;
-  throw new Error(
-    `refusing to listen on ${host}: no operator password is set. Run \`oc daemon set-password\`, ` +
-    'bind to 127.0.0.1, or set auth.loopbackTrusted for a loopback-only daemon.',
-  );
+  return loopbackBind || auth.hasOperator() || cfg.auth.loopbackTrusted;
 }
 
 async function tlsOptions(cfg: DaemonConfig, configDir: string): Promise<{ cert: string; key: string } | null> {

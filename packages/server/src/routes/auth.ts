@@ -23,6 +23,7 @@ export function authRoutes(deps: AppDeps): Hono<AppEnv> {
     if (deps.auth.hasOperator()) throw new OcError('conflict', 'an operator already exists');
     const input = await body(c, SetupSchema);
     await deps.auth.setPassword(input.username, input.password);
+    deps.onOperatorConfigured?.();
     return c.json({ ok: true });
   });
 

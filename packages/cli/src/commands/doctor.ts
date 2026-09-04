@@ -104,10 +104,11 @@ export function register(program: Command): void {
         for (const runtime of runtimes) {
           const id = String(runtime['id'] ?? '?');
           const detection = (runtime['detection'] ?? {}) as Record<string, unknown>;
-          const missing = detection['available'] === false;
+          const available = detection['status'] === 'available' || detection['available'] === true;
+          const missing = detection['status'] === 'missing_binary' || detection['status'] === 'broken' || detection['available'] === false;
           checks.push({
             name: `runtime ${id}`,
-            ok: detection['available'] === true ? true : missing ? false : null,
+            ok: available ? true : missing ? false : null,
             detail: String(detection['version'] ?? detection['notes'] ?? (missing ? 'not installed on the daemon host' : 'unknown')),
             fix: missing ? `install it on the daemon host, then \`oc runtime login ${id}\`` : undefined,
             install: missing && daemonIsThisHost && isInstallable(id) ? id : undefined,

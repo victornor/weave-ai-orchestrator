@@ -30,6 +30,8 @@ export interface AppDeps {
   uiDir?: string | null;
   /** Called on daemon shutdown / used by tests to freeze time. */
   now?: () => Date;
+  /** Set by the daemon when the public listener is held for lack of an operator; `POST /api/auth/setup` calls it. */
+  onOperatorConfigured?: () => void;
 }
 
 export type Principal =

@@ -74,9 +74,11 @@ The same directory also holds `workspaces.yaml` (the registry of workspace paths
 (operator account, sessions, TOTP), and `daemon.json` (written while the daemon runs: pid,
 `publicUrl`, `loopbackUrl`).
 
-**The public listener refuses to start** on a non-loopback bind with no operator password
-configured, unless `auth.loopbackTrusted` is set. That is deliberate; set the password with
-`oc daemon set-password` (minimum 8 characters) before exposing anything.
+**The public listener is held** on a non-loopback bind until an operator password exists (unless
+`auth.loopbackTrusted` is set). The daemon still starts: the loopback listener serves
+`POST /api/auth/setup`, `daemon.json` carries `setupRequired: true`, and `oc daemon set-password`
+run on the daemon host (minimum 8 characters) opens the public listener in place, no restart needed.
+Nothing is ever reachable from the network unauthenticated.
 
 Two listeners always run:
 

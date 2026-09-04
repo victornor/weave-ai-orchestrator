@@ -13,6 +13,7 @@ export interface ContextEntry { url: string; token: string; workspace?: string; 
 export const DEFAULT_URL = 'http://127.0.0.1:7433';
 
 export function configHome(): string {
+  if (process.env['OC_CONFIG_HOME']) return process.env['OC_CONFIG_HOME'];
   const xdg = process.env['XDG_CONFIG_HOME'];
   return xdg && xdg.trim() !== '' ? join(xdg, 'openconductor') : join(homedir(), '.config', 'openconductor');
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TurnInput } from '@openconductor/runtime-sdk';
+import type { TurnInput } from '@agent-conductor/runtime-sdk';
 import { buildArgs, opencodeConfig } from '../src/args.js';
 
 function input(over: Partial<TurnInput> = {}): TurnInput {
@@ -43,9 +43,9 @@ describe('opencode buildArgs', () => {
   });
 
   it('writes the MCP server into .opencode/opencode.json in cwd', () => {
-    const b = buildArgs(input({ mcpServers: { openconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } } }));
+    const b = buildArgs(input({ mcpServers: { agentconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } } }));
     const f = b.files.find((x) => x.path === '/home/agent/.opencode/opencode.json')!;
-    expect(JSON.parse(f.content).mcp.openconductor).toEqual({
+    expect(JSON.parse(f.content).mcp.agentconductor).toEqual({
       type: 'remote', url: 'http://127.0.0.1:7777/mcp/runs/run-1', enabled: true, headers: { Authorization: 'Bearer t' },
     });
   });
@@ -55,9 +55,9 @@ describe('opencode buildArgs', () => {
   });
 
   it('isolates config via XDG dirs', () => {
-    expect(buildArgs(input({ configHome: '/ws/.openconductor/runtimes/opencode' })).env).toMatchObject({
-      XDG_CONFIG_HOME: '/ws/.openconductor/runtimes/opencode',
-      XDG_DATA_HOME: '/ws/.openconductor/runtimes/opencode',
+    expect(buildArgs(input({ configHome: '/ws/.agent-conductor/runtimes/opencode' })).env).toMatchObject({
+      XDG_CONFIG_HOME: '/ws/.agent-conductor/runtimes/opencode',
+      XDG_DATA_HOME: '/ws/.agent-conductor/runtimes/opencode',
     });
   });
 

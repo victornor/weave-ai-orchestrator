@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project, ProjectConfig, WorkspaceConfig } from '@openconductor/shared';
+import type { Project, ProjectConfig, WorkspaceConfig } from '@agent-conductor/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createProjectsService } from './index.js';
 import { git } from '../util/git.js';
@@ -12,7 +12,7 @@ const HUMAN: Actor = { kind: 'human', id: 'victor' };
 const tmps: string[] = [];
 
 async function sourceRepo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), 'oc-src-'));
+  const dir = mkdtempSync(join(tmpdir(), 'ac-src-'));
   tmps.push(dir);
   await git(['init', '-b', 'main'], dir);
   await git(['config', 'user.email', 'test@example.com'], dir);
@@ -75,7 +75,7 @@ describe('projects', () => {
   });
 
   it('detects the real default branch when the declared one does not exist', async () => {
-    const src = mkdtempSync(join(tmpdir(), 'oc-src-'));
+    const src = mkdtempSync(join(tmpdir(), 'ac-src-'));
     tmps.push(src);
     await git(['init', '-b', 'trunk'], src);
     await git(['config', 'user.email', 't@e.com'], src);

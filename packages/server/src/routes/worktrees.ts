@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync } from 'node:fs';
-import { OcError } from '@openconductor/shared';
-import { landedWorkTest } from '@openconductor/core';
+import { OcError } from '@agent-conductor/shared';
+import { landedWorkTest } from '@agent-conductor/core';
 import type { AppEnv } from '../types.js';
 import { body, notFound } from '../http.js';
 

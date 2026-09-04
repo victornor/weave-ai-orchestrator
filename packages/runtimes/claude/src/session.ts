@@ -1,4 +1,4 @@
-import type { SessionRef } from '@openconductor/runtime-sdk';
+import type { SessionRef } from '@agent-conductor/runtime-sdk';
 
 /** Claude Code sessions are addressed by a UUID the caller may choose up front. */
 export interface ClaudeSessionRef { sessionId: string; fork?: boolean }

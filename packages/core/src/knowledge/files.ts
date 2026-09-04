@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { estimateTokens, OcError, type KnowledgeScope } from '@openconductor/shared';
+import { estimateTokens, OcError, type KnowledgeScope } from '@agent-conductor/shared';
 
 /** Budgets in tokens per file (PLAN §13.1). */
 export const BUDGETS: Record<KnowledgeScope, number> = { workspace: 3000, shared: 800, decisions: 1500, project: 1500 };

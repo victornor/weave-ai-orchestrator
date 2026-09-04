@@ -1,15 +1,15 @@
 ---
-name: openconductor-briefing
-description: Rendering the four-section briefing from oc_briefing(), and presenting one decision at a time when the human asks what needs them. Load on any status request ("where are we", "what needs me", "anything for me").
+name: agent-conductor-briefing
+description: Rendering the four-section briefing from ac_briefing(), and presenting one decision at a time when the human asks what needs them. Load on any status request ("where are we", "what needs me", "anything for me").
 ---
 
 # Briefing
 
 ## One source
 
-`oc_briefing()` returns `{needsYou, landed, underway, queued, warnings}`, computed by the daemon from tickets and decisions within a window.
+`ac_briefing()` returns `{needsYou, landed, underway, queued, warnings}`, computed by the daemon from tickets and decisions within a window.
 
-**It is the only source.** Never assemble a second reader out of `oc_ticket_list`, worker state, or what you remember from earlier in the conversation. Two readers disagree, and the human trusts the one that is wrong.
+**It is the only source.** Never assemble a second reader out of `ac_ticket_list`, worker state, or what you remember from earlier in the conversation. Two readers disagree, and the human trusts the one that is wrong.
 
 If the snapshot looks incomplete, say so — do not patch it from memory.
 
@@ -44,7 +44,7 @@ That is a different question from "where are we". Answer it with **the single hi
 3. The real options — the ones you would actually run with, not a menu.
 4. Your recommendation, with a one-line why.
 
-Then wait. **One decision per message.** Do not append "and also…". Do not batch unrelated decisions into a list. When they answer, record it (`oc_decision_answer` if you own it, otherwise map and confirm), echo one line back, and only then bring the next one.
+Then wait. **One decision per message.** Do not append "and also…". Do not batch unrelated decisions into a list. When they answer, record it (`ac_decision_answer` if you own it, otherwise map and confirm), echo one line back, and only then bring the next one.
 
 If nothing is open: "Nothing needs you right now." Then stop — do not fill the silence with a status report they did not ask for.
 

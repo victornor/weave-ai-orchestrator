@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type { EventType, WorkspaceEvent } from '@openconductor/shared';
+import type { EventType, WorkspaceEvent } from '@agent-conductor/shared';
 import { qk } from './keys';
 
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'unreachable';

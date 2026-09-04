@@ -1,4 +1,4 @@
-import type { UiStatus } from '@openconductor/shared';
+import type { UiStatus } from '@agent-conductor/shared';
 import { STATUS_GLYPH, STATUS_LABEL, STATUS_TEXT, STATUS_VAR } from '../lib/status';
 import { cx } from '../lib/cx';
 
@@ -26,7 +26,7 @@ export function StatusGlyph({ status, size = 'sm', pulse, className, title }: St
       viewBox="0 0 12 12"
       role="img"
       aria-label={title ?? STATUS_LABEL[status]}
-      className={cx('flex-none', BOX[size], pulse && 'motion-safe:animate-[oc-pulse_1.6s_ease-in-out_infinite]', className)}
+      className={cx('flex-none', BOX[size], pulse && 'motion-safe:animate-[ac-pulse_1.6s_ease-in-out_infinite]', className)}
     >
       {g.kind === 'circle' ? (
         <circle cx="6" cy="6" r={g.filled ? 4.6 : 4.2} fill={g.filled ? colour : 'none'} stroke={colour} strokeWidth={g.filled ? 0 : 1.5} />
@@ -76,7 +76,7 @@ export function Badge({
     removed: 'bg-failed/10 text-failed border-failed/30',
   } as const;
   return (
-    <span className={cx('oc-mono inline-flex items-center rounded-r4 border px-1.5 py-0.5 text-nano font-medium tracking-micro uppercase', tones[tone], className)}>
+    <span className={cx('ac-mono inline-flex items-center rounded-r4 border px-1.5 py-0.5 text-nano font-medium tracking-micro uppercase', tones[tone], className)}>
       {children}
     </span>
   );

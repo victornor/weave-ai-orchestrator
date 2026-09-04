@@ -5,14 +5,14 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createCore, initLogger } from '@openconductor/core';
-import { DaemonConfigSchema } from '@openconductor/shared';
+import { createCore, initLogger } from '@agent-conductor/core';
+import { DaemonConfigSchema } from '@agent-conductor/shared';
 import { makeHarness } from '../../core/src/testing/context.js';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import type { AppDeps, WorkspaceRuntime } from '../src/types.js';
 
-initLogger(process.env.OC_LOG_LEVEL ?? 'silent');
+initLogger(process.env.AC_LOG_LEVEL ?? 'silent');
 
 let cleanup: (() => void) | null = null;
 afterEach(() => { cleanup?.(); cleanup = null; });
@@ -77,7 +77,7 @@ describe('real core services over HTTP', () => {
     const token = await signRunToken(runTokenSecret(harness.ctx.db), {
       workspaceId: harness.workspaceId, runId: 'run_1', agentId, agentKind: 'worker', projectId: harness.projectId, ticketId: ticket.id, roleId: harness.roleId,
     });
-    const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/oc_ticket_comment`, {
+    const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_ticket_comment`, {
       method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ input: { id: ticket.identifier, body: 'checked out and working' } }),
     }));

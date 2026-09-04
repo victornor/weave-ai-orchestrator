@@ -1,5 +1,5 @@
-import { agentUiStatus, type AgentStatus } from '@openconductor/shared';
-import type { AgentView } from '@openconductor/surface-sdk';
+import { agentUiStatus, type AgentStatus } from '@agent-conductor/shared';
+import type { AgentView } from '@agent-conductor/surface-sdk';
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
 

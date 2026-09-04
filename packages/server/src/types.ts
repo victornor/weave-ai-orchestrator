@@ -1,5 +1,5 @@
-import type { CoreServices, WorkspaceContext, AuthService, Actor, Registries } from '@openconductor/core';
-import type { DaemonConfig } from '@openconductor/shared';
+import type { CoreServices, WorkspaceContext, AuthService, Actor, Registries } from '@agent-conductor/core';
+import type { DaemonConfig } from '@agent-conductor/shared';
 import type { RunTokenClaims } from './runtoken.js';
 import type { ChannelManager } from './channels.js';
 import type { WebhookDispatcher } from './webhooks.js';

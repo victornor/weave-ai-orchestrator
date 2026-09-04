@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useSearch } from '@tanstack/react-router';
-import type { Ticket, TicketStatus } from '@openconductor/shared';
-import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, ticketUiStatus } from '@openconductor/shared';
+import type { Ticket, TicketStatus } from '@agent-conductor/shared';
+import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented } from '../components/Tabs';
 import { TicketCard, TicketRow } from '../components/TicketCard';
@@ -56,7 +56,7 @@ export function BoardRoute(): React.ReactElement {
       <Select label="role" value={role} onChange={setRole} options={(roles.data ?? []).map((r) => ({ value: r.id, label: r.name }))} />
       <Select label="kind" value={kind} onChange={setKind} options={TICKET_KINDS.map((k) => ({ value: k, label: k }))} />
       <Select label="priority" value={priority} onChange={setPriority} options={TICKET_PRIORITIES.map((p) => ({ value: p, label: p }))} />
-      <span className="oc-mono ml-1 hidden text-nano text-text-4 md:inline">c new · j/k move · ⏎ open</span>
+      <span className="ac-mono ml-1 hidden text-nano text-text-4 md:inline">c new · j/k move · ⏎ open</span>
     </div>
   );
 
@@ -129,9 +129,9 @@ export function BoardRoute(): React.ReactElement {
                       <header className="flex items-center gap-2 px-3 pb-2.5 pt-3">
                         <StatusGlyph status={c.status} size="xs" />
                         <h2 className="text-micro font-medium text-text-soft">{c.label}</h2>
-                        <span className="oc-mono text-nano text-text-4">{c.items.length}</span>
+                        <span className="ac-mono text-nano text-text-4">{c.items.length}</span>
                       </header>
-                      <div className="oc-scroll flex flex-col gap-2 px-2 pb-4">
+                      <div className="ac-scroll flex flex-col gap-2 px-2 pb-4">
                         {c.items.map((t) => (
                           <TicketCard key={t.id} ticket={t} onOpen={() => open(t)} />
                         ))}
@@ -153,7 +153,7 @@ export function BoardRoute(): React.ReactElement {
                       render: (t) => (
                         <span className="flex items-center gap-2">
                           <StatusGlyph status={ticketUiStatus(t.status)} size="xs" />
-                          <span className="oc-mono text-micro">{statusText(t.status)}</span>
+                          <span className="ac-mono text-micro">{statusText(t.status)}</span>
                         </span>
                       ),
                     },
@@ -179,7 +179,7 @@ function StatusPill({ label, status, active, onClick }: { label: string; status?
       type="button"
       onClick={onClick}
       className={cx(
-        'oc-mono flex flex-none items-center gap-1.5 rounded-pill border px-2.5 py-1 text-micro',
+        'ac-mono flex flex-none items-center gap-1.5 rounded-pill border px-2.5 py-1 text-micro',
         active ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-3',
       )}
     >
@@ -208,7 +208,7 @@ function Select({
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value || undefined)}
         aria-label={`Filter by ${label}`}
-        className="oc-mono bg-transparent text-micro text-text-soft outline-none"
+        className="ac-mono bg-transparent text-micro text-text-soft outline-none"
       >
         <option value="">any</option>
         {options.map((o) => (

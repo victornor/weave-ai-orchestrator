@@ -67,7 +67,7 @@ export function SettingsRoute(): React.ReactElement {
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): React.ReactElement {
   return (
     <label className="flex flex-col gap-1.5 py-2.5">
-      <span className="oc-label">{label}</span>
+      <span className="ac-label">{label}</span>
       {children}
       {hint ? <span className="text-micro text-text-3">{hint}</span> : null}
     </label>
@@ -99,7 +99,7 @@ function WorkspaceSection(): React.ReactElement {
           />
         </Field>
         <Field label="Ticket prefix" hint="Used for every identifier in this workspace.">
-          <input className={cx(inputCx, 'oc-mono')} defaultValue={summary.data?.workspace.ticketPrefix ?? ''} readOnly />
+          <input className={cx(inputCx, 'ac-mono')} defaultValue={summary.data?.workspace.ticketPrefix ?? ''} readOnly />
         </Field>
         <Field label="Theme" hint="Dark is the designed theme; light is authored from the same tokens.">
           <div className="flex gap-1.5">
@@ -118,8 +118,8 @@ function WorkspaceSection(): React.ReactElement {
       </section>
 
       <section>
-        <div className="oc-label mb-2">Workspaces</div>
-        <div className="oc-card divide-y divide-line-1">
+        <div className="ac-label mb-2">Workspaces</div>
+        <div className="ac-card divide-y divide-line-1">
           {(workspaces.data ?? []).map((w) => (
             <button
               key={w.id}
@@ -128,7 +128,7 @@ function WorkspaceSection(): React.ReactElement {
               className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left hover:bg-bg-2"
             >
               <span className="flex-1 text-meta text-text-1">{w.name}</span>
-              <span className="oc-mono text-micro text-text-3">{w.slug}</span>
+              <span className="ac-mono text-micro text-text-3">{w.slug}</span>
               {(w.slug === ws || w.id === ws) && <Badge tone="accent">current</Badge>}
             </button>
           ))}
@@ -152,14 +152,14 @@ function ProjectsSection(): React.ReactElement {
 
   return (
     <div className="flex flex-col gap-5">
-      <section className="oc-card p-3.5">
-        <div className="oc-label mb-2">Add a project</div>
+      <section className="ac-card p-3.5">
+        <div className="ac-label mb-2">Add a project</div>
         <Field label="Git URL" hint="Cloned into projects/<id>; nobody works in that clone.">
-          <input className={cx(inputCx, 'oc-mono')} placeholder="git@github.com:acme/api.git" value={url} onChange={(e) => setUrl(e.target.value)} />
+          <input className={cx(inputCx, 'ac-mono')} placeholder="git@github.com:acme/api.git" value={url} onChange={(e) => setUrl(e.target.value)} />
         </Field>
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Runtime">
-            <select className={cx(inputCx, 'oc-mono')} value={runtime} onChange={(e) => setRuntime(e.target.value)}>
+            <select className={cx(inputCx, 'ac-mono')} value={runtime} onChange={(e) => setRuntime(e.target.value)}>
               <option value="">default</option>
               {(runtimes.data ?? []).map((r) => (
                 <option key={r.id} value={r.id} disabled={!r.detection.available}>
@@ -170,17 +170,17 @@ function ProjectsSection(): React.ReactElement {
             </select>
           </Field>
           <Field label="Max workers">
-            <input type="number" min={1} max={16} className={cx(inputCx, 'oc-mono')} value={maxWorkers} onChange={(e) => setMaxWorkers(Number(e.target.value))} />
+            <input type="number" min={1} max={16} className={cx(inputCx, 'ac-mono')} value={maxWorkers} onChange={(e) => setMaxWorkers(Number(e.target.value))} />
           </Field>
           <Field label="Auto-merge default">
-            <select className={cx(inputCx, 'oc-mono')} value={autoMerge ? 'on' : 'off'} onChange={(e) => setAutoMerge(e.target.value === 'on')}>
+            <select className={cx(inputCx, 'ac-mono')} value={autoMerge ? 'on' : 'off'} onChange={(e) => setAutoMerge(e.target.value === 'on')}>
               <option value="off">off</option>
               <option value="on">on</option>
             </select>
           </Field>
         </div>
         <Field label="Setup command" hint="Run once per worktree before the first turn.">
-          <input className={cx(inputCx, 'oc-mono')} placeholder="pnpm install" value={setupCommand} onChange={(e) => setSetupCommand(e.target.value)} />
+          <input className={cx(inputCx, 'ac-mono')} placeholder="pnpm install" value={setupCommand} onChange={(e) => setSetupCommand(e.target.value)} />
         </Field>
         <Button
           variant="primary"
@@ -207,20 +207,20 @@ function ProjectsSection(): React.ReactElement {
       ) : (projects.data?.length ?? 0) === 0 ? (
         <EmptyState title="No projects yet." detail="Paste a git URL above, or ask the conductor to add one." />
       ) : (
-        <div className="oc-card divide-y divide-line-1">
+        <div className="ac-card divide-y divide-line-1">
           {(projects.data ?? []).map((p) => (
             <div key={p.id} className="flex flex-wrap items-center gap-3 px-3.5 py-3">
-              <span className="oc-mono text-meta text-text-1">{p.slug}</span>
+              <span className="ac-mono text-meta text-text-1">{p.slug}</span>
               <Badge>{p.status}</Badge>
-              <span className="oc-mono oc-truncate flex-1 text-micro text-text-3">{p.gitUrl}</span>
+              <span className="ac-mono ac-truncate flex-1 text-micro text-text-3">{p.gitUrl}</span>
               <label className="flex items-center gap-1.5">
-                <span className="oc-label">workers</span>
+                <span className="ac-label">workers</span>
                 <input
                   type="number"
                   min={1}
                   defaultValue={p.maxWorkers}
                   onBlur={(e) => patch.mutate({ id: p.id, patch: { maxWorkers: Number(e.target.value) } })}
-                  className="oc-mono h-7 w-14 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+                  className="ac-mono h-7 w-14 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
                 />
               </label>
             </div>
@@ -245,7 +245,7 @@ function ConductorSection(): React.ReactElement {
     <div className="flex flex-col gap-3">
       <Field label="Runtime">
         <select
-          className={cx(inputCx, 'oc-mono')}
+          className={cx(inputCx, 'ac-mono')}
           value={runtime || conductor.data.agent.runtimeId}
           onChange={(e) => {
             setRuntime(e.target.value);
@@ -260,7 +260,7 @@ function ConductorSection(): React.ReactElement {
         </select>
       </Field>
       <Field label="Model">
-        <select className={cx(inputCx, 'oc-mono')} value={conductor.data.agent.model ?? ''} onChange={(e) => patch.mutate({ model: e.target.value })}>
+        <select className={cx(inputCx, 'ac-mono')} value={conductor.data.agent.model ?? ''} onChange={(e) => patch.mutate({ model: e.target.value })}>
           <option value="">default</option>
           {(models.data ?? []).map((m) => (
             <option key={m} value={m}>
@@ -284,10 +284,10 @@ function ChannelsSection(): React.ReactElement {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="oc-label">Telegram</div>
+      <div className="ac-label">Telegram</div>
       <Field label="Enabled" hint="The bot token itself lives in the daemon's secrets, never here.">
         <select
-          className={cx(inputCx, 'oc-mono')}
+          className={cx(inputCx, 'ac-mono')}
           value={telegram.enabled ? 'on' : 'off'}
           onChange={(e) => patch.mutate({ channels: { telegram: { ...telegram, enabled: e.target.value === 'on' } } })}
         >
@@ -297,7 +297,7 @@ function ChannelsSection(): React.ReactElement {
       </Field>
       <Field label="Allowlist" hint="Comma-separated Telegram user ids that may talk to the conductor.">
         <input
-          className={cx(inputCx, 'oc-mono')}
+          className={cx(inputCx, 'ac-mono')}
           defaultValue={(telegram.allowlist ?? []).join(', ')}
           onBlur={(e) =>
             patch.mutate({ channels: { telegram: { ...telegram, allowlist: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) } } })
@@ -319,7 +319,7 @@ function PresentationSection(): React.ReactElement {
       <p className="text-meta leading-relaxed text-text-2">
         Presentation surfaces run on the client. The daemon holds only the desired config; the presenter reconciles it locally.
       </p>
-      <div className="oc-card divide-y divide-line-1">
+      <div className="ac-card divide-y divide-line-1">
         {(presentation.data?.available ?? []).map((s) => (
           <button
             key={s.id}
@@ -329,7 +329,7 @@ function PresentationSection(): React.ReactElement {
             className={cx('flex w-full items-center gap-3 px-3.5 py-2.5 text-left', s.detection.available ? 'hover:bg-bg-2' : 'opacity-50')}
           >
             <span className="flex-1 text-meta text-text-1">{s.displayName}</span>
-            <span className={cx('oc-mono text-micro', s.detection.available ? 'text-done' : 'text-text-3')}>
+            <span className={cx('ac-mono text-micro', s.detection.available ? 'text-done' : 'text-text-3')}>
               {s.detection.available ? 'detected' : (s.detection.reason ?? 'not found')}
             </span>
             {presentation.data?.surface === s.id ? <Badge tone="accent">selected</Badge> : null}
@@ -384,7 +384,7 @@ function SecuritySection(): React.ReactElement {
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <div className="oc-label mb-2">Change password</div>
+        <div className="ac-label mb-2">Change password</div>
         <Field label="Current password">
           <input type="password" className={inputCx} value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
         </Field>
@@ -410,7 +410,7 @@ function SecuritySection(): React.ReactElement {
       </section>
 
       <section>
-        <div className="oc-label mb-2">Two-factor authentication</div>
+        <div className="ac-label mb-2">Two-factor authentication</div>
         {me.data?.totpEnabled ? (
           <div className="flex items-center gap-3">
             <Badge tone="added">enabled</Badge>
@@ -433,12 +433,12 @@ function SecuritySection(): React.ReactElement {
             <QR text={setup.otpauthUrl} />
             <div className="flex min-w-0 flex-1 flex-col gap-3">
               <div>
-                <div className="oc-label mb-1">Secret</div>
-                <code className="oc-mono block break-all rounded-r4 border border-line-1 bg-bg-2 px-2 py-1.5 text-micro text-text-1">{setup.secret}</code>
+                <div className="ac-label mb-1">Secret</div>
+                <code className="ac-mono block break-all rounded-r4 border border-line-1 bg-bg-2 px-2 py-1.5 text-micro text-text-1">{setup.secret}</code>
                 <p className="mt-1 break-all text-nano text-text-4">{setup.otpauthUrl}</p>
               </div>
               <div>
-                <div className="oc-label mb-1.5">Confirm the six digits</div>
+                <div className="ac-label mb-1.5">Confirm the six digits</div>
                 <TOTPInput
                   value={code}
                   onChange={setCode}
@@ -455,10 +455,10 @@ function SecuritySection(): React.ReactElement {
                 />
               </div>
               <div>
-                <div className="oc-label mb-1.5">Recovery codes — store these now</div>
+                <div className="ac-label mb-1.5">Recovery codes — store these now</div>
                 <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
                   {setup.recoveryCodes.map((c) => (
-                    <code key={c} className="oc-mono rounded-r4 border border-line-1 bg-bg-2 px-2 py-1 text-micro text-text-soft">
+                    <code key={c} className="ac-mono rounded-r4 border border-line-1 bg-bg-2 px-2 py-1 text-micro text-text-soft">
                       {c}
                     </code>
                   ))}
@@ -481,11 +481,11 @@ function SecuritySection(): React.ReactElement {
       </section>
 
       <section>
-        <div className="oc-label mb-2">Devices</div>
+        <div className="ac-label mb-2">Devices</div>
         {sessions.isLoading ? (
           <SkeletonRows rows={3} />
         ) : (
-          <div className="oc-card overflow-hidden">
+          <div className="ac-card overflow-hidden">
             {(sessions.data ?? [])
               .filter((s) => !pendingRevoke.has(s.id))
               .map((s) => (
@@ -522,7 +522,7 @@ function NotificationsSection(): React.ReactElement {
   const toast = useToast();
   const [state, setState] = useState<Record<string, boolean>>(() => {
     try {
-      return JSON.parse(localStorage.getItem('oc.notifs') ?? '') as Record<string, boolean>;
+      return JSON.parse(localStorage.getItem('conductor.notifs') ?? '') as Record<string, boolean>;
     } catch {
       return Object.fromEntries(NOTIFS.map((n) => [n.key, n.def]));
     }
@@ -533,7 +533,7 @@ function NotificationsSection(): React.ReactElement {
     const next = { ...state, [key]: on };
     setState(next);
     try {
-      localStorage.setItem('oc.notifs', JSON.stringify(next));
+      localStorage.setItem('conductor.notifs', JSON.stringify(next));
     } catch {
       /* private mode */
     }
@@ -559,7 +559,7 @@ function NotificationsSection(): React.ReactElement {
       <p className="text-meta leading-relaxed text-text-2">
         In-app arrival is the primary path — a toast plus the Needs-you badge — and nothing in any flow depends on a push being delivered.
       </p>
-      <div className="oc-card divide-y divide-line-1">
+      <div className="ac-card divide-y divide-line-1">
         {NOTIFS.map((n) => (
           <label key={n.key} className="flex items-center gap-3 px-3.5 py-3">
             <span className="min-w-0 flex-1">
@@ -573,7 +573,7 @@ function NotificationsSection(): React.ReactElement {
               aria-label={n.label}
               onClick={() => save(n.key, !(state[n.key] ?? n.def))}
               className={cx(
-                'flex h-5 w-9 flex-none items-center rounded-pill border px-0.5 transition-colors duration-(--dur-fast) ease-oc',
+                'flex h-5 w-9 flex-none items-center rounded-pill border px-0.5 transition-colors duration-(--dur-fast) ease-ac',
                 state[n.key] ?? n.def ? 'justify-end border-accent bg-accent' : 'justify-start border-line-2 bg-bg-3',
               )}
             >

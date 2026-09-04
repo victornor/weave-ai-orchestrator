@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
-import { newId, nowIso } from '@openconductor/db';
-import { OcError, RoleSpecSchema, type Role, type RoleSpec, type Project } from '@openconductor/shared';
+import { newId, nowIso } from '@agent-conductor/db';
+import { OcError, RoleSpecSchema, type Role, type RoleSpec, type Project } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, RolesService } from '../api.js';
 import { recordActivity } from '../events.js';

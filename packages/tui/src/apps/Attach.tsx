@@ -1,5 +1,5 @@
 /**
- * `oc attach <agent>` — the universal terminal view of one agent (PLAN §14b.1): live transcript,
+ * `conductor attach <agent>` — the universal terminal view of one agent (PLAN §14b.1): live transcript,
  * status bar, and an input line that posts a ticket comment (worker) or a thread message (conductor).
  *
  * Keys (command mode): p pause/resume · o open ticket · r relaunch · c cancel run · q quit ·
@@ -7,8 +7,8 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
-import type { Agent, Run, RunEvent } from '@openconductor/shared';
-import { runEventsToTranscript, workerToCard, type TranscriptBlock } from '@openconductor/render';
+import type { Agent, Run, RunEvent } from '@agent-conductor/shared';
+import { runEventsToTranscript, workerToCard, type TranscriptBlock } from '@agent-conductor/render';
 import { StatusBar } from '../components/StatusBar.js';
 import { TextInput } from '../components/TextInput.js';
 import { TranscriptView } from '../components/Transcript.js';
@@ -135,11 +135,11 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
     if (key === 'i' || meta.return) { setMode('insert'); return; }
     if (key === 'p') {
       const paused = detail?.agent?.status === 'paused';
-      void act(paused ? 'resumed' : 'paused', () => client.wpost(`/workers/${encodeURIComponent(String(detail?.agent?.id ?? agentId))}/${paused ? 'resume' : 'pause'}`, { reason: 'from oc attach' }));
+      void act(paused ? 'resumed' : 'paused', () => client.wpost(`/workers/${encodeURIComponent(String(detail?.agent?.id ?? agentId))}/${paused ? 'resume' : 'pause'}`, { reason: 'from conductor attach' }));
       return;
     }
     if (key === 'r') {
-      void act('relaunched', () => client.wpost(`/workers/${encodeURIComponent(String(detail?.agent?.id ?? agentId))}/relaunch`, { note: 'relaunched from oc attach' }));
+      void act('relaunched', () => client.wpost(`/workers/${encodeURIComponent(String(detail?.agent?.id ?? agentId))}/relaunch`, { note: 'relaunched from conductor attach' }));
       return;
     }
     if (key === 'c') {

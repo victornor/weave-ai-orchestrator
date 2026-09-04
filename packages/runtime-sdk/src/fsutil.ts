@@ -30,9 +30,9 @@ export async function detectBinary(cmd: string, versionArgs: string[] = ['--vers
   }
 }
 
-/** Per-run scratch directory: os.tmpdir()/openconductor-<runId>. Pure path computation. */
+/** Per-run scratch directory: os.tmpdir()/agent-conductor-<runId>. Pure path computation. */
 export function runTmpDir(runId: string): string {
-  return join(tmpdir(), `openconductor-${runId.replace(/[^\w.-]/g, '_')}`);
+  return join(tmpdir(), `agent-conductor-${runId.replace(/[^\w.-]/g, '_')}`);
 }
 
 /** What a per-CLI pure `buildArgs(input)` returns. */

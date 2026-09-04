@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentView } from '@openconductor/surface-sdk';
+import type { AgentView } from '@agent-conductor/surface-sdk';
 import {
   findWindow, hasSessionArgs, killWindowArgs, listWindowsArgs, newSessionArgs, newWindowArgs, parseListWindows,
   renameWindowArgs, sessionName, shellQuote, statusGlyph, windowName,
@@ -12,8 +12,8 @@ const agent: AgentView = {
 
 describe('tmux command building', () => {
   it('names the session after the workspace', () => {
-    expect(sessionName('acme')).toBe('oc-acme');
-    expect(sessionName('acme.corp prod')).toBe('oc-acme-corp-prod');
+    expect(sessionName('acme')).toBe('ac-acme');
+    expect(sessionName('acme.corp prod')).toBe('ac-acme-corp-prod');
   });
 
   it('builds a window name from the ticket and a status glyph', () => {
@@ -23,26 +23,26 @@ describe('tmux command building', () => {
   });
 
   it('quotes the attach command for the shell', () => {
-    expect(shellQuote(['oc', 'attach', 'w-1', '--url', 'http://127.0.0.1:7433'])).toBe('oc attach w-1 --url http://127.0.0.1:7433');
-    expect(shellQuote(['oc', 'say', "it's fine"])).toBe("oc say 'it'\\''s fine'");
+    expect(shellQuote(['conductor', 'attach', 'w-1', '--url', 'http://127.0.0.1:7433'])).toBe('conductor attach w-1 --url http://127.0.0.1:7433');
+    expect(shellQuote(['conductor', 'say', "it's fine"])).toBe("conductor say 'it'\\''s fine'");
   });
 
   it('creates the session with the conductor in window 0', () => {
-    const args = newSessionArgs('oc-acme', 'conductor', ['oc', 'chat'], { OC_TOKEN: 't' });
-    expect(args.slice(0, 6)).toEqual(['new-session', '-d', '-s', 'oc-acme', '-n', 'conductor']);
+    const args = newSessionArgs('ac-acme', 'conductor', ['conductor', 'chat'], { AC_TOKEN: 't' });
+    expect(args.slice(0, 6)).toEqual(['new-session', '-d', '-s', 'ac-acme', '-n', 'conductor']);
     expect(args).toContain('-e');
-    expect(args).toContain('OC_TOKEN=t');
-    expect(args.at(-1)).toBe('oc chat');
+    expect(args).toContain('AC_TOKEN=t');
+    expect(args.at(-1)).toBe('conductor chat');
   });
 
   it('creates a worker window that prints its id', () => {
-    const args = newWindowArgs('oc-acme', 'x ACME-42', ['oc', 'attach', 'w-1']);
-    expect(args).toEqual(['new-window', '-d', '-t', 'oc-acme:', '-n', 'x ACME-42', '-P', '-F', '#{window_id}', 'oc attach w-1']);
+    const args = newWindowArgs('ac-acme', 'x ACME-42', ['conductor', 'attach', 'w-1']);
+    expect(args).toEqual(['new-window', '-d', '-t', 'ac-acme:', '-n', 'x ACME-42', '-P', '-F', '#{window_id}', 'conductor attach w-1']);
   });
 
   it('targets sessions and windows exactly', () => {
-    expect(hasSessionArgs('oc-acme')).toEqual(['has-session', '-t', '=oc-acme']);
-    expect(listWindowsArgs('oc-acme')).toEqual(['list-windows', '-t', '=oc-acme', '-F', '#{window_id}\t#{window_name}\t#{@oc_agent}']);
+    expect(hasSessionArgs('ac-acme')).toEqual(['has-session', '-t', '=ac-acme']);
+    expect(listWindowsArgs('ac-acme')).toEqual(['list-windows', '-t', '=ac-acme', '-F', '#{window_id}\t#{window_name}\t#{@ac_agent}']);
     expect(renameWindowArgs('@3', 'y ACME-42')).toEqual(['rename-window', '-t', '@3', 'y ACME-42']);
     expect(killWindowArgs('@3')).toEqual(['kill-window', '-t', '@3']);
   });

@@ -1,17 +1,17 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { newId, nowIso } from '@openconductor/db';
+import { newId, nowIso } from '@agent-conductor/db';
 import type { ProjectsService, TicketsService } from '../api.js';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { writeFakeOpenspec, type FakeCase } from './fakeBin.js';
 import { createOpenSpecService } from './index.js';
 
 let h: TestHarness | null = null;
-const previousBin = process.env.OC_OPENSPEC_BIN;
+const previousBin = process.env.AC_OPENSPEC_BIN;
 afterEach(() => {
   h?.cleanup(); h = null;
-  if (previousBin === undefined) delete process.env.OC_OPENSPEC_BIN; else process.env.OC_OPENSPEC_BIN = previousBin;
+  if (previousBin === undefined) delete process.env.AC_OPENSPEC_BIN; else process.env.AC_OPENSPEC_BIN = previousBin;
 });
 
 const CHANGE = 'tst-1-dark-mode';
@@ -36,7 +36,7 @@ function setup(cases: FakeCase[], opts: { changeName?: string | null; policies?:
   harness.services.projects = { fetch: async () => ({ head: 'deadbeef', fastForwarded: true }) } as unknown as ProjectsService;
 
   const bin = writeFakeOpenspec(join(harness.root, 'fake-openspec'), cases);
-  process.env.OC_OPENSPEC_BIN = bin.path;
+  process.env.AC_OPENSPEC_BIN = bin.path;
   return { harness, ticketId, clone, bin };
 }
 
@@ -96,7 +96,7 @@ describe('OpenSpecService.statusFor', () => {
 
     const c = setup(READY_CASES);
     mkdirSync(join(c.clone, 'openspec'), { recursive: true });
-    process.env.OC_OPENSPEC_BIN = join(c.clone, 'no-such-openspec');
+    process.env.AC_OPENSPEC_BIN = join(c.clone, 'no-such-openspec');
     expect(await createOpenSpecService(c.harness.ctx, c.harness.deps).statusFor(c.ticketId)).toEqual({ changeName: CHANGE, ...zero });
   });
 });
@@ -181,7 +181,7 @@ describe('OpenSpecService.version', () => {
     mkdirSync(clone, { recursive: true });
     const svc = createOpenSpecService(harness.ctx, harness.deps);
     expect(await svc.version(harness.projectId)).toBe('1.12.0');
-    process.env.OC_OPENSPEC_BIN = join(clone, 'no-such-openspec');
+    process.env.AC_OPENSPEC_BIN = join(clone, 'no-such-openspec');
     expect(await svc.version(harness.projectId)).toBeNull();
   });
 });

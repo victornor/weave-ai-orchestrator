@@ -10,7 +10,7 @@
 import { execa } from 'execa';
 import { resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
-import { OcError } from '@openconductor/shared';
+import { OcError } from '@agent-conductor/shared';
 
 export const OPENSPEC_TIMEOUT_MS = 30_000;
 
@@ -18,7 +18,7 @@ export const OPENSPEC_TIMEOUT_MS = 30_000;
 export const OPENSPEC_ENV: Record<string, string> = { CI: '1', OPENSPEC_TELEMETRY: '0', OPENSPEC_NO_UPDATE_CHECK: '1', NO_COLOR: '1' };
 
 /** The binary is resolvable per call (tests substitute a fake), then per workspace env, then PATH. */
-export function openspecBin(bin?: string): string { return bin ?? process.env.OC_OPENSPEC_BIN ?? 'openspec'; }
+export function openspecBin(bin?: string): string { return bin ?? process.env.AC_OPENSPEC_BIN ?? 'openspec'; }
 
 export interface OpenSpecCtx {
   /** Directory the command runs in: the primary clone, or a worker's worktree. */

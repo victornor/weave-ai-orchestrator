@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { newId, nowIso } from '@openconductor/db';
-import { OcError, ProjectConfigSchema, type Project, type ProjectConfig } from '@openconductor/shared';
+import { newId, nowIso } from '@agent-conductor/db';
+import { OcError, ProjectConfigSchema, type Project, type ProjectConfig } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, ProjectsService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -65,7 +65,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       // Commit the generated files on the default branch so worktrees branch from a clean tree and merges never hit untracked files.
       const add = await git(['add', '-A', '--', 'openspec', '.claude', '.agents', '.opencode', '.gemini', '.codex'], project.clonePath, 30_000);
       if (add.ok) {
-        const commit = await git(['-c', 'user.name=OpenConductor', '-c', 'user.email=openconductor@localhost', 'commit', '-q', '-m', 'chore: adopt OpenSpec'], project.clonePath, 30_000);
+        const commit = await git(['-c', 'user.name=AgentConductor', '-c', 'user.email=agent-conductor@localhost', 'commit', '-q', '-m', 'chore: adopt OpenSpec'], project.clonePath, 30_000);
         if (!commit.ok && !/nothing to commit/.test(commit.stderr + commit.stdout)) log.warn({ project: project.slug, stderr: commit.stderr.slice(0, 200) }, 'could not commit the OpenSpec init');
         else if (commit.ok) { const push = await git(['push'], project.clonePath, 120_000); if (!push.ok) log.info({ project: project.slug }, 'OpenSpec init committed locally (push skipped or refused)'); }
       }
@@ -117,7 +117,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       try {
         deps().tickets.create(actor, {
           projectId: id, kind: 'scout', title: `Describe project ${cfg.id}`,
-          description: `Investigate the \`${cfg.id}\` repository and write the project knowledge base: overview, stack and commands (run, test, lint, build), conventions the repo docs do not state, current focus, landmines.\n\n## Acceptance criteria\n- \`knowledge/projects/${cfg.id}/PROJECT.md\` filled in through \`oc_knowledge_note\`\n- a \`report\` document on this ticket summarising what you found`,
+          description: `Investigate the \`${cfg.id}\` repository and write the project knowledge base: overview, stack and commands (run, test, lint, build), conventions the repo docs do not state, current focus, landmines.\n\n## Acceptance criteria\n- \`knowledge/projects/${cfg.id}/PROJECT.md\` filled in through \`ac_knowledge_note\`\n- a \`report\` document on this ticket summarising what you found`,
           priority: 'medium', originKind: 'project_describe', originFingerprint: `project_describe:${cfg.id}`,
         });
       } catch (e) { log.warn({ err: String(e), project: cfg.id }, 'could not create the project description ticket'); }

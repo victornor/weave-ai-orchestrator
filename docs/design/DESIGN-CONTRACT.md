@@ -1,6 +1,6 @@
 # Design contract (from the Claude Design mockup, v0.1 dark-first)
 
-Source: `docs/design/mockup/OpenConductor Spec.dc.html` (+ `support.js`), imported 2026-09-04 from Claude Design project `8827627a-a5bb-43e9-b786-300ab5557592`. **The imported file is truncated at 256 KiB (the design tool's read cap); items marked ⚠ must be confirmed against the full export.** This file is the implementation contract for `packages/ui` and `packages/tui`; PLAN.md §21 defers to it.
+Source: `docs/design/mockup/AgentConductor Spec.dc.html` (+ `support.js`), imported 2026-09-04 from Claude Design project `8827627a-a5bb-43e9-b786-300ab5557592`. **The imported file is truncated at 256 KiB (the design tool's read cap); items marked ⚠ must be confirmed against the full export.** This file is the implementation contract for `packages/ui` and `packages/tui`; PLAN.md §21 defers to it.
 
 ## 1. Organising rules (from the spec's intro)
 

@@ -1,5 +1,5 @@
-import type { Ticket, TicketStatus, UiStatus } from '@openconductor/shared';
-import { TICKET_STATUSES } from '@openconductor/shared';
+import type { Ticket, TicketStatus, UiStatus } from '@agent-conductor/shared';
+import { TICKET_STATUSES } from '@agent-conductor/shared';
 
 /**
  * Six owner-naming columns for eleven statuses (DESIGN-CONTRACT §5, designer's

@@ -1,5 +1,5 @@
 /** View models produced by this package. The web widget layer and the TUI widget layer render these and nothing else. */
-import type { DecisionKind, DecisionStatus, TicketKind, TicketPriority, TicketStatus, UiStatus, AgentStatus, CostStatus } from '@openconductor/shared';
+import type { DecisionKind, DecisionStatus, TicketKind, TicketPriority, TicketStatus, UiStatus, AgentStatus, CostStatus } from '@agent-conductor/shared';
 
 // ---------------------------------------------------------------- transcript
 
@@ -202,7 +202,7 @@ export interface BriefingItem {
   primary: string;
   secondary: string | null;
   meta: string | null;
-  /** Ticket identifier or decision id, for `oc decision show <ref>` style follow-ups. */
+  /** Ticket identifier or decision id, for `conductor decision show <ref>` style follow-ups. */
   ref: string | null;
 }
 

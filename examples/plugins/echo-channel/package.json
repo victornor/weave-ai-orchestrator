@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/example-echo-channel",
+  "name": "@agent-conductor/example-echo-channel",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,6 +9,6 @@
     ".": "./index.js"
   },
   "dependencies": {
-    "@openconductor/plugin-sdk": "workspace:*"
+    "@agent-conductor/plugin-sdk": "workspace:*"
   }
 }

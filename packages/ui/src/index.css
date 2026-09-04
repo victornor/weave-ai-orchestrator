@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 
 /* ------------------------------------------------------------------ *
- * OpenConductor design tokens — DESIGN-CONTRACT.md §2
+ * AgentConductor design tokens — DESIGN-CONTRACT.md §2
  * Dark is the designed theme. Light is authored, not inverted:
  * surfaces get warmer and flatter, borders darker relative to their
  * surface, status hues drop in lightness to hold contrast on white.
@@ -249,7 +249,7 @@
   --tracking-micro: var(--track-micro);
   --tracking-label: var(--track-label);
 
-  --ease-oc: var(--ease);
+  --ease-ac: var(--ease);
   --shadow-sheet: var(--elev-sheet);
   --shadow-float: var(--elev-float);
 }
@@ -308,11 +308,11 @@
 }
 
 @layer components {
-  .oc-mono {
+  .ac-mono {
     font-family: var(--ff-mono);
     font-variant-numeric: tabular-nums;
   }
-  .oc-label {
+  .ac-label {
     font-family: var(--ff-mono);
     font-size: var(--fs-nano);
     font-weight: 500;
@@ -320,53 +320,53 @@
     text-transform: uppercase;
     color: var(--text-3);
   }
-  .oc-card {
+  .ac-card {
     background: var(--bg-1);
     border: 1px solid var(--line-1);
     border-radius: var(--r6);
   }
-  .oc-panel {
+  .ac-panel {
     background: var(--bg-1);
     border: 1px solid var(--line-2);
     border-radius: var(--r8);
   }
-  .oc-skeleton {
+  .ac-skeleton {
     background: var(--bg-3);
     border-radius: var(--r4);
-    animation: oc-pulse 1.6s var(--ease) infinite;
+    animation: ac-pulse 1.6s var(--ease) infinite;
   }
-  .oc-scroll {
+  .ac-scroll {
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  .oc-truncate {
+  .ac-truncate {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .oc-safe-bottom {
+  .ac-safe-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
-  .oc-prose {
+  .ac-prose {
     font-size: var(--fs-body);
     line-height: 1.65;
     color: var(--text-body);
   }
-  .oc-prose h1,
-  .oc-prose h2,
-  .oc-prose h3 {
+  .ac-prose h1,
+  .ac-prose h2,
+  .ac-prose h3 {
     color: var(--text-strong);
     font-weight: 600;
     letter-spacing: var(--track-head);
     margin: var(--space-7) 0 var(--space-4);
   }
-  .oc-prose h1 { font-size: var(--text-title); }
-  .oc-prose h2 { font-size: var(--text-head); }
-  .oc-prose h3 { font-size: var(--fs-body); }
-  .oc-prose p, .oc-prose ul, .oc-prose ol { margin: 0 0 var(--space-5); }
-  .oc-prose ul, .oc-prose ol { padding-left: var(--space-7); }
-  .oc-prose li { margin-bottom: var(--space-2); }
-  .oc-prose code {
+  .ac-prose h1 { font-size: var(--text-title); }
+  .ac-prose h2 { font-size: var(--text-head); }
+  .ac-prose h3 { font-size: var(--fs-body); }
+  .ac-prose p, .ac-prose ul, .ac-prose ol { margin: 0 0 var(--space-5); }
+  .ac-prose ul, .ac-prose ol { padding-left: var(--space-7); }
+  .ac-prose li { margin-bottom: var(--space-2); }
+  .ac-prose code {
     font-family: var(--ff-mono);
     font-size: var(--fs-meta);
     background: var(--bg-2);
@@ -374,16 +374,16 @@
     border-radius: var(--r4);
     padding: 0 var(--space-2);
   }
-  .oc-prose pre {
+  .ac-prose pre {
     background: var(--bg-2);
     border: 1px solid var(--line-1);
     border-radius: var(--r6);
     padding: var(--space-5);
     overflow-x: auto;
   }
-  .oc-prose pre code { background: none; border: 0; padding: 0; }
-  .oc-prose a { color: var(--accent-link); text-decoration: underline; }
-  .oc-prose blockquote {
+  .ac-prose pre code { background: none; border: 0; padding: 0; }
+  .ac-prose a { color: var(--accent-link); text-decoration: underline; }
+  .ac-prose blockquote {
     border-left: 2px solid var(--line-2);
     padding-left: var(--space-5);
     color: var(--text-2);
@@ -392,23 +392,23 @@
 }
 
 /* A utility, not a component class, so variants (focus-within:…) apply. */
-@utility oc-focus-ring {
+@utility ac-focus-ring {
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-@keyframes oc-pulse {
+@keyframes ac-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
-@keyframes oc-blink {
+@keyframes ac-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
-@keyframes oc-rise {
+@keyframes ac-rise {
   from { opacity: 0; transform: translateY(var(--space-4)); }
   to { opacity: 1; transform: none; }
 }
-@keyframes oc-sheet-in {
+@keyframes ac-sheet-in {
   from { opacity: 0; transform: translateY(var(--space-8)); }
   to { opacity: 1; transform: none; }
 }

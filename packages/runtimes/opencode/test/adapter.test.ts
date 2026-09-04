@@ -24,7 +24,7 @@ describe('opencode adapter', () => {
   });
 
   it('installs AGENTS.md, skills and a placeholder opencode.json', async () => {
-    const home = tmp('oc-home-'); const skill = tmp('oc-skill-');
+    const home = tmp('ac-home-'); const skill = tmp('ac-skill-');
     writeFileSync(join(skill, 'SKILL.md'), '# demo\n');
     await adapter.installInstructions({ path: home, kind: 'worker' }, { instructions: '# Charter\n', skills: [{ name: 'demo', dir: skill }] });
     expect(readFileSync(join(home, 'AGENTS.md'), 'utf8')).toBe('# Charter\n');

@@ -13,10 +13,10 @@ export function DeviceRow({ session, current, onRevoke }: { session: AuthSession
     <div className={cx('flex items-center gap-3 border-b border-line-1 px-4 py-3', current && 'border-l-2 border-l-accent')}>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="oc-truncate text-ui text-text-1">{session.name ?? 'Unnamed session'}</span>
-          {current ? <span className="oc-mono text-nano text-accent-link">this device</span> : null}
+          <span className="ac-truncate text-ui text-text-1">{session.name ?? 'Unnamed session'}</span>
+          {current ? <span className="ac-mono text-nano text-accent-link">this device</span> : null}
         </div>
-        <div className="oc-mono mt-0.5 text-micro text-text-3">
+        <div className="ac-mono mt-0.5 text-micro text-text-3">
           {KIND_LABEL[session.kind] ?? session.kind} · {session.ip ?? 'unknown ip'} · {ago(session.lastSeenAt)} ago
         </div>
       </div>

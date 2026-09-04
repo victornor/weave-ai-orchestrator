@@ -4,7 +4,7 @@
  * whether run tokens are honoured).
  */
 import { Hono } from 'hono';
-import { OcError } from '@openconductor/shared';
+import { OcError } from '@agent-conductor/shared';
 import type { AppDeps, AppEnv } from './types.js';
 import { authMiddleware } from './auth.js';
 import { onError } from './http.js';

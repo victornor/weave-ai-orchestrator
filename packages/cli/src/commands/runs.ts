@@ -1,7 +1,7 @@
-/** `oc runs list|show|tail|cancel` (PLAN §16.1, §20). */
+/** `conductor runs list|show|tail|cancel` (PLAN §16.1, §20). */
 import type { Command } from 'commander';
-import type { Run, RunEvent } from '@openconductor/shared';
-import { formatCost, formatDuration, formatTokens, runEventsToTranscript, type TranscriptBlock } from '@openconductor/render';
+import type { Run, RunEvent } from '@agent-conductor/shared';
+import { formatCost, formatDuration, formatTokens, runEventsToTranscript, type TranscriptBlock } from '@agent-conductor/render';
 import { emit, fields, heading, style, table, write } from '../output.js';
 import { items, run as guard, session, unwrap } from './util.js';
 

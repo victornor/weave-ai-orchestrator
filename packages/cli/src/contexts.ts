@@ -1,30 +1,30 @@
 /**
- * Remote contexts (`~/.config/openconductor/contexts.yaml`, PLAN §4.4) and workspace resolution.
- * `oc` is a pure remote client: every command works identically against a local or remote daemon.
+ * Remote contexts (`~/.config/agent-conductor/contexts.yaml`, PLAN §4.4) and workspace resolution.
+ * `conductor` is a pure remote client: every command works identically against a local or remote daemon.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, parse as parsePath, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { ContextsFileSchema, type ContextsFile } from '@openconductor/shared';
+import { ContextsFileSchema, type ContextsFile } from '@agent-conductor/shared';
 
 export interface ContextEntry { url: string; token: string; workspace?: string; certPin?: string }
 
 export const DEFAULT_URL = 'http://127.0.0.1:7433';
 
 export function configHome(): string {
-  if (process.env['OC_CONFIG_HOME']) return process.env['OC_CONFIG_HOME'];
+  if (process.env['AC_CONFIG_HOME']) return process.env['AC_CONFIG_HOME'];
   const xdg = process.env['XDG_CONFIG_HOME'];
-  return xdg && xdg.trim() !== '' ? join(xdg, 'openconductor') : join(homedir(), '.config', 'openconductor');
+  return xdg && xdg.trim() !== '' ? join(xdg, 'agent-conductor') : join(homedir(), '.config', 'agent-conductor');
 }
 
 export function stateHome(): string {
   const xdg = process.env['XDG_STATE_HOME'];
-  return xdg && xdg.trim() !== '' ? join(xdg, 'openconductor') : join(homedir(), '.local', 'state', 'openconductor');
+  return xdg && xdg.trim() !== '' ? join(xdg, 'agent-conductor') : join(homedir(), '.local', 'state', 'agent-conductor');
 }
 
 export function contextsPath(): string {
-  return process.env['OC_CONTEXTS_FILE'] ?? join(configHome(), 'contexts.yaml');
+  return process.env['AC_CONTEXTS_FILE'] ?? join(configHome(), 'contexts.yaml');
 }
 
 export function loadContexts(): ContextsFile {
@@ -87,7 +87,7 @@ export function currentContext(explicitName?: string | null): ResolvedContext {
   return { name, entry };
 }
 
-/** A context name derived from the url: `oc.example.com`, `local` for loopback. */
+/** A context name derived from the url: `conductor.example.com`, `local` for loopback. */
 export function suggestContextName(url: string): string {
   try {
     const u = new URL(url);
@@ -123,10 +123,10 @@ export function workspaceIdFromFile(path: string): string | null {
   }
 }
 
-/** `--workspace` > `OC_WORKSPACE` > context default > nearest `workspace.yaml`. */
+/** `--workspace` > `AC_WORKSPACE` > context default > nearest `workspace.yaml`. */
 export function resolveWorkspaceId(explicit?: string | null, context?: ContextEntry | null, cwd: string = process.cwd()): string | null {
   if (explicit) return explicit;
-  const env = process.env['OC_WORKSPACE'];
+  const env = process.env['AC_WORKSPACE'];
   if (env) return env;
   if (context?.workspace) return context.workspace;
   const file = findWorkspaceFile(cwd);

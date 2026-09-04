@@ -1,6 +1,6 @@
 /**
- * Host tool detection (PLAN §20 `oc doctor`). The daemon reports these on `/api/health` so a remote
- * `oc doctor` can tell what is missing on the daemon host rather than on the laptop.
+ * Host tool detection (PLAN §20 `conductor doctor`). The daemon reports these on `/api/health` so a remote
+ * `conductor doctor` can tell what is missing on the daemon host rather than on the laptop.
  */
 import { sh } from '../util/exec.js';
 import { openspecBin } from '../openspec/cli.js';

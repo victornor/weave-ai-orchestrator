@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type * as S from '@openconductor/shared';
+import type * as S from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { renderTemplate } from './template.js';
@@ -56,14 +56,14 @@ export function parseAcceptance(description: string): string[] {
 export function definitionOfDone(kind: S.TicketKind, deliveryMode: string): string {
   if (kind === 'change') {
     return deliveryMode === 'pr'
-      ? 'planning artifacts complete and validated → `proposed`; after approval implement every task, commit as you go, open a PR and record it → `in_review`; after the merge approval, sync, resolve conflicts, merge and call `oc_ticket_merge_done`.'
-      : 'planning artifacts complete and validated → `proposed`; after approval implement every task and commit → `in_review` with a branch work product; after approval merge into the default branch and call `oc_ticket_merge_done`.';
+      ? 'planning artifacts complete and validated → `proposed`; after approval implement every task, commit as you go, open a PR and record it → `in_review`; after the merge approval, sync, resolve conflicts, merge and call `ac_ticket_merge_done`.'
+      : 'planning artifacts complete and validated → `proposed`; after approval implement every task and commit → `in_review` with a branch work product; after approval merge into the default branch and call `ac_ticket_merge_done`.';
   }
   if (kind === 'task') return deliveryMode === 'pr'
     ? 'do the work, commit, open a PR and record it as a work product → `in_review`; merge when the ticket reaches `merging`.'
     : 'do the work, commit on the ticket branch → `in_review`; merge when the ticket reaches `merging`.';
-  if (kind === 'scout') return 'write the findings as a `report` document (`oc_ticket_document_put`): what you did, what you found, evidence with file:line, recommendation. No code changes, no PR → `done`.';
-  return 'answer on the ticket with `oc_ticket_comment`, then transition to `done`.';
+  if (kind === 'scout') return 'write the findings as a `report` document (`ac_ticket_document_put`): what you did, what you found, evidence with file:line, recommendation. No code changes, no PR → `done`.';
+  return 'answer on the ticket with `ac_ticket_comment`, then transition to `done`.';
 }
 
 function knowledgeText(deps: () => CoreServices, scope: S.KnowledgeScope, projectId?: string | null): string {
@@ -215,7 +215,7 @@ export async function buildTurnPrompt(
 
   const flat = flattenWakes(wakes);
   parts.push('\n## Why you were woken');
-  parts.push(bounded(flat, 12, (w) => `- ${w.source}: ${w.reason || '(no reason given)'}`, 'call `oc_inbox` for the rest'));
+  parts.push(bounded(flat, 12, (w) => `- ${w.source}: ${w.reason || '(no reason given)'}`, 'call `ac_inbox` for the rest'));
 
   if (agent.kind === 'worker' && agent.ticketId) {
     const t = ticket(ctx, agent.ticketId);
@@ -245,11 +245,11 @@ export async function buildTurnPrompt(
     parts.push(bounded(open, 10, (t) => {
       const w = workers.find((x) => x.ticketId === t.id);
       return `- ${t.identifier} [${t.status}] ${t.title}${w ? ` — ${w.name} (${w.status})` : ''}`;
-    }, 'call `oc_ticket_list`'));
+    }, 'call `ac_ticket_list`'));
     const pending = ctx.db.all<S.Decision>("SELECT * FROM decisions WHERE workspace_id = ? AND status = 'open' ORDER BY created_at", [ctx.workspaceId]);
     if (pending.length) {
       parts.push('\n## Open decisions');
-      parts.push(bounded(pending, 8, (d) => `- ${d.id} [${d.kind}, owner ${d.owner}] ${d.title}`, 'call `oc_briefing`'));
+      parts.push(bounded(pending, 8, (d) => `- ${d.id} [${d.kind}, owner ${d.owner}] ${d.title}`, 'call `ac_briefing`'));
     }
   }
 
@@ -259,7 +259,7 @@ export async function buildTurnPrompt(
   );
   if (answered.length) {
     parts.push('\n## Answered decisions');
-    parts.push(bounded(answered, 8, (d) => `- ${d.id}${d.ticketId ? ` (${ticket(ctx, d.ticketId)?.identifier ?? d.ticketId})` : ''}: "${d.title}" — answered ${d.answerKey ?? ''}${d.answerText ? `: "${d.answerText}"` : ''}`, 'call `oc_inbox`'));
+    parts.push(bounded(answered, 8, (d) => `- ${d.id}${d.ticketId ? ` (${ticket(ctx, d.ticketId)?.identifier ?? d.ticketId})` : ''}: "${d.title}" — answered ${d.answerKey ?? ''}${d.answerText ? `: "${d.answerText}"` : ''}`, 'call `ac_inbox`'));
   }
 
   const notes: string[] = [];
@@ -276,7 +276,7 @@ export async function buildTurnPrompt(
 
   parts.push('\n## What to do now');
   parts.push(agent.kind === 'conductor'
-    ? 'Call `oc_inbox` if you need details. Handle human messages first, then ticket events. Reply to the human only through `oc_human_send`. Finish with the structured final report.'
-    : 'Call `oc_inbox` if you need details, do the phase your ticket status asks for, leave durable progress on the ticket, and finish with the structured final report. Ask with `oc_ask` instead of guessing; report `blocked` with a routable path if you are stuck.');
+    ? 'Call `ac_inbox` if you need details. Handle human messages first, then ticket events. Reply to the human only through `ac_human_send`. Finish with the structured final report.'
+    : 'Call `ac_inbox` if you need details, do the phase your ticket status asks for, leave durable progress on the ticket, and finish with the structured final report. Ask with `ac_ask` instead of guessing; report `blocked` with a routable path if you are stuck.');
   return parts.join('\n') + '\n';
 }

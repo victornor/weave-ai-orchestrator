@@ -5,10 +5,10 @@ import { join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
-import { workspaceLoader, initLogger } from '@openconductor/core';
+import { workspaceLoader, initLogger } from '@agent-conductor/core';
 import { pluginSpecifier, startDaemon, type DaemonHandle } from '../src/daemon.js';
 
-initLogger(process.env.OC_LOG_LEVEL ?? 'silent');
+initLogger(process.env.AC_LOG_LEVEL ?? 'silent');
 
 let daemon: DaemonHandle | null = null;
 let dirs: string[] = [];
@@ -21,8 +21,8 @@ afterEach(async () => {
 
 describe('startDaemon', () => {
   it('loads a registered workspace and serves health on both listeners', async () => {
-    const configDir = mkdtempSync(join(tmpdir(), 'oc-cfg-'));
-    const wsDir = mkdtempSync(join(tmpdir(), 'oc-ws-'));
+    const configDir = mkdtempSync(join(tmpdir(), 'ac-cfg-'));
+    const wsDir = mkdtempSync(join(tmpdir(), 'ac-ws-'));
     dirs = [configDir, wsDir];
 
     await workspaceLoader.initWorkspace(wsDir, { id: 'smoke', name: 'Smoke', ticketPrefix: 'SMK' });
@@ -60,8 +60,8 @@ describe('plugin loading', () => {
   });
 
   it('loads the example plugin from a relative path and registers its channel and hook', async () => {
-    const configDir = mkdtempSync(join(tmpdir(), 'oc-cfg-'));
-    const wsDir = mkdtempSync(join(tmpdir(), 'oc-ws-'));
+    const configDir = mkdtempSync(join(tmpdir(), 'ac-cfg-'));
+    const wsDir = mkdtempSync(join(tmpdir(), 'ac-ws-'));
     dirs = [configDir, wsDir];
 
     await workspaceLoader.initWorkspace(wsDir, { id: 'plugged', name: 'Plugged', ticketPrefix: 'PLG' });

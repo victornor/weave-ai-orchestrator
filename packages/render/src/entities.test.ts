@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Agent, Ticket } from '@openconductor/shared';
+import type { Agent, Ticket } from '@agent-conductor/shared';
 import { ticketToSummary, workerToCard } from './entities.js';
 
 const now = new Date('2026-09-04T12:00:00.000Z');
@@ -21,7 +21,7 @@ function agent(over: Partial<Agent> = {}): Agent {
     id: 'ag_1', workspaceId: 'ws', kind: 'worker', projectId: 'web', roleId: 'role_1', roleRevision: 1,
     ticketId: 'tkt_1', name: 'Backend Engineer #7', runtimeId: 'claude', model: 'claude-fable-5-1', effort: null,
     status: 'running', pauseReason: null, errorText: null, homePath: '/ws/workers/ag_1', worktreePath: '/ws/workers/ag_1/work',
-    branch: 'oc/acme-42', turnEpoch: 1, turnCount: 7, spawnedBy: 'conductor', spawnReason: null, briefRevision: 1,
+    branch: 'ac/acme-42', turnEpoch: 1, turnCount: 7, spawnedBy: 'conductor', spawnReason: null, briefRevision: 1,
     lastRunAt: null, retiredAt: null, createdAt: '2026-09-04T11:00:00.000Z', updatedAt: '2026-09-04T11:00:00.000Z', ...over,
   };
 }

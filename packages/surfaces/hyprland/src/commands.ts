@@ -8,12 +8,12 @@ export type RuleKeyword = (typeof RULE_KEYWORDS)[number];
 
 export const sanitizeToken = (value: string): string => value.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 
-export const workspacePrefix = (workspaceId: string): string => `oc-${sanitizeToken(workspaceId)}`;
+export const workspacePrefix = (workspaceId: string): string => `ac-${sanitizeToken(workspaceId)}`;
 export const windowClass = (workspaceId: string, agentId: string): string => `${workspacePrefix(workspaceId)}-${sanitizeToken(agentId)}`;
 export const classPattern = (cls: string): string => `^(${cls})$`;
 export const workspaceClassPattern = (workspaceId: string): string => `^(${workspacePrefix(workspaceId)}-.*)$`;
 
-/** `hyprctl keyword windowrule "workspace <n> silent, class:^(oc-<ws>-.*)$"` */
+/** `hyprctl keyword windowrule "workspace <n> silent, class:^(ac-<ws>-.*)$"` */
 export function windowRuleArgs(keyword: RuleKeyword, workspaceId: string, hyprWorkspace: string | number): string[] {
   return ['keyword', keyword, `workspace ${hyprWorkspace} silent, class:${workspaceClassPattern(workspaceId)}`];
 }

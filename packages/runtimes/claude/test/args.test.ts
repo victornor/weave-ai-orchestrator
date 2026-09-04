@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TurnInput } from '@openconductor/runtime-sdk';
+import type { TurnInput } from '@agent-conductor/runtime-sdk';
 import { buildArgs, MAX_ARGV_PROMPT, RESTRICTED_TOOLS } from '../src/args.js';
 
 const NEW_ID = '11111111-2222-4333-8444-555555555555';
@@ -18,7 +18,7 @@ const pairs = (a: string[]) => a.join(' ');
 
 describe('claude buildArgs', () => {
   it('builds the headless stream-json invocation with a fresh session id', () => {
-    const b = buildArgs(input(), { newSessionId: NEW_ID, tmpDir: '/tmp/oc' });
+    const b = buildArgs(input(), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
     expect(b.cmd).toBe('claude');
     expect(pairs(b.args)).toContain('-p --output-format stream-json --verbose --input-format text');
     expect(pairs(b.args)).toContain(`--session-id ${NEW_ID}`);
@@ -43,28 +43,28 @@ describe('claude buildArgs', () => {
   });
 
   it('injects the system prompt as a file only when mode=inject', () => {
-    const skip = buildArgs(input({ systemPrompt: { text: 'charter', mode: 'skip' } }), { newSessionId: NEW_ID, tmpDir: '/tmp/oc' });
+    const skip = buildArgs(input({ systemPrompt: { text: 'charter', mode: 'skip' } }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
     expect(skip.files).toHaveLength(0);
     expect(skip.args.join(' ')).not.toContain('system-prompt');
 
-    const inject = buildArgs(input({ systemPrompt: { text: 'charter', mode: 'inject' } }), { newSessionId: NEW_ID, tmpDir: '/tmp/oc' });
-    expect(pairs(inject.args)).toContain('--append-system-prompt-file /tmp/oc/system-prompt.md');
-    expect(inject.files).toEqual([{ path: '/tmp/oc/system-prompt.md', content: 'charter' }]);
+    const inject = buildArgs(input({ systemPrompt: { text: 'charter', mode: 'inject' } }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
+    expect(pairs(inject.args)).toContain('--append-system-prompt-file /tmp/ac/system-prompt.md');
+    expect(inject.files).toEqual([{ path: '/tmp/ac/system-prompt.md', content: 'charter' }]);
 
-    const replace = buildArgs(input({ systemPrompt: { text: 'charter', mode: 'inject' }, options: { systemPromptMode: 'replace' } }), { newSessionId: NEW_ID, tmpDir: '/tmp/oc' });
-    expect(pairs(replace.args)).toContain('--system-prompt-file /tmp/oc/system-prompt.md');
+    const replace = buildArgs(input({ systemPrompt: { text: 'charter', mode: 'inject' }, options: { systemPromptMode: 'replace' } }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
+    expect(pairs(replace.args)).toContain('--system-prompt-file /tmp/ac/system-prompt.md');
   });
 
   it('passes the output schema inline and the mcp config as a strict file', () => {
     const b = buildArgs(input({
       outputSchema: { type: 'object', properties: { state: { type: 'string' } } },
-      mcpServers: { openconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } },
-    }), { newSessionId: NEW_ID, tmpDir: '/tmp/oc' });
+      mcpServers: { agentconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } },
+    }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
     const i = b.args.indexOf('--json-schema');
     expect(JSON.parse(b.args[i + 1]!)).toEqual({ type: 'object', properties: { state: { type: 'string' } } });
-    expect(pairs(b.args)).toContain('--mcp-config /tmp/oc/mcp-config.json --strict-mcp-config');
+    expect(pairs(b.args)).toContain('--mcp-config /tmp/ac/mcp-config.json --strict-mcp-config');
     const cfg = JSON.parse(b.files.find((f) => f.path.endsWith('mcp-config.json'))!.content);
-    expect(cfg.mcpServers.openconductor).toEqual({ type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } });
+    expect(cfg.mcpServers.agentconductor).toEqual({ type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } });
   });
 
   it('maps the three permission postures', () => {
@@ -79,11 +79,11 @@ describe('claude buildArgs', () => {
   it('allowlists the MCP control plane in restricted mode (dontAsk denies by default)', () => {
     const b = buildArgs(input({
       permission: { mode: 'restricted' },
-      mcpServers: { openconductor: { type: 'http', url: 'http://h/mcp' } },
-    }), { newSessionId: NEW_ID, tmpDir: '/tmp/oc' });
-    expect(pairs(b.args)).toContain('--allowedTools mcp__openconductor');
+      mcpServers: { agentconductor: { type: 'http', url: 'http://h/mcp' } },
+    }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
+    expect(pairs(b.args)).toContain('--allowedTools mcp__agentconductor');
     // auto mode needs no such allowlist
-    const auto = buildArgs(input({ permission: { mode: 'auto' }, mcpServers: { openconductor: { type: 'http', url: 'http://h/mcp' } } }), { newSessionId: NEW_ID, tmpDir: '/tmp/oc' });
+    const auto = buildArgs(input({ permission: { mode: 'auto' }, mcpServers: { agentconductor: { type: 'http', url: 'http://h/mcp' } } }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
     expect(auto.args).not.toContain('--allowedTools');
   });
 
@@ -106,9 +106,9 @@ describe('claude buildArgs', () => {
   it('adds --add-dir only for a worktree outside the home, and sets CLAUDE_CONFIG_DIR', () => {
     const inside = buildArgs(input({ worktree: { path: '/home/agent/work', branch: 'b' } }), { newSessionId: NEW_ID });
     expect(inside.args).not.toContain('--add-dir');
-    const outside = buildArgs(input({ worktree: { path: '/srv/wt/acme-42', branch: 'b' }, configHome: '/ws/.openconductor/runtimes/claude', env: { OC_RUN_ID: 'run-1' } }), { newSessionId: NEW_ID });
+    const outside = buildArgs(input({ worktree: { path: '/srv/wt/acme-42', branch: 'b' }, configHome: '/ws/.agent-conductor/runtimes/claude', env: { AC_RUN_ID: 'run-1' } }), { newSessionId: NEW_ID });
     expect(pairs(outside.args)).toContain('--add-dir /srv/wt/acme-42');
-    expect(outside.env).toEqual({ OC_RUN_ID: 'run-1', CLAUDE_CONFIG_DIR: '/ws/.openconductor/runtimes/claude' });
+    expect(outside.env).toEqual({ AC_RUN_ID: 'run-1', CLAUDE_CONFIG_DIR: '/ws/.agent-conductor/runtimes/claude' });
   });
 
   it('keeps the prompt ahead of variadic tool flags', () => {

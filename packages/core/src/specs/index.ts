@@ -1,5 +1,5 @@
 /**
- * SpecsService (PLAN §12.5): the per-project spec index behind the Spec Explorer, the `oc_spec_*` tools and
+ * SpecsService (PLAN §12.5): the per-project spec index behind the Spec Explorer, the `ac_spec_*` tools and
  * the shared knowledge search. OpenSpec leaves a spec document behind for nearly every feature, so specs are
  * treated as project knowledge: capabilities and their requirements come from the primary clone on the
  * default branch, archived changes are read from `openspec/changes/archive/`, and active changes are read
@@ -11,8 +11,8 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
-import { newId, nowIso } from '@openconductor/db';
-import { OcError } from '@openconductor/shared';
+import { newId, nowIso } from '@agent-conductor/db';
+import { OcError } from '@agent-conductor/shared';
 import type { Actor, CoreServices, SpecsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';

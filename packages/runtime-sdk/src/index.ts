@@ -1,4 +1,4 @@
-import type { RunErrorFamily, RunEventType, PermissionMode, SessionPolicy } from '@openconductor/shared';
+import type { RunErrorFamily, RunEventType, PermissionMode, SessionPolicy } from '@agent-conductor/shared';
 export type { RunErrorFamily, RunEventType };
 
 export type JsonSchema = Record<string, unknown>;

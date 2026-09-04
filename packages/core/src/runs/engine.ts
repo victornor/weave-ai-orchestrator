@@ -1,13 +1,13 @@
 import { seedRuntimeCredentials } from '../workspace/loader.js';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { nowIso } from '@openconductor/db';
+import { nowIso } from '@agent-conductor/db';
 import {
-  OC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents,
+  AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents,
   type Agent, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
   type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
-} from '@openconductor/shared';
-import type { McpServerConfig, RuntimeEvent, TurnHandle, TurnInput, TurnResult } from '@openconductor/runtime-sdk';
+} from '@agent-conductor/shared';
+import type { McpServerConfig, RuntimeEvent, TurnHandle, TurnInput, TurnResult } from '@agent-conductor/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { createSessions, type SessionsService } from '../sessions/index.js';
@@ -182,24 +182,24 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     // 4. run token + MCP config + env
     const token = await mintRunToken(ctx, { agentId: agent.id, runId, ticketId: agent.ticketId, kind: agent.kind, projectId: agent.projectId, roleId: agent.roleId });
     const mcpServers: Record<string, McpServerConfig> = {
-      openconductor: { type: 'http', url: `${ctx.loopbackUrl.replace(/\/$/, '')}/mcp/runs/${runId}`, headers: { Authorization: `Bearer ${token}` } },
+      agentconductor: { type: 'http', url: `${ctx.loopbackUrl.replace(/\/$/, '')}/mcp/runs/${runId}`, headers: { Authorization: `Bearer ${token}` } },
     };
     writeFileSync(join(runDir, 'mcp.json'), JSON.stringify({ mcpServers }, null, 2), 'utf8');
 
     const secrets = roleSecretsEnv(ctx, role);
     redact = makeRedactor([token, ...secrets.values]);
     const env: Record<string, string> = {
-      [OC_ENV.API_URL]: ctx.loopbackUrl,
-      [OC_ENV.RUN_TOKEN]: token,
-      [OC_ENV.RUN_ID]: runId,
-      [OC_ENV.AGENT_ID]: agent.id,
-      [OC_ENV.AGENT_KIND]: agent.kind,
-      [OC_ENV.WORKSPACE_ID]: ctx.workspaceId,
-      [OC_ENV.WAKE_REASON]: wakes.map((w) => `${w.source}:${w.reason}`).join('; ').slice(0, 400),
-      ...(agent.roleId ? { [OC_ENV.ROLE_ID]: agent.roleId } : {}),
-      ...(agent.projectId ? { [OC_ENV.PROJECT_ID]: agent.projectId } : {}),
-      ...(agent.ticketId ? { [OC_ENV.TICKET_ID]: agent.ticketId } : {}),
-      ...(agent.worktreePath ? { [OC_ENV.WORKTREE]: agent.worktreePath } : {}),
+      [AC_ENV.API_URL]: ctx.loopbackUrl,
+      [AC_ENV.RUN_TOKEN]: token,
+      [AC_ENV.RUN_ID]: runId,
+      [AC_ENV.AGENT_ID]: agent.id,
+      [AC_ENV.AGENT_KIND]: agent.kind,
+      [AC_ENV.WORKSPACE_ID]: ctx.workspaceId,
+      [AC_ENV.WAKE_REASON]: wakes.map((w) => `${w.source}:${w.reason}`).join('; ').slice(0, 400),
+      ...(agent.roleId ? { [AC_ENV.ROLE_ID]: agent.roleId } : {}),
+      ...(agent.projectId ? { [AC_ENV.PROJECT_ID]: agent.projectId } : {}),
+      ...(agent.ticketId ? { [AC_ENV.TICKET_ID]: agent.ticketId } : {}),
+      ...(agent.worktreePath ? { [AC_ENV.WORKTREE]: agent.worktreePath } : {}),
       ...secrets.env,
     };
 

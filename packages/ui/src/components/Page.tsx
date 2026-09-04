@@ -37,5 +37,5 @@ export function Page({ children, className }: { children: ReactNode; className?:
 }
 
 export function PageBody({ children, className }: { children: ReactNode; className?: string }): React.ReactElement {
-  return <div className={cx('oc-scroll min-h-0 flex-1', className)}>{children}</div>;
+  return <div className={cx('ac-scroll min-h-0 flex-1', className)}>{children}</div>;
 }

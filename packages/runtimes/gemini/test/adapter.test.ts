@@ -24,7 +24,7 @@ describe('gemini adapter', () => {
   });
 
   it('installs GEMINI.md, skills and a placeholder settings.json', async () => {
-    const home = tmp('oc-home-'); const skill = tmp('oc-skill-');
+    const home = tmp('ac-home-'); const skill = tmp('ac-skill-');
     writeFileSync(join(skill, 'SKILL.md'), '# demo\n');
     await adapter.installInstructions({ path: home, kind: 'worker' }, { instructions: '# Charter\n', skills: [{ name: 'demo', dir: skill }] });
     expect(readFileSync(join(home, 'GEMINI.md'), 'utf8')).toBe('# Charter\n');

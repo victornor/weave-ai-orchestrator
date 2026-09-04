@@ -1,5 +1,5 @@
-import { decisionRow, newId, nowIso, type Db } from '@openconductor/db';
-import { OcError, type Decision, type DecisionKind, type DecisionOwner, type DecisionStatus } from '@openconductor/shared';
+import { decisionRow, newId, nowIso, type Db } from '@agent-conductor/db';
+import { OcError, type Decision, type DecisionKind, type DecisionOwner, type DecisionStatus } from '@agent-conductor/shared';
 import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';

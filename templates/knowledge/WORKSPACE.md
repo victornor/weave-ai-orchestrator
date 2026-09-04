@@ -1,7 +1,7 @@
 <!-- knowledge/workspace/WORKSPACE.md — the conductor's knowledge base. -->
 <!-- Audience: the conductor only. Workers get 403 on this file. Budget: 3000 tokens. -->
-<!-- Seeded by the human at the bootstrap interview; extended by the conductor via oc_knowledge_note. -->
-<!-- Section headings below are fixed: oc_knowledge_note("workspace", section, text) targets them by name. -->
+<!-- Seeded by the human at the bootstrap interview; extended by the conductor via ac_knowledge_note. -->
+<!-- Section headings below are fixed: ac_knowledge_note("workspace", section, text) targets them by name. -->
 
 # {{workspace.name}}
 

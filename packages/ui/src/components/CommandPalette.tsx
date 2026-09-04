@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
-import type { UiStatus } from '@openconductor/shared';
+import type { UiStatus } from '@agent-conductor/shared';
 
 export interface Command {
   id: string;
@@ -65,10 +65,10 @@ export function CommandPalette({
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="relative w-full max-w-xl overflow-hidden rounded-r10 border border-line-3 bg-bg-1 shadow-sheet motion-safe:animate-[oc-rise_var(--dur-panel)_var(--ease)]"
+        className="relative w-full max-w-xl overflow-hidden rounded-r10 border border-line-3 bg-bg-1 shadow-sheet motion-safe:animate-[ac-rise_var(--dur-panel)_var(--ease)]"
       >
         <div className="flex items-center gap-2.5 border-b border-line-1 px-4 py-3.5">
-          <span className="oc-mono text-ui text-text-nav">›</span>
+          <span className="ac-mono text-ui text-text-nav">›</span>
           <input
             ref={input}
             value={q}
@@ -96,11 +96,11 @@ export function CommandPalette({
               }
             }}
           />
-          {scope ? <span className="oc-mono rounded-r4 bg-accent-tint px-1.5 py-0.5 text-nano text-accent-link">{scope}</span> : null}
-          <span className="oc-mono text-nano text-text-4">esc</span>
+          {scope ? <span className="ac-mono rounded-r4 bg-accent-tint px-1.5 py-0.5 text-nano text-accent-link">{scope}</span> : null}
+          <span className="ac-mono text-nano text-text-4">esc</span>
         </div>
 
-        <div className="oc-scroll max-h-80 p-1.5" role="listbox">
+        <div className="ac-scroll max-h-80 p-1.5" role="listbox">
           {rows.length === 0 ? (
             <p className="px-3 py-6 text-center text-meta text-text-3">Nothing matches “{q}”.</p>
           ) : (
@@ -119,15 +119,15 @@ export function CommandPalette({
               >
                 {c.status ? <StatusGlyph status={c.status} size="xs" /> : <span className="size-2 flex-none rounded-r4 bg-accent" />}
                 <span className={cx('text-ui', idx === i ? 'text-text-1' : 'text-text-soft')}>{c.label}</span>
-                {c.sub ? <span className="oc-mono oc-truncate text-meta text-text-nav">{c.sub}</span> : null}
+                {c.sub ? <span className="ac-mono ac-truncate text-meta text-text-nav">{c.sub}</span> : null}
                 <span className="flex-1" />
-                {c.kbd ? <span className="oc-mono text-nano text-text-4">{c.kbd}</span> : null}
+                {c.kbd ? <span className="ac-mono text-nano text-text-4">{c.kbd}</span> : null}
               </button>
             ))
           )}
         </div>
 
-        <div className="oc-mono flex gap-4 border-t border-line-1 px-4 py-2.5 text-nano text-text-4">
+        <div className="ac-mono flex gap-4 border-t border-line-1 px-4 py-2.5 text-nano text-text-4">
           <span>↑↓ navigate</span>
           <span>⏎ run</span>
           <span>⇥ scope to project</span>

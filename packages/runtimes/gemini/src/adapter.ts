@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type {
   AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter, RuntimeCapabilities, RuntimeDetection,
   RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
-} from '@openconductor/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, spawnLines, writeFiles } from '@openconductor/runtime-sdk';
-import { extractReport } from '@openconductor/shared';
+} from '@agent-conductor/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
+import { extractReport } from '@agent-conductor/shared';
 import { buildArgs, geminiSettings, SETTINGS_RELATIVE_PATH } from './args.js';
 import { createGeminiParser } from './events.js';
 import { asGeminiSession } from './session.js';

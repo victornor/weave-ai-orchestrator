@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { KNOWLEDGE_SCOPES } from '@openconductor/shared';
+import { KNOWLEDGE_SCOPES } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
 

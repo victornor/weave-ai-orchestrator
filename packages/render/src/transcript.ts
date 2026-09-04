@@ -13,7 +13,7 @@
  * Payload shapes are read defensively: the runtime adapters normalise events, but a missing field
  * must degrade to a shorter line, never to a crash.
  */
-import type { RunEvent } from '@openconductor/shared';
+import type { RunEvent } from '@agent-conductor/shared';
 import { formatDuration, formatTokens, formatDiffStat, oneLine } from './format.js';
 import { redact } from './redact.js';
 import type { ErrorBlock, FileBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock, TranscriptBlock, TranscriptOptions } from './types.js';
@@ -85,7 +85,7 @@ function toolTarget(name: string, input: Payload | null): string | null {
   if (url) return oneLine(url, 80);
   const prompt = str(input, 'prompt', 'description');
   if (prompt) return oneLine(prompt, 60);
-  if (/^oc_/.test(name)) {
+  if (/^ac_/.test(name)) {
     const id = str(input, 'ticketId', 'id', 'workerId', 'roleId', 'decisionId');
     if (id) return id;
   }
@@ -380,7 +380,7 @@ function collapsedToolLine(name: string, target: string | null, durationMs: numb
 }
 
 function prettyToolName(name: string): string {
-  if (name.startsWith('oc_')) return name;
+  if (name.startsWith('ac_')) return name;
   if (name.startsWith('mcp__')) return name.split('__').slice(-1)[0] ?? name;
   return name;
 }

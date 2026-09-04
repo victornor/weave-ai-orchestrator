@@ -38,7 +38,7 @@ export function Table<T>({
                 key={c.key}
                 scope="col"
                 style={c.width ? { width: c.width } : undefined}
-                className={cx('oc-label border-b border-line-1 px-3 py-2 text-left font-medium', c.align === 'right' && 'text-right')}
+                className={cx('ac-label border-b border-line-1 px-3 py-2 text-left font-medium', c.align === 'right' && 'text-right')}
               >
                 {c.header}
               </th>
@@ -59,13 +59,13 @@ export function Table<T>({
                 onClick={() => onRowClick?.(r)}
                 aria-selected={i === activeIndex}
                 className={cx(
-                  'border-b border-line-1 transition-colors duration-(--dur-fast) ease-oc',
+                  'border-b border-line-1 transition-colors duration-(--dur-fast) ease-ac',
                   onRowClick && 'cursor-pointer hover:bg-bg-1',
                   i === activeIndex && 'bg-bg-2',
                 )}
               >
                 {columns.map((c) => (
-                  <td key={c.key} className={cx('px-3 py-2 text-meta text-text-2', c.mono && 'oc-mono', c.align === 'right' && 'text-right')}>
+                  <td key={c.key} className={cx('px-3 py-2 text-meta text-text-2', c.mono && 'ac-mono', c.align === 'right' && 'text-right')}>
                     {c.render(r)}
                   </td>
                 ))}
@@ -101,7 +101,7 @@ export function ListRow({
         }
       }}
       className={cx(
-        'flex items-center gap-3 border-b border-line-1 px-4 py-2.5 transition-colors duration-(--dur-fast) ease-oc',
+        'flex items-center gap-3 border-b border-line-1 px-4 py-2.5 transition-colors duration-(--dur-fast) ease-ac',
         onClick && 'cursor-pointer hover:bg-bg-1',
         active && 'bg-bg-2',
         className,

@@ -1,10 +1,10 @@
-# Design brief for OpenConductor (paste into Claude Design)
+# Design brief for AgentConductor (paste into Claude Design)
 
-You are designing the web front end of **OpenConductor**, a control plane for AI coding agents working across several git projects. Produce a complete, high-fidelity, clickable mockup of the app for **phone first, then desktop**, in **both light and dark mode**, following the design language in section 5. Every screen must answer, in order: *what is happening, does it need me, what do I do about it.*
+You are designing the web front end of **AgentConductor**, a control plane for AI coding agents working across several git projects. Produce a complete, high-fidelity, clickable mockup of the app for **phone first, then desktop**, in **both light and dark mode**, following the design language in section 5. Every screen must answer, in order: *what is happening, does it need me, what do I do about it.*
 
 ---
 
-## 1. What OpenConductor is
+## 1. What AgentConductor is
 
 A **workspace** is a virtual business: one or more git **projects** (cloned repos), one **conductor** agent the human talks to, and hired **roles** per project (e.g. "Backend Engineer" on the `api` project). Roles are templates; when a ticket is assigned to a role, the system spawns a disposable **worker** for that one ticket, in its own git worktree, with its own AI session. Concurrency is simply more workers. When the work has landed the worker is retired.
 

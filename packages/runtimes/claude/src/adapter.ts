@@ -3,9 +3,9 @@ import { rmSync } from 'node:fs';
 import type {
   AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter, RuntimeCapabilities, RuntimeDetection,
   RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
-} from '@openconductor/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, runTmpDir, spawnLines, writeFiles } from '@openconductor/runtime-sdk';
-import { extractReport } from '@openconductor/shared';
+} from '@agent-conductor/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, runTmpDir, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
+import { extractReport } from '@agent-conductor/shared';
 import { buildArgs, RESTRICTED_TOOLS } from './args.js';
 import { createClaudeParser } from './events.js';
 import { asClaudeSession, type ClaudeSessionRef } from './session.js';

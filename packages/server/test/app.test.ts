@@ -33,13 +33,13 @@ describe('auth gating', () => {
     expect((await res.json()).items).toHaveLength(1);
   });
 
-  it('accepts the oc_session cookie and enforces the Origin on mutations', async () => {
+  it('accepts the ac_session cookie and enforces the Origin on mutations', async () => {
     const { fetch } = app();
-    const ok = await fetch('/api/w/ws1/tickets', { headers: { cookie: 'oc_session=sess-token' } });
+    const ok = await fetch('/api/w/ws1/tickets', { headers: { cookie: 'ac_session=sess-token' } });
     expect(ok.status).toBe(200);
 
     const forged = await fetch('/api/w/ws1/tickets', {
-      method: 'POST', headers: { cookie: 'oc_session=sess-token', origin: 'https://evil.example', 'content-type': 'application/json' },
+      method: 'POST', headers: { cookie: 'ac_session=sess-token', origin: 'https://evil.example', 'content-type': 'application/json' },
       body: JSON.stringify({ kind: 'task', title: 'x' }),
     });
     expect(forged.status).toBe(403);
@@ -144,7 +144,7 @@ describe('routes', () => {
     expect(doc.openapi).toBe('3.1.0');
     expect(Object.keys(doc.paths)).toContain('/api/w/{ws}/tickets');
     const txt = await (await fetch('/llms/api.txt')).text();
-    expect(txt).toContain('oc_inbox');
+    expect(txt).toContain('ac_inbox');
     expect(txt).toContain('/api/w/{ws}/events');
   });
 

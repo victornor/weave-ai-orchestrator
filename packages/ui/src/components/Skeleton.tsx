@@ -1,7 +1,7 @@
 import { cx } from '../lib/cx';
 
 export function Skeleton({ className }: { className?: string }): React.ReactElement {
-  return <div className={cx('oc-skeleton', className)} aria-hidden />;
+  return <div className={cx('ac-skeleton', className)} aria-hidden />;
 }
 
 /** Skeletons keep the row rhythm of the loaded state so nothing shifts. */
@@ -25,7 +25,7 @@ export function SkeletonCards({ count = 2, className }: { count?: number; classN
   return (
     <div className={cx('flex flex-col gap-3', className)} role="status" aria-label="Loading">
       {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="oc-card overflow-hidden">
+        <div key={i} className="ac-card overflow-hidden">
           <div className="flex items-center gap-2 border-b border-line-1 px-3.5 py-2.5">
             <Skeleton className="size-2.5" />
             <Skeleton className="h-2 w-20" />

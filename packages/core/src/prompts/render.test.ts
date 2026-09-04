@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId, nowIso } from '@openconductor/db';
-import type { Agent, RoleSpec } from '@openconductor/shared';
+import { newId, nowIso } from '@agent-conductor/db';
+import type { Agent, RoleSpec } from '@agent-conductor/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { buildTurnPrompt, humanName, renderBrief, renderCharter, renderConductorInstructions, renderWorkerInstructions } from './index.js';
 
@@ -30,7 +30,7 @@ describe('prompt rendering', () => {
       status: 'approved', priority: 'high', assigneeRoleId: h.roleId, createdByKind: 'agent',
       openspecChangeName: 'tst-42-add-dark-mode', createdAt: now, updatedAt: now,
     });
-    const workerId = h.addWorker(ticketId, { branch: 'oc/tst-42-add-dark-mode', worktreePath: null });
+    const workerId = h.addWorker(ticketId, { branch: 'ac/tst-42-add-dark-mode', worktreePath: null });
     worker = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [workerId])!;
     h.services.roles = { charter: () => '## Charter\n\nOwns the api service.' } as never;
     h.services.knowledge = { get: (scope: string) => ({ body: `KB:${scope}` }), bootstrapDigest: () => ({ text: 'SHARED.md + PROJECT.md digest', tokens: 12, truncated: false }) } as never;

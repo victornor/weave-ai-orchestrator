@@ -1,4 +1,4 @@
-import type { SessionRef } from '@openconductor/runtime-sdk';
+import type { SessionRef } from '@agent-conductor/runtime-sdk';
 
 /** Gemini sessions are UUIDs the caller may choose with `--session-id`. */
 export interface GeminiSessionRef { sessionId: string }

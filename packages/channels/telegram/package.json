@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/channel-telegram",
+  "name": "@agent-conductor/channel-telegram",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,8 +14,8 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*",
-    "@openconductor/channel-sdk": "workspace:*",
+    "@agent-conductor/shared": "workspace:*",
+    "@agent-conductor/channel-sdk": "workspace:*",
     "zod": "^3.25.76"
   },
   "devDependencies": {}

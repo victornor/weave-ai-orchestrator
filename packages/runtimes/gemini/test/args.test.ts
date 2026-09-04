@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TurnInput } from '@openconductor/runtime-sdk';
+import type { TurnInput } from '@agent-conductor/runtime-sdk';
 import { buildArgs, geminiSettings, MAX_ARGV_PROMPT } from '../src/args.js';
 
 const NEW_ID = '11111111-2222-4333-8444-555555555555';
@@ -40,9 +40,9 @@ describe('gemini buildArgs', () => {
   });
 
   it('writes MCP servers into .gemini/settings.json in cwd', () => {
-    const b = buildArgs(input({ mcpServers: { openconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } } }), { newSessionId: NEW_ID });
+    const b = buildArgs(input({ mcpServers: { agentconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } } }), { newSessionId: NEW_ID });
     const f = b.files.find((x) => x.path === '/home/agent/.gemini/settings.json')!;
-    expect(JSON.parse(f.content).mcpServers.openconductor).toEqual({
+    expect(JSON.parse(f.content).mcpServers.agentconductor).toEqual({
       httpUrl: 'http://127.0.0.1:7777/mcp/runs/run-1', type: 'http', trust: true, headers: { Authorization: 'Bearer t' },
     });
     expect(JSON.parse(geminiSettings({ l: { type: 'stdio', command: 'node', args: ['s.js'] } })).mcpServers.l)

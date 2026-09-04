@@ -1,5 +1,5 @@
-/* OpenConductor service worker: caches the app shell, never caches /api. */
-const SHELL = 'oc-shell-v1';
+/* AgentConductor service worker: caches the app shell, never caches /api. */
+const SHELL = 'ac-shell-v1';
 const SHELL_URLS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (e) => {
@@ -39,7 +39,7 @@ self.addEventListener('fetch', (e) => {
 });
 
 self.addEventListener('push', (e) => {
-  let data = { title: 'OpenConductor', body: 'Something needs you.' };
+  let data = { title: 'AgentConductor', body: 'Something needs you.' };
   try { data = { ...data, ...e.data.json() }; } catch { /* text push */ }
   e.waitUntil(self.registration.showNotification(data.title, { body: data.body, icon: '/icon.svg', tag: data.tag, data }));
 });

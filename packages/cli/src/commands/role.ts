@@ -1,7 +1,7 @@
-/** `oc role ...` — roles are templates; workers are the things that run (PLAN §11, §20). */
+/** `conductor role ...` — roles are templates; workers are the things that run (PLAN §11, §20). */
 import type { Command } from 'commander';
 import { emit, fields, heading, style, table, write } from '../output.js';
-import { statusGlyph } from '@openconductor/render';
+import { statusGlyph } from '@agent-conductor/render';
 import { items, run, session } from './util.js';
 
 function roleUiStatus(status: string): string {
@@ -133,7 +133,7 @@ export function register(program: Command): void {
       .description(`${verb} a role`)
       .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
         const { client } = await session(command);
-        const tool = verb === 'pause' ? 'oc_role_pause' : verb === 'resume' ? 'oc_role_resume' : 'oc_role_retire';
+        const tool = verb === 'pause' ? 'ac_role_pause' : verb === 'resume' ? 'ac_role_resume' : 'ac_role_retire';
         const result = await client.write({
           tool, input: { roleId: id, reason: opts['reason'] ?? '' },
           http: { method: 'POST', path: client.w(`/roles/${encodeURIComponent(id)}/${verb}`), body: { reason: opts['reason'] ?? '' } },

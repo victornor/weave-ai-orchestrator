@@ -19,7 +19,7 @@ The orchestrator is a git repo you launch a CLI inside. `AGENTS.md` is the syste
 
 VISION.md: "The command structure stays flat: every layer between the captain's intent and the acting agent costs fidelity and tokens, so depth is capped, not grown."
 
-Mapping to openconductor: first mate = workspace conductor, secondmate = project agent (persistent, chartered, project-bounded), crewmate = per-ticket worker/subagent inside a project.
+Mapping to agent-conductor: first mate = workspace conductor, secondmate = project agent (persistent, chartered, project-bounded), crewmate = per-ticket worker/subagent inside a project.
 
 ### On-disk layout
 

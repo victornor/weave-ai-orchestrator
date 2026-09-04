@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, TicketComment, Ticket, Decision, Agent, Role, Run, Project, UsageGrain, UsageWindow } from '@openconductor/shared';
+import type { RunEvent, TicketComment, Ticket, Decision, Agent, Role, Run, Project, UsageGrain, UsageWindow } from '@agent-conductor/shared';
 import { api, qs } from './client';
 import { qk } from './keys';
 import { useWs } from './context';

@@ -1,5 +1,5 @@
 {
-  "name": "OpenConductor",
+  "name": "AgentConductor",
   "short_name": "Conductor",
   "description": "Control plane for AI coding agents",
   "start_url": "/",

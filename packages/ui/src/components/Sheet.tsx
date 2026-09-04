@@ -56,7 +56,7 @@ export function Sheet({
         aria-labelledby={labelledBy}
         className={cx(
           'relative w-full max-w-lg overflow-hidden rounded-t-r8 border border-line-2 bg-bg-1 shadow-sheet sm:rounded-r8',
-          'motion-safe:animate-[oc-sheet-in_var(--dur-panel)_var(--ease)]',
+          'motion-safe:animate-[ac-sheet-in_var(--dur-panel)_var(--ease)]',
         )}
       >
         {title ? (
@@ -68,8 +68,8 @@ export function Sheet({
             </button>
           </div>
         ) : null}
-        <div className="oc-scroll max-h-[70vh] p-4">{children}</div>
-        {footer ? <div className="flex gap-2 border-t border-line-1 p-4 oc-safe-bottom">{footer}</div> : null}
+        <div className="ac-scroll max-h-[70vh] p-4">{children}</div>
+        {footer ? <div className="flex gap-2 border-t border-line-1 p-4 ac-safe-bottom">{footer}</div> : null}
       </div>
     </div>,
     document.body,
@@ -91,7 +91,7 @@ export function Drawer({ open, onClose, title, children }: { open: boolean; onCl
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative flex h-full w-full max-w-xl flex-col border-l border-line-2 bg-bg-1 shadow-sheet motion-safe:animate-[oc-rise_var(--dur-panel)_var(--ease)]"
+        className="relative flex h-full w-full max-w-xl flex-col border-l border-line-2 bg-bg-1 shadow-sheet motion-safe:animate-[ac-rise_var(--dur-panel)_var(--ease)]"
       >
         <div className="flex items-center gap-2 border-b border-line-1 px-4 py-3">
           <h2 className="text-head font-semibold tracking-head text-text-strong">{title}</h2>
@@ -100,7 +100,7 @@ export function Drawer({ open, onClose, title, children }: { open: boolean; onCl
             ✕
           </button>
         </div>
-        <div className="oc-scroll flex-1">{children}</div>
+        <div className="ac-scroll flex-1">{children}</div>
       </div>
     </div>,
     document.body,

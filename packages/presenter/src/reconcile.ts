@@ -1,4 +1,4 @@
-import type { AgentPresence, AgentView, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@openconductor/surface-sdk';
+import type { AgentPresence, AgentView, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@agent-conductor/surface-sdk';
 import type { DesiredPresentation, LogFn, PresentationBlockView, StoredHandle } from './types.js';
 
 export const DEFAULT_KEEP_CLOSED_FOR_MS = 120_000;

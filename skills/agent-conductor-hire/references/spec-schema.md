@@ -1,6 +1,6 @@
 # Role spec — fields
 
-Passed to `oc_role_hire(spec)`. The daemon validates it (`RoleSpecSchema`) and rejects anything malformed with the field names.
+Passed to `ac_role_hire(spec)`. The daemon validates it (`RoleSpecSchema`) and rejects anything malformed with the field names.
 
 | Field | Type | Notes |
 |---|---|---|

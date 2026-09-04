@@ -9,7 +9,7 @@ Schema: `state` (required), `summary` (required, ≤ 4000 chars), `tickets[]` (`
 {"state":"working","summary":"Implemented tasks 1-3 of acme-42-dark-mode: theme tokens, the CSS variable layer, and the settings toggle. Tests green. Remaining: sweep the 14 components that still hardcode colors.","tickets":[{"id":"ACME-42","status":"in_progress","note":"3/7 tasks ticked"}],"nextAction":{"owner":"self","what":"Finish the component sweep, then open the PR"},"knowledgeUpdated":false,"uncommittedWork":false}
 ```
 
-**needs_decision** — you called `oc_ask` and stopped.
+**needs_decision** — you called `ac_ask` and stopped.
 ```json
 {"state":"needs_decision","summary":"The spec does not say whether dark mode follows the OS setting or is user-set only. Both are one day of work and they are not compatible. Asked with two options; recommended following the OS with a manual override.","tickets":[{"id":"ACME-42","status":"in_progress","note":"paused on decision D-7"}],"nextAction":{"owner":"human","what":"Answer D-7: OS-follow with override, or manual only"},"knowledgeUpdated":false,"uncommittedWork":false}
 ```

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ThreadMessage } from '@openconductor/shared';
-import { ticketUiStatus, agentUiStatus } from '@openconductor/shared';
+import type { ThreadMessage } from '@agent-conductor/shared';
+import { ticketUiStatus, agentUiStatus } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Composer } from '../components/Composer';
 import { DecisionCard } from '../components/DecisionCard';
@@ -163,16 +163,16 @@ export function ChatRoute(): React.ReactElement {
       <PageHeader
         title="Conductor"
         meta={`${workers.data?.length ?? 0} workers running · ${decisions.data?.length ?? 0} need you`}
-        actions={<span className="oc-mono hidden text-micro text-text-nav md:block">/brief</span>}
+        actions={<span className="ac-mono hidden text-micro text-text-nav md:block">/brief</span>}
       />
 
       {onboarding ? (
         <div className="flex items-center gap-3 border-b border-line-1 bg-bg-1 px-4 py-2.5">
           <span className="text-meta text-text-2">Setting up your workspace</span>
           <span className="h-1.5 w-32 overflow-hidden rounded-pill bg-bg-3">
-            <span className="block h-full rounded-pill bg-accent transition-[width] duration-(--dur-panel) ease-oc" style={{ width: `${(answered / 5) * 100}%` }} />
+            <span className="block h-full rounded-pill bg-accent transition-[width] duration-(--dur-panel) ease-ac" style={{ width: `${(answered / 5) * 100}%` }} />
           </span>
-          <span className="oc-mono text-micro text-text-3">{answered}/5</span>
+          <span className="ac-mono text-micro text-text-3">{answered}/5</span>
         </div>
       ) : null}
 
@@ -204,7 +204,7 @@ export function ChatRoute(): React.ReactElement {
           {streaming ? (
             <div className="flex flex-col gap-2">
               <MessageBody body={streaming} onTicket={openTicket} ticketStatus={ticketStatus} />
-              <span className="inline-block h-3.5 w-0.5 bg-accent motion-safe:animate-[oc-blink_1s_steps(1)_infinite]" aria-hidden />
+              <span className="inline-block h-3.5 w-0.5 bg-accent motion-safe:animate-[ac-blink_1s_steps(1)_infinite]" aria-hidden />
             </div>
           ) : null}
 
@@ -275,7 +275,7 @@ function ChatMessage({
       >
         {mine ? message.body : <MessageBody body={message.body} onTicket={onTicket} ticketStatus={ticketStatus} />}
       </div>
-      <span className="oc-mono text-nano text-text-4">{clock(message.createdAt)}</span>
+      <span className="ac-mono text-nano text-text-4">{clock(message.createdAt)}</span>
     </div>
   );
 }

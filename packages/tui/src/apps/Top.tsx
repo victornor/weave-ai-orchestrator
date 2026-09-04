@@ -1,8 +1,8 @@
-/** `oc top` — one screen, every worker, grouped by project and role (PLAN §14b.1). */
+/** `conductor top` — one screen, every worker, grouped by project and role (PLAN §14b.1). */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
-import type { Agent } from '@openconductor/shared';
-import { statusRank, workerToCard, type WorkerCardModel } from '@openconductor/render';
+import type { Agent } from '@agent-conductor/shared';
+import { statusRank, workerToCard, type WorkerCardModel } from '@agent-conductor/render';
 import { StatusBar } from '../components/StatusBar.js';
 import { items, type TuiClient } from '../client.js';
 import { useKeys, useStream, useTerminalSize } from '../hooks.js';

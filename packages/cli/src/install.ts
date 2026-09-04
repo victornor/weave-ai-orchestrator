@@ -1,5 +1,5 @@
 /**
- * `oc doctor --install`: the opt-in installer for missing tools (PLAN §20). Pure planning here so it
+ * `conductor doctor --install`: the opt-in installer for missing tools (PLAN §20). Pure planning here so it
  * is testable; the doctor command runs the plan. Nothing here ever runs `sudo` — package-manager
  * installs that need root are printed for the human to run.
  */

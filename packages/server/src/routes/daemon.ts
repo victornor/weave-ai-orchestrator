@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { OcError } from '@openconductor/shared';
-import { detectHostToolsCached, getLogger } from '@openconductor/core';
+import { OcError } from '@agent-conductor/shared';
+import { detectHostToolsCached, getLogger } from '@agent-conductor/core';
 import type { AppDeps, AppEnv } from '../types.js';
 import { body } from '../http.js';
 
@@ -58,7 +58,7 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
     return c.json(await admin.init(input), 201);
   });
 
-  /** PLAN §20 `oc workspace import`: stage an export into `target`, register it, and land its tickets in the backlog. */
+  /** PLAN §20 `conductor workspace import`: stage an export into `target`, register it, and land its tickets in the backlog. */
   app.post('/workspaces/import', async (c) => {
     if (!admin) throw new OcError('internal', 'workspace import is not available on this listener');
     const input = await body(c, z.object({ path: z.string().min(1), target: z.string().min(1) }));

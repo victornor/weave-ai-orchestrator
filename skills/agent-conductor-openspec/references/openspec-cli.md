@@ -20,4 +20,4 @@ Notes:
 - A change with zero spec deltas **fails validation** unless `.openspec.yaml` has `skip_specs: true`. That is the tracker case only.
 - There is no lock and no "active change" concept. One agent per change; you are that agent.
 - The layout in your worktree: `openspec/config.yaml` (context and rules, injected into every artifact instruction), `openspec/specs/<capability>/spec.md` (source of truth after archive), `openspec/changes/<name>/{.openspec.yaml, proposal.md, design.md, tasks.md, specs/<cap>/spec.md}`.
-- Skill prose changes between OpenSpec releases; the JSON contract does not. When the skill text and this file disagree about *process*, follow OpenConductor. When they disagree about *CLI output*, trust the CLI.
+- Skill prose changes between OpenSpec releases; the JSON contract does not. When the skill text and this file disagree about *process*, follow AgentConductor. When they disagree about *CLI output*, trust the CLI.

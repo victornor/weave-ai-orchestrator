@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Decision } from '@openconductor/shared';
+import type { Decision } from '@agent-conductor/shared';
 import { Button } from './Button';
 import { Composer } from './Composer';
 import { StatusGlyph } from './StatusGlyph';
@@ -70,11 +70,11 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
         </span>
         <div className="flex-1" />
         {target.prUrl ? (
-          <a className="oc-mono text-micro" href={target.prUrl} target="_blank" rel="noreferrer">
+          <a className="ac-mono text-micro" href={target.prUrl} target="_blank" rel="noreferrer">
             PR {target.prNumber ? `#${target.prNumber}` : ''} ↗
           </a>
         ) : meta ? (
-          <span className="oc-mono text-micro text-text-3">{meta}</span>
+          <span className="ac-mono text-micro text-text-3">{meta}</span>
         ) : null}
       </div>
 
@@ -89,7 +89,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
               <li key={i} className="flex items-start gap-2.5">
                 <span className="mt-0.5 size-3 flex-none rounded-r4 border border-line-3" aria-hidden />
                 <span className="flex-1 text-meta leading-snug text-text-soft">{t.text}</span>
-                {t.files ? <span className="oc-mono text-micro text-text-4">{t.files}</span> : null}
+                {t.files ? <span className="ac-mono text-micro text-text-4">{t.files}</span> : null}
               </li>
             ))}
           </ul>
@@ -97,7 +97,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
 
         {/* merge approval — CI and diff stats */}
         {decision.kind === 'merge_approval' ? (
-          <div className="oc-mono mb-3 flex flex-wrap items-center gap-3.5 text-micro">
+          <div className="ac-mono mb-3 flex flex-wrap items-center gap-3.5 text-micro">
             {target.ci ? (
               <span className={cx('flex items-center gap-1.5', target.ci.passed === target.ci.total ? 'text-done' : 'text-working')}>
                 <span className="size-2 rounded-pill bg-current" />
@@ -113,7 +113,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
         {/* hire approval — runtime and model */}
         {decision.kind === 'hire_approval' && (target.runtime || target.model) ? (
           <div className="mb-3 flex items-center gap-2 rounded-r6 border border-line-1 bg-bg-2 px-3 py-2">
-            <span className="oc-mono text-micro text-text-soft">
+            <span className="ac-mono text-micro text-text-soft">
               {target.runtime}
               {target.model ? ` · ${target.model}` : ''}
             </span>
@@ -136,14 +136,14 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
                   disabled={busy}
                   onClick={() => answer(o.key)}
                   className={cx(
-                    'rounded-r6 border p-3 text-left transition-colors duration-(--dur-fast) ease-oc',
+                    'rounded-r6 border p-3 text-left transition-colors duration-(--dur-fast) ease-ac',
                     picked ? 'border-accent bg-accent-tint' : 'border-line-2 hover:bg-bg-2',
                   )}
                 >
                   <span className="mb-0.5 flex items-center gap-2">
                     <span className="text-ui font-medium text-text-strong">{o.label}</span>
                     {picked ? (
-                      <span className="oc-mono rounded-r4 border border-accent-edge px-1.5 py-0.5 text-nano tracking-micro text-accent-link">PICKED</span>
+                      <span className="ac-mono rounded-r4 border border-accent-edge px-1.5 py-0.5 text-nano tracking-micro text-accent-link">PICKED</span>
                     ) : null}
                   </span>
                   {o.description ? <span className="block text-micro leading-snug text-text-3">{o.description}</span> : null}
@@ -169,7 +169,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
             onChange={(e) => setConfirm(e.target.value)}
             placeholder={`type ${target.confirm ?? ticketIdentifier ?? 'the ticket id'} to confirm`}
             aria-label="Type the ticket identifier to confirm"
-            className="oc-mono mb-2.5 h-9 w-full rounded-r6 border border-line-2 bg-bg-input px-3 text-meta text-text-1 outline-none placeholder:text-text-4"
+            className="ac-mono mb-2.5 h-9 w-full rounded-r6 border border-line-2 bg-bg-input px-3 text-meta text-text-1 outline-none placeholder:text-text-4"
           />
         ) : null}
 

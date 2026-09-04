@@ -1,8 +1,8 @@
-/** `oc ticket ...` — the same commands for a human and, with OC_RUN_TOKEN, for an agent (PLAN §9.5, §20). */
+/** `conductor ticket ...` — the same commands for a human and, with AC_RUN_TOKEN, for an agent (PLAN §9.5, §20). */
 import type { Command } from 'commander';
-import type { Ticket, TicketComment } from '@openconductor/shared';
-import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES } from '@openconductor/shared';
-import { ticketToSummary, formatRelative, oneLine } from '@openconductor/render';
+import type { Ticket, TicketComment } from '@agent-conductor/shared';
+import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES } from '@agent-conductor/shared';
+import { ticketToSummary, formatRelative, oneLine } from '@agent-conductor/render';
 import { ApiError } from '../api.js';
 import { emit, fields, heading, style, table, write } from '../output.js';
 import { promptTyped } from '../prompt.js';
@@ -43,7 +43,7 @@ export function register(program: Command): void {
       if (opts['autoMerge'] === true) input['autoMerge'] = true;
 
       const created = await client.write<Ticket>({
-        tool: 'oc_ticket_create', input,
+        tool: 'ac_ticket_create', input,
         http: { method: 'POST', path: client.w('/tickets'), body: input },
       });
       emit(created, () => {
@@ -69,7 +69,7 @@ export function register(program: Command): void {
         search: opts['search'], limit: opts['limit'], offset: opts['offset'],
       };
       const payload = client.isAgent
-        ? await client.tool<unknown>('oc_ticket_list', query as Record<string, unknown>)
+        ? await client.tool<unknown>('ac_ticket_list', query as Record<string, unknown>)
         : await client.wget<unknown>('/tickets', query);
       const rows = items<Ticket>(payload, 'tickets').map((t) => ticketToSummary(t, {}));
       emit(payload, () => {
@@ -94,7 +94,7 @@ export function register(program: Command): void {
     .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
       const { client } = await session(command);
       const payload = await client.write<Record<string, unknown>>({
-        tool: 'oc_ticket_get', input: { ticketId: id },
+        tool: 'ac_ticket_get', input: { ticketId: id },
         http: { method: 'GET', path: client.w(`/tickets/${encodeURIComponent(id)}`) },
       });
       const t = unwrap<Ticket>(payload, 'ticket');
@@ -157,7 +157,7 @@ export function register(program: Command): void {
     .action(async (id: string, roleId: string, _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
       const result = await client.write({
-        tool: 'oc_ticket_assign', input: { ticketId: id, roleId },
+        tool: 'ac_ticket_assign', input: { ticketId: id, roleId },
         http: { method: 'POST', path: client.w(`/tickets/${encodeURIComponent(id)}/assign`), body: { roleId } },
       });
       emit(result, () => write(`${style.ok('assigned')} ${id} -> ${roleId}`));
@@ -200,7 +200,7 @@ export function register(program: Command): void {
       if (opts['blockedBy']) input['blockedBy'] = list(opts['blockedBy']);
       if (opts['unblockOwner'] && opts['unblockAction']) input['unblock'] = { owner: opts['unblockOwner'], action: opts['unblockAction'] };
       const result = await client.write({
-        tool: 'oc_ticket_transition', input: { ticketId: id, ...input },
+        tool: 'ac_ticket_transition', input: { ticketId: id, ...input },
         http: { method: 'POST', path: client.w(`/tickets/${encodeURIComponent(id)}/transition`), body: input },
       });
       emit(result, () => write(`${style.ok('moved')} ${id} -> ${status}`));
@@ -215,7 +215,7 @@ export function register(program: Command): void {
       const { client } = await session(command);
       const text = body.join(' ');
       const result = await client.write({
-        tool: 'oc_ticket_comment', input: { ticketId: id, body: text },
+        tool: 'ac_ticket_comment', input: { ticketId: id, body: text },
         http: { method: 'POST', path: client.w(`/tickets/${encodeURIComponent(id)}/comments`), body: { body: text } },
       });
       emit(result, () => write(`${style.ok('commented')} on ${id}`));
@@ -229,7 +229,7 @@ export function register(program: Command): void {
     .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
       const { client } = await session(command);
       const payload = await client.write<unknown>({
-        tool: 'oc_ticket_comments', input: { ticketId: id, after: opts['after'] },
+        tool: 'ac_ticket_comments', input: { ticketId: id, after: opts['after'] },
         http: { method: 'GET', path: client.w(`/tickets/${encodeURIComponent(id)}/comments`), query: { after: opts['after'] } },
       });
       const rows = items<TicketComment>(payload, 'comments');

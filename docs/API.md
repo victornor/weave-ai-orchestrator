@@ -1,11 +1,11 @@
-# OpenConductor HTTP API (v1)
+# AgentConductor HTTP API (v1)
 
 Base: `/api`. Workspace-scoped routes: `/api/w/:ws/...` where `:ws` is the workspace id (slug). JSON in/out. Errors: `{ error: { code, message, details?, retryable } }` with the status from `OcError.status(code)`.
 
-Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `oc_session` httpOnly cookie (web). Loopback listener accepts run tokens (`Bearer rt_...`) for `/mcp/runs/:runId` and `/api/w/:ws/agent/*` only.
+Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `ac_session` httpOnly cookie (web). Loopback listener accepts run tokens (`Bearer rt_...`) for `/mcp/runs/:runId` and `/api/w/:ws/agent/*` only.
 
 ## Daemon-level
-- `GET /api/health` → `{ ok, version, workspaces: [{id, name, status}], operatorConfigured, tlsMode, publicUrl, host: { platform, hostname, tools: { git|gh|openspec|wt: { available, version, need, purpose } } } }` — `host.tools` is the daemon host's tool detection (cached 60 s), which is what a remote `oc doctor` reports.
+- `GET /api/health` → `{ ok, version, workspaces: [{id, name, status}], operatorConfigured, tlsMode, publicUrl, host: { platform, hostname, tools: { git|gh|openspec|wt: { available, version, need, purpose } } } }` — `host.tools` is the daemon host's tool detection (cached 60 s), which is what a remote `conductor doctor` reports.
 - `POST /api/auth/setup` `{ username, password }` (only when no operator) · `POST /api/auth/login` `{ username, password, totp?, deviceName?, kind }` → `{ token, sessionId, expiresAt }` or `{ totpRequired: true }` (401 `auth_totp_required`) · `POST /api/auth/logout` · `GET /api/auth/me` → `{ operator, session, totpEnabled }`
 - `GET /api/auth/sessions` · `DELETE /api/auth/sessions/:id` · `DELETE /api/auth/sessions` (all others)
 - `POST /api/auth/totp/setup` → `{ secret, otpauthUrl, recoveryCodes }` · `POST /api/auth/totp/enable` `{ code }` · `POST /api/auth/totp/disable` `{ password }` · `POST /api/auth/password` `{ current, next }`
@@ -53,10 +53,10 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `oc_session` httpOn
 `GET /presentation` · `PUT /presentation` (PresentationBlocks) · `GET /presenter/desired` → `{ conductor, workers: AgentView[], config }` · `PUT /presenter/:presenterId/handles` `{ handles }`
 
 ### Agent endpoints (run token, loopback)
-`GET /api/w/:ws/agent/inbox` · everything the MCP tools do is also available as `POST /api/w/:ws/agent/tools/:tool` `{ input }` → `ToolResult` for `oc` CLI use.
+`GET /api/w/:ws/agent/inbox` · everything the MCP tools do is also available as `POST /api/w/:ws/agent/tools/:tool` `{ input }` → `ToolResult` for `conductor` CLI use.
 
 ### MCP
-`POST/GET /mcp/runs/:runId` — Streamable HTTP MCP server named `openconductor` exposing the `oc_*` tools scoped to that run's agent (PLAN §9.2).
+`POST/GET /mcp/runs/:runId` — Streamable HTTP MCP server named `agent-conductor` exposing the `ac_*` tools scoped to that run's agent (PLAN §9.2).
 
 ## Events (SSE `type`)
-See `EVENT_TYPES` in `@openconductor/shared`. Payloads carry the entity snapshot where cheap (ticket, decision, worker, thread message) or `{ id }` otherwise.
+See `EVENT_TYPES` in `@agent-conductor/shared`. Payloads carry the entity snapshot where cheap (ticket, decision, worker, thread message) or `{ id }` otherwise.

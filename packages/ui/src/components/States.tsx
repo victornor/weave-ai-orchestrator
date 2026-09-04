@@ -17,7 +17,7 @@ export function EmptyState({
   className?: string;
 }): React.ReactElement {
   return (
-    <div className={cx('oc-card mx-auto max-w-sm p-6 text-center', className)}>
+    <div className={cx('ac-card mx-auto max-w-sm p-6 text-center', className)}>
       <div className="mb-2.5 flex justify-center">
         <StatusGlyph status="done" size="md" />
       </div>
@@ -58,10 +58,10 @@ export function ErrorState({
   const c = code ?? codeOf(error);
   const m = message ?? messageOf(error);
   return (
-    <div className={cx('oc-card border-failed/30 p-3.5', className)} role="alert">
+    <div className={cx('ac-card border-failed/30 p-3.5', className)} role="alert">
       <div className="mb-2 flex items-center gap-2">
         <StatusGlyph status="failed" size="xs" />
-        <span className="oc-mono text-micro text-failed">{c}</span>
+        <span className="ac-mono text-micro text-failed">{c}</span>
       </div>
       <p className="mb-2.5 text-meta leading-relaxed text-text-2">{m}</p>
       <div className="flex items-center gap-3">

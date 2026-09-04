@@ -1,5 +1,5 @@
 {
-  "name": "openconductor",
+  "name": "agent-conductor",
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@11.25.0",
@@ -12,8 +12,8 @@
     "typecheck": "tsc -b tsconfig.json",
     "test": "vitest run",
     "lint": "node scripts/guard-boundaries.mjs && node scripts/guard-console.mjs",
-    "dev": "pnpm --filter @openconductor/server run dev",
-    "oc": "node packages/cli/dist/bin.js"
+    "dev": "pnpm --filter @agent-conductor/server run dev",
+    "conductor": "node packages/cli/dist/bin.js"
   },
   "devDependencies": {
     "typescript": "^5.9.2",

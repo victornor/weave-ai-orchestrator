@@ -1,6 +1,6 @@
-import { newId, nowIso } from '@openconductor/db';
-import type { SessionPolicy } from '@openconductor/shared';
-import type { SessionRef } from '@openconductor/runtime-sdk';
+import { newId, nowIso } from '@agent-conductor/db';
+import type { SessionPolicy } from '@agent-conductor/shared';
+import type { SessionRef } from '@agent-conductor/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
 
 export interface SessionRow {

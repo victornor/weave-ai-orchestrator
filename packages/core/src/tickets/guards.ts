@@ -1,4 +1,4 @@
-import { OcError, canTransition, type TicketKind, type TicketStatus } from '@openconductor/shared';
+import { OcError, canTransition, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
 
 /** Everything the transition guards need, gathered by the service before it decides (PLAN §6.2). */
 export interface GuardFacts {

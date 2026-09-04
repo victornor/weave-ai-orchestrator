@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/plugin-sdk",
+  "name": "@agent-conductor/plugin-sdk",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,9 +14,9 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*",
-    "@openconductor/runtime-sdk": "workspace:*",
-    "@openconductor/channel-sdk": "workspace:*",
-    "@openconductor/surface-sdk": "workspace:*"
+    "@agent-conductor/shared": "workspace:*",
+    "@agent-conductor/runtime-sdk": "workspace:*",
+    "@agent-conductor/channel-sdk": "workspace:*",
+    "@agent-conductor/surface-sdk": "workspace:*"
   }
 }

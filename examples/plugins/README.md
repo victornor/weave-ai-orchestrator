@@ -23,10 +23,10 @@ ticketPrefix: ACME
 
 plugins:
   - ./plugins/echo-channel                    # a directory inside the workspace
-  - name: /srv/oc-plugins/echo-channel        # an absolute path, with config
+  - name: /srv/ac-plugins/echo-channel        # an absolute path, with config
     config:
       prefix: acme
-  - "@acme/oc-plugin-jira"                    # an installed package
+  - "@acme/ac-plugin-jira"                    # an installed package
 
 channels:
   echo: {}                                    # a registered channel still has to be configured
@@ -34,7 +34,7 @@ channels:
 
 A directory needs a `package.json` (its `main`/`exports` entry is used) or an `index.js`. The entry
 module's default export must be a `definePlugin({ id, version, apiVersion: 1, register })` object
-from `@openconductor/plugin-sdk`; anything else is logged and skipped, and one broken plugin never
+from `@agent-conductor/plugin-sdk`; anything else is logged and skipped, and one broken plugin never
 stops the daemon.
 
 Restart the daemon after changing `plugins:` — plugins are registered once, at load.
@@ -42,7 +42,7 @@ Restart the daemon after changing `plugins:` — plugins are registered once, at
 ## Writing one
 
 ```js
-import { definePlugin } from '@openconductor/plugin-sdk';
+import { definePlugin } from '@agent-conductor/plugin-sdk';
 
 export default definePlugin({
   id: 'my-plugin',
@@ -55,7 +55,7 @@ export default definePlugin({
     host.registerSurface(mySurfaceAdapter);
     host.registerWorktreeProvider(myProvider);
     host.registerForge(myForge);
-    host.registerAgentTool(myTool);        // an extra oc_* MCP tool
+    host.registerAgentTool(myTool);        // an extra ac_* MCP tool
     host.registerHook({ events: ['ticket.status'], handler: async (ev) => { /* … */ } });
     host.logger.info('registered');
   },

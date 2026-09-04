@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import type { AgentPresence, AgentView, JsonSchema, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@openconductor/surface-sdk';
+import type { AgentPresence, AgentView, JsonSchema, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@agent-conductor/surface-sdk';
 import {
   CONDUCTOR_AGENT_ID, CONDUCTOR_WINDOW_NAME, findWindow, hasSessionArgs, killWindowArgs, listWindowsArgs,
   newSessionArgs, newWindowArgs, parseListWindows, renameWindowArgs, selectLayoutArgs, selectWindowArgs,
@@ -44,7 +44,7 @@ export function createTmuxSurface(): SurfaceAdapter {
         if (/duplicate session/.test(created.stderr)) return session;
         throw new Error(`tmux: could not create session ${session}: ${created.stderr.trim()}`);
       }
-      // Keep panes open after their command exits so a failed `oc attach` stays readable instead of collapsing the session.
+      // Keep panes open after their command exits so a failed `conductor attach` stays readable instead of collapsing the session.
       await tmux(['set-option', '-t', session, 'remain-on-exit', 'on']);
       const windows = await listWindows(session);
       const first = windows[0];
@@ -92,7 +92,7 @@ export function createTmuxSurface(): SurfaceAdapter {
         additionalProperties: false,
         properties: {
           surface: { type: 'string' },
-          session: { type: 'string', description: 'Override the session name (default oc-<workspaceId>)' },
+          session: { type: 'string', description: 'Override the session name (default ac-<workspaceId>)' },
           layout: { type: 'string', enum: ['grid', 'per-project'] },
           terminal: { type: 'string' },
           workspace: { type: ['string', 'number'] },

@@ -1,4 +1,4 @@
-/** `oc login` / `logout` / `context` / `devices` — remote access (PLAN §4.4). */
+/** `conductor login` / `logout` / `context` / `devices` — remote access (PLAN §4.4). */
 import type { Command } from 'commander';
 import { ApiClient, ApiError } from '../api.js';
 import { currentContext, loadContexts, putContext, removeContext, suggestContextName, useContext } from '../contexts.js';
@@ -21,14 +21,14 @@ function isLoopback(url: string): boolean {
 export function register(program: Command): void {
   program
     .command('login')
-    .argument('<url>', 'daemon url, e.g. https://oc.example.com')
+    .argument('<url>', 'daemon url, e.g. https://conductor.example.com')
     .description('sign in to a daemon and store a named context')
     .option('-n, --name <name>', 'context name (defaults to the host)')
     .option('-u, --username <username>', 'operator username', 'operator')
     .option('--pin', 'pin the TLS certificate (self-signed daemons)')
     .option('--insecure', 'allow plaintext http to a non-loopback host')
     .option('--device <name>', 'device name shown in Settings -> Devices')
-    .option('--password <password>', 'operator password (or set OC_PASSWORD); prompts when omitted')
+    .option('--password <password>', 'operator password (or set AC_PASSWORD); prompts when omitted')
     .option('--workspace-default <id>', 'default workspace for this context')
     .action(async (url: string, opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const target = String(url).replace(/\/+$/, '');
@@ -47,7 +47,7 @@ export function register(program: Command): void {
 
       const client = new ApiClient({ baseUrl: target });
       const username = String(opts['username'] ?? 'operator');
-      const password = (typeof opts['password'] === 'string' && opts['password']) || process.env['OC_PASSWORD'] || await promptHidden(`Password for ${username}@${new URL(target).host}`);
+      const password = (typeof opts['password'] === 'string' && opts['password']) || process.env['AC_PASSWORD'] || await promptHidden(`Password for ${username}@${new URL(target).host}`);
       const deviceName = String(opts['device'] ?? `${process.env['USER'] ?? 'cli'}@${process.env['HOSTNAME'] ?? 'host'}`);
 
       const attempt = async (totp?: string): Promise<LoginResponse> =>
@@ -110,7 +110,7 @@ export function register(program: Command): void {
 
   context
     .command('list', { isDefault: true })
-    .description('list contexts from ~/.config/openconductor/contexts.yaml')
+    .description('list contexts from ~/.config/agent-conductor/contexts.yaml')
     .action(async (_opts: unknown, command: Command) => run(async () => {
       const file = loadContexts();
       const rows = Object.entries(file.contexts).map(([name, entry]) => ({
@@ -129,7 +129,7 @@ export function register(program: Command): void {
           { header: 'WORKSPACE', get: (r) => r.workspace },
           { header: 'AUTH', get: (r) => r.auth },
           { header: 'PINNED', get: (r) => r.pinned },
-        ], { empty: 'no contexts yet — run `oc login <url>`' });
+        ], { empty: 'no contexts yet — run `conductor login <url>`' });
       });
     }));
 

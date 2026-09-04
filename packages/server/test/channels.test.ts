@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ChannelAdapter, InboundMessage, OutboundMessage, SendResult } from '@openconductor/channel-sdk';
-import { newId, nowIso } from '@openconductor/db';
+import type { ChannelAdapter, InboundMessage, OutboundMessage, SendResult } from '@agent-conductor/channel-sdk';
+import { newId, nowIso } from '@agent-conductor/db';
 import { ChannelManager } from '../src/channels.js';
 import { makeHarness, decision, type Harness } from './fakes.js';
 

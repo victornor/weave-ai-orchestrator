@@ -1,5 +1,5 @@
-import { newId, nowIso } from '@openconductor/db';
-import type { Agent, Run, Wakeup } from '@openconductor/shared';
+import { newId, nowIso } from '@agent-conductor/db';
+import type { Agent, Run, Wakeup } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices, Dispatcher } from '../api.js';
 import { executeRun } from './engine.js';

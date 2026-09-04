@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { A, useGo } from './link';
-import { TICKET_STATUSES, ticketUiStatus } from '@openconductor/shared';
+import { TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
 import { RAIL, TABS, href } from './nav';
 import { NavGlyph } from './NavGlyph';
 import { StartWorkSheet } from './StartWorkSheet';
@@ -134,17 +134,17 @@ export function AppShell(): React.ReactElement {
             <NavGlyph glyph="needs-you" active className="size-2.5" />
           </span>
           <span className="flex-1 truncate text-ui font-semibold text-text-1">{ws}</span>
-          <span className="oc-mono text-nano text-text-nav">⌄</span>
+          <span className="ac-mono text-nano text-text-nav">⌄</span>
         </A>
 
         <button
           type="button"
           onClick={() => setStartOpen(true)}
-          className="mb-3.5 flex h-8 items-center gap-2 rounded-r6 bg-accent px-2.5 text-accent-on transition-colors duration-(--dur-fast) ease-oc hover:bg-accent-hover"
+          className="mb-3.5 flex h-8 items-center gap-2 rounded-r6 bg-accent px-2.5 text-accent-on transition-colors duration-(--dur-fast) ease-ac hover:bg-accent-hover"
         >
           <PlusGlyph className="size-2.5" />
           <span className="flex-1 text-left text-meta font-medium">Start Work</span>
-          <span className="oc-mono text-nano opacity-65">⌘⇧␣</span>
+          <span className="ac-mono text-nano opacity-65">⌘⇧␣</span>
         </button>
 
         <nav className="flex flex-col gap-px" aria-label="Sections">
@@ -158,14 +158,14 @@ export function AppShell(): React.ReactElement {
               >
                 <span className={cx('size-1.5 rounded-r4', active ? 'bg-needs-you' : 'bg-line-3')} aria-hidden />
                 <span className="flex-1 text-meta">{item.label}</span>
-                {item.key === 'needs' && needsCount > 0 ? <span className="oc-mono text-nano text-needs-you">{needsCount}</span> : null}
-                <span className="oc-mono text-nano text-text-4">{item.kbd}</span>
+                {item.key === 'needs' && needsCount > 0 ? <span className="ac-mono text-nano text-needs-you">{needsCount}</span> : null}
+                <span className="ac-mono text-nano text-text-4">{item.kbd}</span>
               </A>
             );
           })}
         </nav>
 
-        <div className="oc-label mt-5 mb-2 px-2.5">Projects</div>
+        <div className="ac-label mt-5 mb-2 px-2.5">Projects</div>
         <div className="flex flex-col gap-px">
           {(projects.data ?? []).map((p, i) => (
             <A
@@ -176,14 +176,14 @@ export function AppShell(): React.ReactElement {
               className="flex h-7 items-center gap-2.5 rounded-r4 px-2.5 hover:bg-bg-2"
             >
               <span className="size-1.5 rounded-r4" style={{ background: `var(--status-${(['needs-you', 'done', 'working', 'merging', 'blocked'] as const)[i % 5]})` }} aria-hidden />
-              <span className="oc-mono flex-1 truncate text-meta text-text-2">{p.slug}</span>
+              <span className="ac-mono flex-1 truncate text-meta text-text-2">{p.slug}</span>
             </A>
           ))}
         </div>
 
         <div className="flex-1" />
         <button type="button" onClick={() => setPaletteOpen(true)} className="flex items-center gap-2 border-t border-line-1 px-2.5 py-2.5 text-left">
-          <span className="oc-mono text-micro text-text-nav">⌘K</span>
+          <span className="ac-mono text-micro text-text-nav">⌘K</span>
           <span className="text-micro text-text-nav">everything</span>
         </button>
       </aside>
@@ -197,7 +197,7 @@ export function AppShell(): React.ReactElement {
         {/* phone bottom bar: five tabs plus a floating Start Work */}
         <nav
           aria-label="Sections"
-          className="oc-safe-bottom fixed inset-x-0 bottom-0 z-30 flex h-bar items-start border-t border-line-1 bg-bg-input px-1.5 pt-3 md:hidden"
+          className="ac-safe-bottom fixed inset-x-0 bottom-0 z-30 flex h-bar items-start border-t border-line-1 bg-bg-input px-1.5 pt-3 md:hidden"
         >
           {TABS.map((item) => {
             const active = isActive(href(item, ws));
@@ -206,7 +206,7 @@ export function AppShell(): React.ReactElement {
                 <NavGlyph glyph={item.glyph} active={active} />
                 <span className={cx('text-nano font-medium', active ? 'text-text-1' : 'text-text-nav')}>{item.label}</span>
                 {item.key === 'needs' && needsCount > 0 ? (
-                  <span className="oc-mono absolute -top-1 right-1/4 rounded-pill bg-needs-you px-1 text-nano text-bg-0">{needsCount}</span>
+                  <span className="ac-mono absolute -top-1 right-1/4 rounded-pill bg-needs-you px-1 text-nano text-bg-0">{needsCount}</span>
                 ) : null}
               </A>
             );

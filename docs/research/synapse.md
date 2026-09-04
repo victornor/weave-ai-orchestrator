@@ -1,10 +1,10 @@
 # Synapse research report (v0.29.1, analyzed 2026-09-03)
 
-Synapse (zai-org) is a self-hosted "AI teams" workspace: conversations as the runtime boundary, native actors + bridged CLI agents, governed plugins/skills/runtimes, IM channel connectors. ~300k LOC TypeScript (Fastify + Postgres + Redis/BullMQ). What openconductor takes from it is mostly interfaces and invariants.
+Synapse (zai-org) is a self-hosted "AI teams" workspace: conversations as the runtime boundary, native actors + bridged CLI agents, governed plugins/skills/runtimes, IM channel connectors. ~300k LOC TypeScript (Fastify + Postgres + Redis/BullMQ). What agent-conductor takes from it is mostly interfaces and invariants.
 
 ## Core model
 
-| Synapse | openconductor analogue |
+| Synapse | agent-conductor analogue |
 |---|---|
 | Workspace (governance boundary) | Workspace |
 | Conversation (shared runtime; "there is no standalone, API-invoked session") | Ticket thread |

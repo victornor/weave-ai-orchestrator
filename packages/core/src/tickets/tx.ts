@@ -1,4 +1,4 @@
-import type { Db } from '@openconductor/db';
+import type { Db } from '@agent-conductor/db';
 
 const depth = new WeakMap<object, number>();
 

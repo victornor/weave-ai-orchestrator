@@ -15,7 +15,7 @@ export interface QueuedWrite {
   queuedAt: string;
 }
 
-const KEY = 'oc.queue';
+const KEY = 'conductor.queue';
 
 function read(): QueuedWrite[] {
   try {

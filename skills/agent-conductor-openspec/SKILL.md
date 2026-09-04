@@ -1,11 +1,11 @@
 ---
-name: openconductor-openspec
-description: How an OpenConductor ticket maps onto the OpenSpec propose/apply workflows — the change is already named for you, planning artifacts come before code, and you never archive. Load on any `change` ticket (or a `task` ticket with a tracker change).
+name: agent-conductor-openspec
+description: How an AgentConductor ticket maps onto the OpenSpec propose/apply workflows — the change is already named for you, planning artifacts come before code, and you never archive. Load on any `change` ticket (or a `task` ticket with a tracker change).
 ---
 
-# OpenSpec, as OpenConductor drives it
+# OpenSpec, as AgentConductor drives it
 
-Your ticket is bound to exactly one OpenSpec change. Its name is in your brief and in `oc_ticket_get(id).openspecChangeName`. **Never ask whether to create or continue a change, never pick a different name, and never work in someone else's change.** If the change does not exist yet in `work/`, create it and move on:
+Your ticket is bound to exactly one OpenSpec change. Its name is in your brief and in `ac_ticket_get(id).openspecChangeName`. **Never ask whether to create or continue a change, never pick a different name, and never work in someone else's change.** If the change does not exist yet in `work/`, create it and move on:
 
 ```
 cd work && openspec new change "<the name from your brief>" --goal "<ticket title>" --json
@@ -17,13 +17,13 @@ For a `task` ticket with a tracker change, write `skip_specs: true` into the cha
 
 | Ticket status | What you run | Phase is done when | You request |
 |---|---|---|---|
-| `todo` | the **propose** workflow (`/opsx:propose <change>` on Claude/OpenCode, `$openspec-propose` on Codex) | proposal, specs, design and tasks all written; `openspec validate <change> --json --strict` clean | `oc_ticket_transition(id, "proposed")` |
+| `todo` | the **propose** workflow (`/opsx:propose <change>` on Claude/OpenCode, `$openspec-propose` on Codex) | proposal, specs, design and tasks all written; `openspec validate <change> --json --strict` clean | `ac_ticket_transition(id, "proposed")` |
 | `proposing` | fix what the gate or the revision comment listed | the same as above | `proposed` again |
 | `proposed` | nothing — the human is deciding | — | — |
 | `approved` | the **apply** workflow (`/opsx:apply <change>` / `$openspec-apply`) | every task in `tasks.md` ticked and committed | deliver, then `in_review` |
 | `in_progress` | continue apply | as above | `in_review` |
 | `in_review` | nothing; answer comments | — | — |
-| `merging` | the merge procedure (`openconductor-worker` → `references/delivery.md`) | merged and verified | `oc_ticket_merge_done` |
+| `merging` | the merge procedure (`agent-conductor-worker` → `references/delivery.md`) | merged and verified | `ac_ticket_merge_done` |
 
 The daemon runs `openspec status --change <c> --json` and `openspec validate <c> --json --strict` when you request `proposed`. A rejection lists the exact issues; fix them and request again. It also polls `openspec instructions apply --change <c> --json` after each turn to mirror your progress — so ticking tasks honestly is what makes the outside world see the truth.
 
@@ -33,7 +33,7 @@ The daemon runs `openspec status --change <c> --json` and `openspec validate <c>
 
 - Loop: `openspec status --all --json` → for each `ready` artifact, `openspec instructions <id> --json` → write that file → repeat.
 - Write the proposal, the spec deltas, the design where the schema asks for it, and `tasks.md`. Tasks are the unit the apply phase and the daemon both track: each one a discrete, verifiable piece of behavior.
-- **Material ambiguity is an `oc_ask`, not a question in prose and not a guess.** Give concrete options and a recommendation, then end the turn. Prose questions reach nobody: the OpenSpec skill's own interactive questions have no human on the other end here.
+- **Material ambiguity is an `ac_ask`, not a question in prose and not a guess.** Give concrete options and a recommendation, then end the turn. Prose questions reach nobody: the OpenSpec skill's own interactive questions have no human on the other end here.
 - Do not write code. Do not create files outside `openspec/changes/<change>/`. Do not start "just the scaffolding".
 - When the artifacts are complete, request `proposed` and stop. The skill's closing line tells you to run `/opsx:apply`; **ignore it** — apply happens on a later turn, after the human approves.
 
@@ -43,7 +43,7 @@ The daemon runs `openspec status --change <c> --json` and `openspec validate <c>
 - Implement pending tasks in order. Tick `- [x]` **only when the specified behavior is fully implemented** — not when it is scaffolded, not when it is "basically there".
 - Commit per task or per logical group, with the ticket id in the message.
 - Pause on errors, blockers, or unclear requirements — do not guess. Same obstacle twice → `blocked` with a routable path.
-- **Scope beyond the spec** → `oc_ask` and pause that task. Never absorb it silently, never drop it silently. If it is genuinely separate work, say so on the ticket and let the conductor decide.
+- **Scope beyond the spec** → `ac_ask` and pause that task. Never absorb it silently, never drop it silently. If it is genuinely separate work, say so on the ticket and let the conductor decide.
 - When `state` is `all_done`, deliver per your delivery mode and transition to `in_review`.
 
 ## Revision

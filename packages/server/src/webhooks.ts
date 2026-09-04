@@ -7,9 +7,9 @@
  * network failure never loses the cursor — the delivery is simply retried on the next pump.
  */
 import { createHmac } from 'node:crypto';
-import { nowIso } from '@openconductor/db';
-import { getLogger, type WorkspaceContext } from '@openconductor/core';
-import type { WorkspaceEvent } from '@openconductor/shared';
+import { nowIso } from '@agent-conductor/db';
+import { getLogger, type WorkspaceContext } from '@agent-conductor/core';
+import type { WorkspaceEvent } from '@agent-conductor/shared';
 
 const log = getLogger('daemon', { component: 'webhooks' });
 
@@ -157,11 +157,11 @@ export class WebhookDispatcher {
     const body = JSON.stringify(ev);
     const headers: Record<string, string> = {
       'content-type': 'application/json',
-      'X-OpenConductor-Event': ev.type,
-      'X-OpenConductor-Delivery': String(ev.seq),
-      'X-OpenConductor-Workspace': this.ctx.config.id,
+      'X-AgentConductor-Event': ev.type,
+      'X-AgentConductor-Delivery': String(ev.seq),
+      'X-AgentConductor-Workspace': this.ctx.config.id,
     };
-    if (h.secret) headers['X-OpenConductor-Signature'] = signBody(h.secret, body);
+    if (h.secret) headers['X-AgentConductor-Signature'] = signBody(h.secret, body);
     try {
       const res = await this.fetchImpl(h.url, { method: 'POST', headers, body, signal: AbortSignal.timeout(this.timeoutMs) });
       try { await res.arrayBuffer(); } catch { /* body already consumed or empty */ }

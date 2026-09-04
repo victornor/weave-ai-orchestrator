@@ -1,13 +1,13 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
-import { OcError } from '@openconductor/shared';
-import { getLogger } from '@openconductor/core';
+import { OcError } from '@agent-conductor/shared';
+import { getLogger } from '@agent-conductor/core';
 import type { AppDeps, AppEnv, Principal } from './types.js';
 import { actorFor } from './types.js';
 import { isRunToken, peekWorkspaceId, runTokenSecret, verifyRunToken } from './runtoken.js';
 
 const log = getLogger('auth');
-export const SESSION_COOKIE = 'oc_session';
+export const SESSION_COOKIE = 'ac_session';
 
 /** Routes reachable with no principal at all (bootstrap, login, discovery, health). */
 const OPEN_PATHS: Array<{ method: string; path: RegExp }> = [
@@ -58,7 +58,7 @@ function checkCsrf(c: Context<AppEnv>, deps: AppDeps): void {
 
 /**
  * Resolves the principal for every request:
- * bearer session token · `oc_session` cookie (+CSRF) · run token (loopback listener, agent paths only)
+ * bearer session token · `ac_session` cookie (+CSRF) · run token (loopback listener, agent paths only)
  * · `auth.loopbackTrusted` bypass for loopback peers.
  */
 export function authMiddleware(deps: AppDeps): MiddlewareHandler<AppEnv> {

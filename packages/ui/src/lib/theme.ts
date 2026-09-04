@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 export type Theme = 'dark' | 'light' | 'system';
 
-const KEY = 'oc.theme';
+const KEY = 'conductor.theme';
 
 function systemTheme(): 'dark' | 'light' {
   return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';

@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import type { AgentView, JsonSchema, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@openconductor/surface-sdk';
+import type { AgentView, JsonSchema, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@agent-conductor/surface-sdk';
 import {
   RULE_KEYWORDS, clientsArgs, closeArgs, execArgs, findClient, focusArgs, layoutMsgArgs, parseClients,
   windowClass, windowRuleArgs, type HyprClient, type RuleKeyword,
@@ -105,7 +105,7 @@ export function createHyprlandSurface(): SurfaceAdapter {
       return spawn(ctx, { ...cfg, workspace: undefined }, 'conductor', ctx.chatCommand());
     },
 
-    /** Titles come from the terminal's OSC title, set by `oc attach`; nothing to push. */
+    /** Titles come from the terminal's OSC title, set by `conductor attach`; nothing to push. */
     async updateAgentView() { /* no-op */ },
 
     async focusAgentView(handle, ctx) {

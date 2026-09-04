@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/render",
+  "name": "@agent-conductor/render",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,6 +14,6 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*"
+    "@agent-conductor/shared": "workspace:*"
   }
 }

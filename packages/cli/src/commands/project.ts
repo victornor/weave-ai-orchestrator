@@ -1,4 +1,4 @@
-/** `oc project add|list|show|remove|fetch|set-runtime|set-policy` (PLAN §20). */
+/** `conductor project add|list|show|remove|fetch|set-runtime|set-policy` (PLAN §20). */
 import type { Command } from 'commander';
 import { emit, fields, style, table, write } from '../output.js';
 import { items, run, session } from './util.js';
@@ -24,7 +24,7 @@ export function register(program: Command): void {
       if (opts['maxWorkers']) body['maxWorkers'] = Number(opts['maxWorkers']);
       if (opts['setup']) body['setupCommand'] = opts['setup'];
       const created = await client.write<Record<string, unknown>>({
-        tool: 'oc_project_add', input: body,
+        tool: 'ac_project_add', input: body,
         http: { method: 'POST', path: client.w('/projects'), body },
       });
       emit(created, () => {
@@ -49,7 +49,7 @@ export function register(program: Command): void {
           { header: 'MAX', get: (r) => String(r['maxWorkers'] ?? ''), align: 'right' },
           { header: 'STATUS', get: (r) => String(r['status'] ?? '') },
           { header: 'FETCHED', get: (r) => String(r['lastFetchedAt'] ?? '') },
-        ], { empty: 'no projects — run `oc project add <git-url>`' });
+        ], { empty: 'no projects — run `conductor project add <git-url>`' });
       });
     }));
 
@@ -131,7 +131,7 @@ Keys:   proposalApproval=human|conductor|none   mergeMethod=squash|merge|rebase
         deliveryMode=pr|local-branch            autoMergeDefault=true|false
         taskApproval=human|conductor|none       archiveCommit=push|pr|local
         requireCi=true|false
-Example: oc project set-policy api deliveryMode=pr requireCi=false`)
+Example: conductor project set-policy api deliveryMode=pr requireCi=false`)
     .action(async (id: string, assignments: string[], _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
       const patch: Record<string, unknown> = {};

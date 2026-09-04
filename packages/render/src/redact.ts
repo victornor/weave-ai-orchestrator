@@ -10,9 +10,9 @@ interface Rule { re: RegExp; replace: (m: string, ...groups: string[]) => string
 const keep = (prefix: string) => (m: string) => `${prefix}${REDACTED}`;
 
 const RULES: Rule[] = [
-  // OpenConductor run tokens and session tokens.
+  // AgentConductor run tokens and session tokens.
   { re: /\brt_[A-Za-z0-9_-]{8,}/g, replace: keep('rt_') },
-  { re: /\boc_[A-Za-z0-9_-]{16,}/g, replace: keep('oc_') },
+  { re: /\boc_[A-Za-z0-9_-]{16,}/g, replace: keep('ac_') },
   // Provider keys.
   { re: /\bsk-(?:ant-|proj-|live-)?[A-Za-z0-9_-]{16,}/g, replace: keep('sk-') },
   { re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{16,}/g, replace: (m) => `${m.slice(0, 4)}${REDACTED}` },

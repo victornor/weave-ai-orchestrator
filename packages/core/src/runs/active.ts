@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { RunEvent } from '@openconductor/shared';
+import type { RunEvent } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 
 export interface ActiveRun {

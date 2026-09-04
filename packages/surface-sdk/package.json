@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/surface-sdk",
+  "name": "@agent-conductor/surface-sdk",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,7 +14,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*",
+    "@agent-conductor/shared": "workspace:*",
     "zod": "^3.25.76"
   },
   "devDependencies": {}

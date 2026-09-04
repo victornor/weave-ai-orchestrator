@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId, nowIso } from '@openconductor/db';
-import { FakeRuntime } from '@openconductor/runtime-sdk';
-import type { WorktreeProvider } from '@openconductor/plugin-sdk';
-import type { Agent, Ticket } from '@openconductor/shared';
+import { newId, nowIso } from '@agent-conductor/db';
+import { FakeRuntime } from '@agent-conductor/runtime-sdk';
+import type { WorktreeProvider } from '@agent-conductor/plugin-sdk';
+import type { Agent, Ticket } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createWorkersService, ticketBranch, branchSlug } from './index.js';
 import { createRolesService } from '../roles/index.js';
@@ -63,7 +63,7 @@ describe('workers', () => {
 
   it('derives the ticket branch and change name from the identifier and title', () => {
     const t = { identifier: 'TST-42', title: 'Add dark mode to the dashboard!' } as Ticket;
-    expect(ticketBranch(t)).toBe('oc/tst-42-add-dark-mode-to-the-dashboard');
+    expect(ticketBranch(t)).toBe('ac/tst-42-add-dark-mode-to-the-dashboard');
     expect(branchSlug('///')).toBe('work');
   });
 
@@ -75,7 +75,7 @@ describe('workers', () => {
     expect(worker.name).toBe('Backend Engineer #1');
     expect(worker.homePath).toBe(join(h.ctx.paths.workers, worker.id));
     expect(worker.worktreePath).toBe(join(worker.homePath, 'work'));
-    expect(worker.branch).toBe('oc/tst-1-add-dark-mode');
+    expect(worker.branch).toBe('ac/tst-1-add-dark-mode');
     expect(existsSync(join(worker.homePath, 'AGENTS.md'))).toBe(true);
     expect(existsSync(join(worker.homePath, 'brief.md'))).toBe(true);
     expect(existsSync(join(worker.homePath, 'notes.md'))).toBe(true);
@@ -83,7 +83,7 @@ describe('workers', () => {
     expect(readFileSync(join(worker.homePath, 'brief.md'), 'utf8')).toContain('TST-1 — Add dark mode');
 
     const wt = h.db.get<{ branch: string; status: string; provider: string }>('SELECT * FROM worktrees WHERE agent_id = ?', [worker.id])!;
-    expect(wt).toMatchObject({ branch: 'oc/tst-1-add-dark-mode', status: 'active', provider: 'git' });
+    expect(wt).toMatchObject({ branch: 'ac/tst-1-add-dark-mode', status: 'active', provider: 'git' });
 
     const bound = h.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [ticket.id])!;
     expect(bound.workerId).toBe(worker.id);

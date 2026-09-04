@@ -130,16 +130,16 @@ export function Composer({
         <div className="flex items-center gap-2 rounded-t-r8 border border-line-2 border-b-0 bg-bg-2 px-3 py-2">
           <StatusGlyph status="working" size="xs" />
           <span className="text-micro text-text-2">{queuedReason}</span>
-          {queuedCount > 0 ? <span className="oc-mono ml-auto rounded-r4 bg-bg-3 px-1.5 py-0.5 text-micro text-text-3">{queuedCount} queued</span> : null}
+          {queuedCount > 0 ? <span className="ac-mono ml-auto rounded-r4 bg-bg-3 px-1.5 py-0.5 text-micro text-text-3">{queuedCount} queued</span> : null}
         </div>
       ) : null}
       {scope ? <div className="text-micro text-text-3">{scope}</div> : null}
 
       <div
         className={cx(
-          'rounded-r8 border bg-bg-1 transition-colors duration-(--dur-fast) ease-oc',
+          'rounded-r8 border bg-bg-1 transition-colors duration-(--dur-fast) ease-ac',
           queuedReason && 'rounded-t-none',
-          dictating ? 'border-accent oc-focus-ring' : 'border-line-2 focus-within:border-accent focus-within:oc-focus-ring',
+          dictating ? 'border-accent ac-focus-ring' : 'border-line-2 focus-within:border-accent focus-within:ac-focus-ring',
         )}
       >
         <div className="flex items-end gap-2.5 p-2 pl-3.5">
@@ -165,7 +165,7 @@ export function Composer({
             aria-pressed={dictating}
             onClick={() => (dictating ? dictation.stop() : startMic())}
             className={cx(
-              'inline-flex size-8 flex-none items-center justify-center rounded-r6 border transition-colors duration-(--dur-fast) ease-oc',
+              'inline-flex size-8 flex-none items-center justify-center rounded-r6 border transition-colors duration-(--dur-fast) ease-ac',
               dictating
                 ? 'border-accent bg-accent-tint-strong text-accent-link'
                 : dictation.mode === 'unavailable'
@@ -181,7 +181,7 @@ export function Composer({
             disabled={!text.trim() || disabled}
             onClick={send}
             className={cx(
-              'inline-flex size-8 flex-none items-center justify-center rounded-r6 transition-colors duration-(--dur-fast) ease-oc',
+              'inline-flex size-8 flex-none items-center justify-center rounded-r6 transition-colors duration-(--dur-fast) ease-ac',
               text.trim() && !disabled ? 'bg-accent text-accent-on' : 'bg-bg-3 text-text-4',
             )}
           >
@@ -194,7 +194,7 @@ export function Composer({
             {dictation.levels.map((v, i) => (
               <span key={i} className="w-0.5 rounded-pill bg-accent" style={{ height: `${Math.round(4 + v * 16)}px` }} />
             ))}
-            <span className="oc-mono ml-2 text-micro text-text-3">
+            <span className="ac-mono ml-2 text-micro text-text-3">
               {Math.floor(dictation.elapsed / 60)}:{String(dictation.elapsed % 60).padStart(2, '0')}
             </span>
             <span className="ml-auto text-micro text-text-4">{isTouch ? 'tap the mic to stop' : 'release ⌘⇧M to stop'}</span>

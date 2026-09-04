@@ -1,9 +1,9 @@
-import type { Db } from '@openconductor/db';
-import type { WorkspaceConfig, DaemonConfig } from '@openconductor/shared';
-import type { RuntimeAdapter } from '@openconductor/runtime-sdk';
-import type { ChannelAdapter } from '@openconductor/channel-sdk';
-import type { SurfaceAdapter } from '@openconductor/surface-sdk';
-import type { WorktreeProvider, ForgeAdapter, AgentToolDefinition, Logger as PluginLogger } from '@openconductor/plugin-sdk';
+import type { Db } from '@agent-conductor/db';
+import type { WorkspaceConfig, DaemonConfig } from '@agent-conductor/shared';
+import type { RuntimeAdapter } from '@agent-conductor/runtime-sdk';
+import type { ChannelAdapter } from '@agent-conductor/channel-sdk';
+import type { SurfaceAdapter } from '@agent-conductor/surface-sdk';
+import type { WorktreeProvider, ForgeAdapter, AgentToolDefinition, Logger as PluginLogger } from '@agent-conductor/plugin-sdk';
 import type { EventBus } from './events.js';
 import type { Logger } from './logger.js';
 
@@ -23,7 +23,7 @@ export interface WorkspacePaths {
 }
 export function workspacePaths(root: string): WorkspacePaths {
   const j = (...p: string[]) => [root, ...p].join('/');
-  return { root, state: j('.openconductor'), db: j('.openconductor', 'db.sqlite'), runs: j('.openconductor', 'runs'), conductor: j('conductor'), roles: j('roles'), workers: j('workers'), archive: j('archive', 'workers'), projects: j('projects'), knowledge: j('knowledge'), runtimesHome: j('.openconductor', 'runtimes'), wtConfig: j('.openconductor', 'wt.toml') };
+  return { root, state: j('.agent-conductor'), db: j('.agent-conductor', 'db.sqlite'), runs: j('.agent-conductor', 'runs'), conductor: j('conductor'), roles: j('roles'), workers: j('workers'), archive: j('archive', 'workers'), projects: j('projects'), knowledge: j('knowledge'), runtimesHome: j('.agent-conductor', 'runtimes'), wtConfig: j('.agent-conductor', 'wt.toml') };
 }
 
 export interface WorkspaceContext {

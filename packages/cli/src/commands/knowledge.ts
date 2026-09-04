@@ -1,11 +1,11 @@
-/** `oc knowledge show|edit|note|lint|curate|revert` (PLAN §13, §20). */
+/** `conductor knowledge show|edit|note|lint|curate|revert` (PLAN §13, §20). */
 import type { Command } from 'commander';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KNOWLEDGE_SCOPES } from '@openconductor/shared';
-import { budgetMeter, formatRelative, formatTokens } from '@openconductor/render';
+import { KNOWLEDGE_SCOPES } from '@agent-conductor/shared';
+import { budgetMeter, formatRelative, formatTokens } from '@agent-conductor/render';
 import { ApiError } from '../api.js';
 import { emit, fields, style, table, write } from '../output.js';
 import { items, run, session } from './util.js';
@@ -75,7 +75,7 @@ export function register(program: Command): void {
       const doc = await client.wget<KnowledgeDoc>(`/knowledge/${encodeURIComponent(scope)}`, { project: opts['project'] });
       const editor = process.env['VISUAL'] ?? process.env['EDITOR'];
       if (!editor) throw new ApiError('validation', 'set $EDITOR (or $VISUAL) to edit knowledge from the CLI', 400);
-      const dir = mkdtempSync(join(tmpdir(), 'oc-knowledge-'));
+      const dir = mkdtempSync(join(tmpdir(), 'ac-knowledge-'));
       const file = join(dir, `${scope}${opts['project'] ? `-${opts['project']}` : ''}.md`);
       writeFileSync(file, String(doc.body ?? ''));
       const before = readFileSync(file, 'utf8');
@@ -101,7 +101,7 @@ export function register(program: Command): void {
       const { client } = await session(command);
       const body = { section, text: text.join(' ') };
       const result = await client.write({
-        tool: 'oc_knowledge_note', input: { scope, projectId: opts['project'], ...body },
+        tool: 'ac_knowledge_note', input: { scope, projectId: opts['project'], ...body },
         http: { method: 'POST', path: client.w(`/knowledge/${encodeURIComponent(scope)}/note`), body, query: { project: opts['project'] } },
       });
       emit(result, () => write(`${style.ok('noted')} in ${scope}/${section}`));

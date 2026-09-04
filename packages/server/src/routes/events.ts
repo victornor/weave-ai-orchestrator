@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import type { WorkspaceEvent } from '@openconductor/shared';
+import type { WorkspaceEvent } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
 import { HEARTBEAT_MS, Pump, heartbeat } from '../sse.js';
 

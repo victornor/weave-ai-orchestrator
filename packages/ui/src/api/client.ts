@@ -2,11 +2,11 @@
  * HTTP client for the daemon API (docs/API.md).
  * Session cookie is the primary credential for the web app; a bearer token is
  * kept as well so the same client works when cookies are unavailable (PWA on
- * iOS in some contexts, or a token pasted from `oc login`).
+ * iOS in some contexts, or a token pasted from `conductor login`).
  */
 
-const TOKEN_KEY = 'oc.token';
-const WS_KEY = 'oc.ws';
+const TOKEN_KEY = 'conductor.token';
+const WS_KEY = 'conductor.ws';
 
 let memoryToken: string | null = null;
 

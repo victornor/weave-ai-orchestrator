@@ -29,27 +29,27 @@ describe('MCP endpoint', () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
-    expect(names).toContain('oc_inbox');
-    expect(names).toContain('oc_ticket_transition');
-    expect(names).toContain('oc_ticket_create');       // WORKER_ONLY_TOOLS
-    expect(names).not.toContain('oc_role_hire');        // conductor only
-    expect(names).not.toContain('oc_human_send');
-    expect(tools.find((t) => t.name === 'oc_ask')?.description).toContain('gate_finding');
+    expect(names).toContain('ac_inbox');
+    expect(names).toContain('ac_ticket_transition');
+    expect(names).toContain('ac_ticket_create');       // WORKER_ONLY_TOOLS
+    expect(names).not.toContain('ac_role_hire');        // conductor only
+    expect(names).not.toContain('ac_human_send');
+    expect(tools.find((t) => t.name === 'ac_ask')?.description).toContain('gate_finding');
     await client.close();
   });
 
   it('exposes the conductor toolset for a conductor run token', async () => {
     const { client } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
     const names = (await client.listTools()).tools.map((t) => t.name);
-    expect(names).toContain('oc_role_hire');
-    expect(names).toContain('oc_human_send');
-    expect(names).toContain('oc_briefing');
+    expect(names).toContain('ac_role_hire');
+    expect(names).toContain('ac_human_send');
+    expect(names).toContain('ac_briefing');
     await client.close();
   });
 
   it('dispatches a tool call and returns a ToolResult', async () => {
     const { client } = await connect();
-    const res = await client.callTool({ name: 'oc_ticket_get', arguments: { id: 'ACME-42' } });
+    const res = await client.callTool({ name: 'ac_ticket_get', arguments: { id: 'ACME-42' } });
     expect(res.isError).toBeFalsy();
     const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
     expect(payload.ok).toBe(true);
@@ -59,7 +59,7 @@ describe('MCP endpoint', () => {
 
   it('returns ok:false rather than throwing for unknown ids', async () => {
     const { client } = await connect();
-    const res = await client.callTool({ name: 'oc_ticket_get', arguments: { id: 'ACME-999' } });
+    const res = await client.callTool({ name: 'ac_ticket_get', arguments: { id: 'ACME-999' } });
     const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
     expect(payload).toEqual({ ok: false, error: { code: 'not_found', message: 'ticket ACME-999 not found', retryable: false, details: undefined } });
     await client.close();
@@ -67,7 +67,7 @@ describe('MCP endpoint', () => {
 
   it('refuses a conductor-only tool for a worker', async () => {
     const { client } = await connect();
-    const res = await client.callTool({ name: 'oc_role_hire', arguments: {} });
+    const res = await client.callTool({ name: 'ac_role_hire', arguments: {} });
     const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
     expect(payload.ok).toBe(false);
     expect(payload.error.code).toBe('forbidden');
@@ -77,7 +77,7 @@ describe('MCP endpoint', () => {
   it('enforces the ticket subtree scope on writes', async () => {
     const { client, h } = await connect();
     h.tickets.set('tk_other', { ...h.tickets.get('tk_1')!, id: 'tk_other', identifier: 'ACME-99', parentId: null });
-    const res = await client.callTool({ name: 'oc_ticket_comment', arguments: { id: 'ACME-99', body: 'not mine' } });
+    const res = await client.callTool({ name: 'ac_ticket_comment', arguments: { id: 'ACME-99', body: 'not mine' } });
     const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
     expect(payload.ok).toBe(false);
     expect(payload.error.code).toBe('forbidden');
@@ -101,7 +101,7 @@ describe('agent REST mirror', () => {
     harness = makeHarness({ listener: 'loopback' });
     const app = createApp(harness.deps);
     const token = await signRunToken(runTokenSecret(harness.runtime.ctx.db), WORKER);
-    const res = await app.fetch(new Request('http://127.0.0.1/api/w/ws1/agent/tools/oc_ticket_comment', {
+    const res = await app.fetch(new Request('http://127.0.0.1/api/w/ws1/agent/tools/ac_ticket_comment', {
       method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ input: { id: 'ACME-42', body: 'status update' } }),
     }));
@@ -117,7 +117,7 @@ describe('agent REST mirror', () => {
     const token = await signRunToken(runTokenSecret(harness.runtime.ctx.db), WORKER);
     const res = await app.fetch(new Request('http://127.0.0.1/api/w/ws1/agent/tools', { headers: { authorization: `Bearer ${token}` } }));
     const tools = await res.json();
-    expect(tools.map((t: { name: string }) => t.name)).toContain('oc_worktree_status');
+    expect(tools.map((t: { name: string }) => t.name)).toContain('ac_worktree_status');
     expect(tools[0].inputSchema.type).toBe('object');
   });
 });

@@ -1,5 +1,5 @@
-import type { RuntimeEvent } from '@openconductor/runtime-sdk';
-import { truncate } from '@openconductor/runtime-sdk';
+import type { RuntimeEvent } from '@agent-conductor/runtime-sdk';
+import { truncate } from '@agent-conductor/runtime-sdk';
 
 export interface CodexParseState {
   threadId: string | null;

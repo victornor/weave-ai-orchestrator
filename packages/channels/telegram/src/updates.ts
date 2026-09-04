@@ -1,4 +1,4 @@
-import type { InboundMessage } from '@openconductor/channel-sdk';
+import type { InboundMessage } from '@agent-conductor/channel-sdk';
 import type { CallbackRef } from './callbacks.js';
 
 export interface TgUser { id: number; is_bot?: boolean; username?: string; first_name?: string; last_name?: string }

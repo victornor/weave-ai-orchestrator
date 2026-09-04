@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { RuntimeEvent } from '@openconductor/runtime-sdk';
+import type { RuntimeEvent } from '@agent-conductor/runtime-sdk';
 import { createGeminiParser } from '../src/events.js';
 
 // SYNTHETIC fixtures: this machine has no Gemini credentials, so no live turn could be

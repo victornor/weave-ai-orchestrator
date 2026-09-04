@@ -1,4 +1,4 @@
-import type { CanonicalMessage, CanonicalPart } from '@openconductor/channel-sdk';
+import type { CanonicalMessage, CanonicalPart } from '@agent-conductor/channel-sdk';
 import { chunkText, quoteMarkdownV2, toMarkdownV2, TELEGRAM_TEXT_LIMIT } from './markdown.js';
 import type { CallbackRef } from './callbacks.js';
 

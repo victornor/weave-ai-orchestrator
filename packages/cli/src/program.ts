@@ -1,4 +1,4 @@
-/** The `oc` command tree (PLAN §20). Exported separately from `bin.ts` so tests can parse without exiting. */
+/** The `conductor` command tree (PLAN §20). Exported separately from `bin.ts` so tests can parse without exiting. */
 import { Command, Option } from 'commander';
 import { configureOutput } from './output.js';
 import * as agent from './commands/agent.js';
@@ -28,17 +28,17 @@ export function buildProgram(): Command {
   const program = new Command();
 
   program
-    .name('oc')
-    .description('OpenConductor — talk to the conductor, watch the fleet, ship work')
+    .name('conductor')
+    .description('AgentConductor — talk to the conductor, watch the fleet, ship work')
     .version(VERSION, '-v, --version')
 
     .showHelpAfterError()
-    .addOption(new Option('-w, --workspace <id>', 'workspace id').env('OC_WORKSPACE'))
+    .addOption(new Option('-w, --workspace <id>', 'workspace id').env('AC_WORKSPACE'))
     .option('--json', 'machine-readable output on every command', false)
     .option('--no-color', 'disable colour')
     .option('--context <name>', 'use a named context from contexts.yaml')
-    .addOption(new Option('--url <url>', 'daemon url (bypasses the contexts file)').env('OC_API_URL'))
-    .addOption(new Option('--token <token>', 'bearer token').env('OC_TOKEN'))
+    .addOption(new Option('--url <url>', 'daemon url (bypasses the contexts file)').env('AC_API_URL'))
+    .addOption(new Option('--token <token>', 'bearer token').env('AC_TOKEN'))
     .hook('preAction', (thisCommand) => {
       const opts = thisCommand.opts<{ json?: boolean; color?: boolean }>();
       configureOutput({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Decision, DecisionKind } from '@openconductor/shared';
+import type { Decision, DecisionKind } from '@agent-conductor/shared';
 import { decisionToCard } from './decision.js';
 
 function decision(over: Partial<Decision> & { kind: DecisionKind }): Decision {
@@ -32,7 +32,7 @@ describe('decisionToCard', () => {
     const card = decisionToCard(decision({
       kind: 'merge_approval',
       title: 'Merge ACME-42',
-      target: { prUrl: 'https://github.com/acme/web/pull/12', ciPassed: 7, ciTotal: 7, additions: 18, deletions: 2, files: 3, branch: 'oc/acme-42' },
+      target: { prUrl: 'https://github.com/acme/web/pull/12', ciPassed: 7, ciTotal: 7, additions: 18, deletions: 2, files: 3, branch: 'ac/acme-42' },
     }), { now });
     expect(card.variant).toBe('merge_approval');
     expect(card.options.map((o) => o.label)).toEqual(['Approve merge', 'Hold']);
@@ -42,7 +42,7 @@ describe('decisionToCard', () => {
       { label: 'CI', value: '7/7', format: 'mono' },
       { label: 'Diff', value: '+18 −2', format: 'diff' },
       { label: 'Files', value: '3 files', format: 'mono' },
-      { label: 'Branch', value: 'oc/acme-42', format: 'mono' },
+      { label: 'Branch', value: 'ac/acme-42', format: 'mono' },
     ]);
   });
 
@@ -92,7 +92,7 @@ describe('decisionToCard', () => {
   it('renders a discard approval as destructive with typed confirmation', () => {
     const card = decisionToCard(decision({
       kind: 'discard_approval', title: 'Discard the ACME-42 worktree',
-      target: { worktreePath: '/ws/workers/w1/work', dirtyFiles: 3, branch: 'oc/acme-42' },
+      target: { worktreePath: '/ws/workers/w1/work', dirtyFiles: 3, branch: 'ac/acme-42' },
     }), { ticketIdentifier: 'ACME-42', now });
     expect(card.destructive).toBe(true);
     expect(card.confirm).toEqual({ expect: 'ACME-42', prompt: 'Type ACME-42 to confirm' });

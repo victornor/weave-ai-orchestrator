@@ -1,4 +1,4 @@
-export const PACKAGE = '@openconductor/render';
+export const PACKAGE = '@agent-conductor/render';
 
 export * from './types.js';
 export * from './format.js';

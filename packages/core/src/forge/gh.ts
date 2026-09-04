@@ -1,5 +1,5 @@
-import type { ForgeAdapter } from '@openconductor/plugin-sdk';
-import { OcError } from '@openconductor/shared';
+import type { ForgeAdapter } from '@agent-conductor/plugin-sdk';
+import { OcError } from '@agent-conductor/shared';
 import { sh } from '../util/exec.js';
 
 interface GhPrView {

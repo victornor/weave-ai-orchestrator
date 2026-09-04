@@ -1,12 +1,12 @@
 /**
- * `oc chat` — the conductor thread with inline decision cards and a composer (PLAN §21.2).
+ * `conductor chat` — the conductor thread with inline decision cards and a composer (PLAN §21.2).
  * Commands: `/talk <ticket>` binds the thread to a ticket, `/conductor` goes back,
  * `/d <decision> <key|number>` answers a decision, `/quit` leaves.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
-import type { ChannelThread, Decision, ThreadMessage } from '@openconductor/shared';
-import { decisionToCard, formatRelative, type CardModel } from '@openconductor/render';
+import type { ChannelThread, Decision, ThreadMessage } from '@agent-conductor/shared';
+import { decisionToCard, formatRelative, type CardModel } from '@agent-conductor/render';
 import { DecisionCardView } from '../components/DecisionCard.js';
 import { StatusBar } from '../components/StatusBar.js';
 import { TextInput } from '../components/TextInput.js';
@@ -93,7 +93,7 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
     else if (card.options.some((o) => o.key === raw)) body['key'] = raw;
     else if (card.allowFreeText) body['text'] = raw;
     else { setNotice(`not an option: ${raw}`); return; }
-    if (card.confirm && card.destructive) { setNotice(`${card.confirm.prompt} — use \`oc decision answer\` for destructive decisions`); return; }
+    if (card.confirm && card.destructive) { setNotice(`${card.confirm.prompt} — use \`conductor decision answer\` for destructive decisions`); return; }
     try {
       await client.wpost(`/decisions/${encodeURIComponent(card.id)}/answer`, body);
       setNotice(`answered ${card.id}`);

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { WorktreeProvider, WorktreeInfo } from '@openconductor/plugin-sdk';
-import { OcError } from '@openconductor/shared';
+import type { WorktreeProvider, WorktreeInfo } from '@agent-conductor/plugin-sdk';
+import { OcError } from '@agent-conductor/shared';
 import { sh } from '../util/exec.js';
 import { branchExists, worktreeState } from '../util/git.js';
 

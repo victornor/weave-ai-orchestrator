@@ -1,16 +1,16 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { newId, nowIso } from '@openconductor/db';
+import { newId, nowIso } from '@agent-conductor/db';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { writeFakeOpenspec, type FakeCase } from '../openspec/fakeBin.js';
 import { createSpecsService, deltaKindOf, ftsQuery, readArchivedChanges } from './index.js';
 
 let h: TestHarness | null = null;
-const previousBin = process.env.OC_OPENSPEC_BIN;
+const previousBin = process.env.AC_OPENSPEC_BIN;
 afterEach(() => {
   h?.cleanup(); h = null;
-  if (previousBin === undefined) delete process.env.OC_OPENSPEC_BIN; else process.env.OC_OPENSPEC_BIN = previousBin;
+  if (previousBin === undefined) delete process.env.AC_OPENSPEC_BIN; else process.env.AC_OPENSPEC_BIN = previousBin;
 });
 
 const AUTH_SPEC = '# auth Specification\n\n## Purpose\nWho may sign in.\n\n## Requirements\n### Requirement: Password login\nThe system SHALL accept an email and password.\n';
@@ -29,7 +29,7 @@ function setup(cases: FakeCase[] = CASES): { harness: TestHarness; clone: string
   const clone = join(harness.root, 'projects', 'api');
   mkdirSync(clone, { recursive: true });
   const bin = writeFakeOpenspec(join(harness.root, 'fake-openspec'), cases);
-  process.env.OC_OPENSPEC_BIN = bin.path;
+  process.env.AC_OPENSPEC_BIN = bin.path;
   return { harness, clone, bin };
 }
 
@@ -152,7 +152,7 @@ describe('spec index', () => {
   it('indexes nothing when the binary is missing or openspec/ does not exist', async () => {
     const a = setup();
     fixture(a.harness, a.clone);
-    process.env.OC_OPENSPEC_BIN = join(a.clone, 'no-such-openspec');
+    process.env.AC_OPENSPEC_BIN = join(a.clone, 'no-such-openspec');
     await expect(createSpecsService(a.harness.ctx, a.harness.deps).index(a.harness.projectId)).resolves.toEqual({ capabilities: 0, changes: 0 });
     expect(a.harness.db.get<{ n: number }>('SELECT COUNT(*) n FROM spec_changes')!.n).toBe(0);
     expect(a.harness.db.get<{ n: number }>('SELECT COUNT(*) n FROM knowledge_search')!.n).toBe(0);

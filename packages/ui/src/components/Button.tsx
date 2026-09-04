@@ -33,7 +33,7 @@ export function Button({ variant = 'secondary', size = 'md', kbd, full, classNam
       {...rest}
       className={cx(
         'inline-flex items-center justify-center gap-2 font-medium select-none',
-        'transition-colors duration-(--dur-fast) ease-oc',
+        'transition-colors duration-(--dur-fast) ease-ac',
         'disabled:opacity-45 disabled:pointer-events-none',
         VARIANT[variant],
         variant === 'link' ? '' : SIZE[size],
@@ -42,7 +42,7 @@ export function Button({ variant = 'secondary', size = 'md', kbd, full, classNam
       )}
     >
       {children}
-      {kbd ? <span className="oc-mono text-nano opacity-60">{kbd}</span> : null}
+      {kbd ? <span className="ac-mono text-nano opacity-60">{kbd}</span> : null}
     </button>
   );
 }
@@ -56,7 +56,7 @@ export function IconButton({ label, className, children, ...rest }: ButtonProps 
       {...rest}
       className={cx(
         'inline-flex size-8 items-center justify-center rounded-r6 border border-line-2 bg-transparent text-text-2',
-        'transition-colors duration-(--dur-fast) ease-oc hover:bg-bg-3 hover:text-text-1 disabled:opacity-45',
+        'transition-colors duration-(--dur-fast) ease-ac hover:bg-bg-3 hover:text-text-1 disabled:opacity-45',
         className,
       )}
     >

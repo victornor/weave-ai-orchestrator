@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/runtime-opencode",
+  "name": "@agent-conductor/runtime-opencode",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,8 +14,8 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*",
-    "@openconductor/runtime-sdk": "workspace:*",
+    "@agent-conductor/shared": "workspace:*",
+    "@agent-conductor/runtime-sdk": "workspace:*",
     "execa": "^9.6.0"
   },
   "devDependencies": {}

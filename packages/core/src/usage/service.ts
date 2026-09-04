@@ -7,9 +7,9 @@
  * the shared helper. Series points only contain buckets that actually have rows —
  * empty buckets are omitted, callers that draw axes fill the gaps from `range`.
  */
-import type * as S from '@openconductor/shared';
-import { OcError, bucketKey, estimateCostCents, resolveUsageWindow } from '@openconductor/shared';
-import { newId, nowIso } from '@openconductor/db';
+import type * as S from '@agent-conductor/shared';
+import { OcError, bucketKey, estimateCostCents, resolveUsageWindow } from '@agent-conductor/shared';
+import { newId, nowIso } from '@agent-conductor/db';
 import type { UsageQuery, UsageSeriesPoint, UsageService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';

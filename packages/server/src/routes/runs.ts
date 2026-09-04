@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
-import type { RunEvent } from '@openconductor/shared';
+import type { RunEvent } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
 import { streamSSE } from 'hono/streaming';
 import { body, csv, query } from '../http.js';

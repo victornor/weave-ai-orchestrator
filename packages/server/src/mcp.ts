@@ -6,14 +6,14 @@ import { Hono } from 'hono';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { OcError } from '@openconductor/shared';
-import { getLogger } from '@openconductor/core';
+import { OcError } from '@agent-conductor/shared';
+import { getLogger } from '@agent-conductor/core';
 import type { AppDeps, AppEnv } from './types.js';
 import { jsonSchemaFor, runTool, toolsFor, type ToolCtx } from './tools.js';
 
 const log = getLogger('http', { component: 'mcp' });
 
-export const MCP_SERVER_NAME = 'openconductor';
+export const MCP_SERVER_NAME = 'agentconductor';
 
 /** Build the MCP server exposing exactly the tools this run's agent may call. */
 export function createMcpServer(ctx: ToolCtx, version: string): Server {

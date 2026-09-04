@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#F7F8F9" media="(prefers-color-scheme: light)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>OpenConductor</title>
+    <title>AgentConductor</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -19,7 +19,7 @@
     <script>
       (function () {
         try {
-          var t = localStorage.getItem('oc.theme');
+          var t = localStorage.getItem('conductor.theme');
           if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
           else document.documentElement.setAttribute('data-theme', matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
         } catch (e) {

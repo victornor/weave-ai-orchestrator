@@ -46,6 +46,25 @@ export function workerRoutes(): Hono<AppEnv> {
     const { reason } = await body(c, z.object({ reason: z.string().default('paused by operator') }));
     return c.json(c.get('ws').services.workers.pause(c.get('actor'), c.req.param('id'), reason));
   });
+  app.post('/:id/purge', async (c) => {
+    const { force } = await body(c, z.object({ force: z.boolean().default(false) }));
+    const ws = c.get('ws');
+    const worker = ws.services.workers.get(c.req.param('id'));
+    const result = await ws.services.workers.retireIfLanded(c.get('actor'), worker.id);
+    if (result.retired || !force) return c.json({ ...result, id: worker.id });
+    // Forced: discard the worktree and cancel the worker (the human decided).
+    const row = ws.ctx.db.get<{ id: string; projectId: string; path: string; branch: string; provider: string }>('SELECT * FROM worktrees WHERE agent_id = ? AND status != ? ORDER BY created_at DESC LIMIT 1', [worker.id, 'removed']);
+    if (row) {
+      const provider = ws.ctx.registries.worktreeProviders.get(row.provider) ?? ws.ctx.registries.worktreeProviders.get('git');
+      const project = ws.ctx.db.get<{ clonePath: string }>('SELECT clone_path FROM projects WHERE id = ?', [row.projectId]);
+      if (provider && project) { try { await provider.remove({ repoPath: project.clonePath, path: row.path, branch: row.branch, deleteBranch: true, force: true, configPath: ws.ctx.paths.wtConfig }); } catch { /* best effort */ } }
+      ws.ctx.db.update('worktrees', row.id, { status: 'removed', removedAt: new Date().toISOString() });
+    }
+    try { await ws.services.workers.cancel(c.get('actor'), worker.id, 'purged by the human'); } catch { /* already terminal */ }
+    const again = await ws.services.workers.retireIfLanded(c.get('actor'), worker.id).catch(() => ({ retired: false, reason: 'forced' }));
+    return c.json({ retired: true, forced: true, id: worker.id, detail: again });
+  });
+
   app.post('/:id/resume', (c) => c.json(c.get('ws').services.workers.resume(c.get('actor'), c.req.param('id'))));
 
   return app;

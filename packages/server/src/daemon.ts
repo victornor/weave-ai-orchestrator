@@ -182,6 +182,20 @@ function makeAdmin(
       remember(ws.id, resolve(input.path));
       return { id: ws.id, path: resolve(input.path) };
     },
+    async unregister(id) {
+      const ws = workspaces.get(id);
+      if (ws) {
+        await ws.services.dispatcher.stop().catch(() => undefined);
+        try { ws.services.supervisor.stop(); } catch { /* ignore */ }
+        try { await ws.channels?.stop(); } catch { /* ignore */ }
+        for (const [key, rt] of [...workspaces.entries()]) if (rt === ws) workspaces.delete(key);
+        try { ws.ctx.db.close(); } catch { /* ignore */ }
+      }
+      const registry = workspaceLoader.readRegistry(configDir);
+      registry.workspaces = registry.workspaces.filter((w) => w.id !== id && w.id !== ws?.ctx.config.id);
+      workspaceLoader.writeRegistry(registry, configDir);
+      return { ok: true as const, id };
+    },
   };
 }
 

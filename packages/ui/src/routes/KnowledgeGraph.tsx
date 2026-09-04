@@ -31,15 +31,15 @@ export function layoutGraph(graph: KnowledgeGraph, iterations = 260): LaidOut[] 
     const cool = 1 - it / iterations;
     for (let i = 0; i < n; i++) {
       const a = nodes[i]!;
-      let fx = (50 - a.x) * 0.012;
-      let fy = (50 - a.y) * 0.012;
+      let fx = (50 - a.x) * 0.03;
+      let fy = (50 - a.y) * 0.03;
       for (let j = 0; j < n; j++) {
         if (i === j) continue;
         const b = nodes[j]!;
         let dx = a.x - b.x; let dy = a.y - b.y;
         let d2 = dx * dx + dy * dy;
         if (d2 < 0.01) { dx = (Math.random() - 0.5) * 0.1; dy = (Math.random() - 0.5) * 0.1; d2 = 0.01; }
-        const rep = 90 / d2;
+        const rep = 40 / d2;
         fx += dx * rep; fy += dy * rep;
       }
       a.vx = (a.vx + fx) * 0.5; a.vy = (a.vy + fy) * 0.5;
@@ -52,8 +52,8 @@ export function layoutGraph(graph: KnowledgeGraph, iterations = 260): LaidOut[] 
       a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f;
     }
     for (const a of nodes) {
-      a.x = Math.min(96, Math.max(4, a.x + a.vx * cool));
-      a.y = Math.min(96, Math.max(4, a.y + a.vy * cool));
+      a.x = Math.min(92, Math.max(8, a.x + a.vx * cool));
+      a.y = Math.min(88, Math.max(8, a.y + a.vy * cool));
     }
   }
   return nodes.map(({ vx: _vx, vy: _vy, ...rest }) => rest);

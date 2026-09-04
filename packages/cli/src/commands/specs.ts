@@ -78,7 +78,7 @@ export function register(program: Command): void {
   specs
     .command('changes')
     .option('-p, --project <id>')
-    .option('--state <state>', 'active|archived', 'active')
+    .option('--state <state>', 'active|archived (default: all)')
     .argument('[name]', 'show one change')
     .description('OpenSpec changes')
     .action(async (name: string | undefined, opts: Record<string, string>, command: Command) => run(async () => {

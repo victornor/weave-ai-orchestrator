@@ -353,7 +353,8 @@ async function tlsOptions(cfg: DaemonConfig, configDir: string): Promise<{ cert:
 // ---------- small helpers ----------
 
 function withListen(cfg: DaemonConfig, listen?: string): DaemonConfig {
-  return listen ? { ...cfg, http: { ...cfg.http, listen } } : cfg;
+  const effective = listen ?? process.env['OC_LISTEN'];
+  return effective ? { ...cfg, http: { ...cfg.http, listen: effective } } : cfg;
 }
 
 function resolveUrls(cfg: DaemonConfig): { publicUrl: string; host: string; port: number } {

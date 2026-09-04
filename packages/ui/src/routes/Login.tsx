@@ -52,6 +52,12 @@ function lockSeconds(e: unknown): number | null {
   return null;
 }
 
+/** `?next=/w/…` set by the 401 redirect: return there after sign-in. Only in-app paths are honoured. */
+function nextPath(): string | null {
+  const next = new URLSearchParams(window.location.search).get('next');
+  return next && next.startsWith('/w/') ? next : null;
+}
+
 export function LoginRoute(): React.ReactElement {
   const health = useHealth();
   const me = useMe();
@@ -77,7 +83,7 @@ export function LoginRoute(): React.ReactElement {
     const first = health.data?.workspaces?.[0]?.id;
     if (me.isSuccess && first) {
       setWorkspaceId(first);
-      go(`/w/${first}/needs`, { replace: true });
+      go(nextPath() ?? `/w/${first}/needs`, { replace: true });
     }
   }, [me.isSuccess, health.data, go]);
 
@@ -104,7 +110,7 @@ export function LoginRoute(): React.ReactElement {
     const ws = h?.workspaces?.[0]?.id;
     if (ws) {
       setWorkspaceId(ws);
-      go(`/w/${ws}/needs`, { replace: true });
+      go(nextPath() ?? `/w/${ws}/needs`, { replace: true });
     } else {
       go('/', { replace: true });
     }

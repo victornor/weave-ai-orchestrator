@@ -53,9 +53,20 @@ function stamp(): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-/** `pnpm` from PATH, else corepack's. */
-function pnpm(): string[] {
-  try { execFileSync('pnpm', ['--version'], { stdio: 'ignore' }); return ['pnpm']; } catch { return ['corepack', 'pnpm']; }
+function onPath(bin: string): boolean {
+  try { execFileSync(bin, ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
+}
+
+/**
+ * How to run pnpm inside the release: `mise exec` when the release pins toolchains in `mise.toml`
+ * and mise is installed (services and non-login shells rarely have the shims on PATH), else pnpm
+ * from PATH, else corepack's.
+ */
+function pnpm(release: string): string[] {
+  if (existsSync(join(release, 'mise.toml')) && onPath('mise')) return ['mise', 'exec', '--', 'pnpm'];
+  if (onPath('pnpm')) return ['pnpm'];
+  if (onPath('corepack')) return ['corepack', 'pnpm'];
+  throw new Error('no pnpm: install mise (the release pins node and pnpm in mise.toml) or pnpm itself');
 }
 
 export interface BuildOptions { from: string; ref: string; test?: boolean; log: (line: string) => void }
@@ -70,7 +81,7 @@ export function buildRelease(o: BuildOptions): { path: string; sha: string } {
     run('git', ['clone', '-q', '--no-checkout', from, work], releasesDir(), o.log);
     run('git', ['-C', work, 'checkout', '-q', o.ref], releasesDir(), o.log);
     const sha = execFileSync('git', ['-C', work, 'rev-parse', '--short=10', 'HEAD'], { encoding: 'utf8' }).trim();
-    const [pm, ...pmArgs] = pnpm();
+    const [pm, ...pmArgs] = pnpm(work);
     run(pm!, [...pmArgs, 'install', '--frozen-lockfile'], work, o.log);
     run(pm!, [...pmArgs, 'build'], work, o.log);
     if (o.test) run(pm!, [...pmArgs, 'test'], work, o.log);

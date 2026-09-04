@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDictation } from '../lib/dictation';
-import { useHealth } from '../api/hooks';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
+import { VoiceMeter } from './VoiceMeter';
 
 export type ComposerState = 'idle' | 'queued';
 
@@ -66,7 +66,6 @@ export function Composer({
   const ta = useRef<HTMLTextAreaElement>(null);
   const base = useRef('');
   const [explain, setExplain] = useState(false);
-  const health = useHealth();
   const startedByKey = useRef(false);
 
   const dictation = useDictation(
@@ -77,7 +76,6 @@ export function Composer({
       set(next);
       if (final) base.current = next;
     },
-    { serverConfigured: health.data?.transcription?.configured ?? false },
   );
 
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches;
@@ -202,17 +200,13 @@ export function Composer({
         </div>
 
         {dictating ? (
-          <div className="flex h-9 items-center gap-1.5 border-t border-line-1 px-3.5">
-            {/* fixed-height row: only the bars move, never the box */}
-            <span className="flex h-5 items-center gap-1.5">
-              {dictation.levels.map((v, i) => (
-                <span key={i} className="w-0.5 rounded-pill bg-accent transition-[height] duration-75" style={{ height: `${Math.round(4 + v * 16)}px` }} />
-              ))}
-            </span>
-            <span className="ac-mono ml-2 text-micro text-text-3">
+          <div className="flex h-12 items-center gap-3 border-t border-line-1 px-3.5">
+            {/* fixed-height row: the waveform moves, the box never does */}
+            <VoiceMeter analyser={dictation.analyser} active={dictating} className="h-8 min-w-0 flex-1" />
+            <span className="ac-mono text-micro tabular-nums text-text-3">
               {Math.floor(dictation.elapsed / 60)}:{String(dictation.elapsed % 60).padStart(2, '0')}
             </span>
-            <span className="ml-auto text-micro text-text-4">{isTouch ? 'tap the mic to stop' : startedByKey.current ? 'release ⌘⇧M to stop' : 'click the mic to stop'}</span>
+            <span className="hidden text-micro text-text-4 sm:inline">{isTouch ? 'tap the mic to stop' : startedByKey.current ? 'release ⌘⇧M to stop' : 'click the mic to stop'}</span>
           </div>
         ) : null}
       </div>

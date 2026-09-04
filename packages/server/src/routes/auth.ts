@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { AUTH_SESSION_KINDS, OcError } from '@agent-conductor/shared';
@@ -31,7 +33,7 @@ export function authRoutes(deps: AppDeps): Hono<AppEnv> {
     const input = await body(c, LoginSchema);
     const result = await deps.auth.login({
       ...input,
-      ip: clientIp(c.req.header('x-forwarded-for'), deps),
+      ip: clientIp(c, deps),
       userAgent: c.req.header('user-agent'),
     });
     if ('totpRequired' in result) throw new OcError('auth_totp_required', 'a TOTP code is required');
@@ -84,7 +86,14 @@ export function authRoutes(deps: AppDeps): Hono<AppEnv> {
   return app;
 }
 
-function clientIp(forwarded: string | undefined, deps: AppDeps): string | undefined {
-  if (!deps.daemon.http.trustProxy || !forwarded) return undefined;
-  return forwarded.split(',')[0]?.trim();
+/** The peer address: the proxy header when `http.trustProxy` is on, else the TCP peer itself. */
+function clientIp(c: Context<AppEnv>, deps: AppDeps): string | undefined {
+  const forwarded = c.req.header('x-forwarded-for');
+  if (deps.daemon.http.trustProxy && forwarded) return forwarded.split(',')[0]?.trim();
+  try {
+    const addr = getConnInfo(c).remote.address;
+    return addr?.replace(/^::ffff:/, '');
+  } catch {
+    return undefined;
+  }
 }

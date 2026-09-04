@@ -9,7 +9,7 @@ export function fetchCertPin(url: string, timeoutMs = 8000): Promise<PinResult> 
   const target = new URL(url);
   const port = target.port ? Number(target.port) : 443;
   return new Promise((resolve, reject) => {
-    const socket = connect({ host: target.hostname, port, servername: target.hostname, rejectUnauthorized: false, timeout: timeoutMs }, () => {
+    const socket = connect({ host: target.hostname, port, servername: /^[0-9.]+$|^\[?[0-9a-f:]+\]?$/i.test(target.hostname) ? undefined : target.hostname, rejectUnauthorized: false, timeout: timeoutMs }, () => {
       const cert = socket.getPeerCertificate(false);
       socket.end();
       if (!cert || !cert.raw) { reject(new Error(`no certificate presented by ${target.host}`)); return; }
@@ -36,4 +36,11 @@ export async function applyCertPin(url: string, pin: string): Promise<void> {
     throw new Error(`certificate pin mismatch for ${url}: expected ${pin}, got ${seen.pin}. Re-run \`oc login ${url} --pin\` only if you changed the certificate yourself.`);
   }
   process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
+  // The pin was just verified out of band; Node's blanket warning about the env var is noise for this process.
+  const listeners = process.listeners('warning');
+  process.removeAllListeners('warning');
+  process.on('warning', (w: Error) => {
+    if (/NODE_TLS_REJECT_UNAUTHORIZED/.test(String(w.message))) return;
+    for (const l of listeners) (l as (warning: Error) => void)(w);
+  });
 }

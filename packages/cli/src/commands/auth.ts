@@ -4,7 +4,7 @@ import { ApiClient, ApiError } from '../api.js';
 import { currentContext, loadContexts, putContext, removeContext, suggestContextName, useContext } from '../contexts.js';
 import { emit, fields, style, table, write } from '../output.js';
 import { promptHidden, promptLine } from '../prompt.js';
-import { fetchCertPin } from '../tls.js';
+import { applyCertPin, fetchCertPin } from '../tls.js';
 import { globals, items, run, session } from './util.js';
 
 interface LoginResponse { token?: string; sessionId?: string; expiresAt?: string; totpRequired?: boolean }
@@ -28,6 +28,7 @@ export function register(program: Command): void {
     .option('--pin', 'pin the TLS certificate (self-signed daemons)')
     .option('--insecure', 'allow plaintext http to a non-loopback host')
     .option('--device <name>', 'device name shown in Settings -> Devices')
+    .option('--password <password>', 'operator password (or set OC_PASSWORD); prompts when omitted')
     .option('--workspace-default <id>', 'default workspace for this context')
     .action(async (url: string, opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const target = String(url).replace(/\/+$/, '');
@@ -39,13 +40,14 @@ export function register(program: Command): void {
       if (opts['pin'] === true) {
         const pin = await fetchCertPin(target);
         certPin = pin.pin;
+        await applyCertPin(target, pin.pin);
         write(`${style.dim('certificate')}  ${pin.subject || '(no subject)'} valid to ${pin.validTo}`);
         write(`${style.dim('pin')}          ${pin.pin}`);
       }
 
       const client = new ApiClient({ baseUrl: target });
       const username = String(opts['username'] ?? 'operator');
-      const password = await promptHidden(`Password for ${username}@${new URL(target).host}`);
+      const password = (typeof opts['password'] === 'string' && opts['password']) || process.env['OC_PASSWORD'] || await promptHidden(`Password for ${username}@${new URL(target).host}`);
       const deviceName = String(opts['device'] ?? `${process.env['USER'] ?? 'cli'}@${process.env['HOSTNAME'] ?? 'host'}`);
 
       const attempt = async (totp?: string): Promise<LoginResponse> =>

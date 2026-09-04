@@ -9,7 +9,7 @@ import { configHome } from '../contexts.js';
 import { LAUNCHD_LABEL, followLog, installLaunchdAgent, installService, isRunning, logFile, pidFile, readPid, renderLaunchdPlist, renderServiceUnit, resolveServerBin, startDaemon, stopDaemon, tailLog } from '../daemon.js';
 import { run, session } from './util.js';
 
-interface Health { ok?: boolean; version?: string; workspaces?: Array<{ id?: string; name?: string; status?: string }>; operatorConfigured?: boolean; tlsMode?: string }
+interface Health { ok?: boolean; version?: string; workspaces?: Array<{ id?: string; name?: string; status?: string }>; operatorConfigured?: boolean; tlsMode?: string; publicUrl?: string }
 
 export function register(program: Command): void {
   const daemon = program.command('daemon').description('daemon lifecycle on this machine');
@@ -29,7 +29,7 @@ export function register(program: Command): void {
         foreground: opts['foreground'] === true,
         ...(typeof opts['listen'] === 'string' ? { listen: opts['listen'] } : {}),
       });
-      let ready: { publicUrl?: string } | null = null;
+      let ready: { publicUrl?: string; setupRequired?: boolean } | null = null;
       if (!result.foreground && result.pid) {
         // Wait until the daemon has written its daemon.json (it is listening) or died (port in use, bad config …).
         const marker = join(configHome(), 'daemon.json');
@@ -41,7 +41,7 @@ export function register(program: Command): void {
             throw new ApiError('internal', `the daemon exited right after starting (see ${result.log})`, 500, { logTail: tail });
           }
           try {
-            const j = JSON.parse(readFileSync(marker, 'utf8')) as { pid?: number; publicUrl?: string };
+            const j = JSON.parse(readFileSync(marker, 'utf8')) as { pid?: number; publicUrl?: string; setupRequired?: boolean };
             if (j.pid === result.pid) { ready = j; break; }
           } catch { /* not yet */ }
           await new Promise((r) => setTimeout(r, 250));
@@ -50,7 +50,8 @@ export function register(program: Command): void {
       emit({ started: true, ...result, publicUrl: ready?.publicUrl ?? null }, () => {
         if (result.foreground) return;
         write(`${style.ok(ready ? 'started' : 'started (not confirmed yet)')} pid ${result.pid}`);
-        fields([['url', ready?.publicUrl ?? '(pending)'], ['bin', result.bin], ['log', result.log], ['next', 'oc daemon status']]);
+        if (ready?.setupRequired) write(style.warn('public listener held: no operator password yet — run `oc daemon set-password` on this machine to open it'));
+        fields([['url', ready?.setupRequired ? `${ready.publicUrl ?? ''} (after set-password)` : ready?.publicUrl ?? '(pending)'], ['bin', result.bin], ['log', result.log], ['next', ready?.setupRequired ? 'oc daemon set-password' : 'oc daemon status']]);
       });
     }));
 
@@ -132,7 +133,7 @@ export function register(program: Command): void {
         const password = given || await promptHidden('New password');
         if (!given) { const again = await promptHidden('Repeat password'); if (password !== again) throw new ApiError('validation', 'passwords do not match', 400); }
         await client.post('/api/auth/setup', { username, password });
-        emit({ ok: true, mode: 'setup' }, () => write(`${style.ok('operator configured')} — sign in with \`oc login ${client.baseUrl}\``));
+        emit({ ok: true, mode: 'setup', publicUrl: health?.publicUrl ?? client.baseUrl }, () => write(`${style.ok('operator configured')} — sign in with \`oc login ${health?.publicUrl ?? client.baseUrl}${health?.tlsMode === 'self-signed' ? ' --pin' : ''}\``));
         return;
       }
       const givenNext = (typeof opts['password'] === 'string' && opts['password']) || process.env['OC_PASSWORD'];

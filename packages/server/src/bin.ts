@@ -15,5 +15,6 @@ startDaemon({ configDir: flag('config-dir'), listen: flag('listen'), uiDir: flag
   })
   .catch((err: unknown) => {
     getLogger('daemon').error({ err }, 'daemon failed to start');
-    process.exitCode = 1;
+    // The loopback listener may already be up and would keep the process alive; a failed start must exit.
+    setTimeout(() => process.exit(1), 50);
   });

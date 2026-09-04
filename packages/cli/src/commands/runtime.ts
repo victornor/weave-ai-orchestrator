@@ -9,7 +9,7 @@ import { items, run, session } from './util.js';
 interface RuntimeDescriptor {
   id?: string;
   displayName?: string;
-  detection?: { available?: boolean; version?: string | null; path?: string | null; notes?: string | null };
+  detection?: { status?: string; available?: boolean; version?: string | null; path?: string | null; notes?: string | null };
   capabilities?: Record<string, unknown>;
   models?: Array<{ id?: string; label?: string; source?: string } | string>;
   /** Optional, daemon-provided: how to log this runtime in inside its per-workspace config home. */
@@ -27,8 +27,9 @@ const FALLBACK: Record<string, { env: string; command: string[]; instructions: s
 
 function detectionCell(r: RuntimeDescriptor): string {
   const d = r.detection ?? {};
-  if (d.available === true) return style.ok(`available${d.version ? ` ${d.version}` : ''}`);
-  if (d.available === false) return style.bad('missing');
+  if (d.status === 'available' || d.available === true) return style.ok(`available${d.version ? ` ${d.version}` : ''}`);
+  if (d.status === 'missing_binary' || d.available === false) return style.bad('missing');
+  if (d.status === 'broken' || d.status === 'unsupported') return style.bad(`${d.status}${d.notes ? ` (${d.notes})` : ''}`);
   return style.dim('unknown');
 }
 

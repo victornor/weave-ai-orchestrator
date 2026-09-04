@@ -47,30 +47,40 @@ rather than in a long chat, so bootstrap cost per worker stays flat over the lif
 
 Nothing is installed for you by default. `oc doctor` reports what is missing on this machine and on the daemon host; `oc doctor --install` offers to install the missing pieces that need no root (npm packages such as `openspec` and the runtime CLIs, `brew`/`cargo` for worktrunk) and prints the `sudo` command for the rest.
 
-## Build
+## Install
 
 ```bash
+git clone <this repo> openconductor && cd openconductor
 mise install                 # node + pnpm, if you use mise
 pnpm install
 pnpm build                   # tsc -b across every package
 pnpm --filter @openconductor/ui build    # the web app -> packages/ui/dist
 ```
 
-Then either run the binaries directly:
+Put `oc` on your PATH, either by linking the package or with a two-line wrapper (the wrapper is
+what survives a `mise` node upgrade and works from systemd):
 
 ```bash
-node packages/server/dist/bin.js   # the daemon
-node packages/cli/dist/bin.js      # the CLI
+cd packages/cli && pnpm link --global          # option 1
+# option 2
+cat > ~/.local/bin/oc <<EOF
+#!/bin/sh
+exec "$(mise which node)" "$PWD/packages/cli/dist/bin.js" "\$@"
+EOF
+chmod +x ~/.local/bin/oc
 ```
 
-or put `oc` on your PATH:
+Then let the doctor tell you what else this machine needs:
 
 ```bash
-cd packages/cli && pnpm link --global    # or: npm link
-oc --help
+oc doctor              # node, git, gh, openspec, worktrunk, runtimes, daemon, password, workspaces
+oc doctor --install    # offers the missing no-root installs (npm/brew/cargo); prints the sudo ones
 ```
 
-Everything below assumes `oc` is linked. Where it is not, substitute
+`oc doctor` is the checklist for the rest of this README: whenever a step below fails, run it
+first. Against a remote daemon it also reports what is missing on the daemon host.
+
+Everything below assumes `oc` is on your PATH. Where it is not, substitute
 `node packages/cli/dist/bin.js`.
 
 Root scripts: `pnpm build`, `pnpm test` (vitest), `pnpm lint` (the boundary and console guards),
@@ -91,9 +101,9 @@ auth:
   loopbackTrusted: true
 YAML
 
-# 2. Start the daemon.
+# 2. Start the daemon and check the machine.
 oc daemon start
-oc daemon status
+oc doctor                      # green, or exactly what is missing (and --install for the no-root parts)
 
 # 3. Create a workspace. It is scaffolded on the daemon host and registered.
 oc init ~/Work/acme --prefix ACME --name "Acme Labs"
@@ -109,7 +119,6 @@ oc project add git@github.com:acme/api.git --runtime claude
 # 6. Talk to the conductor.
 oc say "what is in this workspace?"
 oc chat                        # interactive
-oc doctor                      # green checklist, or exactly what is missing
 ```
 
 Open <http://127.0.0.1:7433> for the web app. If it shows "the web UI has not been built", run
@@ -132,47 +141,55 @@ config home.
 
 ## Quickstart B — daemon on a server, work from a laptop and a phone
 
-On the **server** (the daemon host — this is where code runs, where the coding CLIs live, and where
-git credentials live):
+The daemon host is where code runs, where the coding CLIs live, and where git credentials live.
+The easiest safe network is a tailnet: bind to the machine's Tailscale address and every device
+you own can reach it, nothing else can.
+
+On the **server**:
 
 ```bash
-# Build as above, then configure the listener.
+# Install as above, then configure the listener (Tailscale example; use 0.0.0.0 for a LAN/VPS).
+mkdir -p ~/.config/openconductor
 cat > ~/.config/openconductor/daemon.yaml <<'YAML'
 version: 1
 http:
-  listen: 0.0.0.0:7433
-  publicUrl: https://oc.example.com
+  listen: 100.x.y.z:7433                          # `tailscale ip -4`
+  publicUrl: https://myhost.tailnet-name.ts.net:7433   # `tailscale status` shows the MagicDNS name
   tls:
     mode: self-signed          # or "files" behind Caddy/nginx; see docs/OPERATIONS.md
-    domains: [oc.example.com]
+    domains: [myhost.tailnet-name.ts.net, myhost, localhost]
 auth:
   loopbackTrusted: false
 YAML
 
-oc daemon start
-oc daemon set-password         # POSTs /api/auth/setup on first run
+oc daemon start                # "public listener held" until a password exists — expected
+oc daemon set-password         # opens the public listener in place
+oc login https://100.x.y.z:7433 --pin --device server   # a local context for this host
+oc doctor                      # everything on this host; `--install` for what is missing
 
 # Host-only setup: coding CLIs, git, forge.
-oc runtime login claude
+oc runtime login claude        # only if the inherited credentials are not enough
 gh auth login
 ssh-keygen -t ed25519          # and add the key to the forge
 
-oc init ~/work/acme --prefix ACME --name "Acme Labs"
+oc init ~/Work/acme --prefix ACME --name "Acme Labs"
 oc project add git@github.com:acme/api.git --runtime claude
-oc doctor
 
-oc daemon install-service      # systemd user unit; prints the enable commands
+oc daemon stop                 # hand the daemon to systemd
+oc daemon install-service      # prints: daemon-reload, enable --now, loginctl enable-linger
 ```
 
-The daemon refuses to listen on a non-loopback address with no operator password configured.
+A firewall on the server must let the Tailscale interface reach the port, e.g.
+`sudo ufw allow in on tailscale0 to any port 7433 proto tcp`.
 
-On your **laptop**:
+On your **laptop** (install the CLI the same way, no daemon needed):
 
 ```bash
-oc login https://oc.example.com --pin --device laptop
+oc login https://myhost.tailnet-name.ts.net:7433 --pin --device laptop
 # --pin trusts the daemon's self-signed certificate and stores the fingerprint.
 # It prompts for the password, then for a TOTP code if you enabled TOTP.
 
+oc doctor                      # local tools here, plus "daemon host:" rows for the server
 oc context list
 oc chat
 oc top
@@ -182,8 +199,9 @@ oc presenter --surface hyprland        # live workers as windows on this machine
 `oc login` stores a named context in `~/.config/openconductor/contexts.yaml` (URL, token, default
 workspace, cert pin). Every command then works identically against a local or remote daemon.
 
-On your **phone**: open `https://oc.example.com`, sign in, install the PWA. Same state as the
-laptop and Telegram. Enable TOTP in Settings → Security before exposing the daemon publicly.
+On your **phone**: open `https://myhost.tailnet-name.ts.net:7433`, accept the self-signed
+certificate once, sign in, install the PWA. Same state as the laptop and Telegram. Enable TOTP in
+Settings → Security before exposing the daemon beyond a tailnet.
 
 **Telegram** (optional). Put the bot token in `workspace.yaml` as an environment reference and set
 the variable on the daemon host:

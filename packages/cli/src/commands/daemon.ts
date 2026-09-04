@@ -3,6 +3,9 @@ import type { Command } from 'commander';
 import { ApiError } from '../api.js';
 import { emit, fields, style, table, write } from '../output.js';
 import { promptHidden } from '../prompt.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { configHome } from '../contexts.js';
 import { followLog, installService, isRunning, logFile, pidFile, readPid, resolveServerBin, startDaemon, stopDaemon, tailLog } from '../daemon.js';
 import { run, session } from './util.js';
 
@@ -26,10 +29,28 @@ export function register(program: Command): void {
         foreground: opts['foreground'] === true,
         ...(typeof opts['listen'] === 'string' ? { listen: opts['listen'] } : {}),
       });
-      emit({ started: true, ...result }, () => {
+      let ready: { publicUrl?: string } | null = null;
+      if (!result.foreground && result.pid) {
+        // Wait until the daemon has written its daemon.json (it is listening) or died (port in use, bad config …).
+        const marker = join(configHome(), 'daemon.json');
+        const deadline = Date.now() + 20_000;
+        while (Date.now() < deadline) {
+          if (!isRunning(result.pid)) {
+            let tail = '';
+            try { tail = readFileSync(result.log, 'utf8').trim().split('\n').slice(-8).join('\n'); } catch { /* no log */ }
+            throw new ApiError('internal', `the daemon exited right after starting (see ${result.log})`, 500, { logTail: tail });
+          }
+          try {
+            const j = JSON.parse(readFileSync(marker, 'utf8')) as { pid?: number; publicUrl?: string };
+            if (j.pid === result.pid) { ready = j; break; }
+          } catch { /* not yet */ }
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+      emit({ started: true, ...result, publicUrl: ready?.publicUrl ?? null }, () => {
         if (result.foreground) return;
-        write(`${style.ok('started')} pid ${result.pid}`);
-        fields([['bin', result.bin], ['log', result.log], ['next', 'oc daemon status']]);
+        write(`${style.ok(ready ? 'started' : 'started (not confirmed yet)')} pid ${result.pid}`);
+        fields([['url', ready?.publicUrl ?? '(pending)'], ['bin', result.bin], ['log', result.log], ['next', 'oc daemon status']]);
       });
     }));
 
@@ -100,22 +121,25 @@ export function register(program: Command): void {
     .command('set-password')
     .description('set the operator password (first run) or change it')
     .option('-u, --username <username>', 'operator username', 'operator')
+    .option('--password <password>', 'the new password (or set OC_PASSWORD); prompts twice when omitted')
+    .option('--current <password>', 'the current password when changing it (or set OC_CURRENT_PASSWORD)')
     .action(async (opts: Record<string, string>, command: Command) => run(async () => {
       const { client } = await session(command, { workspace: 'none' });
       const health = await client.get<Health>('/api/health');
       const username = String(opts['username'] ?? 'operator');
       if (health?.operatorConfigured === false) {
-        const password = await promptHidden('New password');
-        const again = await promptHidden('Repeat password');
-        if (password !== again) throw new ApiError('validation', 'passwords do not match', 400);
+        const given = (typeof opts['password'] === 'string' && opts['password']) || process.env['OC_PASSWORD'];
+        const password = given || await promptHidden('New password');
+        if (!given) { const again = await promptHidden('Repeat password'); if (password !== again) throw new ApiError('validation', 'passwords do not match', 400); }
         await client.post('/api/auth/setup', { username, password });
         emit({ ok: true, mode: 'setup' }, () => write(`${style.ok('operator configured')} — sign in with \`oc login ${client.baseUrl}\``));
         return;
       }
-      const current = await promptHidden('Current password');
-      const next = await promptHidden('New password');
-      const again = await promptHidden('Repeat new password');
-      if (next !== again) throw new ApiError('validation', 'passwords do not match', 400);
+      const givenNext = (typeof opts['password'] === 'string' && opts['password']) || process.env['OC_PASSWORD'];
+      const givenCurrent = (typeof opts['current'] === 'string' && opts['current']) || process.env['OC_CURRENT_PASSWORD'];
+      const current = givenCurrent || await promptHidden('Current password');
+      const next = givenNext || await promptHidden('New password');
+      if (!givenNext) { const again = await promptHidden('Repeat new password'); if (next !== again) throw new ApiError('validation', 'passwords do not match', 400); }
       await client.post('/api/auth/password', { current, next });
       emit({ ok: true, mode: 'change' }, () => write(style.ok('password changed')));
     }));

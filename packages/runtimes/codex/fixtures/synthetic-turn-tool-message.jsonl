@@ -1,0 +1,9 @@
+{"type":"thread.started","thread_id":"01a069b4-d08e-7600-9dac-8a5d20259196"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","item_type":"reasoning","text":""}}
+{"type":"item.completed","item":{"id":"item_0","item_type":"reasoning","text":"The user wants me to run echo pong."}}
+{"type":"item.completed","item":{"id":"item_1","item_type":"command_execution","command":"echo pong","aggregated_output":"pong\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","item_type":"file_change","status":"completed","changes":[{"path":"/home/agent/work/notes.md","kind":"update"}]}}
+{"type":"item.completed","item":{"id":"item_3","item_type":"mcp_tool_call","server":"openconductor","tool":"oc_report","status":"completed","arguments":{"state":"done"},"result":{"ok":true}}}
+{"type":"item.completed","item":{"id":"item_4","item_type":"agent_message","text":"{\"state\":\"done\",\"summary\":\"said pong\"}"}}
+{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":900,"output_tokens":48}}

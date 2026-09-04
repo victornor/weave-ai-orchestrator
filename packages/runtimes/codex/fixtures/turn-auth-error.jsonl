@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a069b4-d08e-7600-9dac-8a5d20259196"}
+{"type":"turn.started"}
+{"type":"error","message":"Missing environment variable: `CODEIFY_API_KEY`."}
+{"type":"turn.failed","error":{"message":"Missing environment variable: `CODEIFY_API_KEY`."}}

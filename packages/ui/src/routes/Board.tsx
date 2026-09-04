@@ -26,7 +26,8 @@ export function BoardRoute(): React.ReactElement {
   const search = useSearch({ strict: false }) as Record<string, string | undefined>;
   const [view, setView] = useState<View>('kanban');
   // Finished tickets stay out of the way until asked for; `?done=1` keeps the choice in the URL.
-  const [showDone, setShowDone] = useState<boolean>(search['done'] === '1');
+  // The router parses `?done=1` as the number 1, so compare as text.
+  const [showDone, setShowDone] = useState<boolean>(String(search['done'] ?? '') === '1');
   const [project, setProject] = useState<string | undefined>(search['project']);
   // The sidebar links to /board?project=…; a second click on another project must re-filter, not be ignored.
   useEffect(() => { setProject(search['project']); }, [search['project']]);

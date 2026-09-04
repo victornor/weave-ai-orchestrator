@@ -288,7 +288,7 @@ conductor daemon rollback
 `pnpm install --frozen-lockfile && pnpm build` there (nothing running is touched yet) → online
 backup of `daemon.sqlite` and every workspace db into `~/.config/agent-conductor/backups/<stamp>/`
 → switch `current` (and `previous`) → `POST /api/daemon/drain`, which stops dispatching new turns
-and waits up to `upgrade.drainTimeoutSec` (default 180) for running ones → `systemctl --user
+and waits up to `upgrade.drainTimeoutSec` (default 900, since an agent turn can take many minutes) for running ones → `systemctl --user
 restart agent-conductor.service` (or stop/start when no unit is installed) → wait for
 `/api/health`. Releases beyond `upgrade.keep` (default 3) are pruned, never `current` or `previous`.
 
@@ -298,7 +298,7 @@ upgrade:
   source: git@github.com:victornor/agent-conductor.git   # or a local checkout path
   ref: main
   keep: 3
-  drainTimeoutSec: 180
+  drainTimeoutSec: 900
 ```
 
 - Schema migrations run automatically when a database is opened. There is no down-migration; the
@@ -308,7 +308,7 @@ upgrade:
 - Skills and prompt templates ship inside the release and are re-installed into agent homes when
   they change; an agent's local edits are overwritten by design.
 - In-flight work: the drain lets running turns finish. Anything still running at the timeout is
-  interrupted, re-queued once on boot, and resumes its session; worktrees and worker homes are
+  recorded as `interrupted` (never `failed`), re-queued once on boot, and resumes its session; worktrees and worker homes are
   exactly where they were. Nothing is ever reset.
 - `upgrade` and `rollback` refuse to run inside a worker (`AC_RUN_TOKEN` set). Agents developing
   AgentConductor propose the change in a ticket; a human runs the upgrade.

@@ -295,7 +295,11 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   else if (r?.timedOut) { status = 'timed_out'; errorCode = 'timeout'; errorFamily = 'tooling'; }
   else if (r?.error) { status = 'failed'; errorCode = r.error.code; errorFamily = r.error.family; }
   else if (r && r.exitCode !== 0 && r.exitCode !== null) { status = 'failed'; errorCode = `exit_${r.exitCode}`; errorFamily = 'unknown'; }
-  if (f.cancelled) { status = 'cancelled'; errorCode = errorCode ?? 'cancelled'; errorFamily = errorFamily ?? 'tooling'; }
+  if (f.cancelled === 'interrupt' || (!f.failure && !r?.error && (r?.signal === 'SIGTERM' || r?.signal === 'SIGKILL' || r?.exitCode === 143 || r?.exitCode === 137))) {
+    // Daemon shutdown, an upgrade's drain timeout, or a human interrupt: not the agent's failure.
+    // Boot recovery re-queues the wake and the session resumes where it stopped.
+    status = 'interrupted'; errorCode = 'interrupted'; errorFamily = 'tooling';
+  } else if (f.cancelled) { status = 'cancelled'; errorCode = errorCode ?? 'cancelled'; errorFamily = errorFamily ?? 'tooling'; }
 
   const usage = r?.usage ?? null;
   const model = r?.model ?? f.agent.model ?? f.role?.model ?? null;

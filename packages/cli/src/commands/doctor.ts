@@ -88,8 +88,19 @@ export function register(program: Command): void {
 
         const host = (health['host'] ?? null) as HealthHost | null;
         daemonIsThisHost = host?.hostname ? host.hostname === hostname() : isRunning(pid);
+        if (!daemonIsThisHost) {
+          remoteHost = host?.hostname ?? client.baseUrl;
+          // This machine is a client: daemon-host tools and a local daemon process are not its job.
+          for (const check of checks) {
+            if (check.install === 'openspec' || check.install === 'wt' || check.name === 'local daemon process') {
+              check.ok = true;
+              check.detail = `${check.detail} — not needed here, the daemon runs on ${remoteHost}`;
+              delete check.fix;
+              delete check.install;
+            }
+          }
+        }
         if (host?.tools && !daemonIsThisHost) {
-          remoteHost = host.hostname ?? client.baseUrl;
           for (const tool of Object.values(host.tools)) {
             checks.push({
               name: `daemon host: ${tool.id === 'wt' ? 'worktrunk (wt)' : tool.id}`,
@@ -124,7 +135,7 @@ export function register(program: Command): void {
       emit({ checks, failed, installable }, () => {
         for (const check of checks) {
           const mark = check.ok === true ? style.ok('ok  ') : check.ok === false ? style.bad('fail') : style.warn('warn');
-          write(`${mark}  ${check.name.padEnd(26)}  ${check.detail}`);
+          write(`${mark}  ${check.name.padEnd(28)}  ${check.detail}`);
           if (check.ok !== true && check.fix) write(`      ${style.dim(`-> ${check.fix}`)}`);
         }
         write('');

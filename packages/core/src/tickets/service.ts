@@ -4,11 +4,13 @@ import {
   type CommentKind, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
 } from '@openconductor/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
+import type { Project } from '@openconductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { checkTransition, openspecChangeName, type GuardFacts } from './guards.js';
 import { tx } from './tx.js';
 import { landDelivery, type LandResult } from './land.js';
+import { existsSync } from 'node:fs';
 
 function ticketBranchFor(t: { identifier: string; title: string }): string {
   const slug = t.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
@@ -301,7 +303,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         askedInRunId: actor.runId ?? null,
       });
     }
-    if (to === 'in_review' && next.autoMerge) setTimeout(() => { service.autoMergeSweep().catch((e) => log.warn({ err: String(e) }, 'auto-merge sweep failed')); }, 50);
+    if (to === 'in_review' && next.autoMerge) setTimeout(() => { service.autoMergeSweep().catch((e) => log.debug({ err: String(e) }, 'auto-merge sweep after in_review failed')); }, 50).unref();
     if (to === 'approved') wake(next.workerId, 'ticket_assigned', `plan approved for ${next.identifier}`, { ticketId: t.id });
     if (to === 'merging') wake(next.workerId, 'merge_approved', `merge approved for ${next.identifier}`, { ticketId: t.id });
     if (to === 'proposing' && t.status === 'proposed') wake(next.workerId, 'ticket_comment', `revision requested for ${next.identifier}`, { ticketId: t.id });
@@ -573,11 +575,14 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       // Land the delivery into the primary clone first (ff for local-branch; verify containment for pr). Not landed → the worker keeps the ticket in merging.
       let landInfo: LandResult | null = null;
       if (t.projectId) {
-        const project = deps().projects.get(t.projectId);
-        const wt = db.get<{ branch: string }>('SELECT branch FROM worktrees WHERE ticket_id = ? AND status != ? ORDER BY created_at DESC LIMIT 1', [t.id, 'removed']);
-        const branch = wt?.branch ?? ticketBranchFor(t);
-        landInfo = await landDelivery(ctx.config, project, t, branch);
-        recordActivity(db, ws, actor, 'ticket.delivery_landed', 'ticket', t.id, { ...landInfo }, t.id);
+        let project: Project | null = null;
+        try { project = deps().projects.get(t.projectId); } catch { project = null; }
+        if (project && existsSync(project.clonePath)) {
+          const wt = db.get<{ branch: string }>('SELECT branch FROM worktrees WHERE ticket_id = ? AND status != ? ORDER BY created_at DESC LIMIT 1', [t.id, 'removed']);
+          const branch = wt?.branch ?? ticketBranchFor(t);
+          landInfo = await landDelivery(ctx.config, project, t, branch);
+          recordActivity(db, ws, actor, 'ticket.delivery_landed', 'ticket', t.id, { ...landInfo }, t.id);
+        } else log.warn({ ticketId: t.id }, 'mergeDone: no project clone available; skipping delivery landing');
       }
       let archivedAs: string | null = null;
       let skipped: string | null = null;

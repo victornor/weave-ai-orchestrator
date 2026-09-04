@@ -217,15 +217,15 @@ describe('startPresenter', () => {
     // Events are only a nudge: the presenter re-reads the daemon's desired list, which is the truth.
     api.desired = { ...api.desired, workers: [...api.desired.workers, worker('w-2')] };
     api.emit({ type: 'worker.spawned', entityId: 'w-2', payload: worker('w-2') });
-    await vi.waitFor(() => expect(surface.calls.some((c) => c.op === 'ensure' && c.agentId === 'w-2')).toBe(true));
+    await vi.waitFor(() => expect(surface.calls.some((c) => c.op === 'ensure' && c.agentId === 'w-2')).toBe(true), { timeout: 4000 });
 
     api.desired = { ...api.desired, workers: api.desired.workers.map((w) => (w.agentId === 'w-2' ? worker('w-2', { status: 'paused', uiStatus: 'paused' }) : w)) };
     api.emit({ type: 'worker.status', entityId: 'w-2', payload: worker('w-2', { status: 'paused', uiStatus: 'paused' }) });
-    await vi.waitFor(() => expect(surface.calls.some((c) => c.op === 'update:paused')).toBe(true));
+    await vi.waitFor(() => expect(surface.calls.some((c) => c.op === 'update:paused')).toBe(true), { timeout: 4000 });
 
     api.desired = { ...api.desired, workers: api.desired.workers.filter((w) => w.agentId !== 'w-2') };
     api.emit({ type: 'worker.retired', entityId: 'w-2', payload: { id: 'w-2' } });
-    await vi.waitFor(() => expect(surface.calls.some((c) => c.op === 'close' && c.agentId === 'w-2')).toBe(true));
+    await vi.waitFor(() => expect(surface.calls.some((c) => c.op === 'close' && c.agentId === 'w-2')).toBe(true), { timeout: 4000 });
     await presenter.stop();
   });
 

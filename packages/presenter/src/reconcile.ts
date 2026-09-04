@@ -120,7 +120,7 @@ export function createReconciler(opts: ReconcilerOptions): Reconciler {
 
     if (desired.conductor && conductorCfg) await ensure(desired.conductor, o);
     const live = desired.workers.filter((w) => w.status !== 'retired');
-    for (const worker of live) await ensure(worker, o);
+    for (const worker of live) { if (!o.force && entries.has(worker.agentId)) await update(worker); else await ensure(worker, o); }
 
     const desiredIds = new Set(live.map((w) => w.agentId));
     if (desired.conductor && conductorCfg) desiredIds.add(desired.conductor.agentId);

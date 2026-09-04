@@ -132,3 +132,20 @@ Useful env vars: `AC_SKILLS_DIR`, `AC_TEMPLATES_DIR` (point the daemon at a chec
 - New routes are in `docs/API.md`; new CLI commands are in PLAN §20 and the README cheat-sheet.
 - New skills are in `skills/manifest.json` and `skills/README.md`, and something names their trigger.
 - A deviation from `docs/PLAN.md` has an ADR in `docs/adr/`.
+
+## Developing AgentConductor inside AgentConductor
+
+This repo is itself a project in a running AgentConductor workspace, so a worker editing it is a
+process spawned by the system it is changing. Rules that keep that sane:
+
+- **The running daemon is a release, not a checkout.** It lives under
+  `~/.local/share/agent-conductor/current`. Building in your worktree changes nothing that runs.
+- **Never touch the live install**: not `~/.config/agent-conductor`, not the release dirs, not the
+  systemd unit, not the port it listens on. `conductor daemon upgrade|rollback|stop|start` are
+  human commands; they refuse to run inside a worker.
+- **Test against throwaway daemons only**: `--config-dir <tmp> --listen 127.0.0.1:0` (or the
+  loopback port of your choice), with `auth.loopbackTrusted: true` in that dir's `daemon.yaml`.
+- **The test suite clears `AC_*` from the environment** (`vitest.setup.ts`), because your run's
+  `AC_RUN_TOKEN` / `AC_API_URL` would otherwise point tests at the live daemon. Keep it that way.
+- **Deliver through the ticket**: PR, plan, report. The human runs `conductor daemon upgrade`
+  after the merge; that is the deploy step, and it is not yours.

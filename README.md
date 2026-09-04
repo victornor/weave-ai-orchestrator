@@ -275,6 +275,8 @@ Run `conductor <group> --help` for the full set. Global flags: `-w/--workspace`,
 
 ### Daemon and access
 
+`conductor daemon upgrade` builds a release from git, backs up, drains and restarts; `releases` and `rollback` go with it (see docs/OPERATIONS.md §6).
+
 | Command | Does |
 |---|---|
 | `conductor daemon start [-f] [--listen host:port]` | start the daemon on this machine (`--listen` overrides `http.listen` in `daemon.yaml` for this start) |

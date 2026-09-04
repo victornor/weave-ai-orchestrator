@@ -36,6 +36,8 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: '/api/runtimes', tag: 'daemon', summary: 'Registered runtimes with detection and capabilities', auth: 'session' },
   { method: 'GET', path: '/api/runtimes/{id}/models', tag: 'daemon', summary: 'Models a runtime reports', auth: 'session' },
   { method: 'POST', path: '/api/transcribe', tag: 'daemon', summary: 'Audio to text (501 unless a provider is configured)', auth: 'session', mutating: true },
+  { method: 'POST', path: '/api/daemon/drain', tag: 'daemon', summary: 'Stop dispatching and wait for in-flight turns (bounded) before an upgrade restart', auth: 'session', mutating: true },
+  { method: 'POST', path: '/api/daemon/undrain', tag: 'daemon', summary: 'Resume dispatching after a drain whose restart did not happen', auth: 'session', mutating: true },
 
   { method: 'GET', path: W, tag: 'workspace', summary: 'Workspace summary and config', auth: 'session' },
   { method: 'PATCH', path: `${W}/config`, tag: 'workspace', summary: 'Patch workspace.yaml', auth: 'session', mutating: true },

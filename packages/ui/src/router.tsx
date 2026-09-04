@@ -3,6 +3,7 @@ import { AppShell } from './app/AppShell';
 import { WorkspaceProvider } from './api/context';
 import { getWorkspaceId } from './api/client';
 import { LoginRoute } from './routes/Login';
+import { OnboardingRoute } from './routes/Onboarding';
 import { NeedsYouRoute } from './routes/NeedsYou';
 import { ChatRoute } from './routes/Chat';
 import { BoardRoute } from './routes/Board';
@@ -18,6 +19,7 @@ import { SettingsRoute } from './routes/Settings';
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 
 const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: '/login', component: LoginRoute });
+const onboardingRoute = createRoute({ getParentRoute: () => rootRoute, path: '/onboarding', component: OnboardingRoute });
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -25,8 +27,10 @@ const indexRoute = createRoute({
   beforeLoad: () => {
     const ws = getWorkspaceId();
     // Signing in from a phone is almost always prompted by something waiting,
-    // so the app lands on Needs you, not Chat.
-    throw redirect({ to: (ws ? `/w/${ws}/needs` : '/login') as never });
+    // so the app lands on Needs you, not Chat. With no remembered workspace the
+    // onboarding decides: it creates the first one, or the 401 redirect sends
+    // an anonymous visitor to /login.
+    throw redirect({ to: (ws ? `/w/${ws}/needs` : '/onboarding') as never });
   },
   component: () => null,
 });
@@ -71,6 +75,7 @@ const settingsRoute = child('/settings', SettingsRoute, searchPassthrough);
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
+  onboardingRoute,
   wsRoute.addChildren([
     wsIndexRoute,
     needsRoute,

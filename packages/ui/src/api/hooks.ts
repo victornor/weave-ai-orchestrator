@@ -24,12 +24,28 @@ export function useRuntimes(): UseQueryResult<T.RuntimeInfo[]> {
   return useQuery({ queryKey: qk.runtimes(), queryFn: () => api.root<T.RuntimeInfo[]>('/runtimes'), staleTime: 60_000 });
 }
 
-export function useRuntimeModels(runtimeId: string | null | undefined): UseQueryResult<string[]> {
+export function useRuntimeModels(runtimeId: string | null | undefined): UseQueryResult<T.RuntimeModel[]> {
   return useQuery({
     queryKey: qk.runtimeModels(runtimeId ?? ''),
-    queryFn: () => api.root<string[] | { models: string[] }>(`/runtimes/${runtimeId}/models`).then((r) => (Array.isArray(r) ? r : r.models)),
+    queryFn: () =>
+      api.root<Array<string | T.RuntimeModel> | { models: Array<string | T.RuntimeModel> }>(`/runtimes/${runtimeId}/models`).then((r) => {
+        const list = Array.isArray(r) ? r : r.models;
+        return list.map((m) => (typeof m === 'string' ? { id: m, label: m } : m));
+      }),
     enabled: Boolean(runtimeId),
     staleTime: 300_000,
+  });
+}
+
+/** First-run and "new workspace": scaffold on the daemon host and register it. */
+export function useInitWorkspace(): UseMutationResult<{ id: string; path: string }, Error, { id: string; name: string; ticketPrefix: string; path?: string }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => api.root<{ id: string; path: string }>('/workspaces/init', { method: 'POST', body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.workspaces() });
+      void qc.invalidateQueries({ queryKey: qk.health() });
+    },
   });
 }
 

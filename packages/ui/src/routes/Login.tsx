@@ -80,10 +80,13 @@ export function LoginRoute(): React.ReactElement {
 
   // An existing session lands straight on Needs you.
   useEffect(() => {
-    const first = health.data?.workspaces?.[0]?.id;
-    if (me.isSuccess && first) {
+    if (!me.isSuccess || !health.data) return;
+    const first = health.data.workspaces?.[0]?.id;
+    if (first) {
       setWorkspaceId(first);
       go(nextPath() ?? `/w/${first}/needs`, { replace: true });
+    } else {
+      go('/onboarding', { replace: true });
     }
   }, [me.isSuccess, health.data, go]);
 
@@ -112,7 +115,7 @@ export function LoginRoute(): React.ReactElement {
       setWorkspaceId(ws);
       go(nextPath() ?? `/w/${ws}/needs`, { replace: true });
     } else {
-      go('/', { replace: true });
+      go('/onboarding', { replace: true });
     }
   };
 

@@ -150,8 +150,8 @@ function RoleSheet({ roleId, onClose }: { roleId: string; onClose: () => void })
               >
                 <option value="">default</option>
                 {(models.data ?? []).map((m) => (
-                  <option key={m} value={m}>
-                    {m}
+                  <option key={m.id} value={m.id}>
+                    {m.label}
                   </option>
                 ))}
               </select>

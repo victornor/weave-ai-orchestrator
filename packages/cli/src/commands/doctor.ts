@@ -84,7 +84,12 @@ export function register(program: Command): void {
           fix: 'conductor daemon set-password',
         });
         const workspaces = items<Record<string, unknown>>(health['workspaces']);
-        checks.push({ name: 'workspaces', ok: workspaces.length > 0, detail: workspaces.map((w) => String(w['id'])).join(', ') || 'none', fix: 'conductor init <dir>' });
+        checks.push({
+          name: 'workspaces',
+          ok: workspaces.length > 0 ? true : null,
+          detail: workspaces.map((w) => String(w['id'])).join(', ') || 'none yet — onboarding not completed',
+          fix: workspaces.length > 0 ? undefined : `create the first one in the web app (${String(health['publicUrl'] ?? client.baseUrl)}) or with \`conductor init <dir> --id <slug> --prefix <PFX> --name "…"\``,
+        });
 
         const host = (health['host'] ?? null) as HealthHost | null;
         daemonIsThisHost = host?.hostname ? host.hostname === hostname() : isRunning(pid);

@@ -650,7 +650,7 @@ Every turn ends with the agent producing JSON matching `RunReportSchema` (via `-
   "summary": "one paragraph for the record",
   "tickets": [{"id": "ACME-42", "status": "in_progress", "note": "…"}],
   "nextAction": {"owner": "self|conductor|human|none", "what": "…"} ,
-  "memoryUpdated": false }
+  "knowledgeUpdated": false }
 ```
 
 `idle` means "nothing actionable" and is the cheap fast path: the engine records liveness `empty` without penalty when the wake was a digest or timer. Missing report ⇒ `liveness=empty` and a warning event; three consecutive empties on non-digest wakes ⇒ conductor `gate_finding`.

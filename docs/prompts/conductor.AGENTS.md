@@ -1,3 +1,9 @@
+> **Superseded — this is the draft, not the source of truth.**
+> The conductor's always-loaded prompt now lives at `templates/conductor.AGENTS.md.tmpl`, and its procedures at
+> `skills/openconductor-conductor/`, `skills/openconductor-hire/`, `skills/openconductor-planning/`,
+> `skills/openconductor-briefing/` and `skills/openconductor-knowledge/`. Change those; this file is kept
+> only as the record of the first draft.
+
 <!-- Draft v0.1. Target: under 200 lines always-loaded. Everything conditional lives in skills. -->
 <!-- Template variables: {{workspace.name}}, {{human.name}} (configured name, else "captain"), {{projects}}, {{agents}}, {{policies}} -->
 

@@ -1,3 +1,8 @@
+> **Superseded — this is the outline, not the source of truth.**
+> The shipped skills live in `skills/`, one directory per skill with `SKILL.md` and `references/`, indexed by
+> `skills/manifest.json` (skill → audience) and documented in `skills/README.md`. Change those; this file is
+> kept only as the record of the outlines they were written from.
+
 # Skills shipped by OpenConductor — outlines and key rules (draft v0.1)
 
 Each skill is a `SKILL.md` with frontmatter `{ name, description, allowed-tools }` and a `references/` directory for progressive disclosure. The daemon installs them into agent homes per runtime. Rules marked (verbatim) are lifted from the research files and should be kept close to that wording.

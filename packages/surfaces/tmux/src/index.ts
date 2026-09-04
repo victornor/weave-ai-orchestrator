@@ -30,17 +30,28 @@ async function listWindows(session: string): Promise<TmuxWindow[]> {
 }
 
 export function createTmuxSurface(): SurfaceAdapter {
-  const ensureSession = async (ctx: SurfaceContext, cfg: Record<string, unknown>): Promise<string> => {
+  // Concurrent ensure* calls share one in-flight session creation per session name (tmux rejects duplicate sessions).
+  const inflight = new Map<string, Promise<string>>();
+  const ensureSession = (ctx: SurfaceContext, cfg: Record<string, unknown>): Promise<string> => {
     const session = typeof cfg.session === 'string' && cfg.session ? cfg.session : sessionName(ctx.workspaceId);
-    const has = await tmux(hasSessionArgs(session));
-    if (has.ok) return session;
-    const created = await tmux(newSessionArgs(session, CONDUCTOR_WINDOW_NAME, ctx.chatCommand(), ctxEnv(ctx)));
-    if (!created.ok) throw new Error(`tmux: could not create session ${session}: ${created.stderr.trim()}`);
-    const windows = await listWindows(session);
-    const first = windows[0];
-    if (first) await tmux(setAgentOptionArgs(first.windowId, CONDUCTOR_AGENT_ID));
-    ctx.log('info', 'tmux session created', { session });
-    return session;
+    const pending = inflight.get(session);
+    if (pending) return pending;
+    const p = (async () => {
+      const has = await tmux(hasSessionArgs(session));
+      if (has.ok) return session;
+      const created = await tmux(newSessionArgs(session, CONDUCTOR_WINDOW_NAME, ctx.chatCommand(), ctxEnv(ctx)));
+      if (!created.ok) {
+        if (/duplicate session/.test(created.stderr)) return session;
+        throw new Error(`tmux: could not create session ${session}: ${created.stderr.trim()}`);
+      }
+      const windows = await listWindows(session);
+      const first = windows[0];
+      if (first) await tmux(setAgentOptionArgs(first.windowId, CONDUCTOR_AGENT_ID));
+      ctx.log('info', 'tmux session created', { session });
+      return session;
+    })().finally(() => inflight.delete(session));
+    inflight.set(session, p);
+    return p;
   };
 
   const ensureWindow = async (

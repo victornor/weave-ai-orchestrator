@@ -62,6 +62,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@openconductor/presenter':
+        specifier: workspace:*
+        version: link:../presenter
       '@openconductor/render':
         specifier: workspace:*
         version: link:../render

@@ -15,10 +15,10 @@ Implemented and verified on this machine against the real Claude Code CLI (see `
 
 | Area | Status |
 |---|---|
-| Daemon, multi-workspace, HTTP API, MCP tools, SSE, auth (password, TOTP, devices, lockout), self-signed TLS, systemd unit | done |
+| Daemon, multi-workspace, HTTP API, MCP tools, SSE, auth (password, TOTP, devices, lockout), self-signed TLS with CLI pinning, systemd unit, crash recovery (orphan process kill + retry) | done, verified live |
 | Conductor loop, hiring with approval and runtime switch, ticket intake, outcome-language replies | done, verified live |
 | Roles → workers, briefs, worktrees (git provider verified; worktrunk provider implemented), OpenSpec propose → plan approval → apply → in_review → merge → archive, auto-merge, landed-work retirement | done, verified live |
-| Knowledge bases with budgets, notes, curation workers, spec index and explorer | done (curation run verified) |
+| Knowledge bases with budgets, notes, curation workers, spec index and explorer | done, curation and spec index verified live |
 | Usage collection and analytics | done |
 | Channels: web, cli, telegram (unit-tested; no live bot in this environment) | done |
 | Surfaces: headless, tmux (verified), herdr and hyprland (implemented against the real CLIs, not exercised on a live desktop here) and the client-side presenter | done |

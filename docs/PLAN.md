@@ -1143,12 +1143,12 @@ Outlines and key rule text are in `docs/prompts/skills.md`.
 Human commands:
 ```
 oc init <dir> --prefix ACME [--name]          scaffold a workspace
-oc daemon start|stop|status|logs|set-password|install-service   daemon lifecycle; TLS/ACME and listen config in daemon.yaml
+oc daemon start|stop|status|logs|set-password|install-service [--launchd]   daemon lifecycle; TLS/ACME and listen config in daemon.yaml
 oc login <url> [--name] [--pin] | oc logout [--all] | oc context list|use   remote contexts for the CLI
 oc devices list|revoke                          sessions/devices on the daemon
 oc presenter [--surface ...]                     client-side window manager for surfaces (§14b)
 oc project add <git-url> [--id] [--runtime] [--branch]   clone, init openspec, create the scout ticket that seeds the project KB
-oc project list|show|remove|fetch
+oc project list|show|remove|fetch|set-runtime <runtime>|set-policy <key>=<value>...
 oc runtime list|detect|login <id>              runtime availability and auth per workspace
 oc role list|show|activate|set-runtime|set-model|pause|resume|retire|charter show|charter rollback|memory show
 oc worker list|show|pause|resume|relaunch|cancel|purge
@@ -1161,13 +1161,13 @@ oc attach <workerId|conductor>                   live transcript + steering for 
 oc top                                           fleet view
 oc presentation set|open|reconcile|status       surfaces (§14b)
 oc conductor set-model|set-runtime|show         conductor configuration
-oc workspace list|use|register|unregister       multi-workspace registry
+oc workspace list|use|register|unregister|pause|resume   multi-workspace registry
 oc runs list|show|tail <runId>|cancel
 oc usage [--scope workspace|project:<id>|ticket:<id>|role:<id>|model:<id>] [--window 24h|today|7d|week|month|all] [--grain hour|day|week]
 oc knowledge show|edit|note|lint|curate|revert   knowledge bases: sizes, budgets, last curation, curation history
 oc specs list|show <capability>|changes|search   the spec index (TUI explorer with `oc specs`)
 oc worktree list|verify|discard                 provider-managed worktrees and landed-work verdicts
-oc workspace export <dir> | import <dir>        portable package (agents specs, charters, knowledge, tickets as markdown, no secrets)
+oc workspace export [--out <dir>] | import <dir> --target <dir>   portable package (role specs, charters, knowledge, tickets as markdown, no secrets)
 oc doctor                                        checks: runtimes, git, openspec pin, db, permissions
 ```
 Agent commands (run-token scoped): §9.5.

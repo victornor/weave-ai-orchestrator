@@ -12,6 +12,14 @@ function find(program: Command, path: string[]): Command | undefined {
   return node;
 }
 
+/** `addHelpText('after')` only reaches the writer, not `helpInformation()`. */
+function helpOf(command: Command): string {
+  let out = '';
+  command.configureOutput({ writeOut: (str) => { out += str; } });
+  command.outputHelp();
+  return out;
+}
+
 describe('command tree', () => {
   const program = buildProgram();
 
@@ -29,7 +37,7 @@ describe('command tree', () => {
     ['daemon', ['start', 'stop', 'status', 'logs', 'set-password', 'install-service']],
     ['context', ['list', 'use', 'remove', 'show']],
     ['devices', ['list', 'revoke']],
-    ['project', ['add', 'list', 'show', 'remove', 'fetch']],
+    ['project', ['add', 'list', 'show', 'remove', 'fetch', 'set-runtime', 'set-policy']],
     ['runtime', ['list', 'detect', 'login', 'models']],
     ['role', ['list', 'show', 'activate', 'set-runtime', 'set-model', 'pause', 'resume', 'retire', 'charter']],
     ['worker', ['list', 'show', 'pause', 'resume', 'relaunch', 'cancel', 'purge']],
@@ -37,7 +45,7 @@ describe('command tree', () => {
     ['decision', ['list', 'show', 'answer']],
     ['presentation', ['set', 'open', 'reconcile', 'status']],
     ['conductor', ['set-model', 'set-runtime', 'show', 'reset-session']],
-    ['workspace', ['list', 'use', 'register', 'unregister']],
+    ['workspace', ['list', 'use', 'register', 'unregister', 'pause', 'resume', 'export', 'import']],
     ['runs', ['list', 'show', 'tail', 'cancel']],
     ['knowledge', ['show', 'edit', 'note', 'lint', 'curate', 'revert']],
     ['specs', ['list', 'show', 'changes', 'search', 'explore']],
@@ -45,6 +53,19 @@ describe('command tree', () => {
     ['agent', ['inbox']],
   ])('%s has its subcommands', (group, subcommands) => {
     for (const name of subcommands) expect(find(program, [group, name])?.name(), `${group} ${name}`).toBe(name);
+  });
+
+  it('offers --launchd on `daemon install-service` and --out/--target on workspace export/import', () => {
+    expect(find(program, ['daemon', 'install-service'])!.options.map((o) => o.long)).toEqual(expect.arrayContaining(['--print', '--launchd']));
+    expect(find(program, ['workspace', 'export'])!.options.map((o) => o.long)).toContain('--out');
+    expect(find(program, ['workspace', 'import'])!.options.map((o) => o.long)).toContain('--target');
+  });
+
+  it('documents the limits of export and import in the command help', () => {
+    expect(helpOf(find(program, ['workspace', 'export'])!)).toMatch(/Never carries/);
+    expect(helpOf(find(program, ['workspace', 'import'])!)).toMatch(/Does not:/);
+    expect(helpOf(find(program, ['project', 'set-policy'])!)).toMatch(/mergeMethod=squash/);
+    expect(helpOf(find(program, ['daemon', 'install-service'])!)).toMatch(/only on macOS/);
   });
 
   it('carries the global flags every command needs', () => {
@@ -168,4 +189,42 @@ describe('running commands against a stubbed daemon', () => {
     await buildProgram().parseAsync(['node', 'oc', '--json', '--url', 'http://daemon.test', 'project', 'list']);
     expect(seen).toContain('GET /api/w/only/projects');
   });
+
+  it('pauses and resumes the workspace', async () => {
+    const seen = stubFetch({ '/api/w/acme/pause': { id: 'acme', status: 'paused' }, '/api/w/acme/resume': { id: 'acme', status: 'active' } });
+    await buildProgram().parseAsync([...base, 'workspace', 'pause']);
+    await buildProgram().parseAsync([...base, 'workspace', 'resume']);
+    expect(seen).toEqual(['POST /api/w/acme/pause', 'POST /api/w/acme/resume']);
+  });
+
+  it('exports the workspace with an explicit output directory', async () => {
+    const seen = stubFetch({ '/api/w/acme/export': { path: '/ws/exports/x', roles: 2, knowledgeFiles: 3, tickets: 4 } });
+    await buildProgram().parseAsync([...base, 'workspace', 'export', '--out', '/tmp/oc-export']);
+    expect(seen).toContain('POST /api/w/acme/export');
+    expect(JSON.parse(written.join(''))).toMatchObject({ path: '/ws/exports/x', tickets: 4 });
+  });
+
+  it('imports an export into a target workspace directory', async () => {
+    const seen = stubFetch({ '/api/workspaces/import': { id: 'acme', path: '/ws', created: true, roles: 1, knowledgeFiles: 2, tickets: 3, skipped: 0 } });
+    await buildProgram().parseAsync([...base, 'workspace', 'import', '/tmp/pkg', '--target', '/tmp/ws']);
+    expect(seen).toContain('POST /api/workspaces/import');
+    expect(JSON.parse(written.join(''))).toMatchObject({ id: 'acme', tickets: 3 });
+  });
+
+  it('sets a project runtime', async () => {
+    const seen = stubFetch({ '/api/w/acme/projects/api': { id: 'api', runtimeId: 'codex' } });
+    await buildProgram().parseAsync([...base, 'project', 'set-runtime', 'api', 'codex']);
+    expect(seen).toContain('PATCH /api/w/acme/projects/api');
+  });
+
+  it('merges project policies instead of replacing them', async () => {
+    let patched: unknown = null;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PATCH') { patched = JSON.parse(String(init?.body)); return new Response(JSON.stringify({ id: 'api' }), { status: 200 }); }
+      return new Response(JSON.stringify({ id: 'api', policies: { mergeMethod: 'squash', requireCi: true } }), { status: 200 });
+    }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'project', 'set-policy', 'api', 'requireCi=false', 'deliveryMode=local-branch']);
+    expect(patched).toEqual({ policies: { mergeMethod: 'squash', requireCi: false, deliveryMode: 'local-branch' } });
+  });
+
 });

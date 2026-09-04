@@ -1,7 +1,7 @@
-/** `oc workspace list|use|register|unregister` — the multi-workspace registry (PLAN §20). */
+/** `oc workspace list|use|register|unregister|pause|resume|export|import` (PLAN §20). */
 import type { Command } from 'commander';
 import { resolve as resolvePath } from 'node:path';
-import { emit, style, table, write } from '../output.js';
+import { emit, fields, style, table, write } from '../output.js';
 import { loadContexts, putContext } from '../contexts.js';
 import { items, run, session } from './util.js';
 
@@ -59,5 +59,68 @@ export function register(program: Command): void {
       const { client } = await session(command, { workspace: 'none' });
       const result = await client.del(`/api/workspaces/${encodeURIComponent(id)}`);
       emit(result ?? { ok: true }, () => write(`${style.ok('unregistered')} ${id}`));
+    }));
+
+  for (const [name, description] of [['pause', 'stop dispatching runs in this workspace'], ['resume', 'start dispatching runs again']] as const) {
+    workspace
+      .command(name)
+      .description(description)
+      .action(async (_opts: unknown, command: Command) => run(async () => {
+        const { client } = await session(command);
+        const result = await client.wpost<Record<string, unknown>>(`/${name}`, {});
+        emit(result, () => write(`${style.ok(String(result?.['status'] ?? name))} ${String(result?.['id'] ?? '')}`));
+      }));
+  }
+
+  workspace
+    .command('export')
+    .description('write a portable package of this workspace on the daemon host')
+    .option('--out <dir>', 'target directory on the daemon host (default: <workspace>/exports/<timestamp>)')
+    .addHelpText('after', `
+Carries:      workspace.yaml (secrets stay as \${ENV} references), roles/<id>/{role.yaml,CHARTER.md},
+              knowledge/** without archive directories, tickets/<identifier>.md rendered from the db
+              (front-matter fields, description, comments, documents).
+Never carries: the sqlite db, run logs, worker homes and archives, worktrees, project clones,
+              sessions, auth material, or any resolved secret value.`)
+    .action(async (opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const body: Record<string, unknown> = {};
+      if (opts['out']) body['out'] = resolvePath(opts['out']);
+      const result = await client.wpost<Record<string, unknown>>('/export', body);
+      emit(result, () => {
+        write(`${style.ok('exported')} ${String(result?.['path'] ?? '')}`);
+        fields([
+          ['roles', String(result?.['roles'] ?? 0)],
+          ['knowledge files', String(result?.['knowledgeFiles'] ?? 0)],
+          ['tickets', String(result?.['tickets'] ?? 0)],
+        ]);
+      });
+    }));
+
+  workspace
+    .command('import')
+    .argument('<dir>', 'an export directory on the daemon host')
+    .requiredOption('--target <dir>', 'workspace directory to import into (created when it does not exist)')
+    .description('copy an export into a new or existing workspace directory and register it')
+    .addHelpText('after', `
+Imports:      workspace.yaml (only when the target has none), roles, knowledge, and every
+              tickets/*.md as a fresh backlog ticket with an \`[imported]\` provenance comment.
+Does not:     restore ticket status, history, comments, documents, decisions, runs, usage, workers,
+              worktrees or project clones — declared projects still have to be cloned.`)
+    .action(async (dir: string, opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command, { workspace: 'none' });
+      const result = await client.post<Record<string, unknown>>('/api/workspaces/import', {
+        path: resolvePath(dir), target: resolvePath(opts['target']!),
+      });
+      emit(result, () => {
+        write(`${style.ok(result?.['created'] === true ? 'created' : 'updated')} workspace ${String(result?.['id'] ?? '')}`);
+        fields([
+          ['path', String(result?.['path'] ?? '')],
+          ['roles', String(result?.['roles'] ?? 0)],
+          ['knowledge files', String(result?.['knowledgeFiles'] ?? 0)],
+          ['tickets', `${String(result?.['tickets'] ?? 0)} imported as backlog`],
+          ['skipped', String(result?.['skipped'] ?? 0)],
+        ]);
+      });
     }));
 }

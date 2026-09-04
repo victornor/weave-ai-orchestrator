@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@openconductor/db';
 import type { Run, Ticket } from '@openconductor/shared';
@@ -32,6 +34,7 @@ describe('supervisor', () => {
     h.services.workers = { spawnForTicket, retireIfLanded, conductor: () => ({ id: h.conductorId }) } as never;
     h.services.tickets = { livenessViolations: () => [] } as never;
     h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     supervisor = createSupervisor(h.ctx, h.deps);
   });
   afterEach(() => { supervisor.stop(); h.cleanup(); });
@@ -119,5 +122,204 @@ describe('supervisor', () => {
     h.ctx.events.emit('run.finished', 'run', 'r2', { liveness: 'advanced' });
     await supervisor.tick();
     expect(wake.calls.find((c) => (c.input as { reason: string }).reason === 'digest')).toBeUndefined();
+  });
+});
+
+describe('supervisor scheduled passes', () => {
+  let h: TestHarness;
+  let supervisor: Supervisor;
+  let wake: ReturnType<typeof fakeWake>;
+
+  beforeEach(() => {
+    h = makeHarness();
+    wake = fakeWake();
+    h.services.wake = wake as never;
+    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0 } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    supervisor = createSupervisor(h.ctx, h.deps);
+  });
+  afterEach(() => { supervisor.stop(); h.cleanup(); });
+
+  function seedKnowledgeFile(over: Record<string, unknown> = {}): void {
+    h.db.insert('knowledge_files', {
+      id: newId(), workspaceId: h.workspaceId, projectId: null, path: 'knowledge/workspace/WORKSPACE.md', scope: 'workspace',
+      tokenEstimate: 100, budgetTokens: 3000, lastCuratedAt: null, curationPending: 0, hash: 'x',
+      updatedAt: new Date(Date.now() - 30 * 86_400_000).toISOString(), ...over,
+    });
+  }
+
+  describe('curation', () => {
+    it('requests curation for a file whose last curation is older than 14 days', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration } as never;
+      seedKnowledgeFile({ lastCuratedAt: new Date(Date.now() - 20 * 86_400_000).toISOString() });
+      await supervisor.tick();
+      expect(requestCuration).toHaveBeenCalledWith({ kind: 'system', id: null }, 'workspace', null);
+    });
+
+    it('requests curation for a pending file even when it was curated yesterday', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration } as never;
+      seedKnowledgeFile({ lastCuratedAt: new Date(Date.now() - 86_400_000).toISOString(), curationPending: 1 });
+      await supervisor.tick();
+      expect(requestCuration).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves a fresh, unflagged file alone', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration } as never;
+      seedKnowledgeFile({ lastCuratedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      await supervisor.tick();
+      expect(requestCuration).not.toHaveBeenCalled();
+    });
+
+    it('asks at most once per file per day and persists the request in meta', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration } as never;
+      seedKnowledgeFile({ curationPending: 1 });
+      await supervisor.tick();
+      h.db.run("DELETE FROM meta WHERE key = 'supervisor:curation_at'");   // force the 10-minute gate open again
+      await supervisor.tick();
+      expect(requestCuration).toHaveBeenCalledTimes(1);
+      expect(h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:curation_requested:knowledge/workspace/WORKSPACE.md'])).toBeDefined();
+    });
+
+    it('does not run the pass twice inside the 10-minute window', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration } as never;
+      await supervisor.tick();
+      const at = h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:curation_at'])!.value;
+      seedKnowledgeFile({ curationPending: 1 });
+      await supervisor.tick();
+      expect(requestCuration).not.toHaveBeenCalled();
+      expect(h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:curation_at'])!.value).toBe(at);
+    });
+  });
+
+  describe('reconciliation', () => {
+    function seedPrTicket(over: Record<string, unknown> = {}): string {
+      const ticketId = seedTicket(h, { status: 'in_review', kind: 'change', ...over });
+      h.db.insert('ticket_work_products', {
+        id: newId(), ticketId, type: 'pull_request', provider: 'github', url: 'https://github.com/acme/api/pull/7',
+        title: 'PR 7', state: 'open', isPrimary: 1, metadataJson: {}, createdAt: nowIso(), updatedAt: nowIso(),
+      });
+      mkdirSync(join(h.ctx.paths.projects, h.projectSlug), { recursive: true });
+      h.db.update('projects', h.projectId, { status: 'ready' });
+      return ticketId;
+    }
+
+    it('fetches every ready project', async () => {
+      const fetchProject = vi.fn(async () => ({ head: 'abc', fastForwarded: false }));
+      h.services.projects = { fetch: fetchProject } as never;
+      await supervisor.tick();
+      expect(fetchProject).toHaveBeenCalledWith(h.projectId);
+    });
+
+    it('records the PR state on the work product and leaves an open PR alone', async () => {
+      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+      const transition = vi.fn(async () => ({}));
+      h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, transition } as never;
+      h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState: async () => ({ state: 'closed' as const }), mergePr: async () => ({}) });
+      const ticketId = seedPrTicket();
+      await supervisor.tick();
+      expect(h.db.get<{ state: string }>('SELECT state FROM ticket_work_products WHERE ticket_id = ?', [ticketId])?.state).toBe('closed');
+      expect(h.db.get<{ delivery: { prState: string } }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId])?.delivery.prState).toBe('closed');
+      expect(transition).not.toHaveBeenCalled();
+    });
+
+    it('moves a merged PR to merging and wakes the live worker to report only', async () => {
+      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+      const transition = vi.fn(async () => ({}));
+      const mergeDone = vi.fn(async () => ({}));
+      h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, transition, mergeDone } as never;
+      h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState: async () => ({ state: 'merged' as const, mergeCommit: 'deadbeefcafe' }), mergePr: async () => ({}) });
+      const ticketId = seedPrTicket();
+      const workerId = h.addWorker(ticketId);
+
+      await supervisor.tick();
+      expect(transition).toHaveBeenCalledWith({ kind: 'system', id: null }, ticketId, expect.objectContaining({ to: 'merging' }));
+      const woken = wake.calls.find((c) => c.agentId === workerId && (c.input as { source: string }).source === 'merge_approved');
+      expect(woken).toBeDefined();
+      expect((woken!.input as { payload: { mergedOnForge: boolean; mergeCommit: string } }).payload).toMatchObject({ mergedOnForge: true, mergeCommit: 'deadbeefcafe' });
+      expect(String((woken!.input as { reason: string }).reason)).toContain('oc_ticket_merge_done');
+      expect(mergeDone).not.toHaveBeenCalled();
+    });
+
+    it('finishes the merge itself when no worker is alive', async () => {
+      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+      const mergeDone = vi.fn(async () => ({}));
+      h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, transition: vi.fn(async () => ({})), mergeDone } as never;
+      h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState: async () => ({ state: 'merged' as const, mergeCommit: 'cafe1234' }), mergePr: async () => ({}) });
+      const ticketId = seedPrTicket();
+      await supervisor.tick();
+      expect(mergeDone).toHaveBeenCalledWith({ kind: 'system', id: null }, ticketId, { mergeCommit: 'cafe1234', method: 'forge' });
+    });
+
+    it('archives an OpenSpec change left un-archived under a done ticket', async () => {
+      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+      const archiveAfterMerge = vi.fn(async () => ({ archivedAs: '2026-09-04-add-dark-mode', skipped: null }));
+      h.services.openspec = { archiveAfterMerge } as never;
+      const ticketId = seedTicket(h, { status: 'done', kind: 'change', openspecChangeName: 'add-dark-mode' });
+      const clone = join(h.ctx.paths.projects, h.projectSlug);
+      mkdirSync(join(clone, 'openspec', 'changes', 'add-dark-mode'), { recursive: true });
+      await supervisor.tick();
+      expect(archiveAfterMerge).toHaveBeenCalledWith(ticketId);
+    });
+
+    it('leaves an already-archived change alone', async () => {
+      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+      const archiveAfterMerge = vi.fn(async () => ({ archivedAs: null, skipped: null }));
+      h.services.openspec = { archiveAfterMerge } as never;
+      seedTicket(h, { status: 'done', kind: 'change', openspecChangeName: 'add-dark-mode' });
+      const clone = join(h.ctx.paths.projects, h.projectSlug);
+      mkdirSync(join(clone, 'openspec', 'changes', 'add-dark-mode'), { recursive: true });
+      mkdirSync(join(clone, 'openspec', 'changes', 'archive', '2026-09-01-add-dark-mode'), { recursive: true });
+      await supervisor.tick();
+      expect(archiveAfterMerge).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('retention', () => {
+    it('prunes old run directories, clears log_path and keeps the row', async () => {
+      const oldRun = newId();
+      const freshRun = newId();
+      for (const [id, finishedAt] of [[oldRun, new Date(Date.now() - 40 * 86_400_000).toISOString()], [freshRun, nowIso()]] as const) {
+        const dir = join(h.ctx.paths.runs, id);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'events.jsonl'), '{}\n');
+        h.db.insert('runs', {
+          id, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: [], runtimeId: 'claude', status: 'succeeded',
+          turnEpoch: 1, cwd: h.ctx.paths.conductor, finishedAt, logPath: join(dir, 'events.jsonl'), createdAt: finishedAt,
+        });
+      }
+      await supervisor.tick();
+      expect(existsSync(join(h.ctx.paths.runs, oldRun))).toBe(false);
+      expect(existsSync(join(h.ctx.paths.runs, freshRun))).toBe(true);
+      const row = h.db.get<{ id: string; logPath: string | null }>('SELECT id, log_path FROM runs WHERE id = ?', [oldRun]);
+      expect(row?.id).toBe(oldRun);
+      expect(row?.logPath).toBeNull();
+      expect(h.db.get<{ logPath: string | null }>('SELECT log_path FROM runs WHERE id = ?', [freshRun])?.logPath).not.toBeNull();
+    });
+
+    it('deletes worker archives older than workerArchiveDays and keeps recent ones', async () => {
+      const oldWorker = h.addWorker(null, { status: 'retired', retiredAt: new Date(Date.now() - 60 * 86_400_000).toISOString() });
+      const newWorker = h.addWorker(null, { status: 'retired', retiredAt: nowIso() });
+      for (const id of [oldWorker, newWorker]) mkdirSync(join(h.ctx.paths.archive, id), { recursive: true });
+      await supervisor.tick();
+      expect(existsSync(join(h.ctx.paths.archive, oldWorker))).toBe(false);
+      expect(existsSync(join(h.ctx.paths.archive, newWorker))).toBe(true);
+    });
+
+    it('does not repeat the sweep inside the 24-hour window', async () => {
+      await supervisor.tick();
+      const at = h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:retention_at'])!.value;
+      const worker = h.addWorker(null, { status: 'retired', retiredAt: new Date(Date.now() - 60 * 86_400_000).toISOString() });
+      mkdirSync(join(h.ctx.paths.archive, worker), { recursive: true });
+      await supervisor.tick();
+      expect(existsSync(join(h.ctx.paths.archive, worker))).toBe(true);
+      expect(h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:retention_at'])!.value).toBe(at);
+    });
   });
 });

@@ -1,7 +1,8 @@
 export const PACKAGE = '@openconductor/server';
 export { createApp, type WorkspaceAdmin } from './app.js';
-export { startDaemon, VERSION, type DaemonHandle, type StartOptions } from './daemon.js';
-export { ChannelManager, decisionCard } from './channels.js';
+export { startDaemon, pluginSpecifier, VERSION, type DaemonHandle, type StartOptions } from './daemon.js';
+export { ChannelManager, decisionCard, HELP_TEXT } from './channels.js';
+export { WebhookDispatcher, eventMatches, signBody, type WebhookDispatcherOptions } from './webhooks.js';
 export { createMcpServer, mcpRoutes, MCP_SERVER_NAME } from './mcp.js';
 export { TOOLS, runTool, toolsFor, toolNamesFor, jsonSchemaFor, type ToolCtx, type ToolDef } from './tools.js';
 export { signRunToken, verifyRunToken, runTokenSecret, isRunToken, RUN_TOKEN_PREFIX, type RunTokenClaims } from './runtoken.js';

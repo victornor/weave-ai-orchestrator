@@ -13,6 +13,7 @@ export interface WorkspaceAdmin {
   unregister(id: string): Promise<{ ok: true; id: string }>;
   register(path: string): Promise<{ id: string; path: string }>;
   init(input: { path: string; id: string; name: string; ticketPrefix: string }): Promise<{ id: string; path: string }>;
+  importPackage(input: { path: string; target: string }): Promise<{ id: string; path: string; created: boolean; roles: number; knowledgeFiles: number; tickets: number; skipped: number }>;
 }
 
 /** A workspace is registered under both its slug and its db id; list it once. */
@@ -52,6 +53,13 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
       ticketPrefix: z.string().regex(/^[A-Z][A-Z0-9]{1,9}$/),
     }));
     return c.json(await admin.init(input), 201);
+  });
+
+  /** PLAN §20 `oc workspace import`: stage an export into `target`, register it, and land its tickets in the backlog. */
+  app.post('/workspaces/import', async (c) => {
+    if (!admin) throw new OcError('internal', 'workspace import is not available on this listener');
+    const input = await body(c, z.object({ path: z.string().min(1), target: z.string().min(1) }));
+    return c.json(await admin.importPackage(input), 201);
   });
 
   app.get('/runtimes', async (c) => {

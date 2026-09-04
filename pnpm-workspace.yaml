@@ -3,6 +3,7 @@ packages:
   - packages/runtimes/*
   - packages/channels/*
   - packages/surfaces/*
+  - examples/plugins/*
 allowBuilds:
   esbuild: true
 verifyDepsBeforeRun: false

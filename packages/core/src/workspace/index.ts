@@ -15,3 +15,4 @@ export interface WorkspaceLoader {
   configDir(): string;
 }
 export { loader as workspaceLoader } from './loader.js';
+export { exportWorkspace, stageWorkspaceImport, importTickets, parseTicketFile, exportDirName, type ExportResult, type StageResult, type TicketImportResult } from './portable.js';

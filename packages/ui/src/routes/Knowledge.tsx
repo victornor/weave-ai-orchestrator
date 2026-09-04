@@ -22,8 +22,10 @@ import {
 } from '../api/hooks';
 import { ago } from '../lib/format';
 import { cx } from '../lib/cx';
+import { DocsPanel, DocPanel, refFromPath, type DocRef } from './KnowledgeDocs';
+import { KnowledgeGraphView } from './KnowledgeGraph';
 
-type Tab = 'knowledge' | 'specs';
+type Tab = 'knowledge' | 'graph' | 'specs';
 
 export function KnowledgeRoute(): React.ReactElement {
   const [tab, setTab] = useState<Tab>('knowledge');
@@ -67,6 +69,7 @@ export function KnowledgeRoute(): React.ReactElement {
             <Tabs
               items={[
                 { key: 'knowledge', label: 'Knowledge' },
+                { key: 'graph', label: 'Graph' },
                 { key: 'specs', label: 'Specs' },
               ]}
               active={tab}
@@ -80,7 +83,9 @@ export function KnowledgeRoute(): React.ReactElement {
         {q.trim().length > 1 ? (
           <SearchResults hits={search.data ?? []} loading={search.isLoading} />
         ) : tab === 'knowledge' ? (
-          <KnowledgePanel />
+          <KnowledgePanel project={project || undefined} />
+        ) : tab === 'graph' ? (
+          <GraphPanel project={project || undefined} />
         ) : (
           <SpecsPanel project={activeProject} />
         )}
@@ -108,24 +113,27 @@ function SearchResults({ hits, loading }: { hits: ReturnType<typeof useSearch>['
   );
 }
 
-function KnowledgePanel(): React.ReactElement {
+function KnowledgePanel({ project }: { project?: string }): React.ReactElement {
   const index = useKnowledgeIndex();
   const mutate = useKnowledgeMutation();
   const [open, setOpen] = useState<{ scope: string; project?: string } | null>(null);
+  const [openDoc, setOpenDoc] = useState<DocRef | null>(null);
 
   if (index.isLoading) return <SkeletonRows rows={4} />;
   if (index.isError) return <ErrorState code="KNOWLEDGE_LINT_FAILED" message="The knowledge index could not be read." onRetry={() => void index.refetch()} />;
 
-  const files = index.data?.files ?? [];
+  const files = (index.data?.files ?? []).filter((f) => f.kind !== 'doc' && (!project || !f.projectId || f.projectId === project));
   if (!files.length) return <EmptyState title="No knowledge files yet." detail="They are created with the workspace and each project." />;
+  const hubLabel = (f: (typeof files)[number]): string =>
+    f.scope === 'project' ? `${f.projectSlug ?? 'project'} · PROJECT.md` : f.scope === 'shared' ? 'workspace · SHARED.md' : f.scope === 'decisions' ? 'workspace · decisions.md' : 'workspace · WORKSPACE.md';
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-5">
       <div className="grid gap-3 sm:grid-cols-2">
         {files.map((f) => (
-          <button key={f.id} type="button" onClick={() => setOpen({ scope: f.scope, ...(f.projectId ? { project: f.projectId } : {}) })} className="text-left">
+          <button key={f.id ?? f.path} type="button" onClick={() => { setOpenDoc(null); setOpen({ scope: f.scope, ...(f.projectId ? { project: f.projectId } : {}) }); }} className="text-left">
             <BudgetMeter
-              label={`${f.projectSlug ?? 'workspace'} · ${f.scope} KB`}
+              label={hubLabel(f)}
               used={f.tokenEstimate}
               budget={f.budgetTokens}
               lastCuratedAt={f.lastCuratedAt}
@@ -148,13 +156,43 @@ function KnowledgePanel(): React.ReactElement {
           </ul>
         </div>
       ) : null}
-      {open ? <KnowledgeDocPanel scope={open.scope} project={open.project} onClose={() => setOpen(null)} /> : null}
+      {open ? <KnowledgeDocPanel scope={open.scope} project={open.project} onClose={() => setOpen(null)} onOpenDoc={(ref) => { setOpen(null); setOpenDoc(ref); }} /> : null}
+      <DocsPanel project={project} open={openDoc} onOpen={(ref) => { setOpen(null); setOpenDoc(ref); }} />
     </div>
   );
 }
 
-function KnowledgeDocPanel({ scope, project, onClose }: { scope: string; project?: string; onClose: () => void }): React.ReactElement {
+function GraphPanel({ project }: { project?: string }): React.ReactElement {
+  const projects = useProjects();
+  const [openDoc, setOpenDoc] = useState<DocRef | null>(null);
+  const [openHub, setOpenHub] = useState<{ scope: string; project?: string } | null>(null);
+  const openPath = (path: string): void => {
+    const ref = refFromPath(path, projects.data ?? []);
+    if (ref) { setOpenHub(null); setOpenDoc(ref); return; }
+    const m = /^projects\/([^/]+)\/PROJECT\.md$/.exec(path);
+    const scope = m ? 'project' : path.endsWith('SHARED.md') ? 'shared' : path.endsWith('decisions.md') ? 'decisions' : 'workspace';
+    const pid = m ? projects.data?.find((p) => p.slug === m[1])?.id : undefined;
+    setOpenDoc(null);
+    setOpenHub({ scope, ...(pid ? { project: pid } : {}) });
+  };
+  return (
+    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+      <KnowledgeGraphView project={project} onOpen={openPath} />
+      {openDoc ? <DocPanel doc={openDoc} projects={projects.data ?? []} onOpen={(ref) => { setOpenHub(null); setOpenDoc(ref); }} onClose={() => setOpenDoc(null)} /> : null}
+      {openHub ? <KnowledgeDocPanel scope={openHub.scope} project={openHub.project} onClose={() => setOpenHub(null)} onOpenDoc={(ref) => { setOpenHub(null); setOpenDoc(ref); }} /> : null}
+    </div>
+  );
+}
+
+function KnowledgeDocPanel({ scope, project, onClose, onOpenDoc }: { scope: string; project?: string; onClose: () => void; onOpenDoc?: (ref: DocRef) => void }): React.ReactElement {
   const doc = useKnowledgeDoc(scope, project);
+  const onBodyClick = (e: React.MouseEvent<HTMLDivElement>): void => {
+    const a = (e.target as HTMLElement).closest('a[href^="#doc:"]');
+    if (!a || !onOpenDoc) return;
+    e.preventDefault();
+    const slug = a.getAttribute('href')!.slice('#doc:'.length);
+    onOpenDoc({ scope: scope === 'project' ? 'project' : 'shared', slug, ...(project ? { project } : {}) });
+  };
   const revisions = useKnowledgeRevisions(scope, project);
   const mutate = useKnowledgeMutation();
   const [editing, setEditing] = useState(false);
@@ -198,7 +236,7 @@ function KnowledgeDocPanel({ scope, project, onClose }: { scope: string; project
           </>
         )}
       </header>
-      <div className="p-3.5">
+      <div className="p-3.5" onClick={onBodyClick}>
         {doc.isLoading ? (
           <SkeletonRows rows={4} />
         ) : editing ? (

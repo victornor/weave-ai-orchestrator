@@ -13,12 +13,12 @@ Ask in this order and stop at the first yes:
 
 1. **Is it task state, a finding, or a decision about this one ticket?** → the ticket: a comment, a `plan` or `report` document, a work product. Never a knowledge base.
 2. **Would a future contributor to this repo need it, with or without AgentConductor?** → the **repo**: its `AGENTS.md`, its docs, its specs. It goes through your PR like any other change. Do not copy repo content into a knowledge base; point at it.
-3. **Is it about working on this project from the outside — the stack, the commands, a convention the repo does not state, a landmine, a hard-won lesson?** → `knowledge/projects/<id>/PROJECT.md`, via `ac_knowledge_note("project", section, text)`.
+3. **Is it about working on this project from the outside — the stack, the commands, a convention the repo does not state, a landmine, a hard-won lesson?** → `knowledge/projects/<id>/PROJECT.md`, via `ac_knowledge_note("project", section, text)`. **More than a few lines on one topic** (a subsystem, an integration, a runbook, an environment) → a **linked document**: `ac_knowledge_doc_put(slug, body)`, linked from `PROJECT.md`'s Documents section and from related documents with `[[slug]]`. See `references/documents.md`.
 4. **Is it project-agnostic and true everywhere in this workspace — a house convention, a term, a matter of tone?** → `SHARED.md`. **Conductor only**, and it must never name a project, a repo, a client or a role.
 5. **Is it about the business, the portfolio, the human, or a standing policy?** → `WORKSPACE.md`. **Conductor only**; workers cannot read it.
 6. **Is it a durable decision?** → `decisions.md`, one line, appended by the daemon when a decision is marked durable.
 
-Sections are fixed. `PROJECT.md`: Overview · Stack & commands · Conventions · Current focus · Landmines · Learnings. `WORKSPACE.md`: Business · People & preferences · Portfolio · Policies · Standing instructions. `SHARED.md`: Conventions · Glossary · Tone.
+Sections are fixed. `PROJECT.md`: Overview · Stack & commands · Conventions · Current focus · Landmines · Documents · Learnings. `WORKSPACE.md`: Business · People & preferences · Portfolio · Policies · Standing instructions. `SHARED.md`: Conventions · Glossary · Tone.
 
 ## Writing an entry
 
@@ -36,6 +36,10 @@ A rejection is information, not an obstacle. The daemon rejects near-duplicates,
 **Good:** "2026-09-04 The integration suite needs `DATABASE_URL` pointing at a scratch database; `pnpm test:int` creates and drops it, but fails silently if the role lacks CREATEDB."
 **Bad:** "Tests were tricky." · "See ACME-42." · "We use Postgres." (the repo says so) · "Remember to run the tests." (everyone knows)
 
+## Reading before writing
+
+`ac_knowledge_docs` lists every document you can read with a one-line summary; `ac_knowledge_search(query)` finds hub entries and documents by text; `ac_knowledge_doc_get(slug)` returns a document with `linksTo` and `linkedFrom`, so you can walk the graph as deep as the question needs. Read first, then update the existing page rather than writing a near-duplicate.
+
 ## Curation
 
 A curation turn is triggered when a file crosses 80% of its budget, 14 days after the last one, on `conductor knowledge curate`, or after an over-budget rejection. Workspace files are curated by the conductor; a project KB is curated by a curation worker on a "Curate project knowledge" ticket with no worktree of its own.
@@ -46,5 +50,6 @@ Submit the rewritten file with `ac_knowledge_replace(scope, body)`. The daemon d
 
 ## References
 
+- `references/documents.md` — linked documents: when to write one, shape, linking, traversal.
 - `references/curation.md` — the curation procedure, step by step.
 - `references/placement.md` — worked placement examples, and the entries that should never exist.

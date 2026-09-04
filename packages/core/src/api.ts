@@ -122,6 +122,26 @@ export interface KnowledgeService {
   reindex(): void;
   bootstrapDigest(agentId: string): { text: string; tokens: number; truncated: boolean };
   appendDecision(decision: S.Decision): void;
+  /** Linked documents (PLAN §13): topic pages under a scope that link to each other with [[slug]]. */
+  listDocs(filter?: { scope?: S.KnowledgeScope; projectId?: string | null }): KnowledgeDocSummary[];
+  getDoc(scope: S.KnowledgeScope, slug: string, projectId?: string | null): KnowledgeDocDetail;
+  putDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, body: string, projectId?: string | null, reason?: S.KnowledgeRevisionReason): KnowledgeDocWriteResult;
+  deleteDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, projectId?: string | null): void;
+  graph(projectId?: string | null): KnowledgeGraph;
+}
+export interface KnowledgeDocSummary {
+  path: string; scope: S.KnowledgeScope; projectId: string | null; projectSlug: string | null; slug: string; title: string; summary: string;
+  tokenEstimate: number; budgetTokens: number; links: number; backlinks: number; updatedAt: string;
+}
+export interface KnowledgeDocDetail extends KnowledgeDocSummary {
+  body: string; revision: number;
+  linksTo: Array<{ slug: string; path: string | null; title: string | null }>;
+  linkedFrom: Array<{ path: string; slug: string | null; title: string | null }>;
+}
+export interface KnowledgeDocWriteResult { path: string; revision: number; tokenEstimate: number; budgetTokens: number; unresolvedLinks: string[]; backlinks: number; orphan: boolean }
+export interface KnowledgeGraph {
+  nodes: Array<{ id: string; kind: 'hub' | 'doc'; scope: S.KnowledgeScope; projectId: string | null; projectSlug: string | null; slug: string | null; title: string; tokens: number; updatedAt: string }>;
+  edges: Array<{ from: string; to: string }>;
 }
 export interface SpecsService {
   index(projectId: string): Promise<{ capabilities: number; changes: number }>;

@@ -2,7 +2,7 @@
 export const COMMON_TOOLS = [
   'ac_inbox', 'ac_ticket_get', 'ac_ticket_list', 'ac_ticket_comments', 'ac_ticket_checkout', 'ac_ticket_release', 'ac_ticket_comment',
   'ac_ticket_document_put', 'ac_ticket_transition', 'ac_ticket_work_product', 'ac_ask', 'ac_report', 'ac_knowledge_get', 'ac_knowledge_note',
-  'ac_knowledge_replace', 'ac_openspec_status', 'ac_spec_list', 'ac_spec_get', 'ac_spec_search', 'ac_spec_change_get', 'ac_ticket_merge_done', 'ac_worktree_status',
+  'ac_knowledge_replace', 'ac_knowledge_docs', 'ac_knowledge_doc_get', 'ac_knowledge_doc_put', 'ac_knowledge_search', 'ac_openspec_status', 'ac_spec_list', 'ac_spec_get', 'ac_spec_search', 'ac_spec_change_get', 'ac_ticket_merge_done', 'ac_worktree_status',
 ] as const;
 export const CONDUCTOR_TOOLS = [
   'ac_ticket_create', 'ac_ticket_assign', 'ac_ticket_set_priority', 'ac_role_list', 'ac_role_get', 'ac_role_hire', 'ac_role_update_charter',

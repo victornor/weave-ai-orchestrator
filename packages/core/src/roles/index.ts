@@ -127,6 +127,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
             recommendation: 'approve',
             correlationKey: `hire:${spec.id}`,
             target: { roleId: spec.id },
+            askedByAgentId: actor.kind === 'agent' ? actor.id : null,
           });
           decisionId = decision.id;
         } catch (e) {

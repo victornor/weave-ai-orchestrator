@@ -127,7 +127,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       try {
         deps().tickets.create(actor, {
           projectId: id, kind: 'scout', title: `Describe project ${cfg.id}`,
-          description: `Investigate the \`${cfg.id}\` repository and write the project knowledge base: overview, stack and commands (run, test, lint, build), conventions the repo docs do not state, current focus, landmines.\n\n## Acceptance criteria\n- \`knowledge/projects/${cfg.id}/PROJECT.md\` filled in through \`ac_knowledge_note\`\n- a \`report\` document on this ticket summarising what you found`,
+          description: `Investigate the \`${cfg.id}\` repository and write the project knowledge base: overview, stack and commands (run, test, lint, build), conventions the repo docs do not state, current focus, landmines. For each major subsystem, integration or runbook worth more than a few lines, write a linked knowledge document (ac_knowledge_doc_put) and link it from PROJECT.md's Documents section with [[slug]].\n\n## Acceptance criteria\n- \`knowledge/projects/${cfg.id}/PROJECT.md\` filled in through \`ac_knowledge_note\`\n- a \`report\` document on this ticket summarising what you found`,
           priority: 'medium', originKind: 'project_describe', originFingerprint: `project_describe:${cfg.id}`,
         });
         // A new project is news the conductor must act on now (hire a role, assign the scout), not at the next digest.

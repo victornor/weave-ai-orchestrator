@@ -10,6 +10,7 @@ function esc(s: string): string {
 
 function inline(s: string): string {
   return esc(s)
+    .replace(/\[\[([a-z0-9][a-z0-9-]*)(?:\|([^\]]+))?\]\]/g, (_m, slug: string, label?: string) => `<a href="#doc:${slug}" class="ac-doclink">${label ?? slug}</a>`)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|\W)\*([^*\n]+)\*/g, '$1<em>$2</em>')

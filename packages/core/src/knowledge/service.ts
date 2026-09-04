@@ -1,17 +1,17 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { knowledgeRow, newId, nowIso, type Db } from '@agent-conductor/db';
 import {
   estimateTokens, OcError,
   type Decision, type KnowledgeRevisionReason, type KnowledgeScope,
 } from '@agent-conductor/shared';
-import type { Actor, CoreServices, KnowledgeService } from '../api.js';
+import type { Actor, CoreServices, KnowledgeDocDetail, KnowledgeDocSummary, KnowledgeService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
 import {
-  BUDGETS, DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, countWords, entriesOf, findSection, normalize,
-  parseDoc, relPathFor, renderDoc, sectionSizes, seedBody, sha256, similarity, today,
+  BUDGETS, DOC_BUDGET, DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, countWords, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
+  isDocPath, normalize, parseDoc, parseLinks, relPathFor, renderDoc, sectionSizes, seedBody, sha256, similarity, today,
 } from './files.js';
 
 interface FileRow {
@@ -103,6 +103,69 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     db.run('INSERT INTO knowledge_search (kind, project_id, ref, title, body) VALUES (?,?,?,?,?)', [
       'knowledge', row.projectId ?? '', row.path, titleOf(body) ?? row.path, body,
     ]);
+    indexLinks(row, body);
+  }
+
+  // ---------- linked documents ----------
+
+  /** A [[slug]] resolves within the file's own scope first, then to a shared document. */
+  function resolveLink(row: FileRow, slug: string): string | null {
+    const candidates: Array<string | null> = [];
+    if (row.scope === 'project' && row.projectId) {
+      const p = db.get<ProjectRow>('SELECT id, slug, name FROM projects WHERE id = ?', [row.projectId]);
+      if (p) candidates.push(docPathForSafe('project', slug, p.slug));
+    }
+    if (row.scope === 'workspace' || row.scope === 'decisions') candidates.push(docPathForSafe('workspace', slug));
+    candidates.push(docPathForSafe('shared', slug));
+    for (const c of candidates) {
+      if (!c) continue;
+      if (db.get('SELECT 1 FROM knowledge_files WHERE workspace_id = ? AND path = ?', [ws, c])) return c;
+    }
+    return null;
+  }
+  function docPathForSafe(scope: KnowledgeScope, slug: string, projectSlug?: string | null): string | null {
+    try { return docPathFor(scope, slug, projectSlug); } catch { return null; }
+  }
+
+  function indexLinks(row: FileRow, body: string): void {
+    db.run('DELETE FROM knowledge_links WHERE workspace_id = ? AND from_path = ?', [ws, row.path]);
+    for (const slug of parseLinks(body)) {
+      db.run('INSERT OR REPLACE INTO knowledge_links (workspace_id, from_path, to_slug, to_path) VALUES (?,?,?,?)', [ws, row.path, slug, resolveLink(row, slug)]);
+    }
+    // Links from other files that pointed at this slug by name now resolve.
+    const slug = docSlugOf(row.path);
+    if (slug) db.run('UPDATE knowledge_links SET to_path = ? WHERE workspace_id = ? AND to_slug = ? AND to_path IS NULL', [row.path, ws, slug]);
+  }
+
+  function backlinksOf(path: string): Array<{ path: string; slug: string | null; title: string | null }> {
+    return db.all<{ fromPath: string }>('SELECT from_path FROM knowledge_links WHERE workspace_id = ? AND to_path = ?', [ws, path]).map((l) => ({
+      path: l.fromPath, slug: docSlugOf(l.fromPath),
+      title: db.get<{ title: string }>("SELECT title FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [l.fromPath])?.title ?? null,
+    }));
+  }
+
+  function projectSlugOf(projectId: string | null): string | null {
+    return projectId ? db.get<{ slug: string }>('SELECT slug FROM projects WHERE id = ?', [projectId])?.slug ?? null : null;
+  }
+
+  function docSummaryOf(row: FileRow, body: string): KnowledgeDocSummary {
+    return {
+      path: row.path, scope: row.scope, projectId: row.projectId, projectSlug: projectSlugOf(row.projectId), slug: docSlugOf(row.path) ?? row.path,
+      title: docTitle(body) ?? docSlugOf(row.path) ?? row.path, summary: docSummary(body), tokenEstimate: row.tokenEstimate, budgetTokens: row.budgetTokens,
+      links: db.get<{ n: number }>('SELECT COUNT(*) n FROM knowledge_links WHERE workspace_id = ? AND from_path = ?', [ws, row.path])?.n ?? 0,
+      backlinks: db.get<{ n: number }>('SELECT COUNT(*) n FROM knowledge_links WHERE workspace_id = ? AND to_path = ?', [ws, row.path])?.n ?? 0,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  function locateDoc(scope: KnowledgeScope, slug: string, projectId?: string | null): { rel: string; abs: string; projectRowId: string | null } {
+    if (scope === 'project') {
+      const p = projectOf(projectId);
+      const rel = docPathFor(scope, slug, p.slug);
+      return { rel, abs: join(ctx.paths.knowledge, rel), projectRowId: p.id };
+    }
+    const rel = docPathFor(scope, slug);
+    return { rel, abs: join(ctx.paths.knowledge, rel), projectRowId: null };
   }
 
   function titleOf(body: string): string | null {
@@ -269,7 +332,9 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         .all<Record<string, unknown>>('SELECT * FROM knowledge_files WHERE workspace_id = ? ORDER BY path', [ws])
         .map((raw) => knowledgeRow(raw) as unknown as FileRow)
         .map((f) => ({
-          path: f.path, scope: f.scope, projectId: f.projectId, tokenEstimate: f.tokenEstimate, budgetTokens: f.budgetTokens,
+          path: f.path, scope: f.scope, projectId: f.projectId, projectSlug: projectSlugOf(f.projectId), kind: isDocPath(f.path) ? 'doc' : 'hub',
+          title: db.get<{ title: string }>("SELECT title FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [f.path])?.title ?? null,
+          tokenEstimate: f.tokenEstimate, budgetTokens: f.budgetTokens,
           pct: f.budgetTokens ? Math.round((f.tokenEstimate / f.budgetTokens) * 100) : 0,
           lastCuratedAt: f.lastCuratedAt, curationPending: f.curationPending,
         }));
@@ -311,6 +376,26 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     },
 
     reindex() {
+      // Documents edited or added on disk: pick them up, and drop rows whose file is gone.
+      for (const raw of db.all<Record<string, unknown>>('SELECT * FROM knowledge_files WHERE workspace_id = ?', [ws])) {
+        const row = knowledgeRow(raw) as unknown as FileRow;
+        if (!isDocPath(row.path)) continue;
+        const abs = join(ctx.paths.knowledge, row.path);
+        if (!existsSync(abs)) {
+          db.run('DELETE FROM knowledge_links WHERE workspace_id = ? AND from_path = ?', [ws, row.path]);
+          db.run("DELETE FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [row.path]);
+          db.run('DELETE FROM knowledge_revisions WHERE file_id = ?', [row.id]);
+          db.run('DELETE FROM knowledge_files WHERE id = ?', [row.id]);
+          continue;
+        }
+        const body = readBody(abs);
+        if (row.hash !== sha256(body)) {
+          const revision = currentRevision(row.id) + 1;
+          db.insert('knowledge_revisions', { id: newId(), fileId: row.id, revision, body, authorKind: 'human', authorId: null, runId: null, reason: 'human', removedEntriesJson: [], createdAt: nowIso() });
+          db.update('knowledge_files', row.id, { tokenEstimate: estimateTokens(body), hash: sha256(body), updatedAt: nowIso() });
+          indexFile(fileRow(row.path)!, body);
+        }
+      }
       const scopes: Array<{ scope: KnowledgeScope; projectId?: string }> = [{ scope: 'workspace' }, { scope: 'shared' }, { scope: 'decisions' }];
       for (const p of db.all<{ id: string }>('SELECT id FROM projects WHERE workspace_id = ?', [ws])) scopes.push({ scope: 'project', projectId: p.id });
       for (const s of scopes) {
@@ -359,6 +444,92 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         text = `${text.slice(0, limit)}\n\n(truncated, call ac_knowledge_get)\n`;
       }
       return { text, tokens: estimateTokens(text), truncated };
+    },
+
+    listDocs(filter = {}) {
+      const params: Array<string> = [ws];
+      let sql = 'SELECT * FROM knowledge_files WHERE workspace_id = ?';
+      if (filter.scope) { sql += ' AND scope = ?'; params.push(filter.scope); }
+      if (filter.projectId !== undefined) {
+        if (filter.projectId) { const p = projectOf(filter.projectId); sql += " AND (project_id = ? OR scope = 'shared')"; params.push(p.id); }
+        else sql += ' AND project_id IS NULL';
+      }
+      sql += ' ORDER BY path';
+      return db.all<Record<string, unknown>>(sql, params)
+        .map((raw) => knowledgeRow(raw) as unknown as FileRow)
+        .filter((f) => isDocPath(f.path))
+        .map((f) => docSummaryOf(f, readBody(join(ctx.paths.knowledge, f.path))));
+    },
+
+    getDoc(scope, slug, projectId) {
+      const { rel, abs } = locateDoc(scope, slug, projectId);
+      const row = fileRow(rel);
+      if (!row || !existsSync(abs)) throw new OcError('not_found', `document ${slug} does not exist in the ${scope} scope; list documents first`);
+      const body = readBody(abs);
+      const links = db.all<{ toSlug: string; toPath: string | null }>('SELECT to_slug, to_path FROM knowledge_links WHERE workspace_id = ? AND from_path = ? ORDER BY to_slug', [ws, rel]);
+      const detail: KnowledgeDocDetail = {
+        ...docSummaryOf(row, body), body, revision: currentRevision(row.id),
+        linksTo: links.map((l) => ({ slug: l.toSlug, path: l.toPath, title: l.toPath ? db.get<{ title: string }>("SELECT title FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [l.toPath])?.title ?? null : null })),
+        linkedFrom: backlinksOf(rel),
+      };
+      return detail;
+    },
+
+    putDoc(actor, scope, slug, body, projectId, reason = 'note') {
+      const text = body.replace(/\r\n/g, '\n').trim() + '\n';
+      if (!docTitle(text)) throw new OcError('validation', 'a document starts with a `# Title` line');
+      const tokens = estimateTokens(text);
+      if (tokens > DOC_BUDGET) throw new OcError('budget_exceeded', `a document is at most ${DOC_BUDGET} tokens; this one is ${tokens}. Split it into linked documents.`, { tokenEstimate: tokens, budgetTokens: DOC_BUDGET });
+      if (/(?:sk|ghp|xox[bp])-[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\s/]+:[^\s@/]+@/i.test(text)) throw new OcError('validation', 'documents never carry secrets, tokens or credentialed URLs');
+      const { rel, abs, projectRowId } = locateDoc(scope, slug, projectId);
+      let row = fileRow(rel);
+      if (!row) {
+        const id = newId();
+        db.insert('knowledge_files', {
+          id, workspaceId: ws, projectId: projectRowId, path: rel, scope, tokenEstimate: 0, budgetTokens: DOC_BUDGET,
+          lastCuratedAt: null, curationPending: false, hash: '', updatedAt: nowIso(),
+        });
+        row = fileRow(rel)!;
+      }
+      const revision = write(actor, row, abs, text, reason);
+      const fresh = fileRow(rel)!;
+      const unresolved = db.all<{ toSlug: string }>('SELECT to_slug FROM knowledge_links WHERE workspace_id = ? AND from_path = ? AND to_path IS NULL', [ws, rel]).map((l) => l.toSlug);
+      const backlinks = backlinksOf(rel).length;
+      return { path: rel, revision, tokenEstimate: fresh.tokenEstimate, budgetTokens: fresh.budgetTokens, unresolvedLinks: unresolved, backlinks, orphan: backlinks === 0 };
+    },
+
+    deleteDoc(actor, scope, slug, projectId) {
+      const { rel, abs } = locateDoc(scope, slug, projectId);
+      const row = fileRow(rel);
+      if (!row) throw new OcError('not_found', `document ${slug} does not exist`);
+      tx(db, () => {
+        const body = readBody(abs);
+        archiveEntries(row, abs, [`document ${rel} (${estimateTokens(body)} tokens)`, ...body.split('\n')], 'deleted');
+        db.run('DELETE FROM knowledge_links WHERE workspace_id = ? AND from_path = ?', [ws, rel]);
+        db.run('UPDATE knowledge_links SET to_path = NULL WHERE workspace_id = ? AND to_path = ?', [ws, rel]);
+        db.run("DELETE FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [rel]);
+        db.run('DELETE FROM knowledge_revisions WHERE file_id = ?', [row.id]);
+        db.run('DELETE FROM knowledge_files WHERE id = ?', [row.id]);
+        try { if (existsSync(abs)) unlinkSync(abs); } catch (e) { log.warn({ err: e, path: rel }, 'document file could not be removed'); }
+        recordActivity(db, ws, actor, 'knowledge.delete', 'knowledge_file', row.id, { path: rel });
+        ctx.events.emit('knowledge.updated', 'knowledge_file', row.id, { path: rel, scope, projectId: row.projectId, deleted: true });
+      });
+    },
+
+    graph(projectId) {
+      const rows = db.all<Record<string, unknown>>('SELECT * FROM knowledge_files WHERE workspace_id = ? ORDER BY path', [ws]).map((raw) => knowledgeRow(raw) as unknown as FileRow);
+      const pid = projectId ? projectOf(projectId).id : null;
+      const visible = rows.filter((f) => !pid || f.projectId === pid || f.scope === 'shared');
+      const paths = new Set(visible.map((f) => f.path));
+      const nodes = visible.map((f) => ({
+        id: f.path, kind: (isDocPath(f.path) ? 'doc' : 'hub') as 'doc' | 'hub', scope: f.scope, projectId: f.projectId, projectSlug: projectSlugOf(f.projectId),
+        slug: docSlugOf(f.path), title: db.get<{ title: string }>("SELECT title FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [f.path])?.title ?? f.path,
+        tokens: f.tokenEstimate, updatedAt: f.updatedAt,
+      }));
+      const edges = db.all<{ fromPath: string; toPath: string | null }>('SELECT from_path, to_path FROM knowledge_links WHERE workspace_id = ? AND to_path IS NOT NULL', [ws])
+        .filter((e) => paths.has(e.fromPath) && paths.has(e.toPath!))
+        .map((e) => ({ from: e.fromPath, to: e.toPath! }));
+      return { nodes, edges };
     },
 
     appendDecision(decision: Decision) {

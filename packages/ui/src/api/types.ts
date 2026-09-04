@@ -198,8 +198,22 @@ export interface UsageModelRow extends UsageTopRow {
 }
 
 export interface KnowledgeIndex {
-  files: Array<KnowledgeFile & { title?: string; projectSlug?: string | null; curationDueInDays?: number | null }>;
+  files: Array<KnowledgeFile & { title?: string | null; projectSlug?: string | null; kind?: 'hub' | 'doc'; curationDueInDays?: number | null }>;
   warnings: string[];
+}
+
+export interface KnowledgeDocSummary {
+  path: string; scope: string; projectId: string | null; projectSlug: string | null; slug: string; title: string; summary: string;
+  tokenEstimate: number; budgetTokens: number; links: number; backlinks: number; updatedAt: string;
+}
+export interface KnowledgeDocDetail extends KnowledgeDocSummary {
+  body: string; revision: number;
+  linksTo: Array<{ slug: string; path: string | null; title: string | null }>;
+  linkedFrom: Array<{ path: string; slug: string | null; title: string | null }>;
+}
+export interface KnowledgeGraph {
+  nodes: Array<{ id: string; kind: 'hub' | 'doc'; scope: string; projectId: string | null; projectSlug: string | null; slug: string | null; title: string; tokens: number; updatedAt: string }>;
+  edges: Array<{ from: string; to: string }>;
 }
 
 export interface KnowledgeDoc {

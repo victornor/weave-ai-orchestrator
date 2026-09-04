@@ -10,6 +10,18 @@ const project = (c: { req: { query(k: string): string | undefined } }): string |
 export function knowledgeRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.get('/', (c) => c.json(c.get('ws').services.knowledge.lint()));
+  // Linked documents and the graph come before `/:scope` so "docs" and "graph" are not parsed as scopes.
+  app.get('/docs', (c) => {
+    const scope = c.req.query('scope');
+    return c.json(c.get('ws').services.knowledge.listDocs({ ...(scope ? { scope: scopeParam.parse(scope) } : {}), ...(c.req.query('project') !== undefined ? { projectId: project(c) } : {}) }));
+  });
+  app.get('/docs/:scope/:slug', (c) => c.json(c.get('ws').services.knowledge.getDoc(scopeParam.parse(c.req.param('scope')), c.req.param('slug'), project(c))));
+  app.put('/docs/:scope/:slug', async (c) => {
+    const { body: text } = await body(c, z.object({ body: z.string().min(1) }));
+    return c.json(c.get('ws').services.knowledge.putDoc(c.get('actor'), scopeParam.parse(c.req.param('scope')), c.req.param('slug'), text, project(c), 'human'));
+  });
+  app.delete('/docs/:scope/:slug', (c) => { c.get('ws').services.knowledge.deleteDoc(c.get('actor'), scopeParam.parse(c.req.param('scope')), c.req.param('slug'), project(c)); return c.json({ ok: true }); });
+  app.get('/graph', (c) => c.json(c.get('ws').services.knowledge.graph(project(c))));
   app.get('/:scope', (c) => c.json(c.get('ws').services.knowledge.get(scopeParam.parse(c.req.param('scope')), project(c))));
   app.put('/:scope', async (c) => {
     const { body: text } = await body(c, z.object({ body: z.string() }));

@@ -122,6 +122,7 @@ export function register(program: Command): void {
         client,
         apiUrl: client.baseUrl,
         token: client.token ?? '',
+        ocCommand: [process.execPath, process.argv[1] ?? 'oc'],
         workspaceId: client.workspace,
         surface: typeof opts['surface'] === 'string' ? opts['surface'] : undefined,
         once: opts['once'] === true,

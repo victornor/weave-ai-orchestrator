@@ -1,0 +1,146 @@
+/**
+ * Hand-maintained route table. It is the source for `GET /api/openapi.json` and `GET /llms/api.txt`,
+ * and the checklist for docs/API.md. Add a row whenever you add a route.
+ */
+export interface RouteRow {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  path: string;
+  tag: string;
+  summary: string;
+  /** 'open' = no auth, 'session' = operator, 'run' = run token on the loopback listener. */
+  auth: 'open' | 'session' | 'run';
+  mutating?: boolean;
+}
+
+const W = '/api/w/{ws}';
+
+export const ROUTES: RouteRow[] = [
+  { method: 'GET', path: '/api/health', tag: 'daemon', summary: 'Daemon health, loaded workspaces, TLS mode', auth: 'open' },
+  { method: 'GET', path: '/api/openapi.json', tag: 'daemon', summary: 'This document', auth: 'open' },
+  { method: 'GET', path: '/llms/api.txt', tag: 'daemon', summary: 'Agent-readable API summary', auth: 'open' },
+  { method: 'POST', path: '/api/auth/setup', tag: 'auth', summary: 'Create the operator account (only when none exists)', auth: 'open', mutating: true },
+  { method: 'POST', path: '/api/auth/login', tag: 'auth', summary: 'Log in; returns a session token (and sets oc_session for kind=web)', auth: 'open', mutating: true },
+  { method: 'POST', path: '/api/auth/logout', tag: 'auth', summary: 'Revoke the current session', auth: 'session', mutating: true },
+  { method: 'GET', path: '/api/auth/me', tag: 'auth', summary: 'Current operator, session and TOTP state', auth: 'session' },
+  { method: 'GET', path: '/api/auth/sessions', tag: 'auth', summary: 'List sessions/devices', auth: 'session' },
+  { method: 'DELETE', path: '/api/auth/sessions/{id}', tag: 'auth', summary: 'Revoke one session', auth: 'session', mutating: true },
+  { method: 'DELETE', path: '/api/auth/sessions', tag: 'auth', summary: 'Revoke every other session', auth: 'session', mutating: true },
+  { method: 'POST', path: '/api/auth/totp/setup', tag: 'auth', summary: 'Begin TOTP enrolment', auth: 'session', mutating: true },
+  { method: 'POST', path: '/api/auth/totp/enable', tag: 'auth', summary: 'Confirm TOTP enrolment', auth: 'session', mutating: true },
+  { method: 'POST', path: '/api/auth/totp/disable', tag: 'auth', summary: 'Disable TOTP', auth: 'session', mutating: true },
+  { method: 'POST', path: '/api/auth/password', tag: 'auth', summary: 'Change the operator password', auth: 'session', mutating: true },
+  { method: 'GET', path: '/api/workspaces', tag: 'daemon', summary: 'Registered workspaces', auth: 'session' },
+  { method: 'POST', path: '/api/workspaces', tag: 'daemon', summary: 'Register an existing workspace directory', auth: 'session', mutating: true },
+  { method: 'POST', path: '/api/workspaces/init', tag: 'daemon', summary: 'Scaffold and register a new workspace', auth: 'session', mutating: true },
+  { method: 'GET', path: '/api/runtimes', tag: 'daemon', summary: 'Registered runtimes with detection and capabilities', auth: 'session' },
+  { method: 'GET', path: '/api/runtimes/{id}/models', tag: 'daemon', summary: 'Models a runtime reports', auth: 'session' },
+  { method: 'POST', path: '/api/transcribe', tag: 'daemon', summary: 'Audio to text (501 unless a provider is configured)', auth: 'session', mutating: true },
+
+  { method: 'GET', path: W, tag: 'workspace', summary: 'Workspace summary and config', auth: 'session' },
+  { method: 'PATCH', path: `${W}/config`, tag: 'workspace', summary: 'Patch workspace.yaml', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/pause`, tag: 'workspace', summary: 'Pause dispatching', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/resume`, tag: 'workspace', summary: 'Resume dispatching', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/events`, tag: 'workspace', summary: 'SSE event stream; ?after=<seq> replays the outbox', auth: 'session' },
+  { method: 'GET', path: `${W}/briefing`, tag: 'workspace', summary: 'Deterministic briefing snapshot', auth: 'session' },
+  { method: 'POST', path: `${W}/transcribe`, tag: 'workspace', summary: 'Audio to text for this workspace', auth: 'session', mutating: true },
+
+  { method: 'GET', path: `${W}/projects`, tag: 'projects', summary: 'List projects', auth: 'session' },
+  { method: 'POST', path: `${W}/projects`, tag: 'projects', summary: 'Add a project (clone, openspec init, scout ticket)', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/projects/{id}`, tag: 'projects', summary: 'One project', auth: 'session' },
+  { method: 'PATCH', path: `${W}/projects/{id}`, tag: 'projects', summary: 'Update project config', auth: 'session', mutating: true },
+  { method: 'DELETE', path: `${W}/projects/{id}`, tag: 'projects', summary: 'Remove a project', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/projects/{id}/fetch`, tag: 'projects', summary: 'Fetch and fast-forward the primary clone', auth: 'session', mutating: true },
+
+  { method: 'GET', path: `${W}/roles`, tag: 'roles', summary: 'List roles', auth: 'session' },
+  { method: 'GET', path: `${W}/roles/{id}`, tag: 'roles', summary: 'Role with charter, revisions and workers', auth: 'session' },
+  { method: 'POST', path: `${W}/roles`, tag: 'roles', summary: 'Hire a role from a RoleSpec', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/roles/{id}/activate`, tag: 'roles', summary: 'Activate a pending role', auth: 'session', mutating: true },
+  { method: 'PATCH', path: `${W}/roles/{id}`, tag: 'roles', summary: 'Patch a role spec with a reason', auth: 'session', mutating: true },
+  { method: 'PUT', path: `${W}/roles/{id}/charter`, tag: 'roles', summary: 'Replace the charter', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/roles/{id}/rollback`, tag: 'roles', summary: 'Roll back to a revision', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/roles/{id}/pause`, tag: 'roles', summary: 'Pause a role', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/roles/{id}/resume`, tag: 'roles', summary: 'Resume a role', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/roles/{id}/retire`, tag: 'roles', summary: 'Retire a role', auth: 'session', mutating: true },
+
+  { method: 'GET', path: `${W}/workers`, tag: 'workers', summary: 'List workers', auth: 'session' },
+  { method: 'GET', path: `${W}/workers/{id}`, tag: 'workers', summary: 'Worker with ticket, last run and usage', auth: 'session' },
+  { method: 'GET', path: `${W}/workers/{id}/brief`, tag: 'workers', summary: 'The worker brief as text', auth: 'session' },
+  { method: 'POST', path: `${W}/workers/{id}/message`, tag: 'workers', summary: 'Steer a worker (comment + wake)', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/workers/{id}/relaunch`, tag: 'workers', summary: 'Relaunch with a fresh session', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/workers/{id}/cancel`, tag: 'workers', summary: 'Cancel a worker', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/workers/{id}/pause`, tag: 'workers', summary: 'Pause a worker', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/workers/{id}/resume`, tag: 'workers', summary: 'Resume a worker', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/conductor`, tag: 'workers', summary: 'The conductor agent', auth: 'session' },
+  { method: 'POST', path: `${W}/conductor/reset-session`, tag: 'workers', summary: 'Drop the conductor session', auth: 'session', mutating: true },
+  { method: 'PATCH', path: `${W}/conductor`, tag: 'workers', summary: 'Set conductor runtime/model', auth: 'session', mutating: true },
+
+  { method: 'GET', path: `${W}/tickets`, tag: 'tickets', summary: 'List tickets', auth: 'session' },
+  { method: 'POST', path: `${W}/tickets`, tag: 'tickets', summary: 'Create a ticket', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/tickets/{id}`, tag: 'tickets', summary: 'Ticket with blockers, children, worker, openspec state, work products', auth: 'session' },
+  { method: 'PATCH', path: `${W}/tickets/{id}`, tag: 'tickets', summary: 'Update title/description/priority/autoMerge', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/tickets/{id}/assign`, tag: 'tickets', summary: 'Assign to a role', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/tickets/{id}/transition`, tag: 'tickets', summary: 'Move through the state machine', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/tickets/{id}/cancel`, tag: 'tickets', summary: 'Cancel a ticket', auth: 'session', mutating: true },
+  { method: 'PUT', path: `${W}/tickets/{id}/blockers`, tag: 'tickets', summary: 'Replace the blocker set', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/tickets/{id}/comments`, tag: 'tickets', summary: 'Comments', auth: 'session' },
+  { method: 'POST', path: `${W}/tickets/{id}/comments`, tag: 'tickets', summary: 'Comment as the human (wakes the worker)', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/tickets/{id}/documents/{key}`, tag: 'tickets', summary: 'Read a ticket document revision', auth: 'session' },
+  { method: 'PUT', path: `${W}/tickets/{id}/documents/{key}`, tag: 'tickets', summary: 'Write a ticket document revision', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/tickets/{id}/documents/{key}/revisions`, tag: 'tickets', summary: 'Document revision list', auth: 'session' },
+  { method: 'GET', path: `${W}/tickets/{id}/work-products`, tag: 'tickets', summary: 'Work products', auth: 'session' },
+  { method: 'GET', path: `${W}/tickets/{id}/runs`, tag: 'tickets', summary: 'Runs against this ticket', auth: 'session' },
+  { method: 'GET', path: `${W}/tickets/{id}/usage`, tag: 'tickets', summary: 'Usage for this ticket and its subtree', auth: 'session' },
+  { method: 'POST', path: `${W}/tickets/{id}/discard`, tag: 'tickets', summary: 'Discard unlanded work (creates a discard_approval unless already approved)', auth: 'session', mutating: true },
+
+  { method: 'GET', path: `${W}/decisions`, tag: 'decisions', summary: 'List decisions', auth: 'session' },
+  { method: 'GET', path: `${W}/decisions/{id}`, tag: 'decisions', summary: 'One decision', auth: 'session' },
+  { method: 'POST', path: `${W}/decisions/{id}/answer`, tag: 'decisions', summary: 'Answer a decision', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/decisions/{id}/withdraw`, tag: 'decisions', summary: 'Withdraw a decision', auth: 'session', mutating: true },
+
+  { method: 'GET', path: `${W}/runs`, tag: 'runs', summary: 'List runs', auth: 'session' },
+  { method: 'GET', path: `${W}/runs/{id}`, tag: 'runs', summary: 'One run', auth: 'session' },
+  { method: 'GET', path: `${W}/runs/{id}/events`, tag: 'runs', summary: 'Run events by sequence', auth: 'session' },
+  { method: 'GET', path: `${W}/runs/{id}/events/stream`, tag: 'runs', summary: 'Run events as SSE', auth: 'session' },
+  { method: 'POST', path: `${W}/runs/{id}/cancel`, tag: 'runs', summary: 'Interrupt or kill a run', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/runs/{id}/log`, tag: 'runs', summary: 'Raw jsonl run log', auth: 'session' },
+
+  { method: 'GET', path: `${W}/knowledge`, tag: 'knowledge', summary: 'Knowledge lint: sizes against budgets', auth: 'session' },
+  { method: 'GET', path: `${W}/knowledge/{scope}`, tag: 'knowledge', summary: 'Read a knowledge file', auth: 'session' },
+  { method: 'PUT', path: `${W}/knowledge/{scope}`, tag: 'knowledge', summary: 'Replace a knowledge file (human)', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/knowledge/{scope}/note`, tag: 'knowledge', summary: 'Append one entry', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/knowledge/{scope}/revisions`, tag: 'knowledge', summary: 'Revision history', auth: 'session' },
+  { method: 'POST', path: `${W}/knowledge/{scope}/revert`, tag: 'knowledge', summary: 'Revert to a revision', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/knowledge/{scope}/curate`, tag: 'knowledge', summary: 'Schedule a curation run', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/search`, tag: 'knowledge', summary: 'Search knowledge and specs', auth: 'session' },
+  { method: 'GET', path: `${W}/specs/{project}`, tag: 'specs', summary: 'Capabilities', auth: 'session' },
+  { method: 'GET', path: `${W}/specs/{project}/capabilities/{capability}`, tag: 'specs', summary: 'One capability', auth: 'session' },
+  { method: 'GET', path: `${W}/specs/{project}/changes`, tag: 'specs', summary: 'Changes', auth: 'session' },
+  { method: 'GET', path: `${W}/specs/{project}/changes/{name}`, tag: 'specs', summary: 'One change', auth: 'session' },
+  { method: 'GET', path: `${W}/specs/{project}/graph`, tag: 'specs', summary: 'Capability/change/ticket graph', auth: 'session' },
+  { method: 'POST', path: `${W}/specs/{project}/reindex`, tag: 'specs', summary: 'Reindex the spec folder', auth: 'session', mutating: true },
+
+  { method: 'GET', path: `${W}/usage`, tag: 'usage', summary: 'Usage series for a scope and window', auth: 'session' },
+  { method: 'GET', path: `${W}/usage/top`, tag: 'usage', summary: 'Top consumers by model/ticket/role/worker/project', auth: 'session' },
+  { method: 'GET', path: `${W}/usage/models`, tag: 'usage', summary: 'Usage per model', auth: 'session' },
+  { method: 'GET', path: `${W}/usage/ticket/{id}`, tag: 'usage', summary: 'Usage for a ticket', auth: 'session' },
+
+  { method: 'GET', path: `${W}/threads`, tag: 'threads', summary: 'Chat threads', auth: 'session' },
+  { method: 'POST', path: `${W}/threads`, tag: 'threads', summary: 'Create a web thread', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/threads/{id}/messages`, tag: 'threads', summary: 'Thread messages', auth: 'session' },
+  { method: 'POST', path: `${W}/threads/{id}/messages`, tag: 'threads', summary: 'Send an inbound message (wakes the agent)', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/threads/{id}/bind`, tag: 'threads', summary: 'Bind or unbind the thread to a ticket', auth: 'session', mutating: true },
+
+  { method: 'GET', path: `${W}/presentation`, tag: 'presentation', summary: 'Desired presentation config', auth: 'session' },
+  { method: 'PUT', path: `${W}/presentation`, tag: 'presentation', summary: 'Replace the presentation config', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/presenter/desired`, tag: 'presentation', summary: 'Conductor + worker views the presenter should show', auth: 'session' },
+  { method: 'PUT', path: `${W}/presenter/{presenterId}/handles`, tag: 'presentation', summary: 'Store this presenter surface handles', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/presenter/{presenterId}/handles`, tag: 'presentation', summary: 'Read stored handles', auth: 'session' },
+  { method: 'GET', path: `${W}/push/subscriptions`, tag: 'push', summary: 'Web push subscriptions', auth: 'session' },
+  { method: 'POST', path: `${W}/push/subscriptions`, tag: 'push', summary: 'Register a web push subscription', auth: 'session', mutating: true },
+  { method: 'DELETE', path: `${W}/push/subscriptions/{id}`, tag: 'push', summary: 'Remove a subscription', auth: 'session', mutating: true },
+
+  { method: 'GET', path: `${W}/agent/inbox`, tag: 'agent', summary: 'This run wakes, bundled', auth: 'run' },
+  { method: 'GET', path: `${W}/agent/tools`, tag: 'agent', summary: 'Tools this agent may call, with JSON schemas', auth: 'run' },
+  { method: 'POST', path: `${W}/agent/tools/{tool}`, tag: 'agent', summary: 'Call one oc_* tool; returns ToolResult', auth: 'run', mutating: true },
+  { method: 'POST', path: '/mcp/runs/{runId}', tag: 'agent', summary: 'Streamable HTTP MCP endpoint for one run', auth: 'run', mutating: true },
+];

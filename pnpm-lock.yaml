@@ -290,9 +290,21 @@ importers:
       '@openconductor/shared':
         specifier: workspace:*
         version: link:../shared
+      '@openconductor/surface-headless':
+        specifier: workspace:*
+        version: link:../surfaces/headless
+      '@openconductor/surface-herdr':
+        specifier: workspace:*
+        version: link:../surfaces/herdr
+      '@openconductor/surface-hyprland':
+        specifier: workspace:*
+        version: link:../surfaces/hyprland
       '@openconductor/surface-sdk':
         specifier: workspace:*
         version: link:../surface-sdk
+      '@openconductor/surface-tmux':
+        specifier: workspace:*
+        version: link:../surfaces/tmux
       hono:
         specifier: ^4.9.6
         version: 4.13.5

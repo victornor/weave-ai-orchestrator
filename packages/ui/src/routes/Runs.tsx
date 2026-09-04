@@ -22,6 +22,9 @@ const RUN_UI = {
   interrupted: 'stalled',
 } as const;
 
+/** How a turn ended, in words. `needs_decision` means it asked the human; the card may have been answered since. */
+const LIVENESS_TEXT: Record<string, string> = { advanced: 'made progress', plan_only: 'planned only', empty: 'no progress', blocked: 'blocked', needs_decision: 'asked you', failed: 'failed' };
+
 export function RunsRoute(): React.ReactElement {
   const ws = useWs();
   const go = useGo();
@@ -97,7 +100,7 @@ export function RunsRoute(): React.ReactElement {
                   },
                   { key: 'agent', header: 'Agent', render: (r) => nameOf(r.agentId) },
                   { key: 'model', header: 'Model', mono: true, render: (r) => r.model ?? '—' },
-                  { key: 'liveness', header: 'Liveness', mono: true, render: (r) => r.liveness ?? '—' },
+                  { key: 'liveness', header: 'Turn ended', mono: true, render: (r) => LIVENESS_TEXT[r.liveness ?? ''] ?? r.liveness ?? '—' },
                   { key: 'tok', header: 'Tokens', align: 'right', mono: true, render: (r) => tokens((r.usage?.inputTokens ?? 0) + (r.usage?.outputTokens ?? 0)) },
                   { key: 'cost', header: 'Cost', align: 'right', mono: true, render: (r) => cents(r.costCents) },
                   {

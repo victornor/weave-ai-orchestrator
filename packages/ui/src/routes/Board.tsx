@@ -4,7 +4,7 @@ import type { Ticket, TicketStatus } from '@agent-conductor/shared';
 import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented } from '../components/Tabs';
-import { TicketCard, TicketRow } from '../components/TicketCard';
+import { OutcomeChip, TicketCard, TicketRow } from '../components/TicketCard';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Table } from '../components/Table';
@@ -25,6 +25,8 @@ export function BoardRoute(): React.ReactElement {
   const go = useGo();
   const search = useSearch({ strict: false }) as Record<string, string | undefined>;
   const [view, setView] = useState<View>('kanban');
+  // Finished tickets stay out of the way until asked for; `?done=1` keeps the choice in the URL.
+  const [showDone, setShowDone] = useState<boolean>(search['done'] === '1');
   const [project, setProject] = useState<string | undefined>(search['project']);
   // The sidebar links to /board?project=…; a second click on another project must re-filter, not be ignored.
   useEffect(() => { setProject(search['project']); }, [search['project']]);
@@ -33,7 +35,7 @@ export function BoardRoute(): React.ReactElement {
   const [priority, setPriority] = useState<string | undefined>();
   const [status, setStatus] = useState<TicketStatus | undefined>();
 
-  const tickets = useTickets({ limit: 300 });
+  const tickets = useTickets({ limit: 300, ...(showDone ? { includeTerminal: true } : {}) });
   const projects = useProjects();
   const roles = useRoles();
 
@@ -41,7 +43,7 @@ export function BoardRoute(): React.ReactElement {
     () => filterTickets(tickets.data ?? [], { project, role, kind, priority, status }),
     [tickets.data, project, role, kind, priority, status],
   );
-  const columns = useMemo(() => foldBoard(filtered), [filtered]);
+  const columns = useMemo(() => foldBoard(filtered).filter((c) => showDone || c.key !== 'done'), [filtered, showDone]);
 
   const nav = useListNav(filtered.length, {
     onOpen: (i) => {
@@ -68,6 +70,15 @@ export function BoardRoute(): React.ReactElement {
         title="Board"
         actions={
           <div className="flex items-center gap-2">
+            <Segmented
+              ariaLabel="Which tickets"
+              options={[
+                { value: 'active', label: 'Active' },
+                { value: 'all', label: 'All' },
+              ]}
+              value={showDone ? 'all' : 'active'}
+              onChange={(v) => { const on = v === 'all'; setShowDone(on); go('/w/$ws/board', { params: { ws }, search: { ...search, done: on ? '1' : undefined }, replace: true }); }}
+            />
             <Segmented
               className="hidden md:flex"
               ariaLabel="View"
@@ -163,6 +174,7 @@ export function BoardRoute(): React.ReactElement {
                     { key: 'title', header: 'Title', render: (t) => <span className="text-text-1">{t.title}</span> },
                     { key: 'kind', header: 'Kind', width: '6rem', render: (t) => <Badge>{t.kind}</Badge> },
                     { key: 'priority', header: 'Priority', width: '6rem', mono: true, render: (t) => t.priority },
+                    ...(showDone ? [{ key: 'outcome', header: 'Outcome', width: '9rem', render: (t: Ticket) => <OutcomeChip ticket={t} /> }] : []),
                     { key: 'age', header: 'Age', width: '5rem', align: 'right', mono: true, render: (t) => ago(t.updatedAt) },
                   ]}
                 />

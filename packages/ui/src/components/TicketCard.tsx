@@ -16,6 +16,23 @@ export interface TicketCardProps {
   className?: string;
 }
 
+/** What became of a finished ticket: merged, an open PR, a report, or cancelled. */
+export function outcomeOf(ticket: Ticket): { label: string; tone: 'accent' | 'done' | 'neutral' | 'failed' } | null {
+  if (ticket.status !== 'done' && ticket.status !== 'cancelled') return null;
+  if (ticket.status === 'cancelled') return { label: 'cancelled', tone: 'failed' };
+  const d = (ticket.delivery ?? {}) as { merged?: boolean; prUrl?: string; prState?: string; mode?: string };
+  if (d.merged) return { label: 'merged', tone: 'done' };
+  if (d.prUrl) return { label: `PR ${d.prState ?? 'open'}`, tone: 'accent' };
+  if (ticket.kind === 'scout' || ticket.kind === 'question') return { label: ticket.kind === 'scout' ? 'report' : 'answered', tone: 'done' };
+  return { label: 'done', tone: 'done' };
+}
+
+export function OutcomeChip({ ticket }: { ticket: Ticket }): React.ReactElement | null {
+  const o = outcomeOf(ticket);
+  if (!o) return null;
+  return <Badge tone={o.tone === 'accent' ? 'accent' : o.tone === 'done' ? 'added' : o.tone === 'failed' ? 'removed' : 'neutral'}>{o.label}</Badge>;
+}
+
 export function TicketCard({ ticket, workerName, usage, needsYou, stalled, onOpen, selected, className }: TicketCardProps): React.ReactElement {
   const ui = ticketUiStatus(ticket.status, { hasOpenHumanDecision: needsYou, workerStalled: stalled });
   return (
@@ -43,6 +60,7 @@ export function TicketCard({ ticket, workerName, usage, needsYou, stalled, onOpe
       <div className="flex items-center gap-2">
         <Badge>{ticket.kind}</Badge>
         {isFolded(ticket.status) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
+        <OutcomeChip ticket={ticket} />
         {workerName ? <span className="ac-truncate text-micro text-text-3">{workerName}</span> : null}
         <div className="flex-1" />
         <span className="ac-mono text-nano text-text-4">{ago(ticket.updatedAt)}</span>

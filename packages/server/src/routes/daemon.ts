@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { hostname } from 'node:os';
+import { homedir, hostname } from 'node:os';
+import { join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { OcError } from '@agent-conductor/shared';
@@ -17,6 +18,13 @@ export interface WorkspaceAdmin {
   importPackage(input: { path: string; target: string }): Promise<{ id: string; path: string; created: boolean; roles: number; knowledgeFiles: number; tickets: number; skipped: number }>;
 }
 
+/** `~` and `~/x` mean the daemon user's home; anything else resolves against the daemon's cwd. */
+function expandHome(p: string): string {
+  if (p === '~') return homedir();
+  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
+  return resolve(p);
+}
+
 /** A workspace is registered under both its slug and its db id; list it once. */
 const uniqueWorkspaces = (deps: AppDeps) => [...new Set(deps.workspaces.values())];
 
@@ -30,7 +38,7 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
     operatorConfigured: deps.auth.hasOperator(),
     tlsMode: deps.daemon.http.tls.mode,
     publicUrl: deps.publicUrl,
-    host: { platform: process.platform, hostname: hostname(), tools: await detectHostToolsCached() },
+    host: { platform: process.platform, hostname: hostname(), home: homedir(), defaultWorkspaceRoot: join(homedir(), 'agent-conductor'), tools: await detectHostToolsCached() },
   }));
 
   app.get('/workspaces', (c) => c.json(uniqueWorkspaces(deps).map((w) => ({
@@ -52,10 +60,12 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   app.post('/workspaces/init', async (c) => {
     if (!admin) throw new OcError('internal', 'workspace creation is not available on this listener');
     const input = await body(c, z.object({
-      path: z.string().min(1), id: z.string().min(1), name: z.string().min(1),
+      /** Absolute, `~`-prefixed, or omitted (→ `~/agent-conductor/<id>`). Always on the daemon host. */
+      path: z.string().min(1).optional(), id: z.string().min(1), name: z.string().min(1),
       ticketPrefix: z.string().regex(/^[A-Z][A-Z0-9]{1,9}$/),
     }));
-    return c.json(await admin.init(input), 201);
+    const path = expandHome(input.path ?? join('~', 'agent-conductor', input.id));
+    return c.json(await admin.init({ ...input, path }), 201);
   });
 
   /** PLAN §20 `conductor workspace import`: stage an export into `target`, register it, and land its tickets in the backlog. */

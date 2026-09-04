@@ -263,8 +263,8 @@ function ConductorSection(): React.ReactElement {
         <select className={cx(inputCx, 'ac-mono')} value={conductor.data.agent.model ?? ''} onChange={(e) => patch.mutate({ model: e.target.value })}>
           <option value="">default</option>
           {(models.data ?? []).map((m) => (
-            <option key={m} value={m}>
-              {m}
+            <option key={m.id} value={m.id}>
+              {m.label}
             </option>
           ))}
         </select>

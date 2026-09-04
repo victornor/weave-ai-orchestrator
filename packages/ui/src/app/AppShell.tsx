@@ -14,7 +14,7 @@ import { useToast } from '../components/Toast';
 import { useHotkeys } from '../lib/hotkeys';
 import { flushQueue, useQueueCount } from '../lib/queue';
 import type { QueuedWrite } from '../lib/queue';
-import { api, NetworkError } from '../api/client';
+import { api, ApiError, NetworkError, setWorkspaceId } from '../api/client';
 import { cx } from '../lib/cx';
 
 function PlusGlyph({ className }: { className?: string }): React.ReactElement {
@@ -34,6 +34,7 @@ export function AppShell(): React.ReactElement {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
   const [scopeIndex, setScopeIndex] = useState(-1);
+  const [wsMenuOpen, setWsMenuOpen] = useState(false);
 
   const summary = useWorkspaceSummary();
   const decisions = useDecisions({ status: 'open', owner: 'human' });
@@ -117,6 +118,15 @@ export function AppShell(): React.ReactElement {
     true,
   );
 
+  // A remembered workspace that no longer exists (deleted, or a different daemon):
+  // forget it and let `/` decide between the first workspace and onboarding.
+  useEffect(() => {
+    if (summary.isError && summary.error instanceof ApiError && summary.error.status === 404) {
+      try { localStorage.removeItem('conductor.ws'); } catch { /* ignore */ }
+      go('/', { replace: true });
+    }
+  }, [summary.isError, summary.error, go]);
+
   // NET_DAEMON_UNREACHABLE is full-screen at load only; mid-session it
   // degrades to the offline banner.
   if (summary.isError && summary.error instanceof NetworkError && !summary.data) {
@@ -129,13 +139,46 @@ export function AppShell(): React.ReactElement {
     <div className="flex min-h-dvh bg-bg-0">
       {/* desktop rail — the only place all projects appear at once */}
       <aside className="hidden w-rail flex-none flex-col border-r border-line-1 bg-bg-input p-2.5 md:flex">
-        <A to="/w/$ws/needs" params={{ ws }} className="mb-3.5 flex items-center gap-2.5 rounded-r6 px-2 py-1.5 hover:bg-bg-2">
-          <span className="flex size-5 items-center justify-center rounded-r4 bg-accent">
-            <NavGlyph glyph="needs-you" active className="size-2.5" />
-          </span>
-          <span className="flex-1 truncate text-ui font-semibold text-text-1">{ws}</span>
-          <span className="ac-mono text-nano text-text-nav">⌄</span>
-        </A>
+        <div className="relative mb-3.5">
+          <button
+            type="button"
+            onClick={() => setWsMenuOpen((v) => !v)}
+            aria-haspopup="menu"
+            aria-expanded={wsMenuOpen}
+            className="flex w-full items-center gap-2.5 rounded-r6 px-2 py-1.5 text-left hover:bg-bg-2"
+          >
+            <span className="flex size-5 items-center justify-center rounded-r4 bg-accent">
+              <NavGlyph glyph="needs-you" active className="size-2.5" />
+            </span>
+            <span className="flex-1 truncate text-ui font-semibold text-text-1">{summary.data?.workspace?.name ?? ws}</span>
+            <span className="ac-mono text-nano text-text-nav">⌄</span>
+          </button>
+          {wsMenuOpen ? (
+            <div role="menu" className="ac-card absolute left-0 right-0 top-full z-20 mt-1 flex flex-col p-1 shadow-lg" onMouseLeave={() => setWsMenuOpen(false)}>
+              {(workspaces.data ?? []).map((w) => {
+                const key = w.slug || w.id;
+                const active = key === ws || w.id === ws;
+                return (
+                  <button
+                    key={w.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { setWsMenuOpen(false); setWorkspaceId(key); go('/w/$ws/needs', { params: { ws: key } }); }}
+                    className={cx('flex items-center gap-2 rounded-r4 px-2 py-1.5 text-left text-meta hover:bg-bg-2', active ? 'text-text-1' : 'text-text-2')}
+                  >
+                    <span className="flex-1 truncate">{w.name}</span>
+                    <span className="ac-mono text-nano text-text-3">{w.ticketPrefix}</span>
+                  </button>
+                );
+              })}
+              <div className="my-1 h-px bg-line-1" />
+              <button type="button" role="menuitem" onClick={() => { setWsMenuOpen(false); go('/onboarding'); }} className="flex items-center gap-2 rounded-r4 px-2 py-1.5 text-left text-meta text-text-2 hover:bg-bg-2">
+                <PlusGlyph className="size-2" />
+                <span>New workspace</span>
+              </button>
+            </div>
+          ) : null}
+        </div>
 
         <button
           type="button"

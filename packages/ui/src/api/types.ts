@@ -27,7 +27,17 @@ export interface Health {
   workspaces: Array<{ id: string; name: string; status: string }>;
   operatorConfigured: boolean;
   tlsMode: string;
+  publicUrl?: string;
+  host?: {
+    platform: string;
+    hostname: string;
+    home: string;
+    defaultWorkspaceRoot: string;
+    tools: Record<string, { id: string; available: boolean; version: string | null; need: 'required' | 'recommended'; purpose: string }>;
+  };
 }
+
+export interface RuntimeModel { id: string; label: string; provider?: string; source?: 'detected' | 'static'; tier?: string; notes?: string }
 
 export interface LoginResponse {
   token?: string;
@@ -61,7 +71,7 @@ export interface TotpSetup {
 export interface RuntimeInfo {
   id: string;
   displayName: string;
-  detection: { available: boolean; version?: string | null; reason?: string | null };
+  detection: { status?: 'available' | 'missing_binary' | 'broken' | 'unsupported'; available?: boolean; version?: string | null; path?: string | null; notes?: string | null; reason?: string | null };
   capabilities: Record<string, unknown>;
   models?: string[];
 }

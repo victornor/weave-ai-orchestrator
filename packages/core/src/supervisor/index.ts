@@ -186,10 +186,27 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     const events = ctx.events.since(lastSeq, 200);
     if (!events.length) return;
     setMeta('supervisor:digest_seq', String(events[events.length - 1]!.seq));
-    const relevant = events.filter((e) => DIGEST_EVENT_TYPES.has(e.type) && (e.type !== 'run.finished' || ['blocked', 'needs_decision', 'failed'].includes(String((e.payload as { liveness?: string })?.liveness))));
-    if (!relevant.length) return;
     let conductor: Agent;
     try { conductor = deps().workers.conductor(); } catch { return; }
+    const ROUTINE_TICKET_STATUSES = new Set(['backlog', 'todo', 'proposing', 'approved', 'in_progress']);
+    const relevant = events.filter((e) => {
+      if (!DIGEST_EVENT_TYPES.has(e.type)) return false;
+      const p = (e.payload ?? {}) as Record<string, unknown>;
+      // The conductor's own runs are never news to it.
+      if (e.type === 'run.finished') {
+        if (p.agentId === conductor.id || (p.agent as { id?: string } | undefined)?.id === conductor.id) return false;
+        return ['blocked', 'needs_decision', 'failed'].includes(String(p.liveness));
+      }
+      // Routine ticket progress is visible in the board; only ownership changes toward the human/conductor are digest-worthy.
+      if (e.type === 'ticket.status') {
+        const status = String(p.status ?? (p.ticket as { status?: string } | undefined)?.status ?? '');
+        return !ROUTINE_TICKET_STATUSES.has(status);
+      }
+      // Decisions the conductor itself asked the human are not news to it either.
+      if (e.type === 'decision.created') return String(p.owner ?? (p.decision as { owner?: string } | undefined)?.owner ?? '') !== 'human' || p.askedInRunId == null;
+      return true;
+    });
+    if (!relevant.length) return;
     lastDigestAt = Date.now();
     try {
       deps().wake.enqueue(conductor.id, {

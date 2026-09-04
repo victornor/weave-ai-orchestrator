@@ -1,10 +1,120 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, TicketComment, Ticket, Decision, Agent, Role, Run, Project, UsageGrain, UsageWindow } from '@agent-conductor/shared';
+import type { RunEvent, TicketComment, Ticket, Decision, Agent, Role, Run, Project, UsageGrain, UsageWindow, Workspace } from '@agent-conductor/shared';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
 import { useWs } from './context';
 import type * as T from './types';
+
+/* ------------------------------------------------------------- shapes
+ * The daemon answers in the shapes documented in docs/API.md (flat rows, `{ items, total }` pages,
+ * `{ worker, ... }` details). The pages were built against slightly richer view models; these
+ * adapters bridge the two so a route never crashes on a field the daemon does not send.
+ */
+type CostStatus = T.UsageTotals['costStatus'];
+
+function totals(v: unknown): T.UsageTotals {
+  const r = (v ?? {}) as Record<string, unknown>;
+  const num = (k: string): number => (typeof r[k] === 'number' ? (r[k] as number) : 0);
+  const costCents = typeof r['costCents'] === 'number' ? (r['costCents'] as number) : null;
+  return {
+    tokensIn: num('tokensIn'), tokensOut: num('tokensOut'), tokensCached: num('tokensCached'), runs: num('runs'),
+    workerTurns: num('workerTurns') || num('runs'), durationMs: num('durationMs'), costCents,
+    costStatus: (r['costStatus'] as CostStatus | undefined) ?? ((costCents == null ? 'unknown' : 'estimated') as CostStatus),
+  };
+}
+
+function usageSeries(v: unknown): T.UsageSeries {
+  const r = (v ?? {}) as Record<string, unknown>;
+  if (Array.isArray(r['series'])) return r as unknown as T.UsageSeries;
+  const range = (r['range'] ?? {}) as Record<string, string>;
+  const points = listOf<Record<string, unknown>>(r['points'] ?? []);
+  return {
+    scope: String(r['scope'] ?? 'workspace'),
+    window: (range['window'] ?? 'week') as UsageWindow,
+    grain: (range['grain'] ?? 'day') as UsageGrain,
+    start: range['start'] ?? '', end: range['end'] ?? '',
+    series: points.map((p) => ({ ...totals(p), bucket: String(p['bucket'] ?? '') })),
+    total: totals(r['total']),
+    previous: r['previous'] ? totals(r['previous']) : undefined,
+    reportedShare: typeof r['costReportedShare'] === 'number' ? (r['costReportedShare'] as number) : (r['reportedShare'] as number | undefined),
+  } as T.UsageSeries;
+}
+
+function topRow(v: unknown): T.UsageTopRow {
+  const r = (v ?? {}) as Record<string, unknown>;
+  const t = totals(r);
+  return {
+    key: String(r['key'] ?? ''), label: String(r['label'] ?? r['key'] ?? ''), sublabel: (r['sublabel'] as string | null | undefined) ?? null,
+    tokens: typeof r['tokens'] === 'number' ? (r['tokens'] as number) : t.tokensIn + t.tokensOut,
+    costCents: t.costCents, costStatus: t.costStatus, share: r['share'] as number | undefined,
+  };
+}
+
+function workerDetail(v: unknown): T.WorkerDetail {
+  const r = (v ?? {}) as Record<string, unknown>;
+  const agent = (r['agent'] ?? r['worker'] ?? (r['id'] ? r : null)) as Agent | null;
+  if (!agent) throw new Error('worker detail without an agent');
+  const usage = r['usage'] as Record<string, unknown> | null | undefined;
+  return {
+    agent,
+    ticket: (r['ticket'] as Ticket | null | undefined) ?? null,
+    role: (r['role'] as Role | null | undefined) ?? null,
+    project: (r['project'] as Project | null | undefined) ?? null,
+    lastRun: (r['lastRun'] as Run | null | undefined) ?? null,
+    usage: usage ? totals(usage['total'] ?? usage) : null,
+    worktree: (r['worktree'] as T.WorkerDetail['worktree'] | undefined) ?? (agent.worktreePath ? { status: 'unknown', dirty: false, ahead: 0, behind: 0, path: agent.worktreePath } : null),
+  };
+}
+
+function summary(v: unknown): T.WorkspaceSummary {
+  const r = (v ?? {}) as Record<string, unknown>;
+  if (r['workspace'] && typeof r['workspace'] === 'object') return r as unknown as T.WorkspaceSummary;
+  const cfg = (r['config'] ?? {}) as Record<string, unknown>;
+  const id = String(r['id'] ?? cfg['id'] ?? '');
+  return {
+    workspace: {
+      id, slug: id, name: String(r['name'] ?? cfg['name'] ?? id), ticketPrefix: String(r['ticketPrefix'] ?? cfg['ticketPrefix'] ?? ''),
+      status: String(r['status'] ?? 'active') as Workspace['status'], rootPath: String(r['rootPath'] ?? r['root'] ?? ''),
+      createdAt: '', updatedAt: '',
+    },
+    config: cfg,
+    counts: r['counts'] as T.WorkspaceSummary['counts'],
+  };
+}
+
+function ticketDetail(v: unknown): T.TicketDetail {
+  const r = (v ?? {}) as Record<string, unknown>;
+  const spec = r['openspecState'] as Record<string, unknown> | null | undefined;
+  const docs = listOf<Record<string, unknown>>(r['documents'] ?? []);
+  return {
+    ticket: r['ticket'] as Ticket,
+    project: (r['project'] as Project | null | undefined) ?? null,
+    worker: (r['worker'] as Agent | null | undefined) ?? null,
+    role: (r['role'] as Role | null | undefined) ?? null,
+    blockers: listOf<Ticket>(r['blockers'] ?? []),
+    children: listOf<Ticket>(r['children'] ?? []),
+    documents: docs.map((d) => ({ key: String(d['key'] ?? ''), revision: Number(d['revision'] ?? 0), updatedAt: String(d['updatedAt'] ?? d['createdAt'] ?? ''), title: d['title'] as string | undefined })),
+    workProducts: listOf<T.WorkProduct>(r['workProducts'] ?? []),
+    openspecState: spec
+      ? {
+          changeName: (spec['changeName'] as string | null) ?? null,
+          state: (spec['state'] as string | null | undefined) ?? (spec['archived'] ? 'archived' : (spec['applyState'] as string | null | undefined) ?? (spec['planningComplete'] ? 'planned' : 'proposing')),
+          tasks: listOf<{ text: string; done: boolean }>(spec['tasks'] ?? []),
+          validated: spec['validated'] as boolean | undefined ?? (typeof spec['validation'] === 'object' && spec['validation'] !== null ? Boolean((spec['validation'] as Record<string, unknown>)['ok']) : undefined),
+        }
+      : null,
+    usage: r['usage'] ? totals((r['usage'] as Record<string, unknown>)['total'] ?? r['usage']) : undefined,
+  };
+}
+
+function runDetail(v: unknown): T.RunDetail {
+  const r = (v ?? {}) as Record<string, unknown>;
+  if (r['run'] && typeof r['run'] === 'object') { const d = r as unknown as Partial<T.RunDetail>; return { run: d.run as Run, agent: d.agent ?? null, ticket: d.ticket ?? null, phases: d.phases ?? [], usage: d.usage ?? null }; }
+  const run = r as unknown as Run;
+  return { run, agent: null, ticket: null, phases: [], usage: run.usage ? totals(run.usage) : null };
+}
+
 
 /* ---------------------------------------------------------------- daemon */
 
@@ -57,7 +167,7 @@ export function useAuthSessions(): UseQueryResult<T.AuthSession[]> {
 
 export function useWorkspaceSummary(): UseQueryResult<T.WorkspaceSummary> {
   const ws = useWs();
-  return useQuery({ queryKey: qk.workspace(ws), queryFn: () => api.ws<T.WorkspaceSummary>(ws, '') });
+  return useQuery({ queryKey: qk.workspace(ws), queryFn: () => api.ws<unknown>(ws, '').then(summary) });
 }
 
 export function useBriefing(): UseQueryResult<T.Briefing> {
@@ -157,7 +267,7 @@ export function useWorkers(params: { status?: string; project?: string; role?: s
 
 export function useWorker(id: string): UseQueryResult<T.WorkerDetail> {
   const ws = useWs();
-  return useQuery({ queryKey: qk.worker(ws, id), queryFn: () => api.ws<T.WorkerDetail>(ws, `/workers/${id}`), enabled: Boolean(id) });
+  return useQuery({ queryKey: qk.worker(ws, id), queryFn: () => api.ws<unknown>(ws, `/workers/${id}`).then(workerDetail), enabled: Boolean(id) });
 }
 
 export function useWorkerBrief(id: string): UseQueryResult<{ brief: string }> {
@@ -184,7 +294,7 @@ export function useWorkerAction(): UseMutationResult<unknown, Error, { id: strin
 
 export function useConductor(): UseQueryResult<T.WorkerDetail> {
   const ws = useWs();
-  return useQuery({ queryKey: qk.conductor(ws), queryFn: () => api.ws<T.WorkerDetail>(ws, '/conductor') });
+  return useQuery({ queryKey: qk.conductor(ws), queryFn: () => api.ws<unknown>(ws, '/conductor').then(workerDetail) });
 }
 
 export function usePatchConductor(): UseMutationResult<unknown, Error, { runtime?: string; model?: string }> {
@@ -218,7 +328,7 @@ export function useTickets(params: TicketQuery = {}): UseQueryResult<Ticket[]> {
 
 export function useTicket(id: string): UseQueryResult<T.TicketDetail> {
   const ws = useWs();
-  return useQuery({ queryKey: qk.ticket(ws, id), queryFn: () => api.ws<T.TicketDetail>(ws, `/tickets/${id}`), enabled: Boolean(id) });
+  return useQuery({ queryKey: qk.ticket(ws, id), queryFn: () => api.ws<unknown>(ws, `/tickets/${id}`).then(ticketDetail), enabled: Boolean(id) });
 }
 
 export function useCreateTicket(): UseMutationResult<Ticket, Error, Record<string, unknown>> {
@@ -358,7 +468,7 @@ export function useRuns(params: { agent?: string; ticket?: string; status?: stri
 
 export function useRun(id: string): UseQueryResult<T.RunDetail> {
   const ws = useWs();
-  return useQuery({ queryKey: qk.run(ws, id), queryFn: () => api.ws<T.RunDetail>(ws, `/runs/${id}`), enabled: Boolean(id) });
+  return useQuery({ queryKey: qk.run(ws, id), queryFn: () => api.ws<unknown>(ws, `/runs/${id}`).then(runDetail), enabled: Boolean(id) });
 }
 
 export function useRunEvents(id: string, after = 0): UseQueryResult<RunEvent[]> {
@@ -374,14 +484,14 @@ export function useRunEvents(id: string, after = 0): UseQueryResult<RunEvent[]> 
 
 export function useKnowledgeIndex(): UseQueryResult<T.KnowledgeIndex> {
   const ws = useWs();
-  return useQuery({ queryKey: qk.knowledge(ws), queryFn: () => api.ws<T.KnowledgeIndex>(ws, '/knowledge') });
+  return useQuery({ queryKey: qk.knowledge(ws), queryFn: () => api.ws<unknown>(ws, '/knowledge').then((r) => (Array.isArray(r) ? { files: r as T.KnowledgeIndex['files'], warnings: [] } : (r as T.KnowledgeIndex))) });
 }
 
 export function useKnowledgeDoc(scope: string, project?: string): UseQueryResult<T.KnowledgeDoc> {
   const ws = useWs();
   return useQuery({
     queryKey: qk.knowledgeScope(ws, scope, project),
-    queryFn: () => api.ws<T.KnowledgeDoc>(ws, `/knowledge/${scope}${qs({ project })}`),
+    queryFn: () => api.ws<T.KnowledgeDoc>(ws, `/knowledge/${scope}${qs({ project })}`).then((d) => ({ ...d, scope: d.scope ?? scope })),
     enabled: Boolean(scope),
   });
 }
@@ -413,7 +523,7 @@ export function useSearch(q: string, project?: string): UseQueryResult<T.SearchH
   const ws = useWs();
   return useQuery({
     queryKey: qk.search(ws, q, project),
-    queryFn: () => api.ws<T.SearchHit[] | { hits: T.SearchHit[] }>(ws, `/search${qs({ q, project })}`).then((r) => listOf(r, 'hits')),
+    queryFn: () => api.ws<unknown>(ws, `/search${qs({ q, project })}`).then((r) => listOf<T.SearchHit>(r, 'results')),
     enabled: q.trim().length > 1,
   });
 }
@@ -471,14 +581,14 @@ export interface UsageParams extends Record<string, string | undefined> {
 
 export function useUsage(params: UsageParams): UseQueryResult<T.UsageSeries> {
   const ws = useWs();
-  return useQuery({ queryKey: qk.usage(ws, params), queryFn: () => api.ws<T.UsageSeries>(ws, `/usage${qs(params)}`) });
+  return useQuery({ queryKey: qk.usage(ws, params), queryFn: () => api.ws<unknown>(ws, `/usage${qs(params)}`).then(usageSeries) });
 }
 
 export function useUsageTop(params: UsageParams & { by: 'model' | 'ticket' | 'role' | 'worker' | 'project' }): UseQueryResult<T.UsageTopRow[]> {
   const ws = useWs();
   return useQuery({
     queryKey: qk.usageTop(ws, params),
-    queryFn: () => api.ws<T.UsageTopRow[] | { rows: T.UsageTopRow[] }>(ws, `/usage/top${qs(params)}`).then((r) => listOf(r, 'rows')),
+    queryFn: () => api.ws<unknown>(ws, `/usage/top${qs(params)}`).then((r) => listOf<unknown>(r, 'rows').map(topRow)),
   });
 }
 
@@ -486,7 +596,7 @@ export function useUsageModels(params: UsageParams): UseQueryResult<T.UsageModel
   const ws = useWs();
   return useQuery({
     queryKey: qk.usageModels(ws, params),
-    queryFn: () => api.ws<T.UsageModelRow[] | { models: T.UsageModelRow[] }>(ws, `/usage/models${qs(params)}`).then((r) => listOf(r, 'models')),
+    queryFn: () => api.ws<unknown>(ws, `/usage/models${qs(params)}`).then((r) => listOf<Record<string, unknown>>(r, 'models').map((m) => ({ ...topRow(m), model: String(m['model'] ?? m['key'] ?? ''), series: Array.isArray(m['series']) ? (m['series'] as Record<string, unknown>[]).map((p) => ({ ...totals(p), bucket: String(p['bucket'] ?? '') })) : undefined }))),
   });
 }
 

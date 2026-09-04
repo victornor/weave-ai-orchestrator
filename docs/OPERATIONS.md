@@ -187,7 +187,7 @@ loginctl enable-linger "$USER"     # keep it running after you log out
 Notes before you enable it:
 
 - **The daemon resolves its config directory from `XDG_CONFIG_HOME` (falling back to `$HOME/.config`)
-  or from `--config-dir`.** The `OC_CONFIG_HOME` line the generator emits is informational; if your
+  or from `--config-dir`, and `OC_CONFIG_HOME` overrides both.** The `OC_CONFIG_HOME` line the generator emits is therefore effective; if your
   config lives anywhere other than `$HOME/.config/openconductor`, edit the unit and add
   `Environment=XDG_CONFIG_HOME=/your/config/parent` or append `--config-dir /your/path` to
   `ExecStart`. Verify with `oc daemon status` after starting.
@@ -204,9 +204,7 @@ Notes before you enable it:
 `oc daemon stop` only stops a daemon that `oc daemon start` launched from this machine; under
 systemd use `systemctl --user stop openconductor.service`.
 
-**Known gap:** `oc daemon start --listen host:port` exports `OC_LISTEN` but nothing reads it, so the
-flag has no effect. Set `http.listen` in `daemon.yaml`, or pass `--listen` to the server binary
-directly (`node packages/server/dist/bin.js --listen 127.0.0.1:9000`), which does work.
+`oc daemon start --listen host:port` exports `OC_LISTEN`, which the daemon honours (it overrides `http.listen` in `daemon.yaml`); `node packages/server/dist/bin.js --listen 127.0.0.1:9000` does the same.
 
 ---
 

@@ -235,7 +235,7 @@ Run `oc <group> --help` for the full set. Global flags: `-w/--workspace`, `--jso
 
 | Command | Does |
 |---|---|
-| `oc daemon start [-f] [--listen host:port]` | start the daemon on this machine (`--listen` is currently a no-op — set `http.listen` in `daemon.yaml`) |
+| `oc daemon start [-f] [--listen host:port]` | start the daemon on this machine (`--listen` overrides `http.listen` in `daemon.yaml` for this start) |
 | `oc daemon stop \| status \| logs [-f] [-n N]` | lifecycle and the local log |
 | `oc daemon set-password [-u operator]` | first-run operator setup, or change the password |
 | `oc daemon install-service [--print]` | write `~/.config/systemd/user/openconductor.service` |

@@ -11,3 +11,4 @@ export { registerBuiltinForges, GhForge } from './forge/index.js';
 export { humanName, buildTurnPrompt, renderTemplate, renderCharter, renderBrief, renderWorkerInstructions, renderConductorInstructions, type TurnPromptOptions } from './prompts/index.js';
 export { createSessions, type SessionsService, type SessionRow } from './sessions/index.js';
 export { ticketBranch, openspecChangeName, skillsFor } from './workers/index.js';
+export { detectHostTools, detectHostTool, detectHostToolsCached, HOST_TOOL_IDS, type HostTool, type HostToolId } from './tools/host.js';

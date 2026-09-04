@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
+import { hostname } from 'node:os';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { OcError } from '@openconductor/shared';
-import { getLogger } from '@openconductor/core';
+import { detectHostToolsCached, getLogger } from '@openconductor/core';
 import type { AppDeps, AppEnv } from '../types.js';
 import { body } from '../http.js';
 
@@ -22,12 +23,13 @@ const uniqueWorkspaces = (deps: AppDeps) => [...new Set(deps.workspaces.values()
 export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
-  app.get('/health', (c) => c.json({
+  app.get('/health', async (c) => c.json({
     ok: true,
     version: deps.version,
     workspaces: uniqueWorkspaces(deps).map((w) => ({ id: w.id, name: w.ctx.config.name, status: 'active' })),
     operatorConfigured: deps.auth.hasOperator(),
     tlsMode: deps.daemon.http.tls.mode,
+    host: { platform: process.platform, hostname: hostname(), tools: await detectHostToolsCached() },
   }));
 
   app.get('/workspaces', (c) => c.json(uniqueWorkspaces(deps).map((w) => ({

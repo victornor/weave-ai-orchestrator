@@ -218,7 +218,7 @@ Rules:
 - `oc` is a pure remote client: `oc login https://oc.example.com` stores a named context in `~/.config/openconductor/contexts.yaml` (URL, token, default workspace, cert pin); `oc context use <name>`; every command works identically against a local or remote daemon. `oc attach`, `oc chat`, `oc top` stream over WebSocket/SSE with reconnect.
 - **Presentation surfaces run on the client** (§14b): `oc presenter` is a small local process that subscribes to the daemon's event stream and manages terminal windows (Hyprland, herdr, tmux) on the machine it runs on, each window running `oc attach <worker>` against the remote daemon. The daemon holds only the desired presentation config; the presenter reconciles it locally. On the daemon host itself the presenter is optional.
 - Voice dictation works remotely: the browser's Web Speech API when available, else the composer streams audio to `POST /api/w/<ws>/transcribe`, which delegates to a configured transcription provider on the daemon host (pluggable; `none` by default with a clear UI message).
-- What must be set up on the daemon host and nowhere else: coding-CLI logins (`oc runtime login <id>` walks the device-code/OAuth flows in the per-workspace config homes), git credentials/SSH keys and `gh auth`, secrets referenced from `workspace.yaml`, channel bot tokens, worktrunk. `oc doctor` verifies all of them and prints what is missing.
+- What must be set up on the daemon host and nowhere else: coding-CLI logins (`oc runtime login <id>` walks the device-code/OAuth flows in the per-workspace config homes), git credentials/SSH keys and `gh auth`, secrets referenced from `workspace.yaml`, channel bot tokens, worktrunk. `oc doctor [--install] [--yes]` verifies all of them and prints what is missing.
 - Packaging: `oc daemon install-service` writes a systemd user or system unit (Linux) and a launchd plist (macOS); a Docker image with a volume for `/data` (workspaces, config homes) is provided for servers. Backups are the workspace directories plus `~/.config/openconductor`.
 
 ---
@@ -1168,7 +1168,7 @@ oc knowledge show|edit|note|lint|curate|revert   knowledge bases: sizes, budgets
 oc specs list|show <capability>|changes|search   the spec index (TUI explorer with `oc specs`)
 oc worktree list|verify|discard                 provider-managed worktrees and landed-work verdicts
 oc workspace export [--out <dir>] | import <dir> --target <dir>   portable package (role specs, charters, knowledge, tickets as markdown, no secrets)
-oc doctor                                        checks: runtimes, git, openspec pin, db, permissions
+oc doctor [--install] [--yes]                    checks: runtimes, git, gh, openspec, worktrunk, db, permissions; --install offers no-root installs
 ```
 Agent commands (run-token scoped): §9.5.
 

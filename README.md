@@ -50,7 +50,7 @@ Nothing is installed for you by default. `oc doctor` reports what is missing on 
 ## Install
 
 ```bash
-git clone <this repo> openconductor && cd openconductor
+git clone git@github.com:victornor/agent-conductor.git && cd agent-conductor
 mise install                 # node + pnpm, if you use mise
 pnpm install
 pnpm build                   # tsc -b across every package
@@ -182,18 +182,39 @@ oc daemon install-service      # prints: daemon-reload, enable --now, loginctl e
 A firewall on the server must let the Tailscale interface reach the port, e.g.
 `sudo ufw allow in on tailscale0 to any port 7433 proto tcp`.
 
-On your **laptop** (install the CLI the same way, no daemon needed):
+On your **laptop** (CLI only, no daemon; macOS shown, Linux is the same minus brew):
 
 ```bash
-oc login https://myhost.tailnet-name.ts.net:7433 --pin --device laptop
-# --pin trusts the daemon's self-signed certificate and stores the fingerprint.
-# It prompts for the password, then for a TOTP code if you enabled TOTP.
+brew install mise tailscale            # tailscale: join the same tailnet as the server
+git clone git@github.com:victornor/agent-conductor.git && cd agent-conductor
+mise install && pnpm install && pnpm build
+mkdir -p ~/.local/bin && cat > ~/.local/bin/oc <<EOF
+#!/bin/sh
+exec "$(mise which node)" "$PWD/packages/cli/dist/bin.js" "\$@"
+EOF
+chmod +x ~/.local/bin/oc               # and make sure ~/.local/bin is on PATH in ~/.zshrc
 
-oc doctor                      # local tools here, plus "daemon host:" rows for the server
-oc context list
-oc chat
-oc top
-oc presenter --surface hyprland        # live workers as windows on this machine
+oc login https://myhost.tailnet-name.ts.net:7433 --pin --device macbook
+# --pin shows the daemon's certificate fingerprint and stores it; compare it with
+# `oc login` output on the server before typing the password. Then the password,
+# then a TOTP code if you enabled TOTP.
+
+oc doctor                              # local tools here, plus "daemon host:" rows for the server
+oc chat                                # talk to the conductor
+oc top                                 # live agents
+oc presenter --surface tmux            # workers as tmux windows on the laptop (hyprland on Linux)
+```
+
+**Dashboard** from the laptop: open `https://myhost.tailnet-name.ts.net:7433` in the browser.
+The certificate is self-signed, so the browser warns once — Safari: *Show Details → visit this
+website*; Chrome: *Advanced → proceed*. Sign in with the operator password. To make the warning
+go away for good and enable "Add to Dock" as an app, trust the certificate once:
+
+```bash
+# on the laptop, after the first `oc login --pin`
+openssl s_client -connect myhost.tailnet-name.ts.net:7433 -servername myhost.tailnet-name.ts.net </dev/null 2>/dev/null \
+  | openssl x509 -out ~/Downloads/conductor.crt
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Downloads/conductor.crt
 ```
 
 `oc login` stores a named context in `~/.config/openconductor/contexts.yaml` (URL, token, default

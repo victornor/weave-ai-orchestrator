@@ -1314,3 +1314,5 @@ None at the moment. New ones are added here as they arise.
 - `docs/adr/` records deviations from this plan with reasons.
 - `docs/demos/M1..M6.md` scripts pass.
 - Research files in `docs/research/` are the reference when a rule's rationale is unclear; the plan wins on conflict.
+
+**Gaps closed in the final pass (2026-09-04).** Webhook dispatch (HMAC-signed, at-least-once, per-webhook cursor); supervisor curation (10 min), forge reconciliation + archive backfill (hourly) and retention (daily) with persisted stamps; workspace export/import; `oc workspace pause|resume|export|import`, `oc project set-runtime|set-policy`, `oc daemon install-service --launchd`; `/help` on every channel; plugin loader resolving relative `plugins:` paths against the workspace root; Dockerfile + `docs/DOCKER.md`; `examples/plugins/echo-channel`. `oc_report` with `state: done` closes `question` tickets, and tickets can be created by project slug. Verified live on the Claude Code and OpenCode runtimes.

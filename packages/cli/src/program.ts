@@ -31,7 +31,7 @@ export function buildProgram(): Command {
     .name('oc')
     .description('OpenConductor — talk to the conductor, watch the fleet, ship work')
     .version(VERSION, '-v, --version')
-    .enablePositionalOptions()
+
     .showHelpAfterError()
     .addOption(new Option('-w, --workspace <id>', 'workspace id').env('OC_WORKSPACE'))
     .option('--json', 'machine-readable output on every command', false)

@@ -175,7 +175,8 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
         }
         const archivedAs = result.archivedAs ?? archivedDirFor(project.clonePath, changeName);
 
-        if ((project.policies ?? {}).archiveCommit === 'push') await commitArchive(project.clonePath, changeName, log);
+        const archiveCommit = ((project.policies ?? {}) as { archiveCommit?: string }).archiveCommit ?? 'push';
+        if (archiveCommit === 'push' || archiveCommit === 'local') await commitArchive(project.clonePath, changeName, log, archiveCommit === 'push');
 
         recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archived', 'ticket', ticket.id, { changeName, archivedAs, specsUpdated: result.specsUpdated, warnings: result.warnings }, ticket.id);
         ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivedAs: archivedAs });
@@ -197,7 +198,7 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
 }
 
 /** policy `archiveCommit: push` — commit the archived specs on the default branch and push them. */
-async function commitArchive(clonePath: string, changeName: string, log: ReturnType<WorkspaceContext['log']>): Promise<void> {
+async function commitArchive(clonePath: string, changeName: string, log: ReturnType<WorkspaceContext['log']>, push = true): Promise<void> {
   const add = await git(['add', '-A', 'openspec'], clonePath, 30_000);
   if (!add.ok) { log.warn({ clonePath, stderr: add.stderr.slice(0, 300) }, 'git add of the archive failed'); return; }
   const commit = await git(['commit', '-m', `chore(openspec): archive ${changeName}`], clonePath, 30_000);
@@ -207,6 +208,7 @@ async function commitArchive(clonePath: string, changeName: string, log: ReturnT
     log.warn({ changeName, stderr: commit.stderr.slice(0, 300) }, 'git commit of the archive failed');
     return;
   }
-  const push = await git(['push'], clonePath, 120_000);
-  if (!push.ok) log.warn({ changeName, stderr: push.stderr.slice(0, 300) }, 'git push of the archive failed');
+  if (!push) return;
+  const pushed = await git(['push'], clonePath, 120_000);
+  if (!pushed.ok) log.info({ changeName, stderr: pushed.stderr.slice(0, 200) }, 'git push of the archive skipped or refused');
 }

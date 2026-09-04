@@ -225,7 +225,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         if (!bootRecovered) { bootRecovered = true; await bootRecovery().catch((e) => log.error({ err: String(e) }, 'boot recovery failed')); }
         await watchdog().catch((e) => log.error({ err: String(e) }, 'watchdog failed'));
         await spawnPending().catch((e) => log.error({ err: String(e) }, 'spawn pass failed'));
-        await deps().tickets.autoMergeSweep().catch((e) => log.error({ err: String(e) }, 'auto-merge sweep failed'));
+        { const sweep = deps().tickets.autoMergeSweep; if (typeof sweep === 'function') await sweep.call(deps().tickets).catch((e: unknown) => log.error({ err: String(e) }, 'auto-merge sweep failed')); }
         await retireFinished().catch((e) => log.error({ err: String(e) }, 'retire pass failed'));
         if (Date.now() - lastLiveness > LIVENESS_EVERY_MS) { lastLiveness = Date.now(); try { livenessScan(); } catch (e) { log.error({ err: String(e) }, 'liveness scan failed'); } }
         try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }

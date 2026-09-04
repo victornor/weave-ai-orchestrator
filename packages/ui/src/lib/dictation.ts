@@ -43,24 +43,47 @@ export interface Dictation {
  * `none` — in that case the mic stays visible, dimmed with a slash, and
  * explains itself on tap (DESIGN-CONTRACT §4).
  */
-export function useDictation(onText: (text: string, final: boolean) => void, opts: { transcribeUrl?: string } = {}): Dictation {
+/**
+ * Which path to use. The daemon's transcriber (private, works in every browser, needs a provider on
+ * the daemon host) wins when it is configured; the browser's Web Speech API is the fallback — it
+ * ships audio to the browser vendor's service and fails on `network` where that is unreachable.
+ */
+function pickMode(serverConfigured: boolean): DictationMode {
+  if (typeof window === 'undefined') return 'unavailable';
+  const md = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined;
+  const canUpload = Boolean(md) && typeof MediaRecorder !== 'undefined';
+  if (serverConfigured && canUpload) return 'upload';
+  if (speechCtor()) return 'speech';
+  return canUpload && serverConfigured ? 'upload' : 'unavailable';
+}
+
+const ERRORS: Record<string, string> = {
+  'not-allowed': 'Microphone permission was denied.',
+  'service-not-allowed': 'The browser blocked its speech service.',
+  network: 'The browser could not reach its speech service. Configure a transcription provider on the daemon (Settings → Conductor) for dictation that never leaves your machines.',
+  'no-speech': 'No speech was detected.',
+  'audio-capture': 'No microphone was found.',
+  aborted: 'Dictation was cancelled.',
+};
+
+export function useDictation(onText: (text: string, final: boolean) => void, opts: { transcribeUrl?: string; serverConfigured?: boolean } = {}): Dictation {
   const [listening, setListening] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [levels, setLevels] = useState<number[]>(() => new Array(14).fill(0.15));
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<DictationMode>(() => {
-    if (typeof window === 'undefined') return 'unavailable';
-    if (speechCtor()) return 'speech';
-    const md = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined;
-    if (md && typeof MediaRecorder !== 'undefined') return 'upload';
-    return 'unavailable';
-  });
+  const [mode, setMode] = useState<DictationMode>(() => pickMode(Boolean(opts.serverConfigured)));
+  const serverConfigured = Boolean(opts.serverConfigured);
+  useEffect(() => { setMode(pickMode(serverConfigured)); }, [serverConfigured]);
+  const wantListening = useRef(false);
+  const gotResult = useRef(false);
 
   const rec = useRef<SpeechRecognitionLike | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const analyser = useRef<{ ctx: AudioContext; node: AnalyserNode; raf: number } | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const elapsedRef = useRef(0);
+  useEffect(() => { elapsedRef.current = elapsed; }, [elapsed]);
   const cb = useRef(onText);
   cb.current = onText;
 
@@ -97,6 +120,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
   }, []);
 
   const stop = useCallback(() => {
+    wantListening.current = false;
     setListening(false);
     rec.current?.stop();
     rec.current = null;
@@ -111,6 +135,8 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       return;
     }
     setListening(true);
+    wantListening.current = true;
+    gotResult.current = false;
     timer.current = setInterval(() => setElapsed((s) => s + 1), 1000);
 
     if (mode === 'speech') {
@@ -121,30 +147,46 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       r.interimResults = true;
       r.lang = navigator.language || 'en-US';
       r.onresult = (e) => {
+        // Results from `resultIndex` on: an interim result is re-sent (replaced) until it turns final.
         let text = '';
-        let final = false;
+        let final = true;
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const res = e.results[i];
           if (!res) continue;
           text += res[0].transcript;
-          if (res.isFinal) final = true;
+          if (!res.isFinal) final = false;
         }
+        gotResult.current = true;
         cb.current(text, final);
       };
       r.onerror = (e) => {
-        setError(e.error === 'not-allowed' ? 'Microphone permission was denied.' : `Dictation error: ${e.error}`);
+        if (e.error === 'no-speech' || e.error === 'aborted') return; // onend follows; re-armed or ended there
+        setError(ERRORS[e.error] ?? `Dictation error: ${e.error}`);
+        wantListening.current = false;
         setListening(false);
         stopMeters();
       };
       r.onend = () => {
-        setListening(false);
-        stopMeters();
+        // Browsers end continuous recognition on their own (silence, ~60 s cap). Keep going until
+        // the human stops, unless nothing ever came back — then say so instead of spinning.
+        if (wantListening.current && rec.current === r) {
+          if (!gotResult.current && elapsedRef.current >= 8) {
+            setError(ERRORS['no-speech']!);
+            wantListening.current = false;
+            setListening(false);
+            stopMeters();
+            return;
+          }
+          try { r.start(); return; } catch { /* fall through */ }
+        }
+        if (rec.current === r) { setListening(false); stopMeters(); }
       };
       rec.current = r;
       try {
         r.start();
       } catch {
         setListening(false);
+        wantListening.current = false;
       }
       navigator.mediaDevices?.getUserMedia({ audio: true }).then(meter).catch(() => undefined);
       return;
@@ -170,7 +212,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
           void fetch(opts.transcribeUrl ?? '/api/transcribe', { method: 'POST', credentials: 'include', body: fd })
             .then(async (res) => {
               if (res.status === 501) {
-                setMode('unavailable');
+                setMode(speechCtor() ? 'speech' : 'unavailable');
                 setError('No transcription provider is configured on the daemon. Set one in Settings → Conductor.');
                 return;
               }
@@ -178,7 +220,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
               const json = (await res.json()) as { text?: string };
               if (json.text) cb.current(json.text, true);
             })
-            .catch(() => setError('Transcription failed. Type instead, or retry.'));
+            .catch(() => setError('Transcription failed on the daemon. Type instead, or retry.'));
         };
         mr.start();
       })

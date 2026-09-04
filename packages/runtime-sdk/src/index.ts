@@ -50,3 +50,4 @@ export interface RuntimeAdapter {
 }
 export * from './process.js';
 export * from './testkit.js';
+export * from './fsutil.js';

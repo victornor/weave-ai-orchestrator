@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, chmodSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import YAML from 'yaml';
 import { openDb, newId, nowIso } from '@openconductor/db';
 import {
@@ -212,7 +212,7 @@ class Loader implements WorkspaceLoader {
 
     // Per-workspace runtime config homes (CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_CONFIG_HOME …).
     const runtimeIds = new Set<string>([...opts.registries.runtimes.keys(), config.defaults.runtime, config.conductor.runtime, ...config.projects.map((p) => p.runtime ?? config.defaults.runtime)]);
-    for (const id of runtimeIds) if (id) mkdirSync(join(paths.runtimesHome, id), { recursive: true });
+    for (const id of runtimeIds) if (id) { mkdirSync(join(paths.runtimesHome, id), { recursive: true }); seedRuntimeCredentials(id, join(paths.runtimesHome, id)); }
 
     writeWtConfig(paths.wtConfig, config.projects);
     registerBuiltinWorktreeProviders(opts.registries);
@@ -268,3 +268,25 @@ class Loader implements WorkspaceLoader {
 }
 
 export const loader: WorkspaceLoader = new Loader();
+
+/**
+ * Inherit the host user's CLI credentials into a per-workspace runtime config home when it has none yet.
+ * Copies only credential files (never settings), mode 0600. `oc runtime login` can replace them later.
+ */
+function seedRuntimeCredentials(runtimeId: string, home: string): void {
+  const h = process.env.HOME ?? '';
+  const candidates: Record<string, Array<[string, string]>> = {
+    claude: [[join(h, '.claude', '.credentials.json'), join(home, '.credentials.json')]],
+    codex: [[join(h, '.codex', 'auth.json'), join(home, 'auth.json')]],
+    gemini: [[join(h, '.gemini', 'oauth_creds.json'), join(home, 'oauth_creds.json')], [join(h, '.gemini', 'google_accounts.json'), join(home, 'google_accounts.json')]],
+    opencode: [[join(h, '.local', 'share', 'opencode', 'auth.json'), join(home, 'opencode', 'auth.json')]],
+  };
+  for (const [src, dst] of candidates[runtimeId] ?? []) {
+    try {
+      if (existsSync(dst) || !existsSync(src)) continue;
+      mkdirSync(dirname(dst), { recursive: true });
+      copyFileSync(src, dst);
+      chmodSync(dst, 0o600);
+    } catch { /* best effort */ }
+  }
+}

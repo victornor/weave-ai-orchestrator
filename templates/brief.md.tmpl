@@ -1,0 +1,84 @@
+<!-- Rendered by the daemon into workers/<id>/brief.md and inlined into workers/<id>/AGENTS.md (PLAN §11.2). -->
+<!-- Generated from structured ticket data, never from the conductor's prose alone. Revisioned: brief_revision. -->
+
+# Brief — {{ticket.identifier}}
+
+## Task
+
+**{{ticket.identifier}} — {{ticket.title}}**
+Kind `{{ticket.kind}}` · priority `{{ticket.priority}}`
+
+{{ticket.description}}
+
+### Acceptance criteria
+
+{{#each ticket.acceptance}}
+- [ ] {{this}}
+{{/each}}
+{{#unless ticket.acceptance}}
+- [ ] None were written. Derive them from the description, state them in your first ticket comment, and proceed.
+{{/unless}}
+
+{{#if ticket.links}}
+**Links:** {{ticket.links}}
+{{/if}}
+{{#if ticket.openspecChange}}
+**OpenSpec change:** `{{ticket.openspecChange}}` — this is the change name for this ticket. Create it in `work/` with `openspec new change "{{ticket.openspecChange}}" --goal "{{ticket.title}}" --json` if it does not exist yet. Do not ask, and never work in a differently named change. Load `openconductor-openspec`.
+{{/if}}
+
+## Setup
+
+{{#unless brief.noWorktree}}
+Your worktree is `work/`, on branch `{{worktree.branch}}`, created from `origin/{{project.defaultBranch}}`. Absolute path: `{{worktree.path}}`.
+
+**Before anything else, call `oc_worktree_status`.** It returns the authoritative path, branch, dirty flag and ahead/behind counts — never guess them. If the path or the branch differs from what this brief says, **stop**: `oc_report({state: "blocked"})` and transition the ticket to `blocked` with `{owner: "conductor", action: "worker launched in the wrong worktree"}`. Do not work in a checkout you cannot confirm.
+
+Then read `work/AGENTS.md` (the project's own instructions for contributors) once. The project knowledge base and the shared conventions are already in this file — do not fetch them again.
+{{/unless}}
+{{#if brief.noWorktree}}
+**This is a curation ticket and has no worktree of its own.** Your working directory is your home. `work/` is a read-only checkout of the project's default branch, for fact-checking only: never write to it, never commit, never push. Do not call `oc_worktree_status`. Load `openconductor-knowledge` and follow the curation procedure.
+{{/if}}
+
+## Rules
+
+- Stay inside this ticket and this project. Cross-project needs become `blocked` with `{owner: "conductor", action: "…"}`.
+- Never push to `{{project.defaultBranch}}`. Never merge unless the ticket is in `merging`.
+- Delivery mode is `{{project.deliveryMode}}`; merges use `{{project.mergeMethod}}`.
+- Report phase changes only, with `oc_report`. `paused` = a known external wait that clears itself. `blocked` = you need help.
+- Hit the same obstacle twice → `blocked` with a routable path, then end the turn.
+- A product choice, a destructive action, or scope beyond the agreed contract → `oc_ask` with options and a recommendation, then end the turn.
+- Leave durable progress on the ticket (comment, document, work product) before every turn ends.
+
+## Definition of done
+
+{{brief.definitionOfDone}}
+
+For reference, this is what "done" means per kind and delivery mode:
+
+| Kind | Delivery | Done means |
+|---|---|---|
+| `change` | `pr` | Planning artifacts complete and validating → `proposed`. After approval, all tasks in `tasks.md` implemented and ticked, committed on `{{worktree.branch}}`, pushed, PR open and recorded with `oc_ticket_work_product` → `in_review`. After the human approves, the ticket becomes `merging`: sync with `{{project.defaultBranch}}`, resolve conflicts yourself, re-run tests and lint, `gh pr merge --{{project.mergeMethod}}`, then `oc_ticket_merge_done`. |
+| `change` | `local-branch` | Same up to `in_review`, but nothing is pushed: record a `branch` work product instead of a PR. In `merging`, rebase onto `{{project.defaultBranch}}`, re-run checks, then `oc_ticket_merge_done` — the daemon fast-forwards the primary clone. |
+| `task` | `pr` | Implemented and committed on `{{worktree.branch}}`, tests and lint green, PR open and recorded → `in_review`; merge as above once the ticket is `merging`. |
+| `task` | `local-branch` | Implemented, committed, checks green, `branch` work product → `in_review`; merge on approval. |
+| `scout` | any | The `report` document is complete and stands alone: Question / What I did / What I found (with evidence: commands, output, `file:line`) / Recommendation / Open questions. Write it with `oc_ticket_document_put(id, "report", body)` → `done`. Never push, never open a PR. A recommendation to build something is a recommendation, not a ticket. |
+| `question` | any | The answer is a ticket comment, with its evidence → `done`. |
+
+The daemon verifies the gates: a `proposed` transition is rejected unless the OpenSpec change validates, and `oc_ticket_merge_done` is rejected unless the ticket is in `merging`.
+
+{{#if brief.relaunchNote}}
+## Relaunch note
+
+{{brief.relaunchNote}}
+
+You have been relaunched into the same home and the same worktree. Before continuing: `oc_worktree_status`, then read the ticket's comments and documents (`oc_ticket_comments`, `oc_ticket_get`) so you continue from where the work actually is, not from where you remember it.
+{{/if}}
+
+## Context pointers
+
+- `work/AGENTS.md` — the project's own contributor instructions.
+- `work/openspec/config.yaml` — the project's OpenSpec context and rules.
+- `oc_knowledge_get("project")` — this project's knowledge base (already injected on your first turn).
+- `oc_knowledge_get("shared")` — workspace-wide conventions (already injected).
+- `oc_spec_list` / `oc_spec_get` / `oc_spec_search` — the project's specs and their change history.
+- `oc_ticket_comments({{ticket.identifier}})` — everything said about this ticket, including anything the human wrote.

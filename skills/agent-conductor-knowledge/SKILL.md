@@ -1,5 +1,5 @@
 ---
-name: openconductor-knowledge
+name: agent-conductor-knowledge
 description: What belongs in the project knowledge base, the workspace knowledge base, the repo or the ticket — how to write a durable entry, and how to run a curation turn. Load before writing a knowledge note, and on any curation ticket.
 ---
 
@@ -12,8 +12,8 @@ The knowledge bases are the memory between sessions. Nothing else carries contex
 Ask in this order and stop at the first yes:
 
 1. **Is it task state, a finding, or a decision about this one ticket?** → the ticket: a comment, a `plan` or `report` document, a work product. Never a knowledge base.
-2. **Would a future contributor to this repo need it, with or without OpenConductor?** → the **repo**: its `AGENTS.md`, its docs, its specs. It goes through your PR like any other change. Do not copy repo content into a knowledge base; point at it.
-3. **Is it about working on this project from the outside — the stack, the commands, a convention the repo does not state, a landmine, a hard-won lesson?** → `knowledge/projects/<id>/PROJECT.md`, via `oc_knowledge_note("project", section, text)`.
+2. **Would a future contributor to this repo need it, with or without AgentConductor?** → the **repo**: its `AGENTS.md`, its docs, its specs. It goes through your PR like any other change. Do not copy repo content into a knowledge base; point at it.
+3. **Is it about working on this project from the outside — the stack, the commands, a convention the repo does not state, a landmine, a hard-won lesson?** → `knowledge/projects/<id>/PROJECT.md`, via `ac_knowledge_note("project", section, text)`.
 4. **Is it project-agnostic and true everywhere in this workspace — a house convention, a term, a matter of tone?** → `SHARED.md`. **Conductor only**, and it must never name a project, a repo, a client or a role.
 5. **Is it about the business, the portfolio, the human, or a standing policy?** → `WORKSPACE.md`. **Conductor only**; workers cannot read it.
 6. **Is it a durable decision?** → `decisions.md`, one line, appended by the daemon when a decision is marked durable.
@@ -22,7 +22,7 @@ Sections are fixed. `PROJECT.md`: Overview · Stack & commands · Conventions ·
 
 ## Writing an entry
 
-`oc_knowledge_note(scope, section, text)`.
+`ac_knowledge_note(scope, section, text)`.
 
 - **≤ 60 words.** The daemon rejects longer.
 - **Standalone.** No pronouns, no "as discussed", no reference to your ticket unless you name it. The next reader has no other context.
@@ -38,11 +38,11 @@ A rejection is information, not an obstacle. The daemon rejects near-duplicates,
 
 ## Curation
 
-A curation turn is triggered when a file crosses 80% of its budget, 14 days after the last one, on `oc knowledge curate`, or after an over-budget rejection. Workspace files are curated by the conductor; a project KB is curated by a curation worker on a "Curate project knowledge" ticket with no worktree of its own.
+A curation turn is triggered when a file crosses 80% of its budget, 14 days after the last one, on `conductor knowledge curate`, or after an over-budget rejection. Workspace files are curated by the conductor; a project KB is curated by a curation worker on a "Curate project knowledge" ticket with no worktree of its own.
 
 **You may merge, move, tighten, archive and remove. You may never add a fact.** Full procedure: `references/curation.md`.
 
-Submit the rewritten file with `oc_knowledge_replace(scope, body)`. The daemon diffs it, archives every removed entry with its provenance, and records the diff on the ticket so the human can review or revert. Then comment on the ticket listing every removed entry with its reason, and transition to `done`.
+Submit the rewritten file with `ac_knowledge_replace(scope, body)`. The daemon diffs it, archives every removed entry with its provenance, and records the diff on the ticket so the human can review or revert. Then comment on the ticket listing every removed entry with its reason, and transition to `done`.
 
 ## References
 

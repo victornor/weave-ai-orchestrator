@@ -1,5 +1,5 @@
 /**
- * Portable workspace package (PLAN §20 `oc workspace export|import`, §22 M4).
+ * Portable workspace package (PLAN §20 `conductor workspace export|import`, §22 M4).
  *
  * What travels: `workspace.yaml` verbatim from disk (so `${ENV}` secret references stay
  * references), `roles/<id>/{role.yaml,CHARTER.md}`, `knowledge/**` minus archive directories, and
@@ -11,7 +11,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import YAML from 'yaml';
-import { OcError, TICKET_KINDS, TICKET_PRIORITIES, type TicketKind, type TicketPriority } from '@openconductor/shared';
+import { OcError, TICKET_KINDS, TICKET_PRIORITIES, type TicketKind, type TicketPriority } from '@agent-conductor/shared';
 import type { Actor, CoreServices } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { WORKSPACE_FILE } from './loader.js';
@@ -47,7 +47,7 @@ export function exportWorkspace(ctx: WorkspaceContext, opts: { out?: string; now
 /** Copy the portable files of an export into a new or existing workspace directory. Never overwrites an existing workspace.yaml. */
 export function stageWorkspaceImport(from: string, target: string): StageResult {
   const manifest = join(from, WORKSPACE_FILE);
-  if (!existsSync(manifest)) throw new OcError('validation', `${from} is not an OpenConductor export: no ${WORKSPACE_FILE}`);
+  if (!existsSync(manifest)) throw new OcError('validation', `${from} is not an AgentConductor export: no ${WORKSPACE_FILE}`);
   const config = YAML.parse(readFileSync(manifest, 'utf8')) as { id?: string } | null;
   const workspaceId = typeof config?.id === 'string' ? config.id : basename(target);
 

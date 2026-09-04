@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PermanentChannelError, RetryableChannelError, textMessage, type ChannelContext, type InboundMessage } from '@openconductor/channel-sdk';
+import { PermanentChannelError, RetryableChannelError, textMessage, type ChannelContext, type InboundMessage } from '@agent-conductor/channel-sdk';
 import { createTelegramAdapter } from '../src/index.js';
 import { mapTelegramError, isParseError } from '../src/api.js';
 import { parseUpdate } from '../src/updates.js';

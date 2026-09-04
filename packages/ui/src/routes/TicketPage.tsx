@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import { ticketUiStatus } from '@openconductor/shared';
+import { ticketUiStatus } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';
@@ -84,14 +84,14 @@ export function TicketRoute(): React.ReactElement {
         title={
           <span className="flex items-center gap-2.5">
             <StatusGlyph status={ui} size="md" pulse={ui === 'working'} />
-            <span className="oc-mono text-micro text-text-3">{ticket.identifier}</span>
-            <span className="oc-truncate max-w-[50vw]">{ticket.title}</span>
+            <span className="ac-mono text-micro text-text-3">{ticket.identifier}</span>
+            <span className="ac-truncate max-w-[50vw]">{ticket.title}</span>
           </span>
         }
         meta={
           <span className="flex items-center gap-2">
             {isFolded(ticket.status) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
-            {project ? <span className="oc-mono">{project.slug}</span> : null}
+            {project ? <span className="ac-mono">{project.slug}</span> : null}
             {worker ? <span>{worker.name}</span> : null}
           </span>
         }
@@ -105,7 +105,7 @@ export function TicketRoute(): React.ReactElement {
               aria-label="Auto-merge"
               onClick={() => patch.mutate({ id: ticket.id, patch: { autoMerge: !ticket.autoMerge } })}
               className={cx(
-                'flex h-5 w-9 items-center rounded-pill border px-0.5 transition-colors duration-(--dur-fast) ease-oc',
+                'flex h-5 w-9 items-center rounded-pill border px-0.5 transition-colors duration-(--dur-fast) ease-ac',
                 ticket.autoMerge ? 'justify-end border-accent bg-accent' : 'justify-start border-line-2 bg-bg-3',
               )}
             >
@@ -155,13 +155,13 @@ function Overview({ ticketId }: { ticketId: string }): React.ReactElement {
       </div>
       {d.blockers.length ? (
         <section>
-          <div className="oc-label mb-2">Blocked by</div>
-          <div className="oc-card divide-y divide-line-1">
+          <div className="ac-label mb-2">Blocked by</div>
+          <div className="ac-card divide-y divide-line-1">
             {d.blockers.map((b) => (
               <div key={b.id} className="flex items-center gap-2.5 px-3.5 py-2.5">
                 <StatusGlyph status={ticketUiStatus(b.status)} size="xs" />
-                <span className="oc-mono text-micro text-text-3">{b.identifier}</span>
-                <span className="oc-truncate text-meta text-text-1">{b.title}</span>
+                <span className="ac-mono text-micro text-text-3">{b.identifier}</span>
+                <span className="ac-truncate text-meta text-text-1">{b.title}</span>
               </div>
             ))}
           </div>
@@ -173,13 +173,13 @@ function Overview({ ticketId }: { ticketId: string }): React.ReactElement {
 
 function Facts({ title, rows }: { title: string; rows: Array<[string, string]> }): React.ReactElement {
   return (
-    <div className="oc-card p-3.5">
-      <div className="oc-label mb-2.5">{title}</div>
+    <div className="ac-card p-3.5">
+      <div className="ac-label mb-2.5">{title}</div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
         {rows.map(([k, v]) => (
           <div key={k} className="contents">
             <dt className="text-micro text-text-3">{k}</dt>
-            <dd className="oc-mono text-micro text-text-1">{v}</dd>
+            <dd className="ac-mono text-micro text-text-1">{v}</dd>
           </div>
         ))}
       </dl>
@@ -230,14 +230,14 @@ function PlanTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdent
 
       {(revisions.data?.length ?? 0) > 1 ? (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="oc-label">Revisions</span>
+          <span className="ac-label">Revisions</span>
           {(revisions.data ?? []).map((r) => (
             <button
               key={r.revision}
               type="button"
               onClick={() => setRevision(r.revision)}
               className={cx(
-                'oc-mono rounded-r4 border px-2 py-1 text-nano',
+                'ac-mono rounded-r4 border px-2 py-1 text-nano',
                 (revision ?? doc.data.revision) === r.revision ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-3',
               )}
               title={r.reason ?? ''}
@@ -266,12 +266,12 @@ function ActivityTab({ ticketId }: { ticketId: string }): React.ReactElement {
       ) : (
         <div className="flex flex-col gap-3">
           {(comments.data ?? []).map((c) => (
-            <article key={c.id} className={cx('oc-card p-3.5', c.authorKind === 'human' && 'border-accent-edge')}>
+            <article key={c.id} className={cx('ac-card p-3.5', c.authorKind === 'human' && 'border-accent-edge')}>
               <div className="mb-1.5 flex items-center gap-2">
                 <span className="text-micro font-medium text-text-soft">{c.authorKind === 'human' ? 'You' : c.authorKind === 'agent' ? 'Worker' : 'System'}</span>
                 <Badge>{c.kind}</Badge>
                 <div className="flex-1" />
-                <span className="oc-mono text-nano text-text-4">{ago(c.createdAt)}</span>
+                <span className="ac-mono text-nano text-text-4">{ago(c.createdAt)}</span>
               </div>
               <Markdown source={c.body} />
             </article>
@@ -294,18 +294,18 @@ function WorkTab({ ticketId }: { ticketId: string }): React.ReactElement {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
       <section>
-        <div className="oc-label mb-2">Work products</div>
+        <div className="ac-label mb-2">Work products</div>
         {products.isLoading ? (
           <SkeletonRows rows={2} />
         ) : (products.data?.length ?? 0) === 0 ? (
           <EmptyState title="No branch or PR yet." detail="They appear as the worker pushes." />
         ) : (
-          <div className="oc-card divide-y divide-line-1">
+          <div className="ac-card divide-y divide-line-1">
             {(products.data ?? []).map((p) => (
               <div key={p.id} className="flex items-center gap-3 px-3.5 py-2.5">
                 <Badge>{p.type}</Badge>
-                <span className="oc-mono oc-truncate flex-1 text-micro text-text-2">{p.ref ?? p.url ?? '—'}</span>
-                {p.state ? <span className={cx('oc-mono text-nano', p.state === 'success' || p.state === 'merged' ? 'text-done' : p.state === 'failure' ? 'text-failed' : 'text-working')}>{p.state}</span> : null}
+                <span className="ac-mono ac-truncate flex-1 text-micro text-text-2">{p.ref ?? p.url ?? '—'}</span>
+                {p.state ? <span className={cx('ac-mono text-nano', p.state === 'success' || p.state === 'merged' ? 'text-done' : p.state === 'failure' ? 'text-failed' : 'text-working')}>{p.state}</span> : null}
                 {p.url ? (
                   <a href={p.url} target="_blank" rel="noreferrer" className="text-micro">
                     open ↗
@@ -319,13 +319,13 @@ function WorkTab({ ticketId }: { ticketId: string }): React.ReactElement {
 
       {spec ? (
         <section>
-          <div className="oc-label mb-2">
+          <div className="ac-label mb-2">
             OpenSpec · {spec.changeName ?? 'change'} · {done}/{total} tasks
           </div>
           <div className="mb-2.5 h-1.5 overflow-hidden rounded-pill bg-bg-3">
             <div className="h-full bg-done" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
           </div>
-          <ul className="oc-card divide-y divide-line-1">
+          <ul className="ac-card divide-y divide-line-1">
             {spec.tasks.map((t, i) => (
               <li key={i} className="flex items-start gap-2.5 px-3.5 py-2">
                 <span className={cx('mt-0.5 size-3 flex-none rounded-r4 border', t.done ? 'border-done bg-done/20' : 'border-line-3')} aria-hidden />
@@ -337,16 +337,16 @@ function WorkTab({ ticketId }: { ticketId: string }): React.ReactElement {
       ) : null}
 
       <section>
-        <div className="oc-label mb-2">Worktree</div>
-        <div className="oc-card px-3.5 py-2.5">
-          <span className="oc-mono text-micro text-text-2">
+        <div className="ac-label mb-2">Worktree</div>
+        <div className="ac-card px-3.5 py-2.5">
+          <span className="ac-mono text-micro text-text-2">
             {detail.data?.worker?.worktreePath ?? 'no worktree'} · {detail.data?.worker?.branch ?? 'no branch'}
           </span>
         </div>
       </section>
 
       <section>
-        <div className="oc-label mb-2">Runs</div>
+        <div className="ac-label mb-2">Runs</div>
         <Table
           rows={runs.data ?? []}
           rowKey={(r) => r.id}
@@ -378,9 +378,9 @@ function UsageTab({ ticketId }: { ticketId: string }): React.ReactElement {
         <StatTile value={duration(total?.durationMs ?? 0)} caption="agent time" muted />
       </div>
       {subtree ? (
-        <div className="oc-card p-3.5">
-          <div className="oc-label mb-2">Including children</div>
-          <span className="oc-mono text-meta text-text-1">
+        <div className="ac-card p-3.5">
+          <div className="ac-label mb-2">Including children</div>
+          <span className="ac-mono text-meta text-text-1">
             {tokens(subtree.tokensIn + subtree.tokensOut)} tok · {cents(subtree.costCents)} {subtree.costStatus}
           </span>
         </div>

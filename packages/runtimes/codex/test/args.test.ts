@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TurnInput } from '@openconductor/runtime-sdk';
+import type { TurnInput } from '@agent-conductor/runtime-sdk';
 import { buildArgs, mcpConfigToml, mcpOverrides } from '../src/args.js';
 
 function input(over: Partial<TurnInput> = {}): TurnInput {
@@ -16,10 +16,10 @@ const s = (a: string[]) => a.join(' ');
 
 describe('codex buildArgs', () => {
   it('builds a new thread with the prompt on stdin', () => {
-    const b = buildArgs(input(), { tmpDir: '/tmp/oc' });
+    const b = buildArgs(input(), { tmpDir: '/tmp/ac' });
     expect(b.cmd).toBe('codex');
     expect(s(b.args)).toContain('exec --json --skip-git-repo-check -C /home/agent --sandbox workspace-write');
-    expect(s(b.args)).toContain('-o /tmp/oc/last-message.txt');
+    expect(s(b.args)).toContain('-o /tmp/ac/last-message.txt');
     expect(b.args.at(-1)).toBe('-');
     expect(b.stdin).toBe('do the thing');
     expect(b.mode).toBe('new');
@@ -28,7 +28,7 @@ describe('codex buildArgs', () => {
   });
 
   it('resumes and forks without -C or --sandbox (unsupported on those subcommands)', () => {
-    const r = buildArgs(input({ session: { policy: 'per_ticket', ref: { threadId: 'th-1' }, isFirstTurn: false } }), { tmpDir: '/tmp/oc' });
+    const r = buildArgs(input({ session: { policy: 'per_ticket', ref: { threadId: 'th-1' }, isFirstTurn: false } }), { tmpDir: '/tmp/ac' });
     expect(r.args.slice(0, 3)).toEqual(['exec', 'resume', 'th-1']);
     expect(r.args).not.toContain('-C');
     expect(r.args).not.toContain('--sandbox');
@@ -48,34 +48,34 @@ describe('codex buildArgs', () => {
   });
 
   it('passes model, effort and the output schema file', () => {
-    const b = buildArgs(input({ model: 'gpt-5.1-codex', effort: 'high', outputSchema: { type: 'object' } }), { tmpDir: '/tmp/oc' });
+    const b = buildArgs(input({ model: 'gpt-5.1-codex', effort: 'high', outputSchema: { type: 'object' } }), { tmpDir: '/tmp/ac' });
     expect(s(b.args)).toContain('-m gpt-5.1-codex');
     expect(s(b.args)).toContain('-c model_reasoning_effort="high"');
-    expect(s(b.args)).toContain('--output-schema /tmp/oc/output-schema.json');
-    expect(b.files.find((f) => f.path === '/tmp/oc/output-schema.json')).toBeTruthy();
+    expect(s(b.args)).toContain('--output-schema /tmp/ac/output-schema.json');
+    expect(b.files.find((f) => f.path === '/tmp/ac/output-schema.json')).toBeTruthy();
   });
 
   it('passes MCP per invocation and keeps the bearer token out of argv', () => {
     const b = buildArgs(input({
-      mcpServers: { openconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer secret-token', 'X-Trace': 'abc' } } },
+      mcpServers: { agentconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer secret-token', 'X-Trace': 'abc' } } },
     }));
-    expect(s(b.args)).toContain('-c mcp_servers.openconductor.url="http://127.0.0.1:7777/mcp/runs/run-1"');
-    expect(s(b.args)).toContain('-c mcp_servers.openconductor.bearer_token_env_var="OC_MCP_TOKEN_OPENCONDUCTOR"');
-    expect(s(b.args)).toContain('-c mcp_servers.openconductor.http_headers.X-Trace="abc"');
+    expect(s(b.args)).toContain('-c mcp_servers.agentconductor.url="http://127.0.0.1:7777/mcp/runs/run-1"');
+    expect(s(b.args)).toContain('-c mcp_servers.agentconductor.bearer_token_env_var="AC_MCP_TOKEN_AGENTCONDUCTOR"');
+    expect(s(b.args)).toContain('-c mcp_servers.agentconductor.http_headers.X-Trace="abc"');
     expect(s(b.args)).not.toContain('secret-token');
-    expect(b.env['OC_MCP_TOKEN_OPENCONDUCTOR']).toBe('secret-token');
+    expect(b.env['AC_MCP_TOKEN_AGENTCONDUCTOR']).toBe('secret-token');
   });
 
   it('falls back to CODEX_HOME/config.toml when asked', () => {
     const b = buildArgs(input({
-      configHome: '/ws/.openconductor/runtimes/codex',
+      configHome: '/ws/.agent-conductor/runtimes/codex',
       options: { mcpViaConfigFile: true },
-      mcpServers: { openconductor: { type: 'http', url: 'http://h/mcp', headers: { Authorization: 'Bearer t' } } },
+      mcpServers: { agentconductor: { type: 'http', url: 'http://h/mcp', headers: { Authorization: 'Bearer t' } } },
     }));
-    expect(b.env['CODEX_HOME']).toBe('/ws/.openconductor/runtimes/codex');
+    expect(b.env['CODEX_HOME']).toBe('/ws/.agent-conductor/runtimes/codex');
     expect(s(b.args)).not.toContain('mcp_servers');
-    const f = b.files.find((x) => x.path === '/ws/.openconductor/runtimes/codex/config.toml')!;
-    expect(f.content).toContain('[mcp_servers.openconductor]');
+    const f = b.files.find((x) => x.path === '/ws/.agent-conductor/runtimes/codex/config.toml')!;
+    expect(f.content).toContain('[mcp_servers.agentconductor]');
     expect(f.content).toContain('url = "http://h/mcp"');
   });
 

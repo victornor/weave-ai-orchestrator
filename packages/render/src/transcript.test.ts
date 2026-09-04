@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RunEvent, RunEventType } from '@openconductor/shared';
+import type { RunEvent, RunEventType } from '@agent-conductor/shared';
 import { runEventsToTranscript } from './transcript.js';
 import type { FileBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock } from './types.js';
 
@@ -152,11 +152,11 @@ describe('runEventsToTranscript', () => {
   it('redacts secrets in text, tool output and file diffs', () => {
     reset();
     const blocks = runEventsToTranscript([
-      ev('assistant.text', { text: 'exporting OC_RUN_TOKEN=rt_abcdefghijklmnop' }),
+      ev('assistant.text', { text: 'exporting AC_RUN_TOKEN=rt_abcdefghijklmnop' }),
       ev('tool.call', { name: 'Bash', id: 'c', input: { command: 'curl -H "Authorization: Bearer abcdefghijklmnop"' } }),
       ev('tool.result', { id: 'c', output: 'sk-ant-api03-AAAAbbbbCCCCddddEEEE' }),
     ]);
-    expect((blocks[0] as TextBlock).text).toBe('exporting OC_RUN_TOKEN=rt_[redacted]');
+    expect((blocks[0] as TextBlock).text).toBe('exporting AC_RUN_TOKEN=rt_[redacted]');
     expect((blocks[1] as ToolBlock).target).toContain('Bearer [redacted]');
     expect((blocks[1] as ToolBlock).detail).toBe('sk-[redacted]');
   });

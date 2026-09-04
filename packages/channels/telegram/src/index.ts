@@ -2,7 +2,7 @@ import {
   PermanentChannelError, RetryableChannelError,
   type ChannelAdapter, type ChannelCapabilities, type ChannelContext, type JsonSchema,
   type OutboundMessage, type RunningChannel, type SendResult,
-} from '@openconductor/channel-sdk';
+} from '@agent-conductor/channel-sdk';
 import { TelegramClient, isParseError, mapTelegramError, type FetchLike, type MappedError } from './api.js';
 import { CallbackCodec } from './callbacks.js';
 import { TELEGRAM_CONFIG_JSON_SCHEMA, validateTelegramConfig, type TelegramConfig } from './config.js';

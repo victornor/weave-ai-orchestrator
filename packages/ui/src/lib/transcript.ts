@@ -1,4 +1,4 @@
-import type { RunEvent } from '@openconductor/shared';
+import type { RunEvent } from '@agent-conductor/shared';
 
 export type TranscriptBlock =
   | { id: string; type: 'text'; text: string; thinking?: boolean }

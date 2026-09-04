@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { RuntimeEvent } from '@openconductor/runtime-sdk';
+import type { RuntimeEvent } from '@agent-conductor/runtime-sdk';
 import { createCodexParser } from '../src/events.js';
 
 // `turn-auth-error.jsonl` was recorded live from codex 0.150.1 (this machine has no

@@ -8,14 +8,14 @@ Always-loaded prompts live in `templates/` (`conductor.AGENTS.md.tmpl`, `worker.
 
 | Skill | Audience | Purpose |
 |---|---|---|
-| `openconductor-worker` | worker | The turn loop, brief verification, ticket rules, status protocol, delivery and merge, report format, common mistakes. |
-| `openconductor-openspec` | worker | How ticket status maps onto the OpenSpec workflows; what never to do. |
-| `openconductor-scout` | worker | Report format and rules for investigation tickets. |
-| `openconductor-conductor` | conductor | Intake, routing, supervision, digest handling, outcome language. |
-| `openconductor-hire` | conductor | Role overlap check, spec drafting, activation flow, charter refinement. |
-| `openconductor-planning` | conductor | Minimal ticket graphs, qualifying split reasons, acceptance criteria. |
-| `openconductor-briefing` | conductor | The four-section briefing, one decision at a time. |
-| `openconductor-knowledge` | all | Knowledge placement, entry rules, the curation procedure. |
+| `agent-conductor-worker` | worker | The turn loop, brief verification, ticket rules, status protocol, delivery and merge, report format, common mistakes. |
+| `agent-conductor-openspec` | worker | How ticket status maps onto the OpenSpec workflows; what never to do. |
+| `agent-conductor-scout` | worker | Report format and rules for investigation tickets. |
+| `agent-conductor-conductor` | conductor | Intake, routing, supervision, digest handling, outcome language. |
+| `agent-conductor-hire` | conductor | Role overlap check, spec drafting, activation flow, charter refinement. |
+| `agent-conductor-planning` | conductor | Minimal ticket graphs, qualifying split reasons, acceptance criteria. |
+| `agent-conductor-briefing` | conductor | The four-section briefing, one decision at a time. |
+| `agent-conductor-knowledge` | all | Knowledge placement, entry rules, the curation procedure. |
 
 `manifest.json` is the machine-readable version of that table: `skills[].{name, audience, description}` where `audience` is `conductor`, `worker` or `all`, plus the per-runtime install paths.
 

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { UiStatus } from '@openconductor/shared';
+import type { UiStatus } from '@agent-conductor/shared';
 import { StatusGlyph } from './StatusGlyph';
 import { cx } from '../lib/cx';
 
@@ -55,7 +55,7 @@ export function ToastProvider({ children }: { children: ReactNode }): React.Reac
             key={t.id}
             className={cx(
               'pointer-events-auto w-full max-w-sm rounded-r6 border border-line-2 bg-bg-2 px-3.5 py-2.5 shadow-sheet',
-              'motion-safe:animate-[oc-rise_var(--dur-panel)_var(--ease)]',
+              'motion-safe:animate-[ac-rise_var(--dur-panel)_var(--ease)]',
             )}
             role="status"
           >

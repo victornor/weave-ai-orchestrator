@@ -1,7 +1,7 @@
 /** Turns global flags + environment + contexts file into a ready `ApiClient`. */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { OC_ENV } from '@openconductor/shared';
+import { AC_ENV } from '@agent-conductor/shared';
 import { ApiClient, ApiError } from './api.js';
 import { configHome, currentContext, resolveWorkspaceId, DEFAULT_URL, type ContextEntry } from './contexts.js';
 import { applyCertPin } from './tls.js';
@@ -19,21 +19,21 @@ export interface Session {
   client: ApiClient;
   contextName: string | null;
   url: string;
-  /** True when authenticating with `OC_RUN_TOKEN` (an agent inside a run, PLAN §9.5). */
+  /** True when authenticating with `AC_RUN_TOKEN` (an agent inside a run, PLAN §9.5). */
   agent: boolean;
 }
 
 export interface ResolveOptions {
   /** Resolve (and require) a workspace id. Daemon-level commands pass false. */
   workspace?: 'required' | 'optional' | 'none';
-  /** Skip the contexts file entirely (used by `oc login`). */
+  /** Skip the contexts file entirely (used by `conductor login`). */
   anonymous?: boolean;
 }
 
 let pinApplied = false;
 
 export async function resolveSession(options: GlobalOptions, resolveOptions: ResolveOptions = {}): Promise<Session> {
-  const runToken = process.env[OC_ENV.RUN_TOKEN] ?? null;
+  const runToken = process.env[AC_ENV.RUN_TOKEN] ?? null;
   const wantWorkspace = resolveOptions.workspace ?? 'required';
 
   let url: string;
@@ -42,16 +42,16 @@ export async function resolveSession(options: GlobalOptions, resolveOptions: Res
   let entry: ContextEntry | null = null;
 
   if (runToken) {
-    url = options.url ?? process.env[OC_ENV.API_URL] ?? DEFAULT_URL;
+    url = options.url ?? process.env[AC_ENV.API_URL] ?? DEFAULT_URL;
   } else if (options.url) {
     url = options.url;
-    token = options.token ?? process.env['OC_TOKEN'] ?? null;
+    token = options.token ?? process.env['AC_TOKEN'] ?? null;
   } else {
     const ctx = resolveOptions.anonymous ? { name: null, entry: null } : currentContext(options.context ?? null);
     contextName = ctx.name;
     entry = ctx.entry;
-    url = entry?.url ?? process.env[OC_ENV.API_URL] ?? localDaemonUrl() ?? DEFAULT_URL;
-    token = options.token ?? process.env['OC_TOKEN'] ?? entry?.token ?? null;
+    url = entry?.url ?? process.env[AC_ENV.API_URL] ?? localDaemonUrl() ?? DEFAULT_URL;
+    token = options.token ?? process.env['AC_TOKEN'] ?? entry?.token ?? null;
   }
 
   if (entry?.certPin && !pinApplied) {
@@ -61,7 +61,7 @@ export async function resolveSession(options: GlobalOptions, resolveOptions: Res
 
   const workspaceId = wantWorkspace === 'none'
     ? null
-    : resolveWorkspaceId(options.workspace ?? null, entry, process.cwd()) ?? (runToken ? process.env[OC_ENV.WORKSPACE_ID] ?? null : null);
+    : resolveWorkspaceId(options.workspace ?? null, entry, process.cwd()) ?? (runToken ? process.env[AC_ENV.WORKSPACE_ID] ?? null : null);
 
   const client = new ApiClient({ baseUrl: url, token, runToken, workspace: workspaceId });
 
@@ -69,7 +69,7 @@ export async function resolveSession(options: GlobalOptions, resolveOptions: Res
     const only = await soleWorkspace(client);
     if (only) client.workspace = only;
     else {
-      throw new ApiError('validation', 'no workspace selected: pass --workspace <id>, set OC_WORKSPACE, or run inside a workspace directory', 400);
+      throw new ApiError('validation', 'no workspace selected: pass --workspace <id>, set AC_WORKSPACE, or run inside a workspace directory', 400);
     }
   }
 
@@ -89,7 +89,7 @@ async function soleWorkspace(client: ApiClient): Promise<string | null> {
 
 /**
  * No context, no `--url`: talk to the daemon started on this machine over its loopback listener
- * (`daemon.json`), which is what makes `oc daemon set-password` and `oc daemon status` work before
+ * (`daemon.json`), which is what makes `conductor daemon set-password` and `conductor daemon status` work before
  * the first login — and while the public listener is held for lack of an operator password.
  */
 function localDaemonUrl(): string | null {

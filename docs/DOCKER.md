@@ -1,36 +1,36 @@
 # Running the daemon in Docker
 
-The [`Dockerfile`](../Dockerfile) at the repo root builds a single image: the OpenConductor daemon,
+The [`Dockerfile`](../Dockerfile) at the repo root builds a single image: the AgentConductor daemon,
 its web UI, `git`, `gh` and `openspec`. Everything stateful lives in one volume at `/data`.
 
 ```
 /data
-├── config/          OC_CONFIG_HOME — daemon.yaml, workspaces.yaml, daemon.sqlite, daemon.json
+├── config/          AC_CONFIG_HOME — daemon.yaml, workspaces.yaml, daemon.sqlite, daemon.json
 └── workspaces/      one directory per workspace (repos, worktrees, worker homes, knowledge, db)
 ```
 
 ## Build and run
 
 ```bash
-docker build -t openconductor .
+docker build -t agent-conductor .
 
-docker volume create oc-data
-docker run -d --name oc \
+docker volume create ac-data
+docker run -d --name conductor \
   -p 7433:7433 \
-  -v oc-data:/data \
-  openconductor
+  -v ac-data:/data \
+  agent-conductor
 ```
 
 The daemon listens on `0.0.0.0:7433` inside the container. It refuses to start on a non-loopback
 address without an operator password unless `auth.loopbackTrusted` is set, so set one first:
 
 ```bash
-docker exec -it oc node packages/cli/dist/bin.js --url http://127.0.0.1:7433 daemon set-password
-docker exec -it oc node packages/cli/dist/bin.js --url http://127.0.0.1:7433 \
+docker exec -it conductor node packages/cli/dist/bin.js --url http://127.0.0.1:7433 daemon set-password
+docker exec -it conductor node packages/cli/dist/bin.js --url http://127.0.0.1:7433 \
   -w '' init /data/workspaces/acme --prefix ACME --name Acme
 ```
 
-Then point a browser or `oc login http://<host>:7433` at it.
+Then point a browser or `conductor login http://<host>:7433` at it.
 
 ## What the image does not carry
 
@@ -38,8 +38,8 @@ Credentials never go in the image. The daemon host needs them at run time:
 
 | Need | How to provide it |
 |---|---|
-| Coding CLI auth (claude, codex, opencode, gemini) | `docker exec -it oc node packages/cli/dist/bin.js runtime login <id>`, or mount the host's config dir |
-| `gh` auth (required for `deliveryMode: pr`) | `-e GH_TOKEN=...`, or `docker exec -it oc gh auth login` |
+| Coding CLI auth (claude, codex, opencode, gemini) | `docker exec -it conductor node packages/cli/dist/bin.js runtime login <id>`, or mount the host's config dir |
+| `gh` auth (required for `deliveryMode: pr`) | `-e GH_TOKEN=...`, or `docker exec -it conductor gh auth login` |
 | git over SSH | mount a key: `-v ~/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro` |
 | Channel tokens and other `${ENV}` refs in `workspace.yaml` | `-e TELEGRAM_BOT_TOKEN=...` |
 | Webhook secrets (`webhooks[].secret`) | the same way — they are `${ENV}` references, never literals |
@@ -48,12 +48,12 @@ The coding CLIs themselves are **not** installed in the image: which runtimes yo
 licences, are your choice. Add them in a derived image, for example:
 
 ```dockerfile
-FROM openconductor
+FROM agent-conductor
 RUN npm install -g @anthropic-ai/claude-code
 ```
 
 Without any runtime installed the daemon starts, serves the API and the UI, and reports the missing
-runtime through `oc doctor` and `GET /api/runtimes`.
+runtime through `conductor doctor` and `GET /api/runtimes`.
 
 ## TLS
 
@@ -62,7 +62,7 @@ The container speaks plain HTTP. Terminate TLS in front of it (nginx, Caddy, Tra
 ```yaml
 # /data/config/daemon.yaml
 http:
-  publicUrl: https://oc.example.com
+  publicUrl: https://conductor.example.com
   trustProxy: true          # only behind a proxy you control
 ```
 
@@ -75,10 +75,10 @@ Rebuild the image and recreate the container — `/data` survives, and the daemo
 databases on start. Back up by snapshotting the volume while the container is stopped:
 
 ```bash
-docker stop oc
-docker run --rm -v oc-data:/data -v "$PWD":/backup debian:12-slim \
-  tar czf /backup/oc-data.tgz -C / data
-docker start oc
+docker stop conductor
+docker run --rm -v ac-data:/data -v "$PWD":/backup debian:12-slim \
+  tar czf /backup/ac-data.tgz -C / data
+docker start conductor
 ```
 
 ## Notes

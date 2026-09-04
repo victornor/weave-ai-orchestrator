@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { UI_STATUSES } from '@openconductor/shared';
+import { UI_STATUSES } from '@agent-conductor/shared';
 import { StatusGlyph, StatusBadge } from '../components/StatusGlyph';
 import { TicketCard } from '../components/TicketCard';
 import { WorkerCard } from '../components/WorkerCard';

@@ -1,5 +1,5 @@
 /**
- * Response shapes for docs/API.md. Entities come from @openconductor/shared;
+ * Response shapes for docs/API.md. Entities come from @agent-conductor/shared;
  * these are the envelopes the HTTP layer wraps them in.
  */
 import type {
@@ -19,7 +19,7 @@ import type {
   UsageGrain,
   UsageWindow,
   AuthSessionKind,
-} from '@openconductor/shared';
+} from '@agent-conductor/shared';
 
 export interface Health {
   ok: boolean;

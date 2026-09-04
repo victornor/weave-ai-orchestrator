@@ -1,4 +1,4 @@
-/** `oc doctor [--install]` — the checklist that tells a human exactly what is missing (PLAN §20). */
+/** `conductor doctor [--install]` — the checklist that tells a human exactly what is missing (PLAN §20). */
 import type { Command } from 'commander';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
@@ -39,7 +39,7 @@ export function onPath(binary: string): boolean {
 
 const LOCAL_TOOLS: Array<{ id: InstallableId; binary: string; args: string[]; fix: string }> = [
   { id: 'gh', binary: 'gh', args: ['--version'], fix: 'install gh for pull-request delivery (deliveryMode: pr)' },
-  { id: 'openspec', binary: process.env['OC_OPENSPEC_BIN'] ?? 'openspec', args: ['--version'], fix: 'npm install -g @fission-ai/openspec — without it change tickets skip spec validation and archiving' },
+  { id: 'openspec', binary: process.env['AC_OPENSPEC_BIN'] ?? 'openspec', args: ['--version'], fix: 'npm install -g @fission-ai/openspec — without it change tickets skip spec validation and archiving' },
   { id: 'wt', binary: 'wt', args: ['--version'], fix: 'install worktrunk (cargo install worktrunk / brew install worktrunk / pacman -S worktrunk) — until then the plain git worktree fallback is used' },
 ];
 
@@ -56,11 +56,11 @@ export function register(program: Command): void {
         name: 'context',
         ok: ctx.entry !== null,
         detail: ctx.entry ? `${ctx.name} -> ${ctx.entry.url}` : `none in ${contextsPath()}`,
-        fix: ctx.entry ? undefined : 'oc login <url>',
+        fix: ctx.entry ? undefined : 'conductor login <url>',
       });
 
       const pid = readPid();
-      checks.push({ name: 'local daemon process', ok: isRunning(pid) ? true : null, detail: isRunning(pid) ? `running (pid ${pid})` : 'not started from this machine', fix: 'oc daemon start' });
+      checks.push({ name: 'local daemon process', ok: isRunning(pid) ? true : null, detail: isRunning(pid) ? `running (pid ${pid})` : 'not started from this machine', fix: 'conductor daemon start' });
 
       const node = process.versions.node;
       checks.push({ name: 'node', ok: Number(node.split('.')[0]) >= 22, detail: `v${node}`, fix: 'install Node 22 or newer' });
@@ -81,10 +81,10 @@ export function register(program: Command): void {
           name: 'operator password',
           ok: health['operatorConfigured'] === true,
           detail: health['operatorConfigured'] === true ? 'configured' : 'not configured',
-          fix: 'oc daemon set-password',
+          fix: 'conductor daemon set-password',
         });
         const workspaces = items<Record<string, unknown>>(health['workspaces']);
-        checks.push({ name: 'workspaces', ok: workspaces.length > 0, detail: workspaces.map((w) => String(w['id'])).join(', ') || 'none', fix: 'oc init <dir>' });
+        checks.push({ name: 'workspaces', ok: workspaces.length > 0, detail: workspaces.map((w) => String(w['id'])).join(', ') || 'none', fix: 'conductor init <dir>' });
 
         const host = (health['host'] ?? null) as HealthHost | null;
         daemonIsThisHost = host?.hostname ? host.hostname === hostname() : isRunning(pid);
@@ -95,7 +95,7 @@ export function register(program: Command): void {
               name: `daemon host: ${tool.id === 'wt' ? 'worktrunk (wt)' : tool.id}`,
               ok: tool.available ? true : tool.need === 'required' ? false : null,
               detail: tool.available ? `${tool.version ?? 'present'} on ${remoteHost}` : `missing on ${remoteHost} — ${tool.purpose}`,
-              fix: tool.available ? undefined : `install ${tool.id} on ${remoteHost} (run \`oc doctor --install\` there)`,
+              fix: tool.available ? undefined : `install ${tool.id} on ${remoteHost} (run \`conductor doctor --install\` there)`,
             });
           }
         }
@@ -110,13 +110,13 @@ export function register(program: Command): void {
             name: `runtime ${id}`,
             ok: available ? true : missing ? false : null,
             detail: String(detection['version'] ?? detection['notes'] ?? (missing ? 'not installed on the daemon host' : 'unknown')),
-            fix: missing ? `install it on the daemon host, then \`oc runtime login ${id}\`` : undefined,
+            fix: missing ? `install it on the daemon host, then \`conductor runtime login ${id}\`` : undefined,
             install: missing && daemonIsThisHost && isInstallable(id) ? id : undefined,
           });
         }
       } catch (error) {
         const message = error instanceof ApiError ? `${String(error.code).toUpperCase()}: ${error.message}` : (error as Error).message;
-        checks.push({ name: 'daemon api', ok: false, detail: message, fix: 'oc daemon start' });
+        checks.push({ name: 'daemon api', ok: false, detail: message, fix: 'conductor daemon start' });
       }
 
       const failed = checks.filter((c) => c.ok === false).length;
@@ -129,7 +129,7 @@ export function register(program: Command): void {
         }
         write('');
         write(failed === 0 ? style.ok('everything checks out') : style.bad(`${failed} check${failed === 1 ? '' : 's'} failed`));
-        if (installable.length > 0 && opts['install'] !== true) write(style.dim(`installable here: ${installable.join(', ')} — run \`oc doctor --install\``));
+        if (installable.length > 0 && opts['install'] !== true) write(style.dim(`installable here: ${installable.join(', ')} — run \`conductor doctor --install\``));
         if (remoteHost && opts['install'] === true) write(style.dim(`the daemon runs on ${remoteHost}; --install only touches this machine`));
       });
       if (failed > 0) process.exitCode = 1;
@@ -161,7 +161,7 @@ async function installMissing(ids: InstallableId[], yes: boolean): Promise<void>
     write(ok ? `${style.ok('installed')} ${step.id}` : `${style.bad('failed')} ${step.id} — ${r.error?.message ?? `exit ${String(r.status)}`}; try: ${step.manual}`);
   }
   const afterthoughts = results.filter((r) => r.status === 'installed' && ['claude', 'codex', 'opencode', 'gemini'].includes(r.id));
-  if (afterthoughts.length > 0) write(style.dim(`next: ${afterthoughts.map((r) => `oc runtime login ${r.id}`).join(' · ')}`));
+  if (afterthoughts.length > 0) write(style.dim(`next: ${afterthoughts.map((r) => `conductor runtime login ${r.id}`).join(' · ')}`));
   if (results.some((r) => r.status === 'failed')) process.exitCode = 1;
 }
 

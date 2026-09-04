@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { JsonSchema } from '@openconductor/channel-sdk';
+import type { JsonSchema } from '@agent-conductor/channel-sdk';
 
 export const TelegramConfigSchema = z.object({
   /** Resolved by the config loader from an `${ENV_VAR}` reference in workspace.yaml. */

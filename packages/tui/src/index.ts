@@ -1,7 +1,7 @@
 /**
- * `@openconductor/tui` — the Ink apps behind `oc chat`, `oc attach`, `oc top` and `oc specs explore`
+ * `@agent-conductor/tui` — the Ink apps behind `conductor chat`, `conductor attach`, `conductor top` and `conductor specs explore`
  * (PLAN §21.2). Every app is a thin client over the same REST + SSE API and renders the view models
- * from `@openconductor/render`, so the terminal and the web never drift.
+ * from `@agent-conductor/render`, so the terminal and the web never drift.
  */
 import React from 'react';
 import { render } from 'ink';
@@ -12,7 +12,7 @@ import { Specs } from './apps/Specs.js';
 import { clearTerminalTitle } from './terminal.js';
 import type { TuiClient } from './client.js';
 
-export const PACKAGE = '@openconductor/tui';
+export const PACKAGE = '@agent-conductor/tui';
 
 export type { TuiClient, TuiSseMessage, TuiStreamOptions, TuiSubscription } from './client.js';
 export type { ChatOptions } from './apps/Chat.js';

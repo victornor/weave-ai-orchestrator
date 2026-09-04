@@ -3,11 +3,11 @@
  * Coded strictly against docs/API.md: bearer auth, `{ error: { code, message, details, retryable } }`
  * envelopes, workspace-scoped routes under `/api/w/:ws`, SSE with `id:` sequence resume.
  *
- * Agent mode: when `OC_RUN_TOKEN` is set the same client authenticates with the run token and routes
- * writes through `POST /api/w/:ws/agent/tools/:tool` (PLAN §9.5), so `oc ticket comment` works
+ * Agent mode: when `AC_RUN_TOKEN` is set the same client authenticates with the run token and routes
+ * writes through `POST /api/w/:ws/agent/tools/:tool` (PLAN §9.5), so `conductor ticket comment` works
  * identically for a human and for an agent inside a run.
  */
-import type { ErrorCode, ToolResult } from '@openconductor/shared';
+import type { ErrorCode, ToolResult } from '@agent-conductor/shared';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -81,7 +81,7 @@ export class ApiClient {
     this.runToken = options.runToken ?? null;
     this.workspace = options.workspace ?? null;
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
-    this.userAgent = options.userAgent ?? 'oc-cli';
+    this.userAgent = options.userAgent ?? 'ac-cli';
   }
 
   /** True when the client authenticates as an agent inside a run. */
@@ -91,7 +91,7 @@ export class ApiClient {
 
   /** Workspace-scoped path: `/tickets` → `/api/w/acme/tickets`. */
   w(path: string): string {
-    if (!this.workspace) throw new ApiError('validation', 'no workspace selected: pass --workspace, set OC_WORKSPACE, or run inside a workspace directory', 400);
+    if (!this.workspace) throw new ApiError('validation', 'no workspace selected: pass --workspace, set AC_WORKSPACE, or run inside a workspace directory', 400);
     const suffix = path === '' ? '' : path.startsWith('/') ? path : `/${path}`;
     return `/api/w/${encodeURIComponent(this.workspace)}${suffix}`;
   }

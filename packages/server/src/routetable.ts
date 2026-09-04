@@ -19,7 +19,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: '/api/openapi.json', tag: 'daemon', summary: 'This document', auth: 'open' },
   { method: 'GET', path: '/llms/api.txt', tag: 'daemon', summary: 'Agent-readable API summary', auth: 'open' },
   { method: 'POST', path: '/api/auth/setup', tag: 'auth', summary: 'Create the operator account (only when none exists)', auth: 'open', mutating: true },
-  { method: 'POST', path: '/api/auth/login', tag: 'auth', summary: 'Log in; returns a session token (and sets oc_session for kind=web)', auth: 'open', mutating: true },
+  { method: 'POST', path: '/api/auth/login', tag: 'auth', summary: 'Log in; returns a session token (and sets ac_session for kind=web)', auth: 'open', mutating: true },
   { method: 'POST', path: '/api/auth/logout', tag: 'auth', summary: 'Revoke the current session', auth: 'session', mutating: true },
   { method: 'GET', path: '/api/auth/me', tag: 'auth', summary: 'Current operator, session and TOTP state', auth: 'session' },
   { method: 'GET', path: '/api/auth/sessions', tag: 'auth', summary: 'List sessions/devices', auth: 'session' },
@@ -143,6 +143,6 @@ export const ROUTES: RouteRow[] = [
 
   { method: 'GET', path: `${W}/agent/inbox`, tag: 'agent', summary: 'This run wakes, bundled', auth: 'run' },
   { method: 'GET', path: `${W}/agent/tools`, tag: 'agent', summary: 'Tools this agent may call, with JSON schemas', auth: 'run' },
-  { method: 'POST', path: `${W}/agent/tools/{tool}`, tag: 'agent', summary: 'Call one oc_* tool; returns ToolResult', auth: 'run', mutating: true },
+  { method: 'POST', path: `${W}/agent/tools/{tool}`, tag: 'agent', summary: 'Call one ac_* tool; returns ToolResult', auth: 'run', mutating: true },
   { method: 'POST', path: '/mcp/runs/{runId}', tag: 'agent', summary: 'Streamable HTTP MCP endpoint for one run', auth: 'run', mutating: true },
 ];

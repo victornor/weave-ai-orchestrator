@@ -1,5 +1,5 @@
-import { nowIso } from '@openconductor/db';
-import { OcError, type Run, type RunEvent, type RunStatus } from '@openconductor/shared';
+import { nowIso } from '@agent-conductor/db';
+import { OcError, type Run, type RunEvent, type RunStatus } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Page, RunsService } from '../api.js';
 import { recordActivity } from '../events.js';

@@ -93,10 +93,10 @@ export function NeedsYouRoute(): React.ReactElement {
 
             {conductorOwned.data?.length ? (
               <section className="mt-4">
-                <div className="oc-label mb-2">Conductor is deciding</div>
+                <div className="ac-label mb-2">Conductor is deciding</div>
                 <div className="flex flex-col gap-2">
                   {conductorOwned.data.map((d) => (
-                    <div key={d.id} className="oc-card px-3.5 py-2.5">
+                    <div key={d.id} className="ac-card px-3.5 py-2.5">
                       <div className="text-meta text-text-2">{d.title}</div>
                       {d.recommendation ? <div className="mt-1 text-micro text-text-3">Leaning: {d.recommendation}</div> : null}
                     </div>

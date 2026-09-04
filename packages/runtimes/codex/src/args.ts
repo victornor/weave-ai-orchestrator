@@ -1,6 +1,6 @@
 import { join } from 'node:path';
-import type { BuiltCommand, McpServerConfig, TurnInput } from '@openconductor/runtime-sdk';
-import { runTmpDir } from '@openconductor/runtime-sdk';
+import type { BuiltCommand, McpServerConfig, TurnInput } from '@agent-conductor/runtime-sdk';
+import { runTmpDir } from '@agent-conductor/runtime-sdk';
 import { asCodexSession } from './session.js';
 
 export interface CodexBuildOpts { tmpDir?: string }
@@ -18,7 +18,7 @@ function str(v: unknown): string | null { return typeof v === 'string' && v.leng
 function toml(value: string): string { return JSON.stringify(value); }
 
 function envVarName(server: string): string {
-  return `OC_MCP_TOKEN_${server.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+  return `AC_MCP_TOKEN_${server.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
 }
 
 /** `-c mcp_servers.<name>....` overrides for one server, plus any env the token needs. */
@@ -49,7 +49,7 @@ export function mcpOverrides(name: string, s: McpServerConfig): { args: string[]
 
 /** TOML fallback for `CODEX_HOME/config.toml` when per-invocation `-c` is not wanted. */
 export function mcpConfigToml(servers: Record<string, McpServerConfig>): string {
-  const lines: string[] = ['# written by OpenConductor before each turn; do not edit'];
+  const lines: string[] = ['# written by AgentConductor before each turn; do not edit'];
   for (const [name, s] of Object.entries(servers)) {
     lines.push('', `[mcp_servers.${name}]`);
     if (s.type === 'http') {

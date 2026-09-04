@@ -30,7 +30,7 @@ export function Tabs({
             aria-selected={on}
             onClick={() => onChange(t.key)}
             className={cx(
-              'relative shrink-0 px-3 py-2.5 text-ui font-medium transition-colors duration-(--dur-fast) ease-oc',
+              'relative shrink-0 px-3 py-2.5 text-ui font-medium transition-colors duration-(--dur-fast) ease-ac',
               on ? 'text-text-1' : 'text-text-3 hover:text-text-2',
             )}
           >
@@ -74,8 +74,8 @@ export function Segmented<T extends string>({
             aria-checked={on}
             onClick={() => onChange(o.value)}
             className={cx(
-              'border-r border-line-1 px-2.5 py-1.5 text-meta transition-colors duration-(--dur-fast) ease-oc last:border-r-0',
-              mono && 'oc-mono',
+              'border-r border-line-1 px-2.5 py-1.5 text-meta transition-colors duration-(--dur-fast) ease-ac last:border-r-0',
+              mono && 'ac-mono',
               on ? 'bg-bg-3 text-text-1' : 'text-text-3 hover:text-text-2',
             )}
           >

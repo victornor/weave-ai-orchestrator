@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { newId, nowIso } from '@openconductor/db';
-import { FakeRuntime, type TurnInput, type TurnSink, type TurnResult } from '@openconductor/runtime-sdk';
-import type { Run, Wakeup } from '@openconductor/shared';
+import { newId, nowIso } from '@agent-conductor/db';
+import { FakeRuntime, type TurnInput, type TurnSink, type TurnResult } from '@agent-conductor/runtime-sdk';
+import type { Run, Wakeup } from '@agent-conductor/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createWakeService } from '../wake/index.js';
 import { createRunsService } from './index.js';
@@ -100,19 +100,19 @@ describe('run engine', () => {
     expect(runtime.inputs[1]!.turnEpoch).toBe(2);
   });
 
-  it('passes the MCP endpoint, the run token and the OC_* environment to the runtime', async () => {
+  it('passes the MCP endpoint, the run token and the AC_* environment to the runtime', async () => {
     h.services.wake!.enqueue(h.conductorId, { source: 'system', reason: 'digest' });
     const run = await runOnce();
     const input = runtime.inputs[0]!;
-    expect(input.mcpServers.openconductor).toMatchObject({ type: 'http', url: `${h.ctx.loopbackUrl}/mcp/runs/${run.id}` });
-    const authHeader = input.mcpServers.openconductor!.headers!.Authorization!;
+    expect(input.mcpServers.agentconductor).toMatchObject({ type: 'http', url: `${h.ctx.loopbackUrl}/mcp/runs/${run.id}` });
+    const authHeader = input.mcpServers.agentconductor!.headers!.Authorization!;
     expect(authHeader.startsWith('Bearer rt_')).toBe(true);
-    expect(input.env.OC_RUN_TOKEN).toBe(authHeader.slice('Bearer '.length));
-    expect(input.env.OC_RUN_ID).toBe(run.id);
-    expect(input.env.OC_AGENT_KIND).toBe('conductor');
-    expect(input.env.OC_WORKSPACE_ID).toBe(h.workspaceId);
+    expect(input.env.AC_RUN_TOKEN).toBe(authHeader.slice('Bearer '.length));
+    expect(input.env.AC_RUN_ID).toBe(run.id);
+    expect(input.env.AC_AGENT_KIND).toBe('conductor');
+    expect(input.env.AC_WORKSPACE_ID).toBe(h.workspaceId);
     expect(input.outputSchema).toBeTruthy();
-    const claims = await verifyRunToken(runTokenSecret(h.db), input.env.OC_RUN_TOKEN!);
+    const claims = await verifyRunToken(runTokenSecret(h.db), input.env.AC_RUN_TOKEN!);
     expect(claims).toMatchObject({ workspaceId: h.workspaceId, runId: run.id, agentId: h.conductorId, agentKind: 'conductor' });
   });
 
@@ -176,7 +176,7 @@ describe('run engine', () => {
   it('redacts the run token from persisted events', async () => {
     class LeakyRuntime extends FakeRuntime {
       override async runTurn(input: TurnInput, sink: TurnSink): Promise<TurnResult> {
-        sink.onEvent({ ts: nowIso(), type: 'assistant.text', payload: { text: `curl -H "Authorization: Bearer ${input.env.OC_RUN_TOKEN}"` } });
+        sink.onEvent({ ts: nowIso(), type: 'assistant.text', payload: { text: `curl -H "Authorization: Bearer ${input.env.AC_RUN_TOKEN}"` } });
         return super.runTurn(input, sink);
       }
     }
@@ -191,7 +191,7 @@ describe('run engine', () => {
 
   it('describes the worker ticket and worktree state in the turn prompt', async () => {
     const ticketId = seedTicket(h, { status: 'in_progress' });
-    const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null, branch: 'oc/tst-1-add-a-readme-badge' });
+    const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null, branch: 'ac/tst-1-add-a-readme-badge' });
     h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1: Add a README badge' });
     const run = await runOnce();
     const prompt = readFileSync(join(h.ctx.paths.runs, run.id, 'prompt.md'), 'utf8');

@@ -1,7 +1,7 @@
-/** `oc usage` — tokens are the headline, cost is labelled reported or estimated (PLAN §16.3). */
+/** `conductor usage` — tokens are the headline, cost is labelled reported or estimated (PLAN §16.3). */
 import type { Command } from 'commander';
-import { USAGE_GRAINS, USAGE_WINDOWS } from '@openconductor/shared';
-import { usageRows, usageTotals, type UsageSeries } from '@openconductor/render';
+import { USAGE_GRAINS, USAGE_WINDOWS } from '@agent-conductor/shared';
+import { usageRows, usageTotals, type UsageSeries } from '@agent-conductor/render';
 import { emit, fields, heading, style, table, write } from '../output.js';
 import { run, session } from './util.js';
 

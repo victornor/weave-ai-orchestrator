@@ -1,4 +1,4 @@
-/** `oc runtime list|detect|login` — runtime availability and per-workspace auth (PLAN §8.3, §20). */
+/** `conductor runtime list|detect|login` — runtime availability and per-workspace auth (PLAN §8.3, §20). */
 import type { Command } from 'commander';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
@@ -89,7 +89,7 @@ export function register(program: Command): void {
       );
       const fallback = FALLBACK[id];
       const envName = descriptor.configHomeEnv ?? fallback?.env ?? 'XDG_CONFIG_HOME';
-      const configHome = root ? join(root, '.openconductor', 'runtimes', id) : '';
+      const configHome = root ? join(root, '.agent-conductor', 'runtimes', id) : '';
       const command_ = descriptor.login?.command ?? fallback?.command[0] ?? id;
       const args = descriptor.login?.args ?? fallback?.command.slice(1) ?? [];
       const instructions = descriptor.login?.instructions ?? fallback?.instructions ?? [];

@@ -1,4 +1,4 @@
-# OpenConductor daemon. See docs/DOCKER.md.
+# AgentConductor daemon. See docs/DOCKER.md.
 #
 # Stage 1 builds the monorepo (tsc -b for every package plus the Vite web app); stage 2 is a slim
 # runtime carrying only what the daemon needs at run time: node 22, git, gh, openspec, the built
@@ -25,7 +25,7 @@ COPY skills/ skills/
 COPY templates/ templates/
 
 RUN pnpm build \
- && pnpm --filter @openconductor/ui build \
+ && pnpm --filter @agent-conductor/ui build \
  && pnpm prune --prod
 
 # ---------- runtime ----------
@@ -55,10 +55,10 @@ COPY --from=build /src/templates ./templates
 COPY --from=build /src/package.json ./package.json
 
 # One volume holds everything stateful: daemon config + registry + sqlite, and the workspaces.
-ENV OC_CONFIG_HOME=/data/config \
-    OC_SKILLS_DIR=/app/skills \
-    OC_TEMPLATES_DIR=/app/templates \
-    OC_UI_DIR=/app/packages/ui/dist \
+ENV AC_CONFIG_HOME=/data/config \
+    AC_SKILLS_DIR=/app/skills \
+    AC_TEMPLATES_DIR=/app/templates \
+    AC_UI_DIR=/app/packages/ui/dist \
     NODE_ENV=production
 RUN mkdir -p /data/config /data/workspaces
 VOLUME ["/data"]

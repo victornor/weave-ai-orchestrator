@@ -3,12 +3,12 @@
  * messages into `threads`, and drains outbound `thread_messages` rows with `delivery_status =
  * 'pending'` through the owning adapter with capability degradation and backoff.
  */
-import type { ChannelAdapter, CanonicalMessage, CanonicalPart, InboundMessage, RunningChannel } from '@openconductor/channel-sdk';
-import { degrade, textMessage } from '@openconductor/channel-sdk';
-import type { Actor, CoreServices, WorkspaceContext } from '@openconductor/core';
-import { getLogger } from '@openconductor/core';
-import { newId, nowIso } from '@openconductor/db';
-import type { Decision, WorkspaceEvent } from '@openconductor/shared';
+import type { ChannelAdapter, CanonicalMessage, CanonicalPart, InboundMessage, RunningChannel } from '@agent-conductor/channel-sdk';
+import { degrade, textMessage } from '@agent-conductor/channel-sdk';
+import type { Actor, CoreServices, WorkspaceContext } from '@agent-conductor/core';
+import { getLogger } from '@agent-conductor/core';
+import { newId, nowIso } from '@agent-conductor/db';
+import type { Decision, WorkspaceEvent } from '@agent-conductor/shared';
 
 const log = getLogger('channel');
 const SYSTEM: Actor = { kind: 'system', id: null };

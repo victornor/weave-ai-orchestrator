@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { newId, nowIso } from '@openconductor/db';
+import { newId, nowIso } from '@agent-conductor/db';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createBriefingService } from './index.js';
 

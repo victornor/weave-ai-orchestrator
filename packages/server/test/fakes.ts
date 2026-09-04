@@ -2,17 +2,17 @@
  * In-memory doubles for the app-level tests: a real sqlite db + EventBus (so SSE, channels and
  * push exercise real SQL) with hand-written service fakes in front of them.
  */
-import { Db } from '@openconductor/db';
-import { EventBus, createRegistries, getLogger, initLogger } from '@openconductor/core';
-import type { Actor, CoreServices, WorkspaceContext } from '@openconductor/core';
-import type { AuthService } from '@openconductor/core';
+import { Db } from '@agent-conductor/db';
+import { EventBus, createRegistries, getLogger, initLogger } from '@agent-conductor/core';
+import type { Actor, CoreServices, WorkspaceContext } from '@agent-conductor/core';
+import type { AuthService } from '@agent-conductor/core';
 import {
   DaemonConfigSchema, OcError, WorkspaceConfigSchema,
   type Briefing, type Decision, type Ticket, type TicketComment, type Wakeup,
-} from '@openconductor/shared';
+} from '@agent-conductor/shared';
 import type { AppDeps, WorkspaceRuntime } from '../src/types.js';
 
-initLogger(process.env.OC_LOG_LEVEL ?? 'silent');
+initLogger(process.env.AC_LOG_LEVEL ?? 'silent');
 
 export interface Call { service: string; method: string; args: unknown[] }
 
@@ -156,7 +156,7 @@ export function makeHarness(options: { listener?: 'public' | 'loopback'; workspa
     workspaceId,
     config: WorkspaceConfigSchema.parse({ version: 1, id: workspaceId, name: 'Test workspace', ticketPrefix: 'ACME' }),
     daemon: DaemonConfigSchema.parse({}),
-    paths: { root: '/tmp/ws', state: '/tmp/ws/.openconductor', db: ':memory:', runs: '', conductor: '', roles: '', workers: '', archive: '', projects: '', knowledge: '', runtimesHome: '', wtConfig: '' },
+    paths: { root: '/tmp/ws', state: '/tmp/ws/.agent-conductor', db: ':memory:', runs: '', conductor: '', roles: '', workers: '', archive: '', projects: '', knowledge: '', runtimesHome: '', wtConfig: '' },
     db, events: bus, registries: createRegistries(),
     log: (domain: Parameters<typeof getLogger>[0]) => getLogger(domain),
     loopbackUrl: 'http://127.0.0.1:0', skillsDir: '/tmp/skills', templatesDir: '/tmp/templates',

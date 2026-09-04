@@ -3,9 +3,9 @@
  * Needs you / Recently landed / Under way / Up next — plus warnings.
  * Deterministic and read-only: computed from the db, writes no activity and emits no events.
  */
-import type * as S from '@openconductor/shared';
-import { TERMINAL_TICKET_STATUSES } from '@openconductor/shared';
-import { nowIso } from '@openconductor/db';
+import type * as S from '@agent-conductor/shared';
+import { TERMINAL_TICKET_STATUSES } from '@agent-conductor/shared';
+import { nowIso } from '@agent-conductor/db';
 import type { BriefingService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 

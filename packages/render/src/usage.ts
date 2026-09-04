@@ -1,5 +1,5 @@
 /** Usage view models: totals with a window-over-window delta and a cost-provenance label (PLAN §16.3). */
-import type { CostStatus } from '@openconductor/shared';
+import type { CostStatus } from '@agent-conductor/shared';
 import { formatCents, formatCost, formatDelta, formatReportedShare, formatTokens } from './format.js';
 import type { UsageTotalsView } from './types.js';
 

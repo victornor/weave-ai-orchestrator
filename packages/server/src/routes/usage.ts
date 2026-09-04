@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { USAGE_GRAINS, USAGE_WINDOWS } from '@openconductor/shared';
+import { USAGE_GRAINS, USAGE_WINDOWS } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
 import { query } from '../http.js';
 

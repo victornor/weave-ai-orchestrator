@@ -31,13 +31,13 @@ export function ConnectionBanner({
         className,
       )}
     >
-      <span className="size-1.5 rounded-pill bg-current motion-safe:animate-[oc-pulse_1.6s_ease-in-out_infinite]" />
+      <span className="size-1.5 rounded-pill bg-current motion-safe:animate-[ac-pulse_1.6s_ease-in-out_infinite]" />
       <span>
         {offline
           ? `Offline — showing the state from ${capturedAt ? clock(capturedAt) : 'the last sync'}`
           : 'Reconnecting…'}
       </span>
-      {queuedCount ? <span className="oc-mono ml-auto">{queuedCount} queued</span> : null}
+      {queuedCount ? <span className="ac-mono ml-auto">{queuedCount} queued</span> : null}
     </div>
   );
 }
@@ -46,7 +46,7 @@ export function ConnectionBanner({
 export function UnreachableScreen({ host, lastSeen, onRetry, onChangeServer }: { host?: string; lastSeen?: string | null; onRetry: () => void; onChangeServer?: () => void }): React.ReactElement {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-bg-0 p-6 text-center">
-      <div className="oc-mono flex items-center gap-2 text-micro text-failed">
+      <div className="ac-mono flex items-center gap-2 text-micro text-failed">
         <span className="size-2 bg-failed" style={{ clipPath: 'polygon(0 0,100% 0,50% 100%)' }} aria-hidden />
         NET_DAEMON_UNREACHABLE{lastSeen ? ` · last seen ${lastSeen}` : ''}
       </div>

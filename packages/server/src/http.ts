@@ -1,8 +1,8 @@
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z, type ZodTypeAny } from 'zod';
-import { OcError, type ErrorCode } from '@openconductor/shared';
-import { getLogger } from '@openconductor/core';
+import { OcError, type ErrorCode } from '@agent-conductor/shared';
+import { getLogger } from '@agent-conductor/core';
 import type { AppEnv } from './types.js';
 
 const log = getLogger('http');
@@ -28,11 +28,11 @@ export function toOcError(err: unknown): OcError {
 }
 
 export function onError(err: unknown, c: Context<AppEnv>): Response {
-  const oc = toOcError(err);
-  const status = OcError.status(oc.code);
-  if (status >= 500) log.error({ err: oc, path: c.req.path, code: oc.code }, 'request failed');
-  else log.debug({ path: c.req.path, code: oc.code, message: oc.message }, 'request rejected');
-  return c.json(errorBody(oc), status as 400);
+  const conductor = toOcError(err);
+  const status = OcError.status(conductor.code);
+  if (status >= 500) log.error({ err: conductor, path: c.req.path, code: conductor.code }, 'request failed');
+  else log.debug({ path: c.req.path, code: conductor.code, message: conductor.message }, 'request rejected');
+  return c.json(errorBody(conductor), status as 400);
 }
 
 /** Parse + validate a JSON body. Empty bodies validate against the schema too (so `.default({})` works). */

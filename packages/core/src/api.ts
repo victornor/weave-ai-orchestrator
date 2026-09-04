@@ -2,7 +2,7 @@
  * Core service interfaces. Server, MCP tools, CLI and tests code against these; implementations live in core/src/<module>/.
  * Every mutation writes an activity row and emits an event. Errors are OcError with a code from shared.
  */
-import type * as S from '@openconductor/shared';
+import type * as S from '@agent-conductor/shared';
 
 export interface Actor { kind: 'human' | 'agent' | 'system'; id: string | null; runId?: string | null }
 export interface Page<T> { items: T[]; total: number }

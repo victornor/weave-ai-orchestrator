@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId, nowIso } from '@openconductor/db';
-import { OcError, TICKET_KINDS, TICKET_STATUSES, canTransition, type TicketKind, type TicketStatus } from '@openconductor/shared';
+import { newId, nowIso } from '@agent-conductor/db';
+import { OcError, TICKET_KINDS, TICKET_STATUSES, canTransition, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createTicketsService } from './service.js';
 import type { Actor, TicketsService } from '../api.js';
@@ -244,7 +244,7 @@ describe('tickets', () => {
       const depWorker = h.addWorker(dep.id);
       h.db.update('tickets', blocker.id, { status: 'in_progress' });
       await tickets.transition(AGENT, blocker.id, { to: 'in_review' }).catch(() => undefined);
-      tickets.addWorkProduct(AGENT, blocker.id, { type: 'branch', title: 'oc/x' });
+      tickets.addWorkProduct(AGENT, blocker.id, { type: 'branch', title: 'ac/x' });
       h.db.update('tickets', blocker.id, { status: 'merging', autoMerge: 1 });
       await tickets.transition(SYSTEM, blocker.id, { to: 'done' });
       expect(tickets.get(dep.id).status).toBe('todo');

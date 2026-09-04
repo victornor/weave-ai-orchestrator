@@ -101,15 +101,15 @@ export function printError(error: unknown): number {
 
 function nextSteps(error: ApiError): string[] {
   switch (error.code) {
-    case 'net_daemon_unreachable': return ['start it with `oc daemon start`, or point at another one with `oc login <url>`'];
+    case 'net_daemon_unreachable': return ['start it with `conductor daemon start`, or point at another one with `conductor login <url>`'];
     case 'unauthorized':
-    case 'auth_session_expired': return ['sign in again with `oc login <url>`'];
+    case 'auth_session_expired': return ['sign in again with `conductor login <url>`'];
     case 'auth_totp_required': return ['pass the six-digit code when prompted'];
     case 'auth_locked': return ['wait for the lockout to expire, then try again'];
-    case 'runtime_unreachable': return ['check the runtime with `oc runtime detect`', 'or switch runtime with `oc role set-runtime <role> <runtime>`'];
-    case 'not_found': return ['list what exists with the matching `oc ... list` command'];
-    case 'worktree_dirty': return ['inspect it with `oc worktree verify <id>`'];
-    case 'merge_not_approved': return ['approve the merge decision with `oc decision list`'];
+    case 'runtime_unreachable': return ['check the runtime with `conductor runtime detect`', 'or switch runtime with `conductor role set-runtime <role> <runtime>`'];
+    case 'not_found': return ['list what exists with the matching `conductor ... list` command'];
+    case 'worktree_dirty': return ['inspect it with `conductor worktree verify <id>`'];
+    case 'merge_not_approved': return ['approve the merge decision with `conductor decision list`'];
     default: return error.retryable ? ['retryable: try again'] : [];
   }
 }

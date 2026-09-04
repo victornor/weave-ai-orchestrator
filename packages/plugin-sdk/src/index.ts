@@ -1,7 +1,7 @@
-import type { RuntimeAdapter } from '@openconductor/runtime-sdk';
-import type { ChannelAdapter } from '@openconductor/channel-sdk';
-import type { SurfaceAdapter } from '@openconductor/surface-sdk';
-import type { WorkspaceEvent, EventType } from '@openconductor/shared';
+import type { RuntimeAdapter } from '@agent-conductor/runtime-sdk';
+import type { ChannelAdapter } from '@agent-conductor/channel-sdk';
+import type { SurfaceAdapter } from '@agent-conductor/surface-sdk';
+import type { WorkspaceEvent, EventType } from '@agent-conductor/shared';
 export type { RuntimeAdapter, ChannelAdapter, SurfaceAdapter };
 
 export interface WorktreeInfo { path: string; branch: string; head?: string; dirty?: boolean; ahead?: number; behind?: number; mergeConflicts?: boolean; main?: boolean }
@@ -26,5 +26,5 @@ export interface PluginHost {
   config<T = Record<string, unknown>>(): T;
   logger: Logger;
 }
-export interface OpenConductorPlugin { id: string; version: string; apiVersion: 1; register(host: PluginHost): void | Promise<void> }
-export function definePlugin(p: OpenConductorPlugin): OpenConductorPlugin { return p; }
+export interface AgentConductorPlugin { id: string; version: string; apiVersion: 1; register(host: PluginHost): void | Promise<void> }
+export function definePlugin(p: AgentConductorPlugin): AgentConductorPlugin { return p; }

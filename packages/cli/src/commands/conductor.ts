@@ -1,7 +1,7 @@
-/** `oc conductor show|set-model|set-runtime|reset-session` (PLAN §10, §20). */
+/** `conductor conductor show|set-model|set-runtime|reset-session` (PLAN §10, §20). */
 import type { Command } from 'commander';
-import type { Agent } from '@openconductor/shared';
-import { workerToCard } from '@openconductor/render';
+import type { Agent } from '@agent-conductor/shared';
+import { workerToCard } from '@agent-conductor/render';
 import { emit, fields, style, write } from '../output.js';
 import { run, session, unwrap } from './util.js';
 

@@ -159,7 +159,7 @@ export function LoginRoute(): React.ReactElement {
               <path d="M6 0.3 L11.7 6 L6 11.7 L0.3 6 Z" fill="var(--accent-on)" />
             </svg>
           </span>
-          <h1 className="text-title font-semibold tracking-title text-text-strong">OpenConductor</h1>
+          <h1 className="text-title font-semibold tracking-title text-text-strong">AgentConductor</h1>
         </div>
 
         {health.isLoading ? (
@@ -185,7 +185,7 @@ export function LoginRoute(): React.ReactElement {
             {stage !== 'totp' ? (
               <>
                 <label className="flex flex-col gap-1.5">
-                  <span className="oc-label">Username</span>
+                  <span className="ac-label">Username</span>
                   <input
                     value={username}
                     autoComplete="username"
@@ -194,7 +194,7 @@ export function LoginRoute(): React.ReactElement {
                   />
                 </label>
                 <label className="flex flex-col gap-1.5">
-                  <span className="oc-label">Password</span>
+                  <span className="ac-label">Password</span>
                   <input
                     type="password"
                     value={password}
@@ -206,7 +206,7 @@ export function LoginRoute(): React.ReactElement {
                 </label>
                 {stage === 'setup' ? (
                   <label className="flex flex-col gap-1.5">
-                    <span className="oc-label">Confirm password</span>
+                    <span className="ac-label">Confirm password</span>
                     <input
                       type="password"
                       value={confirm}
@@ -219,7 +219,7 @@ export function LoginRoute(): React.ReactElement {
               </>
             ) : (
               <div className="flex flex-col gap-3">
-                <span className="oc-label">Authentication code</span>
+                <span className="ac-label">Authentication code</span>
                 <TOTPInput value={totp} onChange={setTotp} onComplete={() => void submit()} invalid={error?.code === 'AUTH_BAD_CREDENTIALS'} />
                 <p className="text-micro text-text-3">Six digits from your authenticator, or a recovery code.</p>
               </div>
@@ -234,7 +234,7 @@ export function LoginRoute(): React.ReactElement {
                     value={deviceName}
                     onChange={(e) => setDeviceName(e.target.value)}
                     aria-label="Device name"
-                    className="oc-mono ml-auto h-7 w-40 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-2 outline-none"
+                    className="ac-mono ml-auto h-7 w-40 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-2 outline-none"
                   />
                 ) : null}
               </label>
@@ -242,7 +242,7 @@ export function LoginRoute(): React.ReactElement {
 
             {error ? (
               <div className={cx('rounded-r6 border p-3', error.code === 'AUTH_LOCKED' ? 'border-blocked/35 bg-blocked/8' : 'border-failed/30 bg-failed/8')} role="alert">
-                <div className="oc-mono mb-1 text-micro text-failed">{error.code}</div>
+                <div className="ac-mono mb-1 text-micro text-failed">{error.code}</div>
                 <div className="text-meta font-medium text-text-1">
                   {error.code === 'AUTH_LOCKED' && locked
                     ? `Locked for ${Math.floor((countdown ?? 0) / 60)}:${String((countdown ?? 0) % 60).padStart(2, '0')}.`

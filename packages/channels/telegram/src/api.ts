@@ -1,4 +1,4 @@
-import { PermanentChannelError, RetryableChannelError } from '@openconductor/channel-sdk';
+import { PermanentChannelError, RetryableChannelError } from '@agent-conductor/channel-sdk';
 import type { TelegramCall } from './render.js';
 import type { TelegramUpdate } from './updates.js';
 

@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import type { AgentPresence, AgentView, JsonSchema, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@openconductor/surface-sdk';
+import type { AgentPresence, AgentView, JsonSchema, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@agent-conductor/surface-sdk';
 import {
   findPaneForAgent, findTabByLabel, findWorkspaceByLabel, paneCloseArgs, paneLabel, paneListArgs, paneRenameArgs,
   paneRunArgs, paneSplitArgs, parseCreatedPaneId, parseCreatedTabId, parsePaneList, parseTabList, parseWorkspaceList,
@@ -38,7 +38,7 @@ async function herdr(args: string[]): Promise<{ ok: boolean; stdout: string; std
 }
 
 const workspaceLabel = (ctx: SurfaceContext, cfg: Record<string, unknown>): string =>
-  typeof cfg.session === 'string' && cfg.session ? cfg.session : `oc-${ctx.workspaceId}`;
+  typeof cfg.session === 'string' && cfg.session ? cfg.session : `ac-${ctx.workspaceId}`;
 
 export function createHerdrSurface(): SurfaceAdapter {
   const panes = async (workspaceId?: string): Promise<HerdrPane[]> => {
@@ -122,12 +122,12 @@ export function createHerdrSurface(): SurfaceAdapter {
         additionalProperties: false,
         properties: {
           surface: { type: 'string' },
-          session: { type: 'string', description: 'herdr workspace label (default oc-<workspaceId>)' },
+          session: { type: 'string', description: 'herdr workspace label (default ac-<workspaceId>)' },
           tabPerProject: { type: 'boolean', default: true },
           layout: { type: 'string', enum: ['grid', 'per-project'] },
           terminal: { type: 'string' },
           workspace: { type: ['string', 'number'] },
-          reconcile: { type: 'boolean', description: 'Recreate panes the human closed (set by `oc presentation reconcile`)' },
+          reconcile: { type: 'boolean', description: 'Recreate panes the human closed (set by `conductor presentation reconcile`)' },
         },
       };
     },

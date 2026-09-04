@@ -3,9 +3,9 @@ import { promisify } from 'node:util';
 import type {
   AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter, RuntimeCapabilities, RuntimeDetection,
   RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
-} from '@openconductor/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, spawnLines, writeFiles } from '@openconductor/runtime-sdk';
-import { extractReport } from '@openconductor/shared';
+} from '@agent-conductor/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
+import { extractReport } from '@agent-conductor/shared';
 import { buildArgs, CONFIG_RELATIVE_PATH, opencodeConfig } from './args.js';
 import { createOpenCodeParser } from './events.js';
 import { asOpenCodeSession, type OpenCodeSessionRef } from './session.js';

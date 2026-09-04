@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { RunEvent } from '@openconductor/shared';
+import type { RunEvent } from '@agent-conductor/shared';
 import { runEventsToTranscript } from '../lib/transcript';
 import type { TranscriptBlock } from '../lib/transcript';
 import { StatusGlyph } from './StatusGlyph';
@@ -31,7 +31,7 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
     return (
       <div className="flex items-center gap-2.5">
         <StatusGlyph status="working" size="xs" />
-        <span className="oc-mono text-micro text-text-3">
+        <span className="ac-mono text-micro text-text-3">
           phase: {block.phase}
           {block.durationMs != null ? ` · ${duration(block.durationMs)}` : ''}
           {block.tokens != null ? ` · ${fmtTokens(block.tokens)} tok` : ''}
@@ -44,7 +44,7 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
     return (
       <div className="flex items-center gap-2.5">
         <StatusGlyph status={block.status} size="xs" />
-        <span className={cx('oc-mono text-micro', block.status === 'needs-you' ? 'text-needs-you' : block.status === 'failed' ? 'text-failed' : 'text-text-2')}>
+        <span className={cx('ac-mono text-micro', block.status === 'needs-you' ? 'text-needs-you' : block.status === 'failed' ? 'text-failed' : 'text-text-2')}>
           {block.text}
         </span>
       </div>
@@ -55,11 +55,11 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
     return (
       <div className="overflow-hidden rounded-r4 border border-line-1">
         <div className="flex items-center gap-2.5 bg-bg-2 px-2.5 py-1.5">
-          <span className="oc-mono text-micro text-text-3">$</span>
-          <span className="oc-mono oc-truncate flex-1 text-micro text-text-soft">{block.command}</span>
-          {block.exitCode != null ? <span className={cx('oc-mono text-nano', block.exitCode === 0 ? 'text-done' : 'text-failed')}>exit {block.exitCode}</span> : null}
+          <span className="ac-mono text-micro text-text-3">$</span>
+          <span className="ac-mono ac-truncate flex-1 text-micro text-text-soft">{block.command}</span>
+          {block.exitCode != null ? <span className={cx('ac-mono text-nano', block.exitCode === 0 ? 'text-done' : 'text-failed')}>exit {block.exitCode}</span> : null}
         </div>
-        {block.output ? <pre className="oc-mono max-h-40 overflow-auto px-2.5 py-2 text-micro leading-relaxed text-text-3">{block.output}</pre> : null}
+        {block.output ? <pre className="ac-mono max-h-40 overflow-auto px-2.5 py-2 text-micro leading-relaxed text-text-3">{block.output}</pre> : null}
       </div>
     );
   }
@@ -67,16 +67,16 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
   const expandable = Boolean(block.diff);
   const head = (
     <div className={cx('flex items-center gap-2.5 px-2.5 py-1.5', expandable ? 'bg-bg-2' : 'rounded-r4 border border-line-1 bg-bg-2')}>
-      <span className="oc-mono text-nano text-text-3">{expandable ? (open ? '▾' : '▸') : '▸'}</span>
-      <span className={cx('oc-mono text-micro', block.error ? 'text-failed' : 'text-text-2')}>{block.tool}</span>
-      <span className="oc-mono oc-truncate flex-1 text-micro text-text-soft">{block.target}</span>
+      <span className="ac-mono text-nano text-text-3">{expandable ? (open ? '▾' : '▸') : '▸'}</span>
+      <span className={cx('ac-mono text-micro', block.error ? 'text-failed' : 'text-text-2')}>{block.tool}</span>
+      <span className="ac-mono ac-truncate flex-1 text-micro text-text-soft">{block.target}</span>
       {block.adds != null || block.dels != null ? (
-        <span className="oc-mono text-nano">
+        <span className="ac-mono text-nano">
           {block.adds != null ? <span className="text-done">+{block.adds}</span> : null}{' '}
           {block.dels != null ? <span className="text-failed">−{block.dels}</span> : null}
         </span>
       ) : block.durationMs != null ? (
-        <span className="oc-mono text-nano text-text-4">{duration(block.durationMs)}</span>
+        <span className="ac-mono text-nano text-text-4">{duration(block.durationMs)}</span>
       ) : null}
     </div>
   );
@@ -95,7 +95,7 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
 
 export function DiffBlock({ diff }: { diff: string }): React.ReactElement {
   return (
-    <div className="oc-mono max-h-72 overflow-auto border-t border-line-1 text-micro leading-relaxed">
+    <div className="ac-mono max-h-72 overflow-auto border-t border-line-1 text-micro leading-relaxed">
       {diff.split('\n').map((line, i) => (
         <div
           key={i}

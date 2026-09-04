@@ -1,4 +1,4 @@
-import type { Agent, Decision, Ticket } from '@openconductor/shared';
+import type { Agent, Decision, Ticket } from '@agent-conductor/shared';
 
 export function ticket(over: Partial<Ticket> = {}): Ticket {
   return {
@@ -56,7 +56,7 @@ export function agent(over: Partial<Agent> = {}): Agent {
     errorText: null,
     homePath: '/w/workers/a1',
     worktreePath: '/w/workers/a1/work',
-    branch: 'oc/acme-42',
+    branch: 'ac/acme-42',
     turnEpoch: 1,
     turnCount: 3,
     spawnedBy: 'conductor',

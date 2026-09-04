@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import type { RunEvent } from '@openconductor/shared';
-import { agentUiStatus } from '@openconductor/shared';
+import type { RunEvent } from '@agent-conductor/shared';
+import { agentUiStatus } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
 import { Transcript } from '../components/Transcript';
@@ -89,7 +89,7 @@ export function WorkerRoute(): React.ReactElement {
           </span>
         }
         meta={
-          <span className="oc-mono">
+          <span className="ac-mono">
             {[project?.slug, ticket?.identifier, agent.runtimeId, agent.model].filter(Boolean).join(' · ')}
             {usage ? ` · ${tokens(usage.tokensIn + usage.tokensOut)} tok · ${cents(usage.costCents)}` : ''}
             {worktree ? ` · ${worktree.dirty ? 'dirty' : worktree.status} ↑${worktree.ahead} ↓${worktree.behind}` : ''}

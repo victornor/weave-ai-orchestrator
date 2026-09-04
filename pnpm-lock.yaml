@@ -23,13 +23,13 @@ importers:
 
   examples/plugins/echo-channel:
     dependencies:
-      '@openconductor/plugin-sdk':
+      '@agent-conductor/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
 
   packages/channel-sdk:
     dependencies:
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
       zod:
@@ -38,19 +38,19 @@ importers:
 
   packages/channels/cli:
     dependencies:
-      '@openconductor/channel-sdk':
+      '@agent-conductor/channel-sdk':
         specifier: workspace:*
         version: link:../../channel-sdk
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../../shared
 
   packages/channels/telegram:
     dependencies:
-      '@openconductor/channel-sdk':
+      '@agent-conductor/channel-sdk':
         specifier: workspace:*
         version: link:../../channel-sdk
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../../shared
       zod:
@@ -59,25 +59,25 @@ importers:
 
   packages/channels/web:
     dependencies:
-      '@openconductor/channel-sdk':
+      '@agent-conductor/channel-sdk':
         specifier: workspace:*
         version: link:../../channel-sdk
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../../shared
 
   packages/cli:
     dependencies:
-      '@openconductor/presenter':
+      '@agent-conductor/presenter':
         specifier: workspace:*
         version: link:../presenter
-      '@openconductor/render':
+      '@agent-conductor/render':
         specifier: workspace:*
         version: link:../render
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
-      '@openconductor/tui':
+      '@agent-conductor/tui':
         specifier: workspace:*
         version: link:../tui
       chalk:
@@ -101,22 +101,22 @@ importers:
       '@node-rs/argon2':
         specifier: ^2.0.2
         version: 2.2.0
-      '@openconductor/channel-sdk':
+      '@agent-conductor/channel-sdk':
         specifier: workspace:*
         version: link:../channel-sdk
-      '@openconductor/db':
+      '@agent-conductor/db':
         specifier: workspace:*
         version: link:../db
-      '@openconductor/plugin-sdk':
+      '@agent-conductor/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk
-      '@openconductor/runtime-sdk':
+      '@agent-conductor/runtime-sdk':
         specifier: workspace:*
         version: link:../runtime-sdk
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
-      '@openconductor/surface-sdk':
+      '@agent-conductor/surface-sdk':
         specifier: workspace:*
         version: link:../surface-sdk
       execa:
@@ -143,7 +143,7 @@ importers:
 
   packages/db:
     dependencies:
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
       ulid:
@@ -152,37 +152,37 @@ importers:
 
   packages/plugin-sdk:
     dependencies:
-      '@openconductor/channel-sdk':
+      '@agent-conductor/channel-sdk':
         specifier: workspace:*
         version: link:../channel-sdk
-      '@openconductor/runtime-sdk':
+      '@agent-conductor/runtime-sdk':
         specifier: workspace:*
         version: link:../runtime-sdk
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
-      '@openconductor/surface-sdk':
+      '@agent-conductor/surface-sdk':
         specifier: workspace:*
         version: link:../surface-sdk
 
   packages/presenter:
     dependencies:
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
-      '@openconductor/surface-headless':
+      '@agent-conductor/surface-headless':
         specifier: workspace:*
         version: link:../surfaces/headless
-      '@openconductor/surface-herdr':
+      '@agent-conductor/surface-herdr':
         specifier: workspace:*
         version: link:../surfaces/herdr
-      '@openconductor/surface-hyprland':
+      '@agent-conductor/surface-hyprland':
         specifier: workspace:*
         version: link:../surfaces/hyprland
-      '@openconductor/surface-sdk':
+      '@agent-conductor/surface-sdk':
         specifier: workspace:*
         version: link:../surface-sdk
-      '@openconductor/surface-tmux':
+      '@agent-conductor/surface-tmux':
         specifier: workspace:*
         version: link:../surfaces/tmux
       eventsource:
@@ -191,13 +191,13 @@ importers:
 
   packages/render:
     dependencies:
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
 
   packages/runtime-sdk:
     dependencies:
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
       execa:
@@ -209,10 +209,10 @@ importers:
 
   packages/runtimes/claude:
     dependencies:
-      '@openconductor/runtime-sdk':
+      '@agent-conductor/runtime-sdk':
         specifier: workspace:*
         version: link:../../runtime-sdk
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../../shared
       execa:
@@ -221,10 +221,10 @@ importers:
 
   packages/runtimes/codex:
     dependencies:
-      '@openconductor/runtime-sdk':
+      '@agent-conductor/runtime-sdk':
         specifier: workspace:*
         version: link:../../runtime-sdk
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../../shared
       execa:
@@ -233,10 +233,10 @@ importers:
 
   packages/runtimes/gemini:
     dependencies:
-      '@openconductor/runtime-sdk':
+      '@agent-conductor/runtime-sdk':
         specifier: workspace:*
         version: link:../../runtime-sdk
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../../shared
       execa:
@@ -245,10 +245,10 @@ importers:
 
   packages/runtimes/opencode:
     dependencies:
-      '@openconductor/runtime-sdk':
+      '@agent-conductor/runtime-sdk':
         specifier: workspace:*
         version: link:../../runtime-sdk
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../../shared
       execa:
@@ -263,58 +263,58 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.18.1
         version: 1.30.0(zod@3.25.76)
-      '@openconductor/channel-cli':
+      '@agent-conductor/channel-cli':
         specifier: workspace:*
         version: link:../channels/cli
-      '@openconductor/channel-sdk':
+      '@agent-conductor/channel-sdk':
         specifier: workspace:*
         version: link:../channel-sdk
-      '@openconductor/channel-telegram':
+      '@agent-conductor/channel-telegram':
         specifier: workspace:*
         version: link:../channels/telegram
-      '@openconductor/channel-web':
+      '@agent-conductor/channel-web':
         specifier: workspace:*
         version: link:../channels/web
-      '@openconductor/core':
+      '@agent-conductor/core':
         specifier: workspace:*
         version: link:../core
-      '@openconductor/db':
+      '@agent-conductor/db':
         specifier: workspace:*
         version: link:../db
-      '@openconductor/plugin-sdk':
+      '@agent-conductor/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk
-      '@openconductor/runtime-claude':
+      '@agent-conductor/runtime-claude':
         specifier: workspace:*
         version: link:../runtimes/claude
-      '@openconductor/runtime-codex':
+      '@agent-conductor/runtime-codex':
         specifier: workspace:*
         version: link:../runtimes/codex
-      '@openconductor/runtime-gemini':
+      '@agent-conductor/runtime-gemini':
         specifier: workspace:*
         version: link:../runtimes/gemini
-      '@openconductor/runtime-opencode':
+      '@agent-conductor/runtime-opencode':
         specifier: workspace:*
         version: link:../runtimes/opencode
-      '@openconductor/runtime-sdk':
+      '@agent-conductor/runtime-sdk':
         specifier: workspace:*
         version: link:../runtime-sdk
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
-      '@openconductor/surface-headless':
+      '@agent-conductor/surface-headless':
         specifier: workspace:*
         version: link:../surfaces/headless
-      '@openconductor/surface-herdr':
+      '@agent-conductor/surface-herdr':
         specifier: workspace:*
         version: link:../surfaces/herdr
-      '@openconductor/surface-hyprland':
+      '@agent-conductor/surface-hyprland':
         specifier: workspace:*
         version: link:../surfaces/hyprland
-      '@openconductor/surface-sdk':
+      '@agent-conductor/surface-sdk':
         specifier: workspace:*
         version: link:../surface-sdk
-      '@openconductor/surface-tmux':
+      '@agent-conductor/surface-tmux':
         specifier: workspace:*
         version: link:../surfaces/tmux
       hono:
@@ -357,7 +357,7 @@ importers:
 
   packages/surface-sdk:
     dependencies:
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
       zod:
@@ -366,19 +366,19 @@ importers:
 
   packages/surfaces/headless:
     dependencies:
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../../shared
-      '@openconductor/surface-sdk':
+      '@agent-conductor/surface-sdk':
         specifier: workspace:*
         version: link:../../surface-sdk
 
   packages/surfaces/herdr:
     dependencies:
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../../shared
-      '@openconductor/surface-sdk':
+      '@agent-conductor/surface-sdk':
         specifier: workspace:*
         version: link:../../surface-sdk
       execa:
@@ -387,10 +387,10 @@ importers:
 
   packages/surfaces/hyprland:
     dependencies:
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../../shared
-      '@openconductor/surface-sdk':
+      '@agent-conductor/surface-sdk':
         specifier: workspace:*
         version: link:../../surface-sdk
       execa:
@@ -399,10 +399,10 @@ importers:
 
   packages/surfaces/tmux:
     dependencies:
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../../shared
-      '@openconductor/surface-sdk':
+      '@agent-conductor/surface-sdk':
         specifier: workspace:*
         version: link:../../surface-sdk
       execa:
@@ -411,10 +411,10 @@ importers:
 
   packages/tui:
     dependencies:
-      '@openconductor/render':
+      '@agent-conductor/render':
         specifier: workspace:*
         version: link:../render
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
       eventsource:
@@ -439,7 +439,7 @@ importers:
 
   packages/ui:
     dependencies:
-      '@openconductor/shared':
+      '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared
       '@tanstack/react-query':

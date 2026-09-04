@@ -1,4 +1,4 @@
-/** Small interactive prompts. Hidden input is hand-rolled so `oc` needs no prompt dependency. */
+/** Small interactive prompts. Hidden input is hand-rolled so `conductor` needs no prompt dependency. */
 import { createInterface, type Interface } from 'node:readline';
 import { Writable } from 'node:stream';
 

@@ -3,8 +3,8 @@
  * the buttons; the TUI numbers the options and the web renders them as buttons, but the model is
  * identical so the two never drift.
  */
-import type { Decision } from '@openconductor/shared';
-import { decisionUiStatus } from '@openconductor/shared';
+import type { Decision } from '@agent-conductor/shared';
+import { decisionUiStatus } from '@agent-conductor/shared';
 import { formatAge, formatDiffStat, joinMeta, oneLine } from './format.js';
 import { redact } from './redact.js';
 import type { CardBodyLine, CardModel, CardOption, CardVariant } from './types.js';

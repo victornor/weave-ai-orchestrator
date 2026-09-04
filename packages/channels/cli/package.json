@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/channel-cli",
+  "name": "@agent-conductor/channel-cli",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,7 +14,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*",
-    "@openconductor/channel-sdk": "workspace:*"
+    "@agent-conductor/shared": "workspace:*",
+    "@agent-conductor/channel-sdk": "workspace:*"
   }
 }

@@ -3,7 +3,7 @@
  * Implemented by the engine module owner; signatures fixed here.
  */
 import type { WorkspaceContext, Registries } from '../context.js';
-import type { DaemonConfig, WorkspaceConfig, WorkspaceRegistry } from '@openconductor/shared';
+import type { DaemonConfig, WorkspaceConfig, WorkspaceRegistry } from '@agent-conductor/shared';
 export interface LoadOptions { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; stateDir?: string }
 export interface WorkspaceLoader {
   initWorkspace(dir: string, init: { id: string; name: string; ticketPrefix: string }): Promise<WorkspaceConfig>;

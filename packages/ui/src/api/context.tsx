@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { WorkspaceEvent } from '@openconductor/shared';
+import type { WorkspaceEvent } from '@agent-conductor/shared';
 import { EventStream } from './events';
 import type { ConnectionStatus } from './events';
 import { setWorkspaceId } from './client';

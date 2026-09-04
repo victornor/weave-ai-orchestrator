@@ -26,7 +26,7 @@ a:hover{color:#9AA3F5}
 <section style="padding:64px 60px 56px;border-bottom:1px solid rgba(255,255,255,.07);max-width:1180px">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:28px">
     <div style="width:22px;height:22px;border-radius:5px;background:#5E6AD2;display:flex;align-items:center;justify-content:center"><div style="width:9px;height:9px;background:#fff;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)"></div></div>
-    <div style="font:500 13px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.06em;color:#9CA1AA">OPENCONDUCTOR</div>
+    <div style="font:500 13px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.06em;color:#9CA1AA">AGENTCONDUCTOR</div>
     <div style="height:12px;width:1px;background:rgba(255,255,255,.14)"></div>
     <div style="font:400 13px/1 Inter,sans-serif;color:#6B7078">Design spec · v0.1 · dark-first</div>
   </div>
@@ -2049,7 +2049,7 @@ a:hover{color:#9AA3F5}
             <div>
               <div style="width:34px;height:34px;border-radius:8px;background:#5E6AD2;display:flex;align-items:center;justify-content:center;margin-bottom:18px"><div style="width:13px;height:13px;background:#fff;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)"></div></div>
               <div style="font:600 22px/1.25 Inter,sans-serif;color:#F2F3F5;letter-spacing:-.015em;margin-bottom:7px">Sign in</div>
-              <div style="font:400 13.5px/1.55 Inter,sans-serif;color:#6B7078">to <span style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#9CA1AA">oc.acme.dev</span></div>
+              <div style="font:400 13.5px/1.55 Inter,sans-serif;color:#6B7078">to <span style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#9CA1AA">conductor.acme.dev</span></div>
             </div>
             <div style="display:flex;flex-direction:column;gap:11px">
               <div style="height:48px;border:1px solid #282B31;background:#101114;border-radius:8px;display:flex;align-items:center;padding:0 14px;font:400 15px/1 Inter,sans-serif;color:#C6CAD1">victor</div>
@@ -2095,7 +2095,7 @@ a:hover{color:#9AA3F5}
               <div style="height:48px;border:1px solid #282B31;background:#101114;border-radius:8px;display:flex;align-items:center;padding:0 14px;font:400 15px/1 Inter,sans-serif;color:#4E535B">Repeat it</div>
               <div style="height:48px;border-radius:8px;background:#5E6AD2;display:flex;align-items:center;justify-content:center;font:500 15px/1 Inter,sans-serif;color:#fff;margin-top:5px">Create account</div>
             </div>
-            <div style="background:#101114;border:1px solid #1C1E22;border-radius:8px;padding:13px 14px;font:400 12px/1.6 'JetBrains Mono',monospace;color:#6B7078">then, from a terminal:<br><span style="color:#C6CAD1">oc login https://oc.acme.dev</span></div>
+            <div style="background:#101114;border:1px solid #1C1E22;border-radius:8px;padding:13px 14px;font:400 12px/1.6 'JetBrains Mono',monospace;color:#6B7078">then, from a terminal:<br><span style="color:#C6CAD1">conductor login https://conductor.acme.dev</span></div>
           </div>
         </div>
 
@@ -2167,7 +2167,7 @@ a:hover{color:#9AA3F5}
                   </div>
                 </sc-for>
               </div>
-              <div style="margin-top:12px;background:#101114;border:1px solid #1C1E22;border-radius:6px;padding:11px 13px;font:400 11.5px/1.6 'JetBrains Mono',monospace;color:#6B7078">add a terminal: <span style="color:#C6CAD1">oc login https://oc.acme.dev</span></div>
+              <div style="margin-top:12px;background:#101114;border:1px solid #1C1E22;border-radius:6px;padding:11px 13px;font:400 11.5px/1.6 'JetBrains Mono',monospace;color:#6B7078">add a terminal: <span style="color:#C6CAD1">conductor login https://conductor.acme.dev</span></div>
             </div>
           </div>
         </div>
@@ -2215,7 +2215,7 @@ a:hover{color:#9AA3F5}
             <div style="width:12px;height:12px;background:#E5484D;clip-path:polygon(0 0,100% 0,50% 100%)"></div>
             <div>
               <div style="font:600 20px/1.25 Inter,sans-serif;color:#F2F3F5;letter-spacing:-.015em;margin-bottom:8px">Cannot reach the daemon</div>
-              <div style="font:400 13.5px/1.6 Inter,sans-serif;color:#8A8F98"><span style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#C6CAD1">oc.acme.dev</span> did not respond in 10 seconds. Nothing was lost; the daemon keeps running without the web app.</div>
+              <div style="font:400 13.5px/1.6 Inter,sans-serif;color:#8A8F98"><span style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#C6CAD1">conductor.acme.dev</span> did not respond in 10 seconds. Nothing was lost; the daemon keeps running without the web app.</div>
             </div>
             <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#E5484D">NET_DAEMON_UNREACHABLE · last seen 3m ago</div>
             <div style="display:flex;gap:8px">
@@ -2427,7 +2427,7 @@ class Component extends DCLogic {
         {code:'AUTH_BAD_CREDENTIALS', t:'Wrong password.', d:'Four attempts left before this account locks for 15 minutes.', c:'#E5484D'},
         {code:'AUTH_LOCKED', t:'Locked for 12:41.', d:'Five failed attempts. The lock clears on its own; nothing to do but wait.', c:'#FF6B4A'},
         {code:'AUTH_SESSION_EXPIRED', t:'Session expired.', d:'You were signed out after 30 days. Your queued messages are still here.', c:'#E9A23B'},
-        {code:'NET_DAEMON_UNREACHABLE', t:'Cannot reach the daemon.', d:'oc.acme.dev did not respond. Check the server, then retry.', c:'#E5484D'}
+        {code:'NET_DAEMON_UNREACHABLE', t:'Cannot reach the daemon.', d:'conductor.acme.dev did not respond. Check the server, then retry.', c:'#E5484D'}
       ],
       kbCards: [
         {n:'workspace', size:'3.1k / 8k',  pct:'39%', cur:'curated 1d ago',  c:'#5E6AD2', mc:'#5E6AD2', bd:'#1C1E22'},
@@ -2493,7 +2493,7 @@ class Component extends DCLogic {
       devices: [
         {n:'Victor’s phone', k:'web', seen:'now',      ip:'82.14.9.201', me:true,  c:'#3FB950'},
         {n:'MacBook Pro',    k:'web', seen:'2h ago',   ip:'82.14.9.14',  me:false, c:'#8A8F98'},
-        {n:'oc-cli @ homelab', k:'CLI', seen:'11m ago',ip:'10.0.4.2',    me:false, c:'#8A8F98'},
+        {n:'ac-cli @ homelab', k:'CLI', seen:'11m ago',ip:'10.0.4.2',    me:false, c:'#8A8F98'},
         {n:'presenter @ tower', k:'presenter', seen:'3d ago', ip:'10.0.4.9', me:false, c:'#6B7078'}
       ].map(d=>({...d, badge: d.me ? 'this device' : '', bd: d.me ? 'rgba(94,106,210,.35)' : '#1C1E22'})),
       connStates: [
@@ -2564,7 +2564,7 @@ class Component extends DCLogic {
           {s:'Focus in graph', d:'theming centred, four neighbours listed', c:'#5E6AD2'}
         ]},
         {t:'Cold open on a phone', steps:[
-          {s:'Load', d:'no session → sign in to oc.acme.dev', c:'#8A8F98'},
+          {s:'Load', d:'no session → sign in to conductor.acme.dev', c:'#8A8F98'},
           {s:'Password', d:'wrong once: four attempts left, named code', c:'#E5484D'},
           {s:'TOTP', d:'six boxes, paste fills all six', c:'#5E6AD2'},
           {s:'Remember device', d:'named “Victor’s phone”, editable inline', c:'#7C87F0'},

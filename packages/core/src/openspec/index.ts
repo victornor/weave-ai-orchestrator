@@ -9,8 +9,8 @@
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { nowIso, type Db } from '@openconductor/db';
-import { OcError } from '@openconductor/shared';
+import { nowIso, type Db } from '@agent-conductor/db';
+import { OcError } from '@agent-conductor/shared';
 import type { Actor, CoreServices, OpenSpecService, OpenSpecStatus } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';

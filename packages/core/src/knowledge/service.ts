@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { knowledgeRow, newId, nowIso, type Db } from '@openconductor/db';
+import { knowledgeRow, newId, nowIso, type Db } from '@agent-conductor/db';
 import {
   estimateTokens, OcError,
   type Decision, type KnowledgeRevisionReason, type KnowledgeScope,
-} from '@openconductor/shared';
+} from '@agent-conductor/shared';
 import type { Actor, CoreServices, KnowledgeService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -186,7 +186,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     const doc = parseDoc(text);
     const s = findSection(doc, 'Learnings');
     if (!s || !s.lines.length) return text;
-    s.lines = ['(truncated, call oc_knowledge_get for the full Learnings section)'];
+    s.lines = ['(truncated, call ac_knowledge_get for the full Learnings section)'];
     return renderDoc(doc);
   }
 
@@ -356,7 +356,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       if (estimateTokens(text) > budget) {
         // Hard cap: keep the head, which is SHARED.md and the rules, and say so.
         const limit = Math.floor(budget * 3.5);
-        text = `${text.slice(0, limit)}\n\n(truncated, call oc_knowledge_get)\n`;
+        text = `${text.slice(0, limit)}\n\n(truncated, call ac_knowledge_get)\n`;
       }
       return { text, tokens: estimateTokens(text), truncated };
     },

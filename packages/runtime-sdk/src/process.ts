@@ -39,4 +39,4 @@ export function classifyError(exitCode: number | null, stderr: string): { code: 
   if (/enoent|command not found|no such file/.test(s)) return { code: 'tooling', family: 'tooling', message: 'runtime binary or dependency missing' };
   return { code: `exit_${exitCode ?? 'signal'}`, family: 'unknown', message: (stderr.trim().split('\n').pop() || `exit ${exitCode}`).slice(0, 500) };
 }
-import type { RunErrorFamily } from '@openconductor/shared';
+import type { RunErrorFamily } from '@agent-conductor/shared';

@@ -1,4 +1,4 @@
-/** Certificate pinning for `oc login --pin` (PLAN §4.4): self-signed daemons on a LAN or tailnet. */
+/** Certificate pinning for `conductor login --pin` (PLAN §4.4): self-signed daemons on a LAN or tailnet. */
 import { connect } from 'node:tls';
 import { createHash } from 'node:crypto';
 
@@ -33,7 +33,7 @@ export async function applyCertPin(url: string, pin: string): Promise<void> {
   if (!url.startsWith('https:')) return;
   const seen = await fetchCertPin(url);
   if (seen.pin !== pin) {
-    throw new Error(`certificate pin mismatch for ${url}: expected ${pin}, got ${seen.pin}. Re-run \`oc login ${url} --pin\` only if you changed the certificate yourself.`);
+    throw new Error(`certificate pin mismatch for ${url}: expected ${pin}, got ${seen.pin}. Re-run \`conductor login ${url} --pin\` only if you changed the certificate yourself.`);
   }
   process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
   // The pin was just verified out of band; Node's blanket warning about the env var is noise for this process.

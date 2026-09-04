@@ -1,5 +1,5 @@
 /**
- * A minimal third-party OpenConductor plugin (PLAN §17).
+ * A minimal third-party AgentConductor plugin (PLAN §17).
  *
  * It registers two things:
  *   - a channel adapter `echo` that logs every outbound message and never produces inbound ones,
@@ -9,7 +9,7 @@
  * Plain JavaScript on purpose: a plugin needs no build step and no TypeScript to be loadable.
  * See ../README.md for how to list it under `plugins:` in workspace.yaml.
  */
-import { definePlugin } from '@openconductor/plugin-sdk';
+import { definePlugin } from '@agent-conductor/plugin-sdk';
 
 /** ChannelAdapter (packages/channel-sdk). Outbound only: `start()` never calls `ctx.inbound`. */
 function echoChannel(logger, options) {

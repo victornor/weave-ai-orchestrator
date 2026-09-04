@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { OcError, type Project, type Ticket, type WorkspaceConfig } from '@openconductor/shared';
+import { OcError, type Project, type Ticket, type WorkspaceConfig } from '@agent-conductor/shared';
 
 const exec = promisify(execFile);
 async function git(args: string[], cwd: string, timeout = 60_000): Promise<{ ok: boolean; stdout: string; stderr: string }> {

@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/db",
+  "name": "@agent-conductor/db",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,7 +14,7 @@
     "build": "tsc -b && cp -r src/migrations dist/"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*",
+    "@agent-conductor/shared": "workspace:*",
     "ulid": "^3.0.1"
   },
   "devDependencies": {}

@@ -38,9 +38,9 @@ export function RunRoute(): React.ReactElement {
   return (
     <Page>
       <PageHeader
-        title={<span className="oc-mono">{r.id.slice(0, 12)}</span>}
+        title={<span className="ac-mono">{r.id.slice(0, 12)}</span>}
         meta={
-          <span className="oc-mono">
+          <span className="ac-mono">
             {[agent?.name, ticket?.identifier, r.runtimeId, r.model, r.status].filter(Boolean).join(' · ')}
           </span>
         }
@@ -63,18 +63,18 @@ export function RunRoute(): React.ReactElement {
         </div>
 
         {phases?.length ? (
-          <section className="oc-card p-3.5">
-            <div className="oc-label mb-2.5">Phase timings</div>
+          <section className="ac-card p-3.5">
+            <div className="ac-label mb-2.5">Phase timings</div>
             <div className="flex flex-col gap-1.5">
               {phases.map((p) => {
                 const max = Math.max(1, ...phases.map((x) => x.durationMs));
                 return (
                   <div key={p.phase} className="flex items-center gap-3">
-                    <span className="oc-mono w-36 flex-none text-micro text-text-3">{p.phase}</span>
+                    <span className="ac-mono w-36 flex-none text-micro text-text-3">{p.phase}</span>
                     <span className="h-1.5 flex-1 overflow-hidden rounded-pill bg-bg-2">
                       <span className="block h-full rounded-pill bg-accent opacity-75" style={{ width: `${(p.durationMs / max) * 100}%` }} />
                     </span>
-                    <span className="oc-mono w-16 flex-none text-right text-micro text-text-2">{duration(p.durationMs)}</span>
+                    <span className="ac-mono w-16 flex-none text-right text-micro text-text-2">{duration(p.durationMs)}</span>
                   </div>
                 );
               })}
@@ -82,8 +82,8 @@ export function RunRoute(): React.ReactElement {
           </section>
         ) : null}
 
-        <section className="oc-card">
-          <div className="oc-label border-b border-line-1 px-3.5 py-2.5">Transcript</div>
+        <section className="ac-card">
+          <div className="ac-label border-b border-line-1 px-3.5 py-2.5">Transcript</div>
           {events.isLoading ? <SkeletonRows rows={5} /> : <Transcript events={events.data ?? []} />}
         </section>
       </PageBody>

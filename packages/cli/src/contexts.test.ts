@@ -11,9 +11,9 @@ let dir: string;
 const savedEnv = { ...process.env };
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'oc-contexts-'));
-  process.env['OC_CONTEXTS_FILE'] = join(dir, 'contexts.yaml');
-  delete process.env['OC_WORKSPACE'];
+  dir = mkdtempSync(join(tmpdir(), 'ac-contexts-'));
+  process.env['AC_CONTEXTS_FILE'] = join(dir, 'contexts.yaml');
+  delete process.env['AC_WORKSPACE'];
 });
 
 afterEach(() => {
@@ -69,7 +69,7 @@ describe('contexts file', () => {
   it('suggests context names from urls', () => {
     expect(suggestContextName('http://127.0.0.1:7433')).toBe('local');
     expect(suggestContextName('http://localhost:7433')).toBe('local');
-    expect(suggestContextName('https://oc.example.com')).toBe('oc.example.com');
+    expect(suggestContextName('https://conductor.example.com')).toBe('conductor.example.com');
     expect(suggestContextName('not a url')).toBe('default');
   });
 
@@ -102,9 +102,9 @@ describe('workspace resolution', () => {
     const context = { url: 'http://x', token: 't', workspace: 'from-context' };
 
     expect(resolveWorkspaceId('from-flag', context, join(dir, 'ws'))).toBe('from-flag');
-    process.env['OC_WORKSPACE'] = 'from-env';
+    process.env['AC_WORKSPACE'] = 'from-env';
     expect(resolveWorkspaceId(null, context, join(dir, 'ws'))).toBe('from-env');
-    delete process.env['OC_WORKSPACE'];
+    delete process.env['AC_WORKSPACE'];
     expect(resolveWorkspaceId(null, context, join(dir, 'ws'))).toBe('from-context');
     expect(resolveWorkspaceId(null, null, join(dir, 'ws'))).toBe('from-file');
     expect(resolveWorkspaceId(null, null, dir)).toBeNull();

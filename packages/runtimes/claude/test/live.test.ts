@@ -2,21 +2,21 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { RuntimeEvent, TurnInput } from '@openconductor/runtime-sdk';
-import { RUN_REPORT_JSON_SCHEMA } from '@openconductor/shared';
+import type { RuntimeEvent, TurnInput } from '@agent-conductor/runtime-sdk';
+import { RUN_REPORT_JSON_SCHEMA } from '@agent-conductor/shared';
 import { adapter } from '../src/adapter.js';
 
-// Real `claude` turn. Opt in with OC_LIVE_RUNTIME_TESTS=1 (costs tokens, needs auth).
-const live = process.env['OC_LIVE_RUNTIME_TESTS'] === '1';
+// Real `claude` turn. Opt in with AC_LIVE_RUNTIME_TESTS=1 (costs tokens, needs auth).
+const live = process.env['AC_LIVE_RUNTIME_TESTS'] === '1';
 
 describe.skipIf(!live)('claude live turn', () => {
   it('returns a structured report matching the output schema', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'oc-live-claude-'));
+    const home = mkdtempSync(join(tmpdir(), 'ac-live-claude-'));
     try {
       const input: TurnInput = {
         runId: `live-${Date.now()}`, turnEpoch: 1, cwd: home, worktree: null,
         session: { policy: 'fresh', ref: null, isFirstTurn: true },
-        systemPrompt: { text: 'You are an OpenConductor test agent. Answer briefly.', mode: 'inject' },
+        systemPrompt: { text: 'You are an AgentConductor test agent. Answer briefly.', mode: 'inject' },
         prompt: 'Do nothing. Finish with the structured report: state "idle", summary "live runtime smoke test".',
         outputSchema: RUN_REPORT_JSON_SCHEMA as unknown as Record<string, unknown>,
         mcpServers: {}, env: {}, options: { model: 'haiku' },

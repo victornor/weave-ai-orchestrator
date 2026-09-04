@@ -1,19 +1,19 @@
-/** `oc agent inbox` and friends — the run-token surface for agents (PLAN §9.5). */
+/** `conductor agent inbox` and friends — the run-token surface for agents (PLAN §9.5). */
 import type { Command } from 'commander';
-import { oneLine } from '@openconductor/render';
+import { oneLine } from '@agent-conductor/render';
 import { ApiError } from '../api.js';
 import { emit, heading, style, table, write } from '../output.js';
 import { items, run, session } from './util.js';
 
 export function register(program: Command): void {
-  const agent = program.command('agent').description('agent-facing commands (need OC_RUN_TOKEN)');
+  const agent = program.command('agent').description('agent-facing commands (need AC_RUN_TOKEN)');
 
   agent
     .command('inbox', { isDefault: true })
     .description('what this agent has to do now')
     .action(async (_opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
-      if (!client.isAgent) throw new ApiError('forbidden', 'oc agent inbox needs OC_RUN_TOKEN (it is meant for agents inside a run)', 403);
+      if (!client.isAgent) throw new ApiError('forbidden', 'conductor agent inbox needs AC_RUN_TOKEN (it is meant for agents inside a run)', 403);
       const payload = await client.wget<Record<string, unknown>>('/agent/inbox');
       emit(payload, () => {
         const tickets = items<Record<string, unknown>>(payload['tickets']);
@@ -53,11 +53,11 @@ export function register(program: Command): void {
     .description('submit the structured final report for this turn')
     .action(async (json: string, _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
-      if (!client.isAgent) throw new ApiError('forbidden', 'oc agent report needs OC_RUN_TOKEN', 403);
+      if (!client.isAgent) throw new ApiError('forbidden', 'conductor agent report needs AC_RUN_TOKEN', 403);
       const raw = json === '-' ? await readStdin() : json;
       let parsed: unknown;
       try { parsed = JSON.parse(raw); } catch (cause) { throw new ApiError('validation', `report is not valid JSON: ${(cause as Error).message}`, 400); }
-      const result = await client.tool('oc_report', parsed as Record<string, unknown>);
+      const result = await client.tool('ac_report', parsed as Record<string, unknown>);
       emit(result, () => write(style.ok('report submitted')));
     }));
 
@@ -70,12 +70,12 @@ export function register(program: Command): void {
     .description('ask the human (or the conductor) a question and block until it is answered')
     .action(async (title: string[], opts: Record<string, unknown>, command: Command) => run(async () => {
       const { client } = await session(command);
-      if (!client.isAgent) throw new ApiError('forbidden', 'oc agent ask needs OC_RUN_TOKEN', 403);
+      if (!client.isAgent) throw new ApiError('forbidden', 'conductor agent ask needs AC_RUN_TOKEN', 403);
       const options = (opts['option'] as string[] | undefined ?? []).map((pair) => {
         const idx = pair.indexOf('=');
         return idx === -1 ? { key: pair, label: pair } : { key: pair.slice(0, idx), label: pair.slice(idx + 1) };
       });
-      const result = await client.tool('oc_ask', {
+      const result = await client.tool('ac_ask', {
         title: title.join(' '),
         context: String(opts['context'] ?? ''),
         options,
@@ -90,8 +90,8 @@ export function register(program: Command): void {
     .description('send a message to the human through the primary channel')
     .action(async (text: string[], _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
-      if (!client.isAgent) throw new ApiError('forbidden', 'oc agent human needs OC_RUN_TOKEN', 403);
-      const result = await client.tool('oc_human_send', { text: text.join(' ') });
+      if (!client.isAgent) throw new ApiError('forbidden', 'conductor agent human needs AC_RUN_TOKEN', 403);
+      const result = await client.tool('ac_human_send', { text: text.join(' ') });
       emit(result, () => write(style.ok('sent')));
     }));
 }

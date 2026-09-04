@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import type { RunEvent } from '@openconductor/shared';
+import type { RunEvent } from '@agent-conductor/shared';
 import { runEventsToTranscript } from '../lib/transcript';
 import { Transcript } from '../components/Transcript';
 import { markdownToHtml } from '../lib/markdown';
@@ -79,7 +79,7 @@ describe('markdown', () => {
 
 describe('qr', () => {
   it('produces a square matrix with the three finder patterns', () => {
-    const m = qrMatrix('otpauth://totp/OpenConductor:operator?secret=JBSWY3DPEHPK3PXP&issuer=OpenConductor');
+    const m = qrMatrix('otpauth://totp/AgentConductor:operator?secret=JBSWY3DPEHPK3PXP&issuer=AgentConductor');
     expect(m.length).toBeGreaterThanOrEqual(21);
     expect(m.every((row) => row.length === m.length)).toBe(true);
     for (const [r, c] of [

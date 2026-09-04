@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/core",
+  "name": "@agent-conductor/core",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,12 +14,12 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*",
-    "@openconductor/db": "workspace:*",
-    "@openconductor/runtime-sdk": "workspace:*",
-    "@openconductor/channel-sdk": "workspace:*",
-    "@openconductor/surface-sdk": "workspace:*",
-    "@openconductor/plugin-sdk": "workspace:*",
+    "@agent-conductor/shared": "workspace:*",
+    "@agent-conductor/db": "workspace:*",
+    "@agent-conductor/runtime-sdk": "workspace:*",
+    "@agent-conductor/channel-sdk": "workspace:*",
+    "@agent-conductor/surface-sdk": "workspace:*",
+    "@agent-conductor/plugin-sdk": "workspace:*",
     "zod": "^3.25.76",
     "pino": "^9.9.0",
     "yaml": "^2.8.1",

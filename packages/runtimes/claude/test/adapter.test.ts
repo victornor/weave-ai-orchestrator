@@ -28,8 +28,8 @@ describe('claude adapter', () => {
   });
 
   it('installs CLAUDE.md as an @AGENTS.md pointer, plus skills and settings', async () => {
-    const home = tmp('oc-home-');
-    const skill = tmp('oc-skill-');
+    const home = tmp('ac-home-');
+    const skill = tmp('ac-skill-');
     writeFileSync(join(skill, 'SKILL.md'), '# demo skill\n');
     await adapter.installInstructions({ path: home, kind: 'worker' }, { instructions: '# Charter\n', skills: [{ name: 'demo', dir: skill }] });
     expect(readFileSync(join(home, 'CLAUDE.md'), 'utf8')).toBe('@AGENTS.md\n');

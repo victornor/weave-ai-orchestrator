@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { BuiltCommand, McpServerConfig, TurnInput } from '@openconductor/runtime-sdk';
+import type { BuiltCommand, McpServerConfig, TurnInput } from '@agent-conductor/runtime-sdk';
 import { asGeminiSession, isUuid } from './session.js';
 
 export const SETTINGS_RELATIVE_PATH = '.gemini/settings.json';

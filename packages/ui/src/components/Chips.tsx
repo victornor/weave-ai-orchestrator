@@ -1,4 +1,4 @@
-import type { UiStatus } from '@openconductor/shared';
+import type { UiStatus } from '@agent-conductor/shared';
 import { StatusGlyph } from './StatusGlyph';
 import { cx } from '../lib/cx';
 
@@ -21,13 +21,13 @@ export function TicketChip({
       onClick={onClick}
       className={cx(
         'inline-flex max-w-full items-center gap-1.5 rounded-r4 border border-line-2 bg-bg-2 px-2 py-1 align-[-3px]',
-        'transition-colors duration-(--dur-fast) ease-oc hover:bg-bg-3',
+        'transition-colors duration-(--dur-fast) ease-ac hover:bg-bg-3',
         className,
       )}
     >
       <StatusGlyph status={status} size="xs" />
-      <span className="oc-mono text-micro text-text-soft">{identifier}</span>
-      {title ? <span className="oc-truncate text-micro text-text-3">{title}</span> : null}
+      <span className="ac-mono text-micro text-text-soft">{identifier}</span>
+      {title ? <span className="ac-truncate text-micro text-text-3">{title}</span> : null}
     </button>
   );
 }
@@ -51,13 +51,13 @@ export function WorkerChip({
       onClick={onClick}
       className={cx(
         'inline-flex max-w-full items-center gap-1.5 rounded-r4 border border-line-2 bg-bg-2 px-2 py-1',
-        'transition-colors duration-(--dur-fast) ease-oc hover:bg-bg-3',
+        'transition-colors duration-(--dur-fast) ease-ac hover:bg-bg-3',
         className,
       )}
     >
       <StatusGlyph status={status} size="xs" pulse={status === 'working'} />
       <span className="text-micro text-text-soft">{name}</span>
-      {note ? <span className="oc-mono oc-truncate text-micro text-text-3">{note}</span> : null}
+      {note ? <span className="ac-mono ac-truncate text-micro text-text-3">{note}</span> : null}
     </button>
   );
 }
@@ -67,7 +67,7 @@ export function CommandChip({ command, onClick }: { command: string; onClick?: (
     <button
       type="button"
       onClick={onClick}
-      className="oc-mono inline-flex items-center rounded-r4 border border-accent-edge bg-accent-tint px-2 py-1 text-micro text-accent-link"
+      className="ac-mono inline-flex items-center rounded-r4 border border-accent-edge bg-accent-tint px-2 py-1 text-micro text-accent-link"
     >
       {command}
     </button>

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { nowIso } from '@openconductor/db';
-import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, type Agent, type KnowledgeScope, type Run, type Ticket } from '@openconductor/shared';
+import { nowIso } from '@agent-conductor/db';
+import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, type Agent, type KnowledgeScope, type Run, type Ticket } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
@@ -334,7 +334,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         try {
           deps().wake.enqueue(worker.id, {
             source: 'merge_approved',
-            reason: `${row.identifier}: ${note} — do not merge again, just report oc_ticket_merge_done`,
+            reason: `${row.identifier}: ${note} — do not merge again, just report ac_ticket_merge_done`,
             payload: { ticketId: row.ticketId, prUrl: row.url, mergeCommit: pr.mergeCommit ?? null, mergedOnForge: true, note },
             idempotencyKey: `reconcile-merged:${row.ticketId}`,
             requestedBy: SYSTEM,

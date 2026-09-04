@@ -1,10 +1,10 @@
-import { newId, nowIso, ticketRow, type Db } from '@openconductor/db';
+import { newId, nowIso, ticketRow, type Db } from '@agent-conductor/db';
 import {
   OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, estimateTokens,
   type CommentKind, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
-} from '@openconductor/shared';
+} from '@agent-conductor/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
-import type { Project } from '@openconductor/shared';
+import type { Project } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { checkTransition, openspecChangeName, type GuardFacts } from './guards.js';
@@ -14,7 +14,7 @@ import { existsSync } from 'node:fs';
 
 function ticketBranchFor(t: { identifier: string; title: string }): string {
   const slug = t.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
-  return `oc/${t.identifier.toLowerCase()}-${slug}`;
+  return `ac/${t.identifier.toLowerCase()}-${slug}`;
 }
 
 interface ProjectRow { id: string; slug: string; clonePath: string; openspecEnabled: number; policies: Record<string, unknown> | null }

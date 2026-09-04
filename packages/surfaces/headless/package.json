@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/surface-headless",
+  "name": "@agent-conductor/surface-headless",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,7 +14,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*",
-    "@openconductor/surface-sdk": "workspace:*"
+    "@agent-conductor/shared": "workspace:*",
+    "@agent-conductor/surface-sdk": "workspace:*"
   }
 }

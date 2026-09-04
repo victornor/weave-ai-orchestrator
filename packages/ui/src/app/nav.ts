@@ -1,4 +1,4 @@
-import type { UiStatus } from '@openconductor/shared';
+import type { UiStatus } from '@agent-conductor/shared';
 
 export interface NavItem {
   key: string;

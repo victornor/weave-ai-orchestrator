@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { RuntimeEvent } from '@openconductor/runtime-sdk';
+import type { RuntimeEvent } from '@agent-conductor/runtime-sdk';
 import { createClaudeParser } from '../src/events.js';
 
 // Fixtures: recorded live from claude 2.1.258 on 2026-09-03 (`claude -p --output-format

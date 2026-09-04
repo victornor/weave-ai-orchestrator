@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/surface-herdr",
+  "name": "@agent-conductor/surface-herdr",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,8 +14,8 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*",
-    "@openconductor/surface-sdk": "workspace:*",
+    "@agent-conductor/shared": "workspace:*",
+    "@agent-conductor/surface-sdk": "workspace:*",
     "execa": "^9.6.0"
   },
   "devDependencies": {}

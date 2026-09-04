@@ -1,4 +1,4 @@
-import type { UsageGrain, UsageWindow } from '@openconductor/shared';
+import type { UsageGrain, UsageWindow } from '@agent-conductor/shared';
 import { Segmented } from './Tabs';
 import { cx } from '../lib/cx';
 
@@ -45,7 +45,7 @@ export function WindowGrainPicker({
             aria-label="Start date"
             value={custom?.start.slice(0, 10) ?? ''}
             onChange={(e) => onCustom({ start: new Date(e.target.value).toISOString(), end: custom?.end ?? new Date().toISOString() })}
-            className="oc-mono h-7 rounded-r4 border border-line-2 bg-bg-1 px-2 text-micro text-text-1"
+            className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-1 px-2 text-micro text-text-1"
           />
           <span className="text-micro text-text-3">→</span>
           <input
@@ -53,7 +53,7 @@ export function WindowGrainPicker({
             aria-label="End date"
             value={custom?.end.slice(0, 10) ?? ''}
             onChange={(e) => onCustom({ start: custom?.start ?? new Date().toISOString(), end: new Date(e.target.value).toISOString() })}
-            className="oc-mono h-7 rounded-r4 border border-line-2 bg-bg-1 px-2 text-micro text-text-1"
+            className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-1 px-2 text-micro text-text-1"
           />
         </div>
       ) : null}

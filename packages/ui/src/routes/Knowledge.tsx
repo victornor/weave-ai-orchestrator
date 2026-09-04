@@ -39,12 +39,12 @@ export function KnowledgeRoute(): React.ReactElement {
         title="Knowledge & Specs"
         actions={
           <label className="flex items-center gap-2">
-            <span className="oc-label">project</span>
+            <span className="ac-label">project</span>
             <select
               value={project}
               onChange={(e) => setProject(e.target.value)}
               aria-label="Project"
-              className="oc-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1"
+              className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1"
             >
               <option value="">all</option>
               {(projects.data ?? []).map((p) => (
@@ -99,9 +99,9 @@ function SearchResults({ hits, loading }: { hits: ReturnType<typeof useSearch>['
           <Badge tone={h.kind === 'change' ? 'modified' : h.kind === 'requirement' ? 'added' : 'neutral'}>{h.kind}</Badge>
           <div className="min-w-0 flex-1">
             <div className="text-meta text-text-1">{h.title}</div>
-            {h.subtitle ? <div className="oc-mono mt-0.5 text-micro text-text-3">{h.subtitle}</div> : null}
+            {h.subtitle ? <div className="ac-mono mt-0.5 text-micro text-text-3">{h.subtitle}</div> : null}
           </div>
-          {h.projectSlug ? <span className="oc-mono text-nano text-text-4">{h.projectSlug}</span> : null}
+          {h.projectSlug ? <span className="ac-mono text-nano text-text-4">{h.projectSlug}</span> : null}
         </div>
       ))}
     </div>
@@ -137,8 +137,8 @@ function KnowledgePanel(): React.ReactElement {
         ))}
       </div>
       {index.data?.warnings.length ? (
-        <div className="oc-card border-working/30 p-3.5">
-          <div className="oc-label mb-1.5">Lint</div>
+        <div className="ac-card border-working/30 p-3.5">
+          <div className="ac-label mb-1.5">Lint</div>
           <ul className="flex flex-col gap-1">
             {index.data.warnings.map((w, i) => (
               <li key={i} className="text-micro text-text-2">
@@ -161,9 +161,9 @@ function KnowledgeDocPanel({ scope, project, onClose }: { scope: string; project
   const [body, setBody] = useState('');
 
   return (
-    <section className="oc-card">
+    <section className="ac-card">
       <header className="flex items-center gap-2 border-b border-line-1 px-3.5 py-2.5">
-        <span className="oc-mono text-micro text-text-2">{doc.data?.path ?? scope}</span>
+        <span className="ac-mono text-micro text-text-2">{doc.data?.path ?? scope}</span>
         <div className="flex-1" />
         {editing ? (
           <>
@@ -206,7 +206,7 @@ function KnowledgeDocPanel({ scope, project, onClose }: { scope: string; project
             value={body}
             onChange={(e) => setBody(e.target.value)}
             aria-label="Knowledge body"
-            className="oc-mono h-96 w-full resize-y rounded-r6 border border-line-2 bg-bg-input p-3 text-micro leading-relaxed text-text-1 outline-none"
+            className="ac-mono h-96 w-full resize-y rounded-r6 border border-line-2 bg-bg-input p-3 text-micro leading-relaxed text-text-1 outline-none"
           />
         ) : (
           <Markdown source={doc.data?.body ?? ''} />
@@ -214,13 +214,13 @@ function KnowledgeDocPanel({ scope, project, onClose }: { scope: string; project
       </div>
       {revisions.data?.length ? (
         <div className="border-t border-line-1 p-3.5">
-          <div className="oc-label mb-2">Revisions</div>
+          <div className="ac-label mb-2">Revisions</div>
           <div className="flex flex-col gap-1.5">
             {revisions.data.slice(0, 8).map((r) => (
               <div key={r.revision} className="flex items-center gap-3">
-                <span className="oc-mono text-micro text-text-3">r{r.revision}</span>
+                <span className="ac-mono text-micro text-text-3">r{r.revision}</span>
                 <span className="flex-1 text-micro text-text-2">{r.reason}</span>
-                <span className="oc-mono text-nano text-text-4">{ago(r.createdAt)}</span>
+                <span className="ac-mono text-nano text-text-4">{ago(r.createdAt)}</span>
                 <button type="button" className="text-micro text-accent-link" onClick={() => mutate.mutate({ scope, ...(project ? { project } : {}), op: 'revert', revision: r.revision })}>
                   Revert
                 </button>
@@ -258,7 +258,7 @@ function SpecsPanel({ project }: { project: string }): React.ReactElement {
           value={view}
           onChange={setView}
         />
-        <span className="oc-mono text-nano text-text-4">specs are read-only — they change through tickets</span>
+        <span className="ac-mono text-nano text-text-4">specs are read-only — they change through tickets</span>
       </div>
 
       {view === 'graph' ? (
@@ -271,33 +271,33 @@ function SpecsPanel({ project }: { project: string }): React.ReactElement {
         <EmptyState title="No capabilities yet." detail="They appear once a change is archived into the main specs." />
       ) : (
         <>
-          <div className="oc-card divide-y divide-line-1">
+          <div className="ac-card divide-y divide-line-1">
             {(capabilities.data ?? []).map((c) => (
               <button key={c.capability} type="button" onClick={() => setCapability(c.capability)} className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left hover:bg-bg-2">
                 <StatusGlyph status={c.pendingChanges.length ? 'working' : 'idle'} size="xs" />
-                <span className="oc-mono flex-1 text-meta text-text-1">{c.capability}</span>
+                <span className="ac-mono flex-1 text-meta text-text-1">{c.capability}</span>
                 <span className="text-micro text-text-3">{c.requirementCount} requirements</span>
                 {c.pendingChanges.length ? (
-                  <span className="oc-mono text-nano text-working">{c.pendingChanges.map((p) => p.ticketIdentifier ?? p.changeName).join(' · ')}</span>
+                  <span className="ac-mono text-nano text-working">{c.pendingChanges.map((p) => p.ticketIdentifier ?? p.changeName).join(' · ')}</span>
                 ) : null}
-                <span className="oc-mono text-nano text-text-4">{ago(c.updatedAt)}</span>
+                <span className="ac-mono text-nano text-text-4">{ago(c.updatedAt)}</span>
               </button>
             ))}
           </div>
 
           <section>
-            <div className="oc-label mb-2">Changes</div>
-            <div className="oc-card divide-y divide-line-1">
+            <div className="ac-label mb-2">Changes</div>
+            <div className="ac-card divide-y divide-line-1">
               {(changes.data ?? []).map((c) => (
                 <button key={c.changeName} type="button" onClick={() => setChange(c.changeName)} className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left hover:bg-bg-2">
                   <Badge tone={c.state === 'active' ? 'modified' : 'neutral'}>{c.state}</Badge>
-                  <span className="oc-mono flex-1 text-meta text-text-1">{c.changeName}</span>
+                  <span className="ac-mono flex-1 text-meta text-text-1">{c.changeName}</span>
                   {c.taskProgress ? (
-                    <span className="oc-mono text-micro text-text-3">
+                    <span className="ac-mono text-micro text-text-3">
                       {c.taskProgress.done}/{c.taskProgress.total} tasks
                     </span>
                   ) : null}
-                  {c.ticketIdentifier ? <span className="oc-mono text-micro text-text-3">{c.ticketIdentifier}</span> : null}
+                  {c.ticketIdentifier ? <span className="ac-mono text-micro text-text-3">{c.ticketIdentifier}</span> : null}
                 </button>
               ))}
             </div>
@@ -331,7 +331,7 @@ function CapabilityPage({
         <Button variant="link" onClick={onBack}>
           ← capabilities
         </Button>
-        <span className="oc-mono text-head text-text-strong">{capability}</span>
+        <span className="ac-mono text-head text-text-strong">{capability}</span>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_16rem]">
@@ -345,25 +345,25 @@ function CapabilityPage({
               )}
             >
               <div className="mb-1.5 flex items-center gap-2">
-                <span className="oc-mono text-micro text-text-3">{r.name || r.id}</span>
+                <span className="ac-mono text-micro text-text-3">{r.name || r.id}</span>
                 {r.delta ? (
                   <>
                     <Badge tone={DELTA_TONE[r.delta.kind]}>{r.delta.kind}</Badge>
-                    <span className="oc-mono text-nano text-text-3">
+                    <span className="ac-mono text-nano text-text-3">
                       {r.delta.ticketIdentifier ?? r.delta.changeName} · {r.delta.state}
                     </span>
                   </>
                 ) : null}
                 <div className="flex-1" />
-                <span className="oc-mono text-nano text-text-4">{r.scenarios.length} scenarios</span>
+                <span className="ac-mono text-nano text-text-4">{r.scenarios.length} scenarios</span>
               </div>
               <p className={cx('text-meta leading-relaxed', r.delta?.kind === 'REMOVED' ? 'text-text-3 line-through' : 'text-text-body')}>{r.text}</p>
               {r.scenarios.length ? (
                 <details className="mt-2">
-                  <summary className="oc-mono cursor-pointer text-nano text-text-4">scenarios</summary>
+                  <summary className="ac-mono cursor-pointer text-nano text-text-4">scenarios</summary>
                   <div className="mt-2 flex flex-col gap-1">
                     {r.scenarios.map((s, i) => (
-                      <div key={i} className="oc-mono text-micro text-text-2">
+                      <div key={i} className="ac-mono text-micro text-text-2">
                         {s.steps?.length ? s.steps.map((st) => `${st.word} ${st.text}`).join(' · ') : s.text}
                       </div>
                     ))}
@@ -375,11 +375,11 @@ function CapabilityPage({
         </div>
 
         <aside className="flex flex-col gap-2">
-          <div className="oc-label">Change history</div>
+          <div className="ac-label">Change history</div>
           {detail.data.history.map((h) => (
-            <button key={h.changeName} type="button" onClick={() => onOpenChange(h.changeName)} className="oc-card px-3 py-2 text-left hover:bg-bg-2">
-              <div className="oc-mono text-micro text-text-1">{h.changeName}</div>
-              <div className="oc-mono mt-1 flex items-center gap-2 text-nano text-text-3">
+            <button key={h.changeName} type="button" onClick={() => onOpenChange(h.changeName)} className="ac-card px-3 py-2 text-left hover:bg-bg-2">
+              <div className="ac-mono text-micro text-text-1">{h.changeName}</div>
+              <div className="ac-mono mt-1 flex items-center gap-2 text-nano text-text-3">
                 {h.ticketIdentifier ? <span>{h.ticketIdentifier}</span> : null}
                 {h.prUrl ? <span>PR</span> : null}
                 <span className={h.state === 'archived' ? 'text-done' : 'text-working'}>{h.state}</span>
@@ -406,12 +406,12 @@ function ChangePage({ project, name, onBack }: { project: string; name: string; 
         <Button variant="link" onClick={onBack}>
           ← specs
         </Button>
-        <span className="oc-mono text-head text-text-strong">{c.changeName}</span>
+        <span className="ac-mono text-head text-text-strong">{c.changeName}</span>
         <Badge tone={c.state === 'active' ? 'modified' : 'neutral'}>{c.state}</Badge>
       </div>
 
-      <div className="oc-card p-3.5">
-        <div className="oc-label mb-2">
+      <div className="ac-card p-3.5">
+        <div className="ac-label mb-2">
           Tasks · {done}/{c.tasks.length}
         </div>
         <div className="mb-3 h-1.5 overflow-hidden rounded-pill bg-bg-3">
@@ -428,20 +428,20 @@ function ChangePage({ project, name, onBack }: { project: string; name: string; 
       </div>
 
       {c.proposal ? (
-        <section className="oc-card p-3.5">
-          <div className="oc-label mb-2">Proposal</div>
+        <section className="ac-card p-3.5">
+          <div className="ac-label mb-2">Proposal</div>
           <Markdown source={c.proposal} />
         </section>
       ) : null}
       {c.design ? (
-        <section className="oc-card p-3.5">
-          <div className="oc-label mb-2">Design</div>
+        <section className="ac-card p-3.5">
+          <div className="ac-label mb-2">Design</div>
           <Markdown source={c.design} />
         </section>
       ) : null}
       {c.deltas.map((d) => (
-        <section key={`${d.capability}-${d.kind}`} className="oc-card p-3.5">
-          <div className="oc-label mb-2">
+        <section key={`${d.capability}-${d.kind}`} className="ac-card p-3.5">
+          <div className="ac-label mb-2">
             {d.kind} · {d.capability}
           </div>
           <Markdown source={d.body} />
@@ -501,7 +501,7 @@ function SpecGraphView({
   return (
     <div className="flex flex-col gap-3">
       {/* desktop: simple column layout in SVG */}
-      <div className="oc-card hidden p-3 md:block">
+      <div className="ac-card hidden p-3 md:block">
         <svg viewBox="0 0 100 100" className="h-[28rem] w-full" role="img" aria-label="Capability, change and ticket graph">
           {(graph.data?.edges ?? []).map((e, i) => {
             const a = byId.get(e.from);
@@ -522,23 +522,23 @@ function SpecGraphView({
                 stroke={selected === n.id ? 'var(--accent)' : n.kind === 'capability' ? 'var(--status-working)' : n.kind === 'change' ? 'var(--status-done)' : 'var(--line-2)'}
                 strokeWidth="0.3"
               />
-              <text x={n.x + 1.5} y={n.y + 1} fontSize="2.4" fill="var(--text-2)" className="oc-mono">
+              <text x={n.x + 1.5} y={n.y + 1} fontSize="2.4" fill="var(--text-2)" className="ac-mono">
                 {n.label.slice(0, 18)}
               </text>
             </g>
           ))}
         </svg>
-        <p className="oc-mono mt-2 text-nano text-text-4">click to select · double-click to open</p>
+        <p className="ac-mono mt-2 text-nano text-text-4">click to select · double-click to open</p>
       </div>
 
       {/* phone: selected node then neighbours, one hop at a time */}
-      <div className="oc-card md:hidden">
+      <div className="ac-card md:hidden">
         <div className="border-b border-line-1 px-3.5 py-2.5">
           <select
             value={selected ?? ''}
             onChange={(e) => setSelected(e.target.value || null)}
             aria-label="Selected node"
-            className="oc-mono w-full bg-transparent text-meta text-text-1 outline-none"
+            className="ac-mono w-full bg-transparent text-meta text-text-1 outline-none"
           >
             <option value="">pick a node…</option>
             {layout.map((n) => (
@@ -553,7 +553,7 @@ function SpecGraphView({
             {neighbours.map((n) => (
               <button key={n.id} type="button" onClick={() => setSelected(n.id)} onDoubleClick={() => open(n.id)} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left">
                 <StatusGlyph status={n.node!.kind === 'capability' ? 'working' : n.node!.kind === 'change' ? 'done' : 'idle'} size="xs" />
-                <span className="oc-mono flex-1 text-meta text-text-1">{n.node!.label}</span>
+                <span className="ac-mono flex-1 text-meta text-text-1">{n.node!.label}</span>
                 <span className="text-micro text-text-3">{n.kind}</span>
               </button>
             ))}

@@ -1,5 +1,5 @@
-import type { Ticket } from '@openconductor/shared';
-import { ticketUiStatus } from '@openconductor/shared';
+import type { Ticket } from '@agent-conductor/shared';
+import { ticketUiStatus } from '@agent-conductor/shared';
 import { StatusGlyph, Badge } from './StatusGlyph';
 import { isFolded } from '../lib/board';
 import { ago, cents, statusText, tokens } from '../lib/format';
@@ -24,17 +24,17 @@ export function TicketCard({ ticket, workerName, usage, needsYou, stalled, onOpe
       onClick={onOpen}
       aria-current={selected ? 'true' : undefined}
       className={cx(
-        'oc-card w-full p-3 text-left transition-colors duration-(--dur-fast) ease-oc hover:bg-bg-2',
+        'ac-card w-full p-3 text-left transition-colors duration-(--dur-fast) ease-ac hover:bg-bg-2',
         selected && 'border-accent-edge bg-bg-2',
         className,
       )}
     >
       <div className="mb-1.5 flex items-center gap-2">
         <StatusGlyph status={ui} size="xs" pulse={ui === 'working'} />
-        <span className="oc-mono text-micro text-text-3">{ticket.identifier}</span>
+        <span className="ac-mono text-micro text-text-3">{ticket.identifier}</span>
         <div className="flex-1" />
         {usage ? (
-          <span className="oc-mono text-nano text-text-4">
+          <span className="ac-mono text-nano text-text-4">
             {tokens(usage.tokens)} · {cents(usage.costCents)}
           </span>
         ) : null}
@@ -43,9 +43,9 @@ export function TicketCard({ ticket, workerName, usage, needsYou, stalled, onOpe
       <div className="flex items-center gap-2">
         <Badge>{ticket.kind}</Badge>
         {isFolded(ticket.status) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
-        {workerName ? <span className="oc-truncate text-micro text-text-3">{workerName}</span> : null}
+        {workerName ? <span className="ac-truncate text-micro text-text-3">{workerName}</span> : null}
         <div className="flex-1" />
-        <span className="oc-mono text-nano text-text-4">{ago(ticket.updatedAt)}</span>
+        <span className="ac-mono text-nano text-text-4">{ago(ticket.updatedAt)}</span>
       </div>
     </button>
   );
@@ -58,18 +58,18 @@ export function TicketRow({ ticket, workerName, needsYou, stalled, onOpen }: Tic
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full items-start gap-3 border-b border-line-1 px-4 py-3 text-left transition-colors duration-(--dur-fast) ease-oc hover:bg-bg-1"
+      className="flex w-full items-start gap-3 border-b border-line-1 px-4 py-3 text-left transition-colors duration-(--dur-fast) ease-ac hover:bg-bg-1"
     >
       <StatusGlyph status={ui} size="sm" className="mt-1" pulse={ui === 'working'} />
       <div className="min-w-0 flex-1">
         <div className="mb-1 text-body leading-snug text-text-1">{ticket.title}</div>
         <div className="flex items-center gap-2">
-          <span className="oc-mono text-micro text-text-3">{ticket.identifier}</span>
-          {isFolded(ticket.status) ? <span className="oc-mono text-micro text-text-3">{statusText(ticket.status)}</span> : null}
-          {workerName ? <span className="oc-truncate text-micro text-text-3">{workerName}</span> : null}
+          <span className="ac-mono text-micro text-text-3">{ticket.identifier}</span>
+          {isFolded(ticket.status) ? <span className="ac-mono text-micro text-text-3">{statusText(ticket.status)}</span> : null}
+          {workerName ? <span className="ac-truncate text-micro text-text-3">{workerName}</span> : null}
         </div>
       </div>
-      <span className="oc-mono flex-none text-nano text-text-4">{ago(ticket.updatedAt)}</span>
+      <span className="ac-mono flex-none text-nano text-text-4">{ago(ticket.updatedAt)}</span>
     </button>
   );
 }

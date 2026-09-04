@@ -1,8 +1,8 @@
 # Pre-submit checklist
 
-Run through this before `oc_role_hire`. A "no" means fix it, not proceed.
+Run through this before `ac_role_hire`. A "no" means fix it, not proceed.
 
-- [ ] I ran `oc_role_list()` and checked every role in this project, not just the obvious one.
+- [ ] I ran `ac_role_list()` and checked every role in this project, not just the obvious one.
 - [ ] No existing charter covers this work. If one partly covers it, I am updating that charter too, in the same turn.
 - [ ] The role is a **kind of work**, not a person, not a ticket, and not "a second one because the first is busy".
 - [ ] `scope` says both what is in and what is out, in natural language, and would route a ticket nobody has written yet.

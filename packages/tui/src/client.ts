@@ -1,5 +1,5 @@
 /**
- * The slice of `@openconductor/cli`'s `ApiClient` the terminal apps need. Declared structurally so
+ * The slice of `@agent-conductor/cli`'s `ApiClient` the terminal apps need. Declared structurally so
  * the TUI never imports the CLI (the CLI imports the TUI, not the other way round).
  */
 export interface TuiSseMessage { type: string; id: string | null; data: string; json: unknown }

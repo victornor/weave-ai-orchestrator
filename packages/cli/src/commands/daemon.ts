@@ -1,4 +1,4 @@
-/** `oc daemon start|stop|status|logs|set-password|install-service` (PLAN §20). */
+/** `conductor daemon start|stop|status|logs|set-password|install-service` (PLAN §20). */
 import type { Command } from 'commander';
 import { ApiError } from '../api.js';
 import { emit, fields, style, table, write } from '../output.js';
@@ -16,7 +16,7 @@ export function register(program: Command): void {
 
   daemon
     .command('start')
-    .description('start the OpenConductor daemon')
+    .description('start the AgentConductor daemon')
     .option('-f, --foreground', 'run in the foreground and stream logs here')
     .option('--listen <addr>', 'override the listen address, e.g. 127.0.0.1:7433')
     .action(async (opts: Record<string, string | boolean>, command: Command) => run(async () => {
@@ -50,8 +50,8 @@ export function register(program: Command): void {
       emit({ started: true, ...result, publicUrl: ready?.publicUrl ?? null }, () => {
         if (result.foreground) return;
         write(`${style.ok(ready ? 'started' : 'started (not confirmed yet)')} pid ${result.pid}`);
-        if (ready?.setupRequired) write(style.warn('public listener held: no operator password yet — run `oc daemon set-password` on this machine to open it'));
-        fields([['url', ready?.setupRequired ? `${ready.publicUrl ?? ''} (after set-password)` : ready?.publicUrl ?? '(pending)'], ['bin', result.bin], ['log', result.log], ['next', ready?.setupRequired ? 'oc daemon set-password' : 'oc daemon status']]);
+        if (ready?.setupRequired) write(style.warn('public listener held: no operator password yet — run `conductor daemon set-password` on this machine to open it'));
+        fields([['url', ready?.setupRequired ? `${ready.publicUrl ?? ''} (after set-password)` : ready?.publicUrl ?? '(pending)'], ['bin', result.bin], ['log', result.log], ['next', ready?.setupRequired ? 'conductor daemon set-password' : 'conductor daemon status']]);
       });
     }));
 
@@ -83,7 +83,7 @@ export function register(program: Command): void {
           ['log', local.log],
           ['version', health?.version],
           ['tls', health?.tlsMode],
-          ['operator', health?.operatorConfigured === undefined ? undefined : health.operatorConfigured ? 'configured' : style.warn('not configured — run `oc daemon set-password`')],
+          ['operator', health?.operatorConfigured === undefined ? undefined : health.operatorConfigured ? 'configured' : style.warn('not configured — run `conductor daemon set-password`')],
           ['error', error ? style.bad(error) : undefined],
         ]);
         if (health?.workspaces?.length) {
@@ -122,22 +122,22 @@ export function register(program: Command): void {
     .command('set-password')
     .description('set the operator password (first run) or change it')
     .option('-u, --username <username>', 'operator username', 'operator')
-    .option('--password <password>', 'the new password (or set OC_PASSWORD); prompts twice when omitted')
-    .option('--current <password>', 'the current password when changing it (or set OC_CURRENT_PASSWORD)')
+    .option('--password <password>', 'the new password (or set AC_PASSWORD); prompts twice when omitted')
+    .option('--current <password>', 'the current password when changing it (or set AC_CURRENT_PASSWORD)')
     .action(async (opts: Record<string, string>, command: Command) => run(async () => {
       const { client } = await session(command, { workspace: 'none' });
       const health = await client.get<Health>('/api/health');
       const username = String(opts['username'] ?? 'operator');
       if (health?.operatorConfigured === false) {
-        const given = (typeof opts['password'] === 'string' && opts['password']) || process.env['OC_PASSWORD'];
+        const given = (typeof opts['password'] === 'string' && opts['password']) || process.env['AC_PASSWORD'];
         const password = given || await promptHidden('New password');
         if (!given) { const again = await promptHidden('Repeat password'); if (password !== again) throw new ApiError('validation', 'passwords do not match', 400); }
         await client.post('/api/auth/setup', { username, password });
-        emit({ ok: true, mode: 'setup', publicUrl: health?.publicUrl ?? client.baseUrl }, () => write(`${style.ok('operator configured')} — sign in with \`oc login ${health?.publicUrl ?? client.baseUrl}${health?.tlsMode === 'self-signed' ? ' --pin' : ''}\``));
+        emit({ ok: true, mode: 'setup', publicUrl: health?.publicUrl ?? client.baseUrl }, () => write(`${style.ok('operator configured')} — sign in with \`conductor login ${health?.publicUrl ?? client.baseUrl}${health?.tlsMode === 'self-signed' ? ' --pin' : ''}\``));
         return;
       }
-      const givenNext = (typeof opts['password'] === 'string' && opts['password']) || process.env['OC_PASSWORD'];
-      const givenCurrent = (typeof opts['current'] === 'string' && opts['current']) || process.env['OC_CURRENT_PASSWORD'];
+      const givenNext = (typeof opts['password'] === 'string' && opts['password']) || process.env['AC_PASSWORD'];
+      const givenCurrent = (typeof opts['current'] === 'string' && opts['current']) || process.env['AC_CURRENT_PASSWORD'];
       const current = givenCurrent || await promptHidden('Current password');
       const next = givenNext || await promptHidden('New password');
       if (!givenNext) { const again = await promptHidden('Repeat new password'); if (next !== again) throw new ApiError('validation', 'passwords do not match', 400); }

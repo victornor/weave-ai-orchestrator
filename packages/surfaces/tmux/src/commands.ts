@@ -1,4 +1,4 @@
-import type { AgentView } from '@openconductor/surface-sdk';
+import type { AgentView } from '@agent-conductor/surface-sdk';
 
 /** Glyphs for the nine UI status tokens (design contract §2). */
 export const STATUS_GLYPHS: Record<string, string> = {
@@ -22,12 +22,12 @@ export function sanitizeName(value: string): string {
   return value.replace(/[:.\s]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
-export const sessionName = (workspaceId: string): string => `oc-${sanitizeName(workspaceId)}`;
+export const sessionName = (workspaceId: string): string => `ac-${sanitizeName(workspaceId)}`;
 
 export const CONDUCTOR_AGENT_ID = 'conductor';
 export const CONDUCTOR_WINDOW_NAME = 'conductor';
-export const AGENT_OPTION = '@oc_agent';
-export const LIST_FORMAT = '#{window_id}\t#{window_name}\t#{@oc_agent}';
+export const AGENT_OPTION = '@ac_agent';
+export const LIST_FORMAT = '#{window_id}\t#{window_name}\t#{@ac_agent}';
 
 /** Window label: `<glyph> <ticket|role|name>`, trimmed to a sane width. */
 export function windowName(agent: Pick<AgentView, 'name' | 'ticketIdentifier' | 'roleName'>, uiStatus?: string, max = 40): string {

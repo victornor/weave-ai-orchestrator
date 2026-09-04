@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId, nowIso } from '@openconductor/db';
+import { newId, nowIso } from '@agent-conductor/db';
 import YAML from 'yaml';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { exportWorkspace, importTickets, parseTicketFile, stageWorkspaceImport } from './portable.js';
@@ -48,7 +48,7 @@ describe('exportWorkspace', () => {
     expect(readdirSync(join(result.path, 'roles', 'backend')).sort()).toEqual(['CHARTER.md', 'role.yaml']);
     expect(existsSync(join(result.path, 'knowledge', 'workspace', 'WORKSPACE.md'))).toBe(true);
     expect(existsSync(join(result.path, 'knowledge', 'workspace', 'archive'))).toBe(false);
-    for (const forbidden of ['db.sqlite', 'runs', '.openconductor', 'workers']) {
+    for (const forbidden of ['db.sqlite', 'runs', '.agent-conductor', 'workers']) {
       expect(existsSync(join(result.path, forbidden))).toBe(false);
     }
   });
@@ -132,7 +132,7 @@ describe('stageWorkspaceImport', () => {
   });
 
   it('refuses a directory that is not an export', () => {
-    expect(() => stageWorkspaceImport(target.root, join(target.root, 'x'))).toThrow(/not an OpenConductor export/);
+    expect(() => stageWorkspaceImport(target.root, join(target.root, 'x'))).toThrow(/not an AgentConductor export/);
   });
 });
 

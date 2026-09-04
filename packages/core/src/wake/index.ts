@@ -1,5 +1,5 @@
-import { newId, nowIso } from '@openconductor/db';
-import { OcError, type Wakeup, type WakeStatus } from '@openconductor/shared';
+import { newId, nowIso } from '@agent-conductor/db';
+import { OcError, type Wakeup, type WakeStatus } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices, EnqueueInput, WakeService } from '../api.js';
 import { recordActivity } from '../events.js';

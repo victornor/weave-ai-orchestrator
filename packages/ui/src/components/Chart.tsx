@@ -37,7 +37,7 @@ export function StackedBars({
         {keys.map((k, i) => (
           <button key={k.key} type="button" onClick={() => onSelect?.(k.key)} className="flex items-center gap-1.5">
             <span className="size-2 rounded-r4" style={{ background: seriesColor(i) }} />
-            <span className="oc-mono text-micro text-text-3">{k.label}</span>
+            <span className="ac-mono text-micro text-text-3">{k.label}</span>
           </button>
         ))}
       </div>
@@ -46,7 +46,7 @@ export function StackedBars({
           const total = b.parts.reduce((s, p) => s + p.value, 0);
           return (
             <div key={b.label} className="flex min-w-6 flex-1 flex-col items-center gap-2">
-              <span className="oc-mono text-nano text-text-4">{total ? fmtTokens(total) : ''}</span>
+              <span className="ac-mono text-nano text-text-4">{total ? fmtTokens(total) : ''}</span>
               <div className="flex w-full max-w-14 flex-1 flex-col justify-end overflow-hidden rounded-t-r4" title={`${b.label}: ${fmtTokens(total)}`}>
                 {b.parts.map((p) => (
                   <div
@@ -56,7 +56,7 @@ export function StackedBars({
                   />
                 ))}
               </div>
-              <span className="oc-mono text-nano text-text-3">{b.label}</span>
+              <span className="ac-mono text-nano text-text-3">{b.label}</span>
             </div>
           );
         })}
@@ -92,13 +92,13 @@ export function RankedBars({
     <div className={cx('flex flex-col gap-2.5', className)}>
       {rows.map((r, i) => (
         <button key={r.key} type="button" onClick={() => onSelect?.(r.key)} className="flex items-center gap-3 text-left">
-          <span className="oc-mono w-16 flex-none truncate text-micro text-text-3">{r.label}</span>
-          {r.sublabel ? <span className="oc-truncate hidden w-56 flex-none text-meta text-text-soft sm:block">{r.sublabel}</span> : null}
+          <span className="ac-mono w-16 flex-none truncate text-micro text-text-3">{r.label}</span>
+          {r.sublabel ? <span className="ac-truncate hidden w-56 flex-none text-meta text-text-soft sm:block">{r.sublabel}</span> : null}
           <span className="h-1.5 flex-1 overflow-hidden rounded-pill bg-bg-2">
             <span className="block h-full rounded-pill opacity-75" style={{ width: `${(r.value / max) * 100}%`, background: seriesColor(r.colourIndex ?? i) }} />
           </span>
-          <span className="oc-mono w-14 flex-none text-right text-micro text-text-1">{fmtTokens(r.value)}</span>
-          {r.right ? <span className="oc-mono w-12 flex-none text-right text-micro text-text-3">{r.right}</span> : null}
+          <span className="ac-mono w-14 flex-none text-right text-micro text-text-1">{fmtTokens(r.value)}</span>
+          {r.right ? <span className="ac-mono w-12 flex-none text-right text-micro text-text-3">{r.right}</span> : null}
         </button>
       ))}
     </div>
@@ -145,7 +145,7 @@ export function LineSeries({
 export function StatTile({ value, caption, muted, className }: { value: string; caption: string; muted?: boolean; className?: string }): React.ReactElement {
   return (
     <div className={cx('flex-1 bg-bg-1 p-4', className)}>
-      <div className={cx('oc-mono text-display font-medium tracking-display', muted ? 'text-text-2' : 'text-text-strong')}>{value}</div>
+      <div className={cx('ac-mono text-display font-medium tracking-display', muted ? 'text-text-2' : 'text-text-strong')}>{value}</div>
       <div className="mt-2 text-micro text-text-3">{caption}</div>
     </div>
   );

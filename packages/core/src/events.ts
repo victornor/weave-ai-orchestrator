@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
-import type { Db } from '@openconductor/db';
-import { newId, nowIso } from '@openconductor/db';
-import type { EventType, WorkspaceEvent } from '@openconductor/shared';
+import type { Db } from '@agent-conductor/db';
+import { newId, nowIso } from '@agent-conductor/db';
+import type { EventType, WorkspaceEvent } from '@agent-conductor/shared';
 
 /** Durable outbox + in-process bus. Every domain change appends here; SSE/hooks/webhooks consume by seq. */
 export class EventBus {

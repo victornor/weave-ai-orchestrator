@@ -9,7 +9,7 @@ import { git } from '../util/git.js';
 import { projectKeyFromUrl } from '../util/git.js';
 
 const tmps: string[] = [];
-function tmpDir(prefix = 'oc-wt-'): string {
+function tmpDir(prefix = 'ac-wt-'): string {
   const d = mkdtempSync(join(tmpdir(), prefix));
   tmps.push(d);
   return d;
@@ -42,16 +42,16 @@ describe('git worktree provider', () => {
     expect((await provider.detect()).available).toBe(true);
 
     const target = join(tmpDir(), 'worker', 'work');
-    const info = await provider.create({ repoPath: repo, branch: 'oc/tst-1-demo', base: 'main', targetPath: target });
+    const info = await provider.create({ repoPath: repo, branch: 'ac/tst-1-demo', base: 'main', targetPath: target });
     expect(info.path).toBe(target);
     expect(existsSync(join(target, 'README.md'))).toBe(true);
 
     const list = await provider.list(repo);
-    expect(list.map((w) => w.branch)).toContain('oc/tst-1-demo');
+    expect(list.map((w) => w.branch)).toContain('ac/tst-1-demo');
 
-    await provider.remove({ repoPath: repo, path: target, branch: 'oc/tst-1-demo', deleteBranch: true, force: false });
+    await provider.remove({ repoPath: repo, path: target, branch: 'ac/tst-1-demo', deleteBranch: true, force: false });
     expect(existsSync(target)).toBe(false);
-    const branches = await git(['branch', '--list', 'oc/tst-1-demo'], repo);
+    const branches = await git(['branch', '--list', 'ac/tst-1-demo'], repo);
     expect(branches.stdout.trim()).toBe('');
   });
 
@@ -61,7 +61,7 @@ describe('git worktree provider', () => {
     writeFileSync(join(repo, 'node_modules', 'cached.txt'), 'warm', 'utf8');
     const target = join(tmpDir(), 'work');
     const provider = new GitWorktreeProvider();
-    await provider.create({ repoPath: repo, branch: 'oc/tst-2-warm', base: 'main', targetPath: target, setupCommand: 'echo ready > setup.txt', warmPaths: ['node_modules'] });
+    await provider.create({ repoPath: repo, branch: 'ac/tst-2-warm', base: 'main', targetPath: target, setupCommand: 'echo ready > setup.txt', warmPaths: ['node_modules'] });
     expect(existsSync(join(target, 'setup.txt'))).toBe(true);
     expect(existsSync(join(target, 'node_modules', 'cached.txt'))).toBe(true);
   });
@@ -70,9 +70,9 @@ describe('git worktree provider', () => {
     const repo = await initRepo();
     const target = join(tmpDir(), 'work');
     const provider = new GitWorktreeProvider();
-    await provider.create({ repoPath: repo, branch: 'oc/tst-3-dirty', base: 'main', targetPath: target });
+    await provider.create({ repoPath: repo, branch: 'ac/tst-3-dirty', base: 'main', targetPath: target });
     writeFileSync(join(target, 'scratch.txt'), 'unsaved', 'utf8');
-    await expect(provider.remove({ repoPath: repo, path: target, branch: 'oc/tst-3-dirty', deleteBranch: false, force: false })).rejects.toThrow();
+    await expect(provider.remove({ repoPath: repo, path: target, branch: 'ac/tst-3-dirty', deleteBranch: false, force: false })).rejects.toThrow();
     expect(existsSync(target)).toBe(true);
   });
 });
@@ -81,9 +81,9 @@ describe('landed-work test', () => {
   it('never counts uncommitted changes as landed', async () => {
     const repo = await initRepo();
     const target = join(tmpDir(), 'work');
-    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'oc/tst-4', base: 'main', targetPath: target });
+    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'ac/tst-4', base: 'main', targetPath: target });
     writeFileSync(join(target, 'wip.txt'), 'in progress', 'utf8');
-    const v = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'oc/tst-4', defaultBranch: 'main', mergedPr: true });
+    const v = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'ac/tst-4', defaultBranch: 'main', mergedPr: true });
     expect(v.landed).toBe(false);
     expect(v.reason).toMatch(/uncommitted/);
   });
@@ -101,15 +101,15 @@ describe('landed-work test', () => {
     await git(['config', 'user.name', 'Test'], clone);
 
     const target = join(tmpDir(), 'work');
-    await new GitWorktreeProvider().create({ repoPath: clone, branch: 'oc/tst-5', base: 'main', targetPath: target });
+    await new GitWorktreeProvider().create({ repoPath: clone, branch: 'ac/tst-5', base: 'main', targetPath: target });
     await commit(target, 'feature.txt', 'done', 'feat: add feature');
 
-    const before = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'oc/tst-5', defaultBranch: 'main' });
+    const before = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'ac/tst-5', defaultBranch: 'main' });
     expect(before.landed).toBe(false);
     expect(before.reason).toMatch(/not on any remote/);
 
-    await git(['push', 'origin', 'oc/tst-5'], target);
-    const after = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'oc/tst-5', defaultBranch: 'main' });
+    await git(['push', 'origin', 'ac/tst-5'], target);
+    const after = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'ac/tst-5', defaultBranch: 'main' });
     expect(after.landed).toBe(true);
     expect(after.reason).toMatch(/remote-tracking/);
   });
@@ -117,10 +117,10 @@ describe('landed-work test', () => {
   it('lands when the default branch contains the branch (ancestor) in local-branch mode', async () => {
     const repo = await initRepo();
     const target = join(tmpDir(), 'work');
-    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'oc/tst-6', base: 'main', targetPath: target });
+    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'ac/tst-6', base: 'main', targetPath: target });
     await commit(target, 'a.txt', 'a', 'feat: a');
-    await git(['merge', '--ff-only', 'oc/tst-6'], repo);
-    const v = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'oc/tst-6', defaultBranch: 'main', localBranch: true });
+    await git(['merge', '--ff-only', 'ac/tst-6'], repo);
+    const v = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'ac/tst-6', defaultBranch: 'main', localBranch: true });
     expect(v.landed).toBe(true);
     expect(v.reason).toMatch(/ancestor/);
   });
@@ -128,13 +128,13 @@ describe('landed-work test', () => {
   it('lands on a patch-id match (squash merge) when the PR is merged', async () => {
     const repo = await initRepo();
     const target = join(tmpDir(), 'work');
-    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'oc/tst-7', base: 'main', targetPath: target });
+    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'ac/tst-7', base: 'main', targetPath: target });
     await commit(target, 'squashed.txt', 'content\n', 'feat: squashed work');
     const sha = (await git(['rev-parse', 'HEAD'], target)).stdout.trim();
     // same patch on main under a different commit (squash-merge shape): patch-id matches, sha does not
     await git(['cherry-pick', '--no-commit', sha], repo);
     await git(['commit', '-m', 'feat: squashed work (#12)'], repo);
-    const v = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'oc/tst-7', defaultBranch: 'main', mergedPr: true });
+    const v = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'ac/tst-7', defaultBranch: 'main', mergedPr: true });
     expect(v.landed).toBe(true);
     expect(v.reason).toMatch(/equivalent patch/);
   });
@@ -142,16 +142,16 @@ describe('landed-work test', () => {
   it('refuses when the branch is not contained anywhere', async () => {
     const repo = await initRepo();
     const target = join(tmpDir(), 'work');
-    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'oc/tst-8', base: 'main', targetPath: target });
+    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'ac/tst-8', base: 'main', targetPath: target });
     await commit(target, 'unmerged.txt', 'x', 'feat: unmerged');
-    const v = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'oc/tst-8', defaultBranch: 'main', mergedPr: true });
+    const v = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'ac/tst-8', defaultBranch: 'main', mergedPr: true });
     expect(v.landed).toBe(false);
     expect(v.evidence.commitsNotInBase).toBe(1);
   });
 
   it('treats an already-absent worktree as landed', async () => {
     const repo = await initRepo();
-    const v = await landedWorkTest({ repoPath: repo, worktreePath: join(repo, 'nope'), branch: 'oc/tst-9', defaultBranch: 'main' });
+    const v = await landedWorkTest({ repoPath: repo, worktreePath: join(repo, 'nope'), branch: 'ac/tst-9', defaultBranch: 'main' });
     expect(v.landed).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
 ---
-name: openconductor-planning
+name: agent-conductor-planning
 description: How to turn a request into the smallest ticket graph that works — one end-to-end ticket by default, split only for a qualifying reason, with checkable acceptance criteria. Load before creating more than one ticket, or when decomposing work.
 ---
 
@@ -25,7 +25,7 @@ Not qualifying: "it's two files", "it's frontend and backend in the same repo", 
 
 ## Dependencies
 
-Use first-class blockers: `oc_ticket_create({..., blockedBy: ["ACME-51"]})`. Never encode a dependency as prose in a description, and never as ordering you keep in your head — nothing wakes on it.
+Use first-class blockers: `ac_ticket_create({..., blockedBy: ["ACME-51"]})`. Never encode a dependency as prose in a description, and never as ordering you keep in your head — nothing wakes on it.
 
 `parentId` is structure, not sequencing. A parent groups; a blocker orders. Do not use one for the other.
 
@@ -58,7 +58,7 @@ Do not scout when the path is obvious. A scout costs a full turn and produces a 
 
 ## Scope creep during the work
 
-A worker that finds work beyond the spec calls `oc_ask` and pauses that task. It never absorbs it silently and never drops it silently. When that reaches you:
+A worker that finds work beyond the spec calls `ac_ask` and pauses that task. It never absorbs it silently and never drops it silently. When that reaches you:
 
 - **Inside the accepted design and unambiguous** → decide it, and say what you chose.
 - **Expands the contract** → escalate to the human with the five-part escalation form.

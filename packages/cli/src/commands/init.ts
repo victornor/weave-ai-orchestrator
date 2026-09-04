@@ -1,4 +1,4 @@
-/** `oc init <dir>` — scaffold a workspace through the daemon (PLAN §5, §20). */
+/** `conductor init <dir>` — scaffold a workspace through the daemon (PLAN §5, §20). */
 import type { Command } from 'commander';
 import { basename, resolve as resolvePath } from 'node:path';
 import { ApiError } from '../api.js';
@@ -44,7 +44,7 @@ export function register(program: Command): void {
       }
       if (!reachable) {
         throw new ApiError('net_daemon_unreachable', `no daemon is answering at ${url}`, 0, {
-          hint: 'start one with `oc daemon start` (or re-run with --local), or point at a remote daemon with `oc login <url>`',
+          hint: 'start one with `conductor daemon start` (or re-run with --local), or point at a remote daemon with `conductor login <url>`',
         }, true);
       }
 
@@ -59,7 +59,7 @@ export function register(program: Command): void {
 
       emit(workspace ?? { id, path, name, ticketPrefix }, () => {
         write(`${style.ok('workspace ready')} ${style.bold(id)}`);
-        fields([['path', path], ['name', name], ['prefix', ticketPrefix], ['next', 'oc project add <git-url>']]);
+        fields([['path', path], ['name', name], ['prefix', ticketPrefix], ['next', 'conductor project add <git-url>']]);
       });
     }));
 }

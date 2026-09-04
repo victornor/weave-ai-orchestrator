@@ -1,10 +1,10 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { newId, nowIso } from '@openconductor/db';
+import { newId, nowIso } from '@agent-conductor/db';
 import {
   OcError, type Agent, type Project, type Role, type Ticket, type Wakeup,
-} from '@openconductor/shared';
-import type { WorktreeProvider } from '@openconductor/plugin-sdk';
+} from '@agent-conductor/shared';
+import type { WorktreeProvider } from '@agent-conductor/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, WorkersService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -22,8 +22,8 @@ export function branchSlug(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'work';
 }
 
-/** `oc/<identifier-lowercase>-<slug>` (PLAN §11.2); the OpenSpec change name is the same without the prefix. */
-export function ticketBranch(ticket: Ticket): string { return `oc/${ticket.identifier.toLowerCase()}-${branchSlug(ticket.title)}`; }
+/** `ac/<identifier-lowercase>-<slug>` (PLAN §11.2); the OpenSpec change name is the same without the prefix. */
+export function ticketBranch(ticket: Ticket): string { return `ac/${ticket.identifier.toLowerCase()}-${branchSlug(ticket.title)}`; }
 export function openspecChangeName(ticket: Ticket): string { return `${ticket.identifier.toLowerCase()}-${branchSlug(ticket.title)}`; }
 
 export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServices): WorkersService {
@@ -211,7 +211,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       if (!role) throw new OcError('wrong_status', `project ${project.slug} has no active role to curate its knowledge`);
       const ticket = deps().tickets.create(actor, {
         projectId, kind: 'task', title: `Curate project knowledge (${project.slug})`,
-        description: 'Curate this project\'s knowledge base: merge duplicates, fold learnings that became conventions, archive stale entries, keep every section within budget. Never invent facts. Submit with `oc_knowledge_replace`.',
+        description: 'Curate this project\'s knowledge base: merge duplicates, fold learnings that became conventions, archive stale entries, keep every section within budget. Never invent facts. Submit with `ac_knowledge_replace`.',
         priority: 'low', assigneeRoleId: role.id, originKind: 'curation', originFingerprint: `curation:${projectId}`,
       });
       return spawn(actor, ticket.id, { noWorktree: true, spawnReason: 'knowledge curation' });
@@ -305,7 +305,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         ctx.db.update('worktrees', wt.id, { status: 'removed', removedAt: nowIso(), lastVerifiedAt: nowIso(), landedEvidenceJson: verdict.evidence });
       }
 
-      // Archive the home (brief, notes, final report); run logs stay under .openconductor/runs.
+      // Archive the home (brief, notes, final report); run logs stay under .agent-conductor/runs.
       const archive = join(ctx.paths.archive, workerId);
       try {
         if (existsSync(agent.homePath)) {

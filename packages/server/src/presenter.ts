@@ -4,8 +4,8 @@
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { PresentationBlockSchema, agentUiStatus } from '@openconductor/shared';
-import { nowIso } from '@openconductor/db';
+import { PresentationBlockSchema, agentUiStatus } from '@agent-conductor/shared';
+import { nowIso } from '@agent-conductor/db';
 import type { AppDeps, AppEnv } from './types.js';
 import { body } from './http.js';
 

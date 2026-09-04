@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-const daemon = process.env.OC_DAEMON_URL ?? 'http://127.0.0.1:7433';
+const daemon = process.env.AC_DAEMON_URL ?? 'http://127.0.0.1:7433';
 
 export default defineConfig({
   base: '/',
@@ -21,7 +21,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       treeshake: {
-        // @openconductor/shared is pure: constants, mappers and zod schemas
+        // @agent-conductor/shared is pure: constants, mappers and zod schemas
         // the web app never touches. Declaring it side-effect-free lets the
         // unused halves (config/report schemas, and zod with them) drop out.
         moduleSideEffects: (id) => !id.includes('shared/dist/'),

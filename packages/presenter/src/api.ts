@@ -1,5 +1,5 @@
 import { EventSource } from 'eventsource';
-import type { WorkspaceEvent } from '@openconductor/shared';
+import type { WorkspaceEvent } from '@agent-conductor/shared';
 import { toAgentView } from './views.js';
 import type { DesiredPresentation, EventSubscription, PresenterApi, StoredHandle } from './types.js';
 

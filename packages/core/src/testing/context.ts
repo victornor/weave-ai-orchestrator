@@ -5,8 +5,8 @@
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openDb, newId, nowIso, type Db } from '@openconductor/db';
-import { DaemonConfigSchema, WorkspaceConfigSchema, type WorkspaceConfig, type WorkspaceEvent } from '@openconductor/shared';
+import { openDb, newId, nowIso, type Db } from '@agent-conductor/db';
+import { DaemonConfigSchema, WorkspaceConfigSchema, type WorkspaceConfig, type WorkspaceEvent } from '@agent-conductor/shared';
 import { EventBus } from '../events.js';
 import { createRegistries, workspacePaths, type WorkspaceContext } from '../context.js';
 import { getLogger } from '../logger.js';
@@ -36,7 +36,7 @@ export interface HarnessOptions {
 }
 
 export function makeHarness(opts: HarnessOptions = {}): TestHarness {
-  const root = mkdtempSync(join(tmpdir(), 'oc-test-'));
+  const root = mkdtempSync(join(tmpdir(), 'ac-test-'));
   const paths = workspacePaths(root);
   for (const d of [paths.state, paths.knowledge, paths.conductor, paths.roles, paths.workers, paths.projects]) mkdirSync(d, { recursive: true });
 
@@ -107,7 +107,7 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
     db.insert('agents', {
       id, workspaceId, kind: 'worker', projectId: projectId || null, roleId: roleId || null, roleRevision: 1, ticketId,
       name: 'Backend Engineer #1', runtimeId: 'claude', status: 'active', homePath: join(paths.workers, id),
-      worktreePath: join(paths.workers, id, 'work'), branch: 'oc/test', turnEpoch: 0, turnCount: 0, spawnedBy: 'system',
+      worktreePath: join(paths.workers, id, 'work'), branch: 'ac/test', turnEpoch: 0, turnCount: 0, spawnedBy: 'system',
       briefRevision: 1, createdAt: ts, updatedAt: ts, ...over,
     });
     if (ticketId) db.update('tickets', ticketId, { workerId: id, updatedAt: ts });

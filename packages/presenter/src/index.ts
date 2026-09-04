@@ -1,10 +1,10 @@
 import { hostname } from 'node:os';
-import type { WorkspaceEvent } from '@openconductor/shared';
-import type { SurfaceAdapter, SurfaceContext } from '@openconductor/surface-sdk';
-import headless from '@openconductor/surface-headless';
-import tmux from '@openconductor/surface-tmux';
-import herdr from '@openconductor/surface-herdr';
-import hyprland from '@openconductor/surface-hyprland';
+import type { WorkspaceEvent } from '@agent-conductor/shared';
+import type { SurfaceAdapter, SurfaceContext } from '@agent-conductor/surface-sdk';
+import headless from '@agent-conductor/surface-headless';
+import tmux from '@agent-conductor/surface-tmux';
+import herdr from '@agent-conductor/surface-herdr';
+import hyprland from '@agent-conductor/surface-hyprland';
 import { createHttpPresenterApi } from './api.js';
 import { createReconciler, DEFAULT_KEEP_CLOSED_FOR_MS, type Reconciler } from './reconcile.js';
 import { createFileHandleStore, defaultHandleStorePath } from './store.js';
@@ -31,7 +31,7 @@ export interface StartPresenterOptions {
   /** Override the surface from the workspace config. */
   surface?: string;
   presenterId?: string;
-  /** How to invoke the oc CLI on this machine (default ['oc']); the CLI passes its own executable so source checkouts work. */
+  /** How to invoke the conductor CLI on this machine (default ['conductor']); the CLI passes its own executable so source checkouts work. */
   ocCommand?: string[];
   log: LogFn;
   keepClosedForMs?: number;
@@ -81,15 +81,15 @@ export interface BuildContextOptions {
 export function buildSurfaceContext(opts: BuildContextOptions): SurfaceContext & { env: Record<string, string> } {
   const configured = typeof opts.block.terminal === 'string' ? opts.block.terminal : null;
   const terminal = opts.terminal !== undefined ? opts.terminal : resolveTerminal({ configured });
-  const env = { OC_API_URL: opts.apiUrl, OC_TOKEN: opts.token, OC_WORKSPACE: opts.workspaceId };
-  const oc = opts.ocCommand && opts.ocCommand.length ? opts.ocCommand : ['oc'];
-  const base = (agentId: string): string[] => [...oc, 'attach', agentId, '--workspace', opts.workspaceId, '--url', opts.apiUrl];
+  const env = { AC_API_URL: opts.apiUrl, AC_TOKEN: opts.token, AC_WORKSPACE: opts.workspaceId };
+  const conductor = opts.ocCommand && opts.ocCommand.length ? opts.ocCommand : ['conductor'];
+  const base = (agentId: string): string[] => [...conductor, 'attach', agentId, '--workspace', opts.workspaceId, '--url', opts.apiUrl];
   return {
     workspaceId: opts.workspaceId,
     daemonUrl: opts.apiUrl,
     env,
     attachCommand: (agentId: string) => base(agentId),
-    chatCommand: () => [...oc, 'chat', '--workspace', opts.workspaceId, '--url', opts.apiUrl],
+    chatCommand: () => [...conductor, 'chat', '--workspace', opts.workspaceId, '--url', opts.apiUrl],
     terminal: () => terminal,
     log: opts.log,
   };

@@ -1,6 +1,6 @@
 # OpenSpec research report (v1.12.0, analyzed 2026-09-03)
 
-Summary of the findings that drive the openconductor integration design. Full CLI reference lives in the OpenSpec repo (`docs/agent-contract.md`, `docs/cli.md`).
+Summary of the findings that drive the agent-conductor integration design. Full CLI reference lives in the OpenSpec repo (`docs/agent-contract.md`, `docs/cli.md`).
 
 ## Bottom line
 

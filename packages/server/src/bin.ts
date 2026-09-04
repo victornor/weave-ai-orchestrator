@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-/** Daemon entry point. `oc daemon start` execs this. */
-import { getLogger } from '@openconductor/core';
+/** Daemon entry point. `conductor daemon start` execs this. */
+import { getLogger } from '@agent-conductor/core';
 import { startDaemon } from './daemon.js';
 
 const args = process.argv.slice(2);

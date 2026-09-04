@@ -1,9 +1,9 @@
 import type {
   ChannelAdapter, ChannelCapabilities, ChannelContext, JsonSchema, OutboundMessage, RunningChannel, SendResult,
-} from '@openconductor/channel-sdk';
+} from '@agent-conductor/channel-sdk';
 
 /**
- * The cli channel is a no-op transport: `oc chat` / `oc attach` read and write threads
+ * The cli channel is a no-op transport: `conductor chat` / `conductor attach` read and write threads
  * over the HTTP API. The adapter exists so the channel can be registered, capability-
  * checked and config-validated like any other channel.
  */
@@ -33,7 +33,7 @@ export function createCliChannel(): ChannelAdapter {
       return { ok: true } as const;
     },
     async start(ctx: ChannelContext): Promise<RunningChannel> {
-      ctx.log('debug', 'cli channel started (transport handled by the oc client)', { workspaceId: ctx.workspaceId });
+      ctx.log('debug', 'cli channel started (transport handled by the conductor client)', { workspaceId: ctx.workspaceId });
       return { async stop() { /* nothing to tear down */ } };
     },
     async send(_msg: OutboundMessage): Promise<SendResult> {

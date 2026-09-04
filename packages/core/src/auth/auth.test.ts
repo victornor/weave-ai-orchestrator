@@ -3,8 +3,8 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { openDb, type Db } from '@openconductor/db';
-import { DaemonConfigSchema } from '@openconductor/shared';
+import { openDb, type Db } from '@agent-conductor/db';
+import { DaemonConfigSchema } from '@agent-conductor/shared';
 import { createAuthService } from './index.js';
 import type { AuthService } from '../api.js';
 
@@ -17,7 +17,7 @@ describe('auth', () => {
   let auth: AuthService;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'oc-auth-'));
+    dir = mkdtempSync(join(tmpdir(), 'ac-auth-'));
     db = openDb(join(dir, 'daemon.sqlite'));
     auth = createAuthService(db, DaemonConfigSchema.parse({ auth: { lockoutAttempts: 3, lockoutMinutes: 15 } }));
     await auth.setPassword('victor', 'correct horse battery');

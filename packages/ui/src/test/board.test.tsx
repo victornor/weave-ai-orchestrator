@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TICKET_STATUSES } from '@openconductor/shared';
+import { TICKET_STATUSES } from '@agent-conductor/shared';
 import { BOARD_COLUMNS, STATUS_COLUMN, filterTickets, foldBoard, isFolded } from '../lib/board';
 import { ticket } from './factories';
 

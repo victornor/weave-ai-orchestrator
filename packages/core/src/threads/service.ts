@@ -1,5 +1,5 @@
-import { newId, nowIso, threadRow, type Db } from '@openconductor/db';
-import { OcError, type ChannelThread, type ThreadMessage } from '@openconductor/shared';
+import { newId, nowIso, threadRow, type Db } from '@agent-conductor/db';
+import { OcError, type ChannelThread, type ThreadMessage } from '@agent-conductor/shared';
 import type { Actor, CoreServices, ThreadsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';

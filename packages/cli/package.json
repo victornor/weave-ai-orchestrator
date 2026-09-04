@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/cli",
+  "name": "@agent-conductor/cli",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,18 +14,18 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*",
-    "@openconductor/render": "workspace:*",
+    "@agent-conductor/shared": "workspace:*",
+    "@agent-conductor/render": "workspace:*",
     "commander": "^14.0.0",
     "yaml": "^2.8.1",
     "zod": "^3.25.76",
     "chalk": "^5.6.2",
     "open": "^10.2.0",
-    "@openconductor/tui": "workspace:*",
-    "@openconductor/presenter": "workspace:*"
+    "@agent-conductor/tui": "workspace:*",
+    "@agent-conductor/presenter": "workspace:*"
   },
   "devDependencies": {},
   "bin": {
-    "oc": "./dist/bin.js"
+    "conductor": "./dist/bin.js"
   }
 }

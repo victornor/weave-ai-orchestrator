@@ -1,6 +1,6 @@
 /**
  * The daemon process: config, registries, workspaces, two listeners, graceful shutdown.
- * `oc daemon start` execs `bin.js`, which calls `startDaemon()`.
+ * `conductor daemon start` execs `bin.js`, which calls `startDaemon()`.
  */
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
@@ -11,18 +11,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { createAdaptorServer } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
-import { openDb } from '@openconductor/db';
-import type { Db } from '@openconductor/db';
+import { openDb } from '@agent-conductor/db';
+import type { Db } from '@agent-conductor/db';
 import {
   createRegistries, createCore, createAuthService, getLogger, initLogger, workspaceLoader,
   stageWorkspaceImport, importTickets,
   type Registries, type WorkspaceContext,
-} from '@openconductor/core';
-import type { AuthService, CoreServices } from '@openconductor/core';
-import type { ChannelAdapter, SurfaceAdapter } from '@openconductor/plugin-sdk';
-import type { RuntimeAdapter } from '@openconductor/runtime-sdk';
-import type { OpenConductorPlugin, PluginHost, AgentToolDefinition, WorktreeProvider, ForgeAdapter } from '@openconductor/plugin-sdk';
-import { OcError, type DaemonConfig, type EventType, type WorkspaceEvent } from '@openconductor/shared';
+} from '@agent-conductor/core';
+import type { AuthService, CoreServices } from '@agent-conductor/core';
+import type { ChannelAdapter, SurfaceAdapter } from '@agent-conductor/plugin-sdk';
+import type { RuntimeAdapter } from '@agent-conductor/runtime-sdk';
+import type { AgentConductorPlugin, PluginHost, AgentToolDefinition, WorktreeProvider, ForgeAdapter } from '@agent-conductor/plugin-sdk';
+import { OcError, type DaemonConfig, type EventType, type WorkspaceEvent } from '@agent-conductor/shared';
 import { createApp, type WorkspaceAdmin } from './app.js';
 import { ChannelManager } from './channels.js';
 import { WebhookDispatcher } from './webhooks.js';
@@ -31,13 +31,13 @@ import type { AppDeps, WorkspaceRuntime } from './types.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const log = getLogger('daemon');
 
-const RUNTIME_PACKAGES = ['@openconductor/runtime-claude', '@openconductor/runtime-codex', '@openconductor/runtime-opencode', '@openconductor/runtime-gemini'];
-const CHANNEL_PACKAGES = ['@openconductor/channel-web', '@openconductor/channel-cli', '@openconductor/channel-telegram'];
-const SURFACE_PACKAGES = ['@openconductor/surface-headless', '@openconductor/surface-tmux', '@openconductor/surface-herdr', '@openconductor/surface-hyprland'];
+const RUNTIME_PACKAGES = ['@agent-conductor/runtime-claude', '@agent-conductor/runtime-codex', '@agent-conductor/runtime-opencode', '@agent-conductor/runtime-gemini'];
+const CHANNEL_PACKAGES = ['@agent-conductor/channel-web', '@agent-conductor/channel-cli', '@agent-conductor/channel-telegram'];
+const SURFACE_PACKAGES = ['@agent-conductor/surface-headless', '@agent-conductor/surface-tmux', '@agent-conductor/surface-herdr', '@agent-conductor/surface-hyprland'];
 
 export interface StartOptions {
   configDir?: string;
-  /** Override the public listen address (`host:port`), e.g. from `oc daemon start --listen`. */
+  /** Override the public listen address (`host:port`), e.g. from `conductor daemon start --listen`. */
   listen?: string;
   uiDir?: string | null;
 }
@@ -108,8 +108,8 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     await startPublic();
   } else {
     // PLAN §4.4: never expose an unauthenticated daemon. Hold the public listener; the loopback
-    // listener still serves `POST /api/auth/setup`, and `oc daemon set-password` on this host opens it.
-    log.warn({ host, loopback: loopback.url }, 'public listener held until an operator password is set: run `oc daemon set-password` on this host');
+    // listener still serves `POST /api/auth/setup`, and `conductor daemon set-password` on this host opens it.
+    log.warn({ host, loopback: loopback.url }, 'public listener held until an operator password is set: run `conductor daemon set-password` on this host');
     onOperatorConfigured = () => { startPublic().catch((e: unknown) => log.error({ err: e }, 'public listener failed to start after setup')); };
     await writePidFile();
   }
@@ -280,7 +280,7 @@ async function loadPlugins(
     const config = typeof entry === 'string' ? {} : entry.config ?? {};
     try {
       const mod = (await import(pluginSpecifier(ctx, name))) as Record<string, unknown>;
-      const plugin = (mod.default ?? mod.plugin) as OpenConductorPlugin | undefined;
+      const plugin = (mod.default ?? mod.plugin) as AgentConductorPlugin | undefined;
       if (!plugin || typeof plugin.register !== 'function') { log.error({ plugin: name }, 'plugin has no definePlugin default export'); continue; }
       if (plugin.apiVersion !== 1) { log.error({ plugin: name, apiVersion: plugin.apiVersion }, 'unsupported plugin apiVersion'); continue; }
       await plugin.register(pluginHost(name, config, registries, hooks));
@@ -332,8 +332,8 @@ function pluginHost(
 interface LoopbackListener { url: string; server: ServerType; setDeps(deps: AppDeps): void }
 
 /**
- * Loopback listener: run tokens, the MCP endpoint and `ctx.loopbackUrl`. `OC_LOOPBACK_SOCKET`
- * switches it to a unix socket; `OC_LOOPBACK_PORT` pins the port (0 = pick a free one).
+ * Loopback listener: run tokens, the MCP endpoint and `ctx.loopbackUrl`. `AC_LOOPBACK_SOCKET`
+ * switches it to a unix socket; `AC_LOOPBACK_PORT` pins the port (0 = pick a free one).
  */
 async function startLoopbackListener(): Promise<LoopbackListener> {
   let deps: AppDeps | null = null;
@@ -342,12 +342,12 @@ async function startLoopbackListener(): Promise<LoopbackListener> {
     return app!.fetch(req, env as never) as Promise<Response>;
   };
   let app: ReturnType<typeof createApp> | null = null;
-  const socket = process.env.OC_LOOPBACK_SOCKET;
+  const socket = process.env.AC_LOOPBACK_SOCKET;
   const server = createAdaptorServer({ fetch: fetch as never });
   const url = await new Promise<string>((res, rej) => {
     server.once('error', rej);
     if (socket) server.listen(socket, () => res(`http+unix://${socket}`));
-    else server.listen(Number(process.env.OC_LOOPBACK_PORT ?? 0), '127.0.0.1', () => {
+    else server.listen(Number(process.env.AC_LOOPBACK_PORT ?? 0), '127.0.0.1', () => {
       const addr = server.address();
       res(typeof addr === 'object' && addr ? `http://127.0.0.1:${addr.port}` : 'http://127.0.0.1');
     });
@@ -404,7 +404,7 @@ async function tlsOptions(cfg: DaemonConfig, configDir: string): Promise<{ cert:
 // ---------- small helpers ----------
 
 function withListen(cfg: DaemonConfig, listen?: string): DaemonConfig {
-  const effective = listen ?? process.env['OC_LISTEN'];
+  const effective = listen ?? process.env['AC_LISTEN'];
   return effective ? { ...cfg, http: { ...cfg.http, listen: effective } } : cfg;
 }
 
@@ -425,13 +425,13 @@ function splitListen(listen: string): [string, string] {
 function dirs(): { skillsDir: string; templatesDir: string } {
   const repo = resolve(here, '..', '..', '..');
   return {
-    skillsDir: process.env.OC_SKILLS_DIR ?? join(repo, 'skills'),
-    templatesDir: process.env.OC_TEMPLATES_DIR ?? join(repo, 'templates'),
+    skillsDir: process.env.AC_SKILLS_DIR ?? join(repo, 'skills'),
+    templatesDir: process.env.AC_TEMPLATES_DIR ?? join(repo, 'templates'),
   };
 }
 
 function defaultUiDir(): string | null {
-  const candidate = process.env.OC_UI_DIR ?? resolve(here, '..', '..', 'ui', 'dist');
+  const candidate = process.env.AC_UI_DIR ?? resolve(here, '..', '..', 'ui', 'dist');
   return existsSync(candidate) ? candidate : null;
 }
 

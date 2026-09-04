@@ -1,4 +1,4 @@
-/** Local daemon lifecycle (PLAN §20 `oc daemon`). Everything here is host-local, never remote. */
+/** Local daemon lifecycle (PLAN §20 `conductor daemon`). Everything here is host-local, never remote. */
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -11,13 +11,13 @@ export function pidFile(): string { return join(stateHome(), 'daemon.pid'); }
 export function logFile(): string { return join(stateHome(), 'daemon.log'); }
 
 /**
- * The server bin. `@openconductor/server` is expected to export `./bin` →
- * `dist/bin.js`; the repo-relative fallbacks keep `oc daemon start` working from a source checkout
+ * The server bin. `@agent-conductor/server` is expected to export `./bin` →
+ * `dist/bin.js`; the repo-relative fallbacks keep `conductor daemon start` working from a source checkout
  * before the package is linked.
  */
 export function resolveServerBin(): string {
   const req = createRequire(import.meta.url);
-  for (const specifier of ['@openconductor/server/bin', '@openconductor/server/dist/bin.js']) {
+  for (const specifier of ['@agent-conductor/server/bin', '@agent-conductor/server/dist/bin.js']) {
     try { return req.resolve(specifier); } catch { /* try the next one */ }
   }
   const here = dirname(fileURLToPath(import.meta.url));
@@ -27,7 +27,7 @@ export function resolveServerBin(): string {
     resolve(process.cwd(), 'packages/server/dist/bin.js'),
   ];
   for (const candidate of candidates) if (existsSync(candidate)) return candidate;
-  throw new Error('cannot find the OpenConductor server: install @openconductor/server, or build it with `pnpm -r build`');
+  throw new Error('cannot find the AgentConductor server: install @agent-conductor/server, or build it with `pnpm -r build`');
 }
 
 export function readPid(): number | null {
@@ -58,7 +58,7 @@ export function startDaemon(options: StartOptions = {}): StartResult {
   const bin = resolveServerBin();
   mkdirSync(stateHome(), { recursive: true });
   const env = { ...process.env, ...(options.env ?? {}) } as NodeJS.ProcessEnv;
-  if (options.listen) env['OC_LISTEN'] = options.listen;
+  if (options.listen) env['AC_LISTEN'] = options.listen;
 
   if (options.foreground) {
     const child = spawn(process.execPath, [bin], { stdio: 'inherit', env });
@@ -113,7 +113,7 @@ export function followLog(onLine: (line: string) => void): { close(): void } {
   return { close() { child.kill(); } };
 }
 
-export const SERVICE_NAME = 'openconductor.service';
+export const SERVICE_NAME = 'agent-conductor.service';
 
 export function serviceUnitPath(): string {
   return join(process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config'), 'systemd', 'user', SERVICE_NAME);
@@ -122,14 +122,14 @@ export function serviceUnitPath(): string {
 export function renderServiceUnit(bin: string): string {
   return [
     '[Unit]',
-    'Description=OpenConductor daemon',
+    'Description=AgentConductor daemon',
     'After=network-online.target',
     'Wants=network-online.target',
     '',
     '[Service]',
     'Type=simple',
     `ExecStart=${process.execPath} ${bin}`,
-    `Environment=OC_CONFIG_HOME=${configHome()}`,
+    `Environment=AC_CONFIG_HOME=${configHome()}`,
     'Restart=on-failure',
     'RestartSec=3',
     'KillSignal=SIGTERM',
@@ -141,7 +141,7 @@ export function renderServiceUnit(bin: string): string {
   ].join('\n');
 }
 
-export const LAUNCHD_LABEL = 'com.openconductor.daemon';
+export const LAUNCHD_LABEL = 'com.agentconductor.daemon';
 
 export function launchdPlistPath(): string {
   return join(homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);
@@ -163,7 +163,7 @@ export function renderLaunchdPlist(bin: string): string {
     '  </array>',
     '  <key>EnvironmentVariables</key>',
     '  <dict>',
-    '    <key>OC_CONFIG_HOME</key>',
+    '    <key>AC_CONFIG_HOME</key>',
     `    <string>${configHome()}</string>`,
     '  </dict>',
     '  <key>RunAtLoad</key>',
@@ -186,7 +186,7 @@ export function renderLaunchdPlist(bin: string): string {
 }
 
 /**
- * Write `~/Library/LaunchAgents/com.openconductor.daemon.plist`. On anything but macOS the plist is
+ * Write `~/Library/LaunchAgents/com.agentconductor.daemon.plist`. On anything but macOS the plist is
  * only rendered (`written: false`) so it can be copied to a Mac by hand.
  */
 export function installLaunchdAgent(): { path: string; plist: string; commands: string[]; written: boolean } {

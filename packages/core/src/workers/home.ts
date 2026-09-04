@@ -1,15 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Agent, Role } from '@openconductor/shared';
-import type { RuntimeAdapter } from '@openconductor/runtime-sdk';
+import type { Agent, Role } from '@agent-conductor/shared';
+import type { RuntimeAdapter } from '@agent-conductor/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { renderBrief, renderConductorInstructions, renderWorkerInstructions } from '../prompts/index.js';
 
-const MARKER = '.oc-render.json';
+const MARKER = '.ac-render.json';
 
-const CONDUCTOR_SKILLS = ['openconductor-conductor', 'openconductor-hire', 'openconductor-planning', 'openconductor-briefing', 'openconductor-knowledge'];
-const WORKER_SKILLS = ['openconductor-worker', 'openconductor-openspec', 'openconductor-scout', 'openconductor-knowledge'];
+const CONDUCTOR_SKILLS = ['agent-conductor-conductor', 'agent-conductor-hire', 'agent-conductor-planning', 'agent-conductor-briefing', 'agent-conductor-knowledge'];
+const WORKER_SKILLS = ['agent-conductor-worker', 'agent-conductor-openspec', 'agent-conductor-scout', 'agent-conductor-knowledge'];
 
 /** Skill packages shipped with the daemon, filtered to the ones this agent kind loads. */
 export function skillsFor(ctx: WorkspaceContext, kind: 'conductor' | 'worker'): Array<{ name: string; dir: string }> {

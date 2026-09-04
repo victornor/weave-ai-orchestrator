@@ -1,4 +1,4 @@
-# Follow-up brief 1 for the OpenConductor mockup
+# Follow-up brief 1 for the AgentConductor mockup
 
 Two additions to the brief you already have. Keep everything else as designed; extend the same token sheet, status glyphs and component sheet. Phone first, desktop second, both themes.
 
@@ -21,7 +21,7 @@ Clickable path to add: Knowledge & Specs → project `web` → capability "themi
 The daemon runs on a server; the web app and phone reach it over the internet. Design:
 
 1. **Login.** Username, password, then a second step for a 6-digit TOTP code when two-factor is on. "Remember this device" names the device (e.g. "Victor's phone"). Error states: wrong password, locked out for 15 minutes after five failures (show the remaining time), expired session. No sign-up: there is exactly one operator account, created on the server. First-run on a fresh daemon shows a short "set your password" screen instead.
-2. **Settings → Security & Devices.** Change password, enable/disable two-factor (QR + recovery codes), list of devices/sessions (name, kind: web/CLI/presenter, last seen, IP, this device), revoke one or all. A CLI hint: `oc login https://…`.
+2. **Settings → Security & Devices.** Change password, enable/disable two-factor (QR + recovery codes), list of devices/sessions (name, kind: web/CLI/presenter, last seen, IP, this device), revoke one or all. A CLI hint: `conductor login https://…`.
 3. **Connection state.** A subtle, consistent indicator for: connected (nothing shown), reconnecting (thin banner, no modal), offline (read-only view of the last state with a timestamp, composer shows "will send when back online" and queues messages), and server unreachable at load. Streaming transcripts and the board must degrade gracefully.
 4. **Notifications.** A first-time prompt to enable push notifications (decisions and landed work), phrased in outcomes; a Settings toggle; the notification itself as a card preview on the lock screen (plan ready, merge ready, needs you).
 5. **Dictation unavailable.** When the browser has no speech API and the server has no transcription provider, the mic button shows a short explanation on tap and the composer stays usable.

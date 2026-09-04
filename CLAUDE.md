@@ -1,4 +1,4 @@
-# CLAUDE.md — working on OpenConductor
+# CLAUDE.md — working on AgentConductor
 
 For coding agents (and humans) changing this repo. User-facing docs are in [`README.md`](README.md)
 and [`docs/`](docs/); this file is about the code.
@@ -31,10 +31,10 @@ packages/
                   usage, threads, briefing, prompts, auth, forge, workspace loader
   server/         the process: Hono app, routes, two listeners, MCP endpoint, auth, SSE,
                   static UI serving, channel manager, plugin loading. `dist/bin.js` is the daemon.
-  cli/            the `oc` command tree (commander). `dist/bin.js` is the CLI.
-  tui/            Ink components behind `oc chat`, `oc attach`, `oc top`, `oc specs explore`
+  cli/            the `conductor` command tree (commander). `dist/bin.js` is the CLI.
+  tui/            Ink components behind `conductor chat`, `conductor attach`, `conductor top`, `conductor specs explore`
   ui/             React 19 + Vite + Tailwind v4 web app; built to `dist/`, served by the daemon
-  presenter/      the client-side reconciler behind `oc presenter`
+  presenter/      the client-side reconciler behind `conductor presenter`
   runtimes/       claude, codex, opencode, gemini adapters
   channels/       web, cli, telegram
   surfaces/       headless, tmux, herdr, hyprland
@@ -45,7 +45,7 @@ scripts/          guard-boundaries.mjs, guard-console.mjs (these are `pnpm lint`
 
 Dependency direction, enforced by `scripts/guard-boundaries.mjs`:
 
-- `shared` imports **nothing** from `@openconductor/*`.
+- `shared` imports **nothing** from `@agent-conductor/*`.
 - The three SDKs may import `shared` only — never `core`, `db` or `server`.
 - `core` may not import `server`, `cli`, `tui`, `ui`, `presenter`, or any runtime/channel/surface
   package. Adapters are reached through the registries on `WorkspaceContext`, never by import.
@@ -71,9 +71,9 @@ details, retryable)`. `OcError.status(code)` maps to HTTP; the API serialises
 Agent tools return `ToolResult<T>` (`ok(data)` / `fail(err)`) rather than throwing.
 
 **No `console` outside `cli`, `tui` and `ui`.** Enforced by `scripts/guard-console.mjs`. Everywhere
-else use `getLogger(domain, bindings)` from `@openconductor/core` with a domain from `LOG_DOMAINS`;
+else use `getLogger(domain, bindings)` from `@agent-conductor/core` with a domain from `LOG_DOMAINS`;
 it is pino, structured, to stderr (`log.info({ ...fields }, 'message')`). An unavoidable exception carries
-an `oc-allow-console` comment on the line.
+an `ac-allow-console` comment on the line.
 
 **Tests are vitest**, colocated as `src/**/*.test.ts` or under a package's `test/` directory (both
 are in `vitest.config.ts`'s include). Runtime adapters are tested against recorded `fixtures/*.jsonl`
@@ -93,7 +93,7 @@ invariant (checkout, approvals, project boundary).
 ```bash
 pnpm install
 pnpm build                                # tsc -b everywhere
-pnpm --filter @openconductor/ui build     # only when you touched the web app
+pnpm --filter @agent-conductor/ui build     # only when you touched the web app
 
 pnpm test                                 # vitest run, whole repo
 pnpm vitest run packages/core             # one package
@@ -104,7 +104,7 @@ pnpm typecheck                            # tsc -b tsconfig.json
 Daemon, foreground, with a throwaway config dir:
 
 ```bash
-XDG_CONFIG_HOME=/tmp/oc-dev node packages/server/dist/bin.js --listen 127.0.0.1:7433
+XDG_CONFIG_HOME=/tmp/ac-dev node packages/server/dist/bin.js --listen 127.0.0.1:7433
 # flags: --config-dir <dir>  --listen <host:port>  --ui-dir <dir>
 # or:    pnpm dev
 ```
@@ -121,9 +121,9 @@ node packages/cli/dist/bin.js --url http://127.0.0.1:7433 -w acme ticket list
 # or link it once: cd packages/cli && pnpm link --global
 ```
 
-Useful env vars: `OC_SKILLS_DIR`, `OC_TEMPLATES_DIR` (point the daemon at a checkout's `skills/` and
-`templates/`; they default to repo-relative), `OC_UI_DIR`, `OC_LOOPBACK_PORT` / `OC_LOOPBACK_SOCKET`,
-`OC_OPENSPEC_BIN`, `OC_LOG_LEVEL`, `OC_CONTEXTS_FILE`, `OC_API_URL`, `OC_TOKEN`, `OC_WORKSPACE`.
+Useful env vars: `AC_SKILLS_DIR`, `AC_TEMPLATES_DIR` (point the daemon at a checkout's `skills/` and
+`templates/`; they default to repo-relative), `AC_UI_DIR`, `AC_LOOPBACK_PORT` / `AC_LOOPBACK_SOCKET`,
+`AC_OPENSPEC_BIN`, `AC_LOG_LEVEL`, `AC_CONTEXTS_FILE`, `AC_API_URL`, `AC_TOKEN`, `AC_WORKSPACE`.
 
 ## Checklist before you call something done
 

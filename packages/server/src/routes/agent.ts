@@ -1,12 +1,12 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { OcError } from '@openconductor/shared';
+import { OcError } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
 import { runTool, toolNamesFor, toolsFor, jsonSchemaFor, type ToolCtx } from '../tools.js';
 
 /**
- * The MCP tools mirrored over REST for the `oc` CLI (PLAN §9.5). Loopback listener + run token only;
+ * The MCP tools mirrored over REST for the `conductor` CLI (PLAN §9.5). Loopback listener + run token only;
  * the auth middleware enforces that, this router only checks the token matches the workspace.
  */
 export function agentRoutes(): Hono<AppEnv> {
@@ -20,7 +20,7 @@ export function agentRoutes(): Hono<AppEnv> {
     return { ws, claims: principal.claims, actor: c.get('actor') as unknown as ToolCtx['actor'] };
   };
 
-  app.get('/inbox', async (c) => c.json(await runTool('oc_inbox', toolCtx(c as never), {})));
+  app.get('/inbox', async (c) => c.json(await runTool('ac_inbox', toolCtx(c as never), {})));
 
   app.get('/tools', (c) => {
     const ctx = toolCtx(c as never);

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RUN_STATUSES } from '@openconductor/shared';
+import { RUN_STATUSES } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Table } from '../components/Table';
 import { SkeletonRows } from '../components/Skeleton';
@@ -68,11 +68,11 @@ export function RunsRoute(): React.ReactElement {
                     <StatusGlyph status={RUN_UI[r.status]} size="sm" pulse={r.status === 'running'} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-ui text-text-1">{nameOf(r.agentId)}</span>
-                      <span className="oc-mono block truncate text-micro text-text-3">
+                      <span className="ac-mono block truncate text-micro text-text-3">
                         {r.model ?? '—'} · {tokens((r.usage?.inputTokens ?? 0) + (r.usage?.outputTokens ?? 0))} tok · {cents(r.costCents)}
                       </span>
                     </span>
-                    <span className="oc-mono text-nano text-text-4">{ago(r.startedAt ?? r.createdAt)}</span>
+                    <span className="ac-mono text-nano text-text-4">{ago(r.startedAt ?? r.createdAt)}</span>
                   </button>
                 </li>
               ))}
@@ -91,7 +91,7 @@ export function RunsRoute(): React.ReactElement {
                     render: (r) => (
                       <span className="flex items-center gap-2">
                         <StatusGlyph status={RUN_UI[r.status]} size="xs" pulse={r.status === 'running'} />
-                        <span className="oc-mono text-micro">{r.status}</span>
+                        <span className="ac-mono text-micro">{r.status}</span>
                       </span>
                     ),
                   },

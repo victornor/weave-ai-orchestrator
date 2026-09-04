@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ProjectConfigSchema } from '@openconductor/shared';
+import { ProjectConfigSchema } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
 

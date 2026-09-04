@@ -118,7 +118,7 @@ describe('running commands against a stubbed daemon', () => {
     return seen;
   }
 
-  const base = ['node', 'oc', '--json', '--url', 'http://daemon.test', '-w', 'acme'];
+  const base = ['node', 'conductor', '--json', '--url', 'http://daemon.test', '-w', 'acme'];
 
   it('prints tickets as json and calls the workspace route', async () => {
     const seen = stubFetch({
@@ -176,7 +176,7 @@ describe('running commands against a stubbed daemon', () => {
 
   it('fails cleanly when no workspace can be resolved', async () => {
     stubFetch({ '/api/health': { ok: true, workspaces: [{ id: 'a' }, { id: 'b' }] } });
-    await buildProgram().parseAsync(['node', 'oc', '--json', '--url', 'http://daemon.test', 'ticket', 'list']);
+    await buildProgram().parseAsync(['node', 'conductor', '--json', '--url', 'http://daemon.test', 'ticket', 'list']);
     expect(written.join('')).toContain('no workspace selected');
     expect(process.exitCode).toBe(1);
   });
@@ -186,7 +186,7 @@ describe('running commands against a stubbed daemon', () => {
       '/api/health': { ok: true, workspaces: [{ id: 'only' }] },
       '/api/w/only/projects': [{ id: 'api', name: 'api', status: 'ready' }],
     });
-    await buildProgram().parseAsync(['node', 'oc', '--json', '--url', 'http://daemon.test', 'project', 'list']);
+    await buildProgram().parseAsync(['node', 'conductor', '--json', '--url', 'http://daemon.test', 'project', 'list']);
     expect(seen).toContain('GET /api/w/only/projects');
   });
 
@@ -199,7 +199,7 @@ describe('running commands against a stubbed daemon', () => {
 
   it('exports the workspace with an explicit output directory', async () => {
     const seen = stubFetch({ '/api/w/acme/export': { path: '/ws/exports/x', roles: 2, knowledgeFiles: 3, tickets: 4 } });
-    await buildProgram().parseAsync([...base, 'workspace', 'export', '--out', '/tmp/oc-export']);
+    await buildProgram().parseAsync([...base, 'workspace', 'export', '--out', '/tmp/ac-export']);
     expect(seen).toContain('POST /api/w/acme/export');
     expect(JSON.parse(written.join(''))).toMatchObject({ path: '/ws/exports/x', tickets: 4 });
   });

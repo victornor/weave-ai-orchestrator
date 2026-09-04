@@ -1,4 +1,4 @@
-/** `oc presentation set|open|reconcile|status` and `oc presenter` (PLAN §14b, §20). */
+/** `conductor presentation set|open|reconcile|status` and `conductor presenter` (PLAN §14b, §20). */
 import type { Command } from 'commander';
 import { spawn } from 'node:child_process';
 import { ApiError } from '../api.js';
@@ -86,11 +86,11 @@ export function register(program: Command): void {
       const config = await client.wget<Record<string, unknown>>('/presentation').catch(() => ({} as Record<string, unknown>));
       const workers = (config?.['workers'] ?? {}) as Record<string, unknown>;
       const surface = String(workers['surface'] ?? config?.['default'] ?? 'headless');
-      const sessionName = String(workers['session'] ?? `oc-${client.workspace ?? 'workspace'}`);
+      const sessionName = String(workers['session'] ?? `ac-${client.workspace ?? 'workspace'}`);
       if (surface !== 'tmux') {
         emit({ surface, attach: null }, () => {
-          write(`surface is ${style.bold(surface)} — its windows are managed by \`oc presenter\` on the machine you are looking at.`);
-          write(style.dim('run `oc presenter` there, or switch with `oc presentation set workers.surface tmux`'));
+          write(`surface is ${style.bold(surface)} — its windows are managed by \`conductor presenter\` on the machine you are looking at.`);
+          write(style.dim('run `conductor presenter` there, or switch with `conductor presentation set workers.surface tmux`'));
         });
         return;
       }
@@ -106,23 +106,23 @@ export function register(program: Command): void {
     .option('--once', 'reconcile once and exit')
     .action(async (opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const { client } = await session(command);
-      const specifier = '@openconductor/presenter';
+      const specifier = '@agent-conductor/presenter';
       let mod: { startPresenter?: (input: Record<string, unknown>) => Promise<unknown> };
       try {
         mod = (await import(specifier)) as { startPresenter?: (input: Record<string, unknown>) => Promise<unknown> };
       } catch (cause) {
-        throw new ApiError('not_found', `the presenter is not installed: install @openconductor/presenter (${(cause as Error).message})`, 404, {
-          hint: 'pnpm add -g @openconductor/presenter, or run it from a source checkout',
+        throw new ApiError('not_found', `the presenter is not installed: install @agent-conductor/presenter (${(cause as Error).message})`, 404, {
+          hint: 'pnpm add -g @agent-conductor/presenter, or run it from a source checkout',
         });
       }
       if (typeof mod.startPresenter !== 'function') {
-        throw new ApiError('internal', '@openconductor/presenter does not export startPresenter', 500);
+        throw new ApiError('internal', '@agent-conductor/presenter does not export startPresenter', 500);
       }
       await mod.startPresenter({
         client,
         apiUrl: client.baseUrl,
         token: client.token ?? '',
-        ocCommand: [process.execPath, process.argv[1] ?? 'oc'],
+        ocCommand: [process.execPath, process.argv[1] ?? 'conductor'],
         workspaceId: client.workspace,
         surface: typeof opts['surface'] === 'string' ? opts['surface'] : undefined,
         once: opts['once'] === true,

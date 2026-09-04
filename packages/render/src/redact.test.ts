@@ -3,7 +3,7 @@ import { REDACTED, redact, redactValue } from './redact.js';
 
 describe('redact', () => {
   it('redacts run tokens', () => {
-    expect(redact('use OC_RUN_TOKEN=rt_abc123def456ghi789')).toBe('use OC_RUN_TOKEN=rt_[redacted]');
+    expect(redact('use AC_RUN_TOKEN=rt_abc123def456ghi789')).toBe('use AC_RUN_TOKEN=rt_[redacted]');
   });
   it('redacts provider keys', () => {
     expect(redact('sk-ant-api03-AAAAbbbbCCCCddddEEEE')).toBe('sk-[redacted]');

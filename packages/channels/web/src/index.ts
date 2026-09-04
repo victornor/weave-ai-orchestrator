@@ -1,6 +1,6 @@
 import type {
   ChannelAdapter, ChannelCapabilities, ChannelContext, JsonSchema, OutboundMessage, RunningChannel, SendResult,
-} from '@openconductor/channel-sdk';
+} from '@agent-conductor/channel-sdk';
 
 /**
  * The web channel is a no-op transport: the daemon delivers thread messages to the

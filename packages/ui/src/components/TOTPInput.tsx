@@ -79,8 +79,8 @@ export function TOTPInput({
             if (e.key === 'ArrowRight' && i < 5) refs.current[i + 1]?.focus();
           }}
           className={cx(
-            'oc-mono h-13 w-11 rounded-r6 border text-center text-title outline-none transition-colors duration-(--dur-fast) ease-oc',
-            invalid ? 'border-failed bg-bg-1 text-failed' : focus === i ? 'border-accent bg-bg-1 oc-focus-ring' : 'border-line-2 bg-bg-input',
+            'ac-mono h-13 w-11 rounded-r6 border text-center text-title outline-none transition-colors duration-(--dur-fast) ease-ac',
+            invalid ? 'border-failed bg-bg-1 text-failed' : focus === i ? 'border-accent bg-bg-1 ac-focus-ring' : 'border-line-2 bg-bg-input',
             'text-text-1 placeholder:text-text-4',
           )}
         />

@@ -13,11 +13,11 @@ Never guess between two plausible projects because guessing is faster. A ticket 
 
 ## Resolving the role
 
-`oc_role_list()` returns every role with its `scope` and charter summary. Match the ticket against `scope` — it is written in natural language precisely so you can.
+`ac_role_list()` returns every role with its `scope` and charter summary. Match the ticket against `scope` — it is written in natural language precisely so you can.
 
 - **One clear match** → assign, and name the role in your reply to the human ("the backend engineer is on it").
-- **Two matches** → the charters overlap where they should not. Pick the one whose scope names the ticket's *primary* deliverable, assign, and then sharpen both charters with `oc_role_update_charter` so the next ticket is unambiguous.
-- **No match** → load `openconductor-hire`. Do not stretch an existing role into work its charter excludes; the worker will read the exclusion and stop.
+- **Two matches** → the charters overlap where they should not. Pick the one whose scope names the ticket's *primary* deliverable, assign, and then sharpen both charters with `ac_role_update_charter` so the next ticket is unambiguous.
+- **No match** → load `agent-conductor-hire`. Do not stretch an existing role into work its charter excludes; the worker will read the exclusion and stop.
 - **Match, but at `maxWorkers`** → assign anyway. The ticket waits for a slot. Tell the human it is queued and behind what.
 - **Match, but the role is `paused`** → tell the human it is paused and ask whether to resume it. Do not resume a role someone paused deliberately.
 

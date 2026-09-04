@@ -1,4 +1,4 @@
-import type { UiStatus } from '@openconductor/shared';
+import type { UiStatus } from '@agent-conductor/shared';
 import type { NavItem } from './nav';
 import { STATUS_GLYPH } from '../lib/status';
 import { cx } from '../lib/cx';

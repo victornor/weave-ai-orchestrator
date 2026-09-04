@@ -5,15 +5,15 @@ Verified by running the binary against a scratch repo. This is the contract the 
 ## Invocation shape the daemon uses
 
 ```
-wt -C <primary-clone> --config <workspace>/.openconductor/wt.toml \
+wt -C <primary-clone> --config <workspace>/.agent-conductor/wt.toml \
    --config-set 'worktree-path="<workspace>/workers/<workerId>/work"' -y \
-   switch --create oc/<ticket>-<slug> --base main --no-cd --format json
+   switch --create ac/<ticket>-<slug> --base main --no-cd --format json
 ```
 
 - `--config <path>` selects the *user* config for this invocation, so the human's `~/.config/worktrunk/config.toml` is never read or written. `--config-set <toml>` is a repeatable inline override; a literal `worktree-path` with no template variables works (verified: worktree created at exactly `workers/01JULID/work`).
 - `-y` skips approval prompts. Hooks defined in the **user** config need no approval; hooks in a repo's `.config/wt.toml` (project config) require a one-time approval on first run and are therefore avoided for daemon runs.
 - `--no-cd` and `--format json` make `switch` non-interactive. Output (verified):
-  `{"action":"created","branch":"oc/demo-2","path":"/…/workers/01JULID/work","created_branch":true,"base_branch":"main"}`
+  `{"action":"created","branch":"ac/demo-2","path":"/…/workers/01JULID/work","created_branch":true,"base_branch":"main"}`
 - Path template variables available: `{{ repo_path }}`, `{{ repo }}`, `{{ owner }}`, `{{ branch }}`, filters `sanitize`, `sanitize_db`, `codename(n)`. Since the worker id is not a variable, the daemon passes the literal path per invocation (above).
 
 ## Listing (state mirror)
@@ -30,7 +30,7 @@ wt -C <primary-clone> --config <workspace>/.openconductor/wt.toml \
                "display": {state, symbols, statusline} } ] }
 ```
 
-This feeds the `worktrees` table and `oc_worktree_status` (dirty flags, ahead/behind, predicted merge conflicts). `--full` adds CI status via `gh`/`glab`; not needed, the daemon reads PR state itself.
+This feeds the `worktrees` table and `ac_worktree_status` (dirty flags, ahead/behind, predicted merge conflicts). `--full` adds CI status via `gh`/`glab`; not needed, the daemon reads PR state itself.
 
 ## Removal semantics (verified)
 
@@ -44,7 +44,7 @@ This feeds the `worktrees` table and `oc_worktree_status` (dirty flags, ahead/be
 
 Events: `pre-switch`/`post-switch`, `pre-start`/`post-start` (worktree creation), `pre-commit`/`post-commit`, `pre-merge`/`post-merge`, `pre-remove`/`post-remove`. `pre-*` block and abort on failure; `post-*` run in the background with logs under `.git/wt/logs/`. Template variables include `{{ branch }}`, `{{ worktree_path }}`, `{{ worktree_name }}`, `{{ commit }}`, `{{ base }}`, `{{ base_worktree_path }}`, `{{ target }}`, `{{ vars.* }}`. Forms: single string, table (concurrent), array-of-tables (pipeline). Per-project overrides in user config under `[projects."github.com/owner/repo"]` (scalars replace, hooks append).
 
-Daemon's generated `.openconductor/wt.toml` (user-config format, per workspace):
+Daemon's generated `.agent-conductor/wt.toml` (user-config format, per workspace):
 
 ```toml
 [list]

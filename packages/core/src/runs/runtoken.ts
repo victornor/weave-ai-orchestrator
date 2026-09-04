@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { SignJWT, jwtVerify, decodeJwt } from 'jose';
-import type { Db } from '@openconductor/db';
-import { OcError } from '@openconductor/shared';
+import type { Db } from '@agent-conductor/db';
+import { OcError } from '@agent-conductor/shared';
 
 /**
  * Run tokens (PLAN §9.1): HS256 JWTs signed with a per-workspace secret in the `meta` table,
@@ -38,7 +38,7 @@ export async function signRunToken(secret: Uint8Array, claims: RunTokenClaims, t
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(claims.agentId)
-    .setIssuer('openconductor')
+    .setIssuer('agent-conductor')
     .setAudience('run')
     .setIssuedAt()
     .setExpirationTime(Math.floor(Date.now() / 1000) + ttlSeconds)
@@ -56,7 +56,7 @@ export function peekWorkspaceId(token: string): string | null {
 
 export async function verifyRunToken(secret: Uint8Array, token: string): Promise<RunTokenClaims> {
   try {
-    const { payload } = await jwtVerify(strip(token), secret, { issuer: 'openconductor', audience: 'run' });
+    const { payload } = await jwtVerify(strip(token), secret, { issuer: 'agent-conductor', audience: 'run' });
     const kind = payload.kind === 'conductor' ? 'conductor' : 'worker';
     if (typeof payload.wid !== 'string' || typeof payload.rid !== 'string' || typeof payload.aid !== 'string') {
       throw new OcError('unauthorized', 'run token missing claims');

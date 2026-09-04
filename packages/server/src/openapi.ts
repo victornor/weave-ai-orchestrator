@@ -1,5 +1,5 @@
 /** Minimal OpenAPI 3.1 document and the agent-readable `llms/api.txt`, both generated from ROUTES. */
-import { ERROR_CODES, EVENT_TYPES, COMMON_TOOLS, CONDUCTOR_TOOLS } from '@openconductor/shared';
+import { ERROR_CODES, EVENT_TYPES, COMMON_TOOLS, CONDUCTOR_TOOLS } from '@agent-conductor/shared';
 import { ROUTES, type RouteRow } from './routetable.js';
 
 const PARAM = /\{([^}]+)\}/g;
@@ -21,14 +21,14 @@ export function openApiDocument(version: string, publicUrl: string): Record<stri
   }
   return {
     openapi: '3.1.0',
-    info: { title: 'OpenConductor', version, description: 'Control plane for a fleet of coding agents. Errors are { error: { code, message, details?, retryable } }.' },
+    info: { title: 'AgentConductor', version, description: 'Control plane for a fleet of coding agents. Errors are { error: { code, message, details?, retryable } }.' },
     servers: [{ url: publicUrl }],
     tags: [...new Set(ROUTES.map((r) => r.tag))].map((name) => ({ name })),
     paths,
     components: {
       securitySchemes: {
         bearerAuth: { type: 'http', scheme: 'bearer', description: 'Operator session token, or a run token (rt_…) on the loopback listener' },
-        cookieAuth: { type: 'apiKey', in: 'cookie', name: 'oc_session' },
+        cookieAuth: { type: 'apiKey', in: 'cookie', name: 'ac_session' },
       },
       schemas: {
         Error: {
@@ -59,10 +59,10 @@ export function llmsApiText(version: string, publicUrl: string): string {
   const byTag = new Map<string, RouteRow[]>();
   for (const r of ROUTES) { const list = byTag.get(r.tag) ?? []; list.push(r); byTag.set(r.tag, list); }
   const lines: string[] = [
-    `# OpenConductor HTTP API (v1, daemon ${version})`,
+    `# AgentConductor HTTP API (v1, daemon ${version})`,
     '',
     `Base: ${publicUrl}. Workspace routes are /api/w/<workspaceId>/...  JSON in, JSON out.`,
-    'Auth: `Authorization: Bearer <session token>` or the oc_session cookie. Agents use a run token',
+    'Auth: `Authorization: Bearer <session token>` or the ac_session cookie. Agents use a run token',
     '(`Bearer rt_...`) which is only accepted on the daemon loopback listener, and only for /mcp/runs/<runId>',
     'and /api/w/<ws>/agent/*.',
     '',

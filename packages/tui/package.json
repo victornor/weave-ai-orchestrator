@@ -1,5 +1,5 @@
 {
-  "name": "@openconductor/tui",
+  "name": "@agent-conductor/tui",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,8 +14,8 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@openconductor/shared": "workspace:*",
-    "@openconductor/render": "workspace:*",
+    "@agent-conductor/shared": "workspace:*",
+    "@agent-conductor/render": "workspace:*",
     "ink": "^6.3.0",
     "react": "^19.1.1",
     "ws": "^8.18.3",

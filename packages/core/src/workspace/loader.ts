@@ -2,11 +2,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, chmod
 import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import YAML from 'yaml';
-import { openDb, newId, nowIso } from '@openconductor/db';
+import { openDb, newId, nowIso } from '@agent-conductor/db';
 import {
   DaemonConfigSchema, WorkspaceConfigSchema, WorkspaceRegistrySchema, OcError,
   type DaemonConfig, type WorkspaceConfig, type WorkspaceRegistry,
-} from '@openconductor/shared';
+} from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import { workspacePaths } from '../context.js';
 import { EventBus } from '../events.js';
@@ -20,9 +20,9 @@ export const WORKSPACE_FILE = 'workspace.yaml';
 // ---------- config dir (daemon-level) ----------
 
 function configDir(): string {
-  if (process.env.OC_CONFIG_HOME) return process.env.OC_CONFIG_HOME;
+  if (process.env.AC_CONFIG_HOME) return process.env.AC_CONFIG_HOME;
   const xdg = process.env.XDG_CONFIG_HOME;
-  return xdg && xdg.trim().length ? join(xdg, 'openconductor') : join(homedir(), '.config', 'openconductor');
+  return xdg && xdg.trim().length ? join(xdg, 'agent-conductor') : join(homedir(), '.config', 'agent-conductor');
 }
 
 function readYamlFile(path: string): unknown {
@@ -173,7 +173,7 @@ class Loader implements WorkspaceLoader {
       const path = join(root, 'knowledge', rel);
       if (!existsSync(path)) { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, body({ name: config.name, humanName }), 'utf8'); }
     }
-    const gitignore = join(root, '.openconductor', '.gitignore');
+    const gitignore = join(root, '.agent-conductor', '.gitignore');
     if (!existsSync(gitignore)) writeFileSync(gitignore, '*\n', 'utf8');
     writeWtConfig(workspacePaths(root).wtConfig, []);
     return config;
@@ -272,7 +272,7 @@ export const loader: WorkspaceLoader = new Loader();
 
 /**
  * Inherit the host user's CLI credentials into a per-workspace runtime config home when it has none yet.
- * Copies only credential files (never settings), mode 0600. `oc runtime login` can replace them later.
+ * Copies only credential files (never settings), mode 0600. `conductor runtime login` can replace them later.
  */
 export function seedRuntimeCredentials(runtimeId: string, home: string, opts: { force?: boolean } = {}): void {
   const h = process.env.HOME ?? '';

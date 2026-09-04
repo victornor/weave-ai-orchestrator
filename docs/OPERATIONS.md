@@ -204,6 +204,10 @@ Notes before you enable it:
 `oc daemon stop` only stops a daemon that `oc daemon start` launched from this machine; under
 systemd use `systemctl --user stop openconductor.service`.
 
+**Known gap:** `oc daemon start --listen host:port` exports `OC_LISTEN` but nothing reads it, so the
+flag has no effect. Set `http.listen` in `daemon.yaml`, or pass `--listen` to the server binary
+directly (`node packages/server/dist/bin.js --listen 127.0.0.1:9000`), which does work.
+
 ---
 
 ## 4. Logs
@@ -436,8 +440,11 @@ proxy down, or the daemon refused to start. Check the journal: a refusal to bind
 ### Disk fills up
 
 `<workspace>/.openconductor/runs/` and `<workspace>/archive/workers/` are the usual culprits, then
-per-worker `node_modules` in worktrees. `defaults.runLogRetentionDays` (30) and
-`defaults.workerArchiveDays` (30) bound them; `oc worker purge <id>` removes one worker's home and
+per-worker `node_modules` in worktrees. **Neither is pruned automatically yet** —
+`defaults.runLogRetentionDays` (30) and `defaults.workerArchiveDays` (30) are accepted by the config
+schema but nothing enforces them, so delete old run directories and worker archives yourself (a
+`find … -mtime +30 -delete` in a cron job is enough; run directories are named by run id and nothing
+else references them once the run is finished). `oc worker purge <id>` removes one worker's home and
 worktree (refuses a dirty worktree without `--force`). Never delete a live worker's `work/` by hand —
 `oc worktree verify <id>` tells you whether the work has landed, and `oc worktree discard <id>` is
 the supported destructive path.

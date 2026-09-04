@@ -391,7 +391,7 @@ Everything keeps working — a missing binary is never fatal — but `change` ti
   commit is made;
 - `oc specs list|show|changes` and the Spec Explorer are empty.
 
-Fix: `npm i -g @fission-ai/openspec`, confirm with `openspec --version`, then re-run
+Fix: `oc doctor --install` (or `npm i -g @fission-ai/openspec` by hand), confirm with `openspec --version`, then re-run
 `oc project fetch` (which reindexes) or `POST /api/w/<ws>/specs/<project>/reindex`. If the binary is
 somewhere unusual, point the daemon at it with `OC_OPENSPEC_BIN=/path/to/openspec` in the unit. To
 opt a project out entirely, set `openspec: { enabled: false }` on it.

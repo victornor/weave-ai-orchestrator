@@ -43,7 +43,9 @@ rather than in a long chat, so bootstrap cost per worker stays flat over the lif
 | A coding CLI | at least one of `claude`, `opencode`, `codex`, `gemini`, **logged in on the daemon host** |
 | `gh` | required for `deliveryMode: pr` (the default). Use `deliveryMode: local-branch` without it. |
 | `openspec` | optional, recommended — `npm i -g @fission-ai/openspec`. Without it `change` tickets skip spec artifacts and the Spec Explorer is empty. |
-| `worktrunk` (`wt`) | optional, recommended — `pacman -S worktrunk`. Without it set `worktrees: git` (the built-in `git worktree` fallback). |
+| `worktrunk` (`wt`) | optional, recommended — `cargo install worktrunk` / `brew install worktrunk` / `pacman -S worktrunk`. Without it the built-in `git worktree` fallback is used automatically. |
+
+Nothing is installed for you by default. `oc doctor` reports what is missing on this machine and on the daemon host; `oc doctor --install` offers to install the missing pieces that need no root (npm packages such as `openspec` and the runtime CLIs, `brew`/`cargo` for worktrunk) and prints the `sudo` command for the rest.
 
 ## Build
 

@@ -36,6 +36,8 @@ export interface TicketsService {
   mergeDone(actor: Actor, id: string, info: { mergeCommit?: string; method?: string }): Promise<S.Ticket>;
   /** Liveness scan helper: tickets in active statuses without an action path. */
   livenessViolations(): S.Ticket[];
+  /** Move `in_review` tickets with auto_merge on to `merging` once their delivery is ready (local-branch: immediately; pr: CI green or no CI). Returns how many advanced. */
+  autoMergeSweep(): Promise<number>;
   nextIdentifier(): string;
 }
 

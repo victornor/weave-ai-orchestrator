@@ -173,6 +173,8 @@ export interface AuthService {
   totpSetup(): Promise<{ secret: string; otpauthUrl: string; recoveryCodes: string[] }>;
   totpEnable(code: string): Promise<void>; totpDisable(): Promise<void>; totpEnabled(): boolean;
   changePassword(current: string, next: string): Promise<void>;
+  /** Check the operator's password without creating a session (re-auth before TOTP changes). */
+  verifyPassword(password: string): Promise<boolean>;
 }
 
 // ---------- briefing / conductor ----------

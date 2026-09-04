@@ -15,6 +15,16 @@ const SYSTEM: Actor = { kind: 'system', id: null };
 const MAX_ATTEMPTS = 5;
 const SWEEP_MS = 10_000;
 
+export const HELP_TEXT = [
+  'Commands',
+  '/talk <ticket>   talk to the worker on a ticket (e.g. /talk ACME-42)',
+  '/conductor       switch this thread back to the conductor',
+  '/d <id> <answer> answer a decision by option number, key or free text',
+  '/help            this list',
+  '',
+  'Anything else goes to whoever this thread is bound to.',
+].join('\n');
+
 interface PendingRow {
   id: string; threadId: string; body: string; parts: unknown; attempts: number;
   externalThreadId: string | null; channelKind: string;
@@ -95,8 +105,12 @@ export class ChannelManager {
     }
   }
 
-  /** `/talk <ticket>` · `/conductor` · `/d <decisionId> <key|text>` (PLAN §14.2). */
+  /** `/talk <ticket>` · `/conductor` · `/d <decisionId> <key|text>` · `/help` (PLAN §14.2). Kind-agnostic: every channel gets the same commands. */
   private async handleCommand(actor: Actor, threadId: string, text: string): Promise<boolean> {
+    if (/^\/help\s*$/i.test(text)) {
+      await this.reply(threadId, HELP_TEXT);
+      return true;
+    }
     const talk = /^\/talk\s+(\S+)\s*$/i.exec(text);
     if (talk) {
       const ticket = this.services.tickets.get(talk[1]!);

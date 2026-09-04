@@ -6,7 +6,7 @@ import { promptHidden } from '../prompt.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { configHome } from '../contexts.js';
-import { followLog, installService, isRunning, logFile, pidFile, readPid, resolveServerBin, startDaemon, stopDaemon, tailLog } from '../daemon.js';
+import { LAUNCHD_LABEL, followLog, installLaunchdAgent, installService, isRunning, logFile, pidFile, readPid, renderLaunchdPlist, renderServiceUnit, resolveServerBin, startDaemon, stopDaemon, tailLog } from '../daemon.js';
 import { run, session } from './util.js';
 
 interface Health { ok?: boolean; version?: string; workspaces?: Array<{ id?: string; name?: string; status?: string }>; operatorConfigured?: boolean; tlsMode?: string }
@@ -146,12 +146,31 @@ export function register(program: Command): void {
 
   daemon
     .command('install-service')
-    .description('write a systemd user unit for the daemon and print the enable commands')
+    .description('write a systemd user unit (or a launchd agent) for the daemon and print the enable commands')
     .option('--print', 'print the unit instead of writing it')
+    .option('--launchd', 'write a macOS LaunchAgent plist instead of a systemd unit')
+    .addHelpText('after', `
+--launchd writes ~/Library/LaunchAgents/${LAUNCHD_LABEL}.plist, but only on macOS;
+on any other platform the plist is printed so it can be copied to a Mac.`)
     .action(async (opts: Record<string, boolean>) => run(async () => {
+      if (opts['launchd'] === true) {
+        const result = opts['print'] === true
+          ? { ...installLaunchdAgent(), written: false, plist: renderLaunchdPlist(resolveServerBin()) }
+          : installLaunchdAgent();
+        emit(result, () => {
+          if (!result.written) {
+            write(style.dim(`# ${result.path} (not written: ${process.platform === 'darwin' ? '--print' : `this is ${process.platform}, not darwin`})`));
+            write(result.plist);
+            return;
+          }
+          write(`${style.ok('wrote')} ${result.path}`);
+          write('');
+          for (const cmd of result.commands) write(`  ${style.mono(cmd)}`);
+        });
+        return;
+      }
       if (opts['print'] === true) {
         const bin = resolveServerBin();
-        const { renderServiceUnit } = await import('../daemon.js');
         const unit = renderServiceUnit(bin);
         emit({ unit, bin }, () => write(unit));
         return;

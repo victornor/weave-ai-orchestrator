@@ -1,14 +1,26 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { nowIso } from '@openconductor/db';
-import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, type Agent, type Run, type Ticket } from '@openconductor/shared';
+import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, type Agent, type KnowledgeScope, type Run, type Ticket } from '@openconductor/shared';
 import type { WorkspaceContext } from '../context.js';
-import type { CoreServices, Supervisor } from '../api.js';
+import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
+import { archivedDirFor } from '../openspec/index.js';
 import { sh } from '../util/exec.js';
 
 const TICK_MS = 15_000;
 const LIVENESS_EVERY_MS = 60_000;
 const KILL_AFTER_INTERRUPT_MS = 30_000;
+const DAY_MS = 86_400_000;
+/** PLAN §13.4: a knowledge file is due for curation 14 days after its last one; ask at most once a day. */
+const CURATION_EVERY_MS = 10 * 60_000;
+const CURATION_STALE_MS = 14 * DAY_MS;
+const CURATION_REQUEST_COOLDOWN_MS = DAY_MS;
+/** PLAN §7.5 reconciliation is hourly; PLAN §16.1 log retention is a daily sweep. */
+const RECONCILE_EVERY_MS = 60 * 60_000;
+const RETENTION_EVERY_MS = DAY_MS;
+
+const SYSTEM: Actor = { kind: 'system', id: null };
 
 const DIGEST_EVENT_TYPES = new Set(['ticket.status', 'ticket.merged', 'decision.created', 'decision.expired', 'worker.stalled', 'worker.retired', 'run.finished']);
 
@@ -40,6 +52,14 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
 
   const meta = (key: string): string | null => ctx.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', [key])?.value ?? null;
   const setMeta = (key: string, value: string): void => { ctx.db.run('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value]); };
+
+  /** True at most once per `everyMs`, and the last run is persisted so a restart does not re-run immediately. */
+  const due = (key: string, everyMs: number): boolean => {
+    const last = Number(meta(key) ?? 0);
+    if (Number.isFinite(last) && last > 0 && Date.now() - last < everyMs) return false;
+    setMeta(key, String(Date.now()));
+    return true;
+  };
 
   const supervisorEvent = (runId: string, action: string, detail: Record<string, unknown>): void => {
     const seq = (ctx.db.get<{ n: number }>('SELECT COALESCE(MAX(seq),0) n FROM run_events WHERE run_id = ?', [runId])?.n ?? 0) + 1;
@@ -223,6 +243,165 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     } catch (e) { log.warn({ err: String(e) }, 'digest wake failed'); }
   }
 
+
+  // ---------- scheduled curation (PLAN §13.4) ----------
+
+  interface KnowledgeFileRow { path: string; scope: string; projectId: string | null; lastCuratedAt: string | null; curationPending: number; updatedAt: string }
+
+  /** Knowledge files whose last curation (or, if never curated, whose creation) is older than 14 days, plus anything already flagged. */
+  async function curationPass(): Promise<void> {
+    const rows = ctx.db.all<KnowledgeFileRow>(
+      'SELECT path, scope, project_id, last_curated_at, curation_pending, updated_at FROM knowledge_files WHERE workspace_id = ?',
+      [ctx.workspaceId],
+    );
+    const staleBefore = Date.now() - CURATION_STALE_MS;
+    for (const f of rows) {
+      const reference = Date.parse(f.lastCuratedAt ?? f.updatedAt ?? '');
+      const stale = Number.isFinite(reference) && reference < staleBefore;
+      if (!stale && !f.curationPending) continue;
+
+      const key = `supervisor:curation_requested:${f.path}`;
+      const asked = Date.parse(meta(key) ?? '');
+      if (Number.isFinite(asked) && Date.now() - asked < CURATION_REQUEST_COOLDOWN_MS) continue;
+      setMeta(key, nowIso());
+      try {
+        await deps().knowledge.requestCuration(SYSTEM, f.scope as KnowledgeScope, f.projectId);
+        log.info({ path: f.path, scope: f.scope, reason: stale ? 'stale' : 'pending' }, 'curation requested');
+      } catch (e) {
+        log.warn({ path: f.path, err: String(e) }, 'curation request failed');
+      }
+    }
+  }
+
+  // ---------- reconciliation (PLAN §7.5) ----------
+
+  interface ProjectRow { id: string; slug: string; clonePath: string }
+  interface PrRow { ticketId: string; identifier: string; kind: string; status: string; projectId: string | null; workerId: string | null; wpId: string; url: string; state: string | null }
+
+  async function reconcilePass(): Promise<void> {
+    const projects = ctx.db.all<ProjectRow>("SELECT id, slug, clone_path FROM projects WHERE workspace_id = ? AND status = 'ready'", [ctx.workspaceId]);
+    for (const p of projects) {
+      try { await deps().projects.fetch(p.id); }
+      catch (e) { log.warn({ project: p.slug, err: String(e) }, 'reconcile fetch failed'); }
+    }
+    const byId = new Map(projects.map((p) => [p.id, p]));
+    await reconcilePullRequests(byId);
+    reconcileOpenSpecArchives(byId);
+  }
+
+  /** `in_review` tickets with a PR: refresh its state on the work product and finish the ones the forge has merged. */
+  async function reconcilePullRequests(projects: Map<string, ProjectRow>): Promise<void> {
+    const forge = ctx.registries.forges.get('github');
+    if (!forge) return;
+    const rows = ctx.db.all<PrRow>(
+      `SELECT t.id AS ticket_id, t.identifier AS identifier, t.kind AS kind, t.status AS status, t.project_id AS project_id,
+              t.worker_id AS worker_id, wp.id AS wp_id, wp.url AS url, wp.state AS state
+         FROM tickets t JOIN ticket_work_products wp ON wp.ticket_id = t.id AND wp.type = 'pull_request'
+        WHERE t.workspace_id = ? AND t.status = 'in_review' AND wp.url IS NOT NULL
+        ORDER BY wp.created_at DESC`,
+      [ctx.workspaceId],
+    );
+    const seen = new Set<string>();
+    for (const row of rows) {
+      if (seen.has(row.ticketId)) continue;
+      seen.add(row.ticketId);
+      const project = row.projectId ? projects.get(row.projectId) : undefined;
+      if (!project || !existsSync(project.clonePath)) continue;
+
+      const pr = await forge.prState(project.clonePath, row.url).catch((e: unknown) => {
+        log.warn({ ticket: row.identifier, url: row.url, err: String(e) }, 'PR state refresh failed');
+        return null;
+      });
+      if (!pr) continue;
+      if (pr.state !== row.state) {
+        const now = nowIso();
+        ctx.db.run('UPDATE ticket_work_products SET state = ?, updated_at = ? WHERE id = ?', [pr.state, now, row.wpId]);
+        const delivery = (ctx.db.get<{ delivery: Record<string, unknown> | null }>('SELECT delivery_json FROM tickets WHERE id = ?', [row.ticketId])?.delivery ?? {});
+        ctx.db.update('tickets', row.ticketId, { deliveryJson: { ...delivery, prUrl: row.url, prState: pr.state }, updatedAt: now });
+        ctx.events.emit('ticket.work_product', 'ticket', row.ticketId, { ticketId: row.ticketId, id: row.wpId, type: 'pull_request', url: row.url, state: pr.state });
+      }
+      if (pr.state !== 'merged') continue;
+
+      const note = `the pull request was merged on the forge${pr.mergeCommit ? ` (${pr.mergeCommit.slice(0, 12)})` : ''}`;
+      try {
+        await deps().tickets.transition(SYSTEM, row.ticketId, { to: 'merging', note: `reconciliation: ${note}` });
+      } catch (e) {
+        log.warn({ ticket: row.identifier, err: String(e) }, 'reconciliation could not move the ticket to merging');
+        continue;
+      }
+      const worker = liveWorkerFor(row.ticketId);
+      if (worker) {
+        try {
+          deps().wake.enqueue(worker.id, {
+            source: 'merge_approved',
+            reason: `${row.identifier}: ${note} — do not merge again, just report oc_ticket_merge_done`,
+            payload: { ticketId: row.ticketId, prUrl: row.url, mergeCommit: pr.mergeCommit ?? null, mergedOnForge: true, note },
+            idempotencyKey: `reconcile-merged:${row.ticketId}`,
+            requestedBy: SYSTEM,
+          });
+        } catch (e) { log.warn({ ticket: row.identifier, err: String(e) }, 'merge_approved wake failed'); }
+      } else {
+        try {
+          await deps().tickets.mergeDone(SYSTEM, row.ticketId, { mergeCommit: pr.mergeCommit, method: 'forge' });
+          log.info({ ticket: row.identifier, mergeCommit: pr.mergeCommit }, 'reconciliation completed a merge with no live worker');
+        } catch (e) { log.warn({ ticket: row.identifier, err: String(e) }, 'reconciliation mergeDone failed'); }
+      }
+    }
+  }
+
+  /** A `change` ticket can be `done` while its OpenSpec change directory is still un-archived on disk (§12.4 drift). */
+  function reconcileOpenSpecArchives(projects: Map<string, ProjectRow>): void {
+    const rows = ctx.db.all<{ id: string; identifier: string; projectId: string | null; changeName: string }>(
+      "SELECT id, identifier, project_id, openspec_change_name AS change_name FROM tickets WHERE workspace_id = ? AND kind = 'change' AND status = 'done' AND openspec_change_name IS NOT NULL",
+      [ctx.workspaceId],
+    );
+    for (const t of rows) {
+      const project = t.projectId ? projects.get(t.projectId) : undefined;
+      if (!project || !existsSync(project.clonePath)) continue;
+      if (!existsSync(join(project.clonePath, 'openspec', 'changes', t.changeName))) continue;
+      if (archivedDirFor(project.clonePath, t.changeName)) continue;
+      log.info({ ticket: t.identifier, change: t.changeName }, 'archiving an OpenSpec change left behind by a merged ticket');
+      void deps().openspec.archiveAfterMerge(t.id)
+        .catch((e: unknown) => log.warn({ ticket: t.identifier, change: t.changeName, err: String(e) }, 'reconciliation archive failed'));
+    }
+  }
+
+  // ---------- retention (PLAN §16.1) ----------
+
+  /** Prune run log directories and worker archives past their retention. DB rows stay; only `log_path` is cleared. */
+  function retentionPass(): void {
+    const runCutoff = new Date(Date.now() - (ctx.config.defaults.runLogRetentionDays ?? 30) * DAY_MS).toISOString();
+    let runsPruned = 0;
+    for (const r of ctx.db.all<{ id: string; logPath: string | null }>(
+      'SELECT id, log_path FROM runs WHERE workspace_id = ? AND finished_at IS NOT NULL AND finished_at < ?', [ctx.workspaceId, runCutoff],
+    )) {
+      const dir = join(ctx.paths.runs, r.id);
+      const present = existsSync(dir);
+      if (!present && !r.logPath) continue;
+      if (present) {
+        try { rmSync(dir, { recursive: true, force: true }); runsPruned += 1; }
+        catch (e) { log.warn({ runId: r.id, err: String(e) }, 'run log removal failed'); continue; }
+      }
+      if (r.logPath) ctx.db.update('runs', r.id, { logPath: null });
+    }
+
+    const archiveCutoff = Date.now() - (ctx.config.defaults.workerArchiveDays ?? 30) * DAY_MS;
+    let archivesPruned = 0;
+    if (existsSync(ctx.paths.archive)) {
+      for (const entry of readdirSync(ctx.paths.archive, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const dir = join(ctx.paths.archive, entry.name);
+        const agent = ctx.db.get<{ retiredAt: string | null }>('SELECT retired_at FROM agents WHERE id = ?', [entry.name]);
+        let at = agent?.retiredAt ? Date.parse(agent.retiredAt) : NaN;
+        if (!Number.isFinite(at)) { try { at = statSync(dir).mtimeMs; } catch { continue; } }
+        if (at > archiveCutoff) continue;
+        try { rmSync(dir, { recursive: true, force: true }); archivesPruned += 1; }
+        catch (e) { log.warn({ workerId: entry.name, err: String(e) }, 'worker archive removal failed'); }
+      }
+    }
+    if (runsPruned || archivesPruned) log.info({ runsPruned, archivesPruned }, 'retention sweep');
+  }
+
   const supervisor: Supervisor = {
     async tick(): Promise<void> {
       if (ticking) return;
@@ -236,6 +415,9 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         if (Date.now() - lastLiveness > LIVENESS_EVERY_MS) { lastLiveness = Date.now(); try { livenessScan(); } catch (e) { log.error({ err: String(e) }, 'liveness scan failed'); } }
         try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }
         try { conductorDigest(); } catch (e) { log.error({ err: String(e) }, 'digest failed'); }
+        if (due('supervisor:curation_at', CURATION_EVERY_MS)) await curationPass().catch((e) => log.error({ err: String(e) }, 'curation pass failed'));
+        if (due('supervisor:reconcile_at', RECONCILE_EVERY_MS)) await reconcilePass().catch((e) => log.error({ err: String(e) }, 'reconcile pass failed'));
+        if (due('supervisor:retention_at', RETENTION_EVERY_MS)) { try { retentionPass(); } catch (e) { log.error({ err: String(e) }, 'retention pass failed'); } }
       } finally {
         ticking = false;
       }

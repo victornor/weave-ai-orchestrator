@@ -6,8 +6,8 @@ import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { createAdaptorServer } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
@@ -15,15 +15,17 @@ import { openDb } from '@openconductor/db';
 import type { Db } from '@openconductor/db';
 import {
   createRegistries, createCore, createAuthService, getLogger, initLogger, workspaceLoader,
+  stageWorkspaceImport, importTickets,
   type Registries, type WorkspaceContext,
 } from '@openconductor/core';
 import type { AuthService, CoreServices } from '@openconductor/core';
 import type { ChannelAdapter, SurfaceAdapter } from '@openconductor/plugin-sdk';
 import type { RuntimeAdapter } from '@openconductor/runtime-sdk';
 import type { OpenConductorPlugin, PluginHost, AgentToolDefinition, WorktreeProvider, ForgeAdapter } from '@openconductor/plugin-sdk';
-import type { DaemonConfig, EventType, WorkspaceEvent } from '@openconductor/shared';
+import { OcError, type DaemonConfig, type EventType, type WorkspaceEvent } from '@openconductor/shared';
 import { createApp, type WorkspaceAdmin } from './app.js';
 import { ChannelManager } from './channels.js';
+import { WebhookDispatcher } from './webhooks.js';
 import type { AppDeps, WorkspaceRuntime } from './types.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -100,6 +102,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     log.info({ reason }, 'daemon shutting down');
     for (const ws of new Set(workspaces.values())) {
       await ws.channels?.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'channel manager stop failed'));
+      await ws.webhooks?.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'webhook dispatcher stop failed'));
       await ws.services.dispatcher.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'dispatcher stop failed'));
       try { ws.services.supervisor.stop(); } catch (e) { log.warn({ err: e, ws: ws.id }, 'supervisor stop failed'); }
       await cancelRunningRuns(ws);
@@ -128,7 +131,7 @@ async function loadWorkspaceInto(
   const ctx: WorkspaceContext = await workspaceLoader.loadWorkspace(path, opts);
   const services: CoreServices = createCore(ctx);
   // `:ws` in the API is the slug from workspace.yaml; the db id is a ULID. Both resolve.
-  const runtime: WorkspaceRuntime = { id: ctx.config.id, ctx, services, channels: null };
+  const runtime: WorkspaceRuntime = { id: ctx.config.id, ctx, services, channels: null, webhooks: null };
   workspaces.set(ctx.config.id, runtime);
   if (ctx.workspaceId !== ctx.config.id) workspaces.set(ctx.workspaceId, runtime);
 
@@ -147,6 +150,10 @@ async function loadWorkspaceInto(
   const channels = new ChannelManager(ctx, services);
   runtime.channels = channels;
   await channels.start().catch((e: unknown) => log.error({ err: e, ws: ctx.workspaceId }, 'channel manager failed to start'));
+
+  const webhooks = new WebhookDispatcher(ctx);
+  runtime.webhooks = webhooks;
+  try { webhooks.start(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'webhook dispatcher failed to start'); }
   log.info({ workspace: ctx.workspaceId, root: ctx.paths.root }, 'workspace loaded');
   return runtime;
 }
@@ -182,12 +189,28 @@ function makeAdmin(
       remember(ws.id, resolve(input.path));
       return { id: ws.id, path: resolve(input.path) };
     },
+    async importPackage(input) {
+      const from = resolve(input.path);
+      const target = resolve(input.target);
+      const staged = stageWorkspaceImport(from, target);
+      const already = workspaces.get(staged.workspaceId);
+      if (already && already.ctx.paths.root !== target) {
+        throw new OcError('conflict', `workspace ${staged.workspaceId} is already loaded from ${already.ctx.paths.root}`);
+      }
+      const ws = already ?? await loadWorkspaceInto(workspaces, target, opts(), hooks);
+      remember(ws.id, target);
+      const tickets = importTickets(ws.services, from);
+      log.info({ workspace: ws.id, from, target, ...tickets }, 'workspace package imported');
+      return { id: ws.id, path: target, created: staged.created, roles: staged.roles, knowledgeFiles: staged.knowledgeFiles, tickets: tickets.imported, skipped: tickets.skipped };
+    },
+
     async unregister(id) {
       const ws = workspaces.get(id);
       if (ws) {
         await ws.services.dispatcher.stop().catch(() => undefined);
         try { ws.services.supervisor.stop(); } catch { /* ignore */ }
         try { await ws.channels?.stop(); } catch { /* ignore */ }
+        try { await ws.webhooks?.stop(); } catch { /* ignore */ }
         for (const [key, rt] of [...workspaces.entries()]) if (rt === ws) workspaces.delete(key);
         try { ws.ctx.db.close(); } catch { /* ignore */ }
       }
@@ -237,7 +260,7 @@ async function loadPlugins(
     const name = typeof entry === 'string' ? entry : entry.name;
     const config = typeof entry === 'string' ? {} : entry.config ?? {};
     try {
-      const mod = (await import(name)) as Record<string, unknown>;
+      const mod = (await import(pluginSpecifier(ctx, name))) as Record<string, unknown>;
       const plugin = (mod.default ?? mod.plugin) as OpenConductorPlugin | undefined;
       if (!plugin || typeof plugin.register !== 'function') { log.error({ plugin: name }, 'plugin has no definePlugin default export'); continue; }
       if (plugin.apiVersion !== 1) { log.error({ plugin: name, apiVersion: plugin.apiVersion }, 'unsupported plugin apiVersion'); continue; }
@@ -247,6 +270,21 @@ async function loadPlugins(
       log.error({ err: e, plugin: name }, 'plugin failed to load; continuing');
     }
   }
+}
+
+/**
+ * Turn a `plugins:` entry into something `import()` can take. A relative or absolute path is
+ * resolved against the workspace root (and through Node's package resolution, so a directory with a
+ * `package.json` main or an `index.js` works); a bare package name is resolved from the workspace's
+ * own `node_modules` first and otherwise left to the daemon's resolution.
+ */
+export function pluginSpecifier(ctx: Pick<WorkspaceContext, 'paths'>, name: string): string {
+  const req = createRequire(join(ctx.paths.root, 'package.json'));
+  const relative = name.startsWith('.') || isAbsolute(name) || name.startsWith('file:');
+  if (name.startsWith('file:')) return name;
+  const target = relative ? resolve(ctx.paths.root, name) : name;
+  try { return pathToFileURL(req.resolve(target)).href; }
+  catch { return relative ? pathToFileURL(target).href : name; }
 }
 
 function pluginHost(

@@ -24,6 +24,7 @@ rather than in a long chat, so bootstrap cost per worker stays flat over the lif
 - [`docs/PLAN.md`](docs/PLAN.md) — the implementation plan: decisions, domain model, interfaces, milestones.
 - [`docs/API.md`](docs/API.md) — the HTTP + SSE + MCP control-plane API.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — running a daemon on a server: systemd, TLS, backups, upgrades, troubleshooting.
+- [`docs/DOCKER.md`](docs/DOCKER.md) — the container image: one `/data` volume, what it does and does not carry.
 - [`docs/SCENARIOS.md`](docs/SCENARIOS.md) — end-to-end walkthroughs of what each participant sees.
 - [`docs/demos/`](docs/demos/) — reproducible M1–M6 demo scripts against the real commands.
 - [`docs/design/DESIGN-CONTRACT.md`](docs/design/DESIGN-CONTRACT.md) — tokens, components, screens, states.
@@ -238,7 +239,7 @@ Run `oc <group> --help` for the full set. Global flags: `-w/--workspace`, `--jso
 | `oc daemon start [-f] [--listen host:port]` | start the daemon on this machine (`--listen` overrides `http.listen` in `daemon.yaml` for this start) |
 | `oc daemon stop \| status \| logs [-f] [-n N]` | lifecycle and the local log |
 | `oc daemon set-password [-u operator]` | first-run operator setup, or change the password |
-| `oc daemon install-service [--print]` | write `~/.config/systemd/user/openconductor.service` |
+| `oc daemon install-service [--print] [--launchd]` | write `~/.config/systemd/user/openconductor.service`, or with `--launchd` a macOS LaunchAgent plist (printed on any other platform) |
 | `oc login <url> [--pin] [--insecure] [--device N] [--name N]` | sign in, store a context |
 | `oc logout [--all] [--forget]` · `oc context list\|use\|remove\|show` | sessions and contexts |
 | `oc devices list \| revoke <id> \| revoke --all` | sessions signed in to the daemon |
@@ -250,8 +251,12 @@ Run `oc <group> --help` for the full set. Global flags: `-w/--workspace`, `--jso
 |---|---|
 | `oc init <dir> --prefix ACME [--id] [--name] [--local]` | scaffold and register a workspace |
 | `oc workspace list \| use <id> \| register <path> \| unregister <id>` | the daemon's workspace registry |
+| `oc workspace pause \| resume` | stop and restart run dispatch for the workspace |
+| `oc workspace export [--out <dir>]` | portable package on the daemon host: `workspace.yaml`, roles, knowledge, tickets as markdown — no db, no runs, no secrets |
+| `oc workspace import <dir> --target <dir>` | copy an export into a new or existing workspace directory and register it; tickets land in `backlog` with an `[imported]` comment |
 | `oc project add <git-url> [--id] [--runtime] [--branch] [--max-workers N] [--setup CMD]` | clone, `openspec init`, seed the KB, create the scout ticket |
 | `oc project list \| show <id> \| remove <id> \| fetch [id]` | projects; `fetch` fast-forwards the primary clone |
+| `oc project set-runtime <id> <runtime>` · `oc project set-policy <id> <key>=<value>...` | per-project runtime and policies (`deliveryMode`, `mergeMethod`, `requireCi`, …) |
 | `oc runtime list \| detect \| models <id> \| login <id> [--print]` | coding CLIs and their auth |
 
 ### Talking and deciding
@@ -402,8 +407,11 @@ channels:
   telegram:
     botToken: ${TELEGRAM_BOT_TOKEN}
     allowedUserIds: [12345678]
-webhooks: []
-plugins: []                   # npm package names or ./relative/paths
+webhooks:                     # at-least-once, HMAC-SHA256 signed POSTs from the events outbox
+  - url: https://hooks.acme.dev/oc
+    events: [ticket.*, decision.created]   # exact names, `prefix.*`, or `*`
+    secret: ${OC_WEBHOOK_SECRET}           # signs the body as X-OpenConductor-Signature: sha256=<hex>
+plugins: []                   # npm package names, or ./paths relative to the workspace root (see examples/plugins/)
 ```
 
 ### `<workspace>/roles/<id>/role.yaml`

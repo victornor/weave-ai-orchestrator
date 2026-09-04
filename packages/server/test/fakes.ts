@@ -163,7 +163,7 @@ export function makeHarness(options: { listener?: 'public' | 'loopback'; workspa
     saveConfig: async () => undefined,
   } as unknown as WorkspaceContext;
 
-  const runtime: WorkspaceRuntime = { id: workspaceId, ctx, services, channels: null };
+  const runtime: WorkspaceRuntime = { id: workspaceId, ctx, services, channels: null, webhooks: null };
 
   const tokens = new Map<string, { sessionId: string; operatorId: string; kind: 'web' | 'cli' | 'presenter' }>([
     ['sess-token', { sessionId: 'sess1', operatorId: 'op1', kind: 'cli' }],

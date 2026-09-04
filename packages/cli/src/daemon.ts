@@ -141,6 +141,74 @@ export function renderServiceUnit(bin: string): string {
   ].join('\n');
 }
 
+export const LAUNCHD_LABEL = 'com.openconductor.daemon';
+
+export function launchdPlistPath(): string {
+  return join(homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);
+}
+
+/** A LaunchAgent for macOS: same daemon, same config home, restarted on failure, logging to the CLI's log file. */
+export function renderLaunchdPlist(bin: string): string {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    '<dict>',
+    '  <key>Label</key>',
+    `  <string>${LAUNCHD_LABEL}</string>`,
+    '  <key>ProgramArguments</key>',
+    '  <array>',
+    `    <string>${process.execPath}</string>`,
+    `    <string>${bin}</string>`,
+    '  </array>',
+    '  <key>EnvironmentVariables</key>',
+    '  <dict>',
+    '    <key>OC_CONFIG_HOME</key>',
+    `    <string>${configHome()}</string>`,
+    '  </dict>',
+    '  <key>RunAtLoad</key>',
+    '  <true/>',
+    '  <key>KeepAlive</key>',
+    '  <dict>',
+    '    <key>SuccessfulExit</key>',
+    '    <false/>',
+    '  </dict>',
+    '  <key>ProcessType</key>',
+    '  <string>Background</string>',
+    '  <key>StandardOutPath</key>',
+    `  <string>${logFile()}</string>`,
+    '  <key>StandardErrorPath</key>',
+    `  <string>${logFile()}</string>`,
+    '</dict>',
+    '</plist>',
+    '',
+  ].join('\n');
+}
+
+/**
+ * Write `~/Library/LaunchAgents/com.openconductor.daemon.plist`. On anything but macOS the plist is
+ * only rendered (`written: false`) so it can be copied to a Mac by hand.
+ */
+export function installLaunchdAgent(): { path: string; plist: string; commands: string[]; written: boolean } {
+  const bin = resolveServerBin();
+  const path = launchdPlistPath();
+  const plist = renderLaunchdPlist(bin);
+  const written = process.platform === 'darwin';
+  if (written) {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, plist);
+  }
+  return {
+    path, plist, written,
+    commands: [
+      `launchctl bootstrap gui/$(id -u) ${path}`,
+      `launchctl kickstart -k gui/$(id -u)/${LAUNCHD_LABEL}`,
+      `launchctl print gui/$(id -u)/${LAUNCHD_LABEL}`,
+      `launchctl bootout gui/$(id -u)/${LAUNCHD_LABEL}   # stop and unload`,
+    ],
+  };
+}
+
 export function installService(): { path: string; unit: string; commands: string[] } {
   const bin = resolveServerBin();
   const path = serviceUnitPath();

@@ -2,6 +2,7 @@ import type { CoreServices, WorkspaceContext, AuthService, Actor, Registries } f
 import type { DaemonConfig } from '@openconductor/shared';
 import type { RunTokenClaims } from './runtoken.js';
 import type { ChannelManager } from './channels.js';
+import type { WebhookDispatcher } from './webhooks.js';
 
 /** One loaded workspace: its context (db, config, events) plus the assembled core services. */
 export interface WorkspaceRuntime {
@@ -9,6 +10,7 @@ export interface WorkspaceRuntime {
   ctx: WorkspaceContext;
   services: CoreServices;
   channels: ChannelManager | null;
+  webhooks: WebhookDispatcher | null;
 }
 
 /** Which listener a request arrived on. Run tokens are only honoured on `loopback`. */

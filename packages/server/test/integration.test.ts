@@ -2,6 +2,8 @@
  * End-to-end against the real core services (not the fakes), so route wiring and service
  * signatures stay honest. Uses core's own test harness for the temp workspace.
  */
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createCore, initLogger } from '@openconductor/core';
 import { DaemonConfigSchema } from '@openconductor/shared';
@@ -19,7 +21,7 @@ function boot(): { deps: AppDeps; runtime: WorkspaceRuntime; harness: ReturnType
   const harness = makeHarness();
   cleanup = harness.cleanup;
   const services = createCore(harness.ctx);
-  const runtime: WorkspaceRuntime = { id: harness.workspaceId, ctx: harness.ctx, services, channels: null };
+  const runtime: WorkspaceRuntime = { id: harness.workspaceId, ctx: harness.ctx, services, channels: null, webhooks: null };
   const auth = { hasOperator: () => true, verify: () => ({ sessionId: 's1', operatorId: 'op1', kind: 'cli' as const }), totpEnabled: () => false } as unknown as AppDeps['auth'];
   const deps: AppDeps = {
     auth, daemon: DaemonConfigSchema.parse({}), workspaces: new Map([[harness.workspaceId, runtime]]),
@@ -83,4 +85,22 @@ describe('real core services over HTTP', () => {
     expect(payload.ok).toBe(true);
     expect(services.tickets.comments(ticket.id).at(-1)?.body).toBe('checked out and working');
   });
+
+  it('exports the workspace as a portable package over POST /export', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+
+    await app.fetch(new Request(`${base}/tickets`, {
+      method: 'POST', headers: H, body: JSON.stringify({ projectId: harness.projectId, kind: 'task', title: 'Write the README' }),
+    }));
+    const res = await app.fetch(new Request(`${base}/export`, { method: 'POST', headers: H, body: '{}' }));
+    expect(res.status).toBe(201);
+    const result = await res.json();
+    expect(result.tickets).toBe(1);
+    expect(existsSync(join(result.path, 'workspace.yaml'))).toBe(true);
+    expect(readdirSync(join(result.path, 'tickets'))).toEqual(['TST-1.md']);
+    expect(existsSync(join(result.path, 'db.sqlite'))).toBe(false);
+  });
+
 });

@@ -1,5 +1,8 @@
+import { resolve } from 'node:path';
 import { Hono } from 'hono';
+import { z } from 'zod';
 import { nowIso } from '@openconductor/db';
+import { exportWorkspace } from '@openconductor/core';
 import { OcError, WorkspaceConfigSchema } from '@openconductor/shared';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { body } from '../http.js';
@@ -40,6 +43,13 @@ export function workspaceRoutes(deps: AppDeps): Hono<AppEnv> {
     ws.services.dispatcher.start();
     setStatus(ws, 'active');
     return c.json({ id: ws.id, status: 'active' });
+  });
+
+  /** PLAN §20: a portable package — workspace.yaml, roles, knowledge and tickets as markdown. No db, no runs, no secrets. */
+  app.post('/export', async (c) => {
+    const ws = c.get('ws');
+    const { out } = await body(c, z.object({ out: z.string().min(1).optional() }));
+    return c.json(exportWorkspace(ws.ctx, out ? { out: resolve(out) } : {}), 201);
   });
 
   app.get('/briefing', (c) => c.json(c.get('ws').services.briefing.snapshot()));

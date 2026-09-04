@@ -315,7 +315,13 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
 
   const service: TicketsService = {
     create(actor, input: TicketCreateInput) {
-      if (input.projectId && !project(input.projectId)) throw new OcError('not_found', `project ${input.projectId} not found`);
+      if (input.projectId) {
+        // Accept a project slug as well as its id.
+        let resolved: string | null = null;
+        try { resolved = deps().projects.get(input.projectId).id; } catch { resolved = project(input.projectId) ? input.projectId : null; }
+        if (!resolved) throw new OcError('not_found', `project ${input.projectId} not found`);
+        input = { ...input, projectId: resolved };
+      }
       if (input.parentId && !find(input.parentId)) throw new OcError('not_found', `parent ticket ${input.parentId} not found`);
       const blockedBy = input.blockedBy ?? [];
       for (const b of blockedBy) if (!find(b)) throw new OcError('not_found', `blocker ${b} not found`);

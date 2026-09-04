@@ -141,3 +141,66 @@ describe('ChannelManager', () => {
     expect(row?.attempts).toBe(5);
   });
 });
+
+/** PLAN §14.2: the manager owns the commands, so every channel kind gets the same set. */
+describe('manager commands on every channel kind', () => {
+  const KINDS = ['web', 'cli', 'telegram'] as const;
+
+  async function bootKinds(): Promise<{ h: Harness; adapters: Record<string, ReturnType<typeof fakeAdapter>> }> {
+    harness = makeHarness();
+    const adapters: Record<string, ReturnType<typeof fakeAdapter>> = {};
+    for (const kind of KINDS) {
+      const adapter = fakeAdapter();
+      (adapter as unknown as { kind: string }).kind = kind;
+      adapters[kind] = adapter;
+      harness.runtime.ctx.registries.channels.set(kind, adapter);
+    }
+    harness.runtime.ctx.config.channels = Object.fromEntries(KINDS.map((k) => [k, {}]));
+    harness.runtime.ctx.config.conductor.channels = [...KINDS];
+    wireThreads(harness);
+    manager = new ChannelManager(harness.runtime.ctx, harness.runtime.services);
+    await manager.start();
+    return { h: harness, adapters };
+  }
+
+  /** The reply the manager queued for a thread, drained through the owning adapter. */
+  async function replyOn(kind: string, adapter: ReturnType<typeof fakeAdapter>, text: string): Promise<string> {
+    await adapter.inbound!({ externalThreadId: `chat-${kind}`, externalUserId: 'u1', text });
+    await manager!.drain();
+    return adapter.sent.at(-1)?.message.text ?? '';
+  }
+
+  it.each(KINDS)('answers /help on %s', async (kind) => {
+    const { adapters } = await bootKinds();
+    const text = await replyOn(kind, adapters[kind]!, '/help');
+    expect(text).toContain('/talk <ticket>');
+    expect(text).toContain('/conductor');
+    expect(text).toContain('/d <id> <answer>');
+    expect(text).toContain('/help');
+    // /help never reaches the agent as a message.
+    expect(harness!.db.get('SELECT id FROM thread_messages WHERE direction = ?', ['inbound'])).toBeUndefined();
+  });
+
+  it.each(KINDS)('binds and unbinds a thread with /talk and /conductor on %s', async (kind) => {
+    const { h, adapters } = await bootKinds();
+    const threadId = (): string | null =>
+      h.db.get<{ ticketId: string | null }>('SELECT ticket_id FROM channel_threads WHERE external_thread_id = ?', [`chat-${kind}`])?.ticketId ?? null;
+
+    expect(await replyOn(kind, adapters[kind]!, '/talk ACME-42')).toContain('ACME-42');
+    expect(threadId()).toBe('tk_1');
+    expect(await replyOn(kind, adapters[kind]!, '/conductor')).toContain('Back to the conductor');
+    expect(threadId()).toBeNull();
+  });
+
+  it.each(KINDS)('answers a decision with /d on %s', async (kind) => {
+    const { h, adapters } = await bootKinds();
+    expect(await replyOn(kind, adapters[kind]!, '/d dec_1 vars')).toContain('Recorded: vars');
+    expect(h.calls.some((c) => c.service === 'decisions' && c.method === 'answer' && (c.args[2] as { key?: string }).key === 'vars')).toBe(true);
+  });
+
+  it('passes anything that is not a command through to the agent', async () => {
+    const { h, adapters } = await bootKinds();
+    await adapters.telegram!.inbound!({ externalThreadId: 'chat-telegram', externalUserId: 'u1', text: 'ship the thing' });
+    expect(h.db.get<{ body: string }>('SELECT body FROM thread_messages WHERE direction = ?', ['inbound'])?.body).toBe('ship the thing');
+  });
+});

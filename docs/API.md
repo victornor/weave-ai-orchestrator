@@ -9,7 +9,7 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `oc_session` httpOn
 - `POST /api/auth/setup` `{ username, password }` (only when no operator) · `POST /api/auth/login` `{ username, password, totp?, deviceName?, kind }` → `{ token, sessionId, expiresAt }` or `{ totpRequired: true }` (401 `auth_totp_required`) · `POST /api/auth/logout` · `GET /api/auth/me` → `{ operator, session, totpEnabled }`
 - `GET /api/auth/sessions` · `DELETE /api/auth/sessions/:id` · `DELETE /api/auth/sessions` (all others)
 - `POST /api/auth/totp/setup` → `{ secret, otpauthUrl, recoveryCodes }` · `POST /api/auth/totp/enable` `{ code }` · `POST /api/auth/totp/disable` `{ password }` · `POST /api/auth/password` `{ current, next }`
-- `GET /api/workspaces` · `POST /api/workspaces` `{ path }` (register existing) · `POST /api/workspaces/init` `{ path, id, name, ticketPrefix }`
+- `GET /api/workspaces` · `POST /api/workspaces` `{ path }` (register existing) · `POST /api/workspaces/init` `{ path, id, name, ticketPrefix }` · `POST /api/workspaces/import` `{ path, target }` (stage an export into `target`, register it, import its tickets as `backlog`) → `{ id, path, created, roles, knowledgeFiles, tickets, skipped }`
 - `GET /api/runtimes` → `[{ id, displayName, detection, capabilities, models }]` · `GET /api/runtimes/:id/models`
 - `POST /api/transcribe` (multipart audio) → `{ text }` or 501 when provider `none`
 - `GET /llms/api.txt` (agent-readable summary) · `GET /api/openapi.json`
@@ -17,6 +17,7 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `oc_session` httpOn
 ## Workspace
 - `GET /api/w/:ws` → workspace + config summary · `PATCH /api/w/:ws/config` (partial `workspace.yaml`) · `POST /api/w/:ws/pause` · `POST /api/w/:ws/resume`
 - `GET /api/w/:ws/events?after=<seq>` SSE stream (`event: <type>`, `id: <seq>`, `data: WorkspaceEvent`); heartbeat comment every 15 s
+- `POST /api/w/:ws/export` `{ out? }` → `{ path, workspace, roles, knowledgeFiles, tickets }` (portable package: `workspace.yaml`, `roles/**`, `knowledge/**`, `tickets/*.md`; no db, no runs, no secrets)
 - `GET /api/w/:ws/briefing`
 
 ### Projects

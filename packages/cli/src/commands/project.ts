@@ -1,4 +1,4 @@
-/** `oc project add|list|show|remove|fetch` (PLAN §20). */
+/** `oc project add|list|show|remove|fetch|set-runtime|set-policy` (PLAN §20). */
 import type { Command } from 'commander';
 import { emit, fields, style, table, write } from '../output.js';
 import { items, run, session } from './util.js';
@@ -109,4 +109,51 @@ export function register(program: Command): void {
         ], { empty: 'no projects' });
       });
     }));
+
+  project
+    .command('set-runtime')
+    .argument('<project>', 'project id')
+    .argument('<runtime>', 'runtime id, e.g. claude, codex, opencode, gemini')
+    .description('change the default runtime for roles in a project')
+    .action(async (id: string, runtime: string, _opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const updated = await client.patch<Record<string, unknown>>(client.w(`/projects/${encodeURIComponent(id)}`), { runtime });
+      emit(updated, () => write(`${style.ok('updated')} ${id} runtime = ${String(updated?.['runtimeId'] ?? runtime)}`));
+    }));
+
+  project
+    .command('set-policy')
+    .argument('<project>', 'project id')
+    .argument('<assignments...>', 'one or more key=value pairs')
+    .description('change project policies (merged into the existing ones)')
+    .addHelpText('after', `
+Keys:   proposalApproval=human|conductor|none   mergeMethod=squash|merge|rebase
+        deliveryMode=pr|local-branch            autoMergeDefault=true|false
+        taskApproval=human|conductor|none       archiveCommit=push|pr|local
+        requireCi=true|false
+Example: oc project set-policy api deliveryMode=pr requireCi=false`)
+    .action(async (id: string, assignments: string[], _opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const patch: Record<string, unknown> = {};
+      for (const raw of assignments) {
+        const eq = raw.indexOf('=');
+        if (eq <= 0) throw new Error(`not a key=value pair: ${raw}`);
+        patch[raw.slice(0, eq)] = coerce(raw.slice(eq + 1));
+      }
+      const current = await client.wget<Record<string, unknown>>(`/projects/${encodeURIComponent(id)}`);
+      const policies = { ...((current['policies'] ?? {}) as Record<string, unknown>), ...patch };
+      const updated = await client.patch<Record<string, unknown>>(client.w(`/projects/${encodeURIComponent(id)}`), { policies });
+      emit(updated, () => {
+        write(`${style.ok('updated')} ${id} policies`);
+        fields(Object.entries(policies).map(([k, v]) => [k, String(v)] as [string, string]));
+      });
+    }));
+}
+
+/** `true`/`false` and plain integers are typed; everything else stays a string. */
+function coerce(value: string): unknown {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (/^-?\d+$/.test(value)) return Number(value);
+  return value;
 }

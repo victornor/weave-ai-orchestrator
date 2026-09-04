@@ -226,13 +226,25 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'oc_report', scope: 'all', input: z.object({ state: z.enum(REPORT_STATES), note: z.string().optional(), key: z.string().optional() }),
     description: 'Report a phase change (working, needs_decision, blocked, paused, done, failed, idle). Sparingly — phase changes only, not progress narration. Writes a status comment on your ticket and updates liveness.',
-    handler: (ctx, i) => {
+    handler: async (ctx, i) => {
       const bodyText = `[${i.state}]${i.key ? ` ${i.key}` : ''}${i.note ? ` ${i.note}` : ''}`.trim();
       const target = ctx.claims.ticketId;
       let comment: unknown = null;
       if (target) comment = svc(ctx).tickets.comment(ctx.actor, target, bodyText, 'status', 'agent');
       ctx.ws.ctx.events.emit('worker.status', 'agent', ctx.claims.agentId, { agentId: ctx.claims.agentId, state: i.state, note: i.note ?? null, runId: ctx.claims.runId, ticketId: target });
-      return { recorded: true, state: i.state, comment };
+      // A `done` report on a question ticket is its completion (the answer is the comment); close it so small models that skip the transition do not strand the ticket.
+      let closed = false;
+      if (target && i.state === 'done') {
+        try {
+          const t = svc(ctx).tickets.get(target);
+          if (t.kind === 'question' && !['done', 'cancelled'].includes(t.status)) {
+            if (t.status === 'todo' || t.status === 'backlog') await svc(ctx).tickets.transition(ctx.actor, t.id, { to: 'in_progress', note: 'answering' }).catch(() => undefined);
+            await svc(ctx).tickets.transition(ctx.actor, t.id, { to: 'done', note: 'answered (closed from the done report)' });
+            closed = true;
+          }
+        } catch { /* leave it to the worker */ }
+      }
+      return { recorded: true, state: i.state, comment, closed };
     },
   },
   {

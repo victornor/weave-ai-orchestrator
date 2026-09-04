@@ -20,6 +20,7 @@ import { eventRoutes } from './routes/events.js';
 import { projectRoutes } from './routes/projects.js';
 import { roleRoutes } from './routes/roles.js';
 import { workerRoutes, conductorRoutes } from './routes/workers.js';
+import { worktreeRoutes } from './routes/worktrees.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { decisionRoutes } from './routes/decisions.js';
 import { runRoutes } from './routes/runs.js';
@@ -68,6 +69,7 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   ws.route('/search', searchRoute());
   ws.route('/usage', usageRoutes());
   ws.route('/threads', threadRoutes());
+  ws.route('/worktrees', worktreeRoutes());
   ws.route('/presentation', presentationRoutes());
   ws.route('/presenter', presenterRoutes(deps));
   ws.route('/push', pushRoutes());

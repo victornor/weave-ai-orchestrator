@@ -10,6 +10,7 @@ const log = getLogger('http', { component: 'daemon-routes' });
 
 /** Workspace registration/creation is a daemon-lifecycle concern; the daemon injects it. */
 export interface WorkspaceAdmin {
+  unregister(id: string): Promise<{ ok: true; id: string }>;
   register(path: string): Promise<{ id: string; path: string }>;
   init(input: { path: string; id: string; name: string; ticketPrefix: string }): Promise<{ id: string; path: string }>;
 }
@@ -37,6 +38,11 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
     if (!admin) throw new OcError('internal', 'workspace registration is not available on this listener');
     const { path } = await body(c, z.object({ path: z.string().min(1) }));
     return c.json(await admin.register(path), 201);
+  });
+
+  app.delete('/workspaces/:id', async (c) => {
+    if (!admin) throw new OcError('internal', 'workspace registration is not available on this listener');
+    return c.json(await admin.unregister(c.req.param('id')));
   });
 
   app.post('/workspaces/init', async (c) => {

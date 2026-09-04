@@ -33,6 +33,12 @@ export function presenterRoutes(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   /** Desired state: the conductor, every live worker as an AgentView, and the presentation config. */
+  app.post('/reconcile', (c) => {
+    const ws = c.get('ws');
+    ws.ctx.events.emit('presentation.updated', 'workspace', ws.id, { reconcile: true, presentation: ws.ctx.config.presentation });
+    return c.json({ ok: true });
+  });
+
   app.get('/desired', (c) => {
     const ws = c.get('ws');
     const s = ws.services;

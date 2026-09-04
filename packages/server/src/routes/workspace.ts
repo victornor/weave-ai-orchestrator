@@ -12,7 +12,7 @@ export function workspaceRoutes(deps: AppDeps): Hono<AppEnv> {
   app.get('/', (c) => {
     const ws = c.get('ws');
     return c.json({
-      id: ws.id, name: ws.ctx.config.name, ticketPrefix: ws.ctx.config.ticketPrefix, root: ws.ctx.paths.root,
+      id: ws.id, name: ws.ctx.config.name, ticketPrefix: ws.ctx.config.ticketPrefix, root: ws.ctx.paths.root, rootPath: ws.ctx.paths.root,
       status: statusOf(ws), config: ws.ctx.config, loopbackUrl: ws.ctx.loopbackUrl,
       channels: [...Object.keys(ws.ctx.config.channels)],
     });

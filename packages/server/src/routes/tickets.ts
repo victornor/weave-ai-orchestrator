@@ -20,7 +20,7 @@ const TransitionSchema = z.object({
 });
 const ListQuery = z.object({
   project: z.string().optional(), status: csv.optional(), kind: csv.optional(), role: z.string().optional(),
-  search: z.string().optional(), limit: z.coerce.number().int().min(1).max(200).optional(), offset: z.coerce.number().int().min(0).optional(),
+  search: z.string().optional(), limit: z.coerce.number().int().min(1).max(1000).optional(), offset: z.coerce.number().int().min(0).optional(),
   includeTerminal: z.string().optional(),
 });
 

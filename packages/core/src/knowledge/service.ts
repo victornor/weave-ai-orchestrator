@@ -216,7 +216,8 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
           throw new OcError('duplicate_entry', 'a near-identical entry already exists', { section: e.section, existing: e.text });
         }
       }
-      const entry = `- ${today()} · ${trimmed}`;
+      const bare = trimmed.replace(/^(?:\d{4}-\d{2}-\d{2})\s*(?:[·\-–:]\s*)?/, '').trim() || trimmed;
+      const entry = `- ${today()} · ${bare}`;
       const next = appendEntry(body, section, entry);
       const tokens = estimateTokens(next);
       if (tokens > row.budgetTokens) {

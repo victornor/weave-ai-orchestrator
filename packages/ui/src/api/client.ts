@@ -137,6 +137,21 @@ function onUnauthorized(): void {
   window.location.assign(`/login?next=${encodeURIComponent(next)}`);
 }
 
+/**
+ * List endpoints answer with a bare array, `{ items, total }` (the daemon's paged shape) or a
+ * named key (`{ tickets }`); accept all three so a hook never turns a 200 into "undefined data".
+ */
+export function listOf<T>(payload: unknown, key?: string): T[] {
+  if (Array.isArray(payload)) return payload as T[];
+  if (payload && typeof payload === 'object') {
+    const rec = payload as Record<string, unknown>;
+    if (Array.isArray(rec['items'])) return rec['items'] as T[];
+    if (key && Array.isArray(rec[key])) return rec[key] as T[];
+    for (const v of Object.values(rec)) if (Array.isArray(v)) return v as T[];
+  }
+  return [];
+}
+
 function safeJson(text: string): unknown {
   try {
     return JSON.parse(text);

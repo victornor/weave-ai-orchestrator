@@ -301,6 +301,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         askedInRunId: actor.runId ?? null,
       });
     }
+    if (to === 'in_review' && next.autoMerge) setTimeout(() => { service.autoMergeSweep().catch((e) => log.warn({ err: String(e) }, 'auto-merge sweep failed')); }, 50);
     if (to === 'approved') wake(next.workerId, 'ticket_assigned', `plan approved for ${next.identifier}`, { ticketId: t.id });
     if (to === 'merging') wake(next.workerId, 'merge_approved', `merge approved for ${next.identifier}`, { ticketId: t.id });
     if (to === 'proposing' && t.status === 'proposed') wake(next.workerId, 'ticket_comment', `revision requested for ${next.identifier}`, { ticketId: t.id });
@@ -614,6 +615,31 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       propagateTerminal(next, actor);
       log.info({ ticketId: t.id, archivedAs, skipped }, 'ticket merged');
       return next;
+    },
+
+    async autoMergeSweep(): Promise<number> {
+      const rows = db.all<Record<string, unknown>>("SELECT * FROM tickets WHERE workspace_id = ? AND status = 'in_review' AND auto_merge = 1", [ws]).map((r) => ticketRow(r) as unknown as Ticket);
+      let advanced = 0;
+      for (const t of rows) {
+        try {
+          const project = t.projectId ? deps().projects.get(t.projectId) : null;
+          const policies = (project?.policies ?? {}) as { deliveryMode?: string; requireCi?: boolean };
+          const mode = policies.deliveryMode ?? ctx.config.defaults.deliveryMode;
+          if (mode === 'pr' && policies.requireCi !== false && project) {
+            const pr = db.get<{ url: string | null }>("SELECT url FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' ORDER BY created_at DESC LIMIT 1", [t.id]);
+            const forge = ctx.registries.forges.get('github');
+            if (pr?.url && forge) {
+              const state = await forge.prState(project.clonePath, pr.url).catch(() => null);
+              if (!state) continue;
+              if (state.ciState === 'pending') continue;
+              if (state.ciState === 'failure') { systemComment(t.id, 'auto-merge is waiting: CI is red on the PR', { kind: 'system', id: null }); continue; }
+            }
+          }
+          await service.transition({ kind: 'system', id: null }, t.id, { to: 'merging', note: 'auto-merge: no approval required for this ticket' });
+          advanced++;
+        } catch (e) { log.warn({ ticket: t.identifier, err: String(e) }, 'auto-merge advance failed'); }
+      }
+      return advanced;
     },
 
     livenessViolations() {

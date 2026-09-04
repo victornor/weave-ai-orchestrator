@@ -46,7 +46,7 @@ export async function landedWorkTest(input: LandedInput): Promise<LandedVerdict>
   }
 
   if (input.mergedPr || input.localBranch) {
-    const baseRef = (await resolveBaseRef(repoPath, defaultBranch)) ?? defaultBranch;
+    const baseRef = input.localBranch ? defaultBranch : ((await resolveBaseRef(repoPath, defaultBranch)) ?? defaultBranch);
     evidence.baseRef = baseRef;
     const ancestor = await git(['merge-base', '--is-ancestor', branch, baseRef], repoPath, 30_000);
     if (ancestor.ok) return { landed: true, reason: `branch is an ancestor of ${baseRef}`, evidence };

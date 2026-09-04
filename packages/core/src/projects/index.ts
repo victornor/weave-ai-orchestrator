@@ -60,7 +60,16 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       env: { CI: '1', OPENSPEC_TELEMETRY: '0', OPENSPEC_NO_UPDATE_CHECK: '1', NO_COLOR: '1' },
     });
     if (!init.ok) log.warn({ project: project.slug, stderr: init.stderr.slice(0, 300) }, 'openspec init failed (best effort)');
-    else log.info({ project: project.slug }, 'openspec initialised in the primary clone');
+    else {
+      log.info({ project: project.slug }, 'openspec initialised in the primary clone');
+      // Commit the generated files on the default branch so worktrees branch from a clean tree and merges never hit untracked files.
+      const add = await git(['add', '-A', '--', 'openspec', '.claude', '.agents', '.opencode', '.gemini', '.codex'], project.clonePath, 30_000);
+      if (add.ok) {
+        const commit = await git(['-c', 'user.name=OpenConductor', '-c', 'user.email=openconductor@localhost', 'commit', '-q', '-m', 'chore: adopt OpenSpec'], project.clonePath, 30_000);
+        if (!commit.ok && !/nothing to commit/.test(commit.stderr + commit.stdout)) log.warn({ project: project.slug, stderr: commit.stderr.slice(0, 200) }, 'could not commit the OpenSpec init');
+        else if (commit.ok) { const push = await git(['push'], project.clonePath, 120_000); if (!push.ok) log.info({ project: project.slug }, 'OpenSpec init committed locally (push skipped or refused)'); }
+      }
+    }
   }
 
   function upsertConfigBlock(cfg: ProjectConfig): Promise<void> {

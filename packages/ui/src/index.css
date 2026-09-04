@@ -1,0 +1,414 @@
+@import 'tailwindcss';
+
+/* ------------------------------------------------------------------ *
+ * OpenConductor design tokens — DESIGN-CONTRACT.md §2
+ * Dark is the designed theme. Light is authored, not inverted:
+ * surfaces get warmer and flatter, borders darker relative to their
+ * surface, status hues drop in lightness to hold contrast on white.
+ * ------------------------------------------------------------------ */
+
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg-0: #08090b;
+  --bg-1: #101114;
+  --bg-2: #16181c;
+  --bg-3: #1e2126;
+  --bg-input: #0c0d10;
+  --line-1: #1c1e22;
+  --line-2: #282b31;
+  --line-3: #383c44;
+
+  /* text */
+  --text-1: #e9eaec;
+  --text-2: #9ca1aa;
+  --text-3: #6b7078;
+  --text-4: #4e535b;
+  --text-strong: #f2f3f5;
+  --text-soft: #c6cad1;
+  --text-body: #d8dbe0;
+  --text-nav: #5a5f67;
+
+  /* accent */
+  --accent: #5e6ad2;
+  --accent-link: #7c87f0;
+  --accent-hover: #9aa3f5;
+  --accent-on: #ffffff;
+  --accent-tint: rgb(94 106 210 / 0.12);
+  --accent-tint-strong: rgb(94 106 210 / 0.18);
+  --accent-edge: rgb(94 106 210 / 0.35);
+  --focus-ring: rgb(94 106 210 / 0.16);
+
+  /* the nine status tokens */
+  --status-idle: #8a8f98;
+  --status-working: #e9a23b;
+  --status-stalled: #c98a2e;
+  --status-blocked: #ff6b4a;
+  --status-needs-you: #7c87f0;
+  --status-merging: #a472f5;
+  --status-done: #3fb950;
+  --status-failed: #e5484d;
+  --status-paused: #6b7078;
+
+  --overlay: rgb(0 0 0 / 0.62);
+  --elev-sheet: 0 16px 48px rgb(0 0 0 / 0.6);
+  --elev-float: 0 4px 16px rgb(94 106 210 / 0.4);
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg-0: #f7f8f9;
+  --bg-1: #ffffff;
+  --bg-2: #f2f3f5;
+  --bg-3: #eaecef;
+  --bg-input: #ffffff;
+  --line-1: #e6e8eb;
+  --line-2: #d3d6db;
+  --line-3: #c3c7ce;
+
+  --text-1: #16181c;
+  --text-2: #61656c;
+  --text-3: #8a8f98;
+  --text-4: #a2a7ae;
+  --text-strong: #0c0d10;
+  --text-soft: #3d4148;
+  --text-body: #24272c;
+  --text-nav: #8a8f98;
+
+  --accent: #4a55c4;
+  --accent-link: #4a55c4;
+  --accent-hover: #3b45a8;
+  --accent-on: #ffffff;
+  --accent-tint: rgb(74 85 196 / 0.09);
+  --accent-tint-strong: rgb(74 85 196 / 0.14);
+  --accent-edge: rgb(74 85 196 / 0.35);
+  --focus-ring: rgb(74 85 196 / 0.18);
+
+  --status-idle: #6b7078;
+  --status-working: #b4761a;
+  --status-stalled: #96631a;
+  --status-blocked: #d2401e;
+  --status-needs-you: #4a55c4;
+  --status-merging: #7a45d0;
+  --status-done: #22883a;
+  --status-failed: #c22b31;
+  --status-paused: #8a8f98;
+
+  --overlay: rgb(16 24 32 / 0.28);
+  --elev-sheet: 0 16px 48px rgb(16 24 32 / 0.18);
+  --elev-float: 0 4px 16px rgb(74 85 196 / 0.3);
+}
+
+/* space · radii · type · motion (theme-independent) */
+:root {
+  /* space scale 2 · 4 · 6 · 8 · 12 · 16 · 24 · 32 · 48 — Tailwind's
+     numeric scale (0.5 · 1 · 1.5 · 2 · 3 · 4 · 6 · 8 · 12) with base 4px
+     reproduces it exactly; these aliases are for hand-written CSS. */
+  --space-1: 0.125rem;
+  --space-2: 0.25rem;
+  --space-3: 0.375rem;
+  --space-4: 0.5rem;
+  --space-5: 0.75rem;
+  --space-6: 1rem;
+  --space-7: 1.5rem;
+  --space-8: 2rem;
+  --space-9: 3rem;
+
+  --r4: 0.25rem;
+  --r6: 0.375rem;
+  --r8: 0.5rem;
+  --r10: 0.625rem;
+  --r-pill: 999px;
+  --r-device: 1.625rem;
+
+  --ff-ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --ff-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  --fs-display: 1.75rem; /* 28 */
+  --fs-title: 1.25rem; /* 20 */
+  --fs-head: 1rem; /* 16 */
+  --fs-body: 0.875rem; /* 14 */
+  --fs-ui: 0.8125rem; /* 13 */
+  --fs-meta: 0.75rem; /* 12 */
+  --fs-micro: 0.6875rem; /* 11 */
+  --fs-nano: 0.625rem; /* 10 */
+
+  --track-display: -0.02em;
+  --track-title: -0.015em;
+  --track-head: -0.01em;
+  --track-micro: 0.02em;
+  --track-label: 0.1em;
+
+  --thumb-band: 2.75rem; /* 44px — decision-card primary action band */
+  --bar-height: 4.875rem; /* 78px bottom bar */
+  --rail-width: 13rem; /* 208px desktop rail */
+  --banner-height: 1.5rem; /* 24px connection banner */
+
+  /* QR codes must stay black-on-white in both themes to scan. */
+  --qr-bg: #ffffff;
+  --qr-fg: #000000;
+
+  --dur-fast: 80ms;
+  --dur-panel: 120ms;
+  --dur-max: 150ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-panel: 0ms;
+    --dur-max: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Tailwind v4 mapping. Non-inline on purpose: utilities emit var(--token)
+   so a runtime [data-theme] switch repaints without rebuilding classes. */
+@theme {
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-bg-input: var(--bg-input);
+  --color-line-1: var(--line-1);
+  --color-line-2: var(--line-2);
+  --color-line-3: var(--line-3);
+  --color-text-1: var(--text-1);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-text-4: var(--text-4);
+  --color-text-strong: var(--text-strong);
+  --color-text-soft: var(--text-soft);
+  --color-text-body: var(--text-body);
+  --color-text-nav: var(--text-nav);
+  --color-accent: var(--accent);
+  --color-accent-link: var(--accent-link);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-on: var(--accent-on);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-tint-strong: var(--accent-tint-strong);
+  --color-accent-edge: var(--accent-edge);
+
+  --color-idle: var(--status-idle);
+  --color-working: var(--status-working);
+  --color-stalled: var(--status-stalled);
+  --color-blocked: var(--status-blocked);
+  --color-needs-you: var(--status-needs-you);
+  --color-merging: var(--status-merging);
+  --color-done: var(--status-done);
+  --color-failed: var(--status-failed);
+  --color-paused: var(--status-paused);
+
+  --radius-r4: var(--r4);
+  --radius-r6: var(--r6);
+  --radius-r8: var(--r8);
+  --radius-r10: var(--r10);
+  --radius-pill: var(--r-pill);
+  --radius-device: var(--r-device);
+
+  --spacing: 0.25rem;
+  --spacing-thumb: var(--thumb-band);
+  --spacing-bar: var(--bar-height);
+  --spacing-rail: var(--rail-width);
+  --spacing-banner: var(--banner-height);
+
+  --font-sans: var(--ff-ui);
+  --font-mono: var(--ff-mono);
+
+  --text-display: var(--fs-display);
+  --text-display--line-height: 1.15;
+  --text-title: var(--fs-title);
+  --text-title--line-height: 1.2;
+  --text-head: var(--fs-head);
+  --text-head--line-height: 1.3;
+  --text-body: var(--fs-body);
+  --text-body--line-height: 1.5;
+  --text-ui: var(--fs-ui);
+  --text-ui--line-height: 1.35;
+  --text-meta: var(--fs-meta);
+  --text-meta--line-height: 1.4;
+  --text-micro: var(--fs-micro);
+  --text-micro--line-height: 1.35;
+  --text-nano: var(--fs-nano);
+  --text-nano--line-height: 1.3;
+
+  --tracking-display: var(--track-display);
+  --tracking-title: var(--track-title);
+  --tracking-head: var(--track-head);
+  --tracking-micro: var(--track-micro);
+  --tracking-label: var(--track-label);
+
+  --ease-oc: var(--ease);
+  --shadow-sheet: var(--elev-sheet);
+  --shadow-float: var(--elev-float);
+}
+
+/* ------------------------------------------------------------------ */
+
+@layer base {
+  * {
+    border-color: var(--line-1);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--bg-0);
+    color: var(--text-1);
+    font-family: var(--ff-ui);
+    font-size: var(--fs-body);
+    line-height: 1.5;
+    font-feature-settings: 'tnum' 1, 'cv05' 1;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: none;
+  }
+  ::selection {
+    background: var(--accent-tint-strong);
+  }
+  :focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--focus-ring);
+  }
+  input,
+  textarea,
+  button,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+  a {
+    color: var(--accent-link);
+    text-decoration: none;
+  }
+  ::-webkit-scrollbar {
+    width: var(--space-4);
+    height: var(--space-4);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--line-2);
+    border-radius: var(--r-pill);
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  .oc-mono {
+    font-family: var(--ff-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .oc-label {
+    font-family: var(--ff-mono);
+    font-size: var(--fs-nano);
+    font-weight: 500;
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  .oc-card {
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r6);
+  }
+  .oc-panel {
+    background: var(--bg-1);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r8);
+  }
+  .oc-skeleton {
+    background: var(--bg-3);
+    border-radius: var(--r4);
+    animation: oc-pulse 1.6s var(--ease) infinite;
+  }
+  .oc-scroll {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .oc-truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .oc-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  .oc-prose {
+    font-size: var(--fs-body);
+    line-height: 1.65;
+    color: var(--text-body);
+  }
+  .oc-prose h1,
+  .oc-prose h2,
+  .oc-prose h3 {
+    color: var(--text-strong);
+    font-weight: 600;
+    letter-spacing: var(--track-head);
+    margin: var(--space-7) 0 var(--space-4);
+  }
+  .oc-prose h1 { font-size: var(--text-title); }
+  .oc-prose h2 { font-size: var(--text-head); }
+  .oc-prose h3 { font-size: var(--fs-body); }
+  .oc-prose p, .oc-prose ul, .oc-prose ol { margin: 0 0 var(--space-5); }
+  .oc-prose ul, .oc-prose ol { padding-left: var(--space-7); }
+  .oc-prose li { margin-bottom: var(--space-2); }
+  .oc-prose code {
+    font-family: var(--ff-mono);
+    font-size: var(--fs-meta);
+    background: var(--bg-2);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r4);
+    padding: 0 var(--space-2);
+  }
+  .oc-prose pre {
+    background: var(--bg-2);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r6);
+    padding: var(--space-5);
+    overflow-x: auto;
+  }
+  .oc-prose pre code { background: none; border: 0; padding: 0; }
+  .oc-prose a { color: var(--accent-link); text-decoration: underline; }
+  .oc-prose blockquote {
+    border-left: 2px solid var(--line-2);
+    padding-left: var(--space-5);
+    color: var(--text-2);
+    margin: 0 0 var(--space-5);
+  }
+}
+
+/* A utility, not a component class, so variants (focus-within:…) apply. */
+@utility oc-focus-ring {
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+@keyframes oc-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@keyframes oc-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@keyframes oc-rise {
+  from { opacity: 0; transform: translateY(var(--space-4)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes oc-sheet-in {
+  from { opacity: 0; transform: translateY(var(--space-8)); }
+  to { opacity: 1; transform: none; }
+}

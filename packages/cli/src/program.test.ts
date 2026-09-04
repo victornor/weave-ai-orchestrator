@@ -1,0 +1,171 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Command } from 'commander';
+import { buildProgram } from './program.js';
+import { configureOutput } from './output.js';
+
+function find(program: Command, path: string[]): Command | undefined {
+  let node: Command | undefined = program;
+  for (const name of path) {
+    node = node?.commands.find((c) => c.name() === name || c.aliases().includes(name));
+    if (!node) return undefined;
+  }
+  return node;
+}
+
+describe('command tree', () => {
+  const program = buildProgram();
+
+  it('exposes every top-level command from PLAN §20', () => {
+    const expected = [
+      'init', 'daemon', 'login', 'logout', 'context', 'devices', 'presenter', 'project', 'runtime', 'role',
+      'worker', 'ticket', 'decision', 'chat', 'say', 'briefing', 'attach', 'top', 'presentation', 'conductor',
+      'workspace', 'runs', 'usage', 'knowledge', 'specs', 'worktree', 'doctor', 'agent',
+    ];
+    const actual = program.commands.map((c) => c.name());
+    for (const name of expected) expect(actual).toContain(name);
+  });
+
+  it.each([
+    ['daemon', ['start', 'stop', 'status', 'logs', 'set-password', 'install-service']],
+    ['context', ['list', 'use', 'remove', 'show']],
+    ['devices', ['list', 'revoke']],
+    ['project', ['add', 'list', 'show', 'remove', 'fetch']],
+    ['runtime', ['list', 'detect', 'login', 'models']],
+    ['role', ['list', 'show', 'activate', 'set-runtime', 'set-model', 'pause', 'resume', 'retire', 'charter']],
+    ['worker', ['list', 'show', 'pause', 'resume', 'relaunch', 'cancel', 'purge']],
+    ['ticket', ['create', 'list', 'show', 'assign', 'set', 'transition', 'comment', 'cancel', 'discard', 'open']],
+    ['decision', ['list', 'show', 'answer']],
+    ['presentation', ['set', 'open', 'reconcile', 'status']],
+    ['conductor', ['set-model', 'set-runtime', 'show', 'reset-session']],
+    ['workspace', ['list', 'use', 'register', 'unregister']],
+    ['runs', ['list', 'show', 'tail', 'cancel']],
+    ['knowledge', ['show', 'edit', 'note', 'lint', 'curate', 'revert']],
+    ['specs', ['list', 'show', 'changes', 'search', 'explore']],
+    ['worktree', ['list', 'verify', 'discard']],
+    ['agent', ['inbox']],
+  ])('%s has its subcommands', (group, subcommands) => {
+    for (const name of subcommands) expect(find(program, [group, name])?.name(), `${group} ${name}`).toBe(name);
+  });
+
+  it('carries the global flags every command needs', () => {
+    const flags = program.options.map((o) => o.long);
+    expect(flags).toEqual(expect.arrayContaining(['--workspace', '--json', '--no-color', '--context', '--url', '--token']));
+  });
+
+  it('charter has show and rollback', () => {
+    expect(find(program, ['role', 'charter', 'show'])).toBeDefined();
+    expect(find(program, ['role', 'charter', 'rollback'])).toBeDefined();
+  });
+
+  it('exposes --auto-merge on `ticket set` and --force on `ticket discard`', () => {
+    expect(find(program, ['ticket', 'set'])!.options.map((o) => o.long)).toEqual(expect.arrayContaining(['--auto-merge', '--no-auto-merge']));
+    expect(find(program, ['ticket', 'discard'])!.options.map((o) => o.long)).toContain('--force');
+  });
+
+  it('exposes the usage scope/window/grain flags', () => {
+    expect(find(program, ['usage'])!.options.map((o) => o.long)).toEqual(expect.arrayContaining(['--scope', '--window', '--grain', '--start', '--end']));
+  });
+});
+
+describe('running commands against a stubbed daemon', () => {
+  const realFetch = globalThis.fetch;
+  let written: string[];
+
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => { written.push(String(chunk)); return true; });
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => { written.push(String(chunk)); return true; });
+    process.exitCode = undefined;
+    configureOutput({ json: true, color: false });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    globalThis.fetch = realFetch;
+    process.exitCode = undefined;
+  });
+
+  function stubFetch(routes: Record<string, unknown>): string[] {
+    const seen: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      seen.push(`${init?.method ?? 'GET'} ${url.replace(/^http:\/\/daemon\.test/, '')}`);
+      const key = Object.keys(routes).find((route) => url.includes(route));
+      if (!key) return new Response(JSON.stringify({ error: { code: 'not_found', message: `no stub for ${url}`, retryable: false } }), { status: 404 });
+      return new Response(JSON.stringify(routes[key]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    return seen;
+  }
+
+  const base = ['node', 'oc', '--json', '--url', 'http://daemon.test', '-w', 'acme'];
+
+  it('prints tickets as json and calls the workspace route', async () => {
+    const seen = stubFetch({
+      '/api/w/acme/tickets': { items: [{ id: 't1', identifier: 'ACME-42', title: 'Theme tokens', kind: 'change', status: 'in_progress', priority: 'high', createdAt: '2026-09-04T11:00:00.000Z' }], total: 1 },
+    });
+    await buildProgram().parseAsync([...base, 'ticket', 'list', '--status', 'in_progress']);
+    expect(seen[0]).toBe('GET /api/w/acme/tickets?status=in_progress&limit=50&offset=0');
+    expect(JSON.parse(written.join(''))).toMatchObject({ items: [{ identifier: 'ACME-42' }] });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('renders the briefing from the render package', async () => {
+    stubFetch({
+      '/api/w/acme/briefing': {
+        needsYou: [], landed: [], underway: [], queued: [], warnings: [], generatedAt: '2026-09-04T12:00:00.000Z',
+      },
+    });
+    configureOutput({ json: false, color: false });
+    await buildProgram().parseAsync([...base.filter((a) => a !== '--json'), 'briefing']);
+    const text = written.join('');
+    expect(text).toContain('Needs you');
+    expect(text).toContain('Nothing needs you right now.');
+    expect(text).toContain('Queued');
+  });
+
+  it('answers a decision by option number', async () => {
+    const seen = stubFetch({
+      '/api/w/acme/decisions/dec_1/answer': { ok: true },
+      '/api/w/acme/decisions/dec_1': {
+        id: 'dec_1', kind: 'plan_approval', owner: 'human', status: 'open', title: 'Approve the plan',
+        options: [], allowFreeText: false, createdAt: '2026-09-04T11:00:00.000Z', ticketId: 'tkt_1',
+      },
+    });
+    await buildProgram().parseAsync([...base, 'decision', 'answer', 'dec_1', '2']);
+    expect(seen).toContain('POST /api/w/acme/decisions/dec_1/answer');
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('prints a typed error and sets an exit code when the daemon refuses', async () => {
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ error: { code: 'runtime_unreachable', message: 'claude is not installed on the daemon host', retryable: true } }),
+      { status: 503 },
+    )) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'worker', 'list']);
+    expect(JSON.parse(written.join(''))).toMatchObject({ error: { code: 'runtime_unreachable', retryable: true } });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('reports an unreachable daemon with exit code 4', async () => {
+    globalThis.fetch = (async () => { throw new Error('ECONNREFUSED'); }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'project', 'list']);
+    expect(JSON.parse(written.join(''))).toMatchObject({ error: { code: 'net_daemon_unreachable' } });
+    expect(process.exitCode).toBe(4);
+  });
+
+  it('fails cleanly when no workspace can be resolved', async () => {
+    stubFetch({ '/api/health': { ok: true, workspaces: [{ id: 'a' }, { id: 'b' }] } });
+    await buildProgram().parseAsync(['node', 'oc', '--json', '--url', 'http://daemon.test', 'ticket', 'list']);
+    expect(written.join('')).toContain('no workspace selected');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('adopts the only workspace the daemon serves', async () => {
+    const seen = stubFetch({
+      '/api/health': { ok: true, workspaces: [{ id: 'only' }] },
+      '/api/w/only/projects': [{ id: 'api', name: 'api', status: 'ready' }],
+    });
+    await buildProgram().parseAsync(['node', 'oc', '--json', '--url', 'http://daemon.test', 'project', 'list']);
+    expect(seen).toContain('GET /api/w/only/projects');
+  });
+});

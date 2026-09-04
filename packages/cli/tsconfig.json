@@ -14,6 +14,9 @@
     },
     {
       "path": "../../packages/render"
+    },
+    {
+      "path": "../../packages/tui"
     }
   ]
 }

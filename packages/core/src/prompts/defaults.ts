@@ -67,7 +67,7 @@ You are a worker spawned for exactly one ticket: **{{ticket.identifier}}**. This
 
 {{charter}}
 
-{{brief}}
+{{briefText}}
 `;
 
 export const BRIEF_TMPL = `## Brief

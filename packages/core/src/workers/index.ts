@@ -1,2 +1,342 @@
-import type { WorkspaceContext } from '../context.js'; import type { CoreServices, WorkersService } from '../api.js'; import { stub } from '../stub.js';
-export function createWorkersService(_ctx: WorkspaceContext, _deps: () => CoreServices): WorkersService { return stub<WorkersService>('workers'); }
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { newId, nowIso } from '@openconductor/db';
+import {
+  OcError, type Agent, type Project, type Role, type Ticket, type Wakeup,
+} from '@openconductor/shared';
+import type { WorktreeProvider } from '@openconductor/plugin-sdk';
+import type { WorkspaceContext } from '../context.js';
+import type { Actor, CoreServices, WorkersService } from '../api.js';
+import { recordActivity } from '../events.js';
+import { renderHome } from './home.js';
+import { renderBrief } from '../prompts/index.js';
+import { createSessions } from '../sessions/index.js';
+import { landedWorkTest } from '../worktrees/landed.js';
+import { git, worktreeState } from '../util/git.js';
+
+export { renderHome, ensureHomeCurrent, skillsFor } from './home.js';
+
+const LIVE = "('provisioning','active','running','paused','error')";
+
+export function branchSlug(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'work';
+}
+
+/** `oc/<identifier-lowercase>-<slug>` (PLAN §11.2); the OpenSpec change name is the same without the prefix. */
+export function ticketBranch(ticket: Ticket): string { return `oc/${ticket.identifier.toLowerCase()}-${branchSlug(ticket.title)}`; }
+export function openspecChangeName(ticket: Ticket): string { return `${ticket.identifier.toLowerCase()}-${branchSlug(ticket.title)}`; }
+
+export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServices): WorkersService {
+  const log = ctx.log('daemon');
+  const sessions = createSessions(ctx);
+
+  const get = (id: string): Agent => {
+    const a = ctx.db.get<Agent>('SELECT * FROM agents WHERE id = ? AND workspace_id = ?', [id, ctx.workspaceId]);
+    if (!a) throw new OcError('not_found', `agent ${id} not found`);
+    return a;
+  };
+  const ticketOf = (id: string): Ticket => {
+    const t = ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ? AND workspace_id = ?', [id, ctx.workspaceId])
+      ?? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE identifier = ? AND workspace_id = ?', [id, ctx.workspaceId]);
+    if (!t) throw new OcError('not_found', `ticket ${id} not found`);
+    return t;
+  };
+  const projectOf = (id: string): Project => {
+    const p = ctx.db.get<Project>('SELECT * FROM projects WHERE id = ?', [id]);
+    if (!p) throw new OcError('not_found', `project ${id} not found`);
+    return p;
+  };
+  const providerFor = (project: Project): WorktreeProvider => {
+    const p = ctx.registries.worktreeProviders.get(project.worktreeProvider) ?? ctx.registries.worktreeProviders.get('git');
+    if (!p) throw new OcError('internal', 'no worktree provider registered');
+    return p;
+  };
+  const liveInProject = (projectId: string): number =>
+    ctx.db.get<{ n: number }>(`SELECT COUNT(*) n FROM agents WHERE project_id = ? AND kind = 'worker' AND status IN ${LIVE}`, [projectId])?.n ?? 0;
+
+  async function spawn(actor: Actor, ticketId: string, opts: { noWorktree?: boolean; spawnReason?: string } = {}): Promise<Agent> {
+    const ticket = ticketOf(ticketId);
+    const existing = ctx.db.get<Agent>(`SELECT * FROM agents WHERE ticket_id = ? AND kind = 'worker' AND status IN ${LIVE}`, [ticket.id]);
+    if (existing) return existing;
+    if (!ticket.assigneeRoleId) throw new OcError('validation', `ticket ${ticket.identifier} is not assigned to a role`);
+    const role = ctx.db.get<Role>('SELECT * FROM roles WHERE id = ?', [ticket.assigneeRoleId]);
+    if (!role) throw new OcError('not_found', `role ${ticket.assigneeRoleId} not found`);
+    if (role.status !== 'active') throw new OcError('wrong_status', `role ${role.id} is ${role.status}`);
+    const project = projectOf(role.projectId);
+
+    if (deps().roles.freeSlots(role.id) <= 0) throw new OcError('role_full', `role ${role.name} has no free worker slot (max ${role.maxWorkers})`, { roleId: role.id });
+    if (liveInProject(project.id) >= project.maxWorkers) throw new OcError('role_full', `project ${project.slug} is at its worker limit (${project.maxWorkers})`, { projectId: project.id });
+
+    const id = newId();
+    const home = join(ctx.paths.workers, id);
+    const n = (ctx.db.get<{ n: number }>('SELECT COUNT(*) n FROM agents WHERE role_id = ?', [role.id])?.n ?? 0) + 1;
+    const now = nowIso();
+    const branch = ticketBranch(ticket);
+    const spawnedBy = actor.kind === 'human' ? 'human' : actor.kind === 'agent' ? 'conductor' : 'system';
+
+    ctx.db.insert('agents', {
+      id, workspaceId: ctx.workspaceId, kind: 'worker', projectId: project.id, roleId: role.id, roleRevision: role.specRevision,
+      ticketId: ticket.id, name: `${role.name} #${n}`, runtimeId: role.runtimeId, model: role.model, effort: role.effort,
+      status: 'provisioning', homePath: home, worktreePath: null, branch: opts.noWorktree ? null : branch,
+      turnEpoch: 0, turnCount: 0, spawnedBy, spawnReason: opts.spawnReason ?? `ticket ${ticket.identifier}`,
+      briefRevision: 1, createdAt: now, updatedAt: now,
+    });
+
+    let worktreeRowId: string | null = null;
+    try {
+      mkdirSync(home, { recursive: true });
+      if (!opts.noWorktree) {
+        const provider = providerFor(project);
+        const targetPath = join(home, 'work');
+        const info = await provider.create({
+          repoPath: project.clonePath, branch, base: project.defaultBranch, targetPath,
+          setupCommand: project.setupCommand ?? undefined, warmPaths: (project as unknown as { warmPaths?: string[] }).warmPaths ?? [],
+          configPath: ctx.paths.wtConfig,
+        });
+        worktreeRowId = newId();
+        ctx.db.insert('worktrees', {
+          id: worktreeRowId, projectId: project.id, ticketId: ticket.id, agentId: id, provider: provider.id,
+          path: info.path, branch: info.branch || branch, status: 'active', createdAt: now, lastVerifiedAt: now,
+        });
+        ctx.db.update('agents', id, { worktreePath: info.path, branch: info.branch || branch, updatedAt: nowIso() });
+      }
+
+      // Bind the ticket to this worker (TicketsService has no setter for worker_id).
+      ctx.db.run('UPDATE tickets SET worker_id = ?, updated_at = ? WHERE id = ?', [id, nowIso(), ticket.id]);
+      if (ticket.kind === 'change' && project.openspecEnabled && !ticket.openspecChangeName) {
+        ctx.db.run('UPDATE tickets SET openspec_change_name = ? WHERE id = ?', [openspecChangeName(ticket), ticket.id]);
+      }
+      if (ticket.status === 'backlog') {
+        try { await deps().tickets.transition({ kind: 'system', id: null }, ticket.id, { to: 'todo', note: 'worker spawned' }); }
+        catch { ctx.db.run("UPDATE tickets SET status = 'todo', updated_at = ? WHERE id = ?", [nowIso(), ticket.id]); }
+      }
+
+      const agent = get(id);
+      await renderHome(ctx, deps, agent);
+      ctx.db.update('agents', id, { status: 'active', updatedAt: nowIso() });
+      sessions.forTurn({ id, kind: 'worker', runtimeId: role.runtimeId }, role.sessionPolicy);
+      deps().wake.enqueue(id, { source: 'ticket_assigned', reason: `${ticket.identifier}: ${ticket.title}`, payload: { ticketId: ticket.id }, requestedBy: actor });
+    } catch (e) {
+      // Roll back the row, the home and the worktree; nothing half-created is left behind.
+      log.error({ err: String(e), ticketId: ticket.id }, 'worker spawn failed; rolling back');
+      try {
+        if (!opts.noWorktree) {
+          const provider = providerFor(project);
+          await provider.remove({ repoPath: project.clonePath, path: join(home, 'work'), branch, deleteBranch: true, force: true, configPath: ctx.paths.wtConfig }).catch(() => undefined);
+        }
+      } catch { /* best effort */ }
+      if (worktreeRowId) ctx.db.run('DELETE FROM worktrees WHERE id = ?', [worktreeRowId]);
+      ctx.db.run('DELETE FROM wakeups WHERE agent_id = ?', [id]);
+      ctx.db.run('DELETE FROM agent_sessions WHERE agent_id = ?', [id]);
+      ctx.db.run('UPDATE tickets SET worker_id = NULL WHERE worker_id = ?', [id]);
+      ctx.db.run('DELETE FROM agents WHERE id = ?', [id]);
+      try { rmSync(home, { recursive: true, force: true }); } catch { /* leave the directory for inspection */ }
+      throw e instanceof OcError ? e : new OcError('internal', `worker spawn failed: ${String(e)}`);
+    }
+
+    const agent = get(id);
+    recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.spawn', 'agent', id, { ticketId: ticket.id, roleId: role.id, branch }, ticket.id);
+    ctx.events.emit('worker.spawned', 'agent', id, { name: agent.name, ticketId: ticket.id, roleId: role.id, projectId: project.id, branch: agent.branch });
+    log.info({ workerId: id, ticket: ticket.identifier, role: role.id }, 'worker spawned');
+    return agent;
+  }
+
+  /** Progress note the relaunched worker gets in its brief (PLAN §11.6). */
+  async function progressNote(agent: Agent, ticket: Ticket | null): Promise<string> {
+    const bits: string[] = [];
+    if (ticket) {
+      bits.push(`Ticket ${ticket.identifier} is ${ticket.status}.`);
+      const last = ctx.db.get<{ body: string; createdAt: string }>("SELECT body, created_at FROM ticket_comments WHERE ticket_id = ? AND kind = 'status' ORDER BY created_at DESC LIMIT 1", [ticket.id]);
+      if (last) bits.push(`Last status (${last.createdAt}): ${last.body.slice(0, 200)}`);
+      const state = (ticket.openspecState ?? null) as { tasks?: { total?: number; complete?: number } } | null;
+      if (state?.tasks && typeof state.tasks.total === 'number') bits.push(`Tasks ticked: ${state.tasks.complete ?? 0}/${state.tasks.total}.`);
+    }
+    if (agent.worktreePath && existsSync(agent.worktreePath)) {
+      const project = agent.projectId ? ctx.db.get<Project>('SELECT * FROM projects WHERE id = ?', [agent.projectId]) : null;
+      const st = await worktreeState(agent.worktreePath, project?.defaultBranch ?? 'main');
+      bits.push(`Worktree: ${st.dirty ? `${st.changedFiles} uncommitted change(s)` : 'clean'}, ${st.ahead} ahead / ${st.behind} behind ${project?.defaultBranch ?? 'main'}.`);
+      const lastCommit = await git(['log', '-1', '--pretty=%h %s'], agent.worktreePath, 20_000);
+      if (lastCommit.ok && lastCommit.stdout.trim()) bits.push(`Last commit: ${lastCommit.stdout.trim().slice(0, 200)}`);
+    }
+    return bits.join(' ');
+  }
+
+  const service: WorkersService = {
+    list(filter = {}): Agent[] {
+      const where = ["workspace_id = ?", "kind = 'worker'"];
+      const params: unknown[] = [ctx.workspaceId];
+      if (filter.status?.length) { where.push(`status IN (${filter.status.map(() => '?').join(',')})`); params.push(...filter.status); }
+      else if (!filter.includeRetired) where.push("status != 'retired'");
+      if (filter.projectId) { where.push('project_id = ?'); params.push(filter.projectId); }
+      if (filter.roleId) { where.push('role_id = ?'); params.push(filter.roleId); }
+      return ctx.db.all<Agent>(`SELECT * FROM agents WHERE ${where.join(' AND ')} ORDER BY created_at DESC`, params as never[]);
+    },
+
+    get,
+
+    conductor(): Agent {
+      const a = ctx.db.get<Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'conductor'", [ctx.workspaceId]);
+      if (!a) throw new OcError('not_found', 'no conductor for this workspace');
+      return a;
+    },
+
+    async ensureConductor(): Promise<Agent> {
+      let a = ctx.db.get<Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'conductor'", [ctx.workspaceId]);
+      if (!a) {
+        const id = newId();
+        const now = nowIso();
+        mkdirSync(ctx.paths.conductor, { recursive: true });
+        ctx.db.insert('agents', {
+          id, workspaceId: ctx.workspaceId, kind: 'conductor', projectId: null, roleId: null, roleRevision: null, ticketId: null,
+          name: 'Conductor', runtimeId: ctx.config.conductor.runtime, model: ctx.config.conductor.model, effort: ctx.config.conductor.effort ?? null,
+          status: 'active', homePath: ctx.paths.conductor, turnEpoch: 0, turnCount: 0, spawnedBy: 'system', spawnReason: 'workspace bootstrap',
+          briefRevision: 1, createdAt: now, updatedAt: now,
+        });
+        a = get(id);
+        ctx.events.emit('worker.spawned', 'agent', id, { name: 'Conductor', kind: 'conductor' });
+      } else if (a.runtimeId !== ctx.config.conductor.runtime || a.model !== ctx.config.conductor.model) {
+        ctx.db.update('agents', a.id, { runtimeId: ctx.config.conductor.runtime, model: ctx.config.conductor.model, updatedAt: nowIso() });
+        a = get(a.id);
+      }
+      await renderHome(ctx, deps, a);
+      sessions.forTurn({ id: a.id, kind: 'conductor', runtimeId: a.runtimeId }, 'persistent');
+      return get(a.id);
+    },
+
+    spawnForTicket(actor: Actor, ticketId: string): Promise<Agent> { return spawn(actor, ticketId); },
+
+    async spawnCurator(actor: Actor, projectId: string): Promise<Agent> {
+      const project = projectOf(projectId);
+      const role = ctx.db.get<Role>("SELECT * FROM roles WHERE project_id = ? AND status = 'active' ORDER BY created_at LIMIT 1", [projectId]);
+      if (!role) throw new OcError('wrong_status', `project ${project.slug} has no active role to curate its knowledge`);
+      const ticket = deps().tickets.create(actor, {
+        projectId, kind: 'task', title: `Curate project knowledge (${project.slug})`,
+        description: 'Curate this project\'s knowledge base: merge duplicates, fold learnings that became conventions, archive stale entries, keep every section within budget. Never invent facts. Submit with `oc_knowledge_replace`.',
+        priority: 'low', assigneeRoleId: role.id, originKind: 'curation', originFingerprint: `curation:${projectId}`,
+      });
+      return spawn(actor, ticket.id, { noWorktree: true, spawnReason: 'knowledge curation' });
+    },
+
+    async message(actor: Actor, workerId: string, body: string): Promise<Wakeup> {
+      const agent = get(workerId);
+      if (!agent.ticketId) throw new OcError('validation', `${agent.name} has no ticket to talk on`);
+      deps().tickets.comment(actor, agent.ticketId, body, 'relay', actor.kind === 'human' ? 'trusted' : 'agent');
+      const wake = deps().wake.enqueue(workerId, { source: 'conductor_request', reason: body.slice(0, 160), payload: { ticketId: agent.ticketId, message: body }, requestedBy: actor });
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.message', 'agent', workerId, { length: body.length }, agent.ticketId);
+      return wake;
+    },
+
+    async relaunch(actor: Actor, workerId: string, note: string): Promise<Agent> {
+      const agent = get(workerId);
+      const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) ?? null : null;
+      const active = ctx.db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [workerId]);
+      if (active) { try { await deps().runs.cancel(actor, active.id, 'kill'); } catch { /* already gone */ } }
+      const derived = await progressNote(agent, ticket);
+      const relaunchNote = [note, derived].filter(Boolean).join(' ');
+      ctx.db.update('agents', workerId, { briefRevision: agent.briefRevision + 1, status: 'active', errorText: null, updatedAt: nowIso() });
+      const updated = get(workerId);
+      await renderHome(ctx, deps, updated, { relaunchNote });
+      deps().wake.enqueue(workerId, { source: 'system', reason: 'relaunch', payload: { relaunchNote }, requestedBy: actor });
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.relaunch', 'agent', workerId, { note: relaunchNote.slice(0, 400) }, agent.ticketId);
+      ctx.events.emit('worker.relaunched', 'agent', workerId, { note: relaunchNote.slice(0, 400) });
+      log.info({ workerId }, 'worker relaunched');
+      return get(workerId);
+    },
+
+    async cancel(actor: Actor, workerId: string, reason: string): Promise<Agent> {
+      const agent = get(workerId);
+      const active = ctx.db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [workerId]);
+      if (active) { try { await deps().runs.cancel(actor, active.id, 'interrupt'); } catch { /* already gone */ } }
+      deps().wake.cancelForAgent(workerId, `worker cancelled: ${reason}`);
+      ctx.db.update('agents', workerId, { status: 'done', errorText: reason, updatedAt: nowIso() });
+      // The worktree stays until the work lands or a human approves a discard (PLAN §11.5).
+      ctx.db.run("UPDATE worktrees SET status = 'dirty' WHERE agent_id = ? AND status = 'active'", [workerId]);
+      if (agent.ticketId) {
+        try { deps().tickets.comment({ kind: 'system', id: null }, agent.ticketId, `${agent.name} was cancelled: ${reason}. Its branch and worktree are kept until the work lands or is discarded.`, 'status', 'trusted'); } catch { /* comment is best effort */ }
+      }
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.cancel', 'agent', workerId, { reason }, agent.ticketId);
+      ctx.events.emit('worker.status', 'agent', workerId, { status: 'done', reason });
+      return get(workerId);
+    },
+
+    pause(actor: Actor, id: string, reason: string): Agent {
+      get(id);
+      ctx.db.update('agents', id, { status: 'paused', pauseReason: reason, updatedAt: nowIso() });
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.pause', 'agent', id, { reason });
+      ctx.events.emit('worker.status', 'agent', id, { status: 'paused', reason });
+      return get(id);
+    },
+
+    resume(actor: Actor, id: string): Agent {
+      get(id);
+      ctx.db.update('agents', id, { status: 'active', pauseReason: null, updatedAt: nowIso() });
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.resume', 'agent', id, {});
+      ctx.events.emit('worker.status', 'agent', id, { status: 'active' });
+      return get(id);
+    },
+
+    async retireIfLanded(actor: Actor, workerId: string): Promise<{ retired: boolean; reason?: string }> {
+      const agent = get(workerId);
+      if (agent.status === 'retired') return { retired: true };
+      const project = agent.projectId ? projectOf(agent.projectId) : null;
+      const wt = ctx.db.get<{ id: string; path: string; branch: string; status: string }>("SELECT id, path, branch, status FROM worktrees WHERE agent_id = ? AND status != 'removed' ORDER BY created_at DESC LIMIT 1", [workerId]);
+
+      if (project && wt) {
+        const merged = agent.ticketId
+          ? ctx.db.get<{ id: string }>("SELECT id FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' AND lower(COALESCE(state,'')) = 'merged' LIMIT 1", [agent.ticketId])
+          : undefined;
+        const policies = (project.policies ?? {}) as { deliveryMode?: string };
+        const verdict = await landedWorkTest({
+          repoPath: project.clonePath, worktreePath: wt.path, branch: wt.branch, defaultBranch: project.defaultBranch,
+          mergedPr: !!merged, localBranch: (policies.deliveryMode ?? ctx.config.defaults.deliveryMode) === 'local-branch',
+        });
+        if (!verdict.landed) {
+          ctx.db.update('worktrees', wt.id, { status: 'dirty', lastVerifiedAt: nowIso(), landedEvidenceJson: verdict.evidence });
+          log.info({ workerId, reason: verdict.reason }, 'worker not retired: work has not landed');
+          return { retired: false, reason: verdict.reason };
+        }
+        try {
+          const provider = providerFor(project);
+          await provider.remove({ repoPath: project.clonePath, path: wt.path, branch: wt.branch, deleteBranch: true, force: false, configPath: ctx.paths.wtConfig });
+        } catch (e) {
+          ctx.db.update('worktrees', wt.id, { status: 'dirty', lastVerifiedAt: nowIso() });
+          return { retired: false, reason: `worktree removal failed: ${String(e)}` };
+        }
+        ctx.db.update('worktrees', wt.id, { status: 'removed', removedAt: nowIso(), lastVerifiedAt: nowIso(), landedEvidenceJson: verdict.evidence });
+      }
+
+      // Archive the home (brief, notes, final report); run logs stay under .openconductor/runs.
+      const archive = join(ctx.paths.archive, workerId);
+      try {
+        if (existsSync(agent.homePath)) {
+          mkdirSync(join(archive, '..'), { recursive: true });
+          try { renameSync(agent.homePath, archive); }
+          catch { cpSync(agent.homePath, archive, { recursive: true }); rmSync(agent.homePath, { recursive: true, force: true }); }
+        }
+      } catch (e) { log.warn({ workerId, err: String(e) }, 'archiving the worker home failed'); }
+
+      sessions.close(workerId);
+      deps().wake.cancelForAgent(workerId, 'worker retired');
+      ctx.db.update('agents', workerId, { status: 'retired', retiredAt: nowIso(), homePath: archive, updatedAt: nowIso() });
+      if (agent.ticketId) ctx.db.run('UPDATE tickets SET worker_id = NULL WHERE id = ? AND worker_id = ?', [agent.ticketId, workerId]);
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.retire', 'agent', workerId, {}, agent.ticketId);
+      ctx.events.emit('worker.retired', 'agent', workerId, { ticketId: agent.ticketId, name: agent.name });
+      log.info({ workerId }, 'worker retired');
+      return { retired: true };
+    },
+
+    brief(workerId: string): string {
+      const agent = get(workerId);
+      const path = join(agent.homePath, 'brief.md');
+      if (existsSync(path)) return readFileSync(path, 'utf8');
+      return renderBrief(ctx, deps, agent);
+    },
+
+    async resetSession(actor: Actor, id: string, reason: string): Promise<void> {
+      get(id);
+      sessions.reset(id, reason);
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.reset_session', 'agent', id, { reason });
+    },
+  };
+  return service;
+}

@@ -1,0 +1,75 @@
+import type { UiStatus } from '@openconductor/shared';
+import { StatusGlyph } from './StatusGlyph';
+import { cx } from '../lib/cx';
+
+export function TicketChip({
+  identifier,
+  title,
+  status,
+  onClick,
+  className,
+}: {
+  identifier: string;
+  title?: string;
+  status: UiStatus;
+  onClick?: () => void;
+  className?: string;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cx(
+        'inline-flex max-w-full items-center gap-1.5 rounded-r4 border border-line-2 bg-bg-2 px-2 py-1 align-[-3px]',
+        'transition-colors duration-(--dur-fast) ease-oc hover:bg-bg-3',
+        className,
+      )}
+    >
+      <StatusGlyph status={status} size="xs" />
+      <span className="oc-mono text-micro text-text-soft">{identifier}</span>
+      {title ? <span className="oc-truncate text-micro text-text-3">{title}</span> : null}
+    </button>
+  );
+}
+
+export function WorkerChip({
+  name,
+  status,
+  note,
+  onClick,
+  className,
+}: {
+  name: string;
+  status: UiStatus;
+  note?: string;
+  onClick?: () => void;
+  className?: string;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cx(
+        'inline-flex max-w-full items-center gap-1.5 rounded-r4 border border-line-2 bg-bg-2 px-2 py-1',
+        'transition-colors duration-(--dur-fast) ease-oc hover:bg-bg-3',
+        className,
+      )}
+    >
+      <StatusGlyph status={status} size="xs" pulse={status === 'working'} />
+      <span className="text-micro text-text-soft">{name}</span>
+      {note ? <span className="oc-mono oc-truncate text-micro text-text-3">{note}</span> : null}
+    </button>
+  );
+}
+
+export function CommandChip({ command, onClick }: { command: string; onClick?: () => void }): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="oc-mono inline-flex items-center rounded-r4 border border-accent-edge bg-accent-tint px-2 py-1 text-micro text-accent-link"
+    >
+      {command}
+    </button>
+  );
+}

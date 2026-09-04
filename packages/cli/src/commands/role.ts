@@ -1,0 +1,168 @@
+/** `oc role ...` — roles are templates; workers are the things that run (PLAN §11, §20). */
+import type { Command } from 'commander';
+import { emit, fields, heading, style, table, write } from '../output.js';
+import { statusGlyph } from '@openconductor/render';
+import { items, run, session } from './util.js';
+
+function roleUiStatus(status: string): string {
+  switch (status) {
+    case 'active': return 'idle';
+    case 'paused': return 'paused';
+    case 'retired': return 'done';
+    default: return 'needs-you';
+  }
+}
+
+export function register(program: Command): void {
+  const role = program.command('role').description('roles (hired job descriptions)');
+
+  role
+    .command('list', { isDefault: true })
+    .description('list roles')
+    .option('-p, --project <id>', 'filter by project')
+    .action(async (opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const payload = await client.wget('/roles', opts['project'] ? { project: opts['project'] } : undefined);
+      const rows = items<Record<string, unknown>>(payload, 'roles');
+      emit(payload, () => {
+        table(rows, [
+          { header: '', get: (r) => statusGlyph(roleUiStatus(String(r['status'] ?? ''))) },
+          { header: 'ID', get: (r) => String(r['id'] ?? '') },
+          { header: 'NAME', get: (r) => String(r['name'] ?? '') },
+          { header: 'PROJECT', get: (r) => String(r['projectId'] ?? '') },
+          { header: 'RUNTIME', get: (r) => String(r['runtimeId'] ?? '') },
+          { header: 'MODEL', get: (r) => String(r['model'] ?? '(default)') },
+          { header: 'MAX', get: (r) => String(r['maxWorkers'] ?? ''), align: 'right' },
+          { header: 'STATUS', get: (r) => String(r['status'] ?? '') },
+        ], { empty: 'no roles yet — ask the conductor to hire one' });
+      });
+    }));
+
+  role
+    .command('show')
+    .argument('<id>')
+    .description('role spec, charter and live workers')
+    .action(async (id: string, _opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const payload = await client.wget<Record<string, unknown>>(`/roles/${encodeURIComponent(id)}`);
+      const spec = (payload['role'] ?? payload) as Record<string, unknown>;
+      emit(payload, () => {
+        fields([
+          ['id', String(spec['id'] ?? '')],
+          ['name', String(spec['name'] ?? '')],
+          ['project', String(spec['projectId'] ?? '')],
+          ['runtime', String(spec['runtimeId'] ?? '')],
+          ['model', spec['model'] === null ? '(runtime default)' : String(spec['model'] ?? '')],
+          ['session', String(spec['sessionPolicy'] ?? '')],
+          ['max workers', String(spec['maxWorkers'] ?? '')],
+          ['status', String(spec['status'] ?? '')],
+          ['scope', String(spec['scopeText'] ?? '')],
+          ['charter', String(spec['charterSummary'] ?? '')],
+        ]);
+        const workers = items<Record<string, unknown>>(payload['workers'], 'workers');
+        if (workers.length) {
+          write('');
+          heading('Workers');
+          table(workers, [
+            { header: 'ID', get: (w) => String(w['id'] ?? '') },
+            { header: 'NAME', get: (w) => String(w['name'] ?? '') },
+            { header: 'TICKET', get: (w) => String(w['ticketId'] ?? '') },
+            { header: 'STATUS', get: (w) => String(w['status'] ?? '') },
+          ]);
+        }
+        const revisions = items<Record<string, unknown>>(payload['revisions'], 'revisions');
+        if (revisions.length) {
+          write('');
+          heading('Charter revisions');
+          table(revisions, [
+            { header: 'REV', get: (r) => String(r['revision'] ?? ''), align: 'right' },
+            { header: 'AUTHOR', get: (r) => String(r['author'] ?? '') },
+            { header: 'REASON', get: (r) => String(r['reason'] ?? '') },
+            { header: 'WHEN', get: (r) => String(r['createdAt'] ?? '') },
+          ]);
+        }
+      });
+    }));
+
+  role
+    .command('activate')
+    .argument('<id>')
+    .description('activate a hired role so it can pick up tickets')
+    .option('--runtime <runtime>')
+    .option('--model <model>')
+    .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const body: Record<string, unknown> = {};
+      if (opts['runtime']) body['runtime'] = opts['runtime'];
+      if (opts['model']) body['model'] = opts['model'];
+      const result = await client.wpost(`/roles/${encodeURIComponent(id)}/activate`, body);
+      emit(result, () => write(`${style.ok('activated')} ${id}`));
+    }));
+
+  const patch = (field: 'runtime' | 'model') => async (id: string, value: string, opts: Record<string, string>, command: Command) => run(async () => {
+    const { client } = await session(command);
+    const reason = opts['reason'] ?? `set ${field} to ${value}`;
+    const result = await client.patch(client.w(`/roles/${encodeURIComponent(id)}`), {
+      patch: { [field]: field === 'model' && value === 'default' ? null : value },
+      reason,
+    });
+    emit(result, () => write(`${style.ok('updated')} ${id}: ${field} = ${value}`));
+  });
+
+  role
+    .command('set-runtime')
+    .argument('<id>')
+    .argument('<runtime>')
+    .option('--reason <reason>')
+    .description('change the runtime for a role')
+    .action(patch('runtime'));
+
+  role
+    .command('set-model')
+    .argument('<id>')
+    .argument('<model>', 'model id, or "default" for the runtime default')
+    .option('--reason <reason>')
+    .description('change the model for a role')
+    .action(patch('model'));
+
+  for (const verb of ['pause', 'resume', 'retire'] as const) {
+    role
+      .command(verb)
+      .argument('<id>')
+      .option('--reason <reason>', 'why', verb === 'resume' ? '' : `${verb}d from the CLI`)
+      .description(`${verb} a role`)
+      .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
+        const { client } = await session(command);
+        const tool = verb === 'pause' ? 'oc_role_pause' : verb === 'resume' ? 'oc_role_resume' : 'oc_role_retire';
+        const result = await client.write({
+          tool, input: { roleId: id, reason: opts['reason'] ?? '' },
+          http: { method: 'POST', path: client.w(`/roles/${encodeURIComponent(id)}/${verb}`), body: { reason: opts['reason'] ?? '' } },
+        });
+        emit(result, () => write(`${style.ok(`${verb}d`)} ${id}`));
+      }));
+  }
+
+  const charter = role.command('charter').description('role charters');
+
+  charter
+    .command('show')
+    .argument('<id>')
+    .description('print the charter markdown')
+    .action(async (id: string, _opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const payload = await client.wget<Record<string, unknown>>(`/roles/${encodeURIComponent(id)}`);
+      const text = String(payload['charter'] ?? '');
+      emit({ id, charter: text }, () => write(text || style.dim('(no charter yet)')));
+    }));
+
+  charter
+    .command('rollback')
+    .argument('<id>')
+    .argument('<revision>')
+    .description('roll the charter back to a revision')
+    .action(async (id: string, revision: string, _opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const result = await client.wpost(`/roles/${encodeURIComponent(id)}/rollback`, { revision: Number(revision) });
+      emit(result, () => write(`${style.ok('rolled back')} ${id} to revision ${revision}`));
+    }));
+}

@@ -61,6 +61,10 @@ export function ticketRoutes(): Hono<AppEnv> {
 
   app.post('/:id/transition', async (c) => c.json(await c.get('ws').services.tickets.transition(c.get('actor'), c.req.param('id'), await body(c, TransitionSchema))));
 
+  app.post('/:id/retry', async (c) => {
+    const { note } = await body(c, z.object({ note: z.string().optional() }));
+    return c.json(await c.get('ws').services.tickets.retry(c.get('actor'), c.req.param('id'), note));
+  });
   app.post('/:id/cancel', async (c) => {
     const { reason } = await body(c, z.object({ reason: z.string().min(1) }));
     return c.json(c.get('ws').services.tickets.cancel(c.get('actor'), c.req.param('id'), reason));

@@ -4,7 +4,7 @@ import {
   type CommentKind, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
 } from '@agent-conductor/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
-import type { Project } from '@agent-conductor/shared';
+import type { Agent, Project } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { checkTransition, openspecChangeName, type GuardFacts } from './guards.js';
@@ -223,6 +223,12 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   // ---------- transitions ----------
 
   async function transition(actor: Actor, id: string, input: TransitionInput): Promise<Ticket> {
+    {
+      const cur = get(id);
+      if ((cur.status === 'done' || cur.status === 'cancelled') && actor.kind !== 'human') {
+        throw new OcError('forbidden', `only a human reopens a ${cur.status} ticket (reply to it, or \`conductor ticket reopen\`)`);
+      }
+    }
     const t = get(id);
     const to = input.to;
     checkTransition(t.kind, t.status, to, facts(t, input));
@@ -312,6 +318,42 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   }
 
   // ---------- service ----------
+
+  function latestWorkerFor(ticketId: string): Agent | null {
+    return db.get<Agent>("SELECT * FROM agents WHERE ticket_id = ? AND kind = 'worker' ORDER BY created_at DESC LIMIT 1", [ticketId]) ?? null;
+  }
+
+  /**
+   * A human replied to a ticket that has no live worker (PLAN §6, "a ticket is a conversation"):
+   * done/cancelled → reopen and bring a worker back on the ticket's branch; a parked or failed
+   * worker → relaunch it with the comment; an unassigned ticket → the conductor hears about it.
+   */
+  async function followUpWithoutWorker(actor: Actor, ticketId: string, payload: { ticketId: string; commentId: string; body: string }): Promise<void> {
+    const t = get(ticketId);
+    if (t.workerId) return;
+    if (t.status === 'done' || t.status === 'cancelled') {
+      await transition(actor, t.id, { to: t.status === 'done' ? 'in_progress' : 'todo', note: 'reopened by a reply' });
+    }
+    const fresh = get(t.id);
+    const worker = latestWorkerFor(fresh.id);
+    if (worker && worker.status !== 'retired') {
+      await deps().workers.relaunch(actor, worker.id, `The human replied on ${fresh.identifier}: ${payload.body.slice(0, 300)}`);
+      return;
+    }
+    if (fresh.assigneeRoleId) {
+      // A fresh worker of the same role: same branch, same PR, the full ticket record in its brief.
+      if (fresh.status === 'in_progress' || fresh.status === 'todo' || fresh.status === 'approved' || fresh.status === 'in_review') {
+        await deps().workers.spawnForTicket(actor, fresh.id);
+        const spawned = get(fresh.id);
+        if (spawned.workerId) wake(spawned.workerId, 'ticket_comment', `new comment on ${fresh.identifier}`, payload);
+      }
+      return;
+    }
+    try {
+      const conductor = deps().workers.conductor();
+      wake(conductor.id, 'ticket_comment', `${fresh.identifier} got a reply but has no role: ${payload.body.slice(0, 160)}`, payload);
+    } catch { /* no conductor yet */ }
+  }
 
   const service: TicketsService = {
     create(actor, input: TicketCreateInput) {
@@ -513,9 +555,32 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         ctx.events.emit('ticket.comment', 'ticket', t.id, c);
         if (actor.kind === 'human' && t.workerId) {
           wake(t.workerId, 'ticket_comment', `new comment on ${t.identifier}`, { ticketId: t.id, commentId: c.id, body: body.slice(0, 500) });
+        } else if (actor.kind === 'human' && kind === 'comment') {
+          // A reply with nobody listening: reopen a finished ticket, bring a worker back, or tell the conductor.
+          const followUp = { ticketId: t.id, commentId: c.id, body: body.slice(0, 500) };
+          setImmediate(() => { void followUpWithoutWorker(actor, t.id, followUp).catch((e) => log.warn({ err: String(e), ticket: t.identifier }, 'follow-up after a comment failed')); });
         }
         return c;
       });
+    },
+
+    async retry(actor, id, note) {
+      const t = get(id);
+      if (t.status === 'done' || t.status === 'cancelled') throw new OcError('wrong_status', `${t.identifier} is ${t.status}; reply to it or reopen it instead`);
+      const worker = t.workerId ? deps().workers.get(t.workerId) : latestWorkerFor(t.id);
+      if (worker && worker.status !== 'retired') {
+        await deps().workers.relaunch(actor, worker.id, note ?? 'retry requested');
+      } else if (t.assigneeRoleId) {
+        await deps().workers.spawnForTicket(actor, t.id);
+      } else {
+        throw new OcError('validation', `${t.identifier} has no role; assign one first`);
+      }
+      if (t.status === 'blocked') {
+        const back = t.executionRunId ? 'in_progress' : 'todo';
+        try { await service.transition(actor, t.id, { to: back as TicketStatus, note: note ?? 'retrying' }); } catch { /* keep blocked if the machine says so */ }
+      }
+      recordActivity(db, ws, actor, 'ticket.retry', 'ticket', t.id, { note: note ?? null }, t.id);
+      return get(t.id);
     },
 
     comments(id, after) {

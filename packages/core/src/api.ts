@@ -26,6 +26,8 @@ export interface TicketsService {
   transition(actor: Actor, id: string, input: TransitionInput): Promise<S.Ticket>;
   cancel(actor: Actor, id: string, reason: string): S.Ticket;
   comment(actor: Actor, id: string, body: string, kind?: S.CommentKind, sourceTrust?: S.SourceTrust): S.TicketComment;
+  /** Relaunch the ticket's worker (or spawn one) after a failure or a pause; blocked tickets go back to work. */
+  retry(actor: Actor, id: string, note?: string): Promise<S.Ticket>;
   comments(id: string, after?: string): S.TicketComment[];
   putDocument(actor: Actor, id: string, key: string, body: string): { documentId: string; revision: number };
   getDocument(id: string, key: string, revision?: number): { documentId: string; revision: number; body: string; createdAt: string } | null;

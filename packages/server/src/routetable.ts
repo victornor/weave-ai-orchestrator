@@ -84,6 +84,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'PATCH', path: `${W}/tickets/{id}`, tag: 'tickets', summary: 'Update title/description/priority/autoMerge', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/tickets/{id}/assign`, tag: 'tickets', summary: 'Assign to a role', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/tickets/{id}/transition`, tag: 'tickets', summary: 'Move through the state machine', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/tickets/{id}/retry`, tag: 'tickets', summary: 'Relaunch the worker (or spawn one) after a failure; a blocked ticket goes back to work', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/tickets/{id}/cancel`, tag: 'tickets', summary: 'Cancel a ticket', auth: 'session', mutating: true },
   { method: 'PUT', path: `${W}/tickets/{id}/blockers`, tag: 'tickets', summary: 'Replace the blocker set', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/tickets/{id}/comments`, tag: 'tickets', summary: 'Comments', auth: 'session' },

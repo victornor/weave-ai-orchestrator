@@ -49,10 +49,12 @@ export class WorktrunkProvider implements WorktreeProvider {
 
   async create(input: { repoPath: string; branch: string; base: string; targetPath: string; setupCommand?: string; warmPaths?: string[]; configPath?: string }): Promise<WorktreeInfo> {
     mkdirSync(dirname(input.targetPath), { recursive: true });
+    // A reopened ticket comes back on its existing branch: switch to it instead of creating it.
+    const exists = await branchExists(input.repoPath, input.branch);
     const args = [
       ...this.base(input.repoPath, input.configPath),
       '--config-set', `worktree-path="${input.targetPath}"`,
-      '-y', 'switch', '--create', input.branch, '--base', input.base, '--no-cd', '--format', 'json',
+      '-y', 'switch', ...(exists ? [input.branch] : ['--create', input.branch, '--base', input.base]), '--no-cd', '--format', 'json',
     ];
     const r = await sh('wt', args, { cwd: input.repoPath, timeoutMs: 900_000, env: { NO_COLOR: '1' } });
     const doc = parseJsonLoose(r.stdout) as { action?: string; branch?: string; path?: string; created_branch?: boolean; base_branch?: string } | null;

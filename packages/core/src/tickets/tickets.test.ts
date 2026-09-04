@@ -75,7 +75,8 @@ describe('tickets', () => {
             let ok = true;
             let err: unknown;
             try {
-              await tickets.transition(SYSTEM, t.id, {
+              // Reopening a finished ticket is a human's call (PLAN §6.2); everything else the machine may do.
+              await tickets.transition(from === 'done' || from === 'cancelled' ? HUMAN : SYSTEM, t.id, {
                 to: to as TicketStatus,
                 blockedBy: [blocker.id],
                 unblock: { owner: 'human', action: 'decide' },

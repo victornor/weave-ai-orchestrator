@@ -105,6 +105,12 @@ Your last message is one fenced ```json block:
 | Pasting a credential into a comment or commit | Permanent leak in the record | `ac_ask` for it; never write it down |
 | Continuing after a worktree mismatch | You may be writing into the wrong checkout | Stop, report `blocked` |
 
+## When a ticket comes back to you
+
+A ticket is a conversation. The human can reply after you reported `done`, after the PR was opened, or after a failure; the daemon reopens the ticket and wakes you (or a fresh worker of your role) on the **same branch and PR**. Read the new comment first, treat it as the next instruction, keep the branch history (never rewrite it), push to the same PR, and report again. If the reply changes the scope beyond the accepted plan, say so and `ac_ask` instead of silently expanding the work.
+
+A turn that ended in a usage limit, a network failure or a crash is retried by the daemon on its own; when the retries are spent the human gets a card and you are relaunched when they answer. Nothing you did is lost: the session resumes where it stopped.
+
 ## References
 
 - `references/tools.md` — every `ac_*` tool with its input shape.

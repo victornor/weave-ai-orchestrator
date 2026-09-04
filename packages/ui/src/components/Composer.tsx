@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDictation } from '../lib/dictation';
+import { useHealth } from '../api/hooks';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
 
@@ -65,12 +66,19 @@ export function Composer({
   const ta = useRef<HTMLTextAreaElement>(null);
   const base = useRef('');
   const [explain, setExplain] = useState(false);
+  const health = useHealth();
+  const startedByKey = useRef(false);
 
-  const dictation = useDictation((chunk, final) => {
-    const next = `${base.current}${base.current && !base.current.endsWith(' ') ? ' ' : ''}${chunk}`;
-    set(next);
-    if (final) base.current = next;
-  });
+  const dictation = useDictation(
+    (chunk, final) => {
+      const piece = chunk.trim();
+      if (!piece) return;
+      const next = `${base.current}${base.current && !base.current.endsWith(' ') ? ' ' : ''}${piece}`;
+      set(next);
+      if (final) base.current = next;
+    },
+    { serverConfigured: health.data?.transcription?.configured ?? false },
+  );
 
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches;
 
@@ -89,11 +97,14 @@ export function Composer({
     const down = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyM' && !dictation.listening) {
         e.preventDefault();
+        startedByKey.current = true;
         startMic();
       }
     };
+    // Releasing the chord ends push-to-talk; a mic started by click is only stopped by click.
     const up = (e: KeyboardEvent) => {
-      if ((e.code === 'KeyM' || e.key === 'Meta' || e.key === 'Control' || e.key === 'Shift') && dictation.listening) dictation.stop();
+      if (!startedByKey.current || !dictation.listening) return;
+      if (e.code === 'KeyM' || e.key === 'Meta' || e.key === 'Control' || e.key === 'Shift') { startedByKey.current = false; dictation.stop(); }
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -139,7 +150,8 @@ export function Composer({
         className={cx(
           'rounded-r8 border bg-bg-1 transition-colors duration-(--dur-fast) ease-ac',
           queuedReason && 'rounded-t-none',
-          dictating ? 'border-accent ac-focus-ring' : 'border-line-2 focus-within:border-accent focus-within:ac-focus-ring',
+          // No focus ring: the caret says it all. The border only changes while the mic is open.
+          dictating ? 'border-accent' : 'border-line-2',
         )}
       >
         <div className="flex items-end gap-2.5 p-2 pl-3.5">
@@ -157,13 +169,13 @@ export function Composer({
                 send();
               }
             }}
-            className="max-h-48 flex-1 resize-none bg-transparent py-1.5 text-body text-text-1 outline-none placeholder:text-text-4"
+            className="max-h-48 flex-1 resize-none bg-transparent py-1.5 text-body text-text-1 outline-none placeholder:text-text-4 focus-visible:[box-shadow:none]"
           />
           <button
             type="button"
             aria-label={dictation.mode === 'unavailable' ? 'Dictation unavailable' : dictating ? 'Stop dictation' : 'Dictate'}
             aria-pressed={dictating}
-            onClick={() => (dictating ? dictation.stop() : startMic())}
+            onClick={() => { startedByKey.current = false; dictating ? dictation.stop() : startMic(); }}
             className={cx(
               'inline-flex size-8 flex-none items-center justify-center rounded-r6 border transition-colors duration-(--dur-fast) ease-ac',
               dictating
@@ -190,19 +202,26 @@ export function Composer({
         </div>
 
         {dictating ? (
-          <div className="flex items-center gap-1.5 border-t border-line-1 px-3.5 py-2">
-            {dictation.levels.map((v, i) => (
-              <span key={i} className="w-0.5 rounded-pill bg-accent" style={{ height: `${Math.round(4 + v * 16)}px` }} />
-            ))}
+          <div className="flex h-9 items-center gap-1.5 border-t border-line-1 px-3.5">
+            {/* fixed-height row: only the bars move, never the box */}
+            <span className="flex h-5 items-center gap-1.5">
+              {dictation.levels.map((v, i) => (
+                <span key={i} className="w-0.5 rounded-pill bg-accent transition-[height] duration-75" style={{ height: `${Math.round(4 + v * 16)}px` }} />
+              ))}
+            </span>
             <span className="ac-mono ml-2 text-micro text-text-3">
               {Math.floor(dictation.elapsed / 60)}:{String(dictation.elapsed % 60).padStart(2, '0')}
             </span>
-            <span className="ml-auto text-micro text-text-4">{isTouch ? 'tap the mic to stop' : 'release ⌘⇧M to stop'}</span>
+            <span className="ml-auto text-micro text-text-4">{isTouch ? 'tap the mic to stop' : startedByKey.current ? 'release ⌘⇧M to stop' : 'click the mic to stop'}</span>
           </div>
         ) : null}
       </div>
 
-      {dictation.error ? <p className="text-micro text-blocked">{dictation.error}</p> : null}
+      {dictation.error ? (
+        <p className="rounded-r6 border border-blocked/35 bg-blocked/8 px-3 py-2 text-micro leading-relaxed text-text-1" role="alert">
+          {dictation.error}
+        </p>
+      ) : null}
       {explain && dictation.mode === 'unavailable' ? (
         <p className="text-micro leading-relaxed text-text-3">
           Dictation is unavailable: this browser has no Web Speech API and the daemon has no transcription provider.{' '}

@@ -38,6 +38,7 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
     operatorConfigured: deps.auth.hasOperator(),
     tlsMode: deps.daemon.http.tls.mode,
     publicUrl: deps.publicUrl,
+    transcription: { configured: deps.daemon.transcription.provider === 'command' && Boolean(deps.daemon.transcription.command) },
     host: { platform: process.platform, hostname: hostname(), home: homedir(), defaultWorkspaceRoot: join(homedir(), 'agent-conductor'), tools: await detectHostToolsCached() },
   }));
 

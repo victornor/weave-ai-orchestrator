@@ -28,6 +28,7 @@ export interface Health {
   operatorConfigured: boolean;
   tlsMode: string;
   publicUrl?: string;
+  transcription?: { configured: boolean };
   host?: {
     platform: string;
     hostname: string;

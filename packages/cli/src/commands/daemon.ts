@@ -72,10 +72,10 @@ export function register(program: Command): void {
   daemon
     .command('restart')
     .description('drain running turns (bounded), then restart the daemon on the current release')
-    .option('--drain-timeout <sec>', 'seconds to wait for running turns', '180')
+    .option('--drain-timeout <sec>', 'seconds to wait for running turns', '900')
     .action(async (opts: Record<string, string>, command: Command) => run(async () => {
       if (process.env[AC_ENV.RUN_TOKEN]) throw new ApiError('forbidden', 'not available inside a worker run', 403);
-      const result = await drainAndRestart(command, Number.parseInt(String(opts['drainTimeout'] ?? '180'), 10));
+      const result = await drainAndRestart(command, Number.parseInt(String(opts['drainTimeout'] ?? '900'), 10));
       emit(result, () => write(`${style.ok('restarted')} ${result.how} · v${result.version ?? '?'}`));
     }));
 
@@ -207,7 +207,7 @@ on any other platform the plist is printed so it can be copied to a Mac.`)
     .option('--ref <ref>', 'branch, tag or commit (default: daemon.yaml upgrade.ref, else main)')
     .option('--test', 'run the test suite in the new release before switching')
     .option('--no-restart', 'build and switch only; restart later with `systemctl --user restart` or `conductor daemon stop && start`')
-    .option('--drain-timeout <sec>', 'seconds to wait for running turns (default: daemon.yaml upgrade.drainTimeoutSec, else 180)')
+    .option('--drain-timeout <sec>', 'seconds to wait for running turns (default: daemon.yaml upgrade.drainTimeoutSec, else 900)')
     .addHelpText('after', `
 Releases live in ~/.local/share/agent-conductor/releases/<stamp>-<sha>; \`current\` and \`previous\`
 are symlinks next to them. The daemon and the CLI both run from \`current\`, never from a checkout,
@@ -219,7 +219,7 @@ worker run (AC_RUN_TOKEN set): agents propose upgrades through tickets, humans r
       const from = (typeof opts['from'] === 'string' && opts['from']) || cfg.upgrade?.source;
       if (!from) throw new ApiError('validation', 'no source: pass --from <url|path> or set upgrade.source in daemon.yaml', 400);
       const ref = (typeof opts['ref'] === 'string' && opts['ref']) || cfg.upgrade?.ref || 'main';
-      const drainTimeout = Number.parseInt(String(opts['drainTimeout'] ?? cfg.upgrade?.drainTimeoutSec ?? 180), 10);
+      const drainTimeout = Number.parseInt(String(opts['drainTimeout'] ?? cfg.upgrade?.drainTimeoutSec ?? 900), 10);
       const log = (line: string) => write(style.dim(line));
 
       write(`${style.ok('building')} ${from} @ ${ref}`);
@@ -266,13 +266,13 @@ worker run (AC_RUN_TOKEN set): agents propose upgrades through tickets, humans r
   daemon
     .command('rollback')
     .description('switch `current` back to `previous` and restart')
-    .option('--drain-timeout <sec>', 'seconds to wait for running turns', '180')
+    .option('--drain-timeout <sec>', 'seconds to wait for running turns', '900')
     .action(async (opts: Record<string, string>, command: Command) => run(async () => {
       if (process.env[AC_ENV.RUN_TOKEN]) throw new ApiError('forbidden', 'not available inside a worker run', 403);
       const prev = readLink(previousLink());
       if (!prev || !existsSync(prev)) throw new ApiError('not_found', 'no previous release to roll back to', 404);
       const switched = switchRelease(prev);
-      const result = await drainAndRestart(command, Number.parseInt(String(opts['drainTimeout'] ?? '180'), 10));
+      const result = await drainAndRestart(command, Number.parseInt(String(opts['drainTimeout'] ?? '900'), 10));
       emit({ release: prev, wasCurrent: switched.previous, ...result }, () => write(`${style.ok('rolled back')} current -> ${prev} · ${result.how}`));
     }));
 }

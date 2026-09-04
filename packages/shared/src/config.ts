@@ -136,8 +136,8 @@ export const DaemonConfigSchema = z.object({
     ref: z.string().default('main'),
     /** Releases older than the newest `keep` (never `current`/`previous`) are deleted after a switch. */
     keep: z.number().int().min(1).default(3),
-    /** Seconds to wait for running turns before restarting anyway. */
-    drainTimeoutSec: z.number().int().min(0).default(180),
+    /** Seconds to wait for running turns before restarting anyway. An agent turn can take many minutes. */
+    drainTimeoutSec: z.number().int().min(0).default(900),
   }).default({}),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   otlpEndpoint: z.string().optional(),

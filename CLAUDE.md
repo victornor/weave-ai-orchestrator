@@ -76,7 +76,7 @@ it is pino, structured, to stderr (`log.info({ ...fields }, 'message')`). An una
 an `ac-allow-console` comment on the line.
 
 **Tests are vitest**, colocated as `src/**/*.test.ts` or under a package's `test/` directory (both
-are in `vitest.config.ts`'s include). Runtime adapters are tested against recorded `fixtures/*.jsonl`
+are in `vitest.config.ts`'s include); the web app's `.test.tsx` files run through `packages/ui/vitest.config.ts`, which `pnpm test` at the root also runs. Runtime adapters are tested against recorded `fixtures/*.jsonl`
 event streams plus pure `buildArgs` unit tests — do not shell out to a real CLI in a test. Core is
 tested with a fake runtime adapter that scripts events and results.
 

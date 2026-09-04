@@ -29,8 +29,8 @@ export interface Dictation {
   listening: boolean;
   /** seconds since the mic opened, for the 0:06 timer. */
   elapsed: number;
-  /** 14 bars of relative amplitude, 0..1. */
-  levels: number[];
+  /** Live analyser for the voice meter while the mic is open; read it from a rAF loop, never from render. */
+  analyser: { current: AnalyserNode | null };
   error: string | null;
   start: () => void;
   stop: () => void;
@@ -69,18 +69,28 @@ const ERRORS: Record<string, string> = {
 export function useDictation(onText: (text: string, final: boolean) => void, opts: { transcribeUrl?: string; serverConfigured?: boolean } = {}): Dictation {
   const [listening, setListening] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [levels, setLevels] = useState<number[]>(() => new Array(14).fill(0.15));
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<DictationMode>(() => pickMode(Boolean(opts.serverConfigured)));
-  const serverConfigured = Boolean(opts.serverConfigured);
-  useEffect(() => { setMode(pickMode(serverConfigured)); }, [serverConfigured]);
+  const serverConfigured = opts.serverConfigured;
+  // Ask the daemon once whether it transcribes; the composer stays free of data-layer providers.
+  useEffect(() => {
+    if (serverConfigured !== undefined) { setMode(pickMode(serverConfigured)); return; }
+    if (typeof fetch !== 'function') return;
+    let cancelled = false;
+    fetch('/api/health', { credentials: 'include' })
+      .then((r) => (r.ok ? (r.json() as Promise<{ transcription?: { configured?: boolean } }>) : null))
+      .then((h) => { if (!cancelled && h) setMode(pickMode(Boolean(h.transcription?.configured))); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [serverConfigured]);
   const wantListening = useRef(false);
   const gotResult = useRef(false);
 
   const rec = useRef<SpeechRecognitionLike | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
-  const analyser = useRef<{ ctx: AudioContext; node: AnalyserNode; raf: number } | null>(null);
+  const analyser = useRef<{ ctx: AudioContext; node: AnalyserNode } | null>(null);
+  const analyserNode = useRef<AnalyserNode | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedRef = useRef(0);
   useEffect(() => { elapsedRef.current = elapsed; }, [elapsed]);
@@ -91,11 +101,10 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     if (timer.current) clearInterval(timer.current);
     timer.current = null;
     if (analyser.current) {
-      cancelAnimationFrame(analyser.current.raf);
       void analyser.current.ctx.close();
       analyser.current = null;
     }
-    setLevels(new Array(14).fill(0.15));
+    analyserNode.current = null;
     setElapsed(0);
   }, []);
 
@@ -103,17 +112,11 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     try {
       const ctx = new AudioContext();
       const node = ctx.createAnalyser();
-      node.fftSize = 64;
+      node.fftSize = 1024;
+      node.smoothingTimeConstant = 0.6;
       ctx.createMediaStreamSource(stream).connect(node);
-      const data = new Uint8Array(node.frequencyBinCount);
-      const tick = (): void => {
-        node.getByteFrequencyData(data);
-        const bars: number[] = [];
-        for (let i = 0; i < 14; i++) bars.push(Math.max(0.12, (data[i * 2] ?? 0) / 255));
-        setLevels(bars);
-        if (analyser.current) analyser.current.raf = requestAnimationFrame(tick);
-      };
-      analyser.current = { ctx, node, raf: requestAnimationFrame(tick) };
+      analyser.current = { ctx, node };
+      analyserNode.current = node;
     } catch {
       /* metering is decoration */
     }
@@ -235,5 +238,5 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
 
   useEffect(() => () => stop(), [stop]);
 
-  return { mode, listening, elapsed, levels, error, start, stop, toggle };
+  return { mode, listening, elapsed, analyser: analyserNode, error, start, stop, toggle };
 }

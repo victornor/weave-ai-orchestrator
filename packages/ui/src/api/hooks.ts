@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import type { RunEvent, TicketComment, Ticket, Decision, Agent, Role, Run, Project, UsageGrain, UsageWindow } from '@agent-conductor/shared';
-import { api, qs } from './client';
+import { listOf, api, qs } from './client';
 import { qk } from './keys';
 import { useWs } from './context';
 import type * as T from './types';
@@ -29,7 +29,7 @@ export function useRuntimeModels(runtimeId: string | null | undefined): UseQuery
     queryKey: qk.runtimeModels(runtimeId ?? ''),
     queryFn: () =>
       api.root<Array<string | T.RuntimeModel> | { models: Array<string | T.RuntimeModel> }>(`/runtimes/${runtimeId}/models`).then((r) => {
-        const list = Array.isArray(r) ? r : r.models;
+        const list = listOf<string | T.RuntimeModel>(r, 'models');
         return list.map((m) => (typeof m === 'string' ? { id: m, label: m } : m));
       }),
     enabled: Boolean(runtimeId),
@@ -50,7 +50,7 @@ export function useInitWorkspace(): UseMutationResult<{ id: string; path: string
 }
 
 export function useAuthSessions(): UseQueryResult<T.AuthSession[]> {
-  return useQuery({ queryKey: qk.sessions(), queryFn: () => api.root<T.AuthSession[] | { sessions: T.AuthSession[] }>('/auth/sessions').then((r) => (Array.isArray(r) ? r : r.sessions)) });
+  return useQuery({ queryKey: qk.sessions(), queryFn: () => api.root<T.AuthSession[] | { sessions: T.AuthSession[] }>('/auth/sessions').then((r) => listOf(r, 'sessions')) });
 }
 
 /* ------------------------------------------------------------- workspace */
@@ -212,7 +212,7 @@ export function useTickets(params: TicketQuery = {}): UseQueryResult<Ticket[]> {
   const ws = useWs();
   return useQuery({
     queryKey: [...qk.tickets(ws), params],
-    queryFn: () => api.ws<Ticket[] | { tickets: Ticket[] }>(ws, `/tickets${qs(params)}`).then((r) => (Array.isArray(r) ? r : r.tickets)),
+    queryFn: () => api.ws<Ticket[] | { tickets: Ticket[] }>(ws, `/tickets${qs(params)}`).then((r) => listOf(r, 'tickets')),
   });
 }
 
@@ -265,7 +265,7 @@ export function useTicketComments(id: string): UseQueryResult<TicketComment[]> {
   const ws = useWs();
   return useQuery({
     queryKey: qk.ticketComments(ws, id),
-    queryFn: () => api.ws<TicketComment[] | { comments: TicketComment[] }>(ws, `/tickets/${id}/comments`).then((r) => (Array.isArray(r) ? r : r.comments)),
+    queryFn: () => api.ws<TicketComment[] | { comments: TicketComment[] }>(ws, `/tickets/${id}/comments`).then((r) => listOf(r, 'comments')),
     enabled: Boolean(id),
   });
 }
@@ -293,7 +293,7 @@ export function useTicketDocumentRevisions(id: string, key: string): UseQueryRes
   return useQuery({
     queryKey: qk.ticketDocumentRevisions(ws, id, key),
     queryFn: () =>
-      api.ws<T.DocumentRevision[] | { revisions: T.DocumentRevision[] }>(ws, `/tickets/${id}/documents/${key}/revisions`).then((r) => (Array.isArray(r) ? r : r.revisions)),
+      api.ws<T.DocumentRevision[] | { revisions: T.DocumentRevision[] }>(ws, `/tickets/${id}/documents/${key}/revisions`).then((r) => listOf(r, 'revisions')),
     enabled: Boolean(id && key),
   });
 }
@@ -302,7 +302,7 @@ export function useTicketWorkProducts(id: string): UseQueryResult<T.WorkProduct[
   const ws = useWs();
   return useQuery({
     queryKey: qk.ticketWorkProducts(ws, id),
-    queryFn: () => api.ws<T.WorkProduct[] | { workProducts: T.WorkProduct[] }>(ws, `/tickets/${id}/work-products`).then((r) => (Array.isArray(r) ? r : r.workProducts)),
+    queryFn: () => api.ws<T.WorkProduct[] | { workProducts: T.WorkProduct[] }>(ws, `/tickets/${id}/work-products`).then((r) => listOf(r, 'workProducts')),
     enabled: Boolean(id),
   });
 }
@@ -311,7 +311,7 @@ export function useTicketRuns(id: string): UseQueryResult<Run[]> {
   const ws = useWs();
   return useQuery({
     queryKey: qk.ticketRuns(ws, id),
-    queryFn: () => api.ws<Run[] | { runs: Run[] }>(ws, `/tickets/${id}/runs`).then((r) => (Array.isArray(r) ? r : r.runs)),
+    queryFn: () => api.ws<Run[] | { runs: Run[] }>(ws, `/tickets/${id}/runs`).then((r) => listOf(r, 'runs')),
     enabled: Boolean(id),
   });
 }
@@ -327,7 +327,7 @@ export function useDecisions(params: { status?: string; owner?: string } = { sta
   const ws = useWs();
   return useQuery({
     queryKey: [...qk.decisions(ws), params],
-    queryFn: () => api.ws<Decision[] | { decisions: Decision[] }>(ws, `/decisions${qs(params)}`).then((r) => (Array.isArray(r) ? r : r.decisions)),
+    queryFn: () => api.ws<Decision[] | { decisions: Decision[] }>(ws, `/decisions${qs(params)}`).then((r) => listOf(r, 'decisions')),
   });
 }
 
@@ -352,7 +352,7 @@ export function useRuns(params: { agent?: string; ticket?: string; status?: stri
   const ws = useWs();
   return useQuery({
     queryKey: [...qk.runs(ws), params],
-    queryFn: () => api.ws<Run[] | { runs: Run[] }>(ws, `/runs${qs(params)}`).then((r) => (Array.isArray(r) ? r : r.runs)),
+    queryFn: () => api.ws<Run[] | { runs: Run[] }>(ws, `/runs${qs(params)}`).then((r) => listOf(r, 'runs')),
   });
 }
 
@@ -365,7 +365,7 @@ export function useRunEvents(id: string, after = 0): UseQueryResult<RunEvent[]> 
   const ws = useWs();
   return useQuery({
     queryKey: [...qk.runEvents(ws, id), after],
-    queryFn: () => api.ws<RunEvent[] | { events: RunEvent[] }>(ws, `/runs/${id}/events${qs({ after, limit: 500 })}`).then((r) => (Array.isArray(r) ? r : r.events)),
+    queryFn: () => api.ws<RunEvent[] | { events: RunEvent[] }>(ws, `/runs/${id}/events${qs({ after, limit: 500 })}`).then((r) => listOf(r, 'events')),
     enabled: Boolean(id),
   });
 }
@@ -391,7 +391,7 @@ export function useKnowledgeRevisions(scope: string, project?: string): UseQuery
   return useQuery({
     queryKey: qk.knowledgeRevisions(ws, scope, project),
     queryFn: () =>
-      api.ws<T.KnowledgeRevision[] | { revisions: T.KnowledgeRevision[] }>(ws, `/knowledge/${scope}/revisions${qs({ project })}`).then((r) => (Array.isArray(r) ? r : r.revisions)),
+      api.ws<T.KnowledgeRevision[] | { revisions: T.KnowledgeRevision[] }>(ws, `/knowledge/${scope}/revisions${qs({ project })}`).then((r) => listOf(r, 'revisions')),
     enabled: Boolean(scope),
   });
 }
@@ -413,7 +413,7 @@ export function useSearch(q: string, project?: string): UseQueryResult<T.SearchH
   const ws = useWs();
   return useQuery({
     queryKey: qk.search(ws, q, project),
-    queryFn: () => api.ws<T.SearchHit[] | { hits: T.SearchHit[] }>(ws, `/search${qs({ q, project })}`).then((r) => (Array.isArray(r) ? r : r.hits)),
+    queryFn: () => api.ws<T.SearchHit[] | { hits: T.SearchHit[] }>(ws, `/search${qs({ q, project })}`).then((r) => listOf(r, 'hits')),
     enabled: q.trim().length > 1,
   });
 }
@@ -422,7 +422,7 @@ export function useCapabilities(project: string): UseQueryResult<T.CapabilitySum
   const ws = useWs();
   return useQuery({
     queryKey: qk.specs(ws, project),
-    queryFn: () => api.ws<T.CapabilitySummary[] | { capabilities: T.CapabilitySummary[] }>(ws, `/specs/${project}`).then((r) => (Array.isArray(r) ? r : r.capabilities)),
+    queryFn: () => api.ws<T.CapabilitySummary[] | { capabilities: T.CapabilitySummary[] }>(ws, `/specs/${project}`).then((r) => listOf(r, 'capabilities')),
     enabled: Boolean(project),
   });
 }
@@ -440,7 +440,7 @@ export function useSpecChanges(project: string, state?: string): UseQueryResult<
   const ws = useWs();
   return useQuery({
     queryKey: qk.changes(ws, project, state),
-    queryFn: () => api.ws<T.SpecChangeSummary[] | { changes: T.SpecChangeSummary[] }>(ws, `/specs/${project}/changes${qs({ state })}`).then((r) => (Array.isArray(r) ? r : r.changes)),
+    queryFn: () => api.ws<T.SpecChangeSummary[] | { changes: T.SpecChangeSummary[] }>(ws, `/specs/${project}/changes${qs({ state })}`).then((r) => listOf(r, 'changes')),
     enabled: Boolean(project),
   });
 }
@@ -478,7 +478,7 @@ export function useUsageTop(params: UsageParams & { by: 'model' | 'ticket' | 'ro
   const ws = useWs();
   return useQuery({
     queryKey: qk.usageTop(ws, params),
-    queryFn: () => api.ws<T.UsageTopRow[] | { rows: T.UsageTopRow[] }>(ws, `/usage/top${qs(params)}`).then((r) => (Array.isArray(r) ? r : r.rows)),
+    queryFn: () => api.ws<T.UsageTopRow[] | { rows: T.UsageTopRow[] }>(ws, `/usage/top${qs(params)}`).then((r) => listOf(r, 'rows')),
   });
 }
 
@@ -486,7 +486,7 @@ export function useUsageModels(params: UsageParams): UseQueryResult<T.UsageModel
   const ws = useWs();
   return useQuery({
     queryKey: qk.usageModels(ws, params),
-    queryFn: () => api.ws<T.UsageModelRow[] | { models: T.UsageModelRow[] }>(ws, `/usage/models${qs(params)}`).then((r) => (Array.isArray(r) ? r : r.models)),
+    queryFn: () => api.ws<T.UsageModelRow[] | { models: T.UsageModelRow[] }>(ws, `/usage/models${qs(params)}`).then((r) => listOf(r, 'models')),
   });
 }
 
@@ -496,7 +496,7 @@ export function useThreads(): UseQueryResult<T.ThreadSummary[]> {
   const ws = useWs();
   return useQuery({
     queryKey: qk.threads(ws),
-    queryFn: () => api.ws<T.ThreadSummary[] | { threads: T.ThreadSummary[] }>(ws, '/threads?channel=web').then((r) => (Array.isArray(r) ? r : r.threads)),
+    queryFn: () => api.ws<T.ThreadSummary[] | { threads: T.ThreadSummary[] }>(ws, '/threads?channel=web').then((r) => listOf(r, 'threads')),
   });
 }
 
@@ -514,7 +514,7 @@ export function useThreadMessages(id: string | null): UseQueryResult<T.ThreadMes
   return useQuery({
     queryKey: qk.threadMessages(ws, id ?? ''),
     queryFn: () =>
-      api.ws<T.ThreadMessage[] | T.ThreadMessagesPage>(ws, `/threads/${id}/messages${qs({ limit: 200 })}`).then((r) => (Array.isArray(r) ? r : r.messages)),
+      api.ws<T.ThreadMessage[] | T.ThreadMessagesPage>(ws, `/threads/${id}/messages${qs({ limit: 200 })}`).then((r) => listOf(r, 'messages')),
     enabled: Boolean(id),
   });
 }

@@ -81,6 +81,32 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   });
 
   app.post('/transcribe', (c) => transcribe(c, deps));
+
+  /**
+   * Upgrade support (PLAN §20 `conductor daemon upgrade`): stop dispatching new turns everywhere and
+   * wait for in-flight ones, bounded. Nothing is persisted, so a restart comes back dispatching;
+   * `undrain` is for the case where the restart never happens.
+   */
+  app.post('/daemon/drain', async (c) => {
+    const { timeoutSec } = await body(c, z.object({ timeoutSec: z.number().int().min(0).max(3600).default(180) }));
+    const all = uniqueWorkspaces(deps);
+    const deadline = Date.now() + timeoutSec * 1000;
+    const stops = all.map((w) => w.services.dispatcher.stop().catch(() => undefined));
+    await Promise.race([Promise.all(stops), new Promise((r) => setTimeout(r, Math.max(0, deadline - Date.now())))]);
+    const running = all.flatMap((w) => {
+      try { return w.services.runs.list({ status: ['running', 'queued'] }).items.map((r) => ({ workspace: w.id, runId: r.id })); } catch { return []; }
+    });
+    return c.json({ drained: running.length === 0, running, workspaces: all.map((w) => w.id) });
+  });
+
+  app.post('/daemon/undrain', (c) => {
+    const resumed: string[] = [];
+    for (const w of uniqueWorkspaces(deps)) {
+      const status = w.ctx.db.get<{ status: string }>('SELECT status FROM workspaces WHERE id = ?', [w.ctx.workspaceId])?.status ?? 'active';
+      if (status !== 'paused') { w.services.dispatcher.start(); resumed.push(w.id); }
+    }
+    return c.json({ resumed });
+  });
   return app;
 }
 

@@ -129,6 +129,16 @@ export const DaemonConfigSchema = z.object({
     lockoutMinutes: z.number().int().default(15),
   }).default({}),
   transcription: z.object({ provider: z.enum(['none', 'command']).default('none'), command: z.string().optional() }).default({}),
+  /** `conductor daemon upgrade`: where releases are built from and how many to keep (PLAN §20). */
+  upgrade: z.object({
+    /** Git URL or local path the release is cloned from. Required for `upgrade` unless `--from` is passed. */
+    source: z.string().optional(),
+    ref: z.string().default('main'),
+    /** Releases older than the newest `keep` (never `current`/`previous`) are deleted after a switch. */
+    keep: z.number().int().min(1).default(3),
+    /** Seconds to wait for running turns before restarting anyway. */
+    drainTimeoutSec: z.number().int().min(0).default(180),
+  }).default({}),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   otlpEndpoint: z.string().optional(),
 });

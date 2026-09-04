@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { stateHome, configHome } from './contexts.js';
+import { currentLink } from './release.js';
 
 export function pidFile(): string { return join(stateHome(), 'daemon.pid'); }
 export function logFile(): string { return join(stateHome(), 'daemon.log'); }
@@ -16,6 +17,9 @@ export function logFile(): string { return join(stateHome(), 'daemon.log'); }
  * before the package is linked.
  */
 export function resolveServerBin(): string {
+  // A release install always wins: the service must follow the `current` symlink, not a checkout.
+  const current = currentLink();
+  if (existsSync(join(current, 'packages', 'server', 'dist', 'bin.js'))) return join(current, 'packages', 'server', 'dist', 'bin.js');
   const req = createRequire(import.meta.url);
   for (const specifier of ['@agent-conductor/server/bin', '@agent-conductor/server/dist/bin.js']) {
     try { return req.resolve(specifier); } catch { /* try the next one */ }

@@ -1143,7 +1143,9 @@ Outlines and key rule text are in `docs/prompts/skills.md`.
 Human commands:
 ```
 conductor init <dir> --prefix ACME [--name]          scaffold a workspace
-conductor daemon start|stop|status|logs|set-password|install-service [--launchd]   daemon lifecycle; TLS/ACME and listen config in daemon.yaml
+conductor daemon start|stop|restart|status|logs|set-password|install-service [--launchd]   daemon lifecycle; TLS/ACME and listen config in daemon.yaml
+conductor daemon upgrade [--from <url|path>] [--ref <ref>] [--test] [--no-restart]   build a release, back up, drain, switch `current`, restart
+conductor daemon releases | rollback             list releases (`*` current, `-` previous); switch back to `previous` and restart
 conductor login <url> [--name] [--pin] | conductor logout [--all] | conductor context list|use   remote contexts for the CLI
 conductor devices list|revoke                          sessions/devices on the daemon
 conductor presenter [--surface ...]                     client-side window manager for surfaces (§14b)

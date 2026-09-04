@@ -267,27 +267,52 @@ and DB rows with no declaration are flagged, never deleted.
 
 ## 6. Upgrading
 
+The daemon runs from an immutable **release directory**, never from a checkout anyone edits:
+
+```
+~/.local/share/agent-conductor/
+  releases/20260904-231500-1a2b3c4d5e/   a clone at one commit, installed and built
+  releases/20260905-101200-9f8e7d6c5b/
+  current  -> releases/20260905-…         what the service and the `conductor` wrapper run
+  previous -> releases/20260904-…         one `rollback` away
+```
+
 ```bash
-systemctl --user stop agent-conductor.service
-cd ~/src/agent-conductor
-cp ~/.config/agent-conductor/daemon.sqlite /tmp/daemon.sqlite.bak   # cheap insurance
-git pull
-pnpm install
-pnpm build
-pnpm --filter @agent-conductor/ui build
-systemctl --user start agent-conductor.service
-conductor doctor
+conductor daemon upgrade                      # source and ref from daemon.yaml `upgrade:`
+conductor daemon upgrade --ref v0.2.0 --test  # any ref; --test runs the suite before switching
+conductor daemon releases
+conductor daemon rollback
+```
+
+`upgrade` does, in order: clone `upgrade.source` at `upgrade.ref` into a new release dir and
+`pnpm install --frozen-lockfile && pnpm build` there (nothing running is touched yet) → online
+backup of `daemon.sqlite` and every workspace db into `~/.config/agent-conductor/backups/<stamp>/`
+→ switch `current` (and `previous`) → `POST /api/daemon/drain`, which stops dispatching new turns
+and waits up to `upgrade.drainTimeoutSec` (default 180) for running ones → `systemctl --user
+restart agent-conductor.service` (or stop/start when no unit is installed) → wait for
+`/api/health`. Releases beyond `upgrade.keep` (default 3) are pruned, never `current` or `previous`.
+
+```yaml
+# daemon.yaml
+upgrade:
+  source: git@github.com:victornor/agent-conductor.git   # or a local checkout path
+  ref: main
+  keep: 3
+  drainTimeoutSec: 180
 ```
 
 - Schema migrations run automatically when a database is opened. There is no down-migration; the
-  backup is the rollback.
-- The unit's `ExecStart` holds an absolute path to `packages/server/dist/bin.js`. Re-run
-  `conductor daemon install-service` if you moved the checkout.
-- Skills and prompt templates are re-installed into every agent home when the shipped versions
-  change; an agent's local edits are overwritten by design.
-- In-flight work survives: runs whose processes are gone are marked `interrupted`, their wakes are
-  re-queued once, and worktrees and worker homes are exactly where they were. Nothing is ever reset.
-- After a version bump, `conductor daemon status` and `conductor doctor` are the two things to look at.
+  backup taken by `upgrade` is the rollback for data, `conductor daemon rollback` for code.
+- The unit's `ExecStart` points at `current/packages/server/dist/bin.js`; it never needs re-writing
+  for an upgrade. `conductor daemon install-service` prefers `current` whenever it exists.
+- Skills and prompt templates ship inside the release and are re-installed into agent homes when
+  they change; an agent's local edits are overwritten by design.
+- In-flight work: the drain lets running turns finish. Anything still running at the timeout is
+  interrupted, re-queued once on boot, and resumes its session; worktrees and worker homes are
+  exactly where they were. Nothing is ever reset.
+- `upgrade` and `rollback` refuse to run inside a worker (`AC_RUN_TOKEN` set). Agents developing
+  AgentConductor propose the change in a ticket; a human runs the upgrade.
+- After an upgrade, `conductor daemon status` and `conductor doctor` are the two things to look at.
 
 ---
 

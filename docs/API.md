@@ -11,6 +11,7 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `ac_session` httpOn
 - `POST /api/auth/totp/setup` → `{ secret, otpauthUrl, recoveryCodes }` · `POST /api/auth/totp/enable` `{ code }` · `POST /api/auth/totp/disable` `{ password }` · `POST /api/auth/password` `{ current, next }`
 - `GET /api/workspaces` · `POST /api/workspaces` `{ path }` (register existing) · `POST /api/workspaces/init` `{ path, id, name, ticketPrefix }` · `POST /api/workspaces/import` `{ path, target }` (stage an export into `target`, register it, import its tickets as `backlog`) → `{ id, path, created, roles, knowledgeFiles, tickets, skipped }`
 - `GET /api/runtimes` → `[{ id, displayName, detection, capabilities, models }]` · `GET /api/runtimes/:id/models`
+- `POST /api/daemon/drain` `{ timeoutSec? }` → `{ drained, running: [{workspace, runId}], workspaces }` (stop dispatching everywhere, wait for in-flight turns up to the timeout; used by `conductor daemon upgrade` before a restart) · `POST /api/daemon/undrain` → `{ resumed }` (start dispatching again on workspaces that are not paused)
 - `POST /api/transcribe` (multipart audio) → `{ text }` or 501 when provider `none`
 - `GET /llms/api.txt` (agent-readable summary) · `GET /api/openapi.json`
 

@@ -23,7 +23,7 @@ Implemented and verified on this machine against the real Claude Code CLI (see `
 | Channels: web, cli, telegram (unit-tested; no live bot in this environment) | done |
 | Surfaces: headless, tmux (verified), herdr and hyprland (implemented against the real CLIs, not exercised on a live desktop here) and the client-side presenter | done |
 | Web UI (React, PWA, both themes) served by the daemon; `oc` CLI; Ink TUI (`oc chat` verified inside tmux) | done |
-| Runtimes: claude and opencode verified live; codex and gemini implemented from documented formats, unverified live (no credentials here) | partial |
+| Runtimes: claude verified live end to end (conductor + workers); opencode verified live end to end (a hired Docs Writer role answered a question ticket through the MCP tools on a free model); codex and gemini implemented from documented formats, unverified live (no credentials here) | partial |
 | Routines (cron/webhook triggers), push notifications sending, ACME TLS | schema/stubs only; use a reverse proxy for ACME |
 
 Deviations from the plan are recorded in `docs/adr/`.

@@ -138,26 +138,28 @@ export async function startPresenter(opts: StartPresenterOptions): Promise<Runni
   await reconciler.restore((await store.load()).filter((h) => liveAgentIds.has(h.agentId)));
   await reconciler.sync(desired);
 
+  let resyncTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleResync = (): void => {
+    if (resyncTimer) return;
+    resyncTimer = setTimeout(() => {
+      resyncTimer = null;
+      void (async () => {
+        try { desired = await api.getDesired(); await reconciler.sync(desired); }
+        catch (err) { log('warn', 'resync failed', { error: (err as Error)?.message }); }
+      })();
+    }, 400);
+  };
+
   const onEvent = (ev: WorkspaceEvent): void => {
     void (async () => {
       try {
         switch (ev.type) {
-          case 'worker.spawned': {
-            const view = toAgentView(ev.payload, opts.workspaceId);
-            if (view) await reconciler.ensure(view);
-            break;
-          }
+          case 'worker.spawned':
           case 'worker.status':
-          case 'worker.stalled': {
-            const view = toAgentView(ev.payload, opts.workspaceId);
-            if (!view) break;
-            if (view.status === 'retired') reconciler.retire(view.agentId);
-            else await reconciler.update(view);
-            break;
-          }
+          case 'worker.stalled':
           case 'worker.retired': {
-            const agentId = agentIdOf(ev.payload) ?? ev.entityId;
-            if (agentId) reconciler.retire(agentId);
+            // Never trust event payloads (they may be replays); the daemon's desired list is the truth.
+            scheduleResync();
             break;
           }
           case 'presentation.updated': {

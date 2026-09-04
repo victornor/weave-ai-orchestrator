@@ -13,7 +13,9 @@ export function eventRoutes(): Hono<AppEnv> {
   app.get('/', (c) => {
     const bus = c.get('ws').ctx.events;
     const lastEventId = c.req.header('last-event-id');
-    const after = Number(c.req.query('after') ?? lastEventId ?? 0) || 0;
+    // No cursor → tail only (a fresh client wants live changes, not the whole history); a cursor → replay from it.
+    const rawAfter = c.req.query('after') ?? lastEventId;
+    const after = rawAfter === undefined || rawAfter === null || rawAfter === '' ? bus.lastSeq() : (Number(rawAfter) || 0);
 
     return streamSSE(c, async (stream) => {
       const pump = new Pump<WorkspaceEvent>();

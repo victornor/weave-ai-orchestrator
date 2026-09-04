@@ -117,9 +117,24 @@ export async function request<T>(path: string, init: RequestInitLike = {}): Prom
 
   if (!res.ok) {
     const err = (parsed as { error?: ApiErrorBody } | undefined)?.error;
+    if (res.status === 401 && !path.startsWith('/api/auth/')) onUnauthorized();
     throw new ApiError(res.status, err ?? { code: `HTTP_${res.status}`, message: res.statusText || 'Request failed' });
   }
   return parsed as T;
+}
+
+/**
+ * A 401 outside the auth routes means the session is gone (expired, revoked, or a cookie the
+ * daemon no longer recognises): forget the token and go to the login page once, remembering
+ * where we were so sign-in can return there.
+ */
+let redirecting = false;
+function onUnauthorized(): void {
+  if (redirecting || window.location.pathname === '/login') return;
+  redirecting = true;
+  setToken(null, true);
+  const next = window.location.pathname + window.location.search;
+  window.location.assign(`/login?next=${encodeURIComponent(next)}`);
 }
 
 function safeJson(text: string): unknown {

@@ -4,7 +4,7 @@ import { ticketUiStatus, agentUiStatus } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Composer } from '../components/Composer';
 import { DecisionCard } from '../components/DecisionCard';
-import { TicketChip, WorkerChip, CommandChip } from '../components/Chips';
+import { WorkerChip, CommandChip } from '../components/Chips';
 import { Skeleton } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Markdown } from '../components/Markdown';
@@ -31,37 +31,24 @@ const IDENTIFIER = /\b([A-Z][A-Z0-9]+-\d+)\b/g;
 function MessageBody({
   body,
   onTicket,
-  ticketStatus,
 }: {
   body: string;
   onTicket: (id: string) => void;
   ticketStatus: (id: string) => ReturnType<typeof ticketUiStatus> | null;
 }): React.ReactElement {
-  const parts = useMemo(() => {
-    const out: Array<{ text: string; ticket?: string }> = [];
-    let last = 0;
-    for (const m of body.matchAll(IDENTIFIER)) {
-      const idx = m.index ?? 0;
-      if (idx > last) out.push({ text: body.slice(last, idx) });
-      out.push({ text: m[0], ticket: m[0] });
-      last = idx + m[0].length;
-    }
-    if (last < body.length) out.push({ text: body.slice(last) });
-    return out;
-  }, [body]);
-
-  if (!parts.some((p) => p.ticket)) return <Markdown source={body} className="text-body" />;
-
+  // Ticket identifiers become chips, but the rest of the message is still markdown: the identifiers
+  // are rewritten into anchors the markdown renderer keeps, and clicks on those open the ticket.
+  const source = useMemo(() => body.replace(IDENTIFIER, (id) => `[${id}](#ticket:${id})`), [body]);
+  const onClick = (e: React.MouseEvent<HTMLDivElement>): void => {
+    const a = (e.target as HTMLElement).closest('a[href^="#ticket:"]');
+    if (!a) return;
+    e.preventDefault();
+    onTicket(decodeURIComponent(a.getAttribute('href')!.slice('#ticket:'.length)));
+  };
   return (
-    <p className="text-body leading-relaxed text-text-body">
-      {parts.map((p, i) =>
-        p.ticket ? (
-          <TicketChip key={i} identifier={p.ticket} status={ticketStatus(p.ticket) ?? 'idle'} onClick={() => onTicket(p.ticket!)} className="mx-0.5" />
-        ) : (
-          <span key={i}>{p.text}</span>
-        ),
-      )}
-    </p>
+    <div onClick={onClick}>
+      <Markdown source={source} className="text-body" />
+    </div>
   );
 }
 

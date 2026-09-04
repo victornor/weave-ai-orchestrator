@@ -328,7 +328,12 @@ export function useTickets(params: TicketQuery = {}): UseQueryResult<Ticket[]> {
 
 export function useTicket(id: string): UseQueryResult<T.TicketDetail> {
   const ws = useWs();
-  return useQuery({ queryKey: qk.ticket(ws, id), queryFn: () => api.ws<unknown>(ws, `/tickets/${id}`).then(ticketDetail), enabled: Boolean(id) });
+  return useQuery({ queryKey: qk.ticket(ws, id), queryFn: () => api.ws<unknown>(ws, `/tickets/${id}`).then(ticketDetail).then(async (d) => {
+        // The daemon's detail carries ids; the page shows names. Two cheap lookups, tolerated if they fail.
+        if (!d.project && d.ticket.projectId) d.project = await api.ws<Project>(ws, `/projects/${d.ticket.projectId}`).catch(() => null);
+        if (!d.role && d.ticket.assigneeRoleId) d.role = await api.ws<{ role: Role }>(ws, `/roles/${d.ticket.assigneeRoleId}`).then((r) => r.role ?? null).catch(() => null);
+        return d;
+      }), enabled: Boolean(id) });
 }
 
 export function useCreateTicket(): UseMutationResult<Ticket, Error, Record<string, unknown>> {

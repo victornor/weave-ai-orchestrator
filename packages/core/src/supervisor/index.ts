@@ -50,7 +50,13 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     const running = ctx.db.all<Run>("SELECT * FROM runs WHERE workspace_id = ? AND status = 'running'", [ctx.workspaceId]);
     for (const run of running) {
       if (state.active.has(run.id)) continue;
-      if (processAlive(run.pid)) continue;
+      // A run that is still 'running' at boot belonged to a dead daemon: its process (if alive) is an unsupervised orphan. Kill the group, then recover.
+      if (processAlive(run.pid)) {
+        const target = run.pgid ?? run.pid;
+        try { process.kill(-(target as number), 'SIGTERM'); } catch { try { process.kill(run.pid as number, 'SIGTERM'); } catch { /* gone */ } }
+        setTimeout(() => { try { process.kill(-(target as number), 'SIGKILL'); } catch { try { process.kill(run.pid as number, 'SIGKILL'); } catch { /* gone */ } } }, 10_000).unref();
+        log.warn({ runId: run.id, pid: run.pid, pgid: run.pgid }, 'killed an orphaned run process left by the previous daemon');
+      }
       log.warn({ runId: run.id, agentId: run.agentId }, 'run was interrupted by a daemon restart');
       ctx.db.update('runs', run.id, { status: 'interrupted', finishedAt: nowIso(), errorCode: 'interrupted', errorFamily: 'tooling' });
       ctx.db.run("UPDATE wakeups SET status = 'failed', finished_at = ? WHERE run_id = ? AND status IN ('claimed','queued')", [nowIso(), run.id]);

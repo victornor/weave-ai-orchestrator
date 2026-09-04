@@ -384,7 +384,18 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
       } catch (e) { log.warn({ err: String(e) }, 'failed to schedule retry wake'); }
     } else {
       log.warn({ runId, errorFamily }, 'retry budget exhausted');
+      parkForHuman(ctx, deps, f, errorFamily, errorCode, f.failure?.message ?? r?.error?.message ?? null);
     }
+  } else if (status === 'failed' && f.agent.kind === 'worker' && errorFamily !== 'model_refusal') {
+    parkForHuman(ctx, deps, f, errorFamily, errorCode, f.failure?.message ?? r?.error?.message ?? null);
+  }
+  // A successful turn closes any retry card still waiting on the human.
+  if (status === 'succeeded') {
+    try {
+      for (const d of deps().decisions.list({ status: ['open'], ticketId: f.agent.ticketId ?? undefined })) {
+        if (d.kind === 'retry_approval' && (d.target as { agentId?: string } | null)?.agentId === f.agent.id) deps().decisions.withdraw({ kind: 'system', id: null }, d.id, 'the worker recovered');
+      }
+    } catch { /* best effort */ }
   }
 
   // Three consecutive empty turns on non-digest wakes is a gate finding for the conductor (PLAN §9.4).
@@ -415,4 +426,74 @@ function countRetries(ctx: WorkspaceContext, runId: string): number {
     if (cur) n += 1;
   }
   return n;
+}
+
+/**
+ * The automatic retries are spent (or the failure is not retryable): stop burning turns, put the
+ * question to the human as a decision on the ticket, and — for a usage limit — book one more try
+ * for when the limit resets. The worker stays parked until the human answers or the timer fires.
+ */
+function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: FinalizeInput, family: RunErrorFamily | null, code: string | null, message: string | null): void {
+  const log = ctx.log('run').child({ runId: f.run.id });
+  const ticketId = f.agent.ticketId;
+  const quota = family === 'provider_quota';
+  const resetAt = quota ? parseResetTime(message ?? '') : null;
+  const retryAt = quota ? (resetAt ?? new Date(Date.now() + 60 * 60_000)) : null;
+  try {
+    ctx.db.update('agents', f.agent.id, { status: 'paused', pauseReason: `${code ?? family ?? 'failed'}: waiting for a human`, updatedAt: nowIso() });
+    const runtimes = [...ctx.registries.runtimes.keys()].filter((r) => r !== f.agent.runtimeId);
+    const identifier = ticketId ? ctx.db.get<{ identifier: string; status: string }>('SELECT identifier, status FROM tickets WHERE id = ?', [ticketId]) : null;
+    deps().decisions.create({ kind: 'system', id: null }, {
+      kind: 'retry_approval', owner: 'human', ticketId: ticketId ?? null,
+      title: quota
+        ? `${f.agent.name} hit the ${f.agent.runtimeId} usage limit${identifier ? ` on ${identifier.identifier}` : ''}`
+        : `${f.agent.name} failed${identifier ? ` on ${identifier.identifier}` : ''}: ${code ?? family ?? 'unknown error'}`,
+      context: [
+        message ? `Last error: ${message.slice(0, 400)}` : null,
+        quota ? `Automatic retries are spent. One more attempt is booked for ${retryAt!.toISOString().slice(0, 16).replace('T', ' ')} UTC${resetAt ? ' (the limit\'s reset time)' : ''}; retry sooner, switch the runtime, or cancel.` : 'Automatic retries are spent. Retry, switch the runtime, or cancel the ticket.',
+        'Retrying resumes the same session on the same branch.',
+      ].filter(Boolean).join('\n\n'),
+      options: [
+        { key: 'retry', label: 'Retry now', recommended: !quota },
+        { key: 'retry_1h', label: 'Retry in an hour', recommended: quota },
+        ...runtimes.map((r) => ({ key: `runtime:${r}`, label: `Retry on ${r}` })),
+        { key: 'cancel', label: 'Cancel the ticket' },
+      ],
+      recommendation: quota ? 'retry_1h' : 'retry',
+      correlationKey: `retry:${f.agent.id}`,
+      target: { agentId: f.agent.id, ticketId: ticketId ?? null, runtime: f.agent.runtimeId, family, code },
+    });
+    if (ticketId && identifier && !['blocked', 'done', 'cancelled', 'backlog'].includes(identifier.status)) {
+      void deps().tickets.transition({ kind: 'system', id: null }, ticketId, { to: 'blocked', note: `${f.agent.name} is parked after ${code ?? family}; waiting for you` }).catch(() => undefined);
+    }
+    if (retryAt) {
+      deps().wake.enqueue(f.agent.id, {
+        source: 'retry', reason: `retry after the ${f.agent.runtimeId} usage limit resets`, payload: { retryOfRunId: f.run.id, quotaReset: true },
+        notBefore: retryAt.toISOString(), idempotencyKey: `quota_retry:${f.run.id}`, requestedBy: { kind: 'system', id: null },
+      });
+    }
+  } catch (e) {
+    log.warn({ err: String(e) }, 'parking the worker for the human failed');
+  }
+}
+
+/** "resets at 3pm", "resets at 15:30", "reset in 2 hours", "try again in 45 minutes" → a Date, else null. */
+export function parseResetTime(message: string, now = new Date()): Date | null {
+  const m = message.toLowerCase();
+  let r = /(?:reset|resets|try again|available)\s+in\s+(\d+)\s*(hour|hr|minute|min|second|sec)/.exec(m);
+  if (r) {
+    const n = Number(r[1]); const unit = r[2]!;
+    const ms = unit.startsWith('h') ? n * 3_600_000 : unit.startsWith('m') ? n * 60_000 : n * 1000;
+    return new Date(now.getTime() + ms);
+  }
+  r = /resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/.exec(m);
+  if (r) {
+    let h = Number(r[1]); const min = Number(r[2] ?? 0);
+    if (r[3] === 'pm' && h < 12) h += 12;
+    if (r[3] === 'am' && h === 12) h = 0;
+    const at = new Date(now); at.setHours(h, min, 0, 0);
+    if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1);
+    return at;
+  }
+  return null;
 }

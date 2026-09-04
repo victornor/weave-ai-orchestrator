@@ -26,6 +26,7 @@ const VARIANTS: Record<string, CardVariant> = {
   question: 'question',
   approval: 'approval',
   gate_finding: 'gate_finding',
+  retry_approval: 'approval',
 };
 
 const DEFAULTS: Record<CardVariant, CardOption[]> = {

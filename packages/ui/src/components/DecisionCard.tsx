@@ -41,6 +41,7 @@ const HEAD: Record<string, { label: string; status: 'needs-you' | 'merging' | 'b
   question: { label: 'Worker question', status: 'blocked' },
   gate_finding: { label: 'Gate finding', status: 'blocked' },
   approval: { label: 'Needs you', status: 'needs-you' },
+  retry_approval: { label: 'Worker stopped', status: 'failed' },
 };
 
 /**

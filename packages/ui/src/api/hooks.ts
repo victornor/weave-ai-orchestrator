@@ -376,6 +376,15 @@ export function useTransitionTicket(): UseMutationResult<Ticket, Error, { id: st
   });
 }
 
+export function useRetryTicket(): UseMutationResult<Ticket, Error, { id: string; note?: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, note }) => api.ws<Ticket>(ws, `/tickets/${id}/retry`, { method: 'POST', body: note ? { note } : {} }),
+    onSuccess: (_r, v) => { void qc.invalidateQueries({ queryKey: qk.ticket(ws, v.id) }); void qc.invalidateQueries({ queryKey: qk.tickets(ws) }); },
+  });
+}
+
 export function useTicketComments(id: string): UseQueryResult<TicketComment[]> {
   const ws = useWs();
   return useQuery({

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { ticketUiStatus } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
@@ -14,6 +14,7 @@ import { StatTile } from '../components/Chart';
 import {
   usePatchTicket,
   usePostComment,
+  useRetryTicket,
   useTicket,
   useTicketComments,
   useTicketDocument,
@@ -45,6 +46,7 @@ export function TicketRoute(): React.ReactElement {
   const [tab, setTab] = useState<string>('overview');
   const detail = useTicket(ticketId);
   const patch = usePatchTicket();
+  const retry = useRetryTicket();
 
   if (detail.isLoading) {
     return (
@@ -77,6 +79,7 @@ export function TicketRoute(): React.ReactElement {
 
   const { ticket, project, worker } = detail.data;
   const ui = ticketUiStatus(ticket.status);
+  const canRetry = ticket.status === 'blocked' || worker?.status === 'paused' || worker?.status === 'error';
 
   return (
     <Page>
@@ -96,6 +99,12 @@ export function TicketRoute(): React.ReactElement {
           </span>
         }
         actions={
+          <span className="flex items-center gap-3">
+            {canRetry ? (
+              <Button size="sm" variant="primary" onClick={() => retry.mutate({ id: ticket.id })} disabled={retry.isPending}>
+                {worker?.status === 'paused' ? 'Retry now' : 'Retry'}
+              </Button>
+            ) : null}
           <label className="flex items-center gap-2">
             <span className="text-micro text-text-3">auto-merge</span>
             <button
@@ -112,6 +121,7 @@ export function TicketRoute(): React.ReactElement {
               <span className={cx('size-3.5 rounded-pill', ticket.autoMerge ? 'bg-accent-on' : 'bg-text-nav')} />
             </button>
           </label>
+          </span>
         }
         tabs={<Tabs items={TABS} active={tab} onChange={setTab} className="px-3 md:px-4" />}
       />
@@ -254,31 +264,76 @@ function PlanTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdent
 }
 
 function ActivityTab({ ticketId }: { ticketId: string }): React.ReactElement {
+  const detail = useTicket(ticketId);
   const comments = useTicketComments(ticketId);
+  const runs = useTicketRuns(ticketId);
   const post = usePostComment();
+  const status = detail.data?.ticket.status;
+  const worker = detail.data?.worker ?? null;
+
+  // The ticket is a conversation: comments and the worker's turns, in order.
+  const feed = useMemo(() => {
+    const items: Array<{ at: string; key: string; node: React.ReactNode }> = [];
+    for (const c of comments.data ?? []) {
+      items.push({
+        at: c.createdAt, key: `c-${c.id}`,
+        node: (
+          <article className={cx('ac-card p-3.5', c.authorKind === 'human' && 'border-accent-edge')}>
+            <div className="mb-1.5 flex items-center gap-2">
+              <span className="text-micro font-medium text-text-soft">{c.authorKind === 'human' ? 'You' : c.authorKind === 'agent' ? (worker?.name ?? 'Worker') : 'System'}</span>
+              {c.kind !== 'comment' ? <Badge>{c.kind}</Badge> : null}
+              <div className="flex-1" />
+              <span className="ac-mono text-nano text-text-4">{ago(c.createdAt)}</span>
+            </div>
+            <Markdown source={c.body} />
+          </article>
+        ),
+      });
+    }
+    for (const r of runs.data ?? []) {
+      const at = r.finishedAt ?? r.startedAt ?? r.createdAt;
+      const s = r.status === 'running' ? 'working' : r.status === 'succeeded' ? 'done' : r.status === 'interrupted' || r.status === 'cancelled' ? 'paused' : 'failed';
+      items.push({
+        at, key: `r-${r.id}`,
+        node: (
+          <div className="flex items-start gap-2.5 px-1 py-1">
+            <StatusGlyph status={s} size="xs" pulse={r.status === 'running'} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 text-micro text-text-3">
+                <span>turn {r.turnEpoch}</span>
+                <span>·</span>
+                <span className={cx(r.status === 'failed' && 'text-failed', r.status === 'interrupted' && 'text-text-2')}>{r.status}{r.errorCode ? ` (${r.errorCode})` : ''}</span>
+                <span>·</span>
+                <span className="ac-mono">{ago(at)}</span>
+              </div>
+              {r.summary ? <p className="mt-0.5 text-meta leading-relaxed text-text-body">{r.summary}</p> : null}
+            </div>
+          </div>
+        ),
+      });
+    }
+    return items.sort((a, b) => a.at.localeCompare(b.at));
+  }, [comments.data, runs.data, worker?.name]);
+
+  const placeholder =
+    status === 'done' || status === 'cancelled'
+      ? 'Reply to reopen — a worker picks this ticket up again on its branch…'
+      : worker?.status === 'paused' || worker?.status === 'error'
+        ? 'Reply — this relaunches the parked worker with your note…'
+        : worker
+          ? `Reply — ${worker.name} is woken by this…`
+          : 'Reply — a worker is started for this ticket…';
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
-      {comments.isLoading ? (
+      {comments.isLoading || runs.isLoading ? (
         <SkeletonRows rows={4} />
-      ) : (comments.data?.length ?? 0) === 0 ? (
-        <EmptyState title="Nothing has happened yet." detail="Comments from you, the worker and the daemon land here." />
+      ) : feed.length === 0 ? (
+        <EmptyState title="Nothing has happened yet." detail="Your replies, the worker's messages and its turns land here, in order." />
       ) : (
-        <div className="flex flex-col gap-3">
-          {(comments.data ?? []).map((c) => (
-            <article key={c.id} className={cx('ac-card p-3.5', c.authorKind === 'human' && 'border-accent-edge')}>
-              <div className="mb-1.5 flex items-center gap-2">
-                <span className="text-micro font-medium text-text-soft">{c.authorKind === 'human' ? 'You' : c.authorKind === 'agent' ? 'Worker' : 'System'}</span>
-                <Badge>{c.kind}</Badge>
-                <div className="flex-1" />
-                <span className="ac-mono text-nano text-text-4">{ago(c.createdAt)}</span>
-              </div>
-              <Markdown source={c.body} />
-            </article>
-          ))}
-        </div>
+        <div className="flex flex-col gap-3">{feed.map((f) => <div key={f.key}>{f.node}</div>)}</div>
       )}
-      <Composer placeholder="Comment — the worker is woken by this…" submitLabel="Comment" onSubmit={(body) => post.mutate({ id: ticketId, body })} />
+      <Composer placeholder={placeholder} submitLabel="Reply" onSubmit={(body) => post.mutate({ id: ticketId, body })} />
     </div>
   );
 }

@@ -48,7 +48,8 @@ Procedures live in skills: load `agent-conductor-worker` every turn, `agent-cond
 5. Same obstacle twice → `ac_report({state: "blocked"})` and transition to `blocked` with a routable path; end the turn.
 6. A decision above you (product choice, destructive action, contract expansion) → `ac_ask` with concrete options and your recommendation; end the turn. The answer arrives as your next wake.
 7. Leave durable progress on the ticket before the turn ends: a comment, a `plan` or `report` document, a work product. Nothing in your head survives.
-8. Before the ticket finishes, consider one concise `ac_knowledge_note` for the next worker on this project — or, when you learned how a whole subsystem, integration or runbook works, a linked document (`ac_knowledge_docs` to see what exists, `ac_knowledge_doc_put` to write, `[[slug]]` to link).
+8. A reply from the human after you finished reopens the ticket and wakes you on the same branch: read it as the next instruction and push to the same PR.
+9. Before the ticket finishes, consider one concise `ac_knowledge_note` for the next worker on this project — or, when you learned how a whole subsystem, integration or runbook works, a linked document (`ac_knowledge_docs` to see what exists, `ac_knowledge_doc_put` to write, `[[slug]]` to link).
 9. Finish with the structured final report as your last message:
 
 ```json

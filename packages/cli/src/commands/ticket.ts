@@ -301,4 +301,27 @@ export function register(program: Command): void {
       await openUrl(url);
       emit({ url, opened: true }, () => write(`${style.ok('opened')} ${url}`));
     }));
+
+  ticket
+    .command('retry <id>')
+    .description('relaunch the worker (or spawn one) after a failure or a parked usage limit')
+    .option('-m, --note <text>', 'what to tell the worker')
+    .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const t = unwrap<Record<string, unknown>>(await client.wpost(`/tickets/${encodeURIComponent(id)}/retry`, opts['note'] ? { note: opts['note'] } : {}), 'ticket');
+      emit(t, () => write(`${style.ok('retrying')} ${String(t['identifier'])} · ${String(t['status'])}`));
+    }));
+
+  ticket
+    .command('reopen <id>')
+    .description('reopen a done or cancelled ticket; a worker picks it up on its branch')
+    .option('-m, --note <text>', 'why, shown on the ticket')
+    .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const cur = unwrap<Record<string, unknown>>(await client.wget(`/tickets/${encodeURIComponent(id)}`), 'ticket');
+      const to = cur['status'] === 'cancelled' ? 'todo' : 'in_progress';
+      const t = unwrap<Record<string, unknown>>(await client.wpost(`/tickets/${encodeURIComponent(id)}/transition`, { to, note: opts['note'] ?? 'reopened' }), 'ticket');
+      if (opts['note']) await client.wpost(`/tickets/${encodeURIComponent(id)}/comments`, { body: opts['note'] });
+      emit(t, () => write(`${style.ok('reopened')} ${String(t['identifier'])} · ${String(t['status'])}`));
+    }));
 }

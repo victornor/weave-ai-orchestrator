@@ -152,6 +152,33 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     }
   }
 
+  async function applyRetryApproval(actor: Actor, d: Decision, key: string): Promise<void> {
+    const target = (d.target ?? {}) as { agentId?: string; ticketId?: string | null };
+    if (!target.agentId) return;
+    const workers = deps().workers;
+    if (key === 'cancel') {
+      if (target.ticketId) deps().tickets.cancel(actor, target.ticketId, 'cancelled from the retry decision');
+      else await workers.cancel(actor, target.agentId, 'cancelled from the retry decision');
+      return;
+    }
+    if (key === 'retry_1h') {
+      db.update('agents', target.agentId, { status: 'active', pauseReason: null, updatedAt: nowIso() });
+      deps().wake.enqueue(target.agentId, {
+        source: 'retry', reason: 'the human asked for a retry in an hour', payload: { decisionId: d.id },
+        notBefore: new Date(Date.now() + 3_600_000).toISOString(), idempotencyKey: `retry_1h:${d.id}`, requestedBy: actor,
+      });
+      return;
+    }
+    if (key.startsWith('runtime:')) {
+      db.update('agents', target.agentId, { runtimeId: key.slice('runtime:'.length), pauseReason: null, updatedAt: nowIso() });
+    }
+    await workers.relaunch(actor, target.agentId, 'the human asked for a retry');
+    if (target.ticketId) {
+      const t = deps().tickets.get(target.ticketId);
+      if (t.status === 'blocked') await deps().tickets.transition(actor, t.id, { to: t.executionRunId ? 'in_progress' : 'todo', note: 'retrying' }).catch(() => undefined);
+    }
+  }
+
   function applyDiscardApproval(actor: Actor, d: Decision, key: string, text: string | null): void {
     const ticketId = ticketOf(d);
     if (!ticketId) return;
@@ -196,6 +223,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
         case 'plan_approval': await applyPlanApproval(actor, answered, effective, text); break;
         case 'merge_approval': await applyMergeApproval(actor, answered, effective, text); break;
         case 'hire_approval': await applyHireApproval(actor, answered, effective); break;
+        case 'retry_approval': await applyRetryApproval(actor, answered, effective); break;
         case 'discard_approval': applyDiscardApproval(actor, answered, effective, text); break;
         default: break;
       }

@@ -36,7 +36,7 @@ export type MergeMethod = (typeof MERGE_METHODS)[number];
 export const APPROVAL_OWNERS = ['human', 'conductor', 'none'] as const;
 export type ApprovalOwner = (typeof APPROVAL_OWNERS)[number];
 
-export const DECISION_KINDS = ['approval', 'question', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval'] as const;
+export const DECISION_KINDS = ['approval', 'question', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval', 'retry_approval'] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 
 export const DECISION_OWNERS = ['human', 'conductor'] as const;

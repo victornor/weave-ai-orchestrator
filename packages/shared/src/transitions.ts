@@ -11,8 +11,8 @@ const CHANGE: Record<TicketStatus, readonly TicketStatus[]> = {
   in_review: ['merging', 'in_progress', 'blocked', 'cancelled'],
   merging: ['done', 'blocked', 'in_review'],
   blocked: ['todo', 'proposing', 'approved', 'in_progress', 'in_review', 'merging', 'cancelled'],
-  done: [],
-  cancelled: [],
+  done: ['in_progress'],           // a human reopens a finished ticket by replying to it
+  cancelled: ['todo'],
 };
 const TASK: Record<TicketStatus, readonly TicketStatus[]> = {
   backlog: ['todo', 'cancelled'],
@@ -22,7 +22,7 @@ const TASK: Record<TicketStatus, readonly TicketStatus[]> = {
   in_review: ['merging', 'in_progress', 'done', 'blocked', 'cancelled'],
   merging: ['done', 'blocked', 'in_review'],
   blocked: ['todo', 'in_progress', 'in_review', 'merging', 'cancelled'],
-  done: [], cancelled: [],
+  done: ['in_progress'], cancelled: ['todo'],
 };
 const SCOUT: Record<TicketStatus, readonly TicketStatus[]> = {
   backlog: ['todo', 'cancelled'],
@@ -31,7 +31,7 @@ const SCOUT: Record<TicketStatus, readonly TicketStatus[]> = {
   in_progress: ['done', 'blocked', 'cancelled'],
   in_review: ['done', 'cancelled'],
   blocked: ['todo', 'in_progress', 'cancelled'],
-  done: [], cancelled: [],
+  done: ['in_progress'], cancelled: ['todo'],
 };
 export const TRANSITIONS: Record<TicketKind, Record<TicketStatus, readonly TicketStatus[]>> = { change: CHANGE, task: TASK, scout: SCOUT, question: SCOUT };
 

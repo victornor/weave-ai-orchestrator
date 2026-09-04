@@ -9,6 +9,25 @@ Companion files:
 - `docs/prompts/worker.AGENTS.md.tmpl` — draft worker instruction file (role charter + ticket brief) as a worker sees it.
 - `docs/prompts/skills.md` — the skills OpenConductor ships to agents (outline + key rules).
 
+## Implementation status (2026-09-04)
+
+Implemented and verified on this machine against the real Claude Code CLI (see `docs/demos/`): M0–M3 core paths and most of M4–M6.
+
+| Area | Status |
+|---|---|
+| Daemon, multi-workspace, HTTP API, MCP tools, SSE, auth (password, TOTP, devices, lockout), self-signed TLS, systemd unit | done |
+| Conductor loop, hiring with approval and runtime switch, ticket intake, outcome-language replies | done, verified live |
+| Roles → workers, briefs, worktrees (git provider verified; worktrunk provider implemented), OpenSpec propose → plan approval → apply → in_review → merge → archive, auto-merge, landed-work retirement | done, verified live |
+| Knowledge bases with budgets, notes, curation workers, spec index and explorer | done (curation run verified) |
+| Usage collection and analytics | done |
+| Channels: web, cli, telegram (unit-tested; no live bot in this environment) | done |
+| Surfaces: headless, tmux (verified), herdr and hyprland (implemented against the real CLIs, not exercised on a live desktop here) and the client-side presenter | done |
+| Web UI (React, PWA, both themes) served by the daemon; `oc` CLI; Ink TUI (`oc chat` verified inside tmux) | done |
+| Runtimes: claude and opencode verified live; codex and gemini implemented from documented formats, unverified live (no credentials here) | partial |
+| Routines (cron/webhook triggers), push notifications sending, ACME TLS | schema/stubs only; use a reverse proxy for ACME |
+
+Deviations from the plan are recorded in `docs/adr/`.
+
 ---
 
 ## 0. How to read this

@@ -109,6 +109,11 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: `${W}/runs/{id}/log`, tag: 'runs', summary: 'Raw jsonl run log', auth: 'session' },
 
   { method: 'GET', path: `${W}/knowledge`, tag: 'knowledge', summary: 'Knowledge lint: sizes against budgets', auth: 'session' },
+  { method: 'GET', path: `${W}/knowledge/docs`, tag: 'knowledge', summary: 'Linked documents catalogue (?scope=&project=)', auth: 'session' },
+  { method: 'GET', path: `${W}/knowledge/docs/:scope/:slug`, tag: 'knowledge', summary: 'One linked document with its links and backlinks', auth: 'session' },
+  { method: 'PUT', path: `${W}/knowledge/docs/:scope/:slug`, tag: 'knowledge', summary: 'Create or replace a linked document', auth: 'session', mutating: true },
+  { method: 'DELETE', path: `${W}/knowledge/docs/:scope/:slug`, tag: 'knowledge', summary: 'Delete a linked document (archived first)', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/knowledge/graph`, tag: 'knowledge', summary: 'Knowledge graph: hub files and documents as nodes, [[links]] as edges', auth: 'session' },
   { method: 'GET', path: `${W}/knowledge/{scope}`, tag: 'knowledge', summary: 'Read a knowledge file', auth: 'session' },
   { method: 'PUT', path: `${W}/knowledge/{scope}`, tag: 'knowledge', summary: 'Replace a knowledge file (human)', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/knowledge/{scope}/note`, tag: 'knowledge', summary: 'Append one entry', auth: 'session', mutating: true },

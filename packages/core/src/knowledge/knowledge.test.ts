@@ -179,4 +179,34 @@ describe('knowledge', () => {
     expect(body.match(/Use CSS variables for theming/g)).toHaveLength(1);
     expect(body).toContain('approve — yes, variables');
   });
+
+  it('linked documents: put, links, backlinks, catalogue, graph, delete', () => {
+    const first = knowledge.putDoc(WORKER, 'project', 'payments-webhooks', '# Payments webhooks\n\nStripe events land in the API and are applied by a worker. Billing state: [[billing-data-model]].\n\n## Flow\n- verify, queue, apply\n', h.projectId);
+    expect(first.unresolvedLinks).toEqual(['billing-data-model']);
+    expect(first.orphan).toBe(true);
+    const second = knowledge.putDoc(WORKER, 'project', 'billing-data-model', '# Billing data model\n\nTables the webhook worker updates. See [[payments-webhooks]].\n', h.projectId);
+    expect(second.unresolvedLinks).toEqual([]);
+    expect(second.backlinks).toBe(1);
+    // the earlier dangling link now resolves
+    const doc = knowledge.getDoc('project', 'payments-webhooks', h.projectId);
+    expect(doc.linksTo).toEqual([{ slug: 'billing-data-model', path: 'projects/api/docs/billing-data-model.md', title: 'Billing data model' }]);
+    expect(doc.linkedFrom.map((l) => l.slug)).toEqual(['billing-data-model']);
+    expect(doc.summary).toContain('Stripe events land');
+    // hub files link to documents too
+    knowledge.note(WORKER, 'project', 'Documents', '[[payments-webhooks]] — the Stripe pipeline', h.projectId);
+    const catalogue = knowledge.listDocs({ projectId: h.projectId });
+    expect(catalogue.map((d) => d.slug).sort()).toEqual(['billing-data-model', 'payments-webhooks']);
+    expect(catalogue.find((d) => d.slug === 'payments-webhooks')!.backlinks).toBe(2);
+    const graph = knowledge.graph(h.projectId);
+    expect(graph.nodes.some((n) => n.kind === 'hub' && n.scope === 'project')).toBe(true);
+    expect(graph.edges).toContainEqual({ from: 'projects/api/PROJECT.md', to: 'projects/api/docs/payments-webhooks.md' });
+    expect(existsSync(join(h.ctx.paths.knowledge, 'projects/api/docs/payments-webhooks.md'))).toBe(true);
+    // rules
+    expect(() => knowledge.putDoc(WORKER, 'project', 'Bad Slug', '# x\n', h.projectId)).toThrow(/kebab-case/);
+    expect(() => knowledge.putDoc(WORKER, 'project', 'no-title', 'just text\n', h.projectId)).toThrow(/Title/);
+    expect(() => knowledge.putDoc(WORKER, 'project', 'leak', '# Leak\n\nhttps://user:pass@host/db\n', h.projectId)).toThrow(/secrets/);
+    knowledge.deleteDoc(HUMAN, 'project', 'billing-data-model', h.projectId);
+    expect(knowledge.getDoc('project', 'payments-webhooks', h.projectId).linksTo[0]!.path).toBeNull();
+    expect(() => knowledge.getDoc('project', 'billing-data-model', h.projectId)).toThrow(/does not exist/);
+  });
 });

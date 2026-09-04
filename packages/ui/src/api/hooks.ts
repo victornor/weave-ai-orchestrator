@@ -492,6 +492,35 @@ export function useKnowledgeIndex(): UseQueryResult<T.KnowledgeIndex> {
   return useQuery({ queryKey: qk.knowledge(ws), queryFn: () => api.ws<unknown>(ws, '/knowledge').then((r) => (Array.isArray(r) ? { files: r as T.KnowledgeIndex['files'], warnings: [] } : (r as T.KnowledgeIndex))) });
 }
 
+export function useKnowledgeDocs(project?: string): UseQueryResult<T.KnowledgeDocSummary[]> {
+  const ws = useWs();
+  return useQuery({ queryKey: [...qk.knowledge(ws), 'docs', project ?? ''], queryFn: () => api.ws<unknown>(ws, `/knowledge/docs${qs({ project })}`).then((r) => listOf<T.KnowledgeDocSummary>(r)) });
+}
+
+export function useKnowledgeDocDetail(scope: string | null, slug: string | null, project?: string): UseQueryResult<T.KnowledgeDocDetail> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: [...qk.knowledge(ws), 'doc', scope ?? '', slug ?? '', project ?? ''],
+    queryFn: () => api.ws<T.KnowledgeDocDetail>(ws, `/knowledge/docs/${encodeURIComponent(scope!)}/${encodeURIComponent(slug!)}${qs({ project })}`),
+    enabled: Boolean(scope && slug),
+  });
+}
+
+export function useKnowledgeGraph(project?: string): UseQueryResult<T.KnowledgeGraph> {
+  const ws = useWs();
+  return useQuery({ queryKey: [...qk.knowledge(ws), 'graph', project ?? ''], queryFn: () => api.ws<T.KnowledgeGraph>(ws, `/knowledge/graph${qs({ project })}`) });
+}
+
+export function useKnowledgeDocMutation(): UseMutationResult<unknown, Error, { scope: string; slug: string; project?: string; op: 'put' | 'delete'; body?: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ scope, slug, project, op, body }) =>
+      api.ws(ws, `/knowledge/docs/${encodeURIComponent(scope)}/${encodeURIComponent(slug)}${qs({ project })}`, op === 'put' ? { method: 'PUT', body: { body } } : { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.knowledge(ws) }),
+  });
+}
+
 export function useKnowledgeDoc(scope: string, project?: string): UseQueryResult<T.KnowledgeDoc> {
   const ws = useWs();
   return useQuery({

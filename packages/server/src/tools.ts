@@ -258,6 +258,35 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx, i) => svc(ctx).knowledge.note(ctx.actor, i.scope, i.section, i.text, knowledgeScope(ctx, i.scope, i.projectId)),
   },
   {
+    name: 'ac_knowledge_docs', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES).optional(), projectId: z.string().optional() }),
+    description: 'The catalogue of linked knowledge documents you can read: slug, title, one-line summary, link and backlink counts. Workers see their project documents plus shared ones; the conductor sees everything. Read this before writing a document so you link to what exists instead of duplicating it.',
+    handler: (ctx, i) => {
+      if (isConductor(ctx)) return svc(ctx).knowledge.listDocs({ ...(i.scope ? { scope: i.scope } : {}), ...(i.projectId !== undefined ? { projectId: i.projectId } : {}) });
+      return svc(ctx).knowledge.listDocs({ projectId: ctx.claims.projectId, ...(i.scope ? { scope: i.scope } : {}) }).filter((d) => d.scope === 'shared' || d.projectId === ctx.claims.projectId);
+    },
+  },
+  {
+    name: 'ac_knowledge_doc_get', scope: 'all', input: z.object({ slug: z.string().min(2), scope: z.enum(KNOWLEDGE_SCOPES).default('project'), projectId: z.string().optional() }),
+    description: 'Read one linked knowledge document by slug: body, the documents it links to (resolved or not) and the documents that link to it. Follow linksTo/linkedFrom to go as deep as the question needs.',
+    handler: (ctx, i) => svc(ctx).knowledge.getDoc(i.scope, i.slug, knowledgeScope(ctx, i.scope, i.projectId)),
+  },
+  {
+    name: 'ac_knowledge_doc_put', scope: 'all', input: z.object({ slug: z.string().min(2), body: z.string().min(1), scope: z.enum(KNOWLEDGE_SCOPES).default('project'), projectId: z.string().optional() }),
+    description: 'Create or replace a linked knowledge document (kebab-case slug, `# Title` first line, <= 1500 tokens). Link related documents with [[slug]]; the result lists unresolved links and whether the document is an orphan — link it from PROJECT.md or another document so it can be found. Workers write project documents; shared/workspace documents are the conductor\'s.',
+    handler: (ctx, i) => {
+      if (!isConductor(ctx) && i.scope !== 'project') throw new OcError('forbidden', 'workers write project documents only');
+      return svc(ctx).knowledge.putDoc(ctx.actor, i.scope, i.slug, i.body, knowledgeScope(ctx, i.scope, i.projectId));
+    },
+  },
+  {
+    name: 'ac_knowledge_search', scope: 'all', input: z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(50).optional() }),
+    description: 'Full-text search over the knowledge bases and documents you can read. Returns the file path (ref), title and a snippet; read the hit with ac_knowledge_get or ac_knowledge_doc_get.',
+    handler: (ctx, i) => {
+      const hits = svc(ctx).knowledge.search(i.query, isConductor(ctx) ? null : ctx.claims.projectId, i.limit ?? 20);
+      return isConductor(ctx) ? hits : hits.filter((h) => !h.ref.startsWith('workspace/WORKSPACE') && !h.ref.startsWith('workspace/decisions') && !h.ref.startsWith('workspace/docs/'));
+    },
+  },
+  {
     name: 'ac_knowledge_replace', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), body: z.string(), projectId: z.string().optional() }),
     description: 'Rewrite a whole knowledge file. Only valid inside a curation run; otherwise use ac_knowledge_note.',
     handler: (ctx, i) => svc(ctx).knowledge.replace(ctx.actor, i.scope, i.body, 'curation', knowledgeScope(ctx, i.scope, i.projectId)),

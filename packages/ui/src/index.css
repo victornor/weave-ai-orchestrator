@@ -429,3 +429,11 @@
   vertical-align: baseline;
 }
 .ac-prose a[href^='#ticket:']:hover { border-color: var(--accent-edge); color: var(--accent-link); }
+
+/* [[wiki-links]] between knowledge documents. */
+.ac-prose a.ac-doclink {
+  color: var(--accent-link);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent-edge);
+}
+.ac-prose a.ac-doclink:hover { border-bottom-style: solid; }

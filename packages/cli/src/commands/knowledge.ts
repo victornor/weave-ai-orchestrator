@@ -148,4 +148,54 @@ export function register(program: Command): void {
       const result = await client.post(client.w(`/knowledge/${encodeURIComponent(scope)}/curate`), {}, { query: { project: opts['project'] } });
       emit(result, () => write(`${style.ok('curation queued')} for ${scope}`));
     }));
+
+  knowledge
+    .command('docs')
+    .description('linked documents: the catalogue with links and backlinks')
+    .option('-p, --project <id>', 'project id or slug')
+    .option('--scope <scope>', 'project | shared | workspace')
+    .action(async (opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const docs = items<Record<string, unknown>>(await client.wget('/knowledge/docs', { ...(opts['project'] ? { project: opts['project'] } : {}), ...(opts['scope'] ? { scope: opts['scope'] } : {}) }));
+      emit(docs, () => {
+        if (!docs.length) { write(style.dim('no documents yet — agents write them with ac_knowledge_doc_put')); return; }
+        table(docs, [
+          { header: 'SLUG', get: (d) => String(d['slug']) },
+          { header: 'SCOPE', get: (d) => String(d['projectSlug'] ?? d['scope']) },
+          { header: 'TITLE', get: (d) => String(d['title']) },
+          { header: 'LINKS', get: (d) => `${String(d['links'])}→ ←${String(d['backlinks'])}` },
+          { header: 'TOKENS', get: (d) => `${String(d['tokenEstimate'])}/${String(d['budgetTokens'])}` },
+        ]);
+      });
+    }));
+
+  knowledge
+    .command('doc <slug>')
+    .description('print one linked document with its links and backlinks')
+    .option('-p, --project <id>', 'project id or slug')
+    .option('--scope <scope>', 'project | shared | workspace', 'project')
+    .action(async (slug: string, opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const d = await client.wget<Record<string, unknown>>(`/knowledge/docs/${encodeURIComponent(opts['scope'] ?? 'project')}/${encodeURIComponent(slug)}`, opts['project'] ? { project: opts['project'] } : {});
+      emit(d, () => {
+        write(String(d['body']));
+        const to = (d['linksTo'] as Array<{ slug: string; path: string | null }>) ?? [];
+        const from = (d['linkedFrom'] as Array<{ path: string }>) ?? [];
+        write(style.dim(`links → ${to.map((l) => l.slug + (l.path ? '' : ' (unresolved)')).join(', ') || 'none'}`));
+        write(style.dim(`linked from ← ${from.map((l) => l.path).join(', ') || 'none (orphan)'}`));
+      });
+    }));
+
+  knowledge
+    .command('graph')
+    .description('the knowledge graph as edges (use --json for the full node list)')
+    .option('-p, --project <id>', 'project id or slug')
+    .action(async (opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const g = await client.wget<{ nodes: Array<{ id: string; kind: string; title: string }>; edges: Array<{ from: string; to: string }> }>('/knowledge/graph', opts['project'] ? { project: opts['project'] } : {});
+      emit(g, () => {
+        write(`${g.nodes.length} nodes · ${g.edges.length} links`);
+        for (const e of g.edges) write(`  ${e.from}  →  ${e.to}`);
+      });
+    }));
 }

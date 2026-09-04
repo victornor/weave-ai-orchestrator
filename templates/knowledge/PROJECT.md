@@ -26,6 +26,10 @@
 
 <!-- Things that bite: flaky tests, slow steps, generated files, ordering constraints, environments that must not be touched. -->
 
+## Documents
+
+<!-- Linked documents for this project: `- [[slug]] — one line on what it covers`. One per subsystem, integration or runbook. Written with ac_knowledge_doc_put; list what exists with ac_knowledge_docs. -->
+
 ## Learnings
 
 <!-- Dated, concise, perishable entries from workers. One per ticket at most. Curation folds these into Conventions or archives them. -->

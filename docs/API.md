@@ -42,6 +42,8 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `ac_session` httpOn
 
 ### Knowledge & specs
 `GET /knowledge` (lint) · `GET /knowledge/:scope?project=` · `PUT /knowledge/:scope?project=` `{ body }` (human replace) · `POST /knowledge/:scope/note?project=` `{ section, text }` · `GET /knowledge/:scope/revisions?project=` · `POST /knowledge/:scope/revert?project=` `{ revision }` · `POST /knowledge/:scope/curate?project=` · `GET /search?q=&project=` (knowledge + specs)
+
+Linked documents: `GET /knowledge/docs?scope=&project=` → `[{ path, scope, projectId, projectSlug, slug, title, summary, tokenEstimate, budgetTokens, links, backlinks, updatedAt }]` · `GET /knowledge/docs/:scope/:slug?project=` → the document plus `body, revision, linksTo: [{slug, path, title}], linkedFrom: [{path, slug, title}]` · `PUT /knowledge/docs/:scope/:slug` `{ body }` → `{ path, revision, tokenEstimate, budgetTokens, unresolvedLinks, backlinks, orphan }` · `DELETE /knowledge/docs/:scope/:slug` (archived first) · `GET /knowledge/graph?project=` → `{ nodes: [{ id (path), kind: hub|doc, scope, projectId, projectSlug, slug, title, tokens, updatedAt }], edges: [{ from, to }] }`. Documents are `[[slug]]`-linked markdown pages under `knowledge/projects/<id>/docs/`, `knowledge/workspace/shared/` and `knowledge/workspace/docs/`, 1500 tokens each; `GET /knowledge` (lint) rows carry `kind: hub|doc`, `title` and `projectSlug`.
 `GET /specs/:project` (capabilities) · `GET /specs/:project/capabilities/:capability` · `GET /specs/:project/changes?state=` · `GET /specs/:project/changes/:name` · `GET /specs/:project/graph` · `POST /specs/:project/reindex`
 
 ### Usage

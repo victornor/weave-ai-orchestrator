@@ -134,6 +134,22 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     if (key === 'reject' || key === 'decline') return;
     const runtime = key.startsWith('runtime:') ? key.slice('runtime:'.length) : undefined;
     await deps().roles.activate(actor, roleId, runtime ? { runtime } : undefined);
+    // The new role's first job: the project's unassigned "describe" scout ticket, if any, starts now
+    // rather than waiting for the conductor's next turn.
+    try {
+      const role = deps().roles.get(roleId);
+      const waiting = db.all<{ id: string; identifier: string }>(
+        "SELECT id, identifier FROM tickets WHERE workspace_id = ? AND project_id = ? AND status IN ('backlog','todo') AND assignee_role_id IS NULL AND worker_id IS NULL AND origin_kind = 'project_describe'",
+        [ws, role.projectId],
+      );
+      for (const t of waiting) {
+        deps().tickets.assign(actor, t.id, roleId);
+        const now = deps().tickets.get(t.id);
+        if (now.status === 'backlog') await deps().tickets.transition(actor, t.id, { to: 'todo', note: `${role.name} hired; starting the project description.` });
+      }
+    } catch (e) {
+      log.warn({ err: e, roleId }, 'assigning the scout ticket after the hire failed');
+    }
   }
 
   function applyDiscardApproval(actor: Actor, d: Decision, key: string, text: string | null): void {

@@ -3,8 +3,10 @@ import { estimateTokens, OcError, type KnowledgeScope } from '@agent-conductor/s
 
 /** Budgets in tokens per file (PLAN §13.1). */
 export const BUDGETS: Record<KnowledgeScope, number> = { workspace: 3000, shared: 800, decisions: 1500, project: 1500 };
+/** Budget per linked document (PLAN §13): a topic page, not a wiki. */
+export const DOC_BUDGET = 1500;
 
-export const PROJECT_SECTIONS = ['Overview', 'Stack & commands', 'Conventions', 'Current focus', 'Landmines', 'Learnings'] as const;
+export const PROJECT_SECTIONS = ['Overview', 'Stack & commands', 'Conventions', 'Current focus', 'Landmines', 'Documents', 'Learnings'] as const;
 export const WORKSPACE_SECTIONS = ['Overview', 'Goals', 'People & working style', 'Portfolio', 'Conventions', 'Standing instructions'] as const;
 export const SHARED_SECTIONS = ['Conventions', 'Glossary', 'Tone'] as const;
 export const DECISION_SECTIONS = ['Decisions'] as const;
@@ -202,4 +204,54 @@ export function seedBody(scope: KnowledgeScope, opts: { workspaceName?: string; 
         '',
       ].join('\n');
   }
+}
+
+// ---------- linked documents ----------
+
+export const DOC_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,63}$/;
+
+/** Path of a linked document relative to `knowledge/`. `decisions` has no documents. */
+export function docPathFor(scope: KnowledgeScope, slug: string, projectSlug?: string | null): string {
+  if (!DOC_SLUG_RE.test(slug)) throw new OcError('validation', `document slug "${slug}" must be kebab-case (a-z, 0-9, -), 2-64 characters`);
+  switch (scope) {
+    case 'project':
+      if (!projectSlug) throw new OcError('validation', 'a project document needs a project');
+      return `projects/${projectSlug}/docs/${slug}.md`;
+    case 'shared': return `workspace/shared/${slug}.md`;
+    case 'workspace': return `workspace/docs/${slug}.md`;
+    case 'decisions': throw new OcError('validation', 'the decisions log has no documents');
+  }
+}
+
+/** Is this knowledge path a linked document (as opposed to one of the four hub files)? */
+export function isDocPath(rel: string): boolean {
+  return /\/docs\/[^/]+\.md$/.test(rel) || /^workspace\/shared\/[^/]+\.md$/.test(rel);
+}
+
+export function docSlugOf(rel: string): string | null {
+  const m = /([^/]+)\.md$/.exec(rel);
+  return isDocPath(rel) && m ? m[1]! : null;
+}
+
+/** `[[slug]]`, `[[slug|label]]` and relative markdown links to `slug.md` / `docs/slug.md`. */
+export function parseLinks(body: string): string[] {
+  const out = new Set<string>();
+  for (const m of body.matchAll(/\[\[([a-z0-9][a-z0-9-]*)(?:\|[^\]]*)?\]\]/g)) out.add(m[1]!);
+  for (const m of body.matchAll(/\]\((?:\.\/)?(?:docs\/)?([a-z0-9][a-z0-9-]*)\.md\)/g)) out.add(m[1]!);
+  return [...out];
+}
+
+export function docTitle(body: string): string | null {
+  const m = /^#\s+(.+?)\s*$/m.exec(body);
+  return m ? m[1]! : null;
+}
+
+/** First non-empty paragraph after the title, one line, for catalogues. */
+export function docSummary(body: string): string {
+  const lines = body.split('\n');
+  let i = 0;
+  while (i < lines.length && (lines[i]!.trim() === '' || /^#\s/.test(lines[i]!) || /^<!--/.test(lines[i]!))) i++;
+  const para: string[] = [];
+  while (i < lines.length && lines[i]!.trim() !== '' && !/^#/.test(lines[i]!)) { para.push(lines[i]!.trim()); i++; }
+  return para.join(' ').replace(/\s+/g, ' ').slice(0, 240);
 }

@@ -69,7 +69,7 @@ export function TeamRoute(): React.ReactElement {
                           <div key={r.id} className="ac-card p-3.5">
                             <div className="mb-2.5 flex flex-wrap items-center gap-2.5">
                               <span className="text-ui font-medium text-text-1">{r.name}</span>
-                              <Badge>{r.status}</Badge>
+                              <Badge>{r.status === 'pending_activation' ? 'awaiting hire approval' : r.status.replace(/_/g, ' ')}</Badge>
                               <span className="ac-mono text-micro text-text-3">
                                 {r.runtimeId}
                                 {r.model ? ` · ${r.model}` : ''}

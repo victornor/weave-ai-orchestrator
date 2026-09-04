@@ -67,16 +67,16 @@
   --bg-input: #ffffff;
   --line-1: #e6e8eb;
   --line-2: #d3d6db;
-  --line-3: #c3c7ce;
+  --line-3: #c7cad0;
 
   --text-1: #16181c;
   --text-2: #61656c;
   --text-3: #8a8f98;
-  --text-4: #a2a7ae;
+  --text-4: #b4b8bf;
   --text-strong: #0c0d10;
   --text-soft: #3d4148;
   --text-body: #24272c;
-  --text-nav: #8a8f98;
+  --text-nav: #b4b8bf;
 
   --accent: #4a55c4;
   --accent-link: #4a55c4;
@@ -88,12 +88,12 @@
   --focus-ring: rgb(74 85 196 / 0.18);
 
   --status-idle: #6b7078;
-  --status-working: #b4761a;
+  --status-working: #b8791f;
   --status-stalled: #96631a;
   --status-blocked: #d2401e;
   --status-needs-you: #4a55c4;
   --status-merging: #7a45d0;
-  --status-done: #22883a;
+  --status-done: #1f8a34;
   --status-failed: #c22b31;
   --status-paused: #8a8f98;
 
@@ -412,3 +412,20 @@
   from { opacity: 0; transform: translateY(var(--space-8)); }
   to { opacity: 1; transform: none; }
 }
+
+/* Ticket identifiers inside markdown (chat, comments): a chip, not a link. */
+.ac-prose a[href^='#ticket:'] {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0.125rem;
+  padding: 0.0625rem 0.375rem;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.6875rem;
+  text-decoration: none;
+  vertical-align: baseline;
+}
+.ac-prose a[href^='#ticket:']:hover { border-color: var(--accent-edge); color: var(--accent-link); }

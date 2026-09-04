@@ -114,6 +114,7 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
   return {
     async index(projectId) {
       const p = project(projectId);
+      projectId = p.id;
       const openspecDir = join(p.clonePath, 'openspec');
       if (!existsSync(openspecDir)) { log.info({ projectId, clonePath: p.clonePath }, 'no openspec/ directory; nothing to index'); return { capabilities: 0, changes: 0 }; }
 
@@ -221,6 +222,7 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
     },
 
     listCapabilities(projectId) {
+      projectId = project(projectId).id;
       return db.all<CapabilityRow & { pendingChanges: number }>(
         `SELECT c.id, c.capability, c.title, c.requirement_count, c.last_archived_change, c.updated_at,
                 (SELECT COUNT(*) FROM spec_change_capabilities scc JOIN spec_changes sc ON sc.id = scc.change_id
@@ -230,6 +232,7 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
     },
 
     getCapability(projectId, capability) {
+      projectId = project(projectId).id;
       const row = db.get<CapabilityRow>('SELECT id, capability, title, requirement_count, body, last_archived_change, updated_at FROM spec_capabilities WHERE project_id = ? AND capability = ?', [projectId, capability]);
       if (!row) throw new OcError('not_found', `capability ${capability} is not indexed for this project`);
       const requirements = db.all<{ name: string; text: string; scenarios: unknown }>('SELECT name, text, scenarios_json FROM spec_requirements WHERE capability_id = ? ORDER BY rowid', [row.id])
@@ -246,10 +249,12 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
     },
 
     listChanges(projectId, state) {
+      projectId = project(projectId).id;
       return changesOf(projectId, state).map((c) => ({ ...c, capabilities: capsOfChange(c.id) }));
     },
 
     getChange(projectId, changeName) {
+      projectId = project(projectId).id;
       const rows = changesOf(projectId).filter((c) => c.changeName === changeName);
       const row = rows.find((c) => c.state === 'active') ?? rows[0];
       if (!row) throw new OcError('not_found', `change ${changeName} is not indexed for this project`);
@@ -257,6 +262,7 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
     },
 
     graph(projectId) {
+      projectId = project(projectId).id;
       const nodes: Array<{ id: string; kind: 'capability' | 'change' | 'ticket'; label: string; status?: string }> = [];
       const edges: Array<{ from: string; to: string; kind: 'touches' | 'belongs_to' }> = [];
       for (const c of db.all<{ capability: string; requirementCount: number }>('SELECT capability, requirement_count FROM spec_capabilities WHERE project_id = ? ORDER BY capability', [projectId])) {

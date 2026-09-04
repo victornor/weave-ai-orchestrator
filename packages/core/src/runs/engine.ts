@@ -1,3 +1,4 @@
+import { seedRuntimeCredentials } from '../workspace/loader.js';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nowIso } from '@openconductor/db';
@@ -226,7 +227,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       permission: { mode: permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto', allowedTools: permission.allowed, deniedTools: permission.denied },
       model: agent.model ?? role?.model ?? ctx.config.defaults.model ?? null,
       effort: agent.effort ?? role?.effort ?? null,
-      configHome: join(ctx.paths.runtimesHome, agent.runtimeId),
+      configHome: (seedRuntimeCredentials(agent.runtimeId, join(ctx.paths.runtimesHome, agent.runtimeId)), join(ctx.paths.runtimesHome, agent.runtimeId)),
     };
 
     // 5. spawn + stream
@@ -325,7 +326,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
       });
     }
 
-    const agentStatus = status === 'succeeded' ? 'active' : (errorFamily && RETRYABLE.includes(errorFamily)) || status === 'cancelled' ? 'active' : 'error';
+    const agentStatus = status === 'succeeded' ? 'active' : (errorFamily && (RETRYABLE.includes(errorFamily) || (errorFamily === 'auth' && countRetries(ctx, runId) < 1))) || status === 'cancelled' ? 'active' : 'error';
     ctx.db.update('agents', f.agent.id, {
       status: agentStatus,
       turnEpoch: f.run.turnEpoch,
@@ -358,10 +359,15 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   ctx.events.emit('run.finished', 'run', runId, { agentId: f.agent.id, ticketId: f.agent.ticketId, status, liveness, costCents, summary });
   runState(ctx).active.delete(runId);
 
-  // Retry the transient families with backoff (30 s / 2 min / 10 min, max 3).
-  if (errorFamily && RETRYABLE.includes(errorFamily)) {
+  // Auth failures: the per-workspace credential copy may be stale (OAuth rotation); re-seed from the host and retry once.
+  if (errorFamily === 'auth') {
+    try { seedRuntimeCredentials(f.agent.runtimeId, join(ctx.paths.runtimesHome, f.agent.runtimeId), { force: true }); } catch { /* best effort */ }
+  }
+  // Retry the transient families with backoff (30 s / 2 min / 10 min, max 3); auth gets a single retry after re-seeding.
+  if (errorFamily && (RETRYABLE.includes(errorFamily) || errorFamily === 'auth')) {
     const attempt = countRetries(ctx, runId);
-    if (attempt < RETRY_BACKOFF_MS.length) {
+    const maxAttempts = errorFamily === 'auth' ? 1 : RETRY_BACKOFF_MS.length;
+    if (attempt < maxAttempts) {
       const delay = RETRY_BACKOFF_MS[attempt]!;
       const notBefore = new Date(Date.now() + delay).toISOString();
       ctx.db.update('runs', runId, { scheduledRetryAt: notBefore });

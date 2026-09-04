@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, chmodSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import YAML from 'yaml';
@@ -20,6 +20,7 @@ export const WORKSPACE_FILE = 'workspace.yaml';
 // ---------- config dir (daemon-level) ----------
 
 function configDir(): string {
+  if (process.env.OC_CONFIG_HOME) return process.env.OC_CONFIG_HOME;
   const xdg = process.env.XDG_CONFIG_HOME;
   return xdg && xdg.trim().length ? join(xdg, 'openconductor') : join(homedir(), '.config', 'openconductor');
 }
@@ -273,7 +274,7 @@ export const loader: WorkspaceLoader = new Loader();
  * Inherit the host user's CLI credentials into a per-workspace runtime config home when it has none yet.
  * Copies only credential files (never settings), mode 0600. `oc runtime login` can replace them later.
  */
-function seedRuntimeCredentials(runtimeId: string, home: string): void {
+export function seedRuntimeCredentials(runtimeId: string, home: string, opts: { force?: boolean } = {}): void {
   const h = process.env.HOME ?? '';
   const candidates: Record<string, Array<[string, string]>> = {
     claude: [[join(h, '.claude', '.credentials.json'), join(home, '.credentials.json')]],
@@ -283,7 +284,9 @@ function seedRuntimeCredentials(runtimeId: string, home: string): void {
   };
   for (const [src, dst] of candidates[runtimeId] ?? []) {
     try {
-      if (existsSync(dst) || !existsSync(src)) continue;
+      if (!existsSync(src)) continue;
+      // Copy when the workspace has no credentials yet, or when the host's file is newer (OAuth tokens rotate; the host CLI refreshes them).
+      if (!opts.force && existsSync(dst) && statSync(dst).mtimeMs >= statSync(src).mtimeMs) continue;
       mkdirSync(dirname(dst), { recursive: true });
       copyFileSync(src, dst);
       chmodSync(dst, 0o600);

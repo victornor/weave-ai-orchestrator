@@ -35,7 +35,7 @@ export function classifyError(exitCode: number | null, stderr: string): { code: 
   const s = stderr.toLowerCase();
   if (/rate.?limit|429|overloaded|quota|capacity/.test(s)) return { code: 'provider_quota', family: 'provider_quota', message: 'provider rate limited or quota exceeded' };
   if (/enotfound|econnreset|etimedout|502|503|504|network/.test(s)) return { code: 'transient_upstream', family: 'transient_upstream', message: 'transient upstream failure' };
-  if (/unauthori[sz]ed|401|invalid api key|not logged in|login required|authentication/.test(s)) return { code: 'auth', family: 'auth', message: 'runtime authentication failed' };
+  if (/unauthori[sz]ed|401|invalid api key|not logged in|login required|authentication|oauth session expired|could not be refreshed|failed to authenticate/.test(s)) return { code: 'auth', family: 'auth', message: 'runtime authentication failed' };
   if (/enoent|command not found|no such file/.test(s)) return { code: 'tooling', family: 'tooling', message: 'runtime binary or dependency missing' };
   return { code: `exit_${exitCode ?? 'signal'}`, family: 'unknown', message: (stderr.trim().split('\n').pop() || `exit ${exitCode}`).slice(0, 500) };
 }

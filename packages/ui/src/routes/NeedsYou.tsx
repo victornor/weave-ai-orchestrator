@@ -43,7 +43,13 @@ export function NeedsYouRoute(): React.ReactElement {
       toast.push({ title: 'Answer queued', detail: 'Re-validated against the ticket when the connection returns.', status: 'working' });
       return;
     }
-    answer.mutate({ id, ...a }, { onSuccess: () => toast.push({ title: 'Recorded', detail: a.key ? `Answer: ${a.key}` : undefined, status: 'done', ttl: 4000 }) });
+    answer.mutate(
+      { id, ...a },
+      {
+        onSuccess: () => toast.push({ title: 'Recorded', detail: a.key ? `Answer: ${a.key}` : undefined, status: 'done', ttl: 4000 }),
+        onError: (e) => toast.push({ title: 'Could not record that answer', detail: e.message, status: 'failed' }),
+      },
+    );
   };
 
   return (

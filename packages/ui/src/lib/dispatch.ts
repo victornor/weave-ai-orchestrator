@@ -1,12 +1,14 @@
 /**
- * Dispatch labels for the conductor chat (spec `conductor-chat/dispatch-labels`): work the conductor
- * filed during a turn, rendered as an item of the message list under the message that turn produced.
+ * What a conductor turn left in the chat, rendered as items of the message list under the message
+ * that turn produced: the work it filed (spec `conductor-chat/dispatch-labels`) and the decisions it
+ * raised for the human (spec `human-decisions/option-cards`).
  *
- * The link is the ticket's creating run. The conductor does not spawn workers — it files a ticket and
- * the supervisor spawns for it, outside any run — so the run a dispatch is attributed to is the one
- * that created its ticket, matched against the run behind an outbound message in the thread.
+ * Both anchor on a run. The conductor does not spawn workers — it files a ticket and the supervisor
+ * spawns for it, outside any run — so a dispatch is attributed to the run that created its ticket; a
+ * decision is attributed to the run that raised it. Either is matched against the run behind an
+ * outbound message in the thread.
  */
-import type { Agent, AgentStatus, Ticket, ThreadMessage, UiStatus } from '@agent-conductor/shared';
+import type { Agent, AgentStatus, Decision, Ticket, ThreadMessage, UiStatus } from '@agent-conductor/shared';
 import { agentUiStatus, ticketUiStatus } from '@agent-conductor/shared';
 
 /** A worker in one of these has stopped; the ticket is then the honest record of how the work ended. */
@@ -23,12 +25,16 @@ export interface ChatEntry {
   message: ThreadMessage;
   /** Dispatches anchored to this message, in the order their tickets were filed. */
   dispatches: Dispatch[];
+  /** Decisions the run behind this message raised, in the order they were raised. */
+  decisions: Decision[];
 }
 
 export interface ChatEntries {
   entries: ChatEntry[];
   /** Live workers no message in the thread accounts for; they keep the row below the conversation. */
   unattributed: Agent[];
+  /** Decisions no message in the thread accounts for; the open ones keep the block below it. */
+  unanchoredDecisions: Decision[];
 }
 
 /**
@@ -71,7 +77,7 @@ function isDispatched(t: Ticket): boolean {
  * live work no message accounts for. Everything is derived from persisted fields, so a reload rebuilds
  * the same entries in the same order.
  */
-export function chatEntries(messages: ThreadMessage[], tickets: Ticket[], workers: Agent[]): ChatEntries {
+export function chatEntries(messages: ThreadMessage[], tickets: Ticket[], workers: Agent[], decisions: Decision[] = []): ChatEntries {
   const byRun = anchors(messages);
   const byMessage = new Map<string, Dispatch[]>();
   const anchored = new Set<string>();
@@ -89,8 +95,30 @@ export function chatEntries(messages: ThreadMessage[], tickets: Ticket[], worker
     anchored.add(ticket.id);
   }
 
+  // A decision is anchored by the run that raised it, through the same map: the conductor's
+  // question belongs under the message that turn produced, not at the end of the conversation.
+  const decisionsByMessage = new Map<string, Decision[]>();
+  const unanchoredDecisions: Decision[] = [];
+  for (const decision of [...decisions].sort((a, b) =>
+    a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt),
+  )) {
+    const messageId = decision.askedInRunId ? byRun.get(decision.askedInRunId) : undefined;
+    if (!messageId) {
+      unanchoredDecisions.push(decision);
+      continue;
+    }
+    const list = decisionsByMessage.get(messageId) ?? [];
+    list.push(decision);
+    decisionsByMessage.set(messageId, list);
+  }
+
   return {
-    entries: messages.map((message) => ({ message, dispatches: byMessage.get(message.id) ?? [] })),
+    entries: messages.map((message) => ({
+      message,
+      dispatches: byMessage.get(message.id) ?? [],
+      decisions: decisionsByMessage.get(message.id) ?? [],
+    })),
     unattributed: workers.filter((w) => !FINISHED.includes(w.status) && !(w.ticketId && anchored.has(w.ticketId))),
+    unanchoredDecisions,
   };
 }

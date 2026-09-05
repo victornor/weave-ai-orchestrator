@@ -448,11 +448,16 @@ export function useTicketUsage(id: string): UseQueryResult<{ total: T.UsageTotal
 
 /* ------------------------------------------------------------- decisions */
 
-export function useDecisions(params: { status?: string; owner?: string } = { status: 'open', owner: 'human' }): UseQueryResult<Decision[]> {
+export function useDecisions(
+  params: { status?: string | string[]; owner?: string; limit?: number } = { status: 'open', owner: 'human' },
+): UseQueryResult<Decision[]> {
   const ws = useWs();
+  // The route reads `status` as a comma-separated list, so several statuses cost no route work.
+  const status = Array.isArray(params.status) ? params.status.join(',') : params.status;
   return useQuery({
     queryKey: [...qk.decisions(ws), params],
-    queryFn: () => api.ws<Decision[] | { decisions: Decision[] }>(ws, `/decisions${qs(params)}`).then((r) => listOf(r, 'decisions')),
+    queryFn: () =>
+      api.ws<Decision[] | { decisions: Decision[] }>(ws, `/decisions${qs({ ...params, status })}`).then((r) => listOf(r, 'decisions')),
   });
 }
 

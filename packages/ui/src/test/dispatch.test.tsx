@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ThreadMessage } from '@agent-conductor/shared';
 import { chatEntries, dispatchStatus } from '../lib/dispatch';
-import { agent, ticket } from './factories';
+import { agent, decision, ticket } from './factories';
 
 function message(over: Partial<ThreadMessage> & Pick<ThreadMessage, 'id'>): ThreadMessage {
   return {
@@ -104,5 +104,62 @@ describe('chatEntries', () => {
     ];
     const { unattributed } = chatEntries([message({ id: 'm1' })], [dispatched({ id: 'tk_1' })], workers);
     expect(unattributed.map((w) => w.id)).toEqual(['w_loose']);
+  });
+});
+
+describe('chatEntries — decisions', () => {
+  const asked = (over = {}) => decision({ kind: 'question', askedInRunId: 'run_1', ...over });
+
+  it('anchors a decision to the message of the run that raised it', () => {
+    const messages = [message({ id: 'm1' }), message({ id: 'm2', runId: 'run_2' })];
+    const { entries, unanchoredDecisions } = chatEntries(messages, [], [], [asked({ id: 'd1' })]);
+    expect(entries[0]!.decisions.map((d) => d.id)).toEqual(['d1']);
+    expect(entries[1]!.decisions).toEqual([]);
+    expect(unanchoredDecisions).toEqual([]);
+  });
+
+  it('anchors to the last message of a run that sent several', () => {
+    const messages = [message({ id: 'm1' }), message({ id: 'm2' }), message({ id: 'm3', runId: 'run_2' })];
+    const { entries } = chatEntries(messages, [], [], [asked({ id: 'd1' })]);
+    expect(entries[0]!.decisions).toEqual([]);
+    expect(entries[1]!.decisions.map((d) => d.id)).toEqual(['d1']);
+  });
+
+  it('leaves a decision with no matching run unanchored', () => {
+    const messages = [message({ id: 'm1' })];
+    const loose = asked({ id: 'd_worker', askedInRunId: 'run_worker' });
+    const noRun = asked({ id: 'd_none', askedInRunId: null });
+    const { entries, unanchoredDecisions } = chatEntries(messages, [], [], [loose, noRun]);
+    expect(entries[0]!.decisions).toEqual([]);
+    expect(unanchoredDecisions.map((d) => d.id)).toEqual(['d_none', 'd_worker']);
+  });
+
+  it('keeps an answered decision anchored where it was asked', () => {
+    const messages = [message({ id: 'm1' }), message({ id: 'm2', runId: 'run_2', createdAt: '2026-09-01T10:00:00.000Z' })];
+    const answered = asked({ id: 'd1', status: 'answered', answerKey: 'yes', answeredAt: '2026-09-01T09:30:00.000Z' });
+    const { entries } = chatEntries(messages, [], [], [answered]);
+    expect(entries[0]!.decisions.map((d) => d.id)).toEqual(['d1']);
+    expect(entries[1]!.decisions).toEqual([]);
+  });
+
+  it('orders two decisions from one run by when they were raised', () => {
+    const messages = [message({ id: 'm1' })];
+    const first = asked({ id: 'd_first', createdAt: '2026-09-01T09:00:00.000Z' });
+    const second = asked({ id: 'd_second', createdAt: '2026-09-01T09:05:00.000Z' });
+    const { entries } = chatEntries(messages, [], [], [second, first]);
+    expect(entries[0]!.decisions.map((d) => d.id)).toEqual(['d_first', 'd_second']);
+  });
+
+  it('carries both the dispatches and the decisions of one turn', () => {
+    const messages = [message({ id: 'm1' })];
+    const { entries } = chatEntries(messages, [dispatched({ id: 'tk_1' })], [], [asked({ id: 'd1' })]);
+    expect(entries[0]!.dispatches.map((d) => d.ticket.id)).toEqual(['tk_1']);
+    expect(entries[0]!.decisions.map((d) => d.id)).toEqual(['d1']);
+  });
+
+  it('defaults to no decisions when none are passed', () => {
+    const { entries, unanchoredDecisions } = chatEntries([message({ id: 'm1' })], [], []);
+    expect(entries[0]!.decisions).toEqual([]);
+    expect(unanchoredDecisions).toEqual([]);
   });
 });

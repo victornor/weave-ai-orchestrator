@@ -118,4 +118,13 @@ describe('prompt rendering', () => {
     const charter = renderCharter(h.ctx, spec);
     expect(charter).not.toMatch(/\{\{[#/]?[a-z]/i);
   });
+
+  it.runIf(existsSync(SHIPPED_TEMPLATES))('tells the conductor to ask with options when the answer is a closed set', () => {
+    h.ctx.templatesDir = SHIPPED_TEMPLATES;
+    const conductor = renderConductorInstructions(h.ctx, h.deps);
+    expect(conductor).toContain('Ask with options when the answer is a closed set');
+    expect(conductor).toContain('`ac_ask`');
+    // The rule adds a form, it does not replace the ordinary reply path.
+    expect(conductor).toContain('Reply with `ac_human_send`');
+  });
 });

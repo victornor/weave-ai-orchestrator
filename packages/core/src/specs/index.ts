@@ -13,7 +13,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
 import { OcError } from '@agent-conductor/shared';
-import type { Actor, CoreServices, SpecsService } from '../api.js';
+import type { Actor, CoreServices, PendingChange, SpecChangeSummary, SpecsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import * as cli from '../openspec/cli.js';
@@ -40,6 +40,16 @@ export function deltaKindOf(body: string): DeltaKind {
   const m = /^##\s+(ADDED|MODIFIED|REMOVED|RENAMED)\s+Requirements\b/im.exec(body);
   const kind = m?.[1]?.toLowerCase();
   return kind === 'added' || kind === 'modified' || kind === 'removed' || kind === 'renamed' ? kind : 'modified';
+}
+
+/** `- [x] text` / `- [ ] text` lines of a change's tasks.md, in file order. Anything else in the file is prose. */
+export function parseTasks(md: string | null): Array<{ text: string; done: boolean }> {
+  const out: Array<{ text: string; done: boolean }> = [];
+  for (const line of (md ?? '').split('\n')) {
+    const m = /^\s*[-*]\s+\[([ xX])\]\s*(.*)$/.exec(line);
+    if (m) out.push({ text: (m[2] ?? '').trim(), done: (m[1] ?? '').toLowerCase() === 'x' });
+  }
+  return out;
 }
 
 /** proposal.md / design.md / tasks.md plus every `specs/**\/spec.md` delta, keyed by capability path. */
@@ -110,6 +120,21 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
     db.all<ChangeRow>(`SELECT id, change_name, state, ticket_id, archived_as, archived_at, created_at, artifacts_json, updated_at FROM spec_changes WHERE project_id = ?${state ? ' AND state = ?' : ''} ORDER BY archived_at DESC, change_name`, state ? [projectId, state] : [projectId]);
   const capsOfChange = (changeId: string): Array<{ capability: string; deltaKind: string }> =>
     db.all<{ capability: string; deltaKind: string }>('SELECT capability, delta_kind FROM spec_change_capabilities WHERE change_id = ? ORDER BY capability', [changeId]);
+  const identifierOf = (ticketId: string | null): string | null =>
+    (ticketId ? db.get<{ identifier: string }>('SELECT identifier FROM tickets WHERE id = ?', [ticketId])?.identifier ?? null : null);
+  /**
+   * A row stores the change folder verbatim in `artifacts_json`; the UI, the CLI and `ac_spec_change_get`
+   * all want the parsed change, so the parsing happens once here rather than in each client.
+   */
+  const summaryOf = (c: ChangeRow): SpecChangeSummary => {
+    const tasks = parseTasks(c.artifacts.tasks);
+    return {
+      id: c.id, changeName: c.changeName, state: c.state === 'active' ? 'active' : 'archived', ticketId: c.ticketId,
+      ticketIdentifier: identifierOf(c.ticketId), archivedAs: c.archivedAs, archivedAt: c.archivedAt,
+      createdAt: c.createdAt, updatedAt: c.updatedAt, capabilities: capsOfChange(c.id),
+      taskProgress: { done: tasks.filter((t) => t.done).length, total: tasks.length },
+    };
+  };
 
   return {
     async index(projectId) {
@@ -223,12 +248,23 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
 
     listCapabilities(projectId) {
       projectId = project(projectId).id;
-      return db.all<CapabilityRow & { pendingChanges: number }>(
-        `SELECT c.id, c.capability, c.title, c.requirement_count, c.last_archived_change, c.updated_at,
-                (SELECT COUNT(*) FROM spec_change_capabilities scc JOIN spec_changes sc ON sc.id = scc.change_id
-                  WHERE scc.capability = c.capability AND sc.project_id = c.project_id AND sc.state = 'active') AS pending_changes
+      const pending = new Map<string, PendingChange[]>();
+      for (const r of db.all<{ capability: string; changeName: string; ticketId: string | null; ticketIdentifier: string | null; deltaKind: string }>(
+        `SELECT scc.capability, sc.change_name, sc.ticket_id, t.identifier AS ticket_identifier, scc.delta_kind
+           FROM spec_change_capabilities scc JOIN spec_changes sc ON sc.id = scc.change_id
+           LEFT JOIN tickets t ON t.id = sc.ticket_id
+          WHERE sc.project_id = ? AND sc.state = 'active' ORDER BY sc.change_name`, [projectId])) {
+        const list = pending.get(r.capability) ?? [];
+        list.push({ changeName: r.changeName, ticketId: r.ticketId, ticketIdentifier: r.ticketIdentifier, deltaKind: r.deltaKind });
+        pending.set(r.capability, list);
+      }
+      return db.all<CapabilityRow>(
+        `SELECT c.id, c.capability, c.title, c.requirement_count, c.last_archived_change, c.updated_at
            FROM spec_capabilities c WHERE c.project_id = ? ORDER BY c.capability`, [projectId])
-        .map((r) => ({ id: r.id, capability: r.capability, title: r.title, requirementCount: r.requirementCount, lastArchivedChange: r.lastArchivedChange, pendingChanges: r.pendingChanges, updatedAt: r.updatedAt }));
+        .map((r) => ({
+          id: r.id, capability: r.capability, title: r.title, requirementCount: r.requirementCount,
+          lastArchivedChange: r.lastArchivedChange, pendingChanges: pending.get(r.capability) ?? [], updatedAt: r.updatedAt,
+        }));
     },
 
     getCapability(projectId, capability) {
@@ -243,14 +279,14 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
           WHERE sc.project_id = ? AND scc.capability = ? ORDER BY sc.archived_at DESC, sc.change_name`, [projectId, capability]);
       return {
         id: row.id, capability: row.capability, title: row.title, body: row.body, requirements,
-        pending: linked.filter((l) => l.state === 'active').map((l) => ({ changeName: l.changeName, ticketId: l.ticketId, deltaKind: l.deltaKind })),
+        pending: linked.filter((l) => l.state === 'active').map((l) => ({ changeName: l.changeName, ticketId: l.ticketId, ticketIdentifier: identifierOf(l.ticketId), deltaKind: l.deltaKind })),
         history: linked.filter((l) => l.state === 'archived').map((l) => ({ changeName: l.changeName, ticketId: l.ticketId, archivedAs: l.archivedAs, archivedAt: l.archivedAt })),
       };
     },
 
     listChanges(projectId, state) {
       projectId = project(projectId).id;
-      return changesOf(projectId, state).map((c) => ({ ...c, capabilities: capsOfChange(c.id) }));
+      return changesOf(projectId, state).map(summaryOf);
     },
 
     getChange(projectId, changeName) {
@@ -258,7 +294,12 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
       const rows = changesOf(projectId).filter((c) => c.changeName === changeName);
       const row = rows.find((c) => c.state === 'active') ?? rows[0];
       if (!row) throw new OcError('not_found', `change ${changeName} is not indexed for this project`);
-      return { ...row, capabilities: capsOfChange(row.id) };
+      const a = row.artifacts;
+      return {
+        ...summaryOf(row),
+        proposal: a.proposal, design: a.design, tasks: parseTasks(a.tasks),
+        deltas: Object.entries(a.specs).map(([capability, body]) => ({ capability, kind: deltaKindOf(body), body })),
+      };
     },
 
     graph(projectId) {

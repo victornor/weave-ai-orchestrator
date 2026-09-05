@@ -436,7 +436,9 @@ function ChangePage({ project, name, onBack }: { project: string; name: string; 
   if (detail.isLoading) return <SkeletonRows rows={6} />;
   if (detail.isError || !detail.data) return <ErrorState code="CHANGE_NOT_FOUND" message="No such change." />;
   const c = detail.data;
-  const done = c.tasks.filter((t) => t.done).length;
+  const tasks = c.tasks ?? [];
+  const deltas = c.deltas ?? [];
+  const done = tasks.filter((t) => t.done).length;
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
@@ -450,13 +452,13 @@ function ChangePage({ project, name, onBack }: { project: string; name: string; 
 
       <div className="ac-card p-3.5">
         <div className="ac-label mb-2">
-          Tasks · {done}/{c.tasks.length}
+          Tasks · {done}/{tasks.length}
         </div>
         <div className="mb-3 h-1.5 overflow-hidden rounded-pill bg-bg-3">
-          <div className="h-full bg-done" style={{ width: `${c.tasks.length ? (done / c.tasks.length) * 100 : 0}%` }} />
+          <div className="h-full bg-done" style={{ width: `${tasks.length ? (done / tasks.length) * 100 : 0}%` }} />
         </div>
         <ul className="flex flex-col gap-1.5">
-          {c.tasks.map((t, i) => (
+          {tasks.map((t, i) => (
             <li key={i} className="flex items-start gap-2.5">
               <span className={cx('mt-0.5 size-3 flex-none rounded-r4 border', t.done ? 'border-done bg-done/20' : 'border-line-3')} aria-hidden />
               <span className={cx('text-meta', t.done ? 'text-text-3' : 'text-text-1')}>{t.text}</span>
@@ -477,7 +479,7 @@ function ChangePage({ project, name, onBack }: { project: string; name: string; 
           <Markdown source={c.design} />
         </section>
       ) : null}
-      {c.deltas.map((d) => (
+      {deltas.map((d) => (
         <section key={`${d.capability}-${d.kind}`} className="ac-card p-3.5">
           <div className="ac-label mb-2">
             {d.kind} · {d.capability}

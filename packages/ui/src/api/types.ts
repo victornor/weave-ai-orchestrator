@@ -346,7 +346,7 @@ export interface SpecChangeSummary {
   state: 'active' | 'archived';
   ticketId: string | null;
   ticketIdentifier: string | null;
-  createdAt: string;
+  createdAt: string | null;
   archivedAt: string | null;
   capabilities: Array<{ capability: string; deltaKind: string }>;
   taskProgress?: { done: number; total: number };

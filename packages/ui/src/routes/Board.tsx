@@ -11,7 +11,7 @@ import { Table } from '../components/Table';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
 import { MergeQueuePanel } from '../components/MergeQueue';
-import { useMergeQueue, useProjects, useRoles, useTickets, useWorkers } from '../api/hooks';
+import { useDecisions, useMergeQueue, useProjects, useRoles, useTickets, useWorkers, useWorkspaceSummary } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import type { FinishedMode } from '../lib/board';
@@ -28,6 +28,7 @@ import {
 import { useListNav } from '../lib/hotkeys';
 import { ago, statusText } from '../lib/format';
 import { cx } from '../lib/cx';
+import { isAutoApproving } from '../lib/yolo';
 
 type View = 'kanban' | 'table';
 
@@ -58,6 +59,18 @@ export function BoardRoute(): React.ReactElement {
   const workers = useWorkers({});
   // The merge queue is per project, so it is shown once the board is filtered to one (PLAN §11.4).
   const mergeQueue = useMergeQueue(project);
+  // A ticket whose open approval the daemon will grant is not waiting on the human (PLAN §15).
+  const openDecisions = useDecisions({ status: 'open', owner: 'human' });
+  const summary = useWorkspaceSummary();
+  const autoApproving = useMemo(() => {
+    const byId = new Map((tickets.data ?? []).map((t) => [t.id, t]));
+    const ids = new Set<string>();
+    for (const d of openDecisions.data ?? []) {
+      const t = d.ticketId ? byId.get(d.ticketId) : undefined;
+      if (t && isAutoApproving(d, summary.data?.config, projects.data?.find((p) => p.id === t.projectId))) ids.add(t.id);
+    }
+    return ids;
+  }, [openDecisions.data, tickets.data, projects.data, summary.data]);
 
   // `recent` is a window on what the query returned; `all` is everything it returned.
   const shownFinished = useMemo(() => {
@@ -174,7 +187,7 @@ export function BoardRoute(): React.ReactElement {
             {/* phone list */}
             <div className="md:hidden">
               {filtered.map((t, i) => (
-                <TicketRow key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} selected={i === nav.index} onOpen={() => open(t)} />
+                <TicketRow key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} autoApproving={autoApproving.has(t.id)} selected={i === nav.index} onOpen={() => open(t)} />
               ))}
             </div>
 
@@ -203,7 +216,7 @@ export function BoardRoute(): React.ReactElement {
                       </header>
                       <div className="ac-scroll flex flex-col gap-2 px-2 pb-4">
                         {c.items.map((t) => (
-                          <TicketCard key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} onOpen={() => open(t)} />
+                          <TicketCard key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} autoApproving={autoApproving.has(t.id)} onOpen={() => open(t)} />
                         ))}
                       </div>
                     </section>

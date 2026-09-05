@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { yoloEnabled } from '@agent-conductor/shared';
 import type * as S from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
@@ -100,6 +101,7 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
     project: {
       id: p?.slug ?? '', name: p?.name ?? '', defaultBranch: p?.defaultBranch ?? 'main', deliveryMode,
       mergeMethod: String(policies.mergeMethod ?? 'squash'), rules: r?.rules ?? [], openspec: p?.openspecEnabled ?? false,
+      yolo: yoloEnabled(policies, ctx.config.defaults.yolo),
     },
     ticket: {
       identifier: t?.identifier ?? '', title: t?.title ?? '', description: t?.description ?? '', kind: t?.kind ?? 'task',

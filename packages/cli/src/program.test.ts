@@ -96,6 +96,11 @@ describe('command tree', () => {
     expect(helpOf(find(program, ['daemon', 'install-service'])!)).toMatch(/only on macOS/);
   });
 
+  it('documents the YOLO mode key on both policy setters', () => {
+    expect(helpOf(find(program, ['workspace', 'set-default'])!)).toMatch(/yolo=true\|false/);
+    expect(helpOf(find(program, ['project', 'set-policy'])!)).toMatch(/yolo=true\|false/);
+  });
+
   it('carries the global flags every command needs', () => {
     const flags = program.options.map((o) => o.long);
     expect(flags).toEqual(expect.arrayContaining(['--workspace', '--json', '--no-color', '--context', '--url', '--token']));

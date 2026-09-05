@@ -5,12 +5,13 @@ import { PlanPreview } from '../components/PlanPreview';
 import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Button } from '../components/Button';
-import { useAnswerDecision, useDecisions, useTickets, useWorkers } from '../api/hooks';
+import { useAnswerDecision, useDecisions, useProjects, useTickets, useWorkers, useWorkspaceSummary } from '../api/hooks';
 import { useConnection, useWs } from '../api/context';
 import { enqueue, useQueue } from '../lib/queue';
 import { useToast } from '../components/Toast';
 import { useGo } from '../app/link';
 import { useListNav } from '../lib/hotkeys';
+import { isAutoApproving } from '../lib/yolo';
 
 export function NeedsYouRoute(): React.ReactElement {
   const ws = useWs();
@@ -21,6 +22,8 @@ export function NeedsYouRoute(): React.ReactElement {
   const conductorOwned = useDecisions({ status: 'open', owner: 'conductor' });
   const workers = useWorkers({ status: 'running' });
   const tickets = useTickets({ limit: 200 });
+  const projects = useProjects();
+  const summary = useWorkspaceSummary();
   const answer = useAnswerDecision();
   const queue = useQueue();
   const offline = conn.state === 'offline' || conn.state === 'unreachable';
@@ -93,6 +96,7 @@ export function NeedsYouRoute(): React.ReactElement {
                     busy={answer.isPending}
                     queued={isQueued}
                     plan={<PlanPreview decision={d} />}
+                    autoApproving={isAutoApproving(d, summary.data?.config, projects.data?.find((p) => p.id === t?.projectId))}
                     onAnswer={(a) => onAnswer(d.id, a)}
                   />
                 </div>

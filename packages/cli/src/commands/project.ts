@@ -142,7 +142,8 @@ export function register(program: Command): void {
 Keys:   proposalApproval=human|conductor|none   mergeMethod=squash|merge|rebase
         deliveryMode=pr|local-branch            autoMergeDefault=true|false
         taskApproval=human|conductor|none       archiveCommit=push|pr|local
-        requireCi=true|false
+        requireCi=true|false                    mergeConcurrency=<1-8>
+        yolo=true|false                         (YOLO mode for this project; unset inherits the workspace)
 Example: conductor project set-policy api deliveryMode=pr requireCi=false`)
     .action(async (id: string, assignments: string[], _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);

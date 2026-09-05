@@ -81,6 +81,7 @@ Keys:    knowledgeBudgetTokens.project=<n>    knowledgeBudgetTokens.document=<n>
          knowledgeBudgetTokens.workspace=<n>  knowledgeBudgetTokens.shared=<n>
          knowledgeBudgetTokens.decisions=<n>  bootstrapBudgetTokens=<n>
          runtime=<id>  model=<id>  maxConcurrentRuns=<n>  turnTimeoutSec=<n>  autoMerge=true|false
+         yolo=true|false  (YOLO mode: the daemon grants plan and merge approvals itself)
 Example: conductor workspace set-default knowledgeBudgetTokens.project=20000`)
     .action(async (assignments: string[], _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);

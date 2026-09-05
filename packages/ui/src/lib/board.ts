@@ -90,8 +90,11 @@ export function isFolded(status: TicketStatus, opts: { live?: boolean } = {}): b
  */
 export function ticketBoardStatus(
   status: TicketStatus,
-  opts: { live?: boolean; needsYou?: boolean; stalled?: boolean } = {},
+  opts: { live?: boolean; needsYou?: boolean; autoApproving?: boolean; stalled?: boolean } = {},
 ): UiStatus {
+  // A ticket whose open approval the daemon will grant under YOLO mode is not waiting on the human,
+  // whatever its status would otherwise say (PLAN §15): it reads as still moving.
+  if (opts.autoApproving) return opts.stalled ? 'stalled' : 'working';
   if (opts.needsYou) return 'needs-you';
   if (opts.stalled) return 'stalled';
   if (status === 'merging') return 'merging';

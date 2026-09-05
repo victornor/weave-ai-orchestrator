@@ -17,6 +17,11 @@ export interface DecisionCardProps {
   queued?: boolean;
   /** The plan under approval, rendered above the buttons on a `plan_approval` card. */
   plan?: React.ReactNode;
+  /**
+   * YOLO mode will grant this decision, so it is not the human's to approve: the card says so and
+   * offers no approve action. Only ever true for a plan or merge approval (see lib/yolo.ts).
+   */
+  autoApproving?: boolean;
   onAnswer: (answer: { key?: string; text?: string; remember?: boolean }) => void;
   className?: string;
 }
@@ -77,7 +82,7 @@ function answerLine(decision: Decision): string | null {
  * primary action sits bottom-left inside a 44 px thumb band. A decision that has
  * been answered renders the same card as an inert record of what was decided.
  */
-export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy, asker, busy, queued, plan, onAnswer, className }: DecisionCardProps): React.ReactElement {
+export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy, asker, busy, queued, plan, autoApproving, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [freeText, setFreeText] = useState(false);
@@ -89,6 +94,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
   const answered = decision.status === 'answered';
   const inert = decision.status !== 'open';
   const optionList = !NAMED_VARIANTS.includes(decision.kind) && decision.options.length > 0;
+  const auto = !inert && autoApproving === true && (decision.kind === 'plan_approval' || decision.kind === 'merge_approval');
   const head = inert
     ? { label: answered ? 'Answered' : statusLabel(decision.status), status: (answered ? 'done' : 'blocked') as UiStatus }
     : decision.kind === 'question' && asker === 'conductor'
@@ -266,8 +272,13 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
         {queued ? <p className="mb-2 text-micro text-working">Queued — this answer is sent and re-validated when the connection returns.</p> : null}
 
         {/* primary action band, 44px, primary bottom-left. An answered card has none. */}
-        <div className={cx('flex items-center gap-2', !inert && 'min-h-thumb')}>
-          {inert ? null : decision.kind === 'plan_approval' ? (
+        <div className={cx('flex items-center gap-2', !inert && !auto && 'min-h-thumb')}>
+          {auto ? (
+            <p className="text-meta text-text-2" aria-label="Auto-approved by YOLO mode">
+              <span className="font-medium text-needs-you">Auto-approved by YOLO mode</span>
+              {decision.kind === 'merge_approval' ? ' — merging as soon as the PR\u2019s checks are green.' : ' — the worker is already implementing it.'}
+            </p>
+          ) : inert ? null : decision.kind === 'plan_approval' ? (
             <>
               <Button variant="primary" size="thumb" className="flex-1" disabled={busy} onClick={() => answer('approve')} kbd="⏎">
                 Approve

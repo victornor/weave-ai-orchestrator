@@ -8,6 +8,8 @@ const state = vi.hoisted(() => ({
   active: [] as Ticket[],
   finished: [] as Ticket[],
   queries: [] as Array<{ params: Record<string, unknown>; enabled: boolean }>,
+  decisions: [] as Array<Record<string, unknown>>,
+  config: {} as Record<string, unknown>,
   go: vi.fn() as unknown as ReturnType<typeof vi.fn>,
 }));
 
@@ -25,6 +27,8 @@ vi.mock('../api/hooks', () => ({
   useRoles: () => ({ data: [] }),
   useWorkers: () => ({ data: [] }),
   useMergeQueue: () => ({ data: null }),
+  useDecisions: () => ({ data: state.decisions }),
+  useWorkspaceSummary: () => ({ data: { config: state.config } }),
 }));
 
 const { BoardRoute } = await import('../routes/Board');
@@ -43,6 +47,8 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   state.search = {};
   state.queries = [];
+  state.decisions = [];
+  state.config = {};
   state.go = vi.fn();
   state.active = [ticket({ id: 'tk_1', identifier: 'VS-1', title: 'Still going', status: 'in_progress' })];
   state.finished = [

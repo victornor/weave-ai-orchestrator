@@ -40,6 +40,7 @@ import { useTheme } from '../lib/theme';
 import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
 import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, shortSha } from '../lib/upgrade';
 import { cx } from '../lib/cx';
+import { workspaceYolo } from '../lib/yolo';
 
 const SECTIONS = [
   { key: 'workspace', label: 'Workspace' },
@@ -85,6 +86,18 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 const inputCx = 'h-9 w-full rounded-r6 border border-line-2 bg-bg-input px-3 text-body text-text-1 outline-none';
 
+/** A project's YOLO override as the select's value: unset means it follows the workspace. */
+function yoloOverrideOf(policies: Record<string, unknown> | undefined): 'inherit' | 'on' | 'off' {
+  const raw = policies?.['yolo'];
+  return raw === true ? 'on' : raw === false ? 'off' : 'inherit';
+}
+
+/** The project's policies with the override set, or with the key gone when it goes back to inherit. */
+function withYolo(policies: Record<string, unknown> | undefined, choice: string): Record<string, unknown> {
+  const { yolo: _dropped, ...rest } = policies ?? {};
+  return choice === 'inherit' ? rest : { ...rest, yolo: choice === 'on' };
+}
+
 function WorkspaceSection(): React.ReactElement {
   const ws = useWs();
   const go = useGo();
@@ -126,6 +139,8 @@ function WorkspaceSection(): React.ReactElement {
         </Field>
       </section>
 
+      <YoloSection config={summary.data?.config ?? {}} />
+
       <KnowledgeBudgetsSection config={summary.data?.config ?? {}} />
 
       <section>
@@ -146,6 +161,52 @@ function WorkspaceSection(): React.ReactElement {
         </div>
       </section>
     </div>
+  );
+}
+
+/**
+ * YOLO mode: the daemon grants plan and merge approvals itself (PLAN §15). Off by default, and
+ * deliberate to turn on, so the copy says plainly what stops happening and what does not.
+ */
+function YoloSection({ config }: { config: Record<string, unknown> }): React.ReactElement {
+  const patch = usePatchConfig();
+  const toast = useToast();
+  const on = workspaceYolo(config);
+
+  return (
+    <section>
+      <div className="ac-label mb-2">YOLO mode</div>
+      <div className={cx('ac-card flex items-start gap-3 p-3.5', on && 'border-needs-you/40')}>
+        <div className="flex-1">
+          <p className="text-meta text-text-1">
+            Plan approvals and merge approvals are granted by the daemon instead of by you: the plan as soon as it validates,
+            the merge as soon as the PR&apos;s checks are green. Each is recorded as answered by the system.
+          </p>
+          <p className="mt-1.5 text-micro text-text-3">
+            Hires, discards, retries and questions still come to you. Nothing skips CI, the merge queue or the landing check.
+            A project can override this either way in Projects.
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label="YOLO mode"
+          onClick={() =>
+            patch.mutate(
+              { defaults: { yolo: !on } },
+              { onError: (e) => toast.push({ title: 'Could not change YOLO mode', detail: e.message, status: 'failed' }) },
+            )
+          }
+          className={cx(
+            'mt-0.5 h-7 shrink-0 rounded-r6 border px-3 text-meta font-medium',
+            on ? 'border-needs-you/50 bg-needs-you/15 text-needs-you' : 'border-line-2 text-text-3',
+          )}
+        >
+          {on ? 'On' : 'Off'}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -216,6 +277,7 @@ function ProjectsSection(): React.ReactElement {
   const [maxWorkers, setMaxWorkers] = useState(2);
   const [setupCommand, setSetupCommand] = useState('');
   const [autoMerge, setAutoMerge] = useState(false);
+  const workspaceOn = workspaceYolo(useWorkspaceSummary().data?.config ?? {});
 
   return (
     <div className="flex flex-col gap-5">
@@ -289,6 +351,23 @@ function ProjectsSection(): React.ReactElement {
                   onBlur={(e) => patch.mutate({ id: p.id, patch: { maxWorkers: Number(e.target.value) } })}
                   className="ac-mono h-7 w-14 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
                 />
+              </label>
+              <label className="flex items-center gap-1.5">
+                <span className="ac-label">yolo</span>
+                <select
+                  aria-label={`YOLO mode for ${p.slug}`}
+                  className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+                  value={yoloOverrideOf(p.policies)}
+                  onChange={(e) =>
+                    // `policies` is replaced wholesale, so dropping the key is what clears the
+                    // override and puts the project back on the workspace setting.
+                    patch.mutate({ id: p.id, patch: { policies: withYolo(p.policies, e.target.value) } })
+                  }
+                >
+                  <option value="inherit">{workspaceOn ? 'inherit (on)' : 'inherit (off)'}</option>
+                  <option value="on">on</option>
+                  <option value="off">off</option>
+                </select>
               </label>
             </div>
           ))}

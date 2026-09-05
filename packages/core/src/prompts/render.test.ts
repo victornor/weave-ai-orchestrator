@@ -67,6 +67,51 @@ describe('prompt rendering', () => {
     expect(out).not.toMatch(/\{\{|\}\}/);
   });
 
+  describe('YOLO mode in the instructions', () => {
+    const brief = (): string => renderBrief(h.ctx, h.deps, worker);
+    const shipped = (): TestHarness['ctx'] => Object.assign(h.ctx, { templatesDir: SHIPPED_TEMPLATES });
+
+    it('tells a worker its approvals are granted for it when the mode is on', () => {
+      h.ctx.config.defaults.yolo = true;
+      expect(brief()).toContain('YOLO mode is on for this project');
+      shipped();
+      expect(brief()).toContain('YOLO mode is on for this project');
+      expect(brief()).not.toMatch(/\{\{|\}\}/);
+    });
+
+    it('tells a worker the approvals are the human\'s when the mode is off', () => {
+      expect(h.ctx.config.defaults.yolo).toBe(false);
+      expect(brief()).toContain('are the human\'s');
+      expect(brief()).not.toContain('YOLO mode is on');
+      shipped();
+      expect(brief()).toContain('Plan approval and merge approval are the human\'s');
+      expect(brief()).not.toContain('YOLO mode is on');
+    });
+
+    it('follows the project override rather than the workspace default', () => {
+      h.ctx.config.defaults.yolo = true;
+      h.db.update('projects', h.projectId, { policiesJson: { yolo: false } });
+      expect(brief()).not.toContain('YOLO mode is on');
+
+      h.ctx.config.defaults.yolo = false;
+      h.db.update('projects', h.projectId, { policiesJson: { yolo: true } });
+      expect(brief()).toContain('YOLO mode is on for this project');
+    });
+
+    it('states the policy in the conductor instructions, both ways', () => {
+      expect(renderConductorInstructions(h.ctx, h.deps)).toContain('Merge approval is always');
+      h.ctx.config.defaults.yolo = true;
+      const on = renderConductorInstructions(h.ctx, h.deps);
+      expect(on).toContain('YOLO mode is on');
+      expect(on).not.toMatch(/\{\{|\}\}/);
+
+      shipped();
+      const shippedOn = renderConductorInstructions(h.ctx, h.deps);
+      expect(shippedOn).toContain('YOLO mode is on for this workspace');
+      expect(shippedOn).not.toMatch(/\{\{|\}\}/);
+    });
+  });
+
   it('renders a charter from a spec', () => {
     const charter = renderCharter(h.ctx, spec);
     expect(charter).toContain('Backend Engineer');

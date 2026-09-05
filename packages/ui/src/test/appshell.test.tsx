@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UpdateStatus } from '../api/types';
 
-const state = vi.hoisted(() => ({ update: null as UpdateStatus | null, updateError: false }));
+const state = vi.hoisted(() => ({ update: null as UpdateStatus | null, updateError: false, config: {} as Record<string, unknown> }));
 
 vi.mock('@tanstack/react-router', () => ({
   Outlet: () => null,
@@ -31,7 +31,7 @@ vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: [] }),
   useTickets: () => ({ data: [] }),
   useTransitionTicket: () => ({ mutate: vi.fn() }),
-  useWorkspaceSummary: () => ({ data: { workspace: { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME' } }, isError: false, error: null, refetch: vi.fn() }),
+  useWorkspaceSummary: () => ({ data: { workspace: { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME' }, config: state.config }, isError: false, error: null, refetch: vi.fn() }),
   useWorkspaces: () => ({ data: [] }),
 }));
 
@@ -46,7 +46,7 @@ const status = (over: Partial<UpdateStatus> = {}): UpdateStatus => ({
 
 const indicator = (): HTMLElement | null => screen.queryByLabelText('Daemon update available');
 
-beforeEach(() => { state.update = null; state.updateError = false; });
+beforeEach(() => { state.update = null; state.updateError = false; state.config = {}; });
 
 describe('the rail update indicator', () => {
   it('is shown when the daemon reports an update', () => {
@@ -77,5 +77,18 @@ describe('the rail update indicator', () => {
   it('is not shown before the first check has answered', () => {
     render(<AppShell />);
     expect(indicator()).not.toBeInTheDocument();
+  });
+});
+
+describe('AppShell — YOLO mode indicator', () => {
+  it('shows nothing while the mode is off', () => {
+    render(<AppShell />);
+    expect(screen.queryByLabelText('YOLO mode is on')).toBeNull();
+  });
+
+  it('shows a persistent indicator while the mode is on', () => {
+    state.config = { defaults: { yolo: true } };
+    render(<AppShell />);
+    expect(screen.getByLabelText('YOLO mode is on')).toBeInTheDocument();
   });
 });

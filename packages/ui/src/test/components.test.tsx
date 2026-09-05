@@ -75,6 +75,18 @@ describe('TicketCard', () => {
     expect(screen.getByRole('img')).toHaveAccessibleName('needs you');
     expect(screen.queryByText('proposed')).not.toBeInTheDocument();
   });
+
+  it('reads as auto-approving rather than needs-you when the daemon will grant the approval', () => {
+    render(<TicketCard ticket={ticket({ status: 'in_review' })} needsYou autoApproving />);
+    expect(screen.getByText('auto-approving')).toBeInTheDocument();
+    expect(screen.getByRole('img')).not.toHaveAccessibleName('needs you');
+  });
+
+  it('still reads as needs-you when the human owns the approval', () => {
+    render(<TicketCard ticket={ticket({ status: 'in_review' })} needsYou />);
+    expect(screen.queryByText('auto-approving')).not.toBeInTheDocument();
+    expect(screen.getByRole('img')).toHaveAccessibleName('needs you');
+  });
 });
 
 describe('WorkerCard', () => {

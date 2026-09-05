@@ -197,6 +197,67 @@ describe('workers', () => {
     expect(wake.calls[0]).toMatchObject({ agentId: worker.id, input: expect.objectContaining({ source: 'system', reason: 'relaunch' }) });
   });
 
+  // VS-56: resume used to flip the column and stop there, so the endpoint, the CLI verb and the web
+  // button all did nothing. It has to queue the turn and unblock the ticket.
+  describe('resuming a paused worker', () => {
+    const parked = async (): Promise<{ ticket: Ticket; worker: Agent }> => {
+      const ticket = seedTicket({ status: 'blocked' });
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      h.db.update('agents', worker.id, {
+        status: 'paused', pauseReason: 'rate_limit: waiting for a human',
+        pauseDetailJson: { family: 'provider_quota', code: 'rate_limit', message: 'limit resets in 2 hours', resetAt: null, runId: 'r1' },
+      });
+      wake.calls.length = 0;
+      return { ticket, worker };
+    };
+
+    it('clears the pause, queues a turn and unblocks the ticket without touching the worktree', async () => {
+      const { ticket, worker } = await parked();
+
+      const after = workers.resume(HUMAN, worker.id);
+
+      expect(after).toMatchObject({ status: 'active', pauseReason: null, pauseDetail: null });
+      expect(after.worktreePath).toBe(worker.worktreePath);
+      expect(after.branch).toBe(worker.branch);
+      expect(after.briefRevision).toBe(worker.briefRevision);
+      expect(existsSync(worker.worktreePath!)).toBe(true);
+      expect(wake.calls.filter((c) => c.agentId === worker.id)).toHaveLength(1);
+      expect(wake.calls[0]).toMatchObject({ agentId: worker.id, input: expect.objectContaining({ source: 'system', reason: 'resumed' }) });
+      expect(h.services.tickets!.transition).toHaveBeenCalledWith(HUMAN, ticket.id, expect.objectContaining({ to: 'todo' }));
+    });
+
+    it('queues nothing for a worker that was not paused', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      expect(workers.resume(HUMAN, worker.id).status).toBe('active');
+      expect(wake.calls).toHaveLength(0);
+    });
+
+    it('relaunching a worker parked after a failure resumes it instead', async () => {
+      const { worker } = await parked();
+
+      const after = await workers.relaunch({ kind: 'agent', id: 'conductor' }, worker.id, 'you look stuck');
+
+      // Resume, not relaunch: the brief is untouched, so the session and its progress stand.
+      expect(after.briefRevision).toBe(worker.briefRevision);
+      expect(after).toMatchObject({ status: 'active', pauseDetail: null });
+      expect(wake.calls[0]!.input).toMatchObject({ source: 'system', reason: 'resumed' });
+      expect(readFileSync(join(worker.homePath, 'brief.md'), 'utf8')).not.toContain('you look stuck');
+    });
+
+    it('still relaunches a worker that failed without being parked', async () => {
+      const ticket = seedTicket({ status: 'in_progress' });
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      h.db.update('agents', worker.id, { status: 'error', errorText: 'the CLI died' });
+      wake.calls.length = 0;
+
+      const after = await workers.relaunch(HUMAN, worker.id, 'try again');
+      expect(after.briefRevision).toBe(worker.briefRevision + 1);
+      expect(wake.calls[0]!.input).toMatchObject({ source: 'system', reason: 'relaunch' });
+    });
+  });
+
   it('messages a worker as a ticket comment plus a conductor_request wake', async () => {
     const ticket = seedTicket();
     const worker = await workers.spawnForTicket(SYSTEM, ticket.id);

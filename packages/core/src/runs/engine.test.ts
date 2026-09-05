@@ -10,7 +10,7 @@ import { createTicketsService } from '../tickets/service.js';
 import { createWakeService } from '../wake/index.js';
 import { createRunsService } from './index.js';
 import { createDispatcher, type CoreDispatcher } from './dispatcher.js';
-import { executeRun } from './engine.js';
+import { countRetries, executeRun } from './engine.js';
 import { makeRedactor } from './engine.js';
 import { runTokenSecret, verifyRunToken } from './runtoken.js';
 
@@ -214,6 +214,51 @@ describe('run engine', () => {
     expect(run.turnEpoch).toBe(7);
   });
 
+  // The dispatcher records, on the run it opens, which run it is retrying — the one writer of
+  // runs.retry_of_run_id. Without it `countRetries` reads zero forever and the ladder never ends.
+  describe('the retry link', () => {
+    it('records the run a retry wake names, and nothing for an ordinary wake', async () => {
+      runtime.queue.push({ structured: { state: 'working', summary: 'first', tickets: [] } });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      const first = await runOnce();
+      expect(first.retryOfRunId).toBeNull();
+
+      runtime.queue.push({ structured: { state: 'working', summary: 'second', tickets: [] } });
+      h.services.wake!.enqueue(h.conductorId, { source: 'retry', reason: 'retry after overloaded', payload: { retryOfRunId: first.id } });
+      expect((await runOnce()).retryOfRunId).toBe(first.id);
+    });
+
+    // A retry enqueued while an ordinary wake is already queued is coalesced into it and its payload
+    // ends up in that wake's `bundle`; the link has to survive that.
+    it('records the link when the retry wake is coalesced into an ordinary one', async () => {
+      runtime.queue.push({ structured: { state: 'working', summary: 'first', tickets: [] } });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      const first = await runOnce();
+
+      runtime.queue.push({ structured: { state: 'working', summary: 'second', tickets: [] } });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'and also this' });
+      const coalesced = h.services.wake!.enqueue(h.conductorId, { source: 'retry', reason: 'retry after overloaded', payload: { retryOfRunId: first.id } });
+      expect(coalesced.status).toBe('coalesced');
+      expect((await runOnce()).retryOfRunId).toBe(first.id);
+    });
+
+    it('counts a chain of three, and terminates on a cycle', () => {
+      let previous: string | null = null;
+      for (const id of ['r1', 'r2', 'r3', 'r4']) {
+        h.db.insert('runs', {
+          id, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: [], runtimeId: 'fake',
+          status: 'failed', turnEpoch: 0, cwd: '/tmp', retryOfRunId: previous, createdAt: nowIso(),
+        });
+        previous = id;
+      }
+      expect(countRetries(h.ctx, 'r4')).toBe(3);
+      expect(countRetries(h.ctx, 'r1')).toBe(0);
+
+      h.db.update('runs', 'r1', { retryOfRunId: 'r4' });
+      expect(countRetries(h.ctx, 'r4')).toBe(10);
+    });
+  });
+
   // A worker whose automatic retries are spent, or whose failure is not retryable at all, is parked
   // and the choice is put to the human as a retry_approval decision. That decision could not be
   // stored at all until VS-49 widened the kind CHECK, so the human never saw the card; these pin the
@@ -280,38 +325,103 @@ describe('run engine', () => {
       expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('blocked');
     });
 
-    // The retryable families park only once the ladder is spent, which `countRetries` measures by
-    // walking runs.retry_of_run_id. Nothing in the dispatcher writes that column (see the VS-49 PR),
-    // so the chain is staged here to reach the branch.
-    it('raises the card once the retry ladder is spent, and books one more attempt for a usage limit', async () => {
+    // The ladder is real now that the dispatcher links the attempts: four transient failures, three
+    // of them retried on the documented backoff, then the card. `not_before` is cleared between
+    // rounds so the test does not wait out 30 s / 2 min / 10 min — the payload, and so the link, is
+    // untouched.
+    it('retries a transient failure three times on the documented backoff, then parks the worker', async () => {
       const ticketId = seedTicket(h, { status: 'in_progress' });
       const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
-      const earlier = ['r1', 'r2', 'r3'];
-      let previous: string | null = null;
-      for (const id of earlier) {
-        h.db.insert('runs', {
-          id, workspaceId: h.workspaceId, agentId: workerId, ticketId, wakeupIdsJson: [], runtimeId: 'fake',
-          status: 'failed', turnEpoch: 0, cwd: '/tmp', retryOfRunId: previous, createdAt: nowIso(),
-        });
-        previous = id;
-      }
-      runtime.queue.push((input: TurnInput) => {
-        h.db.update('runs', input.runId, { retryOfRunId: 'r3' });
-        return { error: { code: 'rate_limit', family: 'provider_quota', message: 'limit resets in 2 hours' } } as never;
-      });
-      h.services.wake!.enqueue(workerId, { source: 'retry', reason: 'retry after rate_limit' });
-      await runOnce();
+      const failNext = (): void => { runtime.queue.push({ error: { code: 'overloaded', family: 'transient_upstream', message: 'upstream busy' } } as never); };
+      const queuedRetry = (): Wakeup | undefined =>
+        h.db.get<Wakeup>("SELECT * FROM wakeups WHERE agent_id = ? AND status = 'queued' AND source = 'retry' ORDER BY created_at DESC LIMIT 1", [workerId]);
+
+      failNext();
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1: Add a README badge' });
+      const runs: Run[] = [await runOnce()];
       await tick();
 
+      const delays: number[] = [];
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const retry = queuedRetry();
+        expect(retry, `attempt ${attempt} should have been retried`).toBeTruthy();
+        delays.push(new Date(retry!.notBefore!).getTime() - Date.now());
+        expect(openFor(ticketId)).toHaveLength(0);
+        expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('active');
+        h.db.update('wakeups', retry!.id, { notBefore: null });
+        failNext();
+        runs.push(await runOnce());
+        await tick();
+      }
+
+      // Every attempt after the first names the one before it, which is what makes the ladder end.
+      expect(runs.map((r) => r.retryOfRunId)).toEqual([null, runs[0]!.id, runs[1]!.id, runs[2]!.id]);
+      // The timings are unchanged: 30 s, 2 min, 10 min.
+      expect(delays[0]).toBeGreaterThan(20_000);
+      expect(delays[0]).toBeLessThan(40_000);
+      expect(delays[1]).toBeGreaterThan(110_000);
+      expect(delays[1]).toBeLessThan(130_000);
+      expect(delays[2]).toBeGreaterThan(590_000);
+      expect(delays[2]).toBeLessThan(610_000);
+
+      // Fourth failure: the ladder is spent, so nothing more is queued and the human gets the card.
+      expect(queuedRetry()).toBeUndefined();
+      const card = openFor(ticketId)[0]!;
+      expect(card.kind).toBe('retry_approval');
+      expect(card.recommendation).toBe('retry');
+      expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('paused');
+      expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('blocked');
+    });
+
+    // A usage limit never enters the ladder (ADR 0010): the runtime has already said the window is
+    // exhausted, so three more attempts are guaranteed waste.
+    it('parks a usage limit on its first failure, scheduling nothing at all', async () => {
+      const { ticketId, workerId } = await failOnce({ error: { code: 'rate_limit', family: 'provider_quota', message: 'limit resets in 2 hours' } });
+
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND source = 'retry'", [workerId])!.n).toBe(0);
       const card = openFor(ticketId)[0]!;
       expect(card.kind).toBe('retry_approval');
       expect(card.title).toContain('usage limit');
-      expect(card.recommendation).toBe('retry_1h');
-      expect(card.context).toContain('One more attempt is booked');
-      expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('blocked');
+      expect(card.context).toContain('provider_quota');
+      expect(card.context).toContain('limit resets in 2 hours');
+      expect(card.context).toContain('nothing will run until you answer');
+      // The reset time is offered, never booked.
+      expect(card.recommendation).toBe('retry_at_reset');
+      const reset = card.options.find((o: { key: string }) => o.key === 'retry_at_reset')!;
+      expect(reset.label).toContain('Retry when the limit resets');
+      expect(card.options.map((o: { key: string }) => o.key)).toEqual(['retry', 'retry_at_reset', 'runtime:other', 'cancel']);
 
-      const booked = h.db.get<{ notBefore: string }>("SELECT not_before FROM wakeups WHERE agent_id = ? AND source = 'retry' AND not_before IS NOT NULL ORDER BY created_at DESC LIMIT 1", [workerId]);
-      expect(new Date(booked!.notBefore).getTime()).toBeGreaterThan(Date.now() + 90 * 60_000);
+      const agent = h.db.get<{ status: string; pauseReason: string; pauseDetail: Record<string, unknown> }>(
+        'SELECT status, pause_reason, pause_detail_json FROM agents WHERE id = ?', [workerId])!;
+      expect(agent.status).toBe('paused');
+      expect(agent.pauseReason).toBe('rate_limit: waiting for a human');
+      expect(agent.pauseDetail).toMatchObject({ family: 'provider_quota', code: 'rate_limit', message: 'limit resets in 2 hours' });
+      expect(new Date(String(agent.pauseDetail.resetAt)).getTime()).toBeGreaterThan(Date.now() + 100 * 60_000);
+      expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('blocked');
+    });
+
+    it('falls back to the hour offer when the runtime names no reset time', async () => {
+      const { ticketId, workerId } = await failOnce({ error: { code: 'rate_limit', family: 'provider_quota', message: 'you are out of credits' } });
+      const card = openFor(ticketId)[0]!;
+      expect(card.options.map((o: { key: string }) => o.key)).toEqual(['retry', 'retry_1h', 'runtime:other', 'cancel']);
+      expect(card.recommendation).toBe('retry_1h');
+      expect(h.db.get<{ pauseDetail: { resetAt: string | null } }>('SELECT pause_detail_json FROM agents WHERE id = ?', [workerId])!.pauseDetail.resetAt).toBeNull();
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND source = 'retry'", [workerId])!.n).toBe(0);
+    });
+
+    it('books the attempt only when the human chooses the reset option', async () => {
+      const { ticketId, workerId } = await failOnce({ error: { code: 'rate_limit', family: 'provider_quota', message: 'limit resets in 2 hours' } });
+      const card = openFor(ticketId)[0]!;
+      const resetAt = h.db.get<{ pauseDetail: { resetAt: string } }>('SELECT pause_detail_json FROM agents WHERE id = ?', [workerId])!.pauseDetail.resetAt;
+
+      await h.services.decisions!.answer({ kind: 'human', id: 'h1' }, card.id, { key: 'retry_at_reset' });
+
+      const booked = h.db.all<Wakeup>("SELECT * FROM wakeups WHERE agent_id = ? AND source = 'retry'", [workerId]);
+      expect(booked).toHaveLength(1);
+      expect(booked[0]!.notBefore).toBe(resetAt);
+      const agent = h.db.get<{ status: string; pauseReason: string | null; pauseDetail: unknown }>(
+        'SELECT status, pause_reason, pause_detail_json FROM agents WHERE id = ?', [workerId])!;
+      expect(agent).toMatchObject({ status: 'active', pauseReason: null, pauseDetail: null });
     });
 
     it('still blocks the ticket and logs at error when the card cannot be raised', async () => {
@@ -354,6 +464,9 @@ describe('run engine', () => {
 
       expect(openFor(ticketId)).toHaveLength(0);
       expect(h.db.get<{ status: string }>('SELECT status FROM decisions WHERE id = ?', [card.id])!.status).toBe('withdrawn');
+      // A turn taken is a pause spent: the free-text reason and its structured twin go together.
+      expect(h.db.get<{ pauseReason: string | null; pauseDetail: unknown }>('SELECT pause_reason, pause_detail_json FROM agents WHERE id = ?', [workerId]))
+        .toMatchObject({ pauseReason: null, pauseDetail: null });
     });
   });
 });

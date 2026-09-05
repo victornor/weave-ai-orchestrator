@@ -88,7 +88,47 @@ describe('TicketCard', () => {
   });
 });
 
+describe('TicketCard — a paused worker', () => {
+  it('says on the board why the work stopped', () => {
+    render(<TicketCard ticket={ticket()} workerName="Frontend Engineer #7" workerPausedFor="provider_quota · limit resets in 2 hours" />);
+    expect(screen.getByText('paused · provider_quota · limit resets in 2 hours')).toBeInTheDocument();
+  });
+
+  it('says nothing when the worker is not paused', () => {
+    render(<TicketCard ticket={ticket()} workerName="Frontend Engineer #7" />);
+    expect(screen.queryByText(/paused ·/)).not.toBeInTheDocument();
+  });
+});
+
 describe('WorkerCard', () => {
+  // VS-56: a paused worker says why, and offers the one action that puts it back to work.
+  it('names why a paused worker stopped and offers Resume', () => {
+    const resume = vi.fn();
+    render(
+      <WorkerCard
+        agent={agent({
+          status: 'paused',
+          pauseReason: 'rate_limit: waiting for a human',
+          pauseDetail: { family: 'provider_quota', code: 'rate_limit', message: 'limit resets in 2 hours', resetAt: null, runId: 'r1' },
+        })}
+        onResume={resume}
+      />,
+    );
+    expect(screen.getByText('provider_quota · limit resets in 2 hours')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders a worker paused with only a free-text reason, and none for a running one', () => {
+    const { unmount } = render(<WorkerCard agent={agent({ status: 'paused', pauseReason: 'paused by operator' })} />);
+    expect(screen.getByText('paused by operator')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    unmount();
+
+    render(<WorkerCard agent={agent()} />);
+    expect(screen.queryByText(/provider_quota/)).not.toBeInTheDocument();
+  });
+
   it('shows the last line and the worktree state', () => {
     render(
       <WorkerCard

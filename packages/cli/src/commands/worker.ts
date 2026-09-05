@@ -37,6 +37,7 @@ export function register(program: Command): void {
           { header: 'MODEL', get: (r) => r.model ?? '(default)' },
           { header: 'TURN', get: (r) => String(r.turn), align: 'right' },
           { header: 'STATUS', get: (r) => r.statusLabel },
+          { header: 'REASON', get: (r) => r.pauseReason ?? '' },
         ], { empty: 'no workers running' });
       });
     }));
@@ -64,6 +65,7 @@ export function register(program: Command): void {
           ['ticket', card.ticket ? `${card.ticket.identifier} — ${card.ticket.title}` : ''],
           ['runtime', `${card.runtime}${card.model ? ` · ${card.model}` : ''}`],
           ['status', card.statusLabel],
+          ['paused', card.pauseReason ?? undefined],
           ['turn', String(card.turn)],
           ['home', String(agent.homePath ?? '')],
           ['worktree', String(agent.worktreePath ?? '')],

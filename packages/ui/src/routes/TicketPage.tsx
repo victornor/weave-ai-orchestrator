@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { ticketUiStatus } from '@agent-conductor/shared';
+import { workerPauseReason } from '@agent-conductor/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';
@@ -81,6 +82,9 @@ export function TicketRoute(): React.ReactElement {
 
   const { ticket, project, worker } = detail.data;
   const ui = ticketUiStatus(ticket.status);
+  // A parked worker is why this ticket stopped. Retrying relaunches it, and relaunching a parked
+  // worker is a resume — same session, same worktree — so the button says what it does.
+  const pausedFor = worker ? workerPauseReason(worker) : null;
   const canRetry = ticket.status === 'blocked' || worker?.status === 'paused' || worker?.status === 'error';
 
   return (
@@ -105,13 +109,14 @@ export function TicketRoute(): React.ReactElement {
             ) : null}
             {project ? <span className="ac-mono">{project.slug}</span> : null}
             {worker ? <span>{worker.name}</span> : null}
+            {pausedFor ? <span className="ac-mono ac-truncate max-w-[40vw] text-micro text-text-3" title={pausedFor}>paused · {pausedFor}</span> : null}
           </span>
         }
         actions={
           <span className="flex items-center gap-3">
             {canRetry ? (
               <Button size="sm" variant="primary" onClick={() => retry.mutate({ id: ticket.id })} disabled={retry.isPending}>
-                {worker?.status === 'paused' ? 'Retry now' : 'Retry'}
+                {worker?.status === 'paused' ? 'Resume' : 'Retry'}
               </Button>
             ) : null}
           <label className="flex items-center gap-2">

@@ -214,6 +214,18 @@ export function mergeQueueLine(ctx: WorkspaceContext, t: S.Ticket, defaultBranch
   return `- Waiting in this project's merge queue at position ${ahead + 1}. Nothing to merge until the queue admits you; you will be woken then.`;
 }
 
+/**
+ * How a worker reads in the conductor's open-work list. A worker parked after a failure is waiting
+ * on the human, not stalled: say what stopped it and who owns the next move, so the conductor does
+ * not answer a quota limit by relaunching into it (VS-56).
+ */
+function workerStatusLine(w: S.Agent): string {
+  if (w.status !== 'paused' || !w.pauseDetail) return w.status;
+  const d = w.pauseDetail;
+  const why = [d.family ?? d.code, d.message ? d.message.slice(0, 120) : null].filter(Boolean).join(' — ');
+  return `paused: ${why || 'a failure'}; the human owns the resume`;
+}
+
 function bounded<T>(items: T[], max: number, render: (t: T) => string, more: string): string {
   const head = items.slice(0, max).map(render);
   if (items.length > max) head.push(`- +${items.length - max} more, ${more}`);
@@ -265,7 +277,7 @@ export async function buildTurnPrompt(
     parts.push('\n## Open work');
     parts.push(bounded(open, 10, (t) => {
       const w = workers.find((x) => x.ticketId === t.id);
-      return `- ${t.identifier} [${t.status}] ${t.title}${w ? ` — ${w.name} (${w.status})` : ''}`;
+      return `- ${t.identifier} [${t.status}] ${t.title}${w ? ` — ${w.name} (${workerStatusLine(w)})` : ''}`;
     }, 'call `ac_ticket_list`'));
     const pending = ctx.db.all<S.Decision>("SELECT * FROM decisions WHERE workspace_id = ? AND status = 'open' ORDER BY created_at", [ctx.workspaceId]);
     if (pending.length) {

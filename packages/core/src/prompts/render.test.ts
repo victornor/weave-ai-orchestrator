@@ -179,6 +179,25 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('Merge TST-42?');
   });
 
+  // A worker parked after a failure is waiting on the human, not stalled: the conductor must not
+  // answer a usage limit by relaunching into it (VS-56).
+  it('names why a paused worker stopped, and who owns the resume', async () => {
+    const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
+    h.db.update('agents', worker.id, {
+      status: 'paused', pauseReason: 'rate_limit: waiting for a human',
+      pauseDetailJson: { family: 'provider_quota', code: 'rate_limit', message: 'limit resets in 2 hours', resetAt: null, runId: 'r1' },
+    });
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [{ id: 'w3', source: 'system', reason: 'digest', payload: {} } as never], {});
+    expect(prompt).toContain('paused: provider_quota — limit resets in 2 hours; the human owns the resume');
+
+    // Without a structured detail there is nothing to say beyond the status.
+    h.db.update('agents', worker.id, { pauseDetailJson: null });
+    const plain = await buildTurnPrompt(h.ctx, h.deps, conductor, [{ id: 'w4', source: 'system', reason: 'digest', payload: {} } as never], {});
+    expect(plain).toContain('(paused)');
+    expect(plain).not.toContain('the human owns the resume');
+  });
+
   it.runIf(existsSync(SHIPPED_TEMPLATES))('renders the shipped templates without leaving placeholders', () => {
     h.ctx.templatesDir = SHIPPED_TEMPLATES;
     const worker0 = renderWorkerInstructions(h.ctx, h.deps, worker);

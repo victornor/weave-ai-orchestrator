@@ -20,7 +20,7 @@ function agent(over: Partial<Agent> = {}): Agent {
   return {
     id: 'ag_1', workspaceId: 'ws', kind: 'worker', projectId: 'web', roleId: 'role_1', roleRevision: 1,
     ticketId: 'tkt_1', name: 'Backend Engineer #7', runtimeId: 'claude', model: 'claude-fable-5-1', effort: null,
-    status: 'running', pauseReason: null, errorText: null, homePath: '/ws/workers/ag_1', worktreePath: '/ws/workers/ag_1/work',
+    status: 'running', pauseReason: null, pauseDetail: null, errorText: null, homePath: '/ws/workers/ag_1', worktreePath: '/ws/workers/ag_1/work',
     branch: 'ac/acme-42', turnEpoch: 1, turnCount: 7, spawnedBy: 'conductor', spawnReason: null, briefRevision: 1,
     lastRunAt: null, retiredAt: null, createdAt: '2026-09-04T11:00:00.000Z', updatedAt: '2026-09-04T11:00:00.000Z', ...over,
   };
@@ -74,6 +74,23 @@ describe('workerToCard', () => {
     expect(c.lastLine).toBe('running vitest — 38/41 passed');
     expect(c.windowTitle).toBe('Backend Engineer #7 · ACME-42 · working');
     expect(c.meta).toContain('18.4k tok');
+  });
+
+  it('says why a paused worker stopped, with the family, the message and the reset time', () => {
+    const c = workerToCard(agent({
+      status: 'paused', pauseReason: 'rate_limit: waiting for a human',
+      pauseDetail: { family: 'provider_quota', code: 'rate_limit', message: 'limit resets in 2 hours', resetAt: '2026-09-05T14:30:00.000Z', runId: 'r1' },
+    }), {});
+    expect(c.pauseReason).toBe('provider_quota · limit resets in 2 hours · resets 2026-09-05 14:30 UTC');
+    expect(c.meta).toContain('provider_quota');
+  });
+
+  it('falls back to the free-text reason, and says nothing for a worker that is not paused', () => {
+    expect(workerToCard(agent({ status: 'paused', pauseReason: 'paused by operator' }), {}).pauseReason).toBe('paused by operator');
+    expect(workerToCard(agent({ status: 'paused', pauseReason: null }), {}).pauseReason).toBeNull();
+    expect(workerToCard(agent(), {}).pauseReason).toBeNull();
+    // A detail left over from an earlier failure is not shown once the worker is running again.
+    expect(workerToCard(agent({ pauseDetail: { family: 'provider_quota', code: null, message: 'old', resetAt: null, runId: null } }), {}).pauseReason).toBeNull();
   });
 
   it('honours needs-you and paused states', () => {

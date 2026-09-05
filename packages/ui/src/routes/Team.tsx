@@ -8,7 +8,7 @@ import { StatusBadge, Badge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
 import { Markdown } from '../components/Markdown';
 import { Sheet } from '../components/Sheet';
-import { useConductor, useProjects, useRole, useRoleAction, useRoles, useRollbackCharter, useRuntimeModels, useRuntimes, useUpdateRole, useWorkers, useWorkspaceSummary } from '../api/hooks';
+import { useConductor, useProjects, useRole, useRoleAction, useRoles, useRollbackCharter, useRuntimeModels, useRuntimes, useUpdateRole, useWorkerAction, useWorkers, useWorkspaceSummary } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import type * as T from '../api/types';
@@ -21,6 +21,7 @@ export function TeamRoute(): React.ReactElement {
   const roles = useRoles();
   const workers = useWorkers({});
   const conductor = useConductor();
+  const workerAction = useWorkerAction();
   const [openRole, setOpenRole] = useState<string | null>(null);
 
   return (
@@ -93,6 +94,8 @@ export function TeamRoute(): React.ReactElement {
                                     projectSlug={p.slug}
                                     ticketIdentifier={w.ticketId}
                                     onOpen={() => go('/w/$ws/workers/$workerId', { params: { ws, workerId: w.id } })}
+                                    onResume={() => workerAction.mutate({ id: w.id, action: 'resume' })}
+                                    resuming={workerAction.isPending}
                                   />
                                 ))}
                               </div>

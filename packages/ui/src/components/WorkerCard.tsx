@@ -1,6 +1,8 @@
 import type { Agent } from '@agent-conductor/shared';
 import { agentUiStatus } from '@agent-conductor/shared';
+import { workerPauseReason } from '@agent-conductor/render';
 import { StatusGlyph, StatusBadge } from './StatusGlyph';
+import { Button } from './Button';
 import { cents, initials, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
 
@@ -14,6 +16,9 @@ export interface WorkerCardProps {
   needsYou?: boolean;
   stalled?: boolean;
   onOpen?: () => void;
+  /** Offered on a paused worker; resuming continues the same ticket, worktree and session. */
+  onResume?: () => void;
+  resuming?: boolean;
   className?: string;
 }
 
@@ -27,11 +32,17 @@ export function WorkerCard({
   needsYou,
   stalled,
   onOpen,
+  onResume,
+  resuming,
   className,
 }: WorkerCardProps): React.ReactElement {
   const ui = agentUiStatus(agent.status, { needsYou, stalled });
+  // Why it stopped, worded once in @agent-conductor/render so the web app and `conductor worker`
+  // say the same thing. Null unless the worker is paused.
+  const pausedFor = workerPauseReason(agent);
   return (
-    <button type="button" onClick={onOpen} className={cx('ac-card w-full p-3 text-left transition-colors duration-(--dur-fast) ease-ac hover:bg-bg-2', className)}>
+    <div className={cx('ac-card', className)}>
+    <button type="button" onClick={onOpen} className="w-full p-3 text-left transition-colors duration-(--dur-fast) ease-ac hover:bg-bg-2">
       <div className="mb-2.5 flex items-center gap-2.5">
         <span className="ac-mono flex size-7 flex-none items-center justify-center rounded-r4 border border-line-2 bg-bg-3 text-nano text-text-2">
           {initials(agent.name)}
@@ -65,11 +76,25 @@ export function WorkerCard({
         ) : null}
       </div>
     </button>
+      {pausedFor ? (
+        <div className="flex items-center gap-2 border-t border-line-1 px-3 py-2">
+          <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3" title={pausedFor}>
+            {pausedFor}
+          </span>
+          {onResume ? (
+            <Button size="sm" onClick={onResume} disabled={resuming}>
+              Resume
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 export function WorkerRow({ agent, projectSlug, ticketIdentifier, lastLine, needsYou, stalled, onOpen }: WorkerCardProps): React.ReactElement {
   const ui = agentUiStatus(agent.status, { needsYou, stalled });
+  const pausedFor = workerPauseReason(agent);
   return (
     <button
       type="button"
@@ -79,7 +104,7 @@ export function WorkerRow({ agent, projectSlug, ticketIdentifier, lastLine, need
       <StatusGlyph status={ui} size="sm" pulse={ui === 'working'} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-ui text-text-1">{agent.name}</span>
-        <span className="ac-mono block truncate text-micro text-text-3">{lastLine ?? [projectSlug, ticketIdentifier].filter(Boolean).join(' · ')}</span>
+        <span className="ac-mono block truncate text-micro text-text-3">{pausedFor ?? lastLine ?? [projectSlug, ticketIdentifier].filter(Boolean).join(' · ')}</span>
       </span>
     </button>
   );

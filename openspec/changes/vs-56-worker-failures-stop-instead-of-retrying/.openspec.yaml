@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-05
+goal: "Worker failures stop instead of retrying forever: the retry ladder ends
+  after three attempts, quota failures pause immediately with the reason shown,
+  and the human can resume"

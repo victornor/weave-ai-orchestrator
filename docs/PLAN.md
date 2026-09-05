@@ -461,7 +461,7 @@ Steps (module `core/runs/engine.ts`, each step emits `run.phase.timing` with a c
 5. **Spawn via runtime adapter** (`runtime.runTurn`), streaming events into `run_events` (redacted) and the raw jsonl. Update `agent.status=running`, `execution_run_id` on the worker's ticket.
 6. **Supervise** (§7.5): silence watchdog, hard timeout (`agent.spec.turnTimeoutSec`, default 45 min).
 7. **Collect result**: runtime returns `{sessionRef, usage, cost, exitCode, finalMessage, structuredResult?}`. The engine parses the agent's final report (§9.4). If missing, liveness = `empty`.
-8. **Finalize** (transaction): persist run, usage event, session ref; compare-and-clear `execution_run_id`; mark wakes `completed`; apply liveness classification; enqueue follow-up wakes (e.g. `needs_decision` → decision created → owner notified); emit events; if `error_family=transient_upstream|provider_quota` schedule a `retry` wake with backoff (30 s, 2 min, 10 min; max 3).
+8. **Finalize** (transaction): persist run, usage event, session ref; compare-and-clear `execution_run_id`; mark wakes `completed`; apply liveness classification; enqueue follow-up wakes (e.g. `needs_decision` → decision created → owner notified); emit events; if `error_family=transient_upstream` schedule a `retry` wake with backoff (30 s, 2 min, 10 min; max 3), the attempts linked by `retry_of_run_id` so the ladder ends. `provider_quota` is **not** retried: it parks the worker on its first occurrence and puts the choice to the human (ADR 0010).
 
 ### 7.4 Sessions and context economy
 

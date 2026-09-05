@@ -1,10 +1,10 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { estimateTokens } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createKnowledgeService } from './service.js';
-import { BUDGETS, parseLinks } from './files.js';
+import { BUDGETS, PROJECT_SECTIONS, parseDoc, parseLinks } from './files.js';
 import type { Actor, KnowledgeService } from '../api.js';
 
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
@@ -35,13 +35,19 @@ describe('knowledge', () => {
     const project = knowledge.get('project', h.projectId);
     expect(project.path).toBe(join(h.ctx.paths.knowledge, 'projects/api/PROJECT.md'));
     expect(existsSync(project.path)).toBe(true);
-    for (const s of ['## Overview', '## Stack & commands', '## Conventions', '## Current focus', '## Landmines', '## Learnings']) {
-      expect(project.body).toContain(s);
-    }
+    expect(parseDoc(project.body).sections.map((s) => s.name)).toEqual([...PROJECT_SECTIONS]);
     expect(project.budgetTokens).toBe(BUDGETS.project);
     expect(knowledge.get('shared').budgetTokens).toBe(BUDGETS.shared);
     expect(knowledge.get('workspace').body).toContain('## Portfolio');
     expect(knowledge.get('decisions').body).toContain('## Decisions');
+  });
+
+  it('leaves an existing project knowledge file exactly as it is on disk', () => {
+    const path = join(h.ctx.paths.knowledge, 'projects/api/PROJECT.md');
+    mkdirSync(dirname(path), { recursive: true });
+    const existing = '# api\n\n## Overview\n\n- 2026-09-05 \u00b7 An older knowledge base with no Documents section.\n';
+    writeFileSync(path, existing, 'utf8');
+    expect(knowledge.get('project', h.projectId).body).toBe(existing);
   });
 
   it('appends a dated entry under a section and creates a missing one', () => {

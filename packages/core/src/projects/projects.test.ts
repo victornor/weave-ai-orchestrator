@@ -6,6 +6,7 @@ import type { Project, ProjectConfig, WorkspaceConfig } from '@agent-conductor/s
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createProjectsService } from './index.js';
 import { git } from '../util/git.js';
+import { PROJECT_SECTIONS, parseDoc } from '../knowledge/files.js';
 import type { Actor, ProjectsService } from '../api.js';
 
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
@@ -56,7 +57,8 @@ describe('projects', () => {
 
     const kb = join(h.ctx.paths.knowledge, 'projects', 'web', 'PROJECT.md');
     expect(existsSync(kb)).toBe(true);
-    expect(readFileSync(kb, 'utf8')).toContain('## Stack & commands');
+    const headings = parseDoc(readFileSync(kb, 'utf8')).sections.map((s) => s.name);
+    expect(headings).toEqual([...PROJECT_SECTIONS]);
 
     expect(h.services.tickets!.create).toHaveBeenCalledWith(HUMAN, expect.objectContaining({ kind: 'scout', originKind: 'project_describe', title: 'Describe project web' }));
     expect(projects.list()).toHaveLength(1);

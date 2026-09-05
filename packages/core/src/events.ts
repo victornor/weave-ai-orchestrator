@@ -24,6 +24,23 @@ export class EventBus {
 }
 
 import type { Actor } from './api.js';
-export function recordActivity(db: Db, workspaceId: string, actor: Actor, action: string, entityType: string, entityId: string, details: Record<string, unknown> = {}, ticketId: string | null = null): void {
-  db.run('INSERT INTO activity (id, workspace_id, actor_kind, actor_id, run_id, action, entity_type, entity_id, ticket_id, details_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [newId(), workspaceId, actor.kind, actor.id, actor.runId ?? null, action, entityType, entityId, ticketId, JSON.stringify(details), nowIso()]);
+/**
+ * Append one row to the append-only activity record. `projectId` scopes the row to a project so the
+ * changelog (PLAN §13.6) can page a single project's history without a per-row-kind join.
+ *
+ * Left out, it is resolved the same three ways `0011_activity_project.sql` backfilled the history that
+ * predates the column — through the ticket, through the role, or from the project itself — so a row
+ * recorded now and the same row recorded a year ago are scoped identically. A row that reaches no
+ * project stays workspace-level, which is where a workspace ticket's activity belongs.
+ */
+export function recordActivity(db: Db, workspaceId: string, actor: Actor, action: string, entityType: string, entityId: string, details: Record<string, unknown> = {}, ticketId: string | null = null, projectId: string | null = null): void {
+  const project = projectId ?? resolveProject(db, entityType, entityId, ticketId);
+  db.run('INSERT INTO activity (id, workspace_id, actor_kind, actor_id, run_id, action, entity_type, entity_id, ticket_id, project_id, details_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [newId(), workspaceId, actor.kind, actor.id, actor.runId ?? null, action, entityType, entityId, ticketId, project, JSON.stringify(details), nowIso()]);
+}
+
+function resolveProject(db: Db, entityType: string, entityId: string, ticketId: string | null): string | null {
+  if (ticketId) return db.get<{ projectId: string | null }>('SELECT project_id FROM tickets WHERE id = ?', [ticketId])?.projectId ?? null;
+  if (entityType === 'role') return db.get<{ projectId: string | null }>('SELECT project_id FROM roles WHERE id = ?', [entityId])?.projectId ?? null;
+  if (entityType === 'project') return db.get<{ id: string }>('SELECT id FROM projects WHERE id = ?', [entityId])?.id ?? null;
+  return null;
 }

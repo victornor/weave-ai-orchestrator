@@ -947,6 +947,36 @@ Curation is a scheduled, agent-performed rewrite of one knowledge file, run by t
 
 On a worker's first turn (and on a conductor session reset or staleness), the turn prompt includes the injected set from §13.2 plus a five-line reminder of the status protocol. The total is measured and logged as `bootstrap_tokens`; the hard cap is `bootstrapBudgetTokens` (default 16000) and, because every file is itself budgeted, the cap is normally not reached. If it is, project KB **Learnings** are truncated first with an explicit "truncated, call ac_knowledge_get" line; never the brief, SHARED.md or the rules.
 
+### 13.6 The changelog
+
+The knowledge bases are memory for the agents; the **changelog** is the record for the human. It answers "what happened, and when" — and, because nothing ever puts it in a context window, it carries no budget and is allowed to grow without bound.
+
+It is not a knowledge file. It is a read-only projection over the `activity` table, which the daemon has always written and never read back. Seven activity actions become entries; every other row stays operational detail:
+
+| Entry kind | Activity action | Notes |
+|---|---|---|
+| `filed` | `ticket.create` | |
+| `plan_approved` | `ticket.transition` | only where `details.to = 'approved'` |
+| `pr_opened` | `ticket.work_product` | only where `details.type = 'pull_request'`; links to the pull request |
+| `landed` | `ticket.delivery_landed` | written once, by `mergeDone`, when the work reached the clone |
+| `cancelled` | `ticket.cancel` | |
+| `hired` | `role.hire` | |
+| `upgraded` | `daemon.upgraded` | pushed into each workspace from the daemon's post-restart reconciliation |
+
+An entry carries an absolute timestamp, its kind, the actor (`human`, `agent`, `system`), the ticket identifier when it has one, a one-line summary and a link target. The summary is **rendered** from the activity row by `changelogEntry` in `packages/render`, not stored, so every surface shows the same line and a wording fix applies to the whole history without rewriting an append-only row.
+
+**Two scopes.** A project's changelog is the entries carrying that project (`activity.project_id`); the workspace changelog is everything, including the entries that belong to no project. Both are newest-first and paged on `(created_at, id)`, so a row recorded mid-paging is neither repeated nor causes a skip.
+
+**Guarantees.**
+
+- **Append-only.** No client can edit or delete an entry, because no write route and no service member exists to do it. Curation never touches it and no size limit applies.
+- **Never injected.** No changelog entry appears in a bootstrap digest, a worker brief, the conductor's context or any turn prompt, and no `ac_*` tool returns one. A test asserts the digests are byte-identical with and without a year of entries.
+- **No backfill step.** The entries come from history the daemon already recorded, so an upgraded workspace shows a populated changelog on first read. The one exception is `upgraded`, which has no record before this shipped and so appears from the first upgrade after it.
+
+**Surfaces.** `GET /changelog` and `GET /changelog/heatmap` (§API.md), the Changelog tab in the web app's Knowledge area, and `conductor changelog [--project <id>] [--from <date>] [--to <date>]`.
+
+**The heatmap** is a calendar grid of the last 371 days shading **tickets landed per day** — the measure of a day's output, since landing is what means work reached the repository. The view states the measure and its definition. Days are bucketed in a named IANA timezone (the reader's in the web app, the machine's in the CLI), in TypeScript rather than in SQL: SQLite can only express a fixed offset, which is wrong across a DST boundary and so wrong for part of any one-year range. The timeline's day, week and month separators bucket through the same function, so a heatmap cell and the separator it scrolls to always mean the same day.
+
 ---
 
 ## 14. Channels

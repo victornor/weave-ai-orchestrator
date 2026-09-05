@@ -43,6 +43,10 @@ export const qk = {
   knowledgeRevisions: (ws: string, scope: string, project?: string) => ['w', ws, 'knowledge', scope, project ?? '', 'revisions'] as const,
   search: (ws: string, q: string, project?: string) => ['w', ws, 'search', q, project ?? ''] as const,
 
+  changelogRoot: (ws: string) => ['w', ws, 'changelog'] as const,
+  changelog: (ws: string, project?: string) => ['w', ws, 'changelog', 'entries', project ?? ''] as const,
+  changelogHeatmap: (ws: string, project: string | undefined, tz: string) => ['w', ws, 'changelog', 'heatmap', project ?? '', tz] as const,
+
   specsRoot: (ws: string) => ['w', ws, 'specs'] as const,
   specs: (ws: string, project: string) => ['w', ws, 'specs', project] as const,
   capability: (ws: string, project: string, cap: string) => ['w', ws, 'specs', project, 'capabilities', cap] as const,

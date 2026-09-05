@@ -11,6 +11,7 @@ import { EventBus } from '../events.js';
 import { createRegistries, workspacePaths, type WorkspaceContext } from '../context.js';
 import { getLogger } from '../logger.js';
 import type { CoreServices } from '../api.js';
+import { createChangelogService } from '../changelog/index.js';
 
 export interface TestHarness {
   ctx: WorkspaceContext;
@@ -92,6 +93,9 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
   };
 
   const services: Partial<CoreServices> = {};
+  // Real, not a double: it is a read-only projection over this harness's own db, so every suite that
+  // reaches it (and the proxy below would otherwise throw for) reads the activity its own calls wrote.
+  services.changelog = createChangelogService(ctx, () => deps());
   const deps = (): CoreServices =>
     new Proxy({} as CoreServices, {
       get: (_t, prop: string | symbol) => {

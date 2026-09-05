@@ -24,8 +24,9 @@ import { ago } from '../lib/format';
 import { cx } from '../lib/cx';
 import { DocsPanel, DocPanel, refFromPath, type DocRef } from './KnowledgeDocs';
 import { KnowledgeGraphView } from './KnowledgeGraph';
+import { ChangelogPanel } from './Changelog';
 
-type Tab = 'knowledge' | 'graph' | 'specs';
+type Tab = 'knowledge' | 'changelog' | 'graph' | 'specs';
 
 export function KnowledgeRoute(): React.ReactElement {
   const [tab, setTab] = useState<Tab>('knowledge');
@@ -69,6 +70,7 @@ export function KnowledgeRoute(): React.ReactElement {
             <Tabs
               items={[
                 { key: 'knowledge', label: 'Knowledge' },
+                { key: 'changelog', label: 'Changelog' },
                 { key: 'graph', label: 'Graph' },
                 { key: 'specs', label: 'Specs' },
               ]}
@@ -84,6 +86,10 @@ export function KnowledgeRoute(): React.ReactElement {
           <SearchResults hits={search.data ?? []} loading={search.isLoading} />
         ) : tab === 'knowledge' ? (
           <KnowledgePanel project={project || undefined} />
+        ) : tab === 'changelog' ? (
+          // No project selected is the workspace changelog: every project's entries plus the ones
+          // belonging to none. That is the scope the panel gets when `project` is undefined.
+          <ChangelogPanel project={project || undefined} />
         ) : tab === 'graph' ? (
           <GraphPanel project={project || undefined} />
         ) : (

@@ -20,7 +20,7 @@ import {
   OcError, isCancellableUpgrade, isTerminalUpgrade,
   type DaemonConfig, type Upgrade, type UpgradeFailureReason, type UpgradeState,
 } from '@agent-conductor/shared';
-import { getLogger } from '@agent-conductor/core';
+import { getLogger, recordActivity } from '@agent-conductor/core';
 import {
   buildRelease, cliBinIn, currentLink, inOwnScope, planRestart, pruneReleases, readLink,
   releaseSha, switchRelease,
@@ -232,6 +232,35 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
     }
   }
 
+  /**
+   * An upgrade is recorded daemon-level, in `daemon.sqlite`, which has no workspace — but the changelog
+   * (PLAN §13.6) is per workspace, so the completed upgrade is pushed outward: one `daemon.upgraded`
+   * activity row in each registered workspace, belonging to no project and no ticket.
+   *
+   * Guarded by the upgrade id, so reconciling the same upgrade twice writes nothing. This is the only
+   * changelog entry the daemon has to write; every other kind was already in `activity` and needed no
+   * backfill. It cannot be applied retroactively — upgrades that completed before this shipped have no
+   * row — so upgrades appear in the changelog from the first one after this release.
+   */
+  function recordUpgradeInChangelogs(row: Upgrade): void {
+    for (const w of uniqueWorkspaces(deps.workspaces)) {
+      try {
+        const already = w.ctx.db.get<{ id: string }>(
+          "SELECT id FROM activity WHERE workspace_id = ? AND action = 'daemon.upgraded' AND entity_id = ?",
+          [w.ctx.workspaceId, row.id]);
+        if (already) continue;
+        recordActivity(
+          w.ctx.db, w.ctx.workspaceId,
+          { kind: 'system', id: null }, 'daemon.upgraded', 'daemon', row.id,
+          { fromRelease: row.fromRelease, toRelease: row.toRelease, version: deps.version, requestedBy: row.requestedBy },
+        );
+      } catch (e) {
+        // A workspace whose db is unavailable must not stop the upgrade from being reported completed.
+        log.warn({ err: e, upgradeId: row.id, workspaceId: w.id }, 'could not record the upgrade in a workspace changelog');
+      }
+    }
+  }
+
   return {
     status(): UpgradeStatus {
       const upgrade = latest();
@@ -274,6 +303,7 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
       return read(row.id)!;
     },
 
+
     reconcile(): void {
       const row = inFlight();
       if (!row) return;
@@ -283,6 +313,7 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
           || Boolean(row.toSha && runningSha && row.toSha === runningSha);
         if (onTarget) {
           finish(row.id, 'completed', { cameBackVersion: deps.version });
+          recordUpgradeInChangelogs(row);
           log.info({ upgradeId: row.id, version: deps.version }, 'upgrade completed');
           return;
         }

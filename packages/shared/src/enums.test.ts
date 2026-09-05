@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CANCELLABLE_UPGRADE_STATES, TERMINAL_UPGRADE_STATES, UPGRADE_FAILURE_REASONS, UPGRADE_STATES,
+  CANCELLABLE_UPGRADE_STATES, CHANGELOG_KINDS, CHANGELOG_MEASURE_KIND, CHANGELOG_SOURCES,
+  TERMINAL_UPGRADE_STATES, UPGRADE_FAILURE_REASONS, UPGRADE_STATES,
   isCancellableUpgrade, isTerminalUpgrade, type UpgradeState,
 } from './enums.js';
 
@@ -39,5 +40,26 @@ describe('upgrade states', () => {
 
   it('names every failure reason the daemon can record', () => {
     expect(UPGRADE_FAILURE_REASONS).toEqual(['wait_timeout', 'build_failed', 'backup_failed', 'switch_failed', 'restart_unverified', 'restart_failed', 'abandoned']);
+  });
+});
+
+describe('changelog kinds', () => {
+  it('gives every kind exactly one activity action to project from', () => {
+    expect(Object.keys(CHANGELOG_SOURCES).sort()).toEqual([...CHANGELOG_KINDS].sort());
+    for (const kind of CHANGELOG_KINDS) expect(CHANGELOG_SOURCES[kind].action).toMatch(/^[a-z]+\.[a-z_]+$/);
+  });
+
+  // Two actions carry more than one meaning, so the kind is only right with the detail filter.
+  it('distinguishes the two actions that need a detail filter', () => {
+    expect(CHANGELOG_SOURCES.plan_approved.detail).toEqual({ key: 'to', value: 'approved' });
+    expect(CHANGELOG_SOURCES.pr_opened.detail).toEqual({ key: 'type', value: 'pull_request' });
+    for (const kind of ['filed', 'landed', 'cancelled', 'hired', 'upgraded'] as const) {
+      expect(CHANGELOG_SOURCES[kind].detail).toBeUndefined();
+    }
+  });
+
+  it('measures a day by the kind that means work reached the repository', () => {
+    expect(CHANGELOG_MEASURE_KIND).toBe('landed');
+    expect(CHANGELOG_KINDS).toContain(CHANGELOG_MEASURE_KIND);
   });
 });

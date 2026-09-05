@@ -32,3 +32,23 @@ export interface JobStep { id: string; label: string; state: E.JobStepState; sta
 export interface JobLogLine { seq: number; step: string; stream: E.JobLogStream; text: string }
 /** A long-running workspace-setup operation. Workspace-scoped, durable, readable after a restart. */
 export interface Job { id: string; workspaceId: string; kind: E.JobKind; entityType: string; entityId: string; state: E.JobState; steps: JobStep[]; log: JobLogLine[]; logSeq: number; requestedBy: string; startedAt: string; finishedAt: string | null; failedStep: string | null; message: string | null }
+
+/**
+ * One entry in a workspace's changelog (PLAN §13.6). Derived from an `activity` row at read time, so
+ * `summary` and `link` are rendered rather than stored — see `changelogEntry` in `@agent-conductor/render`.
+ */
+export interface ChangelogEntry {
+  id: string; at: string; kind: E.ChangelogKind;
+  actor: { kind: E.AuthorKind; id: string | null; label: string };
+  projectId: string | null; ticketId: string | null; ticketIdentifier: string | null;
+  summary: string; link: { kind: 'ticket' | 'url'; target: string } | null;
+}
+/** A page of changelog entries, newest first. `nextCursor` is null when nothing older remains. */
+export interface ChangelogPage { entries: ChangelogEntry[]; nextCursor: string | null }
+/** One day of the activity heatmap. `date` is `YYYY-MM-DD` in the timezone the caller asked for. */
+export interface ChangelogDay { date: string; landed: number; total: number; byKind: Record<E.ChangelogKind, number> }
+/** The heatmap series plus the measure it shades, so the view can state its definition. */
+export interface ChangelogHeatmap {
+  days: ChangelogDay[]; timezone: string;
+  measure: { kind: E.ChangelogKind; label: string; definition: string };
+}

@@ -30,6 +30,7 @@ import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import { ago, cents, duration, statusText, tokens } from '../lib/format';
 import { isFolded } from '../lib/board';
+import { draftKey, useDraft } from '../lib/drafts';
 import { cx } from '../lib/cx';
 
 const TABS = [
@@ -275,12 +276,16 @@ function PlanTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdent
 }
 
 function ActivityTab({ ticketId }: { ticketId: string }): React.ReactElement {
+  const ws = useWs();
   const detail = useTicket(ticketId);
   const comments = useTicketComments(ticketId);
   const runs = useTicketRuns(ticketId);
   const post = usePostComment();
   const status = detail.data?.ticket.status;
   const worker = detail.data?.worker ?? null;
+  // Keyed by the ticket's own id, so the reply drafted here is the one the worker page offers too:
+  // both composers post to the same conversation.
+  const { draft, patch } = useDraft(detail.data ? draftKey(ws, `ticket:${detail.data.ticket.id}`) : null);
 
   // The ticket is a conversation: comments and the worker's turns, in order.
   const feed = useMemo(() => {
@@ -344,7 +349,13 @@ function ActivityTab({ ticketId }: { ticketId: string }): React.ReactElement {
       ) : (
         <div className="flex flex-col gap-3">{feed.map((f) => <div key={f.key}>{f.node}</div>)}</div>
       )}
-      <Composer placeholder={placeholder} submitLabel="Reply" onSubmit={(body) => post.mutate({ id: ticketId, body })} />
+      <Composer
+        placeholder={placeholder}
+        submitLabel="Reply"
+        value={draft.text}
+        onChange={(text) => patch({ text })}
+        onSubmit={(body) => post.mutate({ id: ticketId, body })}
+      />
     </div>
   );
 }

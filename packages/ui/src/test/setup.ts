@@ -20,6 +20,15 @@ if (!window.localStorage) {
   });
 }
 
+// Composer drafts live in sessionStorage; one test's draft must not be the next test's opening state.
+afterEach(() => {
+  try {
+    sessionStorage.clear();
+  } catch {
+    /* no store in this environment */
+  }
+});
+
 if (!window.matchMedia) {
   window.matchMedia = ((q: string) => ({
     matches: false,

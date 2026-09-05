@@ -123,6 +123,14 @@ export function Composer({
     if (autoFocus) ta.current?.focus();
   }, [autoFocus]);
 
+  // A composer that opens on a restored draft puts the caret after the text: the human is
+  // continuing a sentence, not editing from its start. Mount only — moving it on every change
+  // would fight typing.
+  useEffect(() => {
+    const el = ta.current;
+    if (el?.value) el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
+
   // Grow to fit, then stop and scroll inside. Measuring needs the box collapsed, which throws the
   // scroll position away, so it is put back afterwards: at the bottom when the caret is at the end
   // of the text — always so while dictating, since the transcript is appended — and where the

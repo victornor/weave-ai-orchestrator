@@ -1,11 +1,12 @@
-/** The rail's daemon-update indicator (PLAN §20). */
+/** The rail: its workspace list, its daemon-update entry, and the shell's own indicators. */
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { UpdateStatus } from '../api/types';
+import type { UpdateStatus, Upgrade } from '../api/types';
 
 const state = vi.hoisted(() => ({
   update: null as UpdateStatus | null,
   updateError: false,
+  upgrade: null as Upgrade | null,
   config: {} as Record<string, unknown>,
   workspaces: [] as Array<Record<string, unknown>>,
   decisions: [] as unknown[],
@@ -22,8 +23,17 @@ vi.mock('@tanstack/react-router', () => ({
   Outlet: () => null,
   useRouterState: () => '/w/ws1/chat',
 }));
+// The rail entry is a link with a search target, so the stand-in has to keep both.
 vi.mock('../app/link', () => ({
-  A: ({ to, children, ...rest }: { to: string; children: React.ReactNode }) => <a href={to} {...rest}>{children}</a>,
+  A: ({ to, params, search, children, ...rest }: { to: string; params?: Record<string, string>; search?: Record<string, unknown>; children: React.ReactNode }) => (
+    <a
+      href={Object.entries(params ?? {}).reduce((acc, [k, v]) => acc.replace(`$${k}`, v), to)}
+      data-search={search ? JSON.stringify(search) : undefined}
+      {...rest}
+    >
+      {children}
+    </a>
+  ),
   useGo: () => (to: string) => { went.calls.push(to); },
 }));
 vi.mock('../api/context', () => ({
@@ -47,6 +57,7 @@ vi.mock('../lib/hotkeys', () => ({
 }));
 vi.mock('../api/hooks', () => ({
   useDaemonUpdate: () => ({ data: state.update ?? undefined, isError: state.updateError }),
+  useDaemonUpgrade: () => ({ data: { upgrade: state.upgrade, waitingFor: [] }, isError: false }),
   useDecisions: () => ({ data: state.decisions }),
   useProjects: () => ({ data: [] }),
   useTickets: () => ({ data: [] }),
@@ -64,7 +75,15 @@ const status = (over: Partial<UpdateStatus> = {}): UpdateStatus => ({
   updateAvailable: true, checkedAt: '2026-09-05T10:00:00.000Z', error: null, ...over,
 });
 
+const record = (over: Partial<Upgrade> = {}): Upgrade => ({
+  id: 'u1', state: 'queued', source: '/src', ref: 'main', targetSha: 'b'.repeat(40),
+  fromRelease: '/rel/a', toRelease: null, toSha: null, requestedBy: 'op1',
+  requestedAt: '2026-09-05T10:00:00.000Z', startedAt: null, finishedAt: null, reason: null, message: null,
+  log: [], backups: [], cameBackVersion: null, ...over,
+});
+
 const indicator = (): HTMLElement | null => screen.queryByLabelText('Daemon update available');
+const upgrading = (): HTMLElement | null => screen.queryByLabelText('Daemon upgrade in progress');
 
 const listItem = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   id: 'ws1', name: 'Acme', ticketPrefix: 'ACME', root: '/tmp/ws1', projects: [], needsYou: 0, ...over,
@@ -73,6 +92,7 @@ const listItem = (over: Record<string, unknown> = {}): Record<string, unknown> =
 beforeEach(() => {
   state.update = null;
   state.updateError = false;
+  state.upgrade = null;
   state.workspaces = [];
   state.decisions = [];
   hotkeys.current = [];
@@ -82,11 +102,44 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-describe('the rail update indicator', () => {
+describe('the rail update entry', () => {
   it('is shown when the daemon reports an update', () => {
     state.update = status();
     render(<AppShell />);
     expect(indicator()).toBeInTheDocument();
+  });
+
+  it('names the update and the target it would move to', () => {
+    state.update = status();
+    render(<AppShell />);
+    const entry = indicator() as HTMLElement;
+    expect(entry).toHaveTextContent('Update available');
+    expect(entry).toHaveTextContent('main');
+    expect(entry).toHaveTextContent('b'.repeat(10));
+  });
+
+  it('links straight to the Updates section of Settings', () => {
+    state.update = status();
+    render(<AppShell />);
+    const entry = indicator() as HTMLElement;
+    expect(entry).toHaveAttribute('href', '/w/ws1/settings');
+    expect(JSON.parse(entry.getAttribute('data-search') ?? '{}')).toEqual({ section: 'updates' });
+  });
+
+  it('shows the upgrade instead of the update once one is in flight, and only that', () => {
+    state.update = status();
+    state.upgrade = record({ state: 'building' });
+    render(<AppShell />);
+    expect(indicator()).not.toBeInTheDocument();
+    expect(upgrading()).toHaveTextContent('Building the new release');
+  });
+
+  it('is gone once the upgrade reached a terminal state and no update is left', () => {
+    state.update = status({ updateAvailable: false });
+    state.upgrade = record({ state: 'completed' });
+    render(<AppShell />);
+    expect(indicator()).not.toBeInTheDocument();
+    expect(upgrading()).not.toBeInTheDocument();
   });
 
   it('is not shown when the daemon is up to date', () => {

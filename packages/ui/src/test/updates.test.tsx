@@ -15,10 +15,15 @@ const state = vi.hoisted(() => ({
   cancelled: 0,
   refreshed: 0,
   toasts: [] as Array<Record<string, unknown>>,
+  search: {} as Record<string, string | undefined>,
+  went: [] as Array<{ to: string; opts?: Record<string, unknown> }>,
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
-vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
+vi.mock('../app/link', () => ({
+  useGo: () => (to: string, opts?: Record<string, unknown>) => { state.went.push({ to, opts }); },
+  useSearchParams: () => state.search,
+}));
 vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
 vi.mock('../components/Toast', () => ({
   useToast: () => ({ push: (t: Record<string, unknown>) => { state.toasts.push(t); return 't1'; }, dismiss: vi.fn() }),
@@ -74,6 +79,8 @@ beforeEach(() => {
   state.cancelled = 0;
   state.refreshed = 0;
   state.toasts = [];
+  state.search = {};
+  state.went = [];
 });
 
 describe('Updates: the release state', () => {
@@ -186,6 +193,71 @@ describe('Updates: following an upgrade', () => {
     expect(screen.getByText(/error TS1005/)).toBeInTheDocument();
     // The previous release is still the one running.
     expect(screen.getAllByText('v1.0.0').length).toBeGreaterThan(0);
+  });
+});
+
+describe('Settings: addressing a section by URL', () => {
+  it('opens the Updates section straight from the URL', () => {
+    state.search = { section: 'updates' };
+    render(<SettingsRoute />);
+    expect(screen.getByRole('tab', { name: 'Updates' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText(RUNNING.path)).toBeInTheDocument();
+  });
+
+  it('opens the first section when the URL names none, or names one that does not exist', () => {
+    render(<SettingsRoute />);
+    expect(screen.getByRole('tab', { name: 'Workspace' })).toHaveAttribute('aria-selected', 'true');
+    state.search = { section: 'nope' };
+    render(<SettingsRoute />);
+    expect(screen.getAllByRole('tab', { name: 'Workspace' })[1]).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('switches on a tab click and writes the section back to the URL by key', () => {
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Updates' }));
+    expect(screen.getByRole('tab', { name: 'Updates' })).toHaveAttribute('aria-selected', 'true');
+    expect(state.went).toEqual([
+      { to: '/w/$ws/settings', opts: { params: { ws: 'ws1' }, search: { section: 'updates' }, replace: true } },
+    ]);
+  });
+
+  it('keeps the rest of the search when it rewrites the section', () => {
+    state.search = { keep: 'me' };
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Updates' }));
+    expect(state.went[0]?.opts).toMatchObject({ search: { keep: 'me', section: 'updates' } });
+  });
+});
+
+describe('Settings: the phone entry for an available update', () => {
+  const entry = (): HTMLElement | null => screen.queryByLabelText('Daemon update available');
+
+  it('sits at the top of Settings and opens the Updates section', () => {
+    render(<SettingsRoute />);
+    const banner = entry() as HTMLElement;
+    expect(banner).toHaveTextContent('Update available');
+    expect(banner).toHaveTextContent('main · bbbbbbbbbb');
+    fireEvent.click(banner);
+    expect(screen.getByRole('tab', { name: 'Updates' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('is gone once the Updates section is the one being shown', () => {
+    state.search = { section: 'updates' };
+    render(<SettingsRoute />);
+    expect(entry()).toBeNull();
+  });
+
+  it('is gone once the daemon is up to date', () => {
+    state.update = status({ updateAvailable: false });
+    render(<SettingsRoute />);
+    expect(entry()).toBeNull();
+  });
+
+  it('says the daemon is upgrading while one is in flight', () => {
+    state.upgrade = record({ state: 'switching' });
+    render(<SettingsRoute />);
+    expect(entry()).toBeNull();
+    expect(screen.getByLabelText('Daemon upgrade in progress')).toHaveTextContent('Backing up and switching');
   });
 });
 

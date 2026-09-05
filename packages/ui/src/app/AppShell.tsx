@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Outlet, useRouterState } from '@tanstack/react-router';
-import { useGo } from './link';
+import { A, useGo } from './link';
 import { TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
 import { RAIL, TABS, href } from './nav';
 import { WorkspaceNav } from './WorkspaceNav';
@@ -11,15 +11,16 @@ import { CommandPalette } from '../components/CommandPalette';
 import type { Command } from '../components/CommandPalette';
 import { ConnectionBanner, UnreachableScreen } from '../components/ConnectionBanner';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
-import { useDaemonUpdate, useDecisions, useProjects, useTickets, useTransitionTicket, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
+import { useDaemonUpdate, useDaemonUpgrade, useDecisions, useProjects, useTickets, useTransitionTicket, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
 import { useToast } from '../components/Toast';
 import { useHotkeys } from '../lib/hotkeys';
 import { flushQueue, useQueueCount } from '../lib/queue';
 import { readExpanded, toggleExpanded } from '../lib/wsExpansion';
-import { showsUpdateIndicator } from '../lib/upgrade';
+import { updateEntry, updateEntryLabel } from '../lib/upgrade';
 import type { QueuedWrite } from '../lib/queue';
 import type { WorkspaceListItem } from '../api/types';
 import { api, ApiError, NetworkError } from '../api/client';
+import { cx } from '../lib/cx';
 import { workspaceYolo } from '../lib/yolo';
 
 export function AppShell(): React.ReactElement {
@@ -40,6 +41,7 @@ export function AppShell(): React.ReactElement {
   const tickets = useTickets({ limit: 100 });
   const workspaces = useWorkspaces();
   const daemonUpdate = useDaemonUpdate();
+  const daemonUpgrade = useDaemonUpgrade();
   const transition = useTransitionTicket();
   const queuedCount = useQueueCount();
 
@@ -50,7 +52,8 @@ export function AppShell(): React.ReactElement {
    */
   const activeWs = summary.data?.workspace.id ?? ws;
   // Nothing is shown when the daemon is up to date, when checking is not configured, or when it failed.
-  const updateAvailable = showsUpdateIndicator(daemonUpdate.data);
+  // One fact, one entry: the rail block on desktop, the More badge on a phone (PLAN §20).
+  const update = updateEntry(daemonUpdate.data, daemonUpgrade.data?.upgrade ?? null);
 
   // Queued writes (offline, or taken while the conductor was mid-turn) are
   // flushed in order as soon as the stream is back.
@@ -173,6 +176,26 @@ export function AppShell(): React.ReactElement {
           <span className="ac-mono text-nano opacity-65">⌘⇧␣</span>
         </button>
 
+        {/* Self-contained block above the workspace list: it is about the daemon, not any one
+            workspace, and it routes to the Updates section by key so a settings reshuffle cannot
+            strand it. It replaces the dot the Settings entry used to carry — one fact, one entry. */}
+        {update ? (
+          <A
+            to="/w/$ws/settings"
+            params={{ ws }}
+            search={{ section: 'updates' }}
+            aria-label={updateEntryLabel(update)}
+            className="mb-3.5 flex flex-none flex-col gap-1 rounded-r6 border border-accent-edge bg-accent-tint px-2.5 py-2"
+          >
+            <span className="flex items-center gap-2">
+              <span className={cx('size-1.5 flex-none rounded-pill', update.state === 'upgrading' ? 'bg-merging' : 'bg-needs-you')} aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-meta font-medium text-text-1">{update.title}</span>
+            </span>
+            <span className="ac-mono truncate text-nano text-text-3">{update.detail}</span>
+            <span className="text-micro font-medium text-accent-link">Open Updates</span>
+          </A>
+        ) : null}
+
         <WorkspaceNav
           workspaces={listed}
           activeWs={activeWs}
@@ -181,7 +204,6 @@ export function AppShell(): React.ReactElement {
           onToggle={(key) => setExpanded((cur) => toggleExpanded(cur, key))}
           needsCount={needsCount}
           projects={projects.data ?? []}
-          updateAvailable={updateAvailable}
           onNewWorkspace={() => go('/onboarding')}
         />
 
@@ -208,7 +230,7 @@ export function AppShell(): React.ReactElement {
           <Outlet />
         </main>
 
-        <BottomBar ws={ws} items={TABS} needsCount={needsCount} isActive={isActive} onStartWork={() => setStartOpen(true)} />
+        <BottomBar ws={ws} items={TABS} needsCount={needsCount} update={update} isActive={isActive} onStartWork={() => setStartOpen(true)} />
       </div>
 
       <CommandPalette

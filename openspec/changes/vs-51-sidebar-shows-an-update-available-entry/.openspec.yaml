@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Sidebar shows an Update available entry with a button that opens the
+  Updates settings page

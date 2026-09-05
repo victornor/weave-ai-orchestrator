@@ -59,6 +59,30 @@ describe('BottomBar', () => {
     expect(screen.getByRole('button', { name: 'Start work' })).toBeInTheDocument();
   });
 
+  it('badges More when the daemon has an update, without moving the tabs', () => {
+    render(
+      <BottomBar
+        ws="ws1"
+        items={TABS}
+        needsCount={0}
+        update={{ state: 'available', title: 'Update available', detail: 'main · bbbbbbbbbb' }}
+        isActive={() => false}
+        onStartWork={vi.fn()}
+      />,
+    );
+    const nav = screen.getByRole('navigation', { name: 'Sections' });
+    const badge = within(nav).getByLabelText('Daemon update available');
+    expect(within(nav).getByText('More').closest('a')).toContainElement(badge);
+    // Out of flow, like the Needs-you count: the bar keeps the geometry the rest of this file pins down.
+    expect(badge.className).toContain('absolute');
+    expect(nav.style.paddingTop).toBe(`${BAR.tabTop}rem`);
+  });
+
+  it('badges nothing when there is no update', () => {
+    renderBar();
+    expect(screen.queryByLabelText('Daemon update available')).toBeNull();
+  });
+
   it('positions the button so it intersects no tab at 390px', () => {
     renderBar();
     const nav = screen.getByRole('navigation', { name: 'Sections' });

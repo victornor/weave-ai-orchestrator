@@ -78,7 +78,9 @@ an `ac-allow-console` comment on the line.
 **Tests are vitest**, colocated as `src/**/*.test.ts` or under a package's `test/` directory (both
 are in `vitest.config.ts`'s include); the web app's `.test.tsx` files run through `packages/ui/vitest.config.ts`, which `pnpm test` at the root also runs. Runtime adapters are tested against recorded `fixtures/*.jsonl`
 event streams plus pure `buildArgs` unit tests — do not shell out to a real CLI in a test. Core is
-tested with a fake runtime adapter that scripts events and results.
+tested with a fake runtime adapter that scripts events and results. Both vitest configs alias
+`@agent-conductor/*` onto each package's `src/index.ts`, so `pnpm test` runs against sources and
+needs no prior `pnpm build`.
 
 **Style.** Match the file you are in. Short doc comments at the top of a module saying what it is and
 which PLAN section it implements. Tables and imperatives over prose. Do not add tests, docs,

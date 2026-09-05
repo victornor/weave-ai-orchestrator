@@ -28,6 +28,7 @@ import {
 import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import { chatEntries } from '../lib/dispatch';
+import { draftKey, useDraft } from '../lib/drafts';
 import { useStickToBottom } from '../lib/stickToBottom';
 import { enqueue, useQueueCount } from '../lib/queue';
 import { useToast } from '../components/Toast';
@@ -70,6 +71,10 @@ export function ChatRoute(): React.ReactElement {
   const threads = useThreads();
   const createThread = useCreateThread();
   const [threadId, setThreadId] = useState<string | null>(null);
+  // The unsent message — text, the project it is tagged with, what it answers — kept per workspace
+  // and thread, so leaving the page and coming back finds it where it was left. Keyed by the
+  // thread, so switching thread reads that thread's draft rather than carrying this one over.
+  const { draft, patch } = useDraft(threadId ? draftKey(ws, `thread:${threadId}`) : null);
   const messages = useThreadMessages(threadId);
   const post = usePostThreadMessage();
   // Answered decisions are loaded too: an answered card stays in the conversation as the record of
@@ -83,9 +88,9 @@ export function ChatRoute(): React.ReactElement {
   const projects = useProjects();
   const queuedCount = useQueueCount('thread');
   /** The project chosen beside the input; `undefined` until the human touches it, so the thread decides. */
-  const [pickedProject, setPickedProject] = useState<string | null | undefined>(undefined);
+  const pickedProject = draft.projectId;
   /** The conductor message the next message answers, or null. Choosing another replaces it. */
-  const [replyToId, setReplyToId] = useState<string | null>(null);
+  const replyToId = draft.replyToId ?? null;
   const conductor = useConductor();
   const conductorId = conductor.data?.agent.id ?? null;
   /** The conductor run being streamed, or null when it is idle. */
@@ -140,9 +145,6 @@ export function ChatRoute(): React.ReactElement {
 
   const openTicket = useCallback((identifier: string) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } }), [go, ws]);
   const openWorker = useCallback((workerId: string) => go('/w/$ws/workers/$workerId', { params: { ws, workerId } }), [go, ws]);
-
-  useEffect(() => setPickedProject(undefined), [threadId]);
-  useEffect(() => setReplyToId(null), [threadId]);
 
   // The quote in the composer comes from the message the human clicked, which is on screen by
   // definition; the quote on an already-sent message comes from its own `replyToExcerpt`.
@@ -228,12 +230,12 @@ export function ChatRoute(): React.ReactElement {
         label: text.slice(0, 60),
       });
       // Cleared on both paths: the next message must not be silently attributed to the same question.
-      setReplyToId(null);
+      patch({ replyToId: null });
       return;
     }
     setSending(true);
     post.mutate({ threadId, body: text, projectId, ...(replyToId ? { replyToMessageId: replyToId } : {}) });
-    setReplyToId(null);
+    patch({ replyToId: null });
   };
 
   // Onboarding: the conductor's first-run interview is just Chat with a
@@ -301,7 +303,7 @@ export function ChatRoute(): React.ReactElement {
                     onTicket={openTicket}
                     ticketStatus={ticketStatus}
                     projectName={projectName}
-                    onReply={entry.message.direction === 'outbound' ? () => setReplyToId(entry.message.id) : undefined}
+                    onReply={entry.message.direction === 'outbound' ? () => patch({ replyToId: entry.message.id }) : undefined}
                   />
                   {entry.dispatches.map((d) => (
                     <DispatchLabel
@@ -386,10 +388,12 @@ export function ChatRoute(): React.ReactElement {
             placeholder="Message the conductor…"
             queuedReason={offline ? 'Offline — your message is queued' : working ? 'Conductor is replying — your message is queued' : null}
             queuedCount={queuedCount}
+            value={draft.text}
+            onChange={(text) => patch({ text })}
             scope={
               <>
-                {replyTo ? <ReplyQuote body={replyTo.body} onDismiss={() => setReplyToId(null)} /> : null}
-                <ProjectPicker projects={projects.data ?? []} value={projectId} onChange={setPickedProject} />
+                {replyTo ? <ReplyQuote body={replyTo.body} onDismiss={() => patch({ replyToId: null })} /> : null}
+                <ProjectPicker projects={projects.data ?? []} value={projectId} onChange={(id) => patch({ projectId: id })} />
               </>
             }
             onSubmit={send}

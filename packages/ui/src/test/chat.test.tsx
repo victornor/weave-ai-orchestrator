@@ -23,12 +23,13 @@ const state = vi.hoisted(() => ({
   decisionQuery: null as Record<string, unknown> | null,
   answer: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   toasts: [] as Array<Record<string, unknown>>,
+  ws: 'ws1',
 }));
 
 vi.mock('../api/context', async () => {
   const { useEffect, useRef } = await import('react');
   return {
-    useWs: () => 'ws1',
+    useWs: () => state.ws,
     useConnection: () => ({ state: state.connection, capturedAt: null, lastSeq: 0, attempts: 0 }),
     useWorkspaceEvents: (fn: (e: WorkspaceEvent) => void) => {
       const ref = useRef(fn);
@@ -124,6 +125,7 @@ beforeEach(() => {
   state.decisionQuery = null;
   state.answer = vi.fn();
   state.toasts = [];
+  state.ws = 'ws1';
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
@@ -935,5 +937,88 @@ describe('ChatRoute history paging', () => {
     scrollable(list(container), 2000).to(0);
 
     expect(state.loadOlder).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatRoute drafts', () => {
+  const box = (): HTMLTextAreaElement => screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+  const type = (body: string): void => { fireEvent.change(box(), { target: { value: body } }); };
+
+  it('keeps an unsent message when the page is left, and restores it with the caret at the end', () => {
+    const view = render(<ChatRoute />);
+    type('half a thought about the');
+    view.unmount();
+
+    render(<ChatRoute />);
+    expect(box().value).toBe('half a thought about the');
+    expect(box().selectionStart).toBe('half a thought about the'.length);
+    expect(box().selectionEnd).toBe('half a thought about the'.length);
+  });
+
+  it('clears the draft once the message is sent', () => {
+    const view = render(<ChatRoute />);
+    type('ship it');
+    fireEvent.click(screen.getByLabelText('Send'));
+    expect(state.posted).toHaveLength(1);
+    expect(box().value).toBe('');
+    view.unmount();
+
+    render(<ChatRoute />);
+    expect(box().value).toBe('');
+  });
+
+  it('forgets a draft the human clears themselves', () => {
+    const view = render(<ChatRoute />);
+    type('never mind');
+    type('');
+    view.unmount();
+
+    render(<ChatRoute />);
+    expect(box().value).toBe('');
+  });
+
+  it('keeps the drafts of two workspaces apart', () => {
+    const view = render(<ChatRoute />);
+    type('for the first workspace');
+    view.unmount();
+
+    state.ws = 'ws2';
+    const other = render(<ChatRoute />);
+    expect(box().value).toBe('');
+    type('for the second');
+    other.unmount();
+
+    state.ws = 'ws1';
+    render(<ChatRoute />);
+    expect(box().value).toBe('for the first workspace');
+  });
+
+  it('restores the reply reference and the project tag with the text', () => {
+    state.projects = [project({ id: 'p1', name: 'API' }), project({ id: 'p2', slug: 'web', name: 'Web' })];
+    state.messages = [message({ id: 'm1', body: 'Should I ship it behind a flag?' })];
+
+    const view = render(<ChatRoute />);
+    fireEvent.click(screen.getByLabelText('Reply to this message'));
+    fireEvent.change(screen.getByLabelText('Project for this message'), { target: { value: 'p2' } });
+    type('yes, do it');
+    view.unmount();
+
+    render(<ChatRoute />);
+    expect(box().value).toBe('yes, do it');
+    expect(screen.getByText('Replying to the conductor')).toBeInTheDocument();
+    expect((screen.getByLabelText('Project for this message') as HTMLSelectElement).value).toBe('p2');
+
+    fireEvent.click(screen.getByLabelText('Send'));
+    expect(state.posted[0]).toEqual({ threadId: 'th_1', body: 'yes, do it', projectId: 'p2', replyToMessageId: 'm1' });
+  });
+
+  it('restores what dictation transcribed before the page was left', () => {
+    // Dictation writes through the same value the human types into, so a stopped mic leaves a draft.
+    const view = render(<ChatRoute />);
+    type('file a ticket for the login bug');
+    view.unmount();
+
+    render(<ChatRoute />);
+    expect(box().value).toBe('file a ticket for the login bug');
   });
 });

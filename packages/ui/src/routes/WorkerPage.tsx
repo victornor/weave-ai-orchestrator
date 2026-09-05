@@ -15,6 +15,7 @@ import { usePostComment, useRunEvents, useWorker, useWorkerAction, useWorkerBrie
 import { useWorkspaceEvents, useWs } from '../api/context';
 import { useGo } from '../app/link';
 import { cents, tokens } from '../lib/format';
+import { draftKey, useDraft } from '../lib/drafts';
 
 const TABS = [
   { key: 'transcript', label: 'Transcript' },
@@ -30,6 +31,10 @@ export function WorkerRoute(): React.ReactElement {
   const brief = useWorkerBrief(workerId);
   const action = useWorkerAction();
   const comment = usePostComment();
+  // The steer box and the ticket page's reply box post to the same conversation, so they share one
+  // draft: a note started on either is there on the other.
+  const steerTicketId = detail.data?.ticket?.id ?? null;
+  const { draft, patch } = useDraft(steerTicketId ? draftKey(ws, `ticket:${steerTicketId}`) : null);
 
   const runId = detail.data?.lastRun?.id ?? '';
   const persisted = useRunEvents(runId);
@@ -138,6 +143,8 @@ export function WorkerRoute(): React.ReactElement {
             <Composer
               placeholder="Steer this worker — posts a ticket comment and wakes it…"
               submitLabel="Send"
+              value={draft.text}
+              onChange={(text) => patch({ text })}
               onSubmit={(body) => comment.mutate({ id: ticket.id, body })}
             />
           </div>

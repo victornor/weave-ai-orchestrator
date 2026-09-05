@@ -27,6 +27,7 @@ import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import { chatEntries } from '../lib/dispatch';
 import { enqueue, useQueueCount } from '../lib/queue';
+import { useToast } from '../components/Toast';
 import { useGo } from '../app/link';
 import { clock } from '../lib/format';
 import { cx } from '../lib/cx';
@@ -61,13 +62,17 @@ function MessageBody({
 export function ChatRoute(): React.ReactElement {
   const ws = useWs();
   const go = useGo();
+  const toast = useToast();
   const conn = useConnection();
   const threads = useThreads();
   const createThread = useCreateThread();
   const [threadId, setThreadId] = useState<string | null>(null);
   const messages = useThreadMessages(threadId);
   const post = usePostThreadMessage();
-  const decisions = useDecisions({ status: 'open', owner: 'human' });
+  // Answered decisions are loaded too: an answered card stays in the conversation as the record of
+  // what was decided. The limit is explicit because mixing answered rows into a `created_at DESC`
+  // list could otherwise push an old open decision out of the default page.
+  const decisions = useDecisions({ status: ['open', 'answered'], owner: 'human', limit: 200 });
   const answer = useAnswerDecision();
   // Terminal tickets and retired workers are exactly the dispatches whose labels must keep showing.
   const tickets = useTickets({ limit: 200, includeTerminal: true });
@@ -150,11 +155,20 @@ export function ChatRoute(): React.ReactElement {
     [projects.data],
   );
 
-  // Each message, followed by the dispatches its turn filed; live work with no anchor falls out.
-  const { entries, unattributed } = useMemo(
-    () => chatEntries(messages.data ?? [], tickets.data ?? [], workers.data ?? []),
-    [messages.data, tickets.data, workers.data],
+  // Each message, followed by the dispatches its turn filed and the decisions it raised; work and
+  // decisions with no anchor fall out.
+  const { entries, unattributed, unanchoredDecisions } = useMemo(
+    () => chatEntries(messages.data ?? [], tickets.data ?? [], workers.data ?? [], decisions.data ?? []),
+    [messages.data, tickets.data, workers.data, decisions.data],
   );
+  // A decision below the conversation is a prompt, not a record: only the open ones belong there.
+  const waiting = useMemo(() => unanchoredDecisions.filter((d) => d.status === 'open'), [unanchoredDecisions]);
+
+  const answerDecision = (id: string, a: { key?: string; text?: string }): void =>
+    answer.mutate(
+      { id, ...a },
+      { onError: (e) => toast.push({ title: 'Could not record that answer', detail: e.message, status: 'failed' }) },
+    );
 
   const send = (text: string): void => {
     if (!threadId) return;
@@ -170,7 +184,7 @@ export function ChatRoute(): React.ReactElement {
     }
     const d = /^\/d\s+(\S+)\s*(\S+)?/.exec(text);
     if (d?.[1]) {
-      answer.mutate({ id: d[1], ...(d[2] ? { key: d[2] } : {}) });
+      answerDecision(d[1], d[2] ? { key: d[2] } : {});
       return;
     }
     if (offline) {
@@ -197,7 +211,7 @@ export function ChatRoute(): React.ReactElement {
     <Page>
       <PageHeader
         title="Conductor"
-        meta={`${running} workers running · ${decisions.data?.length ?? 0} need you`}
+        meta={`${running} workers running · ${(decisions.data ?? []).filter((d) => d.status === 'open').length} need you`}
         actions={<span className="ac-mono hidden text-micro text-text-nav md:block">/brief</span>}
       />
 
@@ -245,6 +259,16 @@ export function ChatRoute(): React.ReactElement {
                     onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
                   />
                 ))}
+                {entry.decisions.map((d) => (
+                  <DecisionCard
+                    key={d.id}
+                    decision={d}
+                    asker="conductor"
+                    ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
+                    busy={answer.isPending}
+                    onAnswer={(a) => answerDecision(d.id, a)}
+                  />
+                ))}
               </div>
             ))
           )}
@@ -271,14 +295,15 @@ export function ChatRoute(): React.ReactElement {
             </div>
           ) : null}
 
-          {/* decision cards are first-class blocks in the thread */}
-          {(decisions.data ?? []).map((d) => (
+          {/* decisions no message in this thread accounts for: a worker's question, or one raised
+              in a turn that never replied. Anchored ones sit in the conversation above. */}
+          {waiting.map((d) => (
             <DecisionCard
               key={d.id}
               decision={d}
               ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
               busy={answer.isPending}
-              onAnswer={(a) => answer.mutate({ id: d.id, ...a })}
+              onAnswer={(a) => answerDecision(d.id, a)}
             />
           ))}
 

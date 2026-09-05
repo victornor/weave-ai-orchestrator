@@ -91,6 +91,16 @@ describe('DispatchLabel', () => {
   });
 });
 
+const question = (over: Partial<Parameters<typeof decision>[0]> = {}): ReturnType<typeof decision> =>
+  decision({
+    kind: 'question',
+    options: [
+      { key: 'local', label: 'localStorage + system fallback', description: 'No backend change.', recommended: true },
+      { key: 'user', label: 'Persist on the user record', description: 'Needs a migration.' },
+    ],
+    ...over,
+  });
+
 describe('DecisionCard', () => {
   it('renders the plan variant with Approve / Revise / reject', () => {
     render(<DecisionCard decision={decision()} ticketIdentifier="ACME-42" onAnswer={() => undefined} />);
@@ -108,20 +118,92 @@ describe('DecisionCard', () => {
   });
 
   it('marks the recommended option PICKED on a worker question', () => {
+    render(<DecisionCard decision={question()} onAnswer={() => undefined} />);
+    expect(screen.getByText('PICKED')).toBeInTheDocument();
+    expect(screen.getByText('Write your own…')).toBeInTheDocument();
+  });
+
+  it('renders each option of a two-option question exactly once', () => {
+    render(<DecisionCard decision={question()} onAnswer={() => undefined} />);
+    expect(screen.getAllByText('localStorage + system fallback')).toHaveLength(1);
+    expect(screen.getAllByText('Persist on the user record')).toHaveLength(1);
+    expect(screen.getAllByRole('radio')).toHaveLength(2);
+  });
+
+  it('selects an option without answering, and sends the last selection', () => {
+    const onAnswer = vi.fn();
+    render(<DecisionCard decision={question()} onAnswer={onAnswer} />);
+    const send = screen.getByRole('button', { name: 'Send answer' });
+    expect(send).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('radio', { name: /localStorage/ }));
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(screen.getByRole('radio', { name: /localStorage/ })).toBeChecked();
+
+    fireEvent.click(screen.getByRole('radio', { name: /user record/ }));
+    expect(screen.getByRole('radio', { name: /localStorage/ })).not.toBeChecked();
+    expect(onAnswer).not.toHaveBeenCalled();
+
+    fireEvent.click(send);
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith({ key: 'user' });
+  });
+
+  it('answers with free text from the write-your-own composer', () => {
+    const onAnswer = vi.fn();
+    render(<DecisionCard decision={question()} onAnswer={onAnswer} />);
+    fireEvent.click(screen.getByText('Write your own…'));
+    const box = screen.getByLabelText('Answer in your own words…');
+    fireEvent.change(box, { target: { value: 'neither — put it behind a flag' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(onAnswer).toHaveBeenCalledWith({ text: 'neither — put it behind a flag' });
+  });
+
+  it('offers no free-text alternative when the decision forbids one', () => {
+    render(<DecisionCard decision={question({ allowFreeText: false })} onAnswer={() => undefined} />);
+    expect(screen.queryByText('Write your own…')).not.toBeInTheDocument();
+  });
+
+  it('names the conductor as the asker of a conductor question', () => {
+    render(<DecisionCard decision={question()} asker="conductor" onAnswer={() => undefined} />);
+    expect(screen.getByText('Conductor asks')).toBeInTheDocument();
+  });
+
+  it('keeps the worker heading for a worker question', () => {
+    render(<DecisionCard decision={question()} asker="worker" onAnswer={() => undefined} />);
+    expect(screen.getByText('Worker question')).toBeInTheDocument();
+  });
+
+  it('renders an answered decision as an inert record of the option chosen', () => {
+    const onAnswer = vi.fn();
     render(
       <DecisionCard
-        decision={decision({
-          kind: 'question',
-          options: [
-            { key: 'local', label: 'localStorage + system fallback', description: 'No backend change.', recommended: true },
-            { key: 'user', label: 'Persist on the user record', description: 'Needs a migration.' },
-          ],
-        })}
+        decision={question({ status: 'answered', answerKey: 'user', answeredAt: '2026-09-01T10:15:00.000Z' })}
+        asker="conductor"
+        onAnswer={onAnswer}
+      />,
+    );
+    expect(screen.getByText('Answered')).toBeInTheDocument();
+    expect(screen.getByText('Persist on the user record')).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send answer' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Write your own…')).not.toBeInTheDocument();
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  it('shows the words when the answer was written rather than picked', () => {
+    render(
+      <DecisionCard
+        decision={question({ status: 'answered', answerKey: null, answerText: 'neither — put it behind a flag' })}
         onAnswer={() => undefined}
       />,
     );
-    expect(screen.getByText('PICKED')).toBeInTheDocument();
-    expect(screen.getByText('Something else…')).toBeInTheDocument();
+    expect(screen.getByText('neither — put it behind a flag')).toBeInTheDocument();
+  });
+
+  it('offers nothing to answer on an answered plan approval', () => {
+    render(<DecisionCard decision={decision({ status: 'answered', answerKey: 'approve' })} onAnswer={() => undefined} />);
+    expect(screen.queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Approve')).toBeInTheDocument();
   });
 
   it('keeps the destructive variant disabled until the identifier is typed', () => {

@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import type { Decision } from '@agent-conductor/shared';
+import type { Decision, UiStatus } from '@agent-conductor/shared';
 import { Button } from './Button';
 import { Composer } from './Composer';
 import { StatusGlyph } from './StatusGlyph';
+import { clock } from '../lib/format';
 import { cx } from '../lib/cx';
 
 export interface DecisionCardProps {
@@ -10,6 +11,8 @@ export interface DecisionCardProps {
   ticketIdentifier?: string | null;
   projectSlug?: string | null;
   askedBy?: string | null;
+  /** Who raised a question: the conductor asking the human reads differently from a worker asking. */
+  asker?: 'conductor' | 'worker';
   busy?: boolean;
   queued?: boolean;
   onAnswer: (answer: { key?: string; text?: string; remember?: boolean }) => void;
@@ -33,7 +36,10 @@ interface Target {
   confirm?: string;
 }
 
-const HEAD: Record<string, { label: string; status: 'needs-you' | 'merging' | 'blocked' | 'failed' }> = {
+/** Decisions with a purpose-built body and buttons; everything else takes the option-list path. */
+const NAMED_VARIANTS = ['plan_approval', 'merge_approval', 'hire_approval', 'discard_approval'];
+
+const HEAD: Record<string, { label: string; status: UiStatus }> = {
   plan_approval: { label: 'Plan approval', status: 'needs-you' },
   merge_approval: { label: 'Merge approval', status: 'merging' },
   hire_approval: { label: 'Hire approval', status: 'needs-you' },
@@ -44,18 +50,48 @@ const HEAD: Record<string, { label: string; status: 'needs-you' | 'merging' | 'b
   retry_approval: { label: 'Worker stopped', status: 'failed' },
 };
 
+const HEAD_TEXT: Partial<Record<UiStatus, string>> = {
+  'needs-you': 'text-needs-you',
+  merging: 'text-merging',
+  failed: 'text-failed',
+  blocked: 'text-blocked',
+  done: 'text-done',
+};
+
+function statusLabel(status: Decision['status']): string {
+  return status === 'withdrawn' ? 'Withdrawn' : status === 'expired' ? 'Expired' : status === 'superseded' ? 'Superseded' : 'Closed';
+}
+
+/** What was answered, in the words the human would recognise: the option's label, else its key. */
+function answerLine(decision: Decision): string | null {
+  const chosen = decision.answerKey ? (decision.options.find((o) => o.key === decision.answerKey)?.label ?? decision.answerKey) : null;
+  const text = decision.answerText?.trim() || null;
+  if (chosen && text) return `${chosen} — ${text}`;
+  return chosen ?? text;
+}
+
 /**
  * One decision per card. Header says what it is, the body is per variant, the
- * primary action sits bottom-left inside a 44 px thumb band.
+ * primary action sits bottom-left inside a 44 px thumb band. A decision that has
+ * been answered renders the same card as an inert record of what was decided.
  */
-export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy, busy, queued, onAnswer, className }: DecisionCardProps): React.ReactElement {
+export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy, asker, busy, queued, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [freeText, setFreeText] = useState(false);
-  const head = HEAD[decision.kind] ?? HEAD['approval']!;
+  const [selected, setSelected] = useState<string | null>(null);
   const target = (decision.target ?? {}) as Target;
   const destructive = decision.kind === 'discard_approval';
   const meta = [ticketIdentifier, projectSlug, askedBy].filter(Boolean).join(' · ');
+  // A decision that is no longer open cannot be answered again; it is a record, not a prompt.
+  const answered = decision.status === 'answered';
+  const inert = decision.status !== 'open';
+  const optionList = !NAMED_VARIANTS.includes(decision.kind) && decision.options.length > 0;
+  const head = inert
+    ? { label: answered ? 'Answered' : statusLabel(decision.status), status: (answered ? 'done' : 'blocked') as UiStatus }
+    : decision.kind === 'question' && asker === 'conductor'
+      ? { label: 'Conductor asks', status: 'needs-you' as UiStatus }
+      : (HEAD[decision.kind] ?? HEAD['approval']!);
 
   const answer = (key: string, text?: string): void => onAnswer(text === undefined ? { key } : { key, text });
 
@@ -66,8 +102,8 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
     >
       <div className="flex items-center gap-2 border-b border-line-1 px-3.5 py-2.5">
         <StatusGlyph status={head.status} size="sm" />
-        <span className={cx('text-meta font-medium', head.status === 'merging' ? 'text-merging' : head.status === 'needs-you' ? 'text-needs-you' : head.status === 'failed' ? 'text-failed' : 'text-blocked')}>
-          {decision.kind === 'plan_approval' ? 'Needs you' : head.label}
+        <span className={cx('text-meta font-medium', HEAD_TEXT[head.status] ?? 'text-blocked')}>
+          {!inert && decision.kind === 'plan_approval' ? 'Needs you' : head.label}
         </span>
         <div className="flex-1" />
         {target.prUrl ? (
@@ -119,26 +155,34 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
               {target.model ? ` · ${target.model}` : ''}
             </span>
             <div className="flex-1" />
-            <button type="button" className="text-micro font-medium text-accent-link" onClick={() => setFreeText(true)}>
-              Switch runtime
-            </button>
+            {inert ? null : (
+              <button type="button" className="text-micro font-medium text-accent-link" onClick={() => setFreeText(true)}>
+                Switch runtime
+              </button>
+            )}
           </div>
         ) : null}
 
-        {/* question — options with the picked recommendation */}
-        {decision.kind === 'question' || decision.kind === 'gate_finding' || (decision.options.length > 2 && decision.kind === 'approval') ? (
-          <div className="mb-3 flex flex-col gap-2">
+        {/* options — picking one selects it; the send action below commits it */}
+        {optionList && !inert ? (
+          <div className="mb-3 flex flex-col gap-2" role="radiogroup" aria-label="Options">
             {decision.options.map((o) => {
               const picked = o.recommended || o.key === decision.recommendation;
+              const chosen = selected === o.key;
               return (
                 <button
                   key={o.key}
                   type="button"
+                  role="radio"
+                  aria-checked={chosen}
                   disabled={busy}
-                  onClick={() => answer(o.key)}
+                  onClick={() => {
+                    setSelected(o.key);
+                    setFreeText(false);
+                  }}
                   className={cx(
                     'rounded-r6 border p-3 text-left transition-colors duration-(--dur-fast) ease-ac',
-                    picked ? 'border-accent bg-accent-tint' : 'border-line-2 hover:bg-bg-2',
+                    chosen ? 'border-accent bg-accent-tint' : picked ? 'border-accent-edge' : 'border-line-2 hover:bg-bg-2',
                   )}
                 >
                   <span className="mb-0.5 flex items-center gap-2">
@@ -154,17 +198,29 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
             {decision.allowFreeText ? (
               <button
                 type="button"
-                onClick={() => setFreeText((v) => !v)}
+                aria-expanded={freeText}
+                onClick={() => {
+                  setSelected(null);
+                  setFreeText((v) => !v);
+                }}
                 className="rounded-r6 border border-dashed border-line-2 p-3 text-left text-meta text-text-4 hover:text-text-2"
               >
-                Something else…
+                Write your own…
               </button>
             ) : null}
           </div>
         ) : null}
 
+        {/* answered — the record of what was decided */}
+        {answered ? (
+          <div className="mb-3 rounded-r6 border border-line-1 bg-bg-2 p-3" aria-label="The answer given">
+            <p className="text-meta leading-relaxed text-text-1">{answerLine(decision) ?? 'No answer recorded.'}</p>
+            {decision.answeredAt ? <p className="ac-mono mt-1 text-micro text-text-4">{clock(decision.answeredAt)}</p> : null}
+          </div>
+        ) : null}
+
         {/* discard worktree — type the ticket id to confirm */}
-        {destructive ? (
+        {destructive && !inert ? (
           <input
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
@@ -174,7 +230,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
           />
         ) : null}
 
-        {freeText ? (
+        {freeText && !inert ? (
           <Composer
             className="mb-3"
             rows={2}
@@ -187,7 +243,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
           />
         ) : null}
 
-        {revising ? (
+        {revising && !inert ? (
           <Composer
             className="mb-3"
             rows={3}
@@ -204,9 +260,9 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
 
         {queued ? <p className="mb-2 text-micro text-working">Queued — this answer is sent and re-validated when the connection returns.</p> : null}
 
-        {/* primary action band, 44px, primary bottom-left */}
-        <div className="flex min-h-thumb items-center gap-2">
-          {decision.kind === 'plan_approval' ? (
+        {/* primary action band, 44px, primary bottom-left. An answered card has none. */}
+        <div className={cx('flex items-center gap-2', !inert && 'min-h-thumb')}>
+          {inert ? null : decision.kind === 'plan_approval' ? (
             <>
               <Button variant="primary" size="thumb" className="flex-1" disabled={busy} onClick={() => answer('approve')} kbd="⏎">
                 Approve
@@ -246,12 +302,10 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
             >
               Discard
             </Button>
-          ) : decision.options.length <= 2 && decision.options.length > 0 ? (
-            decision.options.map((o, i) => (
-              <Button key={o.key} variant={i === 0 ? 'primary' : 'secondary'} size="thumb" className="flex-1" disabled={busy} onClick={() => answer(o.key)}>
-                {o.label}
-              </Button>
-            ))
+          ) : optionList ? (
+            <Button variant="primary" size="thumb" className="flex-1" disabled={busy || selected === null} onClick={() => answer(selected!)}>
+              Send answer
+            </Button>
           ) : null}
         </div>
       </div>

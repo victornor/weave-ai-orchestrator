@@ -1,7 +1,7 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Project, RunEvent, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
-import { agent, project, ticket } from './factories';
+import type { Agent, Decision, Project, RunEvent, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
+import { agent, decision, project, ticket } from './factories';
 import { enqueue } from '../lib/queue';
 
 const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>() }));
@@ -16,6 +16,10 @@ const state = vi.hoisted(() => ({
   projects: [] as Project[],
   posted: [] as Array<Record<string, unknown>>,
   connection: 'connected' as string,
+  decisions: [] as Decision[],
+  decisionQuery: null as Record<string, unknown> | null,
+  answer: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  toasts: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('../api/context', async () => {
@@ -42,14 +46,17 @@ vi.mock('../api/hooks', () => ({
   useCreateThread: () => ({ mutate: vi.fn(), isPending: false, data: null }),
   useThreadMessages: () => ({ data: state.messages, isLoading: false, isError: false, refetch: vi.fn() }),
   usePostThreadMessage: () => ({ mutate: (v: Record<string, unknown>) => state.posted.push(v) }),
-  useDecisions: () => ({ data: [] }),
-  useAnswerDecision: () => ({ mutate: vi.fn(), isPending: false }),
+  useDecisions: (p: Record<string, unknown>) => { state.decisionQuery = p; return { data: state.decisions }; },
+  useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
   useTickets: (p: Record<string, unknown>) => { state.ticketQuery = p; return { data: state.tickets }; },
   useWorkers: (p: Record<string, unknown>) => { state.workerQuery = p; return { data: state.workers }; },
   useProjects: () => ({ data: state.projects, isSuccess: true }),
 }));
 
 vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
+vi.mock('../components/Toast', () => ({
+  useToast: () => ({ push: (t: Record<string, unknown>) => { state.toasts.push(t); return 't1'; }, dismiss: vi.fn() }),
+}));
 vi.mock('../lib/queue', () => ({ enqueue: vi.fn(), useQueueCount: () => 0 }));
 
 const { ChatRoute } = await import('../routes/Chat');
@@ -102,6 +109,10 @@ beforeEach(() => {
   state.posted = [];
   state.connection = 'connected';
   vi.mocked(enqueue).mockClear();
+  state.decisions = [];
+  state.decisionQuery = null;
+  state.answer = vi.fn();
+  state.toasts = [];
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
@@ -419,5 +430,131 @@ describe('project context', () => {
     state.messages = [message({ id: 'm1', body: 'old message', direction: 'inbound', projectId: 'p_gone' })];
     render(<ChatRoute />);
     expect(screen.getByText('old message').parentElement!.parentElement!).toHaveTextContent('p_gone');
+  });
+});
+
+describe('ChatRoute decision cards', () => {
+  /** True when `a` comes before `b` in the rendered document. */
+  const precedes = (a: Element, b: Element): boolean =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  const asked = (over: Partial<Decision> = {}): Decision =>
+    decision({
+      id: 'd1', kind: 'question', ticketId: null, askedInRunId: 'run_1', title: 'File this as a ticket?',
+      context: 'It is a one-line fix.', recommendation: null, target: null,
+      options: [
+        { key: 'file', label: 'File it', description: 'A ticket, routed to the engineer.' },
+        { key: 'skip', label: 'Leave it', description: 'Nothing is filed.' },
+      ],
+      ...over,
+    });
+
+  it('asks for open and answered decisions, so an answered card survives in the history', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    render(<ChatRoute />);
+    expect(state.decisionQuery).toMatchObject({ status: ['open', 'answered'], owner: 'human' });
+  });
+
+  it('renders the card directly after the message of the turn that raised it', () => {
+    state.messages = [
+      message({ id: 'm0', body: 'Before the question.', runId: 'run_0' }),
+      message({ id: 'm1', body: 'One thing before I start.' }),
+      message({ id: 'm2', body: 'Anything else?', runId: 'run_2' }),
+    ];
+    state.decisions = [asked()];
+
+    render(<ChatRoute />);
+    const card = screen.getByLabelText('Conductor asks: File this as a ticket?');
+    expect(precedes(screen.getByText('One thing before I start.'), card)).toBe(true);
+    expect(precedes(card, screen.getByText('Anything else?'))).toBe(true);
+    expect(screen.getByRole('radio', { name: /File it/ })).toBeInTheDocument();
+    expect(screen.getByText('Write your own…')).toBeInTheDocument();
+  });
+
+  it('keeps its position when later messages arrive', () => {
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked()];
+
+    const { rerender } = render(<ChatRoute />);
+    state.messages = [
+      ...state.messages,
+      message({ id: 'm2', body: 'Go ahead.', direction: 'inbound', authorKind: 'human', runId: null }),
+      message({ id: 'm3', body: 'Done.', runId: 'run_2' }),
+    ];
+    rerender(<ChatRoute />);
+
+    const card = screen.getByLabelText('Conductor asks: File this as a ticket?');
+    expect(precedes(screen.getByText('One thing before I start.'), card)).toBe(true);
+    expect(precedes(card, screen.getByText('Go ahead.'))).toBe(true);
+    expect(precedes(card, screen.getByText('Done.'))).toBe(true);
+  });
+
+  it('answers with the option that was selected and sent', () => {
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked()];
+
+    render(<ChatRoute />);
+    fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
+    expect(state.answer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    expect(state.answer).toHaveBeenCalledWith({ id: 'd1', key: 'file' }, expect.anything());
+  });
+
+  it('reports an answer the daemon refused', () => {
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked()];
+    state.answer = vi.fn((_vars: unknown, opts: { onError: (e: Error) => void }) => opts.onError(new Error('decision d1 is answered')));
+
+    render(<ChatRoute />);
+    fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    expect(state.toasts).toEqual([{ title: 'Could not record that answer', detail: 'decision d1 is answered', status: 'failed' }]);
+  });
+
+  it('renders an answered decision in place, inert, showing what was chosen', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'One thing before I start.' }),
+      message({ id: 'm2', body: 'Done.', runId: 'run_2' }),
+    ];
+    state.decisions = [asked({ status: 'answered', answerKey: 'file', answeredAt: '2026-09-01T09:30:00.000Z' })];
+
+    render(<ChatRoute />);
+    const card = screen.getByLabelText('Answered: File this as a ticket?');
+    expect(precedes(screen.getByText('One thing before I start.'), card)).toBe(true);
+    expect(precedes(card, screen.getByText('Done.'))).toBe(true);
+    expect(screen.getByText('File it')).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send answer' })).not.toBeInTheDocument();
+  });
+
+  it('rebuilds the same cards in the same places on a fresh mount', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'One thing before I start.' }),
+      message({ id: 'm2', body: 'Done.', runId: 'run_2' }),
+    ];
+    state.decisions = [asked({ status: 'answered', answerKey: 'file' })];
+
+    const first = render(<ChatRoute />).container.innerHTML;
+    cleanup();
+    expect(render(<ChatRoute />).container.innerHTML).toBe(first);
+  });
+
+  it('keeps an unanchored open decision below the conversation, and drops an answered one', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    const workerQuestion = asked({ id: 'd_worker', title: 'Which storage?', askedInRunId: 'run_worker' });
+    const oldAnswer = asked({ id: 'd_old', title: 'Ship on Friday?', askedInRunId: 'run_worker', status: 'answered', answerKey: 'file' });
+    state.decisions = [workerQuestion, oldAnswer];
+
+    render(<ChatRoute />);
+    const card = screen.getByLabelText('Worker question: Which storage?');
+    expect(precedes(screen.getByText('Filed it.'), card)).toBe(true);
+    expect(screen.queryByLabelText('Answered: Ship on Friday?')).not.toBeInTheDocument();
+  });
+
+  it('counts only the decisions still waiting', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    state.decisions = [asked(), asked({ id: 'd2', status: 'answered', answerKey: 'file' })];
+    render(<ChatRoute />);
+    expect(screen.getByText(/1 need you/)).toBeInTheDocument();
   });
 });

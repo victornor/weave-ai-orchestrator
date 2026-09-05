@@ -1,0 +1,28 @@
+## 1. Loading the decisions the chat needs
+
+- [x] 1.1 Let `useDecisions` in `packages/ui/src/api/hooks.ts` take more than one status and an explicit `limit`, passing the statuses to the existing comma-separated `status` query parameter, and change the conductor chat's query (`packages/ui/src/routes/Chat.tsx`) to load open and answered human-owned decisions with a limit of 200; verify with a test that the chat asks for both statuses and that an answered decision reaches its rendering, while `Needs you` and the ticket page keep asking for open decisions only.
+
+- [x] 1.2 Extend the chat's entry selector in `packages/ui/src/lib/dispatch.ts` so each entry also carries the decisions raised by the run behind that message, reusing the run-to-last-outbound-message map it already builds: a decision is anchored when its `askedInRunId` matches, anchored decisions are ordered by creation, and every other decision is returned as the unanchored remainder; verify with unit tests covering a decision anchored to its conductor message, a decision anchored to the last of several messages from one run, an open decision with no matching run left unanchored, an answered decision still anchored, two decisions from one run in creation order, and a decision anchored to a message that also carries dispatch labels.
+
+## 2. The decision card
+
+- [x] 2.1 Change the option-list path in `packages/ui/src/components/DecisionCard.tsx` — the path taken by `question`, `gate_finding` and any decision whose options do not map onto a named approval variant — from answering on click to selecting on click plus a single primary send action in the thumb band, and remove the second rendering of the same options as thumb-band buttons so a two-option question shows each option exactly once; leave the plan, merge, hire and discard variants and their existing confirmation behavior untouched. Verify with component tests that clicking an option selects it without calling the answer handler, that picking a second option moves the selection, that the send action answers with the selected key, that the write-your-own composer answers with its text, that a decision forbidding free text offers no such composer, that each option renders exactly once for a two-option question, and that the plan and discard variants behave as they do today.
+
+- [x] 2.2 Render an answered decision as an inert card: the question and its context, one line naming what was answered — the chosen option's label, falling back to its key when the option is absent, or the free text that was written — and when it was answered, with no selectable option and no send action, and a header that reads as answered rather than as waiting. Verify with component tests that an answered-by-key decision names the option's label, that an answered-by-text decision shows the text, that no option is selectable and no send action is offered, and that the answer handler is never called from an answered card.
+
+- [x] 2.3 Give the card the asker: a question raised by the conductor is headed as a conductor question and a question raised by a worker keeps today's heading, driven by an explicit prop rather than inferred from the decision's fields. Verify with component tests for both headings and that the heading of every other variant is unchanged.
+
+## 3. The two surfaces
+
+- [x] 3.1 Render the anchored decision cards from task 1.2 inside the conductor chat's message list, directly after the message each is anchored to and after that message's dispatch labels, and keep the existing block below the conversation for the unanchored decisions that are still open; report a failed answer with an error toast. Verify with route tests that a card renders directly after its conductor message, that it keeps that position after a later human message and a later conductor message, that an answered decision renders in place as answered, that answering from the card calls the answer endpoint with the chosen key, that a decision with no anchor renders in the block below the conversation and an answered one there does not, that the same props render identically on a fresh mount (the reload case), and that a failed answer raises the toast.
+
+- [x] 3.2 Cover `Needs you` for the same question: the open decision the chat is showing appears there as a card with the same question and the same options, answering it there calls the answer endpoint with the chosen key, an answer that fails raises the error toast, and a decision that has been answered elsewhere is no longer listed. Verify with route tests for `packages/ui/src/routes/NeedsYou.tsx`; change its behavior only where a test shows it does not meet the requirement.
+
+## 4. Asking with options
+
+- [x] 4.1 Add one rule to `templates/conductor.AGENTS.md.tmpl` and to `skills/agent-conductor-conductor/SKILL.md` where each covers reaching the human: when the answer needed from the human is one of a small, known set, ask with `ac_ask` carrying those options and a recommendation; otherwise ask in prose. Do not change anything else about what the conductor asks or how it words it. Verify by reading the rendered template for the conductor in a test workspace and confirming the rule is present and that no other instruction changed.
+
+## 5. Verification
+
+- [x] 5.1 Run `pnpm lint`, `pnpm typecheck` and `pnpm test`, plus the web app's build, and confirm they pass; note any pre-existing failure that is unrelated to this change.
+  - `pnpm lint` (boundaries ok, console ok), `pnpm typecheck`, `pnpm test` (629 core/server/etc. passed, 1 skipped; 97 web passed), `pnpm build` and the web app's `vite build` are all green. No pre-existing failures appeared.

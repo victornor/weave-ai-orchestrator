@@ -127,6 +127,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
 
   const services = {
     tickets: impl('tickets', {
+      stop: async () => {},
       get: getTicket,
       list: () => ({ items: [...tickets.values()], total: tickets.size }),
       blockers: () => [], children: () => [], workProducts: () => [],

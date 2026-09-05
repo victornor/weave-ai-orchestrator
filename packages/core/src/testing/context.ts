@@ -120,6 +120,13 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
   };
 }
 
+/** Minimal specs service double: records every re-index. The ticket service schedules one after a
+ *  merge, so any suite that merges needs this or the harness proxy throws inside a detached timer. */
+export function fakeSpecs(): { index: (projectId: string) => Promise<{ capabilities: number; changes: number }>; calls: string[] } {
+  const calls: string[] = [];
+  return { calls, index: async (projectId) => { calls.push(projectId); return { capabilities: 0, changes: 0 }; } };
+}
+
 /** Minimal wake service double: records every enqueue. */
 export function fakeWake(): { enqueue: (agentId: string, input: Record<string, unknown>) => Record<string, unknown>; calls: Array<{ agentId: string; input: Record<string, unknown> }>; listForAgent: () => never[]; cancelForAgent: () => number } {
   const calls: Array<{ agentId: string; input: Record<string, unknown> }> = [];

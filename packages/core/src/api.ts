@@ -46,6 +46,8 @@ export interface TicketsService {
   /** Move `in_review` tickets with auto_merge on to `merging` once their delivery is ready (local-branch: immediately; pr: CI green or no CI). Returns how many advanced. */
   autoMergeSweep(): Promise<number>;
   nextIdentifier(): string;
+  /** Async: cancel the follow-up work a merge or an `in_review` scheduled but has not run yet, and await what is already in flight. Never rejects; safe to call when idle and more than once. Drain before disposing of the workspace database. */
+  stop(): Promise<void>;
 }
 
 // ---------- merge queue ----------

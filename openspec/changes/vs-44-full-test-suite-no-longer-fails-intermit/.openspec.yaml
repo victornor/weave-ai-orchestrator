@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Full test suite no longer fails intermittently from the post-merge spec
+  re-index timer in the ticket service

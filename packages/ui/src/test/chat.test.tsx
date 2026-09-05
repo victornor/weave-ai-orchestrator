@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Decision, Project, RunEvent, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
 import { agent, decision, project, ticket } from './factories';
@@ -578,7 +578,7 @@ describe('ChatRoute decision cards', () => {
     expect(state.decisionQuery).toMatchObject({ status: ['open', 'answered'], owner: 'human' });
   });
 
-  it('renders the card directly after the message of the turn that raised it', () => {
+  it('pins an open card below the whole conversation, not where it was asked', () => {
     state.messages = [
       message({ id: 'm0', body: 'Before the question.', runId: 'run_0' }),
       message({ id: 'm1', body: 'One thing before I start.' }),
@@ -588,13 +588,15 @@ describe('ChatRoute decision cards', () => {
 
     render(<ChatRoute />);
     const card = screen.getByLabelText('Conductor asks: File this as a ticket?');
-    expect(precedes(screen.getByText('One thing before I start.'), card)).toBe(true);
-    expect(precedes(card, screen.getByText('Anything else?'))).toBe(true);
+    // Exactly one card: pinned instead of anchored, never both.
+    expect(screen.getAllByLabelText('Conductor asks: File this as a ticket?')).toHaveLength(1);
+    expect(screen.getByLabelText('Open decisions')).toContainElement(card);
+    expect(precedes(screen.getByText('Anything else?'), card)).toBe(true);
     expect(screen.getByRole('radio', { name: /File it/ })).toBeInTheDocument();
     expect(screen.getByText('Write your own…')).toBeInTheDocument();
   });
 
-  it('keeps its position when later messages arrive', () => {
+  it('keeps the card pinned below the newest message as the conversation grows', () => {
     state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
     state.decisions = [asked()];
 
@@ -607,9 +609,64 @@ describe('ChatRoute decision cards', () => {
     rerender(<ChatRoute />);
 
     const card = screen.getByLabelText('Conductor asks: File this as a ticket?');
-    expect(precedes(screen.getByText('One thing before I start.'), card)).toBe(true);
-    expect(precedes(card, screen.getByText('Go ahead.'))).toBe(true);
-    expect(precedes(card, screen.getByText('Done.'))).toBe(true);
+    expect(precedes(screen.getByText('Go ahead.'), card)).toBe(true);
+    expect(precedes(screen.getByText('Done.'), card)).toBe(true);
+  });
+
+  it('pins the area between the message list and the composer', () => {
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked()];
+
+    render(<ChatRoute />);
+    const area = screen.getByLabelText('Open decisions');
+    // Outside the scrolling body — the list keeps its own scroll and its scroll-to-bottom button.
+    expect(area.closest('.ac-scroll')).toBe(area);
+    expect(area.contains(screen.getByText('One thing before I start.'))).toBe(false);
+    expect(precedes(area, screen.getByPlaceholderText('Message the conductor…'))).toBe(true);
+  });
+
+  it('stacks several open decisions oldest first', () => {
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [
+      asked({ id: 'd_new', title: 'Second question?', createdAt: '2026-09-01T09:05:00.000Z' }),
+      asked({ id: 'd_old', title: 'First question?', createdAt: '2026-09-01T09:00:00.000Z' }),
+    ];
+
+    render(<ChatRoute />);
+    const area = screen.getByLabelText('Open decisions');
+    const cards = Array.from(area.querySelectorAll('article')).map((a) => a.getAttribute('aria-label'));
+    expect(cards).toEqual(['Conductor asks: First question?', 'Conductor asks: Second question?']);
+  });
+
+  it('answers the card that was sent from the pinned area', () => {
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked({ id: 'd_a', title: 'First question?', createdAt: '2026-09-01T09:00:00.000Z' }), asked({ id: 'd_b', title: 'Second question?', createdAt: '2026-09-01T09:05:00.000Z' })];
+
+    render(<ChatRoute />);
+    const second = screen.getByLabelText('Conductor asks: Second question?');
+    fireEvent.click(within(second).getByRole('radio', { name: /File it/ }));
+    fireEvent.click(within(second).getByRole('button', { name: 'Send answer' }));
+    expect(state.answer).toHaveBeenCalledWith({ id: 'd_b', key: 'file' }, expect.anything());
+  });
+
+  it('drops the card from the pinned area once it is answered, leaving the record in history', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'One thing before I start.' }),
+      message({ id: 'm2', body: 'Done.', runId: 'run_2' }),
+    ];
+    state.decisions = [asked()];
+
+    const { rerender } = render(<ChatRoute />);
+    expect(screen.getByLabelText('Open decisions')).toBeInTheDocument();
+
+    // However it was answered — here, or from Needs you — the decision comes back answered.
+    state.decisions = [asked({ status: 'answered', answerKey: 'file', answeredAt: '2026-09-01T09:30:00.000Z' })];
+    rerender(<ChatRoute />);
+
+    expect(screen.queryByLabelText('Open decisions')).not.toBeInTheDocument();
+    const record = screen.getByLabelText('Answered: File this as a ticket?');
+    expect(precedes(screen.getByText('One thing before I start.'), record)).toBe(true);
+    expect(precedes(record, screen.getByText('Done.'))).toBe(true);
   });
 
   it('answers with the option that was selected and sent', () => {
@@ -662,7 +719,7 @@ describe('ChatRoute decision cards', () => {
     expect(render(<ChatRoute />).container.innerHTML).toBe(first);
   });
 
-  it('keeps an unanchored open decision below the conversation, and drops an answered one', () => {
+  it('pins an unanchored open decision too, and drops an answered one it cannot place', () => {
     state.messages = [message({ id: 'm1', body: 'Filed it.' })];
     const workerQuestion = asked({ id: 'd_worker', title: 'Which storage?', askedInRunId: 'run_worker' });
     const oldAnswer = asked({ id: 'd_old', title: 'Ship on Friday?', askedInRunId: 'run_worker', status: 'answered', answerKey: 'file' });
@@ -670,7 +727,7 @@ describe('ChatRoute decision cards', () => {
 
     render(<ChatRoute />);
     const card = screen.getByLabelText('Worker question: Which storage?');
-    expect(precedes(screen.getByText('Filed it.'), card)).toBe(true);
+    expect(screen.getByLabelText('Open decisions')).toContainElement(card);
     expect(screen.queryByLabelText('Answered: Ship on Friday?')).not.toBeInTheDocument();
   });
 

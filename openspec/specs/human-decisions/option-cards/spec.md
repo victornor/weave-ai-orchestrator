@@ -1,7 +1,7 @@
 # human-decisions/option-cards Specification
 
 ## Purpose
-Defines how a decision that carries a defined set of options is put to the human and answered: how its card reads, where it sits in the conductor chat, how it is answered from the chat and from `Needs you`, and what it shows once it has been answered — so that a choice the conductor is waiting on is visible where it was asked, answerable in one gesture, and still readable in the history afterwards.
+Defines how a decision that carries a defined set of options is put to the human and answered: how its card reads, where it waits in the conductor chat, how it is answered from the chat and from `Needs you`, and what it shows once it has been answered — so that a choice the conductor is waiting on is always on screen, answerable in one gesture, and still readable in the history afterwards.
 
 ## Requirements
 

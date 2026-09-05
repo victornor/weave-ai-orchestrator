@@ -33,7 +33,7 @@ export interface ChatEntries {
   entries: ChatEntry[];
   /** Live workers no message in the thread accounts for; they keep the row below the conversation. */
   unattributed: Agent[];
-  /** Decisions no message in the thread accounts for; the open ones keep the block below it. */
+  /** Decisions no message in the thread accounts for; an open one is pinned above the composer. */
   unanchoredDecisions: Decision[];
 }
 
@@ -95,8 +95,9 @@ export function chatEntries(messages: ThreadMessage[], tickets: Ticket[], worker
     anchored.add(ticket.id);
   }
 
-  // A decision is anchored by the run that raised it, through the same map: the conductor's
-  // question belongs under the message that turn produced, not at the end of the conversation.
+  // A decision is anchored by the run that raised it, through the same map: once it is answered, the
+  // record of what was decided reads under the message that turn produced. While it is still open the
+  // chat pins it above the composer instead, so the anchor is where it lands, not where it waits.
   const decisionsByMessage = new Map<string, Decision[]>();
   const unanchoredDecisions: Decision[] = [];
   for (const decision of [...decisions].sort((a, b) =>

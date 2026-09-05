@@ -44,6 +44,7 @@ import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, shor
 import { cx } from '../lib/cx';
 import { workspaceYolo } from '../lib/yolo';
 import { SETTINGS_AREAS, firstSectionOf, resolveSettingsLocation, sectionsOfArea } from '../lib/settings';
+import { disablePush, enablePush, subscriptionId } from '../lib/push';
 
 /**
  * Settings is two areas: what belongs to this workspace, and what belongs to this daemon and so
@@ -755,7 +756,8 @@ function DeviceSection(): React.ReactElement {
       return Object.fromEntries(NOTIFS.map((n) => [n.key, n.def]));
     }
   });
-  const [permission, setPermission] = useState(typeof Notification !== 'undefined' ? Notification.permission : 'default');
+  const [enabled, setEnabled] = useState(() => subscriptionId(ws) !== null);
+  const [busy, setBusy] = useState(false);
 
   const save = (key: string, on: boolean): void => {
     const next = { ...state, [key]: on };
@@ -767,19 +769,23 @@ function DeviceSection(): React.ReactElement {
     }
   };
 
-  const subscribe = async (): Promise<void> => {
-    if (typeof Notification === 'undefined') return;
-    const p = await Notification.requestPermission();
-    setPermission(p);
-    if (p !== 'granted') return;
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true });
-      await api.ws(ws, '/push/subscribe', { method: 'POST', body: sub.toJSON() });
-      toast.push({ title: 'Push enabled', detail: 'Decisions and landed work will reach this device.', status: 'done' });
-    } catch {
-      toast.push({ title: 'Push is not available', detail: 'In-app arrival still works: a toast plus the Needs-you badge.', status: 'working' });
-    }
+  /** Whatever went wrong — a blocked permission, a daemon without VAPID keys — the human reads it. */
+  const run = (what: 'on' | 'off'): void => {
+    setBusy(true);
+    const done = what === 'on' ? enablePush(ws) : disablePush(ws);
+    done
+      .then(() => {
+        setEnabled(what === 'on');
+        toast.push(
+          what === 'on'
+            ? { title: 'Push enabled', detail: 'Decisions and landed work will reach this device.', status: 'done' }
+            : { title: 'Push turned off for this device', status: 'done' },
+        );
+      })
+      .catch((e: Error) =>
+        toast.push({ title: what === 'on' ? 'Could not enable push' : 'Could not turn push off', detail: e.message, status: 'failed', ttl: 8000 }),
+      )
+      .finally(() => setBusy(false));
   };
 
   return (
@@ -834,10 +840,17 @@ function DeviceSection(): React.ReactElement {
             </label>
           ))}
         </div>
-        {permission !== 'granted' ? (
-          <Button onClick={() => void subscribe()}>Get notified when something needs you</Button>
+        {enabled ? (
+          <div className="flex items-center gap-3">
+            <p className="min-w-0 flex-1 text-micro text-text-3">Push is on for this device.</p>
+            <Button disabled={busy} onClick={() => run('off')}>
+              Turn off on this device
+            </Button>
+          </div>
         ) : (
-          <p className="text-micro text-text-3">Push is on for this device.</p>
+          <Button disabled={busy} onClick={() => run('on')}>
+            Get notified when something needs you
+          </Button>
         )}
       </section>
     </div>

@@ -6,7 +6,8 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { newId, nowIso, type Db } from '@agent-conductor/db';
 import { getLogger } from '@agent-conductor/core';
-import type { AppEnv } from './types.js';
+import { PUSH_ROUTES, type PushConfig } from '@agent-conductor/shared';
+import type { AppDeps, AppEnv } from './types.js';
 import { body } from './http.js';
 
 const log = getLogger('http', { component: 'push' });
@@ -24,12 +25,18 @@ export async function sendPush(db: Db, payload: { title: string; body: string; u
   return { sent: 0, skipped: subs.length };
 }
 
-export function pushRoutes(): Hono<AppEnv> {
+export function pushRoutes(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
-  app.get('/subscriptions', (c) => c.json(listSubscriptions(c.get('ws').ctx.db).map((s) => ({ id: s.id, endpoint: s.endpoint, createdAt: s.createdAt }))));
+  /** What the browser needs before `pushManager.subscribe` can succeed at all. */
+  app.get(PUSH_ROUTES.config, (c) => {
+    const vapidPublicKey = deps.daemon.push.vapidPublicKey ?? null;
+    return c.json<PushConfig>({ configured: vapidPublicKey !== null, vapidPublicKey });
+  });
 
-  app.post('/subscriptions', async (c) => {
+  app.get(PUSH_ROUTES.subscriptions, (c) => c.json(listSubscriptions(c.get('ws').ctx.db).map((s) => ({ id: s.id, endpoint: s.endpoint, createdAt: s.createdAt }))));
+
+  app.post(PUSH_ROUTES.subscriptions, async (c) => {
     const principal = c.get('principal');
     const sub = await body(c, z.object({ endpoint: z.string().url(), keys: z.record(z.string(), z.string()) }));
     const db = c.get('ws').ctx.db;
@@ -39,7 +46,7 @@ export function pushRoutes(): Hono<AppEnv> {
     return c.json({ id }, 201);
   });
 
-  app.delete('/subscriptions/:id', (c) => {
+  app.delete(PUSH_ROUTES.subscription, (c) => {
     c.get('ws').ctx.db.run('DELETE FROM push_subscriptions WHERE id = ?', [c.req.param('id')]);
     return c.json({ ok: true });
   });

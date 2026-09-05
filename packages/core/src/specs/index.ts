@@ -13,7 +13,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
 import { OcError } from '@agent-conductor/shared';
-import type { Actor, CoreServices, PendingChange, SpecChangeSummary, SpecsService } from '../api.js';
+import type { Actor, CapabilityRequirement, CoreServices, PendingChange, RequirementDelta, SpecChangeSummary, SpecsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import * as cli from '../openspec/cli.js';
@@ -30,6 +30,8 @@ export interface ChangeRecord {
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 const readIf = (p: string): string | null => (existsSync(p) ? readFileSync(p, 'utf8') : null);
+/** Requirement names are matched across files, so only case and run-together whitespace are forgiven. */
+const normalizeName = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ');
 const dirs = (p: string): string[] => (existsSync(p) ? readdirSync(p, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort() : []);
 
 /**
@@ -40,6 +42,55 @@ export function deltaKindOf(body: string): DeltaKind {
   const m = /^##\s+(ADDED|MODIFIED|REMOVED|RENAMED)\s+Requirements\b/im.exec(body);
   const kind = m?.[1]?.toLowerCase();
   return kind === 'added' || kind === 'modified' || kind === 'removed' || kind === 'renamed' ? kind : 'modified';
+}
+
+const DELTA_KINDS: Record<string, DeltaKind> = { added: 'added', modified: 'modified', removed: 'removed', renamed: 'renamed' };
+
+export interface DeltaScenario { text: string; steps: Array<{ word: string; text: string }> }
+/** One `### Requirement:` of a delta spec, under the `## <KIND> Requirements` section it appears in. */
+export interface DeltaRequirement { kind: DeltaKind; name: string; text: string; scenarios: DeltaScenario[] }
+
+/**
+ * Every requirement a delta spec touches, in file order. A delta spec groups its requirements under
+ * `## ADDED|MODIFIED|REMOVED|RENAMED Requirements` headers; any other `##` heading (`## Purpose`) ends the
+ * group. A RENAMED group names its requirements in `- FROM:` / `- TO:` list items rather than in headers,
+ * and both sides are reported: the old name is what the capability still carries, the new one is arriving.
+ *
+ * Text and scenarios are carried along because a requirement an active change only ADDs is not in the
+ * capability's own spec yet — the delta spec is the only place its wording exists.
+ */
+export function parseDeltaRequirements(body: string): DeltaRequirement[] {
+  const out: DeltaRequirement[] = [];
+  let kind: DeltaKind | null = null;
+  let current: DeltaRequirement | null = null;
+  let scenario: DeltaScenario | null = null;
+  const start = (k: DeltaKind, name: string): DeltaRequirement => {
+    const r: DeltaRequirement = { kind: k, name: name.trim(), text: '', scenarios: [] };
+    out.push(r);
+    scenario = null;
+    return r;
+  };
+  for (const raw of body.split('\n')) {
+    const line = raw.trimEnd();
+    const requirement = /^###\s+Requirement:\s*(.+)$/.exec(line);
+    if (requirement) { current = kind ? start(kind, requirement[1]!) : null; scenario = null; continue; }
+    const scen = /^####\s+Scenario:\s*(.+)$/.exec(line);
+    if (scen && current) { scenario = { text: scen[1]!.trim(), steps: [] }; current.scenarios.push(scenario); continue; }
+    const section = /^##\s+(ADDED|MODIFIED|REMOVED|RENAMED)\s+Requirements\b/i.exec(line);
+    if (section) { kind = DELTA_KINDS[section[1]!.toLowerCase()]!; current = null; scenario = null; continue; }
+    if (/^#{1,4}\s/.test(line)) { kind = null; current = null; scenario = null; continue; }
+    if (kind === 'renamed') {
+      const side = /^\s*[-*]\s*(?:FROM|TO):\s*`?\s*###\s+Requirement:\s*(.+?)\s*`?\s*$/i.exec(line);
+      if (side) { start('renamed', side[1]!); current = null; continue; }
+    }
+    if (scenario) {
+      const step = /^\s*[-*]\s*\*\*([A-Za-z]+)\*\*\s*(.*)$/.exec(line);
+      if (step) scenario.steps.push({ word: step[1]!.toUpperCase(), text: step[2]!.trim() });
+      continue;
+    }
+    if (current) current.text += current.text.length ? `\n${line}` : line;
+  }
+  return out.filter((r) => r.name.length > 0).map((r) => ({ ...r, text: r.text.trim() }));
 }
 
 /** `- [x] text` / `- [ ] text` lines of a change's tasks.md, in file order. Anything else in the file is prose. */
@@ -271,12 +322,31 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
       projectId = project(projectId).id;
       const row = db.get<CapabilityRow>('SELECT id, capability, title, requirement_count, body, last_archived_change, updated_at FROM spec_capabilities WHERE project_id = ? AND capability = ?', [projectId, capability]);
       if (!row) throw new OcError('not_found', `capability ${capability} is not indexed for this project`);
-      const requirements = db.all<{ name: string; text: string; scenarios: unknown }>('SELECT name, text, scenarios_json FROM spec_requirements WHERE capability_id = ? ORDER BY rowid', [row.id])
-        .map((r) => ({ name: r.name, text: r.text, scenarios: Array.isArray(r.scenarios) ? r.scenarios : [] }));
-      const linked = db.all<{ changeName: string; ticketId: string | null; deltaKind: string; state: string; archivedAs: string | null; archivedAt: string | null }>(
-        `SELECT sc.change_name, sc.ticket_id, scc.delta_kind, sc.state, sc.archived_as, sc.archived_at
+      const requirements: CapabilityRequirement[] = db.all<{ name: string; text: string; scenarios: unknown }>('SELECT name, text, scenarios_json FROM spec_requirements WHERE capability_id = ? ORDER BY rowid', [row.id])
+        .map((r) => ({ name: r.name, text: r.text, scenarios: Array.isArray(r.scenarios) ? r.scenarios : [], delta: null }));
+      const linked = db.all<{ changeName: string; ticketId: string | null; deltaKind: string; state: string; archivedAs: string | null; archivedAt: string | null; artifacts: ChangeArtifacts }>(
+        `SELECT sc.change_name, sc.ticket_id, scc.delta_kind, sc.state, sc.archived_as, sc.archived_at, sc.artifacts_json
            FROM spec_change_capabilities scc JOIN spec_changes sc ON sc.id = scc.change_id
           WHERE sc.project_id = ? AND scc.capability = ? ORDER BY sc.archived_at DESC, sc.change_name`, [projectId, capability]);
+
+      // Pending deltas are read inline off the requirement, so an active change's delta spec is matched
+      // requirement by requirement against the capability. Archived changes are history, never pending.
+      const at = new Map(requirements.map((r, i) => [normalizeName(r.name), i]));
+      for (const l of linked) {
+        if (l.state !== 'active') continue;
+        const deltaSpec = l.artifacts?.specs?.[capability];
+        if (!deltaSpec) continue;
+        const ticketIdentifier = identifierOf(l.ticketId);
+        for (const d of parseDeltaRequirements(deltaSpec)) {
+          const delta = { kind: d.kind.toUpperCase() as RequirementDelta['kind'], changeName: l.changeName, ticketIdentifier, state: 'pending' as const };
+          const known = at.get(normalizeName(d.name));
+          if (known !== undefined) { requirements[known]!.delta ??= delta; continue; }
+          if (d.kind === 'removed' || d.kind === 'modified') continue;   // the capability never had it; nothing to mark
+          at.set(normalizeName(d.name), requirements.length);
+          requirements.push({ name: d.name, text: d.text, scenarios: d.scenarios, delta });
+        }
+      }
+
       return {
         id: row.id, capability: row.capability, title: row.title, body: row.body, requirements,
         pending: linked.filter((l) => l.state === 'active').map((l) => ({ changeName: l.changeName, ticketId: l.ticketId, ticketIdentifier: identifierOf(l.ticketId), deltaKind: l.deltaKind })),

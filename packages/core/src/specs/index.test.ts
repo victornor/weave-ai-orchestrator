@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { writeFakeOpenspec, type FakeCase } from '../openspec/fakeBin.js';
-import { createSpecsService, deltaKindOf, ftsQuery, parseTasks, readArchivedChanges } from './index.js';
+import { createSpecsService, deltaKindOf, ftsQuery, parseDeltaRequirements, parseTasks, readArchivedChanges } from './index.js';
 
 let h: TestHarness | null = null;
 const previousBin = process.env.AC_OPENSPEC_BIN;
@@ -80,6 +80,7 @@ describe('spec index', () => {
     expect(cap.body).toBe(AUTH_SPEC);
     expect(cap.requirements.map((r) => r.name)).toEqual(['Password login', 'Dark mode toggle']);
     expect(cap.requirements[0]!.scenarios).toEqual([{ name: 'good password' }]);
+    expect(cap.requirements.every((r) => r.delta === null)).toBe(true);   // the archived changes touching auth are history, not pending
     expect(cap.history).toEqual([
       { changeName: 'tst-2-sso', ticketId: null, ticketIdentifier: null, state: 'archived', archivedAs: '2026-09-01-tst-2-sso', archivedAt: '2026-09-01T00:00:00.000Z' },
       { changeName: 'tst-1-login', ticketId: null, ticketIdentifier: null, state: 'archived', archivedAs: '2026-08-01-tst-1-login', archivedAt: '2026-08-01T00:00:00.000Z' },
@@ -147,6 +148,39 @@ describe('spec index', () => {
     expect(second[0]!.id).toBe(first.id);
     expect(harness.db.get<{ n: number }>('SELECT COUNT(*) n FROM spec_requirements')!.n).toBe(2);
     expect(harness.db.get<{ n: number }>('SELECT COUNT(*) n FROM spec_changes')!.n).toBe(3);
+  });
+
+  it('marks the requirements an active change adds, modifies or removes, and leaves the rest alone', async () => {
+    const { harness, clone } = setup();
+    fixture(harness, clone);
+    const worktree = harness.db.get<{ worktreePath: string }>("SELECT worktree_path FROM agents WHERE kind = 'worker'")!.worktreePath;
+    write(join(worktree, 'openspec', 'changes', 'tst-3-dark-mode', 'specs', 'auth', 'spec.md'), [
+      '## Purpose', 'Signing in, in the dark.', '',
+      '## MODIFIED Requirements', '',
+      '### Requirement: Password login', 'The system SHALL accept an email and password, or a magic link.', '',
+      '## ADDED Requirements', '',
+      '### Requirement: Magic link login', 'The system SHALL accept a signed link sent by email.', '',
+      '#### Scenario: A fresh link', '- **WHEN** the link is under an hour old', '- **THEN** the session is created', '',
+      '## REMOVED Requirements', '',
+      '### Requirement: Dark mode toggle', '',
+    ].join('\n'));
+
+    const svc = createSpecsService(harness.ctx, harness.deps);
+    await svc.index(harness.projectId);
+
+    const cap = svc.getCapability(harness.projectId, 'auth');
+    expect(cap.requirements.map((r) => [r.name, r.delta?.kind ?? null])).toEqual([
+      ['Password login', 'MODIFIED'],
+      ['Dark mode toggle', 'REMOVED'],
+      ['Magic link login', 'ADDED'],
+    ]);
+    expect(cap.requirements[0]!.delta).toEqual({ kind: 'MODIFIED', changeName: 'tst-3-dark-mode', ticketIdentifier: 'TST-3', state: 'pending' });
+    // the added requirement is not on the default branch yet, so its wording comes from the delta spec
+    expect(cap.requirements[2]).toMatchObject({
+      text: 'The system SHALL accept a signed link sent by email.',
+      scenarios: [{ text: 'A fresh link', steps: [{ word: 'WHEN', text: 'the link is under an hour old' }, { word: 'THEN', text: 'the session is created' }] }],
+    });
+    expect(cap.pending).toEqual([{ changeName: 'tst-3-dark-mode', ticketId: expect.any(String), ticketIdentifier: 'TST-3', deltaKind: 'modified' }]);
   });
 
   it('searches capabilities, requirements and change artifacts without touching knowledge rows', async () => {
@@ -220,6 +254,29 @@ describe('spec parsing helpers', () => {
     expect(deltaKindOf('## RENAMED Requirements\n')).toBe('renamed');
     expect(deltaKindOf('# Delta\n\n## REMOVED Requirements\n\n## ADDED Requirements\n')).toBe('removed');
     expect(deltaKindOf('nothing recognisable here')).toBe('modified');
+  });
+
+  it('reads every requirement of a delta spec under the section it belongs to', () => {
+    const body = [
+      '## Purpose', 'Prose that names no requirement.', '',
+      '## ADDED Requirements', '### Requirement: New feature', 'The system SHALL do something new.', '',
+      '#### Scenario: Basic case', '- **WHEN** the user does X', '- **THEN** the system does Y', '',
+      '## MODIFIED Requirements', '### Requirement: Existing feature', 'Now also handling A.', '',
+      '## REMOVED Requirements', '### Requirement: Deprecated feature', '',
+      '## RENAMED Requirements', '', '- FROM: `### Requirement: Old name`', '- TO: `### Requirement: New name`', '',
+    ].join('\n');
+    expect(parseDeltaRequirements(body).map((r) => [r.kind, r.name])).toEqual([
+      ['added', 'New feature'],
+      ['modified', 'Existing feature'],
+      ['removed', 'Deprecated feature'],
+      ['renamed', 'Old name'],
+      ['renamed', 'New name'],
+    ]);
+    const added = parseDeltaRequirements(body)[0]!;
+    expect(added.text).toBe('The system SHALL do something new.');
+    expect(added.scenarios).toEqual([{ text: 'Basic case', steps: [{ word: 'WHEN', text: 'the user does X' }, { word: 'THEN', text: 'the system does Y' }] }]);
+    expect(parseDeltaRequirements('### Requirement: Outside every section\nnot under a delta header\n')).toEqual([]);
+    expect(parseDeltaRequirements('')).toEqual([]);
   });
 
   it('reads the checklist of a tasks.md and ignores its prose', () => {

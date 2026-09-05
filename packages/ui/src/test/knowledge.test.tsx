@@ -48,7 +48,18 @@ const CAPABILITY_DETAIL: CapabilityDetail = {
   ],
 };
 
-const state = vi.hoisted(() => ({ change: {} as Record<string, unknown>, capabilityArgs: [] as string[] }));
+/** The same capability while an active change is about to rewrite it (core fills `delta` per requirement). */
+const CAPABILITY_PENDING: CapabilityDetail = {
+  ...CAPABILITY_DETAIL,
+  requirements: [
+    { ...CAPABILITY_DETAIL.requirements[0]!, delta: { kind: 'MODIFIED', changeName: 'tst-3-labels', ticketIdentifier: 'TST-3', state: 'pending' } },
+    { ...CAPABILITY_DETAIL.requirements[1]!, delta: { kind: 'REMOVED', changeName: 'tst-3-labels', ticketIdentifier: 'TST-3', state: 'pending' } },
+    { name: 'Label tooltip', text: 'The label SHALL carry a tooltip.', scenarios: [], delta: { kind: 'ADDED', changeName: 'tst-3-labels', ticketIdentifier: null, state: 'pending' } },
+  ],
+  pending: [{ changeName: 'tst-3-labels', ticketId: 'tk_3', ticketIdentifier: 'TST-3', deltaKind: 'modified' }],
+};
+
+const state = vi.hoisted(() => ({ change: {} as Record<string, unknown>, capabilityArgs: [] as string[], capability: null as CapabilityDetail | null }));
 
 vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: [{ id: 'p1', slug: 'api' }] }),
@@ -64,7 +75,7 @@ vi.mock('../api/hooks', () => ({
   useCapabilities: () => ({ data: [CAPABILITY], isLoading: false, isError: false, refetch: vi.fn() }),
   useCapability: (project: string, capability: string) => {
     state.capabilityArgs = [project, capability];
-    return { data: CAPABILITY_DETAIL, isLoading: false, isError: false };
+    return { data: state.capability, isLoading: false, isError: !state.capability };
   },
   useSpecGraph: () => ({ data: { nodes: [], edges: [] }, isLoading: false }),
   useSpecChanges: () => ({ data: [{ ...ARCHIVED } as unknown as SpecChangeSummary], isLoading: false, isError: false }),
@@ -80,9 +91,17 @@ function openArchivedChange(): void {
   fireEvent.click(screen.getByText('tst-1-login'));
 }
 
+/** Specs tab → the capability list → the capability page. */
+function openCapability(): void {
+  render(<KnowledgeRoute />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Specs' }));
+  fireEvent.click(screen.getByText('conductor-chat/dispatch-labels'));
+}
+
 beforeEach(() => {
   state.change = { ...ARCHIVED };
   state.capabilityArgs = [];
+  state.capability = CAPABILITY_DETAIL;
 });
 
 describe('Knowledge — archived change page', () => {
@@ -116,5 +135,26 @@ describe('Knowledge — nested capability page', () => {
     expect(screen.getByText('Change history')).toBeInTheDocument();
     expect(screen.getByText('TST-1')).toBeInTheDocument();
     expect(screen.getByText('archived')).toBeInTheDocument();
+  });
+});
+
+describe('Knowledge — pending deltas on a capability', () => {
+  it('marks the requirements an active change is about to modify, remove and add', () => {
+    state.capability = CAPABILITY_PENDING;
+    openCapability();
+    expect(screen.getByText('MODIFIED')).toBeInTheDocument();
+    expect(screen.getByText('REMOVED')).toBeInTheDocument();
+    expect(screen.getByText('ADDED')).toBeInTheDocument();
+    expect(screen.getAllByText('TST-3 · pending')).toHaveLength(2);
+    expect(screen.getByText('tst-3-labels · pending')).toBeInTheDocument();   // no ticket yet: the change name stands in
+    expect(screen.getByText('The label SHALL carry a tooltip.')).toBeInTheDocument();
+  });
+
+  it('marks nothing when no active change touches the capability', () => {
+    openCapability();
+    expect(screen.getByText('Anchored labels')).toBeInTheDocument();
+    expect(screen.queryByText('MODIFIED')).not.toBeInTheDocument();
+    expect(screen.queryByText('ADDED')).not.toBeInTheDocument();
+    expect(screen.queryByText(/· pending/)).not.toBeInTheDocument();
   });
 });

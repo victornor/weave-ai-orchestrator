@@ -347,7 +347,7 @@ export interface Requirement {
   name: string;
   text: string;
   scenarios: Array<{ text?: string; steps?: Array<{ word: string; text: string }> }>;
-  /** Inline pending delta (PLAN §12.5). The API does not populate it yet; the page renders without it. */
+  /** Inline pending delta (PLAN §12.5): set for a requirement an active change is about to touch, absent otherwise. */
   delta?: { kind: 'ADDED' | 'MODIFIED' | 'REMOVED' | 'RENAMED'; changeName: string; ticketIdentifier: string | null; state: string } | null;
 }
 

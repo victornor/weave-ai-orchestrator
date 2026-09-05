@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Capability page highlights requirements that an active change is about to
+  modify
+skip_specs: true

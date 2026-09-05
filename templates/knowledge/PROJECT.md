@@ -1,5 +1,5 @@
 <!-- knowledge/projects/<id>/PROJECT.md — the project knowledge base. -->
-<!-- Audience: this project's workers and the conductor. Budget: 1500 tokens. -->
+<!-- Audience: this project's workers and the conductor. Budget: `defaults.knowledgeBudgetTokens.project` (10000 by default). -->
 <!-- Section headings below are fixed: ac_knowledge_note(scope, section, text) targets them by name. -->
 <!-- Entries: <= 60 words, standalone, absolute dates, no pronouns, no secrets, nothing derivable from git. -->
 <!-- Perishable entries carry a marker: <!--exp:YYYY-MM-DD--> -->

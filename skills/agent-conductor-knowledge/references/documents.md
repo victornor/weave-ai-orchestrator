@@ -8,7 +8,7 @@ with `[[slug]]`. Together they form the project's knowledge graph. Think Obsidia
 |---|---|---|
 | Path | `knowledge/projects/<id>/PROJECT.md` | `knowledge/projects/<id>/docs/<slug>.md` |
 | Write with | `ac_knowledge_note(scope, section, text)` | `ac_knowledge_doc_put(slug, body)` |
-| Size | 1500 tokens for the whole file | 1500 tokens per document |
+| Size | the workspace's configured budget for that file (10000 tokens by default) | the configured document budget (10000 tokens by default) |
 | Shape | fixed sections, ≤ 60-word entries | `# Title`, a one-line summary paragraph, then whatever the topic needs |
 | Found through | always loaded at boot | `ac_knowledge_docs` (catalogue), links, `ac_knowledge_search` |
 

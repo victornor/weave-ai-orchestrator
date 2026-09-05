@@ -1,4 +1,4 @@
-/** `conductor workspace list|use|register|unregister|pause|resume|export|import` (PLAN §20). */
+/** `conductor workspace list|use|register|unregister|set-default|pause|resume|export|import` (PLAN §20). */
 import type { Command } from 'commander';
 import { resolve as resolvePath } from 'node:path';
 import { emit, fields, style, table, write } from '../output.js';
@@ -73,6 +73,27 @@ export function register(program: Command): void {
   }
 
   workspace
+    .command('set-default')
+    .argument('<assignments...>', 'one or more key=value pairs; dotted keys reach one level in')
+    .description('change workspace defaults (merged into the existing ones)')
+    .addHelpText('after', `
+Keys:    knowledgeBudgetTokens.project=<n>    knowledgeBudgetTokens.document=<n>
+         knowledgeBudgetTokens.workspace=<n>  knowledgeBudgetTokens.shared=<n>
+         knowledgeBudgetTokens.decisions=<n>  bootstrapBudgetTokens=<n>
+         runtime=<id>  model=<id>  maxConcurrentRuns=<n>  turnTimeoutSec=<n>  autoMerge=true|false
+Example: conductor workspace set-default knowledgeBudgetTokens.project=20000`)
+    .action(async (assignments: string[], _opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const defaults = parseAssignments(assignments);
+      const updated = await client.patch<Record<string, unknown>>(client.w('/config'), { defaults });
+      const applied = (updated['defaults'] ?? {}) as Record<string, unknown>;
+      emit(updated, () => {
+        write(`${style.ok('updated')} workspace defaults`);
+        fields(Object.keys(defaults).map((k) => [k, JSON.stringify(applied[k])] as [string, string]));
+      });
+    }));
+
+  workspace
     .command('export')
     .description('write a portable package of this workspace on the daemon host')
     .option('--out <dir>', 'target directory on the daemon host (default: <workspace>/exports/<timestamp>)')
@@ -123,4 +144,30 @@ Does not:     restore ticket status, history, comments, documents, decisions, ru
         ]);
       });
     }));
+}
+
+/** `a=1 b.c=2` into `{ a: 1, b: { c: 2 } }`; only the daemon decides whether a key is real. */
+export function parseAssignments(assignments: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const raw of assignments) {
+    const eq = raw.indexOf('=');
+    if (eq <= 0) throw new Error(`not a key=value pair: ${raw}`);
+    const path = raw.slice(0, eq).split('.');
+    const value = coerce(raw.slice(eq + 1));
+    let node = out;
+    for (const key of path.slice(0, -1)) {
+      if (typeof node[key] !== 'object' || node[key] === null) node[key] = {};
+      node = node[key] as Record<string, unknown>;
+    }
+    node[path[path.length - 1]!] = value;
+  }
+  return out;
+}
+
+/** `true`/`false` and plain integers are typed; everything else stays a string. */
+function coerce(value: string): unknown {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (/^-?\d+$/.test(value)) return Number(value);
+  return value;
 }

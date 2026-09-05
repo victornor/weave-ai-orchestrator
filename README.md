@@ -294,6 +294,7 @@ Run `conductor <group> --help` for the full set. Global flags: `-w/--workspace`,
 |---|---|
 | `conductor init <dir> --prefix ACME [--id] [--name] [--local]` | scaffold and register a workspace |
 | `conductor workspace list \| use <id> \| register <path> \| unregister <id>` | the daemon's workspace registry |
+| `conductor workspace set-default <key=value...>` | change workspace defaults, e.g. `knowledgeBudgetTokens.project=20000` |
 | `conductor workspace pause \| resume` | stop and restart run dispatch for the workspace |
 | `conductor workspace export [--out <dir>]` | portable package on the daemon host: `workspace.yaml`, roles, knowledge, tickets as markdown — no db, no runs, no secrets |
 | `conductor workspace import <dir> --target <dir>` | copy an export into a new or existing workspace directory and register it; tickets land in `backlog` with an `[imported]` comment |
@@ -416,7 +417,13 @@ defaults:
   maxConcurrentRuns: 6
   turnTimeoutSec: 2700
   silenceTimeoutSec: 600      # the stuck-worker watchdog window
-  bootstrapBudgetTokens: 8000
+  bootstrapBudgetTokens: 16000
+  knowledgeBudgetTokens:        # tokens per knowledge file; curation is triggered at 80% of it
+    workspace: 10000
+    shared: 2000
+    decisions: 4000
+    project: 10000
+    document: 10000
   permissionMode: auto        # auto | restricted | bypass
 projects:
   - id: api

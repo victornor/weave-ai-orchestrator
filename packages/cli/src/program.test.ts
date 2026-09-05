@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { Command } from 'commander';
 import { buildProgram } from './program.js';
 import { configureOutput } from './output.js';
+import { parseAssignments } from './commands/workspace.js';
 
 function find(program: Command, path: string[]): Command | undefined {
   let node: Command | undefined = program;
@@ -48,7 +49,7 @@ describe('command tree', () => {
     ['decision', ['list', 'show', 'answer']],
     ['presentation', ['set', 'open', 'reconcile', 'status']],
     ['conductor', ['set-model', 'set-runtime', 'show', 'reset-session']],
-    ['workspace', ['list', 'use', 'register', 'unregister', 'pause', 'resume', 'export', 'import']],
+    ['workspace', ['list', 'use', 'register', 'unregister', 'set-default', 'pause', 'resume', 'export', 'import']],
     ['runs', ['list', 'show', 'tail', 'cancel']],
     ['knowledge', ['show', 'edit', 'note', 'lint', 'curate', 'revert']],
     ['specs', ['list', 'show', 'changes', 'search', 'explore']],
@@ -56,6 +57,15 @@ describe('command tree', () => {
     ['agent', ['inbox']],
   ])('%s has its subcommands', (group, subcommands) => {
     for (const name of subcommands) expect(find(program, [group, name])?.name(), `${group} ${name}`).toBe(name);
+  });
+
+  it('turns `workspace set-default` assignments into a nested patch', () => {
+    expect(parseAssignments(['knowledgeBudgetTokens.project=20000', 'autoMerge=true', 'model=opus'])).toEqual({
+      knowledgeBudgetTokens: { project: 20000 }, autoMerge: true, model: 'opus',
+    });
+    expect(parseAssignments(['knowledgeBudgetTokens.project=1', 'knowledgeBudgetTokens.document=2']))
+      .toEqual({ knowledgeBudgetTokens: { project: 1, document: 2 } });
+    expect(() => parseAssignments(['knowledgeBudgetTokens.project'])).toThrow(/not a key=value pair/);
   });
 
   it('offers --launchd on `daemon install-service` and --out/--target on workspace export/import', () => {

@@ -31,6 +31,9 @@ describe('knowledge', () => {
   });
   afterEach(() => h.cleanup());
 
+  /** The workspace's configured budgets: changing one is what the human does from settings. */
+  const budgets = () => h.ctx.config.defaults.knowledgeBudgetTokens;
+
   it('seeds every knowledge file with its sections and budget', () => {
     const project = knowledge.get('project', h.projectId);
     expect(project.path).toBe(join(h.ctx.paths.knowledge, 'projects/api/PROJECT.md'));
@@ -94,11 +97,93 @@ describe('knowledge', () => {
   it('rejects over-budget writes, flags curation and spawns a curation worker', async () => {
     const filler = Array.from({ length: 400 }, (_, i) => `- 2026-01-01 · durable fact number ${i} about the project internals`).join('\n');
     knowledge.replace(HUMAN, 'project', `# API\n\n## Learnings\n${filler}\n`, 'human', h.projectId);
+    budgets().project = 500;
     expect(() => knowledge.note(WORKER, 'project', 'Learnings', 'One more thing worth remembering here.', h.projectId))
       .toThrowError(expect.objectContaining({ code: 'budget_exceeded' }));
     await tick();
     expect(knowledge.get('project', h.projectId).curationPending).toBe(true);
     expect(workers.spawnCurator).toHaveBeenCalledWith(expect.objectContaining({ kind: 'system' }), h.projectId);
+  });
+
+  it('measures a write against the configured budget, not the one the file was created with', async () => {
+    const entry = 'The billing reconciler runs nightly and reads from the read replica.';
+    budgets().project = 500;
+    const filler = Array.from({ length: 40 }, (_, i) => `- 2026-01-01 · durable fact number ${i} about the project internals`).join('\n');
+    knowledge.replace(HUMAN, 'project', `# API\n\n## Learnings\n${filler}\n`, 'human', h.projectId);
+    expect(() => knowledge.note(WORKER, 'project', 'Learnings', entry, h.projectId))
+      .toThrowError(expect.objectContaining({ code: 'budget_exceeded' }));
+
+    // The human raises the budget: the same entry goes in on the next write, with no restart.
+    budgets().project = 10000;
+    expect(knowledge.note(WORKER, 'project', 'Learnings', entry, h.projectId).revision).toBeGreaterThan(1);
+    expect(knowledge.get('project', h.projectId).body).toContain(entry);
+    await tick();
+  });
+
+  it('reports the configured budget everywhere it reports a size, and mirrors it onto the row', async () => {
+    knowledge.putDoc(WORKER, 'project', 'billing-data-model', '# Billing data model\n\nOne invoice per period.\n', h.projectId);
+    budgets().project = 12345;
+    budgets().document = 6789;
+
+    expect(knowledge.get('project', h.projectId).budgetTokens).toBe(12345);
+    expect(knowledge.listDocs({ projectId: h.projectId }).map((d) => d.budgetTokens)).toEqual([6789]);
+    expect(knowledge.getDoc('project', 'billing-data-model', h.projectId).budgetTokens).toBe(6789);
+    const lint = knowledge.lint();
+    expect(lint.find((r) => r.path === 'projects/api/PROJECT.md')!.budgetTokens).toBe(12345);
+    expect(lint.find((r) => r.path.endsWith('billing-data-model.md'))!.budgetTokens).toBe(6789);
+
+    // The database column and the write event mirror the configured value.
+    expect(h.db.get<{ budgetTokens: number }>('SELECT budget_tokens AS budgetTokens FROM knowledge_files WHERE path = ?', ['projects/api/PROJECT.md'])!.budgetTokens).toBe(12345);
+    knowledge.note(WORKER, 'project', 'Learnings', 'Invoices are immutable once issued.', h.projectId);
+    await tick();
+    const updated = h.events.filter((e) => e.type === 'knowledge.updated').at(-1)!;
+    expect((updated.payload as { budgetTokens: number }).budgetTokens).toBe(12345);
+  });
+
+  it('schedules curation at 80% of the configured budget without rejecting the write', async () => {
+    const body = `# API\n\n## Learnings\n${Array.from({ length: 10 }, (_, i) => `- 2026-01-01 · durable fact number ${i} about the project internals`).join('\n')}\n`;
+    knowledge.replace(HUMAN, 'project', body, 'human', h.projectId);
+    const tokens = knowledge.get('project', h.projectId).tokenEstimate;
+    budgets().project = Math.ceil(tokens / 0.85);
+
+    expect(knowledge.note(WORKER, 'project', 'Learnings', 'The gateway retries idempotent calls twice.', h.projectId).revision).toBeGreaterThan(1);
+    await tick();
+    expect(knowledge.get('project', h.projectId).curationPending).toBe(true);
+    expect(workers.spawnCurator).toHaveBeenCalled();
+  });
+
+  it('rejects a document over the configured document budget', () => {
+    budgets().document = 500;
+    const long = `# Payments\n\n${'The webhook pipeline verifies, queues and applies each event. '.repeat(60)}\n`;
+    expect(() => knowledge.putDoc(WORKER, 'project', 'payments', long, h.projectId))
+      .toThrowError(expect.objectContaining({ code: 'budget_exceeded' }));
+    budgets().document = 10000;
+    expect(knowledge.putDoc(WORKER, 'project', 'payments', long, h.projectId).budgetTokens).toBe(10000);
+  });
+
+  it('states the configured budget in a seeded file and corrects a stale one on the next write', () => {
+    budgets().project = 9000;
+    expect(knowledge.get('project', h.projectId).body).toContain('Budget 9000 tokens');
+
+    const path = join(h.ctx.paths.knowledge, 'projects/api/PROJECT.md');
+    const stale = '# api\n\n<!-- The project knowledge base. Budget 1500 tokens. Workers append concise dated learnings. -->\n\n## Learnings\n';
+    writeFileSync(path, stale, 'utf8');
+    expect(knowledge.get('project', h.projectId).body).toBe(stale);  // reading changes nothing
+
+    knowledge.note(WORKER, 'project', 'Learnings', 'The seed script is not safe to run twice.', h.projectId);
+    const body = knowledge.get('project', h.projectId).body;
+    expect(body).toContain('<!-- The project knowledge base. Budget 9000 tokens. Workers append concise dated learnings. -->');
+    expect(body).not.toContain('1500');
+  });
+
+  it('leaves a file with no budget marker alone', () => {
+    const path = join(h.ctx.paths.knowledge, 'projects/api/PROJECT.md');
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, '# api\n\n## Learnings\n', 'utf8');
+    knowledge.note(WORKER, 'project', 'Learnings', 'Nothing here states a budget.', h.projectId);
+    const body = knowledge.get('project', h.projectId).body;
+    expect(body).not.toContain('<!--');
+    expect(body).toContain('Nothing here states a budget.');
   });
 
   it('requests conductor curation for workspace-scoped files', async () => {
@@ -194,6 +279,23 @@ describe('knowledge', () => {
     const small = knowledge.bootstrapDigest(workerId);
     expect(small.truncated).toBe(true);
     expect(small.text).toContain('truncated');
+  });
+
+  it('carries full-size knowledge bases into a worker digest without truncating', () => {
+    const workerId = h.addWorker(null);
+    const lines = (tokens: number) => {
+      const line = '- 2026-01-01 · durable fact about the project internals worth keeping in the knowledge base';
+      return Array.from({ length: Math.floor((tokens * 3.5) / (line.length + 1)) }, () => line).join('\n');
+    };
+    knowledge.replace(HUMAN, 'shared', `# Shared knowledge\n\n## Conventions\n${lines(budgets().shared)}\n`, 'human');
+    knowledge.replace(HUMAN, 'project', `# API\n\n## Learnings\n${lines(budgets().project)}\n`, 'human', h.projectId);
+    expect(knowledge.get('shared').tokenEstimate).toBeGreaterThan(budgets().shared * 0.9);
+    expect(knowledge.get('project', h.projectId).tokenEstimate).toBeGreaterThan(budgets().project * 0.9);
+
+    const d = knowledge.bootstrapDigest(workerId);
+    expect(d.truncated).toBe(false);
+    expect(d.text).not.toContain('truncated');
+    expect(d.tokens).toBeLessThanOrEqual(h.ctx.config.defaults.bootstrapBudgetTokens);
   });
 
   it('appends answered decisions to decisions.md once', () => {

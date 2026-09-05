@@ -23,8 +23,10 @@ export function workspaceRoutes(deps: AppDeps): Hono<AppEnv> {
 
   app.patch('/config', async (c) => {
     const ws = c.get('ws');
-    const patch = await body(c, WorkspaceConfigSchema.deepPartial());
-    const merged = WorkspaceConfigSchema.safeParse({ ...ws.ctx.config, ...patch });
+    // The patch is merged raw: parsing it against the config schema first would fill every key the
+    // client left out with that key's default, and the merge would then write those over the config.
+    const patch = await body(c, z.record(z.string(), z.unknown()));
+    const merged = WorkspaceConfigSchema.safeParse(deepMerge(ws.ctx.config, patch));
     if (!merged.success) throw new OcError('validation', 'the patched workspace config is invalid', { issues: merged.error.issues });
     await ws.ctx.saveConfig(merged.data);
     ws.ctx.events.emit('workspace.updated', 'workspace', ws.id, { config: merged.data });
@@ -56,6 +58,21 @@ export function workspaceRoutes(deps: AppDeps): Hono<AppEnv> {
   app.post('/transcribe', (c) => transcribe(c as never, deps));
 
   return app;
+}
+
+/**
+ * Merge a config patch key by key. A shallow spread would replace a whole block — `defaults`,
+ * `conductor`, `presentation` — and the schema would then refill the keys the client did not send
+ * with their defaults, silently resetting settings nobody touched. Lists are replaced wholesale.
+ */
+function deepMerge(base: unknown, patch: unknown): unknown {
+  if (!isPlainObject(base) || !isPlainObject(patch)) return patch;
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(patch)) out[k] = k in base ? deepMerge(base[k], v) : v;
+  return out;
+}
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
 function statusOf(ws: WorkspaceRuntime): string {

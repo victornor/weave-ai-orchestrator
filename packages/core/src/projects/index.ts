@@ -44,7 +44,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
     const dir = join(ctx.paths.knowledge, 'projects', slug);
     mkdirSync(join(dir, 'archive'), { recursive: true });
     const file = join(dir, 'PROJECT.md');
-    if (!existsSync(file)) writeFileSync(file, projectKnowledgeSkeleton(slug), 'utf8');
+    if (!existsSync(file)) writeFileSync(file, projectKnowledgeSkeleton(slug, ctx.config.defaults.knowledgeBudgetTokens.project), 'utf8');
     try { deps().knowledge.reindex(); } catch { /* knowledge service may not be ready yet */ }
   }
 

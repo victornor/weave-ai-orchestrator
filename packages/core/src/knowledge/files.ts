@@ -254,11 +254,58 @@ export function docSlugOf(rel: string): string | null {
   return isDocPath(rel) && m ? m[1]! : null;
 }
 
-/** `[[slug]]`, `[[slug|label]]` and relative markdown links to `slug.md` / `docs/slug.md`. */
+/** Blank out inline code spans on one line, keeping the prose around them. */
+function stripInlineCode(line: string): string {
+  let out = '';
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] !== '`') { out += line[i]!; i++; continue; }
+    let n = 0;
+    while (line[i + n] === '`') n++;
+    // CommonMark: a code span closes on a backtick run of exactly the same length.
+    let j = i + n;
+    let end = -1;
+    while (j < line.length) {
+      if (line[j] !== '`') { j++; continue; }
+      let k = 0;
+      while (line[j + k] === '`') k++;
+      if (k === n) { end = j; break; }
+      j += k;
+    }
+    if (end === -1) { out += line.slice(i, i + n); i += n; continue; } // unmatched run: literal backticks
+    out += ' ';
+    i = end + n;
+  }
+  return out;
+}
+
+/** Blank out fenced code blocks and inline code spans so links inside them are not matched. */
+function stripCode(body: string): string {
+  let fence: string | null = null;
+  return body
+    .split('\n')
+    .map((line) => {
+      if (fence) {
+        if (new RegExp(`^ {0,3}${fence[0]}{${fence.length},} *$`).test(line)) fence = null;
+        return '';
+      }
+      const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+      if (open) { fence = open[1]!; return ''; }
+      return stripInlineCode(line);
+    })
+    .join('\n');
+}
+
+/**
+ * `[[slug]]`, `[[slug|label]]` and relative markdown links to `slug.md` / `docs/slug.md`.
+ * Code spans and fenced code blocks are ignored, so a document that documents the link
+ * syntax does not report its own examples as links.
+ */
 export function parseLinks(body: string): string[] {
   const out = new Set<string>();
-  for (const m of body.matchAll(/\[\[([a-z0-9][a-z0-9-]*)(?:\|[^\]]*)?\]\]/g)) out.add(m[1]!);
-  for (const m of body.matchAll(/\]\((?:\.\/)?(?:docs\/)?([a-z0-9][a-z0-9-]*)\.md\)/g)) out.add(m[1]!);
+  const prose = stripCode(body);
+  for (const m of prose.matchAll(/\[\[([a-z0-9][a-z0-9-]*)(?:\|[^\]]*)?\]\]/g)) out.add(m[1]!);
+  for (const m of prose.matchAll(/\]\((?:\.\/)?(?:docs\/)?([a-z0-9][a-z0-9-]*)\.md\)/g)) out.add(m[1]!);
   return [...out];
 }
 

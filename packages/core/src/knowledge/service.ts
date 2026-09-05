@@ -394,6 +394,9 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
           db.insert('knowledge_revisions', { id: newId(), fileId: row.id, revision, body, authorKind: 'human', authorId: null, runId: null, reason: 'human', removedEntriesJson: [], createdAt: nowIso() });
           db.update('knowledge_files', row.id, { tokenEstimate: estimateTokens(body), hash: sha256(body), updatedAt: nowIso() });
           indexFile(fileRow(row.path)!, body);
+        } else {
+          // The body is unchanged but the link parser may have: re-derive the links either way.
+          indexLinks(row, body);
         }
       }
       const scopes: Array<{ scope: KnowledgeScope; projectId?: string }> = [{ scope: 'workspace' }, { scope: 'shared' }, { scope: 'decisions' }];

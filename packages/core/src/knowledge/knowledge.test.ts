@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { estimateTokens } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createKnowledgeService } from './service.js';
-import { BUDGETS } from './files.js';
+import { BUDGETS, parseLinks } from './files.js';
 import type { Actor, KnowledgeService } from '../api.js';
 
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
@@ -138,6 +138,16 @@ describe('knowledge', () => {
     expect(knowledge.revisions('project', h.projectId).some((r) => r.reason === 'expiry')).toBe(true);
   });
 
+  it('reindex re-derives the links of an unchanged document', () => {
+    knowledge.putDoc(WORKER, 'project', 'payments-webhooks', '# Payments webhooks\n\nStripe events. Syntax: `[[example]]`.\n', h.projectId);
+    const path = 'projects/api/docs/payments-webhooks.md';
+    // a link row left behind by the older parser, which matched inside code spans
+    h.db.run('INSERT OR REPLACE INTO knowledge_links (workspace_id, from_path, to_slug, to_path) VALUES (?,?,?,?)', [h.workspaceId, path, 'example', null]);
+    expect(knowledge.getDoc('project', 'payments-webhooks', h.projectId).linksTo.map((l) => l.slug)).toEqual(['example']);
+    knowledge.reindex();
+    expect(knowledge.getDoc('project', 'payments-webhooks', h.projectId).linksTo).toEqual([]);
+  });
+
   it('lints every file with sizes and pending triggers', () => {
     const rows = knowledge.lint();
     expect(rows.map((r) => r.path).sort()).toEqual(['projects/api/PROJECT.md', 'workspace/SHARED.md', 'workspace/WORKSPACE.md', 'workspace/decisions.md']);
@@ -223,5 +233,35 @@ describe('knowledge', () => {
     knowledge.deleteDoc(HUMAN, 'project', 'billing-data-model', h.projectId);
     expect(knowledge.getDoc('project', 'payments-webhooks', h.projectId).linksTo[0]!.path).toBeNull();
     expect(() => knowledge.getDoc('project', 'billing-data-model', h.projectId)).toThrow(/does not exist/);
+  });
+
+  it('parseLinks ignores wiki links inside code spans and fenced blocks', () => {
+    expect(parseLinks('Write `[[in-code]]` to link, as in [[real-doc]].')).toEqual(['real-doc']);
+    expect(parseLinks('A ``span with [[nested]] `ticks` `` then [[after-span]].')).toEqual(['after-span']);
+    expect(parseLinks('See [[before]].\n\n```md\n[[fenced-one]]\nsee [[fenced-two]] and [x](docs/fenced-three.md)\n```\n\nAnd [[after]].\n')).toEqual(['before', 'after']);
+    expect(parseLinks('~~~\n[[tilde-fenced]]\n~~~\n[[outside]]\n')).toEqual(['outside']);
+    // markdown links are stripped too, and an unmatched backtick stays literal prose
+    expect(parseLinks('`[a](docs/coded.md)` but [b](docs/real.md)')).toEqual(['real']);
+    expect(parseLinks('a ` stray tick and [[still-linked]]')).toEqual(['still-linked']);
+  });
+
+  it('a document that documents the link syntax reports no links', () => {
+    const body = [
+      '# Knowledge documents',
+      '',
+      'Link to another document with `[[slug]]`, or `[[slug|label]]` for a custom label.',
+      '',
+      '```md',
+      'See [[run-engine]] for the turn loop.',
+      '```',
+      '',
+      'The real reference is [[payments-webhooks]].',
+      '',
+    ].join('\n');
+    // only the prose link is reported — none of `slug`, `slug|label` or the fenced example
+    expect(knowledge.putDoc(WORKER, 'project', 'knowledge-documents', body, h.projectId).unresolvedLinks).toEqual(['payments-webhooks']);
+    const doc = knowledge.getDoc('project', 'knowledge-documents', h.projectId);
+    expect(doc.linksTo.map((l) => l.slug)).toEqual(['payments-webhooks']);
+    expect(knowledge.listDocs({ projectId: h.projectId }).find((d) => d.slug === 'knowledge-documents')!.links).toBe(1);
   });
 });

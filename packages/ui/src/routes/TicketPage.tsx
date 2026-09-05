@@ -312,7 +312,8 @@ function ActivityTab({ ticketId }: { ticketId: string }): React.ReactElement {
               <div className="flex-1" />
               <span className="ac-mono text-nano text-text-4">{ago(c.createdAt)}</span>
             </div>
-            <Markdown source={c.body} />
+            {/* Composer text, like a chat message: the line breaks it was written with are kept. */}
+            <Markdown source={c.body} breaks />
           </article>
         ),
       });

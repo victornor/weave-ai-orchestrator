@@ -98,6 +98,11 @@ function message(over: Partial<ThreadMessage> & Pick<ThreadMessage, 'id' | 'body
   };
 }
 
+/** The whole rendered message — bubble, quote, project tag and timestamp — around a piece of its text. */
+function messageAround(text: string): HTMLElement {
+  return screen.getByText(text).closest('.group') as HTMLElement;
+}
+
 const emit = (e: Partial<WorkspaceEvent> & Pick<WorkspaceEvent, 'type' | 'entityId'>): void => {
   act(() => {
     for (const h of bus.handlers) h({ seq: 1, workspaceId: 'ws1', entityType: 'run', payload: {}, createdAt: '', ...e } as WorkspaceEvent);
@@ -209,6 +214,59 @@ describe('ChatRoute live turn', () => {
 
     expect(screen.queryByText('ac_human_send')).not.toBeInTheDocument();
     expect(screen.getAllByText(reply)).toHaveLength(1);
+  });
+});
+
+describe('ChatRoute message formatting', () => {
+  const mine = (body: string): ThreadMessage =>
+    message({ id: 'm1', body, direction: 'inbound', authorKind: 'human', authorId: 'victor', runId: null });
+
+  it('keeps the line breaks of a message the human typed', () => {
+    state.messages = [mine('first line\nsecond line\n\n\nlast paragraph')];
+    const { container } = render(<ChatRoute />);
+
+    const paras = container.querySelectorAll('.ac-prose p');
+    expect(paras).toHaveLength(2);
+    expect(paras[0]!.innerHTML).toBe('first line<br>second line');
+    expect(paras[1]!.textContent).toBe('last paragraph');
+  });
+
+  it('renders a list the human typed as a list', () => {
+    state.messages = [mine('do these:\n\n- one\n- two')];
+    const { container } = render(<ChatRoute />);
+
+    expect([...container.querySelectorAll('.ac-prose li')].map((li) => li.textContent)).toEqual(['one', 'two']);
+  });
+
+  it('renders a code fence the human typed verbatim', () => {
+    state.messages = [mine('run it:\n\n```\npnpm test\npnpm lint\n```')];
+    const { container } = render(<ChatRoute />);
+
+    const pre = container.querySelector('.ac-prose pre code');
+    expect(pre?.textContent).toBe('\npnpm test\npnpm lint\n');
+    expect(pre?.innerHTML).not.toContain('<br>');
+  });
+
+  it('renders the human and the conductor sides the same way', () => {
+    const body = 'about TST-1\nsecond line';
+    state.messages = [mine(body), message({ id: 'm2', body })];
+    const { container } = render(<ChatRoute />);
+
+    const rendered = [...container.querySelectorAll('.ac-prose')].map((el) => el.innerHTML);
+    expect(rendered).toHaveLength(2);
+    expect(rendered[0]).toBe(rendered[1]);
+    expect(rendered[0]).toContain('href="#ticket:TST-1"');
+    expect(rendered[0]).toContain('<br>');
+  });
+
+  it('leaves the quote of a replied-to message a plain clamped excerpt', () => {
+    state.messages = [{ ...mine('yes, do it'), replyToMessageId: 'm0', replyToExcerpt: 'Shall I file it?\nIt is ready.' }];
+    const { container } = render(<ChatRoute />);
+
+    const quote = container.querySelector('.line-clamp-2')!;
+    expect(quote.textContent).toBe('Shall I file it?\nIt is ready.');
+    expect(quote.innerHTML).not.toContain('<br>');
+    expect(quote.closest('.ac-prose')).toBeNull();
   });
 });
 
@@ -433,9 +491,9 @@ describe('project context', () => {
     ];
     render(<ChatRoute />);
 
-    const withProject = screen.getByText('with a project').parentElement!.parentElement!;
+    const withProject = messageAround('with a project');
     expect(withProject).toHaveTextContent('Web');
-    const without = screen.getByText('without one').parentElement!.parentElement!;
+    const without = messageAround('without one');
     expect(without).not.toHaveTextContent('Web');
     expect(without).not.toHaveTextContent('API');
   });
@@ -443,7 +501,7 @@ describe('project context', () => {
   it('falls back to the raw reference when the project is gone from the list', () => {
     state.messages = [message({ id: 'm1', body: 'old message', direction: 'inbound', projectId: 'p_gone' })];
     render(<ChatRoute />);
-    expect(screen.getByText('old message').parentElement!.parentElement!).toHaveTextContent('p_gone');
+    expect(messageAround('old message')).toHaveTextContent('p_gone');
   });
 });
 
@@ -468,7 +526,7 @@ describe('ChatRoute reply reference', () => {
   it('offers a reply control on conductor messages and not on the human’s own', () => {
     render(<ChatRoute />);
     expect(replyControls()).toHaveLength(2);
-    const mine = screen.getByText('my own message').parentElement!.parentElement!;
+    const mine = messageAround('my own message');
     expect(mine.querySelector('[aria-label="Reply to this message"]')).toBeNull();
   });
 
@@ -543,9 +601,9 @@ describe('ChatRoute reply reference', () => {
     ];
     render(<ChatRoute />);
 
-    const reply = screen.getByText('yes, do it').parentElement!.parentElement!;
+    const reply = messageAround('yes, do it');
     expect(reply).toHaveTextContent('Should I ship it behind a flag?');
-    const plain = screen.getByText('unprompted').parentElement!.parentElement!;
+    const plain = messageAround('unprompted');
     expect(plain).not.toHaveTextContent('Should I ship it behind a flag?');
   });
 
@@ -555,7 +613,7 @@ describe('ChatRoute reply reference', () => {
       message({ id: 'm9', body: 'the second one', direction: 'inbound', authorKind: 'human', replyToMessageId: 'm_gone', replyToExcerpt: 'which one did you mean?' }),
     ];
     render(<ChatRoute />);
-    expect(screen.getByText('the second one').parentElement!.parentElement!).toHaveTextContent('which one did you mean?');
+    expect(messageAround('the second one')).toHaveTextContent('which one did you mean?');
   });
 });
 

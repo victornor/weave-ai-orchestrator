@@ -374,6 +374,8 @@
   .ac-prose h2 { font-size: var(--text-head); }
   .ac-prose h3 { font-size: var(--fs-body); }
   .ac-prose p, .ac-prose ul, .ac-prose ol { margin: 0 0 var(--space-5); }
+  /* No trailing gap: prose sits inside chat bubbles and comment cards that own their own padding. */
+  .ac-prose > :last-child { margin-bottom: 0; }
   .ac-prose ul, .ac-prose ol { padding-left: var(--space-7); }
   .ac-prose li { margin-bottom: var(--space-2); }
   .ac-prose code {

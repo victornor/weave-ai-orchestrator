@@ -39,7 +39,7 @@ import { cx } from '../lib/cx';
 
 const IDENTIFIER = /\b([A-Z][A-Z0-9]+-\d+)\b/g;
 
-/** Ticket identifiers in agent text become chips that expand inline. */
+/** Ticket identifiers in message text become chips that expand inline. */
 function MessageBody({
   body,
   onTicket,
@@ -59,7 +59,7 @@ function MessageBody({
   };
   return (
     <div onClick={onClick}>
-      <Markdown source={source} className="text-body" />
+      <Markdown source={source} className="text-body" breaks />
     </div>
   );
 }
@@ -526,7 +526,9 @@ function ChatMessage({
           mine ? 'max-w-[80%] rounded-r10 rounded-br-r4 bg-bg-3 px-3.5 py-2.5 text-body text-text-1' : 'w-full',
         )}
       >
-        {mine ? message.body : <MessageBody body={message.body} onTicket={onTicket} ticketStatus={ticketStatus} />}
+        {/* Both directions through the same renderer: what the human typed reads back the way they
+            typed it, and the two sides of the thread stay consistent. */}
+        <MessageBody body={message.body} onTicket={onTicket} ticketStatus={ticketStatus} />
       </div>
       <span className="flex items-center gap-1.5">
         {message.projectId ? (

@@ -116,6 +116,29 @@ describe('markdown', () => {
     expect(html).toContain('<code>code</code>');
     expect(html).not.toContain('<script>');
   });
+
+  it('reflows the lines of a paragraph by default', () => {
+    expect(markdownToHtml('first line\nsecond line')).toBe('<p>first line second line</p>');
+  });
+
+  it('keeps single newlines as hard breaks under breaks', () => {
+    expect(markdownToHtml('first line\nsecond line', { breaks: true })).toBe('<p>first line<br />second line</p>');
+  });
+
+  it('collapses a run of blank lines into one paragraph gap under breaks', () => {
+    expect(markdownToHtml('one\n\n\n\ntwo', { breaks: true })).toBe('<p>one</p>\n<p>two</p>');
+  });
+
+  it('leaves lists, fences and escaping alone under breaks', () => {
+    const html = markdownToHtml('- one\n- two\n\n```\na\nb <b>\n```', { breaks: true });
+    expect(html).toContain('<ul>\n<li>one</li>\n<li>two</li>\n</ul>');
+    expect(html).toContain('<pre><code>\na\nb &lt;b&gt;\n</code></pre>');
+    expect(html).not.toContain('<br />');
+  });
+
+  it('still renders an inline span that spans a hard break', () => {
+    expect(markdownToHtml('**bold\nacross**', { breaks: true })).toBe('<p><strong>bold<br />across</strong></p>');
+  });
 });
 
 describe('qr', () => {

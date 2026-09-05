@@ -48,6 +48,22 @@ describe('tickets', () => {
     expect(make({ assigneeRoleId: null }).status).toBe('backlog');
   });
 
+  it('records the run that created the ticket, and nothing when there is no run', () => {
+    expect(tickets.create(AGENT, { kind: 'change', title: 'From a turn', projectId: h.projectId, assigneeRoleId: h.roleId }).createdRunId).toBe('run-1');
+    expect(make().createdRunId).toBeNull();
+    expect(tickets.create(SYSTEM, { kind: 'task', title: 'From the system', projectId: h.projectId }).createdRunId).toBeNull();
+  });
+
+  it('keeps the creating run unchanged as the ticket moves', async () => {
+    const t = tickets.create(AGENT, { kind: 'task', title: 'Anchored', projectId: h.projectId });
+    tickets.assign(HUMAN, t.id, h.roleId);
+    await tickets.transition(SYSTEM, t.id, { to: 'in_progress' });
+    tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'u' });
+    await tickets.transition(AGENT, t.id, { to: 'in_review' });
+    await tickets.transition(HUMAN, t.id, { to: 'done' });
+    expect(tickets.get(t.id).createdRunId).toBe('run-1');
+  });
+
   it('binds an OpenSpec change name for change tickets in openspec projects', () => {
     expect(make().openspecChangeName).toBe('tst-1-add-dark-mode');
     expect(make({ kind: 'scout', title: 'Investigate' }).openspecChangeName).toBeNull();

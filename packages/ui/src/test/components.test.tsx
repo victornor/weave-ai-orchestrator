@@ -5,6 +5,7 @@ import { StatusGlyph, StatusBadge } from '../components/StatusGlyph';
 import { TicketCard } from '../components/TicketCard';
 import { WorkerCard } from '../components/WorkerCard';
 import { DecisionCard } from '../components/DecisionCard';
+import { DispatchLabel } from '../components/DispatchLabel';
 import { Composer } from '../components/Composer';
 import { BudgetMeter } from '../components/BudgetMeter';
 import { TOTPInput } from '../components/TOTPInput';
@@ -64,6 +65,29 @@ describe('WorkerCard', () => {
     expect(screen.getByText('↑3 ↓0')).toBeInTheDocument();
     expect(screen.getByText('18.4k tok')).toBeInTheDocument();
     expect(screen.getByText('$0.41 est')).toBeInTheDocument();
+  });
+});
+
+describe('DispatchLabel', () => {
+  it('names the work and the state it is in', () => {
+    render(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="working" />);
+    expect(screen.getByText('ACME-42')).toBeInTheDocument();
+    expect(screen.getByText('Frontend Engineer #7')).toBeInTheDocument();
+    expect(screen.getByText('working')).toBeInTheDocument();
+  });
+
+  it('keeps reading truthfully once the work has ended', () => {
+    const { rerender } = render(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="done" />);
+    expect(screen.getByRole('button', { name: 'ACME-42: Frontend Engineer #7 — done' })).toBeInTheDocument();
+    rerender(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="failed" />);
+    expect(screen.getByRole('button', { name: 'ACME-42: Frontend Engineer #7 — failed' })).toBeInTheDocument();
+  });
+
+  it('is a way in', () => {
+    const onClick = vi.fn();
+    render(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="done" onClick={onClick} />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(onClick).toHaveBeenCalledOnce();
   });
 });
 

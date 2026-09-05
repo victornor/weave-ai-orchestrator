@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Keep dispatched-worker labels anchored in the conductor chat and show
+  their final outcome

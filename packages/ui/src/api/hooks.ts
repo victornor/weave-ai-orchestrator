@@ -316,6 +316,7 @@ export interface TicketQuery extends Record<string, string | number | boolean | 
   search?: string;
   limit?: number;
   offset?: number;
+  includeTerminal?: boolean;
 }
 
 export function useTickets(params: TicketQuery = {}): UseQueryResult<Ticket[]> {

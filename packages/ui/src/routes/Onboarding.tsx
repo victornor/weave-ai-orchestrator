@@ -4,14 +4,17 @@
  * `conductor init` + `workspace config` + `project add` do; the daemon has no notion of a default
  * workspace, so a fresh install lands here until the first one exists.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useGo } from '../app/link';
 import { api, ApiError, setWorkspaceId } from '../api/client';
 import { useHealth, useInitWorkspace, useMe, useRuntimeModels, useRuntimes } from '../api/hooks';
 import type { RuntimeInfo } from '../api/types';
 import { Button } from '../components/Button';
+import { JobProgress } from '../components/JobProgress';
 import { Skeleton } from '../components/Skeleton';
+import { useJobStream } from '../api/jobStream';
+import { duration } from '../lib/format';
 import { cx } from '../lib/cx';
 
 type Step = 'workspace' | 'conductor' | 'projects' | 'create';
@@ -23,6 +26,46 @@ const STEPS: Array<{ key: Step; label: string }> = [
 ];
 
 interface ProjectDraft { url: string; id: string; runtime: string; maxWorkers: number; setupCommand: string; idTouched: boolean }
+
+type StepState = 'pending' | 'running' | 'done' | 'failed';
+/**
+ * One line of the create step. `jobId` is set for the steps the daemon performs as a job — today
+ * only adding a project — and is what the view re-attaches to after a reload.
+ */
+interface StepView {
+  label: string;
+  state: StepState;
+  detail?: string;
+  startedAt?: number;
+  endedAt?: number;
+  jobId?: string;
+  /** The project the step is adding, so Retry knows what to retry. */
+  projectId?: string;
+}
+
+/**
+ * Enough to come back to a create that is still running: which workspace, which steps, and the job
+ * for each. Without it a reload during a four-minute clone lands back on an empty first-run form.
+ */
+const RESUME_KEY = 'ac.onboarding.resume';
+interface Resume { workspaceId: string; name: string; steps: StepView[] }
+
+function readResume(): Resume | null {
+  try {
+    const raw = window.localStorage.getItem(RESUME_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Resume;
+    return parsed && typeof parsed.workspaceId === 'string' && Array.isArray(parsed.steps) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function writeResume(resume: Resume | null): void {
+  try {
+    if (resume) window.localStorage.setItem(RESUME_KEY, JSON.stringify(resume));
+    else window.localStorage.removeItem(RESUME_KEY);
+  } catch { /* private mode, a full quota: the flow still works, it just cannot resume */ }
+}
 
 export function slugOf(text: string): string {
   return text
@@ -97,62 +140,117 @@ export function OnboardingRoute(): React.ReactElement {
     }));
 
   // Step 4 — create
-  const [progress, setProgress] = useState<Array<{ label: string; state: 'pending' | 'running' | 'done' | 'failed'; detail?: string }>>([]);
+  const [progress, setProgress] = useState<StepView[]>([]);
   const [creating, setCreating] = useState(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [workspaceId, setWsId] = useState<string | null>(null);
+  /** Ticks the elapsed time of whatever is running; nothing else re-renders on it. */
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!progress.some((s) => s.state === 'running')) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [progress]);
+
+  // A reload mid-create comes back to the same steps, re-attached to the jobs still running.
+  useEffect(() => {
+    const resume = readResume();
+    if (!resume) return;
+    setWsId(resume.workspaceId);
+    setProgress(resume.steps);
+    setName((n) => n || resume.name);
+    setStep('create');
+    setCreating(resume.steps.some((s) => s.state === 'running' || s.state === 'pending'));
+    if (resume.steps.every((s) => s.state === 'done')) setCreatedId(resume.workspaceId);
+  }, []);
 
   const workspaceValid = name.trim().length > 0 && /^[a-z0-9][a-z0-9-]{0,39}$/.test(id) && PREFIX_RE.test(prefix) && path.trim().length > 0;
   const conductorValid = runtime.length > 0;
   const projectsValid = projects.every((p) => p.url.trim().length > 0 && /^[a-z0-9][a-z0-9-]*$/.test(p.id));
 
+  /** One place that writes a step, so the resume record and the view never disagree. */
+  const patchStep = useCallback((i: number, patch: Partial<StepView>, ws?: string, label?: string): void => {
+    setProgress((prev) => {
+      const next = prev.map((s, j) => (j === i ? { ...s, ...patch } : s));
+      const id = ws ?? workspaceId;
+      if (id) writeResume({ workspaceId: id, name: label ?? name, steps: next });
+      return next;
+    });
+  }, [workspaceId, name]);
+
   const create = async (): Promise<void> => {
     setCreating(true);
-    const steps = [
-      { label: `Create workspace ${name}`, state: 'pending' as const },
-      { label: `Configure the conductor (${runtime}${model ? ` · ${model}` : ''})`, state: 'pending' as const },
+    const steps: StepView[] = [
+      { label: `Create workspace ${name}`, state: 'pending' },
+      { label: `Configure the conductor (${runtime}${model ? ` · ${model}` : ''})`, state: 'pending' },
       ...projects.map((p) => ({ label: `Add project ${p.id}`, state: 'pending' as const })),
     ];
     setProgress(steps);
-    const mark = (i: number, state: 'running' | 'done' | 'failed', detail?: string): void =>
-      setProgress((prev) => prev.map((s, j) => (j === i ? { ...s, state, ...(detail !== undefined ? { detail } : {}) } : s)));
+    const mark = (i: number, patch: Partial<StepView>, ws?: string): void => patchStep(i, patch, ws, name);
     let wsId: string;
     try {
-      mark(0, 'running');
+      mark(0, { state: 'running', startedAt: Date.now() });
       const r = await init.mutateAsync({ id, name: name.trim(), ticketPrefix: prefix, path: path.trim() });
       wsId = r.id;
-      mark(0, 'done', r.path);
+      setWsId(wsId);
+      mark(0, { state: 'done', detail: r.path, endedAt: Date.now() }, wsId);
     } catch (e) {
-      mark(0, 'failed', describe(e));
+      mark(0, { state: 'failed', detail: describe(e), endedAt: Date.now() });
       setCreating(false);
       return;
     }
     try {
-      mark(1, 'running');
+      mark(1, { state: 'running', startedAt: Date.now() }, wsId);
       const conductor: Record<string, unknown> = { runtime, model: model || null };
       if (humanName.trim()) conductor['humanName'] = humanName.trim();
       await api.ws(wsId, '/config', { method: 'PATCH', body: { conductor } });
-      mark(1, 'done');
+      mark(1, { state: 'done', endedAt: Date.now() }, wsId);
     } catch (e) {
-      mark(1, 'failed', describe(e));
+      mark(1, { state: 'failed', detail: describe(e), endedAt: Date.now() }, wsId);
     }
     for (let i = 0; i < projects.length; i++) {
       const p = projects[i]!;
       try {
-        mark(2 + i, 'running');
-        await api.ws(wsId, '/projects', {
+        mark(2 + i, { state: 'running', startedAt: Date.now() }, wsId);
+        // 202: the row and its job exist, the clone has not finished. The step watches the job.
+        const started = await api.ws<StartedAdd>(wsId, '/projects', {
           method: 'POST',
           body: { url: p.url.trim(), id: p.id, runtime: p.runtime, maxWorkers: p.maxWorkers, ...(p.setupCommand.trim() ? { setupCommand: p.setupCommand.trim() } : {}) },
         });
-        mark(2 + i, 'done');
+        mark(2 + i, { jobId: started?.jobId ?? undefined, projectId: started?.project?.id ?? p.id }, wsId);
       } catch (e) {
-        mark(2 + i, 'failed', describe(e));
+        mark(2 + i, { state: 'failed', detail: describe(e), endedAt: Date.now() }, wsId);
       }
     }
     setWorkspaceId(wsId);
-    setCreatedId(wsId);
     await qc.invalidateQueries();
     setCreating(false);
   };
+
+  /** A job-backed step reports its own end; the flow is finished when none is left running. */
+  const finishStep = useCallback((i: number, state: 'done' | 'failed', detail?: string): void => {
+    patchStep(i, { state, endedAt: Date.now(), ...(detail !== undefined ? { detail } : {}) });
+  }, [patchStep]);
+
+  const retryStep = useCallback(async (i: number): Promise<void> => {
+    const step = progress[i];
+    if (!step?.projectId || !workspaceId) return;
+    patchStep(i, { state: 'running', startedAt: Date.now(), endedAt: undefined, detail: undefined, jobId: undefined });
+    try {
+      const started = await api.ws<StartedAdd>(workspaceId, `/projects/${encodeURIComponent(step.projectId)}/retry`, { method: 'POST', body: {} });
+      patchStep(i, { jobId: started?.jobId ?? undefined });
+    } catch (e) {
+      patchStep(i, { state: 'failed', detail: describe(e), endedAt: Date.now() });
+    }
+  }, [progress, workspaceId, patchStep]);
+
+  const allDone = progress.length > 0 && progress.every((s) => s.state === 'done' || s.state === 'failed');
+  const anyRunning = progress.some((s) => s.state === 'running' || s.state === 'pending');
+  useEffect(() => {
+    if (!allDone || !workspaceId || createdId) return;
+    setCreatedId(workspaceId);
+    void qc.invalidateQueries();
+  }, [allDone, workspaceId, createdId, qc]);
 
   if (health.isLoading || me.isLoading) {
     return (
@@ -327,24 +425,23 @@ export function OnboardingRoute(): React.ReactElement {
             <>
               <ol className="ac-card flex flex-col divide-y divide-line-1 p-0">
                 {progress.map((s, i) => (
-                  <li key={i} className="flex items-start gap-3 px-4 py-3">
-                    <span className={cx('ac-mono mt-0.5 w-14 flex-none text-nano uppercase', s.state === 'done' ? 'text-done' : s.state === 'failed' ? 'text-failed' : s.state === 'running' ? 'text-accent-link' : 'text-text-3')}>
-                      {s.state}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-meta text-text-1">{s.label}</span>
-                      {s.detail ? <span className={cx('ac-mono block truncate text-micro', s.state === 'failed' ? 'text-failed' : 'text-text-3')}>{s.detail}</span> : null}
-                    </span>
-                  </li>
+                  <StepRow
+                    key={i}
+                    step={s}
+                    now={now}
+                    workspaceId={workspaceId}
+                    onFinish={(state, detail) => finishStep(i, state, detail)}
+                    onRetry={s.projectId ? () => void retryStep(i) : undefined}
+                  />
                 ))}
               </ol>
               <Actions>
                 {createdId ? (
-                  <Button variant="primary" onClick={() => go(`/w/${createdId}/needs`, { replace: true })}>Open {name}</Button>
-                ) : creating ? (
+                  <Button variant="primary" onClick={() => { writeResume(null); go(`/w/${createdId}/needs`, { replace: true }); }}>Open {name}</Button>
+                ) : creating || anyRunning ? (
                   <span className="text-meta text-text-3">Working…</span>
                 ) : (
-                  <Button variant="secondary" onClick={() => { setProgress([]); setStep('workspace'); }}>Fix and retry</Button>
+                  <Button variant="secondary" onClick={() => { writeResume(null); setProgress([]); setStep('workspace'); }}>Fix and retry</Button>
                 )}
               </Actions>
             </>
@@ -358,6 +455,59 @@ export function OnboardingRoute(): React.ReactElement {
         </div>
       ) : null}
     </Frame>
+  );
+}
+
+/** `POST /projects` and `POST /projects/:id/retry`: the row, and the job doing the rest. */
+interface StartedAdd { project?: { id?: string } | null; jobId?: string | null }
+
+/**
+ * One create step. A step with a job shows which sub-step is running and tails its output; a step
+ * without one — creating the workspace, configuring the conductor — shows its state and how long it
+ * took, which is all a single request has to say.
+ */
+function StepRow({ step, now, workspaceId, onFinish, onRetry }: {
+  step: StepView;
+  now: number;
+  workspaceId: string | null;
+  onFinish: (state: 'done' | 'failed', detail?: string) => void;
+  onRetry?: () => void;
+}): React.ReactElement {
+  const job = useJobStream(workspaceId, step.jobId ?? null);
+
+  // The job is the authority on whether a job-backed step ended.
+  const jobState = job?.state;
+  const jobMessage = job?.message ?? null;
+  useEffect(() => {
+    if (!step.jobId || !jobState || jobState === 'running') return;
+    if (step.state === 'done' || step.state === 'failed') return;
+    onFinish(jobState === 'done' ? 'done' : 'failed', jobMessage ?? undefined);
+  }, [step.jobId, step.state, jobState, jobMessage, onFinish]);
+
+  const elapsed = step.startedAt ? duration((step.endedAt ?? now) - step.startedAt) : null;
+  const failed = step.state === 'failed';
+
+  return (
+    <li className="flex items-start gap-3 px-4 py-3">
+      <span className={cx('ac-mono mt-0.5 w-14 flex-none text-nano uppercase', step.state === 'done' ? 'text-done' : failed ? 'text-failed' : step.state === 'running' ? 'text-accent-link' : 'text-text-3')}>
+        {step.state}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline justify-between gap-3">
+          <span className="block text-meta text-text-1">{step.label}</span>
+          {elapsed ? <span className="ac-mono flex-none text-nano text-text-3">{elapsed}</span> : null}
+        </span>
+        {step.detail ? <span className={cx('ac-mono block truncate text-micro', failed ? 'text-failed' : 'text-text-3')}>{step.detail}</span> : null}
+        {job && job.steps.length ? (
+          <JobProgress className="mt-2" steps={job.steps} log={job.log} failedStep={job.failedStep} message={failed ? job.message : null} now={now} />
+        ) : null}
+        {failed && onRetry ? (
+          <span className="mt-2 block">
+            <Button variant="secondary" size="sm" onClick={onRetry}>Retry</Button>
+          </span>
+        ) : null}
+      </span>
+    </li>
   );
 }
 

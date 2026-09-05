@@ -304,7 +304,8 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | `conductor workspace pause \| resume` | stop and restart run dispatch for the workspace |
 | `conductor workspace export [--out <dir>]` | portable package on the daemon host: `workspace.yaml`, roles, knowledge, tickets as markdown — no db, no runs, no secrets |
 | `conductor workspace import <dir> --target <dir>` | copy an export into a new or existing workspace directory and register it; tickets land in `backlog` with an `[imported]` comment |
-| `conductor project add <git-url> [--id] [--runtime] [--branch] [--max-workers N] [--setup CMD]` | clone, `openspec init`, seed the KB, create the scout ticket |
+| `conductor project add <git-url> [--id] [--runtime] [--branch] [--max-workers N] [--setup CMD] [--no-follow]` | clone, `openspec init`, seed the KB, create the scout ticket — each sub-step and its output stream to the terminal as it runs |
+| `conductor project retry <id> [--no-follow]` | re-run an add that failed, reusing whatever is already on disk |
 | `conductor project list \| show <id> \| remove <id> \| fetch [id]` | projects; `fetch` fast-forwards the primary clone |
 | `conductor project set-runtime <id> <runtime>` · `conductor project set-policy <id> <key>=<value>...` | per-project runtime and policies (`deliveryMode`, `mergeMethod`, `requireCi`, …) |
 | `conductor runtime list \| detect \| models <id> \| login <id> [--print]` | coding CLIs and their auth |

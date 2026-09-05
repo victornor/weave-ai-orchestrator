@@ -1155,7 +1155,8 @@ conductor daemon releases | rollback             list releases (`*` current, `-`
 conductor login <url> [--name] [--pin] | conductor logout [--all] | conductor context list|use   remote contexts for the CLI
 conductor devices list|revoke                          sessions/devices on the daemon
 conductor presenter [--surface ...]                     client-side window manager for surfaces (§14b)
-conductor project add <git-url> [--id] [--runtime] [--branch]   clone, init openspec, create the scout ticket that seeds the project KB
+conductor project add <git-url> [--id] [--runtime] [--branch] [--no-follow]   clone, init openspec, create the scout ticket that seeds the project KB; follows the job's sub-steps and output live
+conductor project retry <id> [--no-follow]              re-run a failed add against whatever is already on disk
 conductor project list|show|remove|fetch|set-runtime <runtime>|set-policy <key>=<value>...
 conductor runtime list|detect|login <id>              runtime availability and auth per workspace
 conductor role list|show|activate|set-runtime|set-model|pause|resume|retire|charter show|charter rollback|memory show

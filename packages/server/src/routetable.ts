@@ -53,11 +53,16 @@ export const ROUTES: RouteRow[] = [
   { method: 'POST', path: `${W}/transcribe`, tag: 'workspace', summary: 'Audio to text for this workspace', auth: 'session', mutating: true },
 
   { method: 'GET', path: `${W}/projects`, tag: 'projects', summary: 'List projects', auth: 'session' },
-  { method: 'POST', path: `${W}/projects`, tag: 'projects', summary: 'Add a project (clone, openspec init, scout ticket)', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/projects`, tag: 'projects', summary: 'Add a project — 202 with the cloning row and the job doing the work', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/projects/{id}`, tag: 'projects', summary: 'One project', auth: 'session' },
   { method: 'PATCH', path: `${W}/projects/{id}`, tag: 'projects', summary: 'Update project config', auth: 'session', mutating: true },
   { method: 'DELETE', path: `${W}/projects/{id}`, tag: 'projects', summary: 'Remove a project', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/projects/{id}/fetch`, tag: 'projects', summary: 'Fetch and fast-forward the primary clone', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/projects/{id}/retry`, tag: 'projects', summary: 'Re-run a failed add, reusing what is already on disk', auth: 'session', mutating: true },
+
+  { method: 'GET', path: `${W}/jobs`, tag: 'jobs', summary: 'Long-running setup operations; ?kind= &entity=', auth: 'session' },
+  { method: 'GET', path: `${W}/jobs/{id}`, tag: 'jobs', summary: 'One job with its sub-steps and log tail', auth: 'session' },
+  { method: 'GET', path: `${W}/jobs/{id}/stream`, tag: 'jobs', summary: 'SSE: replay the job, then tail it; ?after=<seq>', auth: 'session' },
 
   { method: 'GET', path: `${W}/roles`, tag: 'roles', summary: 'List roles', auth: 'session' },
   { method: 'GET', path: `${W}/roles/{id}`, tag: 'roles', summary: 'Role with charter, revisions and workers', auth: 'session' },

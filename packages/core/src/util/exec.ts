@@ -2,10 +2,33 @@ import { execa } from 'execa';
 
 export interface ExecResult { ok: boolean; exitCode: number | null; stdout: string; stderr: string; failed: boolean }
 
+/** Each output line of a command, as it arrives — for a caller reporting a long command's progress. */
+export type OnLine = (stream: 'stdout' | 'stderr', line: string) => void;
+
+export interface ShOptions { cwd: string; timeoutMs?: number; env?: Record<string, string>; input?: string; onLine?: OnLine }
+
+/**
+ * Split a chunked byte stream into lines without withholding a partial one. Carriage returns are
+ * line breaks too: git writes its clone counters with `\r`, and without this a clone arrives as one
+ * enormous line at the end, which is exactly the silence being fixed.
+ */
+function lineSplitter(emit: (line: string) => void): { write(chunk: string): void; end(): void } {
+  let buffer = '';
+  return {
+    write(chunk: string): void {
+      buffer += chunk;
+      const parts = buffer.split(/\r\n|\r|\n/);
+      buffer = parts.pop() ?? '';
+      for (const part of parts) if (part.trim() !== '') emit(part);
+    },
+    end(): void { if (buffer.trim() !== '') emit(buffer); buffer = ''; },
+  };
+}
+
 /** Run a command without throwing. Every call names an explicit cwd and timeout. */
-export async function sh(cmd: string, args: string[], opts: { cwd: string; timeoutMs?: number; env?: Record<string, string>; input?: string }): Promise<ExecResult> {
+export async function sh(cmd: string, args: string[], opts: ShOptions): Promise<ExecResult> {
   try {
-    const r = await execa(cmd, args, {
+    const subprocess = execa(cmd, args, {
       cwd: opts.cwd,
       timeout: opts.timeoutMs ?? 60_000,
       reject: false,
@@ -13,6 +36,17 @@ export async function sh(cmd: string, args: string[], opts: { cwd: string; timeo
       env: opts.env ? { ...process.env, ...opts.env } : undefined,
       input: opts.input,
     });
+    if (opts.onLine) {
+      // The buffered result is still what resolves; this only mirrors the bytes as they arrive.
+      for (const name of ['stdout', 'stderr'] as const) {
+        const readable = subprocess[name];
+        if (!readable) continue;
+        const split = lineSplitter((line) => opts.onLine?.(name, line));
+        readable.on('data', (chunk: Buffer | string) => split.write(String(chunk)));
+        readable.on('end', () => split.end());
+      }
+    }
+    const r = await subprocess;
     const exitCode = typeof r.exitCode === 'number' ? r.exitCode : null;
     return { ok: exitCode === 0, exitCode, stdout: String(r.stdout ?? ''), stderr: String(r.stderr ?? ''), failed: exitCode !== 0 };
   } catch (e) {

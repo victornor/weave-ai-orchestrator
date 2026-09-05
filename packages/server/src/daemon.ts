@@ -173,6 +173,8 @@ async function loadWorkspaceInto(
   }
 
   await loadPlugins(ctx, opts.registries, hooks);
+  // A job still `running` belongs to a process that is gone; fail it before anything reads it.
+  try { services.jobs.reconcile(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'job reconciliation failed'); }
   await services.workers.ensureConductor().catch((e: unknown) => log.error({ err: e, ws: ctx.workspaceId }, 'ensureConductor failed'));
   try { services.dispatcher.start(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'dispatcher failed to start'); }
   try { services.supervisor.start(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'supervisor failed to start'); }

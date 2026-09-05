@@ -1,8 +1,8 @@
-import { sh, type ExecResult } from './exec.js';
+import { sh, type ExecResult, type OnLine } from './exec.js';
 
-/** `input` feeds a command that reads stdin, such as `git patch-id`. */
-export async function git(args: string[], cwd: string, timeoutMs = 60_000, input?: string): Promise<ExecResult> {
-  return sh('git', args, { cwd, timeoutMs, env: { GIT_TERMINAL_PROMPT: '0' }, input });
+/** `input` feeds a command that reads stdin, such as `git patch-id`; `onLine` mirrors its output live. */
+export async function git(args: string[], cwd: string, timeoutMs = 60_000, input?: string, onLine?: OnLine): Promise<ExecResult> {
+  return sh('git', args, { cwd, timeoutMs, env: { GIT_TERMINAL_PROMPT: '0' }, input, onLine });
 }
 
 export interface WorktreeState { exists: boolean; dirty: boolean; changedFiles: number; branch: string | null; ahead: number; behind: number; head: string | null }

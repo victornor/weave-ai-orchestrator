@@ -149,6 +149,41 @@ export const isCancellableUpgrade = (state: string | null | undefined): boolean 
 export const UPGRADE_FAILURE_REASONS = ['wait_timeout', 'build_failed', 'backup_failed', 'switch_failed', 'restart_unverified', 'restart_failed', 'abandoned'] as const;
 export type UpgradeFailureReason = (typeof UPGRADE_FAILURE_REASONS)[number];
 
+/**
+ * A job is one long-running workspace-setup operation, observable while it runs: an ordered list of
+ * sub-steps with their own timings plus a bounded tail of the output its commands produced. Adding a
+ * project is the only kind so far — minutes of cloning, adopting OpenSpec and seeding knowledge that
+ * used to happen inside one silent request.
+ */
+export const JOB_KINDS = ['project_add'] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+
+export const JOB_STATES = ['running', 'done', 'failed'] as const;
+export type JobState = (typeof JOB_STATES)[number];
+export const TERMINAL_JOB_STATES: readonly JobState[] = ['done', 'failed'];
+export const isTerminalJob = (state: string | null | undefined): boolean => TERMINAL_JOB_STATES.includes(state as JobState);
+
+export const JOB_STEP_STATES = ['pending', 'running', 'done', 'skipped', 'failed'] as const;
+export type JobStepState = (typeof JOB_STEP_STATES)[number];
+
+/** Which of a job's two streams a captured line came from. `daemon` is the job's own narration. */
+export const JOB_LOG_STREAMS = ['stdout', 'stderr', 'daemon'] as const;
+export type JobLogStream = (typeof JOB_LOG_STREAMS)[number];
+
+/** The sub-steps of a `project_add` job, in the order `projects.add` performs them. */
+export const PROJECT_ADD_STEPS = [
+  { id: 'clone', label: 'Clone the repository' },
+  { id: 'resolve_branch', label: 'Resolve the default branch' },
+  { id: 'declare', label: 'Declare the project' },
+  { id: 'openspec', label: 'Adopt OpenSpec' },
+  { id: 'knowledge', label: 'Seed the knowledge base' },
+  { id: 'ticket', label: 'Create the scout ticket' },
+] as const;
+export type ProjectAddStepId = (typeof PROJECT_ADD_STEPS)[number]['id'];
+
+/** Every kind's step list, so a job can be seeded complete-and-`pending` the moment it is created. */
+export const JOB_STEPS: Record<JobKind, ReadonlyArray<{ id: string; label: string }>> = { project_add: PROJECT_ADD_STEPS };
+
 export const LOG_DOMAINS = ['daemon', 'wake', 'run', 'runtime', 'ticket', 'openspec', 'decision', 'channel', 'knowledge', 'usage', 'plugin', 'http', 'auth', 'worktree', 'surface', 'supervisor'] as const;
 export type LogDomain = (typeof LOG_DOMAINS)[number];
 

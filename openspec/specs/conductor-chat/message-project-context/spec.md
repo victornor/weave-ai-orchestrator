@@ -93,6 +93,8 @@ When the chat opens a thread, the selector SHALL default to the project carried 
 
 The default SHALL be derived from the thread's own stored messages, so the same thread opened on another device offers the same default.
 
+A choice the human made for a message they have not sent yet SHALL take precedence over that default while the draft it belongs to lasts, so leaving the page and returning offers the message back as it was being written. Once the draft is gone, the default is the thread's last choice again.
+
 #### Scenario: Reopening a thread whose last message named a project
 
 - **WHEN** the human opens a thread whose most recent message carried a project
@@ -112,6 +114,11 @@ The default SHALL be derived from the thread's own stored messages, so the same 
 
 - **WHEN** the human changes the selection and sends a message
 - **THEN** subsequent messages in that session default to the new choice, and it remains the default after the chat is reloaded
+
+#### Scenario: Choosing a project for a message that has not been sent
+
+- **WHEN** the human changes the selection, does not send, leaves the page and returns to the thread
+- **THEN** the selector still shows the project they chose
 
 ### Requirement: A sent message shows the project it carried
 

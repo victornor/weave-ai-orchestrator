@@ -63,6 +63,19 @@ export interface WorkerCardContext {
   now?: Date;
 }
 
+/**
+ * One line saying why a paused worker stopped: the failure family, the runtime's own message and the
+ * reset time when it reported one. Falls back to the free-text `pauseReason` — that is all a worker
+ * a human paused carries, and all a worker paused before VS-56 has. Null unless it is paused.
+ */
+export function workerPauseReason(agent: Agent): string | null {
+  if (agent?.status !== 'paused') return null;
+  const d = agent.pauseDetail;
+  if (!d) return agent.pauseReason ?? null;
+  const parts = [d.family, d.message ? oneLine(redact(d.message), 160) : null, d.resetAt ? `resets ${d.resetAt.slice(0, 16).replace('T', ' ')} UTC` : null].filter(Boolean);
+  return parts.length ? parts.join(' · ') : agent.pauseReason ?? null;
+}
+
 export function workerToCard(agent: Agent, ctx: WorkerCardContext = {}): WorkerCardModel {
   const a = agent ?? ({} as Agent);
   const uiStatus = agentUiStatus(a.status, { needsYou: ctx.needsYou === true, stalled: ctx.stalled === true });
@@ -87,13 +100,14 @@ export function workerToCard(agent: Agent, ctx: WorkerCardContext = {}): WorkerC
     glyph: statusGlyph(uiStatus),
     statusLabel: statusLabel(uiStatus),
     lastLine: ctx.lastLine ? oneLine(redact(ctx.lastLine), 120) : null,
+    pauseReason: workerPauseReason(a),
     worktree,
     runtime: a.runtimeId ?? 'unknown',
     model: a.model ?? null,
     turn: a.turnCount ?? 0,
     tokens: tokensLabel,
     cost: cost === '—' ? null : cost,
-    meta: joinMeta(ctx.projectName ?? a.projectId, ticket?.identifier, a.runtimeId, a.model, tokensLabel, cost === '—' ? null : cost),
+    meta: joinMeta(ctx.projectName ?? a.projectId, ticket?.identifier, a.runtimeId, a.model, tokensLabel, cost === '—' ? null : cost, workerPauseReason(a)),
     windowTitle: joinMeta(name, ticket?.identifier, statusLabel(uiStatus)),
   };
 }

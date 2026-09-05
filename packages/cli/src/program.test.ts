@@ -228,6 +228,26 @@ describe('running commands against a stubbed daemon', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  // VS-56: a stopped worker says why on the command line too, in the same words the web app uses.
+  it('prints why a paused worker stopped in the worker list', async () => {
+    stubFetch({
+      '/api/w/acme/workers': {
+        workers: [{
+          id: 'ag_1', workspaceId: 'ws', kind: 'worker', projectId: 'p1', roleId: 'r1', ticketId: 'tk_1',
+          name: 'Backend Engineer #1', runtimeId: 'claude', model: null, status: 'paused',
+          pauseReason: 'rate_limit: waiting for a human',
+          pauseDetail: { family: 'provider_quota', code: 'rate_limit', message: 'limit resets in 2 hours', resetAt: null, runId: 'r1' },
+          turnCount: 3, homePath: '/w', createdAt: '2026-09-05T11:00:00.000Z', updatedAt: '2026-09-05T11:00:00.000Z',
+        }],
+      },
+    });
+    await buildProgram().parseAsync(['node', 'conductor', '--url', 'http://daemon.test', '-w', 'acme', 'worker', 'list']);
+    const out = written.join('');
+    expect(out).toContain('REASON');
+    expect(out).toContain('provider_quota');
+    expect(out).toContain('limit resets in 2 hours');
+  });
+
   it('prints a typed error and sets an exit code when the daemon refuses', async () => {
     globalThis.fetch = (async () => new Response(
       JSON.stringify({ error: { code: 'runtime_unreachable', message: 'claude is not installed on the daemon host', retryable: true } }),

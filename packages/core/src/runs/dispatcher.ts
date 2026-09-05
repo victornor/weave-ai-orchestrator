@@ -12,6 +12,35 @@ export interface CoreDispatcher extends Dispatcher {
 
 const IDLE_AGENT_STATUSES = ['active', 'error'];
 
+/**
+ * The run a claim is retrying, taken from the wakes it claims. Every producer of a retry — the
+ * engine's backoff, the supervisor's boot recovery and its watchdog — puts `retryOfRunId` in the
+ * wake payload and nothing else carries it, so claiming is the one place the link can be written.
+ * This is the only writer of `runs.retry_of_run_id`; `countRetries` in engine.ts is its only reader,
+ * and without it the retry ladder counts zero forever and never ends.
+ */
+function retryOf(claimed: Wakeup[]): string | null {
+  // A wake enqueued while another is already queued is coalesced into it, its payload appended to
+  // that wake's `bundle` (wake/index.ts gate 3) — so a retry can arrive either way round.
+  const link = (payload: unknown): string | null => {
+    const p = (payload ?? {}) as Record<string, unknown>;
+    const id = p['retryOfRunId'];
+    if (typeof id === 'string' && id) return id;
+    const bundle = Array.isArray(p['bundle']) ? (p['bundle'] as Array<Record<string, unknown>>) : [];
+    for (let i = bundle.length - 1; i >= 0; i -= 1) {
+      const nested = (bundle[i]?.['payload'] ?? {}) as Record<string, unknown>;
+      const inner = nested['retryOfRunId'];
+      if (typeof inner === 'string' && inner) return inner;
+    }
+    return null;
+  };
+  for (let i = claimed.length - 1; i >= 0; i -= 1) {
+    const id = link(claimed[i]!.payload);
+    if (id) return id;
+  }
+  return null;
+}
+
 /** PLAN §7.2: 1 s tick, one run at a time per agent, caps per host and per project. The DB is authoritative. */
 export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices): CoreDispatcher {
   const log = ctx.log('run');
@@ -46,7 +75,7 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
       ctx.db.insert('runs', {
         id: runId, workspaceId: ctx.workspaceId, agentId: agent.id, ticketId: agent.ticketId,
         wakeupIdsJson: ids, runtimeId: agent.runtimeId, model: agent.model, status: 'queued',
-        turnEpoch: agent.turnEpoch + 1, cwd: agent.homePath, createdAt: now,
+        turnEpoch: agent.turnEpoch + 1, cwd: agent.homePath, retryOfRunId: retryOf(queued), createdAt: now,
       });
       for (const id of ids) ctx.db.update('wakeups', id, { runId });
       return ctx.db.get<Run>('SELECT * FROM runs WHERE id = ?', [runId])!;

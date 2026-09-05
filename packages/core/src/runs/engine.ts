@@ -20,7 +20,13 @@ import { runTokenSecret, signRunToken } from './runtoken.js';
 
 const PAYLOAD_LIMIT = 8 * 1024;
 const RETRY_BACKOFF_MS = [30_000, 120_000, 600_000];
-const RETRYABLE: RunErrorFamily[] = ['transient_upstream', 'provider_quota'];
+/**
+ * The families the system retries by itself. `provider_quota` is deliberately absent (VS-56, ADR
+ * 0010): a usage limit is not transient the way an upstream 503 is — the runtime has already said
+ * the window is exhausted — so the ladder could only fail three more times at rising cost before
+ * reaching the same card. A quota failure parks the worker on its first occurrence instead.
+ */
+const RETRYABLE: RunErrorFamily[] = ['transient_upstream'];
 
 // ---------- redaction ----------
 
@@ -337,6 +343,9 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
       turnCount: f.agent.turnCount + 1,
       lastRunAt: now,
       errorText: status === 'succeeded' ? null : (f.failure?.message ?? r?.error?.message ?? errorCode),
+      // The agent took a turn, so whatever paused it is spent: the pause reason and its structured
+      // twin are cleared together, always. `parkForHuman` below may set them again for this failure.
+      ...(agentStatus === 'active' ? { pauseReason: null, pauseDetailJson: null } : {}),
       updatedAt: now,
     });
 
@@ -367,7 +376,8 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   if (errorFamily === 'auth') {
     try { seedRuntimeCredentials(f.agent.runtimeId, join(ctx.paths.runtimesHome, f.agent.runtimeId), { force: true }); } catch { /* best effort */ }
   }
-  // Retry the transient families with backoff (30 s / 2 min / 10 min, max 3); auth gets a single retry after re-seeding.
+  // Retry the transient family with backoff (30 s / 2 min / 10 min, max 3); auth gets a single retry
+  // after re-seeding. A usage limit is not in RETRYABLE and falls through to parking below.
   if (errorFamily && (RETRYABLE.includes(errorFamily) || errorFamily === 'auth')) {
     const attempt = countRetries(ctx, runId);
     const maxAttempts = errorFamily === 'auth' ? 1 : RETRY_BACKOFF_MS.length;
@@ -417,7 +427,12 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   return finalRun;
 }
 
-function countRetries(ctx: WorkspaceContext, runId: string): number {
+/**
+ * How many automatic attempts have already been made on this piece of work, by walking the chain of
+ * `retry_of_run_id` links the dispatcher records at claim time. The 10-hop cap is a guard: a cycle in
+ * the data must not spin here.
+ */
+export function countRetries(ctx: WorkspaceContext, runId: string): number {
   let n = 0;
   let cur: string | null = runId;
   while (cur && n < 10) {
@@ -429,16 +444,17 @@ function countRetries(ctx: WorkspaceContext, runId: string): number {
 }
 
 /**
- * The automatic retries are spent (or the failure is not retryable): stop burning turns, put the
- * question to the human as a decision on the ticket, and — for a usage limit — book one more try
- * for when the limit resets. The worker stays parked until the human answers or the timer fires.
+ * The system will not attempt this work again by itself — the automatic retries are spent, the
+ * failure is not retryable, or the runtime reported a usage limit, which never enters the ladder.
+ * Stop burning turns, record why the worker stopped, and put the question to the human as a decision
+ * on the ticket. Nothing is scheduled here: the worker stays parked, spending nothing, until the
+ * human answers (VS-56 — the previous version booked a quota retry the human had not asked for).
  */
 function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: FinalizeInput, family: RunErrorFamily | null, code: string | null, message: string | null): void {
   const log = ctx.log('run').child({ runId: f.run.id });
   const ticketId = f.agent.ticketId;
   const quota = family === 'provider_quota';
   const resetAt = quota ? parseResetTime(message ?? '') : null;
-  const retryAt = quota ? (resetAt ?? new Date(Date.now() + 60 * 60_000)) : null;
   // Each step is guarded on its own: parking is the last thing that happens before a human has to
   // notice by hand, so one step failing must not take the others with it, and none of it may fail
   // quietly. VS-49: the decision could not be stored at all, and the single try that used to wrap
@@ -448,7 +464,18 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
   };
 
   step('pause the agent', () => {
-    ctx.db.update('agents', f.agent.id, { status: 'paused', pauseReason: `${code ?? family ?? 'failed'}: waiting for a human`, updatedAt: nowIso() });
+    ctx.db.update('agents', f.agent.id, {
+      status: 'paused',
+      pauseReason: `${code ?? family ?? 'failed'}: waiting for a human`,
+      // The structured twin of that line: what every surface reads to name the family and the
+      // runtime's own words without joining runs or a decision that may not exist.
+      pauseDetailJson: {
+        family: family ?? null, code: code ?? null,
+        message: message ? message.slice(0, 400) : null,
+        resetAt: resetAt ? resetAt.toISOString() : null, runId: f.run.id,
+      },
+      updatedAt: nowIso(),
+    });
   });
 
   let identifier: { identifier: string; status: string } | undefined;
@@ -465,19 +492,24 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
         ? `${f.agent.name} hit the ${f.agent.runtimeId} usage limit${identifier ? ` on ${identifier.identifier}` : ''}`
         : `${f.agent.name} failed${identifier ? ` on ${identifier.identifier}` : ''}: ${code ?? family ?? 'unknown error'}`,
       context: [
+        `Failure: ${family ?? 'unknown'}${code ? ` (${code})` : ''}`,
         message ? `Last error: ${message.slice(0, 400)}` : null,
-        quota ? `Automatic retries are spent. One more attempt is booked for ${retryAt!.toISOString().slice(0, 16).replace('T', ' ')} UTC${resetAt ? ' (the limit\'s reset time)' : ''}; retry sooner, switch the runtime, or cancel.` : 'Automatic retries are spent. Retry, switch the runtime, or cancel the ticket.',
+        quota
+          ? `${resetAt ? `The runtime says the limit resets at ${fmtUtc(resetAt)} UTC. ` : ''}A usage limit is not retried automatically, so nothing will run until you answer: retry now, ${resetAt ? 'retry when it resets' : 'retry in an hour'}, switch the runtime, or cancel.`
+          : 'Automatic retries are spent. Retry, switch the runtime, or cancel the ticket.',
         'Retrying resumes the same session on the same branch.',
       ].filter(Boolean).join('\n\n'),
       options: [
         { key: 'retry', label: 'Retry now', recommended: !quota },
-        { key: 'retry_1h', label: 'Retry in an hour', recommended: quota },
+        resetAt
+          ? { key: 'retry_at_reset', label: `Retry when the limit resets (${fmtUtc(resetAt)} UTC)`, recommended: true }
+          : { key: 'retry_1h', label: 'Retry in an hour', recommended: quota },
         ...runtimes.map((r) => ({ key: `runtime:${r}`, label: `Retry on ${r}` })),
         { key: 'cancel', label: 'Cancel the ticket' },
       ],
-      recommendation: quota ? 'retry_1h' : 'retry',
+      recommendation: quota ? (resetAt ? 'retry_at_reset' : 'retry_1h') : 'retry',
       correlationKey: `retry:${f.agent.id}`,
-      target: { agentId: f.agent.id, ticketId: ticketId ?? null, runtime: f.agent.runtimeId, family, code },
+      target: { agentId: f.agent.id, ticketId: ticketId ?? null, runtime: f.agent.runtimeId, family, code, resetAt: resetAt ? resetAt.toISOString() : null },
     });
     raised = true;
   });
@@ -494,13 +526,11 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
     }).catch((e: unknown) => log.error({ err: String(e), step: 'block the ticket', agentId: f.agent.id, ticketId }, 'parking the worker for the human failed at block the ticket'));
   });
 
-  step('book the quota retry', () => {
-    if (!retryAt) return;
-    deps().wake.enqueue(f.agent.id, {
-      source: 'retry', reason: `retry after the ${f.agent.runtimeId} usage limit resets`, payload: { retryOfRunId: f.run.id, quotaReset: true },
-      notBefore: retryAt.toISOString(), idempotencyKey: `quota_retry:${f.run.id}`, requestedBy: { kind: 'system', id: null },
-    });
-  });
+}
+
+/** `2026-09-05 14:30` — the card and its options name a reset time the same way. */
+function fmtUtc(at: Date): string {
+  return at.toISOString().slice(0, 16).replace('T', ' ');
 }
 
 /** "resets at 3pm", "resets at 15:30", "reset in 2 hours", "try again in 45 minutes" → a Date, else null. */

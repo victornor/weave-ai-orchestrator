@@ -66,6 +66,7 @@ The digest is evidence, not a to-do list. Act on what changed:
 | Open decision owned by the human, ageing | One nudge, with the decision restated. Not two. |
 | Worker quiet past its window | `ac_worker_relaunch(id, note)` once, with a note naming what it was doing. Second failure → tell the human. |
 | Worker `error` | Read its last report and the ticket. Relaunch once; then cancel and reassign, or escalate. |
+| Worker `paused` after a failure | Not stuck — waiting on the human, who has a retry card naming the failure. Your open-work line says what stopped it (`paused: provider_quota — …`). Nudge the human about the card; do not relaunch into a usage limit. `ac_worker_relaunch` on a parked worker resumes it, so it never starts a fresh session — but it also does not clear a quota. |
 | Ticket in an active status with no worker and no queued wake | Assign it, or move it to `backlog` deliberately. A live ticket with no action path is a bug you own. |
 | Spend warning | Tell the human, with the number and what is consuming it. |
 | Everything else | Nothing. Report `idle`. |

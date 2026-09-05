@@ -30,6 +30,7 @@ import { useListNav } from '../lib/hotkeys';
 import { ago, statusText } from '../lib/format';
 import { cx } from '../lib/cx';
 import { isAutoApproving } from '../lib/yolo';
+import { workerPauseReason } from '@agent-conductor/render';
 
 type View = 'kanban' | 'table';
 
@@ -82,6 +83,11 @@ export function BoardRoute(): React.ReactElement {
     [tickets.data, shownFinished, project, role, kind, priority, status],
   );
   const live = useMemo(() => liveWorkersByTicket(workers.data ?? []), [workers.data]);
+  // A paused worker is why a ticket stopped moving; the board says so rather than looking idle.
+  const pausedFor = (ticketId: string): string | null => {
+    const w = live.get(ticketId);
+    return w ? workerPauseReason(w) : null;
+  };
   const columns = useMemo(
     () => foldBoard(filtered, live).filter((c) => finished !== 'hide' || c.key !== 'done'),
     [filtered, live, finished],
@@ -188,7 +194,7 @@ export function BoardRoute(): React.ReactElement {
             {/* phone list */}
             <div className="md:hidden">
               {filtered.map((t, i) => (
-                <TicketRow key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} autoApproving={autoApproving.has(t.id)} selected={i === nav.index} onOpen={() => open(t)} />
+                <TicketRow key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)} autoApproving={autoApproving.has(t.id)} selected={i === nav.index} onOpen={() => open(t)} />
               ))}
             </div>
 
@@ -217,7 +223,7 @@ export function BoardRoute(): React.ReactElement {
                       </header>
                       <div className="ac-scroll flex flex-col gap-2 px-2 pb-4">
                         {c.items.map((t) => (
-                          <TicketCard key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} autoApproving={autoApproving.has(t.id)} onOpen={() => open(t)} />
+                          <TicketCard key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)} autoApproving={autoApproving.has(t.id)} onOpen={() => open(t)} />
                         ))}
                       </div>
                     </section>

@@ -228,6 +228,10 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
 
     async relaunch(actor: Actor, workerId: string, note: string): Promise<Agent> {
       const agent = get(workerId);
+      // A worker parked after a failure is not stuck, it is waiting on a human: relaunching it is a
+      // resume (VS-56). Its session, ticket, worktree and brief all stand, so there is nothing to
+      // re-render and no progress to re-derive.
+      if (agent.status === 'paused' && agent.pauseDetail) return service.resume(actor, workerId);
       const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) ?? null : null;
       const active = ctx.db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [workerId]);
       if (active) { try { await deps().runs.cancel(actor, active.id, 'kill'); } catch { /* already gone */ } }
@@ -261,17 +265,51 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
 
     pause(actor: Actor, id: string, reason: string): Agent {
       get(id);
-      ctx.db.update('agents', id, { status: 'paused', pauseReason: reason, updatedAt: nowIso() });
+      // A human's pause carries its reason and no failure family; any structured detail a previous
+      // failure left is stale the moment someone pauses it by hand.
+      ctx.db.update('agents', id, { status: 'paused', pauseReason: reason, pauseDetailJson: null, updatedAt: nowIso() });
       recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.pause', 'agent', id, { reason });
       ctx.events.emit('worker.status', 'agent', id, { status: 'paused', reason });
       return get(id);
     },
 
+    /**
+     * Put a paused worker back to work: same ticket, same worktree, same branch, same session. Until
+     * VS-56 this only flipped the column, so the endpoint, the CLI verb and the web button all did
+     * nothing — the dispatcher had no wake to claim. Each step is guarded on its own so a failure to
+     * unblock the ticket does not cost the worker its turn.
+     */
     resume(actor: Actor, id: string): Agent {
-      get(id);
-      ctx.db.update('agents', id, { status: 'active', pauseReason: null, updatedAt: nowIso() });
+      const agent = get(id);
+      const wasPaused = agent.status === 'paused';
+      ctx.db.update('agents', id, { status: 'active', pauseReason: null, pauseDetailJson: null, updatedAt: nowIso() });
       recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.resume', 'agent', id, {});
       ctx.events.emit('worker.status', 'agent', id, { status: 'active' });
+      if (!wasPaused) return get(id);
+
+      // Idempotent per turn: resuming twice before the worker runs coalesces into the same wake.
+      try {
+        deps().wake.enqueue(id, {
+          source: 'system', reason: 'resumed', payload: { resumed: true },
+          idempotencyKey: `resume:${id}:${agent.turnEpoch}`, requestedBy: actor,
+        });
+      } catch (e) { log.error({ workerId: id, err: String(e) }, 'resuming the worker could not queue its turn'); }
+
+      const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;
+      if (ticket?.status === 'blocked') {
+        void deps().tickets.transition(actor, ticket.id, {
+          to: ticket.executionRunId ? 'in_progress' : 'todo',
+          note: `${agent.name} was resumed`,
+        }).catch((e: unknown) => log.warn({ workerId: id, ticketId: ticket.id, err: String(e) }, 'resuming the worker could not unblock its ticket'));
+      }
+      try {
+        deps().wake.enqueue(service.conductor().id, {
+          source: 'system', reason: `${agent.name} was resumed${ticket ? ` on ${ticket.identifier}` : ''}`,
+          payload: { kind: 'worker_resumed', workerId: id, ticketId: agent.ticketId },
+          idempotencyKey: `worker_resumed:${id}:${agent.turnEpoch}`, requestedBy: actor,
+        });
+      } catch { /* no conductor yet, or its queue is busy; the digest carries the event anyway */ }
+      log.info({ workerId: id }, 'worker resumed');
       return get(id);
     },
 

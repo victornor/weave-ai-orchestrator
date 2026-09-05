@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
 import type { RunEvent } from '@agent-conductor/shared';
 import { agentUiStatus } from '@agent-conductor/shared';
+import { workerPauseReason } from '@agent-conductor/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
 import { Transcript } from '../components/Transcript';
@@ -82,6 +83,7 @@ export function WorkerRoute(): React.ReactElement {
   }
 
   const { agent, ticket, project, usage, worktree } = detail.data;
+  const pausedFor = workerPauseReason(agent);
   const events = [...(persisted.data ?? []), ...live];
 
   return (
@@ -98,6 +100,7 @@ export function WorkerRoute(): React.ReactElement {
             {[project?.slug, ticket?.identifier, agent.runtimeId, agent.model].filter(Boolean).join(' · ')}
             {usage ? ` · ${tokens(usage.tokensIn + usage.tokensOut)} tok · ${cents(usage.costCents)}` : ''}
             {worktree ? ` · ${worktree.dirty ? 'dirty' : worktree.status} ↑${worktree.ahead} ↓${worktree.behind}` : ''}
+            {pausedFor ? <span className="text-blocked"> · {pausedFor}</span> : null}
           </span>
         }
         actions={
@@ -105,6 +108,11 @@ export function WorkerRoute(): React.ReactElement {
             {ticket ? (
               <Button variant="ghost" size="sm" onClick={() => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: ticket.identifier } })}>
                 Ticket
+              </Button>
+            ) : null}
+            {agent.status === 'paused' ? (
+              <Button size="sm" onClick={() => action.mutate({ id: workerId, action: 'resume' })}>
+                Resume
               </Button>
             ) : null}
             <Button size="sm" onClick={() => action.mutate({ id: workerId, action: 'relaunch', note: 'relaunched from the web app' })}>

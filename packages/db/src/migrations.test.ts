@@ -57,6 +57,50 @@ describe('migrations', () => {
     db.close();
   });
 
+  // VS-56: why a paused worker stopped, structured. Additive and backfill-free — every worker that
+  // predates it keeps its free-text `pause_reason` and gains a null detail.
+  describe('the agent pause detail', () => {
+    const agentColumns = (db: Db): string[] => db.all<{ name: string }>('PRAGMA table_info(agents)').map((c) => c.name);
+
+    it('adds the column and preserves every worker that predates it', () => {
+      const path = join(dir, 'pause.sqlite');
+      const before = openDbAsOf(path, '0010_decision_kinds.sql');
+      seedTicket(before, { workspace: 'ws1', ticket: 't1' });
+      expect(agentColumns(before)).not.toContain('pause_detail_json');
+      const seed = (id: string, status: string, pauseReason: string | null): void => {
+        before.run(
+          `INSERT INTO agents (id, workspace_id, kind, name, runtime_id, status, pause_reason, home_path, created_at, updated_at)
+           VALUES (?, 'ws1', 'worker', ?, 'claude', ?, ?, '/tmp/h', 't0', 't0')`, [id, id, status, pauseReason]);
+      };
+      seed('a_active', 'active', null);
+      seed('a_paused', 'paused', 'rate_limit: waiting for a human');
+      seed('a_retired', 'retired', null);
+      before.close();
+
+      const db = openDb(path);
+      expect(agentColumns(db)).toContain('pause_detail_json');
+      const rows = db.all<{ id: string; status: string; pauseReason: string | null; pauseDetail: unknown }>(
+        'SELECT id, status, pause_reason, pause_detail_json FROM agents ORDER BY id');
+      expect(rows.map((r) => r.id)).toEqual(['a_active', 'a_paused', 'a_retired']);
+      expect(rows.map((r) => r.status)).toEqual(['active', 'paused', 'retired']);
+      expect(rows[1]!.pauseReason).toBe('rate_limit: waiting for a human');
+      expect(rows.every((r) => r.pauseDetail === null)).toBe(true);
+      expect(db.all('PRAGMA foreign_key_check')).toHaveLength(0);
+      db.close();
+    });
+
+    it('applies once and leaves its meta row alone on reopen', () => {
+      const path = join(dir, 'pause-again.sqlite');
+      const first = openDb(path);
+      const before = agentColumns(first);
+      first.close();
+      const second = openDb(path);
+      expect(agentColumns(second)).toEqual(before);
+      expect(second.all<{ value: string }>("SELECT value FROM meta WHERE key = 'migration:0011_agent_pause_detail.sql'")).toHaveLength(1);
+      second.close();
+    });
+  });
+
   it('is a no-op when it runs again on the same file', () => {
     const path = join(dir, 'b.sqlite');
     const first = openDb(path);

@@ -80,6 +80,7 @@ export function agent(over: Partial<Agent> = {}): Agent {
     effort: null,
     status: 'running',
     pauseReason: null,
+    pauseDetail: null,
     errorText: null,
     homePath: '/w/workers/a1',
     worktreePath: '/w/workers/a1/work',

@@ -7,6 +7,8 @@ import { cx } from '../lib/cx';
 export interface TicketCardProps {
   ticket: Ticket;
   workerName?: string | null;
+  /** Why this ticket's worker is paused, when it is — the board says why the work stopped without opening the worker. */
+  workerPausedFor?: string | null;
   /** A worker is live on this ticket right now — the card reads as working whatever the status says. */
   working?: boolean;
   usage?: { tokens: number; costCents: number | null } | null;
@@ -36,7 +38,7 @@ export function OutcomeChip({ ticket }: { ticket: Ticket }): React.ReactElement 
   return <Badge tone={o.tone === 'accent' ? 'accent' : o.tone === 'done' ? 'added' : o.tone === 'failed' ? 'removed' : 'neutral'}>{o.label}</Badge>;
 }
 
-export function TicketCard({ ticket, workerName, working, usage, needsYou, autoApproving, stalled, onOpen, selected, className }: TicketCardProps): React.ReactElement {
+export function TicketCard({ ticket, workerName, workerPausedFor, working, usage, needsYou, autoApproving, stalled, onOpen, selected, className }: TicketCardProps): React.ReactElement {
   const ui = ticketBoardStatus(ticket.status, { live: working, needsYou, autoApproving, stalled });
   return (
     <button
@@ -60,6 +62,11 @@ export function TicketCard({ ticket, workerName, working, usage, needsYou, autoA
         ) : null}
       </div>
       <div className="mb-2 text-ui leading-snug text-text-1">{ticket.title}</div>
+      {workerPausedFor ? (
+        <div className="ac-mono ac-truncate mb-2 rounded-r4 bg-bg-2 px-2.5 py-1.5 text-nano text-text-3" title={workerPausedFor}>
+          paused · {workerPausedFor}
+        </div>
+      ) : null}
       <div className="flex items-center gap-2">
         <Badge>{ticket.kind}</Badge>
         {isFolded(ticket.status, { live: working }) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
@@ -74,7 +81,7 @@ export function TicketCard({ ticket, workerName, working, usage, needsYou, autoA
 }
 
 /** Dense list row for the phone board and search results. */
-export function TicketRow({ ticket, workerName, working, needsYou, autoApproving, stalled, onOpen }: TicketCardProps): React.ReactElement {
+export function TicketRow({ ticket, workerName, workerPausedFor, working, needsYou, autoApproving, stalled, onOpen }: TicketCardProps): React.ReactElement {
   const ui = ticketBoardStatus(ticket.status, { live: working, needsYou, autoApproving, stalled });
   return (
     <button
@@ -90,6 +97,7 @@ export function TicketRow({ ticket, workerName, working, needsYou, autoApproving
           {isFolded(ticket.status, { live: working }) ? <span className="ac-mono text-micro text-text-3">{statusText(ticket.status)}</span> : null}
           {autoApproving ? <span className="ac-mono text-micro text-accent-link">auto-approving</span> : null}
           {workerName ? <span className="ac-truncate text-micro text-text-3">{workerName}</span> : null}
+          {workerPausedFor ? <span className="ac-truncate text-micro text-text-3">paused · {workerPausedFor}</span> : null}
         </div>
       </div>
       <span className="ac-mono flex-none text-nano text-text-4">{ago(ticket.updatedAt)}</span>

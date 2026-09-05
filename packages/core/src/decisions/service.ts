@@ -152,27 +152,39 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     }
   }
 
+  /** The structured pause the run engine recorded, for a card raised before `target` carried the reset time. */
+  function pauseDetailOf(agentId: string): { resetAt?: string | null } | null {
+    return db.get<{ pauseDetail: { resetAt?: string | null } | null }>('SELECT pause_detail_json FROM agents WHERE id = ?', [agentId])?.pauseDetail ?? null;
+  }
+
   async function applyRetryApproval(actor: Actor, d: Decision, key: string): Promise<void> {
-    const target = (d.target ?? {}) as { agentId?: string; ticketId?: string | null };
+    const target = (d.target ?? {}) as { agentId?: string; ticketId?: string | null; resetAt?: string | null };
     if (!target.agentId) return;
-    const workers = deps().workers;
     if (key === 'cancel') {
       if (target.ticketId) deps().tickets.cancel(actor, target.ticketId, 'cancelled from the retry decision');
-      else await workers.cancel(actor, target.agentId, 'cancelled from the retry decision');
+      else await deps().workers.cancel(actor, target.agentId, 'cancelled from the retry decision');
       return;
     }
-    if (key === 'retry_1h') {
-      db.update('agents', target.agentId, { status: 'active', pauseReason: null, updatedAt: nowIso() });
+    // Both deferred answers wake the worker later rather than now; nothing was booked when the card
+    // was raised, so this is the only thing that ever schedules an attempt after a usage limit.
+    if (key === 'retry_1h' || key === 'retry_at_reset') {
+      const atReset = key === 'retry_at_reset';
+      const stored = atReset ? (target.resetAt ?? pauseDetailOf(target.agentId)?.resetAt ?? null) : null;
+      const parsed = stored ? Date.parse(stored) : NaN;
+      const at = new Date(Number.isFinite(parsed) ? parsed : Date.now() + 3_600_000);
+      db.update('agents', target.agentId, { status: 'active', pauseReason: null, pauseDetailJson: null, updatedAt: nowIso() });
       deps().wake.enqueue(target.agentId, {
-        source: 'retry', reason: 'the human asked for a retry in an hour', payload: { decisionId: d.id },
-        notBefore: new Date(Date.now() + 3_600_000).toISOString(), idempotencyKey: `retry_1h:${d.id}`, requestedBy: actor,
+        source: 'retry',
+        reason: atReset ? 'the human asked for a retry when the usage limit resets' : 'the human asked for a retry in an hour',
+        payload: { decisionId: d.id },
+        notBefore: at.toISOString(), idempotencyKey: `${key}:${d.id}`, requestedBy: actor,
       });
       return;
     }
     if (key.startsWith('runtime:')) {
-      db.update('agents', target.agentId, { runtimeId: key.slice('runtime:'.length), pauseReason: null, updatedAt: nowIso() });
+      db.update('agents', target.agentId, { runtimeId: key.slice('runtime:'.length), pauseReason: null, pauseDetailJson: null, updatedAt: nowIso() });
     }
-    await workers.relaunch(actor, target.agentId, 'the human asked for a retry');
+    await deps().workers.relaunch(actor, target.agentId, 'the human asked for a retry');
     if (target.ticketId) {
       const t = deps().tickets.get(target.ticketId);
       if (t.status === 'blocked') await deps().tickets.transition(actor, t.id, { to: t.executionRunId ? 'in_progress' : 'todo', note: 'retrying' }).catch(() => undefined);

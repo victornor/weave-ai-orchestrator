@@ -180,6 +180,8 @@ export interface WorkerCardModel {
   statusLabel: string;
   /** `running vitest — 38/41 passed` */
   lastLine: string | null;
+  /** Why a paused worker stopped: `provider_quota · limit resets in 2 hours · resets 2026-09-05 14:30 UTC`. Null unless it is paused. */
+  pauseReason: string | null;
   worktree: WorktreeView | null;
   runtime: string;
   model: string | null;

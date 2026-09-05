@@ -30,6 +30,7 @@ vi.mock('../api/hooks', () => ({
     reset: vi.fn(),
   }),
   useRoleAction: () => ({ mutate: vi.fn() }),
+  useWorkerAction: () => ({ mutate: vi.fn(), isPending: false }),
   useRollbackCharter: () => ({ mutate: vi.fn() }),
 }));
 

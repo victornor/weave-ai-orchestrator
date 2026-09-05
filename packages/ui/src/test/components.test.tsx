@@ -237,6 +237,36 @@ describe('Composer', () => {
     fireEvent.click(mic);
     expect(screen.getByText(/Dictation is unavailable/)).toBeInTheDocument();
   });
+
+  it('stops growing at its cap, scrolls to the last line, and keeps the send control', () => {
+    render(<Composer onSubmit={() => undefined} placeholder="Message the conductor…" />);
+    const box = growable(screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement, 420);
+
+    fireEvent.change(box, { target: { value: 'a\n'.repeat(40) } });
+
+    // Capped rather than pushing the row taller, and scrolled to the bottom so the last line shows.
+    expect(box.style.height).toBe('192px');
+    expect(box.scrollTop).toBe(420);
+    expect(screen.getByLabelText('Send')).toBeInTheDocument();
+  });
+
+  it('follows text appended without a keystroke, the way dictation adds it', () => {
+    const { rerender } = render(<Composer onSubmit={() => undefined} value="one" onChange={() => undefined} placeholder="Message the conductor…" />);
+    const box = growable(screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement, 420);
+
+    rerender(<Composer onSubmit={() => undefined} value="one two three" onChange={() => undefined} placeholder="Message the conductor…" />);
+
+    expect(box.scrollTop).toBe(420);
+  });
+
+  // jsdom has no layout: scrollHeight is always 0 and scrollTop never moves. These stand in for the
+  // measurements a browser would make, so the autosize effect can be observed at all.
+  function growable(el: HTMLTextAreaElement, scrollHeight: number): HTMLTextAreaElement {
+    let top = 0;
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+    Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = v; } });
+    return el;
+  }
 });
 
 describe('BudgetMeter', () => {

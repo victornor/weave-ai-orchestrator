@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useDictation } from '../lib/dictation';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
 import { VoiceMeter } from './VoiceMeter';
 
 export type ComposerState = 'idle' | 'queued';
+
+/**
+ * The input stops growing here and scrolls internally, so the mic and send controls never move off
+ * screen. Kept in step with `max-h-[min(12rem,35dvh)]` on the textarea, which clamps it further on a
+ * short viewport; 12rem is this number.
+ */
+const MAX_INPUT_PX = 192;
 
 export interface ComposerProps {
   placeholder?: string;
@@ -116,11 +123,18 @@ export function Composer({
     if (autoFocus) ta.current?.focus();
   }, [autoFocus]);
 
-  useEffect(() => {
+  // Grow to fit, then stop and scroll inside. Measuring needs the box collapsed, which throws the
+  // scroll position away, so it is put back afterwards: at the bottom when the caret is at the end
+  // of the text — always so while dictating, since the transcript is appended — and where the
+  // browser already left it otherwise. Layout effect, so the wrong height is never painted.
+  useLayoutEffect(() => {
     const el = ta.current;
     if (!el) return;
+    const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
+    const prev = el.scrollTop;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_PX)}px`;
+    el.scrollTop = atEnd ? el.scrollHeight : prev;
   }, [text]);
 
   const send = useCallback(() => {
@@ -167,7 +181,7 @@ export function Composer({
                 send();
               }
             }}
-            className="max-h-48 flex-1 resize-none bg-transparent py-1.5 text-body text-text-1 outline-none placeholder:text-text-4 focus-visible:[box-shadow:none]"
+            className="max-h-[min(12rem,35dvh)] flex-1 resize-none overflow-y-auto bg-transparent py-1.5 text-body text-text-1 outline-none placeholder:text-text-4 focus-visible:[box-shadow:none]"
           />
           <button
             type="button"

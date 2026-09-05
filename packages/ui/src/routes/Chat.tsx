@@ -130,9 +130,14 @@ export function ChatRoute(): React.ReactElement {
     ),
   );
 
-  // New messages and streamed events follow the bottom only while the human is there; scrolled up,
-  // they land below the fold behind the scroll-to-bottom button instead of moving the viewport.
-  const stick = useStickToBottom([messages.data, liveEvents.length]);
+  // One hook owns the list's two ends. New messages and streamed events follow the bottom only while
+  // the human is there; scrolled up, they land below the fold behind the scroll-to-bottom button
+  // instead of moving the viewport. At the other end, reaching the top pulls in the page before the
+  // loaded history and holds the viewport on what they were reading while it lands.
+  const stick = useStickToBottom([messages.data, liveEvents.length], {
+    ready: !messages.isLoading,
+    older: { hasOlder: messages.hasOlder, isLoadingOlder: messages.isLoadingOlder, loadOlder: messages.loadOlder },
+  });
 
   const ticketStatus = useCallback(
     (identifier: string) => {
@@ -245,6 +250,14 @@ export function ChatRoute(): React.ReactElement {
       <div className="relative flex min-h-0 flex-1 flex-col">
         <PageBody scrollRef={stick.scrollRef} className="px-4 py-5 md:px-7">
           <div className="mx-auto flex max-w-3xl flex-col gap-5">
+            {/* Above the history, where the page being fetched will appear. Nothing marks the start
+                of the thread: the loads simply stop once the API has answered with a short page. */}
+            {messages.isLoadingOlder ? (
+              <div role="status" className="flex justify-center">
+                <span className="ac-mono text-micro text-text-4">Loading earlier messages…</span>
+              </div>
+            ) : null}
+
             {messages.isLoading ? (
               <>
                 <Skeleton className="ml-auto h-12 w-2/3 rounded-r10" />

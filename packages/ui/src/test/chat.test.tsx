@@ -8,6 +8,9 @@ const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>()
 const state = vi.hoisted(() => ({
   conductor: { agent: { id: 'ag_conductor' }, lastRun: null as { id: string; status: string } | null },
   messages: [] as ThreadMessage[],
+  hasOlder: false,
+  isLoadingOlder: false,
+  loadOlder: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   persisted: [] as RunEvent[],
   tickets: [] as Ticket[],
   workers: [] as Agent[],
@@ -44,7 +47,10 @@ vi.mock('../api/hooks', () => ({
   useRunEvents: (id: string) => ({ data: id ? state.persisted : [] }),
   useThreads: () => ({ data: [{ id: 'th_1' }], isSuccess: true }),
   useCreateThread: () => ({ mutate: vi.fn(), isPending: false, data: null }),
-  useThreadMessages: () => ({ data: state.messages, isLoading: false, isError: false, refetch: vi.fn() }),
+  useThreadMessages: () => ({
+    data: state.messages, isLoading: false, isError: false, refetch: vi.fn(),
+    hasOlder: state.hasOlder, isLoadingOlder: state.isLoadingOlder, loadOlder: state.loadOlder,
+  }),
   usePostThreadMessage: () => ({ mutate: (v: Record<string, unknown>) => state.posted.push(v) }),
   useDecisions: (p: Record<string, unknown>) => { state.decisionQuery = p; return { data: state.decisions }; },
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
@@ -102,6 +108,9 @@ beforeEach(() => {
   FakeEventSource.open = [];
   state.conductor = { agent: { id: 'ag_conductor' }, lastRun: null };
   state.messages = [];
+  state.hasOlder = false;
+  state.isLoadingOlder = false;
+  state.loadOlder = vi.fn();
   state.persisted = [];
   state.tickets = [];
   state.workers = [];
@@ -772,5 +781,102 @@ describe('ChatRoute follow the bottom', () => {
     state.messages = [message({ id: 'm1', body: 'Filed it.' })];
     rerender(<ChatRoute />);
     expect(scrolls()).toBe(before + 1);
+  });
+});
+
+describe('ChatRoute history paging', () => {
+  const CLIENT = 300;
+
+  // jsdom has no layout. Same stand-in as the follow suite above, but the height grows: a page
+  // arriving at the top is exactly the case where the list gets taller than it was.
+  function scrollable(el: HTMLElement, height: number): { to: (top: number) => void; grow: (h: number) => void } {
+    let top = 0;
+    let scrollHeight = height;
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => CLIENT });
+    Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = v; } });
+    return {
+      to: (v: number) => { top = v; fireEvent.scroll(el); },
+      grow: (h: number) => { scrollHeight = h; },
+    };
+  }
+
+  const list = (c: HTMLElement): HTMLElement => c.querySelector('.ac-scroll') as HTMLElement;
+  const calls = (): unknown[][] => (window.HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mock.calls;
+  const lastScroll = (): unknown => calls()[calls().length - 1]?.[0];
+
+  it('opens on the newest page at the bottom, without animating there', () => {
+    state.messages = [message({ id: 'm1', body: 'Oldest loaded.' }), message({ id: 'm2', body: 'Newest.' })];
+
+    render(<ChatRoute />);
+
+    // The jump is instant; only the follow that comes after it animates.
+    expect(lastScroll()).toEqual({ behavior: 'auto', block: 'end' });
+  });
+
+  it('animates the follow once the list is open', () => {
+    state.messages = [message({ id: 'm1', body: 'Newest.' })];
+    const { rerender } = render(<ChatRoute />);
+
+    state.messages = [...state.messages, message({ id: 'm2', body: 'And one more.' })];
+    rerender(<ChatRoute />);
+
+    expect(lastScroll()).toEqual({ behavior: 'smooth', block: 'end' });
+  });
+
+  it('asks for the page before the loaded history at the top, and holds the viewport while it arrives', () => {
+    state.messages = [message({ id: 'm2', body: 'Newest.' })];
+    state.hasOlder = true;
+
+    const { container, rerender } = render(<ChatRoute />);
+    const el = list(container);
+    const { to, grow } = scrollable(el, 2000);
+
+    // The human scrolls back to the top of what is loaded: 1960px above the bottom.
+    to(40);
+    expect(state.loadOlder).toHaveBeenCalledTimes(1);
+
+    // The page arrives above what was on screen and makes the list 1200px taller.
+    grow(3200);
+    const before = calls().length;
+    state.messages = [message({ id: 'm0', body: 'Older.' }), ...state.messages];
+    rerender(<ChatRoute />);
+
+    // The same content is under the eye — still 1960px above the bottom — and the follow did not
+    // read the prepended page as new content at the other end.
+    expect(screen.getByText('Older.')).toBeInTheDocument();
+    expect(el.scrollTop).toBe(1240);
+    expect(calls().length).toBe(before);
+  });
+
+  it('shows a loading row above the history only while an older page is in flight', () => {
+    state.messages = [message({ id: 'm1', body: 'Newest.' })];
+    const { rerender } = render(<ChatRoute />);
+    expect(screen.queryByText('Loading earlier messages…')).not.toBeInTheDocument();
+
+    state.isLoadingOlder = true;
+    rerender(<ChatRoute />);
+    expect(screen.getByText('Loading earlier messages…')).toBeInTheDocument();
+  });
+
+  it('stops asking once the loaded history reaches the beginning of the thread', () => {
+    state.messages = [message({ id: 'm1', body: 'The first thing I ever said.' })];
+    state.hasOlder = false;
+
+    const { container } = render(<ChatRoute />);
+    scrollable(list(container), 2000).to(0);
+
+    expect(state.loadOlder).not.toHaveBeenCalled();
+  });
+
+  it('does not ask twice for the same page', () => {
+    state.messages = [message({ id: 'm1', body: 'Newest.' })];
+    state.hasOlder = true;
+    state.isLoadingOlder = true;
+
+    const { container } = render(<ChatRoute />);
+    scrollable(list(container), 2000).to(0);
+
+    expect(state.loadOlder).not.toHaveBeenCalled();
   });
 });

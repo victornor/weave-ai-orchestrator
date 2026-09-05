@@ -10,10 +10,10 @@ import { EmptyState, ErrorState } from '../components/States';
 import { Table } from '../components/Table';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
-import { useProjects, useRoles, useTickets } from '../api/hooks';
+import { useProjects, useRoles, useTickets, useWorkers } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
-import { filterTickets, foldBoard, isFolded } from '../lib/board';
+import { filterTickets, foldBoard, isFolded, liveWorkersByTicket, ticketBoardStatus } from '../lib/board';
 import { useListNav } from '../lib/hotkeys';
 import { ago, statusText } from '../lib/format';
 import { cx } from '../lib/cx';
@@ -39,12 +39,16 @@ export function BoardRoute(): React.ReactElement {
   const tickets = useTickets({ limit: 300, ...(showDone ? { includeTerminal: true } : {}) });
   const projects = useProjects();
   const roles = useRoles();
+  // Worker liveness is what the columns are really about; the worker events the stream already
+  // tracks invalidate this query, so a spawn or a retirement re-folds the board on its own.
+  const workers = useWorkers({});
 
   const filtered = useMemo(
     () => filterTickets(tickets.data ?? [], { project, role, kind, priority, status }),
     [tickets.data, project, role, kind, priority, status],
   );
-  const columns = useMemo(() => foldBoard(filtered).filter((c) => showDone || c.key !== 'done'), [filtered, showDone]);
+  const live = useMemo(() => liveWorkersByTicket(workers.data ?? []), [workers.data]);
+  const columns = useMemo(() => foldBoard(filtered, live).filter((c) => showDone || c.key !== 'done'), [filtered, live, showDone]);
 
   const nav = useListNav(filtered.length, {
     onOpen: (i) => {
@@ -130,7 +134,7 @@ export function BoardRoute(): React.ReactElement {
             {/* phone list */}
             <div className="md:hidden">
               {filtered.map((t, i) => (
-                <TicketRow key={t.id} ticket={t} selected={i === nav.index} onOpen={() => open(t)} />
+                <TicketRow key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} selected={i === nav.index} onOpen={() => open(t)} />
               ))}
             </div>
 
@@ -147,7 +151,7 @@ export function BoardRoute(): React.ReactElement {
                       </header>
                       <div className="ac-scroll flex flex-col gap-2 px-2 pb-4">
                         {c.items.map((t) => (
-                          <TicketCard key={t.id} ticket={t} onOpen={() => open(t)} />
+                          <TicketCard key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} onOpen={() => open(t)} />
                         ))}
                       </div>
                     </section>
@@ -166,7 +170,7 @@ export function BoardRoute(): React.ReactElement {
                       width: '9rem',
                       render: (t) => (
                         <span className="flex items-center gap-2">
-                          <StatusGlyph status={ticketUiStatus(t.status)} size="xs" />
+                          <StatusGlyph status={ticketBoardStatus(t.status, { live: live.has(t.id) })} size="xs" />
                           <span className="ac-mono text-micro">{statusText(t.status)}</span>
                         </span>
                       ),

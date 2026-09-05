@@ -52,6 +52,27 @@ describe('TicketCard', () => {
     render(<TicketCard ticket={ticket({ status: 'in_progress' })} />);
     expect(screen.queryByText('in progress')).not.toBeInTheDocument();
   });
+
+  it('reads as working, names the worker and keeps its real status when a worker is live on it', () => {
+    render(<TicketCard ticket={ticket({ status: 'todo' })} working workerName="Platform Engineer #21" />);
+    expect(screen.getByRole('img')).toHaveAccessibleName('working');
+    expect(screen.getByText('todo')).toBeInTheDocument();
+    expect(screen.getByText('Platform Engineer #21')).toBeInTheDocument();
+  });
+
+  it('marks a merging ticket merging, not needs-you, so it does not read like one waiting for review', () => {
+    render(<TicketCard ticket={ticket({ status: 'merging' })} working />);
+    expect(screen.getByRole('img')).toHaveAccessibleName('merging');
+    const { unmount } = render(<TicketCard ticket={ticket({ status: 'in_review' })} />);
+    expect(screen.getAllByRole('img').at(-1)).toHaveAccessibleName('needs you');
+    unmount();
+  });
+
+  it('leaves a proposed ticket with a live worker needing you', () => {
+    render(<TicketCard ticket={ticket({ status: 'proposed' })} working />);
+    expect(screen.getByRole('img')).toHaveAccessibleName('needs you');
+    expect(screen.queryByText('proposed')).not.toBeInTheDocument();
+  });
 });
 
 describe('WorkerCard', () => {

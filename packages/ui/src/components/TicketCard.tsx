@@ -1,13 +1,14 @@
 import type { Ticket } from '@agent-conductor/shared';
-import { ticketUiStatus } from '@agent-conductor/shared';
 import { StatusGlyph, Badge } from './StatusGlyph';
-import { isFolded } from '../lib/board';
+import { isFolded, ticketBoardStatus } from '../lib/board';
 import { ago, cents, statusText, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
 
 export interface TicketCardProps {
   ticket: Ticket;
   workerName?: string | null;
+  /** A worker is live on this ticket right now — the card reads as working whatever the status says. */
+  working?: boolean;
   usage?: { tokens: number; costCents: number | null } | null;
   needsYou?: boolean;
   stalled?: boolean;
@@ -33,8 +34,8 @@ export function OutcomeChip({ ticket }: { ticket: Ticket }): React.ReactElement 
   return <Badge tone={o.tone === 'accent' ? 'accent' : o.tone === 'done' ? 'added' : o.tone === 'failed' ? 'removed' : 'neutral'}>{o.label}</Badge>;
 }
 
-export function TicketCard({ ticket, workerName, usage, needsYou, stalled, onOpen, selected, className }: TicketCardProps): React.ReactElement {
-  const ui = ticketUiStatus(ticket.status, { hasOpenHumanDecision: needsYou, workerStalled: stalled });
+export function TicketCard({ ticket, workerName, working, usage, needsYou, stalled, onOpen, selected, className }: TicketCardProps): React.ReactElement {
+  const ui = ticketBoardStatus(ticket.status, { live: working, needsYou, stalled });
   return (
     <button
       type="button"
@@ -59,7 +60,7 @@ export function TicketCard({ ticket, workerName, usage, needsYou, stalled, onOpe
       <div className="mb-2 text-ui leading-snug text-text-1">{ticket.title}</div>
       <div className="flex items-center gap-2">
         <Badge>{ticket.kind}</Badge>
-        {isFolded(ticket.status) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
+        {isFolded(ticket.status, { live: working }) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
         <OutcomeChip ticket={ticket} />
         {workerName ? <span className="ac-truncate text-micro text-text-3">{workerName}</span> : null}
         <div className="flex-1" />
@@ -70,8 +71,8 @@ export function TicketCard({ ticket, workerName, usage, needsYou, stalled, onOpe
 }
 
 /** Dense list row for the phone board and search results. */
-export function TicketRow({ ticket, workerName, needsYou, stalled, onOpen }: TicketCardProps): React.ReactElement {
-  const ui = ticketUiStatus(ticket.status, { hasOpenHumanDecision: needsYou, workerStalled: stalled });
+export function TicketRow({ ticket, workerName, working, needsYou, stalled, onOpen }: TicketCardProps): React.ReactElement {
+  const ui = ticketBoardStatus(ticket.status, { live: working, needsYou, stalled });
   return (
     <button
       type="button"
@@ -83,7 +84,7 @@ export function TicketRow({ ticket, workerName, needsYou, stalled, onOpen }: Tic
         <div className="mb-1 text-body leading-snug text-text-1">{ticket.title}</div>
         <div className="flex items-center gap-2">
           <span className="ac-mono text-micro text-text-3">{ticket.identifier}</span>
-          {isFolded(ticket.status) ? <span className="ac-mono text-micro text-text-3">{statusText(ticket.status)}</span> : null}
+          {isFolded(ticket.status, { live: working }) ? <span className="ac-mono text-micro text-text-3">{statusText(ticket.status)}</span> : null}
           {workerName ? <span className="ac-truncate text-micro text-text-3">{workerName}</span> : null}
         </div>
       </div>

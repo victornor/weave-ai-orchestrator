@@ -1,11 +1,12 @@
-import type { Ticket, TicketStatus, UiStatus } from '@agent-conductor/shared';
-import { TICKET_STATUSES } from '@agent-conductor/shared';
+import type { Agent, AgentStatus, Ticket, TicketStatus, UiStatus } from '@agent-conductor/shared';
+import { TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
 
 /**
  * Six owner-naming columns for eleven statuses (DESIGN-CONTRACT §5, designer's
  * call 8). backlog, proposing, approved, merging and cancelled fold into their
  * neighbouring column; the exact status is printed on the card. The table view
- * exposes all eleven.
+ * exposes all eleven. On top of that, a live worker overrides the status and puts
+ * its ticket In progress — see `columnFor`.
  */
 export const BOARD_COLUMNS = [
   { key: 'todo', label: 'Todo', owner: 'unassigned', status: 'idle' },
@@ -33,9 +34,69 @@ export const STATUS_COLUMN: Record<TicketStatus, BoardColumnKey> = {
   cancelled: 'done',
 };
 
-/** True when the card must print its exact status because it was folded. */
-export function isFolded(status: TicketStatus): boolean {
-  return STATUS_COLUMN[status] !== (status as BoardColumnKey);
+/**
+ * A worker in one of these is on its ticket right now: spawned and not finished.
+ * `paused` and `error` are not live — nothing is moving — and `done`/`retired` are over.
+ */
+const LIVE_AGENT_STATUSES: readonly AgentStatus[] = ['provisioning', 'active', 'running'];
+
+export function isLiveWorker(worker: Pick<Agent, 'status'> | null | undefined): boolean {
+  return Boolean(worker && LIVE_AGENT_STATUSES.includes(worker.status));
+}
+
+/**
+ * Ticket id → the live worker on it. A ticket's `workerId` stays set after the worker
+ * retires, so liveness can only come from the workers themselves.
+ */
+export function liveWorkersByTicket(workers: readonly Agent[]): Map<string, Agent> {
+  const byTicket = new Map<string, Agent>();
+  for (const w of workers) {
+    if (!w.ticketId || !isLiveWorker(w)) continue;
+    const seen = byTicket.get(w.ticketId);
+    if (!seen || w.createdAt > seen.createdAt) byTicket.set(w.ticketId, w);
+  }
+  return byTicket;
+}
+
+/** Anything with `has(ticketId)`: the map above, or a plain set of ids. */
+export interface LiveLookup {
+  has: (ticketId: string) => boolean;
+}
+
+/**
+ * Statuses where the human owns the next move. A live worker sitting on one of these is
+ * waiting for an answer, not working, so the ticket stays in the column that names its owner.
+ */
+const HUMAN_OWNED: readonly TicketStatus[] = ['proposed', 'in_review', 'blocked', 'done', 'cancelled'];
+
+/**
+ * Which column a ticket lands in. A live worker puts it In progress whatever its stored
+ * status says — a `change` ticket sits in `todo` for its whole propose turn, and `merging`
+ * folds into In review, so status alone leaves In progress empty while workers are running.
+ */
+export function columnFor(status: TicketStatus, opts: { live?: boolean } = {}): BoardColumnKey {
+  return opts.live && !HUMAN_OWNED.includes(status) ? 'in_progress' : STATUS_COLUMN[status];
+}
+
+/** True when the card must print its exact status because it is not in the column that status owns. */
+export function isFolded(status: TicketStatus, opts: { live?: boolean } = {}): boolean {
+  return columnFor(status, opts) !== (status as BoardColumnKey);
+}
+
+/**
+ * The status token a ticket shows on the board. `merging` beats a live worker because it is
+ * the more specific fact about what that worker is doing, and it is what keeps a merging
+ * ticket from reading like one waiting for review.
+ */
+export function ticketBoardStatus(
+  status: TicketStatus,
+  opts: { live?: boolean; needsYou?: boolean; stalled?: boolean } = {},
+): UiStatus {
+  if (opts.needsYou) return 'needs-you';
+  if (opts.stalled) return 'stalled';
+  if (status === 'merging') return 'merging';
+  if (opts.live && !HUMAN_OWNED.includes(status)) return 'working';
+  return ticketUiStatus(status);
 }
 
 export const ALL_TICKET_STATUSES = TICKET_STATUSES;
@@ -50,11 +111,14 @@ export interface BoardColumn<T> {
 
 const ORDER = new Map<TicketStatus, number>(TICKET_STATUSES.map((s, i) => [s, i]));
 
-export function foldBoard<T extends Pick<Ticket, 'status' | 'priority' | 'updatedAt'>>(tickets: readonly T[]): Array<BoardColumn<T>> {
+export function foldBoard<T extends Pick<Ticket, 'id' | 'status' | 'priority' | 'updatedAt'>>(
+  tickets: readonly T[],
+  live?: LiveLookup,
+): Array<BoardColumn<T>> {
   const cols: Array<BoardColumn<T>> = BOARD_COLUMNS.map((c) => ({ ...c, items: [] as T[] }));
   const byKey = new Map(cols.map((c) => [c.key, c]));
   for (const t of tickets) {
-    const key = STATUS_COLUMN[t.status];
+    const key = columnFor(t.status, { live: live?.has(t.id) });
     byKey.get(key)?.items.push(t);
   }
   const prio = { critical: 0, high: 1, medium: 2, low: 3 } as const;

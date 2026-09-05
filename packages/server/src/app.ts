@@ -72,7 +72,7 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   ws.route('/usage', usageRoutes());
   ws.route('/threads', threadRoutes());
   ws.route('/worktrees', worktreeRoutes());
-  ws.route('/presentation', presentationRoutes());
+  ws.route('/presentation', presentationRoutes(deps));
   ws.route('/presenter', presenterRoutes(deps));
   ws.route('/push', pushRoutes());
   ws.route('/agent', agentRoutes());

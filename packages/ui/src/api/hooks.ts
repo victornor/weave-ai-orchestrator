@@ -821,11 +821,17 @@ export function usePresentation(): UseQueryResult<T.PresentationConfig> {
   return useQuery({ queryKey: qk.presentation(ws), queryFn: () => api.ws<T.PresentationConfig>(ws, '/presentation') });
 }
 
-export function usePutPresentation(): UseMutationResult<unknown, Error, Record<string, unknown>> {
+export function usePresentationSurfaces(): UseQueryResult<T.PresentationSurfaces> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.presentationSurfaces(ws), queryFn: () => api.ws<T.PresentationSurfaces>(ws, '/presentation/surfaces') });
+}
+
+/** `PUT /presentation` replaces the stored config wholesale — always send the whole object. */
+export function usePutPresentation(): UseMutationResult<T.PresentationConfig, Error, T.PresentationConfig> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body) => api.ws(ws, '/presentation', { method: 'PUT', body }),
+    mutationFn: (body) => api.ws<T.PresentationConfig>(ws, '/presentation', { method: 'PUT', body }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: qk.presentation(ws) }),
   });
 }

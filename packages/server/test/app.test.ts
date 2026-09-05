@@ -371,3 +371,39 @@ describe('usage accounts', () => {
     expect((await fetch('/api/w/ws1/usage/accounts')).status).toBe(401);
   });
 });
+
+describe('presentation', () => {
+  it('returns the stored config, not a surface pick-list (VS-50)', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/presentation', { headers: authed() });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ default: 'headless' });
+  });
+
+  it('lists the surface kinds this daemon has adapters for, without a detection flag', async () => {
+    const { h, fetch } = app();
+    for (const kind of ['headless', 'tmux']) {
+      h.deps.registries.surfaces.set(kind, { kind } as never);
+    }
+    const res = await fetch('/api/w/ws1/presentation/surfaces', { headers: authed() });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ surfaces: ['headless', 'tmux'] });
+  });
+
+  it('replaces the config on PUT and announces it', async () => {
+    const { h, fetch } = app();
+    const res = await fetch('/api/w/ws1/presentation', {
+      method: 'PUT', headers: authed({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ default: 'tmux', workers: { surface: 'tmux', session: 'ac' } }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ default: 'tmux', workers: { surface: 'tmux', session: 'ac' } });
+    expect(h.bus.since(0).filter((e) => e.type === 'presentation.updated')).toHaveLength(1);
+  });
+
+  it('is session-gated', async () => {
+    const { fetch } = app();
+    expect((await fetch('/api/w/ws1/presentation')).status).toBe(401);
+    expect((await fetch('/api/w/ws1/presentation/surfaces')).status).toBe(401);
+  });
+});

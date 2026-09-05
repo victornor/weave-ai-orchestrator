@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createProjectsService } from '../projects/index.js';
 import { createTicketsService } from '../tickets/service.js';
-import { createThreadsService } from './service.js';
+import { createThreadsService, REPLY_EXCERPT_CHARS } from './service.js';
 import type { Actor, ThreadsService, TicketsService } from '../api.js';
 
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
@@ -102,6 +102,111 @@ describe('threads', () => {
     );
     expect(threads.messages(t.id)).toHaveLength(0);
     expect(wake.calls).toHaveLength(0);
+  });
+
+  it('carries the message a reply names onto the message and into the wake payload', async () => {
+    const t = threads.bindOrGet('web', 'web-r1', null, 'Victor');
+    const asked = await threads.outbound(CONDUCTOR, t.id, 'Should I ship the selector behind a flag?');
+    const msg = await threads.inbound(HUMAN, t.id, 'yes, do it', { replyToMessageId: asked.id });
+
+    expect(msg.replyToMessageId).toBe(asked.id);
+    expect(msg.replyToExcerpt).toBe('Should I ship the selector behind a flag?');
+    const stored = threads.messages(t.id).find((m) => m.id === msg.id);
+    expect(stored?.replyToMessageId).toBe(asked.id);
+    expect(stored?.replyToExcerpt).toBe('Should I ship the selector behind a flag?');
+    expect(wake.calls[0]?.input.payload).toEqual(
+      expect.objectContaining({ messageId: msg.id, replyToMessageId: asked.id, replyToExcerpt: 'Should I ship the selector behind a flag?' }),
+    );
+  });
+
+  it('reports no replied-to message explicitly when a message answers nothing', async () => {
+    const t = threads.bindOrGet('web', 'web-r2', null);
+    const msg = await threads.inbound(HUMAN, t.id, 'just a thought');
+
+    expect(msg.replyToMessageId).toBeNull();
+    expect(msg.replyToExcerpt).toBeNull();
+    const stored = threads.messages(t.id)[0];
+    expect(stored?.replyToMessageId).toBeNull();
+    expect(stored?.replyToExcerpt).toBeNull();
+    expect(wake.calls[0]?.input.payload).toEqual(
+      expect.objectContaining({ threadId: t.id, messageId: msg.id, body: 'just a thought', replyToMessageId: null, replyToExcerpt: null }),
+    );
+  });
+
+  it('bounds the excerpt of a long replied-to message on both the read and the payload', async () => {
+    const t = threads.bindOrGet('web', 'web-r3', null);
+    const long = 'x'.repeat(REPLY_EXCERPT_CHARS + 250);
+    const asked = await threads.outbound(CONDUCTOR, t.id, long);
+    const msg = await threads.inbound(HUMAN, t.id, 'ok', { replyToMessageId: asked.id });
+
+    expect(msg.replyToExcerpt).toHaveLength(REPLY_EXCERPT_CHARS);
+    expect(threads.messages(t.id).find((m) => m.id === msg.id)?.replyToExcerpt).toHaveLength(REPLY_EXCERPT_CHARS);
+    expect((wake.calls[0]?.input.payload as { replyToExcerpt: string }).replyToExcerpt).toHaveLength(REPLY_EXCERPT_CHARS);
+  });
+
+  it('still returns the quote when the replied-to message falls outside the read window', async () => {
+    const t = threads.bindOrGet('web', 'web-r4', null);
+    const asked = await threads.outbound(CONDUCTOR, t.id, 'which one did you mean?');
+    for (let i = 0; i < 3; i++) await threads.outbound(CONDUCTOR, t.id, `filler ${i}`);
+    const msg = await threads.inbound(HUMAN, t.id, 'the second', { replyToMessageId: asked.id });
+
+    // A page that cannot contain the referenced message: the excerpt is joined in, not resolved by the caller.
+    const page = threads.messages(t.id, { limit: 1 });
+    expect(page.map((m) => m.id)).toEqual([msg.id]);
+    expect(page[0]?.replyToExcerpt).toBe('which one did you mean?');
+  });
+
+  it('rejects a reply to an unknown message, storing no message and waking nobody', async () => {
+    const t = threads.bindOrGet('web', 'web-r5', null);
+    await expect(threads.inbound(HUMAN, t.id, 'answering the void', { replyToMessageId: 'nope' })).rejects.toThrowError(
+      expect.objectContaining({ code: 'not_found' }),
+    );
+    expect(threads.messages(t.id)).toHaveLength(0);
+    expect(wake.calls).toHaveLength(0);
+  });
+
+  it('rejects a reply naming a message of another thread', async () => {
+    const other = threads.bindOrGet('web', 'web-r6a', null);
+    const elsewhere = await threads.outbound(CONDUCTOR, other.id, 'a question over here');
+    const t = threads.bindOrGet('web', 'web-r6b', null);
+
+    await expect(threads.inbound(HUMAN, t.id, 'crossing over', { replyToMessageId: elsewhere.id })).rejects.toThrowError(
+      expect.objectContaining({ code: 'not_found' }),
+    );
+    expect(threads.messages(t.id)).toHaveLength(0);
+    expect(wake.calls).toHaveLength(0);
+  });
+
+  it('references only the message named, following no chain of replies', async () => {
+    const t = threads.bindOrGet('web', 'web-r7', null);
+    const first = await threads.outbound(CONDUCTOR, t.id, 'the original question');
+    const second = await threads.inbound(HUMAN, t.id, 'a first answer', { replyToMessageId: first.id });
+    const third = await threads.inbound(HUMAN, t.id, 'actually, about that answer', { replyToMessageId: second.id });
+
+    expect(third.replyToMessageId).toBe(second.id);
+    expect(third.replyToExcerpt).toBe('a first answer');
+  });
+
+  it('stores the reply reference on a ticket-bound thread without raising a human_message wake', async () => {
+    const ticket = tickets.create(HUMAN, { kind: 'change', title: 'Dark mode', projectId: h.projectId, assigneeRoleId: h.roleId });
+    const workerId = h.addWorker(ticket.id);
+    const t = threads.bindOrGet('web', 'web-r8', null, 'Victor');
+    const asked = await threads.outbound(CONDUCTOR, t.id, 'which page did you mean?');
+    threads.bindTicket(HUMAN, t.id, ticket.id);
+    const msg = await threads.inbound(HUMAN, t.id, 'the settings page', { replyToMessageId: asked.id });
+
+    expect(msg.replyToMessageId).toBe(asked.id);
+    expect(tickets.comments(ticket.id).map((c) => c.body)).toContain('the settings page');
+    expect(wake.calls).toEqual([
+      expect.objectContaining({ agentId: workerId, input: expect.objectContaining({ source: 'ticket_comment' }) }),
+    ]);
+  });
+
+  it('gives the conductor own outbound messages no reply reference', async () => {
+    const t = threads.bindOrGet('web', 'web-r9', null);
+    const out = await threads.outbound(CONDUCTOR, t.id, 'on it');
+    expect(out.replyToMessageId).toBeNull();
+    expect(out.replyToExcerpt).toBeNull();
   });
 
   it('marks outbound web messages delivered and other channels pending', async () => {

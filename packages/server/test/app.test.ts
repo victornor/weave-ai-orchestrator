@@ -287,4 +287,39 @@ describe('routes', () => {
     expect(res.status).toBe(404);
     expect((await res.json()).error.code).toBe('not_found');
   });
+
+  // Same shape for the message a reply answers: forwarded verbatim, and the service's thread-scoped
+  // rejection is what turns a reference to another thread's message into a 404.
+  it('forwards the message a chat reply answers', async () => {
+    const { h, fetch } = app();
+    const seen: Array<Record<string, unknown> | undefined> = [];
+    h.impls['threads']!['inbound'] = (_a: unknown, _t: unknown, body: string, opts?: Record<string, unknown>) => {
+      seen.push(opts);
+      return { id: 'tm_2', body, replyToMessageId: opts?.['replyToMessageId'] ?? null, replyToExcerpt: opts?.['replyToMessageId'] ? 'the question' : null };
+    };
+
+    const asReply = await fetch('/api/w/ws1/threads/th_1/messages', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ body: 'yes, do it', replyToMessageId: 'tm_asked' }),
+    });
+    expect(asReply.status).toBe(201);
+    await expect(asReply.json()).resolves.toMatchObject({ replyToMessageId: 'tm_asked', replyToExcerpt: 'the question' });
+
+    const plain = await fetch('/api/w/ws1/threads/th_1/messages', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ body: 'unprompted' }),
+    });
+    expect(plain.status).toBe(201);
+
+    expect(seen.map((o) => o?.['replyToMessageId'])).toEqual(['tm_asked', undefined]);
+  });
+
+  it('surfaces a reply to a message outside the thread as not_found', async () => {
+    const { h, fetch } = app();
+    h.impls['threads']!['inbound'] = () => { throw new OcError('not_found', 'message tm_elsewhere not found in thread th_1'); };
+
+    const res = await fetch('/api/w/ws1/threads/th_1/messages', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ body: 'crossing over', replyToMessageId: 'tm_elsewhere' }),
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe('not_found');
+  });
 });

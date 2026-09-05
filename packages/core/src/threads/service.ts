@@ -10,6 +10,14 @@ interface ThreadRow extends ChannelThread { isPrimary: boolean; channelKind?: st
 /** Channels that reach a human directly; anything else is delivered by the server's channel manager. */
 const HUMAN_CHANNELS = ['web', 'telegram'];
 
+/**
+ * How much of a replied-to message travels with the reply, both on a read and in the wake payload.
+ * The excerpt is a locator, not a transcript: the conductor also gets the referenced message's id, and
+ * it holds the full text in its own session. Bounding it keeps a page of 50 messages from growing
+ * without bound when many of them are replies.
+ */
+export const REPLY_EXCERPT_CHARS = 500;
+
 export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServices): ThreadsService {
   const db: Db = ctx.db;
   const log = ctx.log('channel');
@@ -38,6 +46,17 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     return threadRow(r) as unknown as ThreadRow;
   }
 
+  function excerpt(body: string): string {
+    return body.slice(0, REPLY_EXCERPT_CHARS);
+  }
+
+  /** The message a reply names, or a `not_found` throw. Scoped to the thread, so it cannot cross one. */
+  function repliedToMessage(threadId: string, messageId: string): { id: string; body: string } {
+    const r = db.get<{ id: string; body: string }>('SELECT id, body FROM thread_messages WHERE id = ? AND thread_id = ?', [messageId, threadId]);
+    if (!r) throw new OcError('not_found', `message ${messageId} not found in thread ${threadId}`);
+    return r;
+  }
+
   function get(id: string): ThreadRow {
     const r = db.get<Record<string, unknown>>(
       'SELECT t.* FROM channel_threads t JOIN channels c ON c.id = t.channel_id WHERE t.id = ? AND c.workspace_id = ?',
@@ -52,15 +71,17 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     direction: 'inbound' | 'outbound',
     actor: Actor,
     body: string,
-    opts: { parts?: unknown[]; runId?: string | null; externalMessageId?: string; deliveryStatus?: string; projectId?: string | null } = {},
+    opts: { parts?: unknown[]; runId?: string | null; externalMessageId?: string; deliveryStatus?: string; projectId?: string | null; replyToMessageId?: string | null; replyToExcerpt?: string | null } = {},
   ): ThreadMessage {
     const msg: ThreadMessage = {
       id: newId(), threadId, direction, authorKind: actor.kind, authorId: actor.id, runId: opts.runId ?? actor.runId ?? null,
-      projectId: opts.projectId ?? null, body, parts: opts.parts ?? [], externalMessageId: opts.externalMessageId ?? null,
+      projectId: opts.projectId ?? null, replyToMessageId: opts.replyToMessageId ?? null, replyToExcerpt: opts.replyToExcerpt ?? null,
+      body, parts: opts.parts ?? [], externalMessageId: opts.externalMessageId ?? null,
       deliveryStatus: opts.deliveryStatus ?? 'received', createdAt: nowIso(),
     };
     db.insert('thread_messages', {
-      id: msg.id, threadId, direction, authorKind: msg.authorKind, authorId: msg.authorId, runId: msg.runId, projectId: msg.projectId, body,
+      id: msg.id, threadId, direction, authorKind: msg.authorKind, authorId: msg.authorId, runId: msg.runId, projectId: msg.projectId,
+      replyToMessageId: msg.replyToMessageId, body,
       partsJson: msg.parts, externalMessageId: msg.externalMessageId, deliveryStatus: msg.deliveryStatus, createdAt: msg.createdAt,
     });
     db.run('UPDATE channel_threads SET last_message_at = ? WHERE id = ?', [msg.createdAt, threadId]);
@@ -118,8 +139,18 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       // Resolved before anything is written, so a reference to a project this workspace does not
       // have stores no message and wakes nobody. `get` takes an id or a slug and is workspace-scoped.
       const project = opts.projectId ? deps().projects.get(opts.projectId) : null;
+      // Same posture for the replied-to message, and scoped to this thread rather than checked against
+      // it: the query cannot return a row from another thread, so a reference can never cross a thread
+      // — and therefore a workspace — boundary. It is also the read that produces the excerpt.
+      const repliedTo = opts.replyToMessageId ? repliedToMessage(t.id, opts.replyToMessageId) : null;
       return tx(db, () => {
-        const msg = insertMessage(t.id, 'inbound', human, body, { ...opts, projectId: project?.id ?? null, deliveryStatus: 'received' });
+        const msg = insertMessage(t.id, 'inbound', human, body, {
+          ...opts,
+          projectId: project?.id ?? null,
+          replyToMessageId: repliedTo?.id ?? null,
+          replyToExcerpt: repliedTo ? excerpt(repliedTo.body) : null,
+          deliveryStatus: 'received',
+        });
         recordActivity(db, ws, human, 'thread.inbound', 'thread_message', msg.id, { threadId: t.id }, t.ticketId);
         ctx.events.emit('thread.message', 'thread_message', msg.id, { ...msg, ticketId: t.ticketId });
         if (t.ticketId) {
@@ -130,7 +161,11 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
             deps().wake.enqueue(t.agentId, {
               source: 'human_message',
               reason: `message from ${t.humanLabel ?? 'the human'}${project ? ` about ${project.slug}` : ''}`,
-              payload: { threadId: t.id, messageId: msg.id, body: body.slice(0, 2000), projectId: project?.id ?? null, projectSlug: project?.slug ?? null },
+              payload: {
+                threadId: t.id, messageId: msg.id, body: body.slice(0, 2000),
+                projectId: project?.id ?? null, projectSlug: project?.slug ?? null,
+                replyToMessageId: msg.replyToMessageId, replyToExcerpt: msg.replyToExcerpt,
+              },
               requestedBy: human,
             });
           } catch (e) {
@@ -158,11 +193,19 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     messages(threadId, opts = {}) {
       const t = get(threadId);
       const params: Array<string | number> = [t.id];
-      let sql = 'SELECT * FROM thread_messages WHERE thread_id = ?';
-      if (opts.before) { sql += ' AND created_at < ?'; params.push(opts.before); }
-      sql += ' ORDER BY created_at DESC, rowid DESC LIMIT ?';
+      // The quote is joined in rather than resolved by the caller: this read is paged, so the replied-to
+      // message is often outside the window, and a stored copy of its text could go stale. The join
+      // repeats the thread predicate so the read enforces the invariant the write does.
+      let sql = `SELECT m.*, r.body AS reply_to_excerpt FROM thread_messages m
+                 LEFT JOIN thread_messages r ON r.id = m.reply_to_message_id AND r.thread_id = m.thread_id
+                 WHERE m.thread_id = ?`;
+      if (opts.before) { sql += ' AND m.created_at < ?'; params.push(opts.before); }
+      sql += ' ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?';
       params.push(Math.min(opts.limit ?? 50, 500));
-      return db.all<ThreadMessage>(sql, params).reverse();
+      return db
+        .all<ThreadMessage>(sql, params)
+        .map((m) => (m.replyToExcerpt === null ? m : { ...m, replyToExcerpt: excerpt(m.replyToExcerpt) }))
+        .reverse();
     },
 
     primaryThread() {

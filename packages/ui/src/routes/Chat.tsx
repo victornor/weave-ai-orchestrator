@@ -82,6 +82,8 @@ export function ChatRoute(): React.ReactElement {
   const queuedCount = useQueueCount('thread');
   /** The project chosen beside the input; `undefined` until the human touches it, so the thread decides. */
   const [pickedProject, setPickedProject] = useState<string | null | undefined>(undefined);
+  /** The conductor message the next message answers, or null. Choosing another replaces it. */
+  const [replyToId, setReplyToId] = useState<string | null>(null);
   const conductor = useConductor();
   const conductorId = conductor.data?.agent.id ?? null;
   /** The conductor run being streamed, or null when it is idle. */
@@ -143,6 +145,14 @@ export function ChatRoute(): React.ReactElement {
   const openWorker = useCallback((workerId: string) => go('/w/$ws/workers/$workerId', { params: { ws, workerId } }), [go, ws]);
 
   useEffect(() => setPickedProject(undefined), [threadId]);
+  useEffect(() => setReplyToId(null), [threadId]);
+
+  // The quote in the composer comes from the message the human clicked, which is on screen by
+  // definition; the quote on an already-sent message comes from its own `replyToExcerpt`.
+  const replyTo = useMemo(
+    () => (replyToId ? (messages.data ?? []).find((m) => m.id === replyToId) ?? null : null),
+    [replyToId, messages.data],
+  );
 
   // The default is the project the thread last used — read off its own messages, so it is the same
   // on every device and needs no client-side storage.
@@ -192,13 +202,16 @@ export function ChatRoute(): React.ReactElement {
       enqueue({
         kind: 'thread',
         path: `/threads/${threadId}/messages`,
-        body: { body: text, ...(projectId ? { projectId } : {}) },
+        body: { body: text, ...(projectId ? { projectId } : {}), ...(replyToId ? { replyToMessageId: replyToId } : {}) },
         label: text.slice(0, 60),
       });
+      // Cleared on both paths: the next message must not be silently attributed to the same question.
+      setReplyToId(null);
       return;
     }
     setSending(true);
-    post.mutate({ threadId, body: text, projectId });
+    post.mutate({ threadId, body: text, projectId, ...(replyToId ? { replyToMessageId: replyToId } : {}) });
+    setReplyToId(null);
   };
 
   // Onboarding: the conductor's first-run interview is just Chat with a
@@ -250,7 +263,13 @@ export function ChatRoute(): React.ReactElement {
           ) : (
             entries.map((entry) => (
               <div key={entry.message.id} className="flex flex-col gap-2">
-                <ChatMessage message={entry.message} onTicket={openTicket} ticketStatus={ticketStatus} projectName={projectName} />
+                <ChatMessage
+                  message={entry.message}
+                  onTicket={openTicket}
+                  ticketStatus={ticketStatus}
+                  projectName={projectName}
+                  onReply={entry.message.direction === 'outbound' ? () => setReplyToId(entry.message.id) : undefined}
+                />
                 {entry.dispatches.map((d) => (
                   <DispatchLabel
                     key={d.ticket.id}
@@ -320,7 +339,12 @@ export function ChatRoute(): React.ReactElement {
             placeholder="Message the conductor…"
             queuedReason={offline ? 'Offline — your message is queued' : working ? 'Conductor is replying — your message is queued' : null}
             queuedCount={queuedCount}
-            scope={<ProjectPicker projects={projects.data ?? []} value={projectId} onChange={setPickedProject} />}
+            scope={
+              <>
+                {replyTo ? <ReplyQuote body={replyTo.body} onDismiss={() => setReplyToId(null)} /> : null}
+                <ProjectPicker projects={projects.data ?? []} value={projectId} onChange={setPickedProject} />
+              </>
+            }
             onSubmit={send}
           />
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -369,20 +393,52 @@ function ProjectPicker({
   );
 }
 
+/**
+ * What the next message answers, shown above the input until it is sent or dismissed. The text comes
+ * from the message the human clicked, which is on screen; two lines is enough to recognise it.
+ */
+function ReplyQuote({ body, onDismiss }: { body: string; onDismiss: () => void }): React.ReactElement {
+  return (
+    <div className="mb-1.5 flex items-start gap-2 rounded-r6 border-l-2 border-accent bg-bg-2 py-1 pl-2 pr-1">
+      <span className="min-w-0 flex-1">
+        <span className="block text-nano text-text-4">Replying to the conductor</span>
+        <span className="line-clamp-2 block text-micro text-text-2">{body}</span>
+      </span>
+      <button
+        type="button"
+        aria-label="Dismiss reply"
+        onClick={onDismiss}
+        className="flex-none rounded-r4 px-1.5 py-0.5 text-micro text-text-3 hover:bg-bg-3 hover:text-text-1"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 function ChatMessage({
   message,
   onTicket,
   ticketStatus,
   projectName,
+  onReply,
 }: {
   message: ThreadMessage;
   onTicket: (id: string) => void;
   ticketStatus: (id: string) => ReturnType<typeof ticketUiStatus> | null;
   projectName: (id: string) => string;
+  onReply?: () => void;
 }): React.ReactElement {
   const mine = message.direction === 'inbound';
   return (
-    <div className={cx('flex flex-col gap-1', mine && 'items-end')}>
+    <div className={cx('group flex flex-col gap-1', mine && 'items-end')}>
+      {/* The quote comes off the message itself, so it survives a reload and does not need the
+          message it answers to still be in the loaded page. */}
+      {message.replyToExcerpt ? (
+        <span className={cx('max-w-[80%] border-l-2 border-line-2 pl-2 text-micro text-text-3', mine ? 'text-right' : 'w-full max-w-full')}>
+          <span className="line-clamp-2 block">{message.replyToExcerpt}</span>
+        </span>
+      ) : null}
       <div
         className={cx(
           mine ? 'max-w-[80%] rounded-r10 rounded-br-r4 bg-bg-3 px-3.5 py-2.5 text-body text-text-1' : 'w-full',
@@ -395,6 +451,16 @@ function ChatMessage({
           <span className="rounded-r4 border border-line-2 bg-bg-2 px-1.5 py-0.5 text-nano text-text-3">{projectName(message.projectId)}</span>
         ) : null}
         <span className="ac-mono text-nano text-text-4">{clock(message.createdAt)}</span>
+        {onReply ? (
+          <button
+            type="button"
+            aria-label="Reply to this message"
+            onClick={onReply}
+            className="rounded-r4 px-1.5 py-0.5 text-nano text-text-4 hover:bg-bg-3 hover:text-text-1"
+          >
+            Reply
+          </button>
+        ) : null}
       </span>
     </div>
   );

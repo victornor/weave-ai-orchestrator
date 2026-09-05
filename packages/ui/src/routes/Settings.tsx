@@ -37,6 +37,7 @@ import type { TotpSetup } from '../api/types';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import { useTheme } from '../lib/theme';
+import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
 import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, shortSha } from '../lib/upgrade';
 import { cx } from '../lib/cx';
 
@@ -228,9 +229,9 @@ function ProjectsSection(): React.ReactElement {
             <select className={cx(inputCx, 'ac-mono')} value={runtime} onChange={(e) => setRuntime(e.target.value)}>
               <option value="">default</option>
               {(runtimes.data ?? []).map((r) => (
-                <option key={r.id} value={r.id} disabled={!r.detection.available}>
+                <option key={r.id} value={r.id} disabled={!isRuntimeAvailable(r)}>
                   {r.displayName}
-                  {r.detection.available ? '' : ' (not installed)'}
+                  {isRuntimeAvailable(r) ? '' : ` (${runtimeStatusLabel(r)})`}
                 </option>
               ))}
             </select>

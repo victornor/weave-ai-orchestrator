@@ -124,7 +124,13 @@ export interface TotpSetup {
 export interface RuntimeInfo {
   id: string;
   displayName: string;
-  detection: { status?: 'available' | 'missing_binary' | 'broken' | 'unsupported'; available?: boolean; version?: string | null; path?: string | null; notes?: string | null; reason?: string | null };
+  /**
+   * Mirrors `RuntimeDetection` in @agent-conductor/runtime-sdk, which `GET /api/runtimes` returns
+   * unchanged. There is no `available` boolean on the wire — declaring an optional one here let the
+   * add-project selector read `undefined` and disable every runtime (VS-45), so the shape is exact
+   * on purpose: a future SDK change has to fail typecheck here.
+   */
+  detection: { status: 'available' | 'missing_binary' | 'broken' | 'unsupported'; version?: string | null; path?: string | null; notes?: string | null };
   capabilities: Record<string, unknown>;
   models?: string[];
 }

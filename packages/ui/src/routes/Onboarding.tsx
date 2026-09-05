@@ -9,13 +9,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useGo } from '../app/link';
 import { api, ApiError, setWorkspaceId } from '../api/client';
 import { useHealth, useInitWorkspace, useMe, useRuntimeModels, useRuntimes } from '../api/hooks';
-import type { RuntimeInfo } from '../api/types';
 import { Button } from '../components/Button';
 import { JobProgress } from '../components/JobProgress';
 import { Skeleton } from '../components/Skeleton';
 import { useJobStream } from '../api/jobStream';
 import { duration } from '../lib/format';
 import { cx } from '../lib/cx';
+import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
 
 type Step = 'workspace' | 'conductor' | 'projects' | 'create';
 const STEPS: Array<{ key: Step; label: string }> = [
@@ -121,7 +121,7 @@ export function OnboardingRoute(): React.ReactElement {
   useEffect(() => { if (!pathTouched) setPath(id ? `${root}/${id}` : ''); }, [id, root, pathTouched]);
 
   // Step 2 — conductor
-  const available = useMemo(() => (runtimes.data ?? []).filter(isAvailable), [runtimes.data]);
+  const available = useMemo(() => (runtimes.data ?? []).filter(isRuntimeAvailable), [runtimes.data]);
   const [runtime, setRuntime] = useState<string>('');
   useEffect(() => { if (!runtime && available[0]) setRuntime(available[0].id); }, [available, runtime]);
   const models = useRuntimeModels(runtime || null);
@@ -323,7 +323,7 @@ export function OnboardingRoute(): React.ReactElement {
             ) : (
               <div className="grid grid-cols-2 gap-2">
                 {(runtimes.data ?? []).map((r) => {
-                  const ok = isAvailable(r);
+                  const ok = isRuntimeAvailable(r);
                   return (
                     <button
                       key={r.id}
@@ -337,7 +337,7 @@ export function OnboardingRoute(): React.ReactElement {
                       )}
                     >
                       <span className="text-ui font-medium text-text-1">{r.displayName}</span>
-                      <span className="ac-mono text-micro text-text-3">{ok ? r.detection.version ?? 'available' : 'not installed on the daemon host'}</span>
+                      <span className="ac-mono text-micro text-text-3">{runtimeStatusLabel(r)}</span>
                     </button>
                   );
                 })}
@@ -379,7 +379,7 @@ export function OnboardingRoute(): React.ReactElement {
                 <Field label="Runtime">
                   <select value={p.runtime} onChange={(e) => patchProject(i, { runtime: e.target.value })} className={INPUT}>
                     {(runtimes.data ?? []).map((r) => (
-                      <option key={r.id} value={r.id} disabled={!isAvailable(r)}>{r.displayName}</option>
+                      <option key={r.id} value={r.id} disabled={!isRuntimeAvailable(r)}>{r.displayName}</option>
                     ))}
                   </select>
                 </Field>
@@ -509,10 +509,6 @@ function StepRow({ step, now, workspaceId, onFinish, onRetry }: {
       </span>
     </li>
   );
-}
-
-function isAvailable(r: RuntimeInfo): boolean {
-  return r.detection?.status === 'available' || r.detection?.available === true;
 }
 
 function describe(e: unknown): string {

@@ -12,7 +12,13 @@ import { TOTPInput } from '../components/TOTPInput';
 import { ConnectionBanner } from '../components/ConnectionBanner';
 import { EmptyState, ErrorState } from '../components/States';
 import { ApiError } from '../api/client';
+import { PlanPreview } from '../components/PlanPreview';
 import { agent, decision, ticket } from './factories';
+
+const planDoc = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+vi.mock('../api/hooks', () => ({
+  useTicketDocument: () => planDoc.current ?? { data: undefined, isLoading: false, isError: true },
+}));
 
 describe('StatusGlyph', () => {
   it('renders one accessible glyph per status token', () => {
@@ -108,6 +114,14 @@ describe('DecisionCard', () => {
     expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Revise/ })).toBeInTheDocument();
     expect(screen.getByText('ThemeProvider + OS fallback')).toBeInTheDocument();
+  });
+
+  it('renders the plan slot on a plan approval only', () => {
+    const { unmount } = render(<DecisionCard decision={decision()} plan={<p>the rendered plan</p>} onAnswer={() => undefined} />);
+    expect(screen.getByText('the rendered plan')).toBeInTheDocument();
+    unmount();
+    render(<DecisionCard decision={decision({ kind: 'merge_approval' })} plan={<p>the rendered plan</p>} onAnswer={() => undefined} />);
+    expect(screen.queryByText('the rendered plan')).not.toBeInTheDocument();
   });
 
   it('answers with the approve key', () => {
@@ -314,5 +328,40 @@ describe('states', () => {
     render(<ErrorState error={new ApiError(503, { code: 'runtime_unreachable', message: 'The claude-code runtime did not answer in 30s.' })} onRetry={() => undefined} />);
     expect(screen.getByText('RUNTIME_UNREACHABLE')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+});
+
+describe('PlanPreview', () => {
+  const doc = (body: string): Record<string, unknown> => ({ data: { key: 'plan', revision: 2, body, createdAt: '' }, isLoading: false, isError: false });
+
+  it('opens the plan from the approval control without leaving it', () => {
+    planDoc.current = doc('# Plan for dark-mode\n\n## Proposal\n\nSemantic tokens first.');
+    render(<DecisionCard decision={decision()} plan={<PlanPreview decision={decision()} />} onAnswer={() => undefined} />);
+    const toggle = screen.getByRole('button', { name: /Read the plan/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Semantic tokens first.')).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(screen.getByText('Semantic tokens first.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument();
+    expect(screen.getByText('r2')).toBeInTheDocument();
+  });
+
+  it('says so when the proposal is missing or empty', () => {
+    planDoc.current = doc('   ');
+    const { unmount } = render(<PlanPreview decision={decision()} />);
+    expect(screen.getByText('No plan document on this ticket — the proposal is missing or empty.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Read the plan/ })).not.toBeInTheDocument();
+    unmount();
+
+    planDoc.current = { data: undefined, isLoading: false, isError: true };
+    render(<PlanPreview decision={decision()} />);
+    expect(screen.getByText('No plan document on this ticket — the proposal is missing or empty.')).toBeInTheDocument();
+  });
+
+  it('renders nothing for a decision that is not a plan approval', () => {
+    planDoc.current = doc('# Plan');
+    const { container } = render(<PlanPreview decision={decision({ kind: 'merge_approval' })} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

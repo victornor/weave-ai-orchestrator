@@ -4,6 +4,7 @@ import type { Decision } from '@agent-conductor/shared';
 import { decision } from './factories';
 
 const state = vi.hoisted(() => ({
+  planDoc: null as { key: string; revision: number; body: string; createdAt: string } | null,
   decisions: [] as Decision[],
   conductorOwned: [] as Decision[],
   queries: [] as Array<Record<string, unknown>>,
@@ -24,6 +25,7 @@ vi.mock('../api/hooks', () => ({
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
   useTickets: () => ({ data: [] }),
   useWorkers: () => ({ data: [] }),
+  useTicketDocument: () => ({ data: state.planDoc ?? undefined, isLoading: false, isError: state.planDoc === null }),
 }));
 
 vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
@@ -46,6 +48,7 @@ const asked = (over: Partial<Decision> = {}): Decision =>
   });
 
 beforeEach(() => {
+  state.planDoc = null;
   state.decisions = [];
   state.conductorOwned = [];
   state.queries = [];
@@ -85,6 +88,21 @@ describe('NeedsYouRoute', () => {
     fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
     expect(state.toasts).toEqual([{ title: 'Could not record that answer', detail: 'decision d1 is answered', status: 'failed' }]);
+  });
+
+  it('puts the plan one tap from the approval, and says so when there is none', () => {
+    state.planDoc = { key: 'plan', revision: 1, body: '# Plan for dark-mode\n\nSemantic tokens first.', createdAt: '' };
+    state.decisions = [decision()];
+    const { unmount } = render(<NeedsYouRoute />);
+    fireEvent.click(screen.getByRole('button', { name: /Read the plan/ }));
+    expect(screen.getByText('Semantic tokens first.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument();
+    unmount();
+
+    state.planDoc = null;
+    render(<NeedsYouRoute />);
+    expect(screen.getByText('No plan document on this ticket — the proposal is missing or empty.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument();
   });
 
   it('stops listing a decision that was answered elsewhere', () => {

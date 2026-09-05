@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { DecisionCard } from '../components/DecisionCard';
+import { PlanPreview } from '../components/PlanPreview';
 import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Button } from '../components/Button';
@@ -91,6 +92,7 @@ export function NeedsYouRoute(): React.ReactElement {
                     askedBy={d.askedByAgentId}
                     busy={answer.isPending}
                     queued={isQueued}
+                    plan={<PlanPreview decision={d} />}
                     onAnswer={(a) => onAnswer(d.id, a)}
                   />
                 </div>

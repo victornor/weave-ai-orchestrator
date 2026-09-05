@@ -51,6 +51,7 @@ vi.mock('../api/hooks', () => ({
   useTickets: (p: Record<string, unknown>) => { state.ticketQuery = p; return { data: state.tickets }; },
   useWorkers: (p: Record<string, unknown>) => { state.workerQuery = p; return { data: state.workers }; },
   useProjects: () => ({ data: state.projects, isSuccess: true }),
+  useTicketDocument: () => ({ data: undefined, isLoading: false, isError: true }),
 }));
 
 vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));

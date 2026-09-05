@@ -206,15 +206,20 @@ function PlanTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdent
   const [revising, setRevising] = useState(false);
   const planDecision = decisions.data?.find((d) => d.kind === 'plan_approval' && (d.ticketId === ticketId || d.ticketId === ticketIdentifier));
 
+  // A missing plan never hides the approval: the control has to say there is nothing to read.
+  const body = doc.data?.body?.trim() ?? '';
+  const missing = !doc.isLoading && (doc.isError || body.length === 0);
   if (doc.isLoading) return <SkeletonRows rows={5} />;
-  if (doc.isError || !doc.data) return <EmptyState title="No plan yet — the worker is proposing." detail="The plan arrives as a decision card when it is ready." />;
+  if (missing && !planDecision) return <EmptyState title="No plan yet — the worker is proposing." detail="The plan arrives as a decision card when it is ready." />;
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
       {planDecision ? (
         <div className="flex flex-wrap items-center gap-2 rounded-r6 border border-accent-edge bg-accent-tint px-3.5 py-2.5">
           <StatusGlyph status="needs-you" size="sm" />
-          <span className="flex-1 text-meta text-text-1">This plan is waiting on you.</span>
+          <span className="flex-1 text-meta text-text-1">
+            {missing ? 'This plan is waiting on you — but its proposal is missing or empty.' : 'This plan is waiting on you.'}
+          </span>
           <Button variant="primary" size="sm" onClick={() => answer.mutate({ id: planDecision.id, key: 'approve' })}>
             Approve
           </Button>
@@ -238,7 +243,7 @@ function PlanTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdent
         />
       ) : null}
 
-      {(revisions.data?.length ?? 0) > 1 ? (
+      {missing ? null : (revisions.data?.length ?? 0) > 1 ? (
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="ac-label">Revisions</span>
           {(revisions.data ?? []).map((r) => (
@@ -248,7 +253,7 @@ function PlanTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdent
               onClick={() => setRevision(r.revision)}
               className={cx(
                 'ac-mono rounded-r4 border px-2 py-1 text-nano',
-                (revision ?? doc.data.revision) === r.revision ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-3',
+                (revision ?? doc.data?.revision) === r.revision ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-3',
               )}
               title={r.reason ?? ''}
             >
@@ -258,7 +263,11 @@ function PlanTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdent
         </div>
       ) : null}
 
-      <Markdown source={doc.data.body} />
+      {missing ? (
+        <EmptyState title="No plan document on this ticket." detail="The worker's proposal is missing or empty — ask it to re-propose before approving." />
+      ) : (
+        <Markdown source={body} />
+      )}
     </div>
   );
 }

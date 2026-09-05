@@ -45,8 +45,20 @@ const AGG_COLUMNS = [
   "COALESCE(SUM(CASE WHEN u.cost_status = 'reported' THEN u.cost_cents ELSE 0 END), 0) AS costReportedCents",
 ].join(', ');
 
-const TOP_COLUMN: Record<'model' | 'ticket' | 'role' | 'worker' | 'project', string> = {
-  model: 'model', ticket: 'ticket_id', role: 'role_id', worker: 'agent_id', project: 'project_id',
+/** Prefix for the synthetic `top by ticket` key of usage that belongs to an agent rather than a ticket. */
+const AGENT_KEY_PREFIX = 'agent:';
+
+/**
+ * Grouping key per `top` dimension. Ticket-less usage is not unattributable: it is an agent's own
+ * turns (today only the conductor's chat), so it groups per agent under `agent:<id>` and gets a real
+ * label instead of collapsing into one "unknown" bucket.
+ */
+const TOP_KEY: Record<'model' | 'ticket' | 'role' | 'worker' | 'project', string> = {
+  model: "COALESCE(u.model, 'unknown')",
+  ticket: `COALESCE(u.ticket_id, '${AGENT_KEY_PREFIX}' || u.agent_id)`,
+  role: "COALESCE(u.role_id, 'unknown')",
+  worker: "COALESCE(u.agent_id, 'unknown')",
+  project: "COALESCE(u.project_id, 'unknown')",
 };
 
 export function emptyPoint(bucket: string): UsageSeriesPoint {
@@ -131,11 +143,19 @@ export function createUsageService(ctx: WorkspaceContext): UsageService {
     return seal(acc);
   };
 
+  /** The conductor's own turns read as its chat; any other ticket-less agent is named and marked as such. */
+  const agentLabel = (agentId: string): string => {
+    const a = ctx.db.get<{ name: string; kind: S.AgentKind }>('SELECT name, kind FROM agents WHERE id = ? AND workspace_id = ?', [agentId, ctx.workspaceId]);
+    if (!a) return 'unknown';
+    return a.kind === 'conductor' ? `${a.name} chat` : `${a.name} · no ticket`;
+  };
+
   const label = (by: 'model' | 'ticket' | 'role' | 'worker' | 'project', key: string): string => {
     if (key === 'unknown') return 'unknown';
     switch (by) {
       case 'model': return key;
       case 'ticket': {
+        if (key.startsWith(AGENT_KEY_PREFIX)) return agentLabel(key.slice(AGENT_KEY_PREFIX.length));
         const t = ctx.db.get<{ identifier: string; title: string }>('SELECT identifier, title FROM tickets WHERE id = ? AND workspace_id = ?', [key, ctx.workspaceId]);
         return t ? `${t.identifier} ${t.title}` : key;
       }
@@ -168,12 +188,12 @@ export function createUsageService(ctx: WorkspaceContext): UsageService {
     top(q) {
       const r = range(q);
       const scope = parseScope(q.scope);
-      const col = TOP_COLUMN[q.by];
-      if (!col) throw new OcError('validation', `unknown usage grouping "${q.by}"`, { by: q.by });
+      const keyExpr = TOP_KEY[q.by];
+      if (!keyExpr) throw new OcError('validation', `unknown usage grouping "${q.by}"`, { by: q.by });
       const rows = ctx.db.all<AggRow & { key: string }>(
-        `SELECT COALESCE(u.${col}, 'unknown') AS key, ${AGG_COLUMNS} FROM usage_events u
+        `SELECT ${keyExpr} AS key, ${AGG_COLUMNS} FROM usage_events u
          WHERE u.workspace_id = ? AND u.occurred_at >= ? AND u.occurred_at < ?${scope.sql}
-         GROUP BY u.${col} ORDER BY costCents DESC, tokensIn + tokensOut DESC LIMIT 20`,
+         GROUP BY ${keyExpr} ORDER BY costCents DESC, tokensIn + tokensOut DESC LIMIT 20`,
         [ctx.workspaceId, r.start, r.end, ...scope.params],
       );
       return rows.map((row) => ({ ...point(r.start, row), key: row.key, label: label(q.by, row.key) }));

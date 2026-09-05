@@ -14,6 +14,8 @@ interface SpeechRecognitionLike {
   onresult: ((e: SpeechRecognitionEventLike) => void) | null;
   onerror: ((e: { error: string }) => void) | null;
   onend: (() => void) | null;
+  onsoundstart: (() => void) | null;
+  onspeechstart: (() => void) | null;
 }
 type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
 
@@ -31,6 +33,12 @@ export interface Dictation {
   elapsed: number;
   /** Live analyser for the voice meter while the mic is open; read it from a rAF loop, never from render. */
   analyser: { current: AnalyserNode | null };
+  /**
+   * True only when this hook owns the microphone stream the transcriber is hearing, i.e. upload
+   * mode. In speech mode the Web Speech API owns the mic and exposes no stream, so there is
+   * nothing honest to meter — the composer must not draw a waveform then.
+   */
+  metered: boolean;
   error: string | null;
   start: () => void;
   stop: () => void;
@@ -66,6 +74,10 @@ const ERRORS: Record<string, string> = {
   aborted: 'Dictation was cancelled.',
 };
 
+const UNAVAILABLE = 'Dictation is not available in this browser, and the daemon has no transcription provider configured.';
+/** The recognizer heard sound and still returned no words — not the same thing as silence. */
+const NO_TRANSCRIPT = 'The browser heard audio but its speech service returned no words. Try again, or configure a transcription provider on the daemon (Settings \u2192 Conductor) for dictation that never leaves your machines.';
+
 export function useDictation(onText: (text: string, final: boolean) => void, opts: { transcribeUrl?: string; serverConfigured?: boolean } = {}): Dictation {
   const [listening, setListening] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -83,14 +95,17 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [serverConfigured]);
+  const [metered, setMetered] = useState(false);
   const wantListening = useRef(false);
   const gotResult = useRef(false);
+  const heardAudio = useRef(false);
 
   const rec = useRef<SpeechRecognitionLike | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const analyser = useRef<{ ctx: AudioContext; node: AnalyserNode } | null>(null);
   const analyserNode = useRef<AnalyserNode | null>(null);
+  const owned = useRef<MediaStream | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedRef = useRef(0);
   useEffect(() => { elapsedRef.current = elapsed; }, [elapsed]);
@@ -105,10 +120,18 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       analyser.current = null;
     }
     analyserNode.current = null;
+    // Release the mic we opened: closing the AudioContext alone leaves the tracks live, which keeps
+    // the browser's recording indicator on and holds the capture against the next attempt.
+    if (owned.current) {
+      for (const t of owned.current.getTracks()) t.stop();
+      owned.current = null;
+    }
+    setMetered(false);
     setElapsed(0);
   }, []);
 
   const meter = useCallback((stream: MediaStream) => {
+    owned.current = stream;
     try {
       const ctx = new AudioContext();
       const node = ctx.createAnalyser();
@@ -117,6 +140,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       ctx.createMediaStreamSource(stream).connect(node);
       analyser.current = { ctx, node };
       analyserNode.current = node;
+      setMetered(true);
     } catch {
       /* metering is decoration */
     }
@@ -134,17 +158,24 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
   const start = useCallback(() => {
     setError(null);
     if (mode === 'unavailable') {
-      setError('Dictation is not available in this browser, and the daemon has no transcription provider configured.');
+      setError(UNAVAILABLE);
+      return;
+    }
+    // Resolve the recognizer before anything says "listening": a missing constructor here used to
+    // leave the composer sitting on an open timer with nothing transcribing.
+    const Ctor = mode === 'speech' ? speechCtor() : null;
+    if (mode === 'speech' && !Ctor) {
+      setMode('unavailable');
+      setError(UNAVAILABLE);
       return;
     }
     setListening(true);
     wantListening.current = true;
     gotResult.current = false;
+    heardAudio.current = false;
     timer.current = setInterval(() => setElapsed((s) => s + 1), 1000);
 
-    if (mode === 'speech') {
-      const Ctor = speechCtor();
-      if (!Ctor) return;
+    if (Ctor) {
       const r = new Ctor();
       r.continuous = true;
       r.interimResults = true;
@@ -162,6 +193,10 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         gotResult.current = true;
         cb.current(text, final);
       };
+      // The recognizer is the only thing that can tell us it heard anything — we never touch its
+      // stream. Without this, silence and "heard you, transcribed nothing" look identical.
+      r.onsoundstart = () => { heardAudio.current = true; };
+      r.onspeechstart = () => { heardAudio.current = true; };
       r.onerror = (e) => {
         if (e.error === 'no-speech' || e.error === 'aborted') return; // onend follows; re-armed or ended there
         setError(ERRORS[e.error] ?? `Dictation error: ${e.error}`);
@@ -174,7 +209,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         // the human stops, unless nothing ever came back — then say so instead of spinning.
         if (wantListening.current && rec.current === r) {
           if (!gotResult.current && elapsedRef.current >= 8) {
-            setError(ERRORS['no-speech']!);
+            setError(heardAudio.current ? NO_TRANSCRIPT : ERRORS['no-speech']!);
             wantListening.current = false;
             setListening(false);
             stopMeters();
@@ -190,8 +225,12 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       } catch {
         setListening(false);
         wantListening.current = false;
+        stopMeters();
       }
-      navigator.mediaDevices?.getUserMedia({ audio: true }).then(meter).catch(() => undefined);
+      // No getUserMedia here. The Web Speech API opens its own capture, and a second concurrent one
+      // starves it on mobile browsers, where the microphone is effectively exclusive: the meter
+      // bounced off our stream while the recognizer heard nothing and ended in "no speech" (VS-25).
+      // Its stream cannot be read, so speech mode has no meter at all rather than a fictional one.
       return;
     }
 
@@ -238,5 +277,5 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
 
   useEffect(() => () => stop(), [stop]);
 
-  return { mode, listening, elapsed, analyser: analyserNode, error, start, stop, toggle };
+  return { mode, listening, elapsed, analyser: analyserNode, metered, error, start, stop, toggle };
 }

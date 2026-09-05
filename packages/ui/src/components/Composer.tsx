@@ -216,7 +216,17 @@ export function Composer({
         {dictating ? (
           <div className="flex h-12 items-center gap-3 border-t border-line-1 px-3.5">
             {/* fixed-height row: the waveform moves, the box never does */}
-            <VoiceMeter analyser={dictation.analyser} active={dictating} className="h-8 min-w-0 flex-1" />
+            {dictation.metered ? (
+              <VoiceMeter analyser={dictation.analyser} active={dictating} className="h-8 min-w-0 flex-1" />
+            ) : (
+              // The Web Speech API owns the mic and hands out no stream, so there is nothing to
+              // meter; the waveform that used to sit here read a second capture of our own, which
+              // is exactly what starved the recognizer on mobile (VS-25).
+              <span className="flex h-8 min-w-0 flex-1 items-center gap-2 text-micro text-text-3">
+                <span className="size-1.5 flex-none animate-pulse rounded-full bg-accent" aria-hidden />
+                Listening…
+              </span>
+            )}
             <span className="ac-mono text-micro tabular-nums text-text-3">
               {Math.floor(dictation.elapsed / 60)}:{String(dictation.elapsed % 60).padStart(2, '0')}
             </span>

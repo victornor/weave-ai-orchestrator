@@ -68,6 +68,13 @@ export type ReportState = (typeof REPORT_STATES)[number];
 
 export const RUN_PHASES = ['prepare_home', 'prepare_worktree', 'build_prompt', 'spawn', 'turn', 'collect_result', 'finalize'] as const;
 export type RunPhase = (typeof RUN_PHASES)[number];
+/**
+ * The phases the run engine actually times, in the order it times them. `RUN_PHASES` also declares
+ * `spawn` and `finalize`, which nothing records — reading "the next phase" off the full list puts
+ * every mid-turn run in `spawn`. Anything inferring the phase under way from `run.phase.timing`
+ * events walks this list instead. `packages/core/src/runs/engine.test.ts` pins it to the engine.
+ */
+export const RECORDED_RUN_PHASES: readonly RunPhase[] = ['prepare_home', 'prepare_worktree', 'build_prompt', 'turn', 'collect_result'];
 
 export const RUN_EVENT_TYPES = [
   'session.started', 'session.resumed', 'turn.started', 'assistant.text', 'assistant.thinking', 'tool.call', 'tool.result', 'tool.denied',

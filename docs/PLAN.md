@@ -633,6 +633,8 @@ Conductor only:
 - `ac_worker_relaunch(id, note)` / `ac_worker_cancel(id, reason)` (cancel leaves the worktree; discarding unlanded work is a human `discard_approval`).
 - `ac_decision_answer(id, {key?, text})` for decisions owned by the conductor.
 - `ac_human_send(threadId?, body)` → outbound message to the human on the originating channel (the only way the conductor's text reaches the human; plain assistant text is captured as the run's summary but NOT delivered — Synapse's `send_to` rule). Workers do not have this tool: a worker talks to the human only by commenting on its ticket (`ac_ticket_comment`), and the daemon relays ticket comments to any thread bound to that ticket (§11.7).
+- `ac_run_inspect(ref, {since?, full?, limit?})` → what a worker is doing: `ref` is a ticket identifier, worker id or run id, resolving to the running run or the most recent one. Returns the run (id, status, turn, current phase, phases already timed, started at, elapsed, liveness, error), the worker (status, pause reason, role, ticket), and a compact redacted transcript of its recent events. Read-only. The window is the newest `limit` events (default 40, max 200); `since` pages forward from a sequence and `full` starts at the beginning. The response is capped at 32 KB and carries `{ totalEvents, firstSeq, lastSeq, truncated, resumeFrom, omittedBefore, note }`.
+- `ac_run_list(ref, {limit?})` → that ticket's or worker's recent runs, newest first, with status, turn, liveness, duration, error family and the run each retry names.
 - `ac_briefing()` → deterministic snapshot JSON (§10.5) for status reports.
 - `ac_project_list()`, `ac_project_add(url, opts)` (requires human decision), `ac_usage(filter)` (same windows as §16.3).
 

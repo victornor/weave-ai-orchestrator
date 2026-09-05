@@ -88,7 +88,7 @@ The `/usage` series answer carries `billingMix: { subscription, metered, unknown
 `GET /api/w/:ws/agent/inbox` · everything the MCP tools do is also available as `POST /api/w/:ws/agent/tools/:tool` `{ input }` → `ToolResult` for `conductor` CLI use.
 
 ### MCP
-`POST/GET /mcp/runs/:runId` — Streamable HTTP MCP server named `agent-conductor` exposing the `ac_*` tools scoped to that run's agent (PLAN §9.2).
+`POST/GET /mcp/runs/:runId` — Streamable HTTP MCP server named `agent-conductor` exposing the `ac_*` tools scoped to that run's agent (PLAN §9.2). Conductor-only `ac_run_inspect` / `ac_run_list` read a run's phase, elapsed time and transcript over this surface — the same events `GET /runs/:id/events` serves to a session, which a run token may not reach.
 
 ## Events (SSE `type`)
 See `EVENT_TYPES` in `@agent-conductor/shared`. Payloads carry the entity snapshot where cheap (ticket, decision, worker, thread message) or `{ id }` otherwise.

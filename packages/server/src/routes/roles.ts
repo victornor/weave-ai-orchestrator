@@ -26,7 +26,9 @@ export function roleRoutes(): Hono<AppEnv> {
   });
 
   app.patch('/:id', async (c) => {
-    const { patch, reason } = await body(c, z.object({ patch: RoleSpecSchema.partial(), reason: z.string().min(1) }));
+    // Strict: an unknown key would otherwise be stripped and the update would report success while
+    // changing nothing — the `runtimeId` vs `runtime` mix-up the web app used to ship (VS-32).
+    const { patch, reason } = await body(c, z.object({ patch: RoleSpecSchema.partial().strict(), reason: z.string().min(1) }));
     return c.json(await c.get('ws').services.roles.update(c.get('actor'), c.req.param('id'), patch, reason));
   });
 

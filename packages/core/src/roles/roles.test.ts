@@ -100,6 +100,22 @@ describe('roles', () => {
     expect(roles.revisions('api-backend')).toHaveLength(3);
   });
 
+  it('changes the runtime and clears the model override, on the row the next spawn reads', async () => {
+    await roles.hire(CONDUCTOR, spec({ model: 'claude-opus-5' }));
+    const onCodex = await roles.update(HUMAN, 'api-backend', { runtime: 'codex' }, 'changed from the web app');
+    // `runtimeId` is the column; `runtime` is the spec field, and it is the column that spawn copies
+    expect(onCodex.runtimeId).toBe('codex');
+    expect(onCodex.model).toBe('claude-opus-5');
+    expect(roles.revisions('api-backend').at(-1)).toMatchObject({ changedKeys: ['runtime'], reason: 'changed from the web app' });
+
+    const cleared = await roles.update(HUMAN, 'api-backend', { model: null }, 'back to the default');
+    expect(cleared.model).toBeNull();
+    expect(roles.revisions('api-backend').at(-1)).toMatchObject({ changedKeys: ['model'] });
+
+    const yaml = YAML.parse(readFileSync(join(h.ctx.paths.roles, 'api-backend', 'role.yaml'), 'utf8')) as RoleSpec;
+    expect(yaml).toMatchObject({ runtime: 'codex', model: null });
+  });
+
   it('updates the charter as its own revision and renders one on demand', async () => {
     await roles.hire(CONDUCTOR, spec());
     await roles.updateCharter(CONDUCTOR, 'api-backend', '# Charter\n\nBe careful with migrations.', 'repeated migration mistakes', { applyToRunning: true });

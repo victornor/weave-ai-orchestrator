@@ -48,6 +48,22 @@ describe('threads', () => {
     expect(h.events.some((e) => e.type === 'thread.message')).toBe(true);
   });
 
+  it('stores a multi-line body verbatim, on the thread and on the ticket it lands as a comment on', async () => {
+    // The chat renders the line breaks a human typed, so the daemon must keep them: no trimming,
+    // no rewrapping, no normalising of the blank lines between paragraphs.
+    const body = 'first line\nsecond line\n\n\nlast paragraph\n\n```\npnpm test\n```\n';
+    const ticket = tickets.create(HUMAN, { kind: 'change', title: 'Formatting', projectId: h.projectId, assigneeRoleId: h.roleId });
+    h.addWorker(ticket.id);
+    const t = threads.bindOrGet('web', 'web-nl', null, 'Victor');
+    threads.bindTicket(HUMAN, t.id, ticket.id);
+    const msg = await threads.inbound(HUMAN, t.id, body);
+
+    expect(msg.body).toBe(body);
+    expect(threads.messages(t.id).map((m) => m.body)).toEqual([body]);
+    expect(tickets.comments(ticket.id).map((c) => c.body)).toContain(body);
+    expect((wake.calls[0]?.input.payload as { body: string }).body).toBe(body);
+  });
+
   it('routes an inbound message on a ticket-bound thread into a ticket comment that wakes the worker', async () => {
     const ticket = tickets.create(HUMAN, { kind: 'change', title: 'Dark mode', projectId: h.projectId, assigneeRoleId: h.roleId });
     const workerId = h.addWorker(ticket.id);

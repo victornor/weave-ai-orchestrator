@@ -19,7 +19,13 @@ function inline(s: string): string {
     );
 }
 
-export function markdownToHtml(src: string): string {
+/**
+ * `breaks` makes a single newline inside a paragraph a hard break instead of a space. It is off by
+ * default because most of what this renders is hard-wrapped generated markdown — knowledge files,
+ * plans, briefs, charters — where every wrapped line would otherwise break. Composer text (thread
+ * messages, ticket comments) is not wrapped: a newline there is one the human typed, so it opts in.
+ */
+export function markdownToHtml(src: string, opts: { breaks?: boolean } = {}): string {
   const lines = src.replace(/\r\n/g, '\n').split('\n');
   const out: string[] = [];
   let inCode = false;
@@ -28,7 +34,10 @@ export function markdownToHtml(src: string): string {
 
   const flushPara = (): void => {
     if (para.length) {
-      out.push(`<p>${inline(para.join(' '))}</p>`);
+      // The separator is substituted after `inline`, not before: the newlines survive escaping
+      // untouched, so an inline span still spans a break the way it does when lines are reflowed.
+      const body = inline(para.join(opts.breaks ? '\n' : ' '));
+      out.push(`<p>${opts.breaks ? body.replace(/\n/g, '<br />') : body}</p>`);
       para = [];
     }
   };

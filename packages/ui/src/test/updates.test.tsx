@@ -62,10 +62,11 @@ const record = (over: Partial<Upgrade> = {}): Upgrade => ({
   log: [], backups: [], cameBackVersion: null, ...over,
 });
 
-/** Render Settings and switch to the Updates tab, the way the operator gets there. */
+/** Render Settings and reach the Updates tab, the way the operator gets there: the daemon area first. */
 function openUpdates(): void {
   render(<SettingsRoute />);
-  fireEvent.click(screen.getByText('Updates'));
+  fireEvent.click(screen.getByRole('radio', { name: 'This daemon' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Updates' }));
 }
 
 beforeEach(() => {
@@ -212,20 +213,23 @@ describe('Settings: addressing a section by URL', () => {
     expect(screen.getAllByRole('tab', { name: 'Workspace' })[1]).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('switches on a tab click and writes the section back to the URL by key', () => {
+  it('switches on a tab click and writes the section and its area back to the URL by key', () => {
     render(<SettingsRoute />);
+    // Updates lives in the daemon area (VS-52), so the operator picks the area and then the section.
+    fireEvent.click(screen.getByRole('radio', { name: 'This daemon' }));
     fireEvent.click(screen.getByRole('tab', { name: 'Updates' }));
     expect(screen.getByRole('tab', { name: 'Updates' })).toHaveAttribute('aria-selected', 'true');
-    expect(state.went).toEqual([
-      { to: '/w/$ws/settings', opts: { params: { ws: 'ws1' }, search: { section: 'updates' }, replace: true } },
-    ]);
+    expect(state.went.at(-1)).toEqual({
+      to: '/w/$ws/settings',
+      opts: { params: { ws: 'ws1' }, search: { area: 'daemon', section: 'updates' }, replace: true },
+    });
   });
 
   it('keeps the rest of the search when it rewrites the section', () => {
     state.search = { keep: 'me' };
     render(<SettingsRoute />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Updates' }));
-    expect(state.went[0]?.opts).toMatchObject({ search: { keep: 'me', section: 'updates' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'This daemon' }));
+    expect(state.went.at(-1)?.opts).toMatchObject({ search: { keep: 'me', area: 'daemon', section: 'updates' } });
   });
 });
 

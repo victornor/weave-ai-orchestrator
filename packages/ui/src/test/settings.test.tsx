@@ -8,12 +8,13 @@ const state = vi.hoisted(() => ({
   config: {} as Record<string, unknown>,
   workspaces: [] as Array<Record<string, unknown>>,
   went: [] as string[],
+  search: {} as Record<string, string | undefined>,
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
 vi.mock('../app/link', () => ({
   useGo: () => (to: string) => { state.went.push(to); },
-  useSearchParams: () => ({}),
+  useSearchParams: () => state.search,
 }));
 vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
@@ -37,6 +38,7 @@ beforeEach(() => {
   state.projects = [];
   state.workspaces = [];
   state.went = [];
+  state.search = {};
   state.config = {
     defaults: { bootstrapBudgetTokens: 16000, turnTimeoutSec: 2700, knowledgeBudgetTokens: { workspace: 10000, shared: 2000, decisions: 4000, project: 10000, document: 10000 } },
   };

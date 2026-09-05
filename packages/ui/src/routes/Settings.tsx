@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Page, PageBody, PageHeader } from '../components/Page';
-import { Tabs } from '../components/Tabs';
+import { Segmented, Tabs } from '../components/Tabs';
 import { Button } from '../components/Button';
 import { Badge } from '../components/StatusGlyph';
 import { DeviceRow } from '../components/DeviceRow';
@@ -43,34 +43,32 @@ import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
 import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, shortSha, updateEntry, updateEntryLabel } from '../lib/upgrade';
 import { cx } from '../lib/cx';
 import { workspaceYolo } from '../lib/yolo';
+import { SETTINGS_AREAS, firstSectionOf, resolveSettingsLocation, sectionsOfArea } from '../lib/settings';
 
-const SECTIONS = [
-  { key: 'workspace', label: 'Workspace' },
-  { key: 'projects', label: 'Projects' },
-  { key: 'conductor', label: 'Conductor' },
-  { key: 'channels', label: 'Channels' },
-  { key: 'presentation', label: 'Presentation' },
-  { key: 'security', label: 'Security & Devices' },
-  { key: 'notifications', label: 'Notifications' },
-  { key: 'updates', label: 'Updates' },
-] as const;
-
-/** A section is addressed by key, never by position, so `?section=updates` survives a reshuffle. */
-function sectionFromSearch(raw: string | undefined): string {
-  return SECTIONS.some((s) => s.key === raw) ? (raw as string) : 'workspace';
-}
-
+/**
+ * Settings is two areas: what belongs to this workspace, and what belongs to this daemon and so
+ * reads the same from every workspace. The area and the section are both in the URL, and a link
+ * naming only a section resolves its own area — see `resolveSettingsLocation`, which is what keeps
+ * the rail's `?section=updates` entry working without naming an area.
+ */
 export function SettingsRoute(): React.ReactElement {
   const ws = useWs();
   const go = useGo();
   const search = useSearchParams();
   // The URL is the entry point and the tabs write back to it, but the tab click stays local state so
   // the section switches on the click rather than a router round-trip. Same shape as the board filters.
-  const [section, setSection] = useState<string>(() => sectionFromSearch(search['section']));
-  useEffect(() => { setSection(sectionFromSearch(search['section'])); }, [search['section']]);
+  // The area always follows the section, so one piece of state carries both.
+  const [section, setSection] = useState<string>(() => resolveSettingsLocation({ area: search['area'], section: search['section'] }).section);
+  useEffect(() => {
+    setSection(resolveSettingsLocation({ area: search['area'], section: search['section'] }).section);
+  }, [search['area'], search['section']]);
+  const area = resolveSettingsLocation({ section }).area;
+
+  // `replace`, so clicking through six sections leaves one history entry rather than six.
   const choose = (key: string): void => {
-    setSection(key);
-    go('/w/$ws/settings', { params: { ws }, search: { ...search, section: key }, replace: true });
+    const next = resolveSettingsLocation({ section: key });
+    setSection(next.section);
+    go('/w/$ws/settings', { params: { ws }, search: { ...search, area: next.area, section: next.section }, replace: true });
   };
 
   const update = useDaemonUpdate();
@@ -79,7 +77,18 @@ export function SettingsRoute(): React.ReactElement {
 
   return (
     <Page>
-      <PageHeader title="Settings" tabs={<Tabs items={SECTIONS} active={section} onChange={choose} className="px-3 md:px-4" />} />
+      <PageHeader
+        title="Settings"
+        actions={
+          <Segmented
+            ariaLabel="Settings area"
+            options={SETTINGS_AREAS.map((a) => ({ value: a.key, label: a.label }))}
+            value={area}
+            onChange={(next) => choose(firstSectionOf(next))}
+          />
+        }
+        tabs={<Tabs items={sectionsOfArea(area)} active={section} onChange={choose} className="px-3 md:px-4" />}
+      />
       <PageBody className="p-4 md:p-5">
         <div className="mx-auto max-w-3xl">
           {/* Phone only: the rail block carries this on desktop, and one fact gets one entry. */}
@@ -104,7 +113,7 @@ export function SettingsRoute(): React.ReactElement {
           {section === 'channels' ? <ChannelsSection /> : null}
           {section === 'presentation' ? <PresentationSection /> : null}
           {section === 'security' ? <SecuritySection /> : null}
-          {section === 'notifications' ? <NotificationsSection /> : null}
+          {section === 'device' ? <DeviceSection /> : null}
           {section === 'updates' ? <UpdatesSection /> : null}
         </div>
       </PageBody>
@@ -142,7 +151,6 @@ function WorkspaceSection(): React.ReactElement {
   const summary = useWorkspaceSummary();
   const workspaces = useWorkspaces();
   const patch = usePatchConfig();
-  const [theme, setTheme] = useTheme();
   const [name, setName] = useState('');
   /** The daemon answers `/w/:ws` with the workspace's canonical id, whichever form the URL used. */
   const activeId = summary.data?.workspace.id ?? ws;
@@ -185,20 +193,6 @@ function WorkspaceSection(): React.ReactElement {
         </Field>
         <Field label="Ticket prefix" hint="Used for every identifier in this workspace.">
           <input className={cx(inputCx, 'ac-mono')} defaultValue={summary.data?.workspace.ticketPrefix ?? ''} readOnly />
-        </Field>
-        <Field label="Theme" hint="Dark is the designed theme; light is authored from the same tokens.">
-          <div className="flex gap-1.5">
-            {(['dark', 'light', 'system'] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTheme(t)}
-                className={cx('rounded-r6 border px-3 py-1.5 text-meta', theme === t ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-3')}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
         </Field>
       </section>
 
@@ -738,15 +732,22 @@ function SecuritySection(): React.ReactElement {
   );
 }
 
+/* ------------------------------------------------------------------- device
+ * Neither the daemon's nor the workspace's: the theme and the notification preferences live in this
+ * browser's localStorage, so they follow the device and not the account. The section says so, which
+ * is what keeps the page at two areas without filing per-device state under either of them.
+ */
+
 const NOTIFS = [
   { key: 'decisions', label: 'Decisions', detail: 'Plans, merges, hires, worker questions', def: true },
   { key: 'landed', label: 'Landed work', detail: 'A PR merged, a ticket closed', def: true },
   { key: 'everything', label: 'Everything else', detail: 'Status changes, run starts, curation', def: false },
 ] as const;
 
-function NotificationsSection(): React.ReactElement {
+function DeviceSection(): React.ReactElement {
   const ws = useWs();
   const toast = useToast();
+  const [theme, setTheme] = useTheme();
   const [state, setState] = useState<Record<string, boolean>>(() => {
     try {
       return JSON.parse(localStorage.getItem('conductor.notifs') ?? '') as Record<string, boolean>;
@@ -782,38 +783,63 @@ function NotificationsSection(): React.ReactElement {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       <p className="text-meta leading-relaxed text-text-2">
-        In-app arrival is the primary path — a toast plus the Needs-you badge — and nothing in any flow depends on a push being delivered.
+        These are stored in this browser only — not on the daemon and not in any workspace. Another device signed in to the
+        same account has its own.
       </p>
-      <div className="ac-card divide-y divide-line-1">
-        {NOTIFS.map((n) => (
-          <label key={n.key} className="flex items-center gap-3 px-3.5 py-3">
-            <span className="min-w-0 flex-1">
-              <span className="block text-meta text-text-1">{n.label}</span>
-              <span className="block text-micro text-text-3">{n.detail}</span>
-            </span>
+
+      <section>
+        <div className="ac-label mb-2">Theme</div>
+        <div className="flex gap-1.5">
+          {(['dark', 'light', 'system'] as const).map((t) => (
             <button
+              key={t}
               type="button"
-              role="switch"
-              aria-checked={state[n.key] ?? n.def}
-              aria-label={n.label}
-              onClick={() => save(n.key, !(state[n.key] ?? n.def))}
-              className={cx(
-                'flex h-5 w-9 flex-none items-center rounded-pill border px-0.5 transition-colors duration-(--dur-fast) ease-ac',
-                state[n.key] ?? n.def ? 'justify-end border-accent bg-accent' : 'justify-start border-line-2 bg-bg-3',
-              )}
+              onClick={() => setTheme(t)}
+              className={cx('rounded-r6 border px-3 py-1.5 text-meta', theme === t ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-3')}
             >
-              <span className={cx('size-3.5 rounded-pill', state[n.key] ?? n.def ? 'bg-accent-on' : 'bg-text-nav')} />
+              {t}
             </button>
-          </label>
-        ))}
-      </div>
-      {permission !== 'granted' ? (
-        <Button onClick={() => void subscribe()}>Get notified when something needs you</Button>
-      ) : (
-        <p className="text-micro text-text-3">Push is on for this device.</p>
-      )}
+          ))}
+        </div>
+        <p className="mt-1.5 text-micro text-text-3">Dark is the designed theme; light is authored from the same tokens.</p>
+      </section>
+
+      <section className="flex flex-col gap-4">
+        <div className="ac-label">Notifications</div>
+        <p className="text-meta leading-relaxed text-text-2">
+          In-app arrival is the primary path — a toast plus the Needs-you badge — and nothing in any flow depends on a push being delivered.
+        </p>
+        <div className="ac-card divide-y divide-line-1">
+          {NOTIFS.map((n) => (
+            <label key={n.key} className="flex items-center gap-3 px-3.5 py-3">
+              <span className="min-w-0 flex-1">
+                <span className="block text-meta text-text-1">{n.label}</span>
+                <span className="block text-micro text-text-3">{n.detail}</span>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={state[n.key] ?? n.def}
+                aria-label={n.label}
+                onClick={() => save(n.key, !(state[n.key] ?? n.def))}
+                className={cx(
+                  'flex h-5 w-9 flex-none items-center rounded-pill border px-0.5 transition-colors duration-(--dur-fast) ease-ac',
+                  state[n.key] ?? n.def ? 'justify-end border-accent bg-accent' : 'justify-start border-line-2 bg-bg-3',
+                )}
+              >
+                <span className={cx('size-3.5 rounded-pill', state[n.key] ?? n.def ? 'bg-accent-on' : 'bg-text-nav')} />
+              </button>
+            </label>
+          ))}
+        </div>
+        {permission !== 'granted' ? (
+          <Button onClick={() => void subscribe()}>Get notified when something needs you</Button>
+        ) : (
+          <p className="text-micro text-text-3">Push is on for this device.</p>
+        )}
+      </section>
     </div>
   );
 }

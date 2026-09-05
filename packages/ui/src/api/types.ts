@@ -136,6 +136,22 @@ export interface RuntimeInfo {
   models?: string[];
 }
 
+/**
+ * `GET /api/workspaces`. Deliberately not the shared `Workspace` row: the daemon sends each loaded
+ * workspace's identity, its project ids and the number of decisions waiting on the human — there is
+ * no `slug` and there are no timestamps on the wire, and reading one that is not sent is how the
+ * rail's workspace entries came to render an empty column.
+ */
+export interface WorkspaceListItem {
+  id: string;
+  name: string;
+  ticketPrefix: string;
+  root: string;
+  projects: string[];
+  /** Open decisions owned by the human, so every workspace can be badged from one request. */
+  needsYou: number;
+}
+
 export interface WorkspaceSummary {
   workspace: Workspace;
   config: Record<string, unknown>;

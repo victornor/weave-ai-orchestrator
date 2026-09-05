@@ -108,11 +108,36 @@ function WorkspaceSection(): React.ReactElement {
   const patch = usePatchConfig();
   const [theme, setTheme] = useTheme();
   const [name, setName] = useState('');
+  /** The daemon answers `/w/:ws` with the workspace's canonical id, whichever form the URL used. */
+  const activeId = summary.data?.workspace.id ?? ws;
 
   if (summary.isLoading) return <SkeletonRows rows={4} />;
 
   return (
     <div className="flex flex-col gap-5">
+      {/* First on the page: on a phone the bottom bar has no room for a workspace list, so More —
+          which opens Settings — is where the other workspaces are reached. */}
+      <section>
+        <div className="ac-label mb-2">Workspaces</div>
+        <div className="ac-card divide-y divide-line-1">
+          {(workspaces.data ?? []).map((w) => (
+            <button
+              key={w.id}
+              type="button"
+              onClick={() => go(`/w/${w.id}/needs`)}
+              className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left hover:bg-bg-2"
+            >
+              <span className="flex-1 text-meta text-text-1">{w.name}</span>
+              {w.needsYou > 0 ? (
+                <span className="ac-mono text-nano text-needs-you" aria-label={`${w.needsYou} waiting for you`}>{w.needsYou}</span>
+              ) : null}
+              <span className="ac-mono text-micro text-text-3">{w.ticketPrefix}</span>
+              {w.id === activeId && <Badge tone="accent">current</Badge>}
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section>
         <Field label="Name">
           <input
@@ -145,23 +170,6 @@ function WorkspaceSection(): React.ReactElement {
 
       <KnowledgeBudgetsSection config={summary.data?.config ?? {}} />
 
-      <section>
-        <div className="ac-label mb-2">Workspaces</div>
-        <div className="ac-card divide-y divide-line-1">
-          {(workspaces.data ?? []).map((w) => (
-            <button
-              key={w.id}
-              type="button"
-              onClick={() => go(`/w/${w.slug || w.id}/needs`)}
-              className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left hover:bg-bg-2"
-            >
-              <span className="flex-1 text-meta text-text-1">{w.name}</span>
-              <span className="ac-mono text-micro text-text-3">{w.slug}</span>
-              {(w.slug === ws || w.id === ws) && <Badge tone="accent">current</Badge>}
-            </button>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }

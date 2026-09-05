@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Outlet, useRouterState } from '@tanstack/react-router';
-import { A, useGo } from './link';
+import { useGo } from './link';
 import { TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
 import { RAIL, TABS, href } from './nav';
-import { NavGlyph } from './NavGlyph';
+import { WorkspaceNav } from './WorkspaceNav';
 import { StartWorkSheet } from './StartWorkSheet';
 import { BottomBar } from './BottomBar';
 import { PlusGlyph } from './PlusGlyph';
@@ -15,10 +15,11 @@ import { useDaemonUpdate, useDecisions, useProjects, useTickets, useTransitionTi
 import { useToast } from '../components/Toast';
 import { useHotkeys } from '../lib/hotkeys';
 import { flushQueue, useQueueCount } from '../lib/queue';
+import { readExpanded, toggleExpanded } from '../lib/wsExpansion';
 import { showsUpdateIndicator } from '../lib/upgrade';
 import type { QueuedWrite } from '../lib/queue';
-import { api, ApiError, NetworkError, setWorkspaceId } from '../api/client';
-import { cx } from '../lib/cx';
+import type { WorkspaceListItem } from '../api/types';
+import { api, ApiError, NetworkError } from '../api/client';
 import { workspaceYolo } from '../lib/yolo';
 
 export function AppShell(): React.ReactElement {
@@ -30,7 +31,8 @@ export function AppShell(): React.ReactElement {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
   const [scopeIndex, setScopeIndex] = useState(-1);
-  const [wsMenuOpen, setWsMenuOpen] = useState(false);
+  /** Which workspace groups the rail has open, seeded from what this device remembered. */
+  const [expanded, setExpanded] = useState<string[]>(() => readExpanded());
 
   const summary = useWorkspaceSummary();
   const decisions = useDecisions({ status: 'open', owner: 'human' });
@@ -42,6 +44,11 @@ export function AppShell(): React.ReactElement {
   const queuedCount = useQueueCount();
 
   const needsCount = decisions.data?.length ?? 0;
+  /**
+   * The daemon answers `/w/:ws` with the workspace's canonical id whichever form the URL used, so
+   * this — not the raw route param — is what a listed workspace is compared against.
+   */
+  const activeWs = summary.data?.workspace.id ?? ws;
   // Nothing is shown when the daemon is up to date, when checking is not configured, or when it failed.
   const updateAvailable = showsUpdateIndicator(daemonUpdate.data);
 
@@ -72,6 +79,24 @@ export function AppShell(): React.ReactElement {
     ),
   );
 
+  /**
+   * Until the workspace list answers, the rail still shows the workspace the route names: the
+   * sections being displayed must not vanish while a request is in flight.
+   */
+  const listed = useMemo<WorkspaceListItem[]>(() => {
+    const data = workspaces.data ?? [];
+    if (data.some((w) => w.id === activeWs)) return data;
+    return [
+      {
+        id: activeWs,
+        name: summary.data?.workspace.name ?? activeWs,
+        ticketPrefix: summary.data?.workspace.ticketPrefix ?? '',
+        root: '', projects: [], needsYou: 0,
+      },
+      ...data,
+    ];
+  }, [workspaces.data, activeWs, summary.data]);
+
   const commands = useMemo<Command[]>(() => {
     const cmds: Command[] = [];
     for (const t of tickets.data ?? []) {
@@ -99,8 +124,8 @@ export function AppShell(): React.ReactElement {
     }
     cmds.push({ id: 'filter', label: 'Filter board', sub: scope ? `project: ${scope}` : 'project · kind · priority', kbd: 'F', run: () => go('/w/$ws/board', { params: { ws } }) });
     for (const w of workspaces.data ?? []) {
-      if (w.slug === ws || w.id === ws) continue;
-      cmds.push({ id: `ws-${w.id}`, label: 'Switch workspace', sub: w.name, kbd: '⌘⇧O', run: () => go('/w/$ws/needs', { params: { ws: w.slug || w.id } }) });
+      if (w.id === ws) continue;
+      cmds.push({ id: `ws-${w.id}`, label: 'Switch workspace', sub: w.name, kbd: '⌘⇧O', run: () => go('/w/$ws/needs', { params: { ws: w.id } }) });
     }
     for (const item of RAIL) {
       cmds.push({ id: `go-${item.key}`, label: `Go to ${item.label}`, kbd: item.kbd, run: () => go(href(item, ws)) });
@@ -138,95 +163,28 @@ export function AppShell(): React.ReactElement {
     <div className="flex h-dvh overflow-hidden bg-bg-0">
       {/* desktop rail — the only place all projects appear at once */}
       <aside className="hidden w-rail flex-none flex-col border-r border-line-1 bg-bg-input p-2.5 md:flex">
-        <div className="relative mb-3.5">
-          <button
-            type="button"
-            onClick={() => setWsMenuOpen((v) => !v)}
-            aria-haspopup="menu"
-            aria-expanded={wsMenuOpen}
-            className="flex w-full items-center gap-2.5 rounded-r6 px-2 py-1.5 text-left hover:bg-bg-2"
-          >
-            <span className="flex size-5 items-center justify-center rounded-r4 bg-accent">
-              <NavGlyph glyph="needs-you" active className="size-2.5" />
-            </span>
-            <span className="flex-1 truncate text-ui font-semibold text-text-1">{summary.data?.workspace?.name ?? ws}</span>
-            <span className="ac-mono text-nano text-text-nav">⌄</span>
-          </button>
-          {wsMenuOpen ? (
-            <div role="menu" className="ac-card absolute left-0 right-0 top-full z-20 mt-1 flex flex-col p-1 shadow-lg" onMouseLeave={() => setWsMenuOpen(false)}>
-              {(workspaces.data ?? []).map((w) => {
-                const key = w.slug || w.id;
-                const active = key === ws || w.id === ws;
-                return (
-                  <button
-                    key={w.id}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => { setWsMenuOpen(false); setWorkspaceId(key); go('/w/$ws/needs', { params: { ws: key } }); }}
-                    className={cx('flex items-center gap-2 rounded-r4 px-2 py-1.5 text-left text-meta hover:bg-bg-2', active ? 'text-text-1' : 'text-text-2')}
-                  >
-                    <span className="flex-1 truncate">{w.name}</span>
-                    <span className="ac-mono text-nano text-text-3">{w.ticketPrefix}</span>
-                  </button>
-                );
-              })}
-              <div className="my-1 h-px bg-line-1" />
-              <button type="button" role="menuitem" onClick={() => { setWsMenuOpen(false); go('/onboarding'); }} className="flex items-center gap-2 rounded-r4 px-2 py-1.5 text-left text-meta text-text-2 hover:bg-bg-2">
-                <PlusGlyph className="size-2" />
-                <span>New workspace</span>
-              </button>
-            </div>
-          ) : null}
-        </div>
-
         <button
           type="button"
           onClick={() => setStartOpen(true)}
-          className="mb-3.5 flex h-8 items-center gap-2 rounded-r6 bg-accent px-2.5 text-accent-on transition-colors duration-(--dur-fast) ease-ac hover:bg-accent-hover"
+          className="mb-3.5 flex h-8 flex-none items-center gap-2 rounded-r6 bg-accent px-2.5 text-accent-on transition-colors duration-(--dur-fast) ease-ac hover:bg-accent-hover"
         >
           <PlusGlyph className="size-2.5" />
           <span className="flex-1 text-left text-meta font-medium">Start Work</span>
           <span className="ac-mono text-nano opacity-65">⌘⇧␣</span>
         </button>
 
-        <nav className="flex flex-col gap-px" aria-label="Sections">
-          {RAIL.map((item) => {
-            const active = isActive(href(item, ws));
-            return (
-              <A
-                key={item.key}
-                to={href(item, ws)}
-                className={cx('flex h-7 items-center gap-2.5 rounded-r4 px-2.5', active ? 'bg-bg-3 text-text-1' : 'text-text-3 hover:bg-bg-2')}
-              >
-                <span className={cx('size-1.5 rounded-r4', active ? 'bg-needs-you' : 'bg-line-3')} aria-hidden />
-                <span className="flex-1 text-meta">{item.label}</span>
-                {item.key === 'needs' && needsCount > 0 ? <span className="ac-mono text-nano text-needs-you">{needsCount}</span> : null}
-                {item.key === 'settings' && updateAvailable ? (
-                  <span role="status" aria-label="Daemon update available" title="Daemon update available" className="size-1.5 rounded-pill bg-needs-you" />
-                ) : null}
-                <span className="ac-mono text-nano text-text-4">{item.kbd}</span>
-              </A>
-            );
-          })}
-        </nav>
+        <WorkspaceNav
+          workspaces={listed}
+          activeWs={activeWs}
+          activePath={path}
+          expanded={expanded}
+          onToggle={(key) => setExpanded((cur) => toggleExpanded(cur, key))}
+          needsCount={needsCount}
+          projects={projects.data ?? []}
+          updateAvailable={updateAvailable}
+          onNewWorkspace={() => go('/onboarding')}
+        />
 
-        <div className="ac-label mt-5 mb-2 px-2.5">Projects</div>
-        <div className="flex flex-col gap-px">
-          {(projects.data ?? []).map((p, i) => (
-            <A
-              key={p.id}
-              to="/w/$ws/board"
-              params={{ ws }}
-              search={{ project: p.id }}
-              className="flex h-7 items-center gap-2.5 rounded-r4 px-2.5 hover:bg-bg-2"
-            >
-              <span className="size-1.5 rounded-r4" style={{ background: `var(--status-${(['needs-you', 'done', 'working', 'merging', 'blocked'] as const)[i % 5]})` }} aria-hidden />
-              <span className="ac-mono flex-1 truncate text-meta text-text-2">{p.slug}</span>
-            </A>
-          ))}
-        </div>
-
-        <div className="flex-1" />
         <button type="button" onClick={() => setPaletteOpen(true)} className="flex items-center gap-2 border-t border-line-1 px-2.5 py-2.5 text-left">
           <span className="ac-mono text-micro text-text-nav">⌘K</span>
           <span className="text-micro text-text-nav">everything</span>

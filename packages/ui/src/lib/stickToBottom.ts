@@ -13,6 +13,15 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 
 /** Within this many pixels of the bottom still counts as being at the bottom. */
 const THRESHOLD_PX = 48;
+
+/**
+ * Is this element showing its newest content? The one definition of "at the bottom", so a caller
+ * that needs the answer outside the hook — recording a reading position on the way out — cannot
+ * drift from what the follow itself measures.
+ */
+export function isAtBottom(el: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= THRESHOLD_PX;
+}
 /** Within this many pixels of the top counts as asking for the page before the loaded history. */
 const NEAR_TOP_PX = 120;
 
@@ -80,7 +89,7 @@ export function useStickToBottom(
       const top = el.scrollTop;
       const up = top < last;
       last = top;
-      if (el.scrollHeight - top - el.clientHeight <= THRESHOLD_PX) {
+      if (isAtBottom(el)) {
         following.current = true;
         setAtBottom(true);
         setUnread(false);

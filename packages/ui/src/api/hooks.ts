@@ -133,8 +133,13 @@ export function useMe(enabled = true): UseQueryResult<T.AuthMe> {
   return useQuery({ queryKey: qk.me(), queryFn: () => api.root<T.AuthMe>('/auth/me'), enabled, retry: false });
 }
 
-export function useWorkspaces(): UseQueryResult<T.Workspace[]> {
-  return useQuery({ queryKey: qk.workspaces(), queryFn: () => api.root<T.Workspace[]>('/workspaces') });
+/**
+ * Every workspace, with its Needs-you count. The sidebar badges all of them at once, so this is
+ * refetched on an interval: the active workspace's own badge comes from its live decisions query,
+ * and this covers the others without an event stream each.
+ */
+export function useWorkspaces(): UseQueryResult<T.WorkspaceListItem[]> {
+  return useQuery({ queryKey: qk.workspaces(), queryFn: () => api.root<T.WorkspaceListItem[]>('/workspaces'), refetchInterval: 60_000 });
 }
 
 export function useRuntimes(): UseQueryResult<T.RuntimeInfo[]> {

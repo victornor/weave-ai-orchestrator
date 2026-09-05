@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Decision, Project, ThreadMessage } from '@agent-conductor/shared';
 import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
@@ -29,7 +29,8 @@ import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import { chatEntries } from '../lib/dispatch';
 import { draftKey, useDraft } from '../lib/drafts';
-import { useStickToBottom } from '../lib/stickToBottom';
+import { isAtBottom, useStickToBottom } from '../lib/stickToBottom';
+import { readChatScroll, writeChatScroll } from '../lib/chatScroll';
 import { enqueue, useQueueCount } from '../lib/queue';
 import { useToast } from '../components/Toast';
 import { useGo } from '../app/link';
@@ -199,6 +200,36 @@ export function ChatRoute(): React.ReactElement {
     older: { hasOlder: messages.hasOlder, isLoadingOlder: messages.isLoadingOlder, loadOlder: messages.loadOlder },
   });
 
+  /**
+   * The scrolling element, so this workspace's reading position can be kept. Held as state rather
+   * than a ref because the effects below key on it; the hook's own ref is still called, so it keeps
+   * owning the measuring.
+   */
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const attachScroll = useCallback((el: HTMLDivElement | null) => { setScrollEl(el); stick.scrollRef(el); }, [stick]);
+
+  // Recorded as the human scrolls, not on the way out: by the time an unmount cleanup runs React has
+  // already detached the ref, and a detached element reports no scroll position to record.
+  // `isAtBottom` is measured off the element rather than read off the follow, which only pauses on
+  // an upward scroll and so can still say "at the bottom" for a list that is not.
+  useEffect(() => {
+    if (!scrollEl) return;
+    const record = (): void => writeChatScroll(ws, scrollEl.scrollTop, isAtBottom(scrollEl));
+    scrollEl.addEventListener('scroll', record, { passive: true });
+    return () => scrollEl.removeEventListener('scroll', record);
+  }, [scrollEl, ws]);
+
+  // Coming back to a workspace's chat: put the list back where it was left, but only when that was
+  // away from the newest message. At the bottom there is nothing to restore — the hook opens there
+  // anyway, and setting the offset ourselves would fight the scroll it is in the middle of.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || messages.isLoading || !scrollEl) return;
+    restored.current = true;
+    const saved = readChatScroll(ws);
+    if (saved !== null) scrollEl.scrollTop = saved;
+  }, [messages.isLoading, scrollEl, ws]);
+
   const answerDecision = (id: string, a: { key?: string; text?: string }): void =>
     answer.mutate(
       { id, ...a },
@@ -266,7 +297,7 @@ export function ChatRoute(): React.ReactElement {
       {/* The button floats over the list, so it is anchored to this wrapper rather than to the
           scrolled content, which would carry it away with the rest. */}
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <PageBody scrollRef={stick.scrollRef} className="px-4 py-5 md:px-7">
+        <PageBody scrollRef={attachScroll} className="px-4 py-5 md:px-7">
           <div className="mx-auto flex max-w-3xl flex-col gap-5">
             {/* Above the history, where the page being fetched will appear. Nothing marks the start
                 of the thread: the loads simply stop once the API has answered with a short page. */}

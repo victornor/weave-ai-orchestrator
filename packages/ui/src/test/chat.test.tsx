@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Decision, Project, RunEvent, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
 import { agent, decision, project, ticket } from './factories';
 import { enqueue } from '../lib/queue';
+import { clearChatScroll, readChatScroll, writeChatScroll } from '../lib/chatScroll';
 
 const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>() }));
 const state = vi.hoisted(() => ({
@@ -1020,5 +1021,85 @@ describe('ChatRoute drafts', () => {
 
     render(<ChatRoute />);
     expect(box().value).toBe('file a ticket for the login bug');
+  });
+});
+
+/**
+ * VS-46: the reading position is per workspace and survives leaving the chat. The geometry goes on
+ * the prototype, not on the node: the effect that restores runs inside `render()`, before a test can
+ * reach the element to define anything on it.
+ */
+describe('ChatRoute reading position', () => {
+  const HEIGHT = 1600;
+  const CLIENT = 300;
+  const tops = new WeakMap<HTMLElement, number>();
+
+  beforeEach(() => {
+    Object.defineProperty(HTMLDivElement.prototype, 'scrollHeight', { configurable: true, get: () => HEIGHT });
+    Object.defineProperty(HTMLDivElement.prototype, 'clientHeight', { configurable: true, get: () => CLIENT });
+    Object.defineProperty(HTMLDivElement.prototype, 'scrollTop', {
+      configurable: true,
+      get(this: HTMLElement) { return tops.get(this) ?? 0; },
+      set(this: HTMLElement, v: number) { tops.set(this, v); },
+    });
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    clearChatScroll('ws1');
+  });
+
+  afterEach(() => {
+    for (const prop of ['scrollHeight', 'clientHeight', 'scrollTop']) {
+      Reflect.deleteProperty(HTMLDivElement.prototype, prop);
+    }
+    clearChatScroll('ws1');
+  });
+
+  const list = (c: HTMLElement): HTMLElement => c.querySelector('.ac-scroll') as HTMLElement;
+
+  it('restores a position the human had scrolled to', () => {
+    writeChatScroll('ws1', 420, false);
+    const { container } = render(<ChatRoute />);
+    expect(list(container).scrollTop).toBe(420);
+  });
+
+  it('leaves a chat that was at its newest message to the follow', () => {
+    writeChatScroll('ws1', 980, true);
+    const { container } = render(<ChatRoute />);
+    // Nothing was recorded for a chat left at the bottom, so nothing is put back by hand.
+    expect(list(container).scrollTop).toBe(0);
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('records where the chat was left when it is closed', () => {
+    const { container, unmount } = render(<ChatRoute />);
+    const el = list(container);
+    // The list opens at its newest message; the human scrolls up from there into the history.
+    el.scrollTop = HEIGHT - CLIENT;
+    fireEvent.scroll(el);
+    el.scrollTop = 380;
+    fireEvent.scroll(el);
+    unmount();
+    expect(readChatScroll('ws1')).toBe(380);
+  });
+
+  it('records nothing when the chat was left at its newest message', () => {
+    const { container, unmount } = render(<ChatRoute />);
+    const el = list(container);
+    el.scrollTop = HEIGHT - CLIENT;
+    fireEvent.scroll(el);
+    unmount();
+    expect(readChatScroll('ws1')).toBeNull();
+  });
+
+  it('keeps each workspace’s position apart', () => {
+    const { container, unmount } = render(<ChatRoute />);
+    const el = list(container);
+    el.scrollTop = HEIGHT - CLIENT;
+    fireEvent.scroll(el);
+    el.scrollTop = 380;
+    fireEvent.scroll(el);
+    unmount();
+
+    expect(readChatScroll('ws1')).toBe(380);
+    expect(readChatScroll('other')).toBeNull();
   });
 });

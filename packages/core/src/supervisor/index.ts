@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { nowIso } from '@agent-conductor/db';
-import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, type Agent, type KnowledgeScope, type Run, type Ticket } from '@agent-conductor/shared';
+import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, type Agent, type KnowledgeScope, type Run, type Ticket } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
@@ -21,6 +21,13 @@ const RECONCILE_EVERY_MS = 60 * 60_000;
 const RETENTION_EVERY_MS = DAY_MS;
 
 const SYSTEM: Actor = { kind: 'system', id: null };
+
+/**
+ * The queue order for tickets waiting on a worker: highest priority first (`TICKET_PRIORITIES`
+ * is declared in that order), creation time breaking ties. Interpolated, never parameterised:
+ * every value comes from the enum, not from input.
+ */
+const QUEUE_ORDER_SQL = `CASE priority ${TICKET_PRIORITIES.map((p, i) => `WHEN '${p}' THEN ${i}`).join(' ')} ELSE ${TICKET_PRIORITIES.length} END, created_at`;
 
 const DIGEST_EVENT_TYPES = new Set(['ticket.created', 'project.added', 'ticket.status', 'ticket.merged', 'decision.created', 'decision.expired', 'worker.stalled', 'worker.retired', 'run.finished']);
 
@@ -145,7 +152,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   async function spawnPending(): Promise<void> {
     const statuses = WORKER_STATUSES.map(() => '?').join(',');
     const tickets = ctx.db.all<Ticket>(
-      `SELECT * FROM tickets WHERE workspace_id = ? AND status IN (${statuses}) AND assignee_role_id IS NOT NULL AND worker_id IS NULL ORDER BY created_at`,
+      `SELECT * FROM tickets WHERE workspace_id = ? AND status IN (${statuses}) AND assignee_role_id IS NOT NULL AND worker_id IS NULL ORDER BY ${QUEUE_ORDER_SQL}`,
       [ctx.workspaceId, ...WORKER_STATUSES],
     );
     for (const ticket of tickets) {

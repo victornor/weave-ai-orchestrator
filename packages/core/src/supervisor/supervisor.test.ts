@@ -72,6 +72,20 @@ describe('supervisor', () => {
     expect(spawnForTicket).toHaveBeenCalledTimes(1);   // only the first ticket, which has no worker
   });
 
+  it('spawns waiting tickets by priority, with creation time breaking ties', async () => {
+    const at = (min: number) => new Date(Date.UTC(2026, 8, 5, 8, min)).toISOString();
+    const seeded: Record<string, string> = {};
+    // Seeded in creation order, so a naive `ORDER BY created_at` would spawn them exactly as listed.
+    for (const [n, priority, min] of [[1, 'medium', 0], [2, 'low', 1], [3, 'critical', 2], [4, 'high', 3], [5, 'medium', 4]] as const) {
+      seeded[`TST-${n}`] = seedTicket(h, { number: n, identifier: `TST-${n}`, priority, createdAt: at(min), updatedAt: at(min) });
+    }
+
+    await supervisor.tick();
+
+    const order = spawnForTicket.mock.calls.map(([, ticketId]) => Object.keys(seeded).find((k) => seeded[k] === ticketId));
+    expect(order).toEqual(['TST-3', 'TST-4', 'TST-1', 'TST-5', 'TST-2']);
+  });
+
   it('warns the conductor when a ticket has waited too long for a slot', async () => {
     h.ctx.config.defaults.spawnWaitWarnSec = 0;
     spawnForTicket.mockRejectedValue(Object.assign(new Error('full'), { code: 'role_full' }));

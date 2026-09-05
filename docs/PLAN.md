@@ -761,7 +761,7 @@ A worker's write scope: its worktree (`workers/<id>/work/`), its ticket and that
 
 ### 11.2 Spawn, brief, home
 
-Trigger: a ticket is assigned to a role and the role has a free slot (`role.max_workers`, `project.max_workers`). The supervisor spawns transactionally:
+Trigger: a ticket is assigned to a role and the role has a free slot (`role.max_workers`, `project.max_workers`). When several assigned tickets are waiting, the supervisor takes them in queue order — highest priority first (`critical` > `high` > `medium` > `low`), creation time breaking ties; running workers are never preempted. The supervisor spawns transactionally:
 
 1. Create the `agents` row (`kind=worker`, `status=provisioning`), name `<Role name> #<n>` (n increments per role, for humans; the id is a ULID).
 2. Create the home `workers/<id>/` with skills for the runtime.

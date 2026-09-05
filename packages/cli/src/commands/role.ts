@@ -3,6 +3,7 @@ import type { Command } from 'commander';
 import { emit, fields, heading, style, table, write } from '../output.js';
 import { statusGlyph } from '@agent-conductor/render';
 import { items, run, session } from './util.js';
+import { ApiError } from '../api.js';
 
 function roleUiStatus(status: string): string {
   switch (status) {
@@ -46,6 +47,7 @@ export function register(program: Command): void {
       const { client } = await session(command);
       const payload = await client.wget<Record<string, unknown>>(`/roles/${encodeURIComponent(id)}`);
       const spec = (payload['role'] ?? payload) as Record<string, unknown>;
+      const conc = (payload['concurrency'] ?? {}) as Record<string, unknown>;
       emit(payload, () => {
         fields([
           ['id', String(spec['id'] ?? '')],
@@ -55,6 +57,9 @@ export function register(program: Command): void {
           ['model', spec['model'] === null ? '(runtime default)' : String(spec['model'] ?? '')],
           ['session', String(spec['sessionPolicy'] ?? '')],
           ['max workers', String(spec['maxWorkers'] ?? '')],
+          ['effective', conc['effective'] === undefined
+            ? '(unknown)'
+            : `${conc['effective']} concurrent · ${conc['live'] ?? 0} live · ${conc['free'] ?? 0} free${Number(conc['projectMax']) < Number(conc['roleMax']) ? ` (capped by the project limit of ${conc['projectMax']})` : ''}`],
           ['status', String(spec['status'] ?? '')],
           ['scope', String(spec['scopeText'] ?? '')],
           ['charter', String(spec['charterSummary'] ?? '')],
@@ -124,6 +129,24 @@ export function register(program: Command): void {
     .option('--reason <reason>')
     .description('change the model for a role')
     .action(patch('model'));
+
+  role
+    .command('set-max-workers')
+    .argument('<id>')
+    .argument('<n>', 'how many workers this role may run at once (1-32)')
+    .option('--reason <reason>')
+    .description('change how many workers a role may run at once')
+    .action(async (id: string, n: string, opts: Record<string, string>, command: Command) => run(async () => {
+      const maxWorkers = Number(n);
+      if (!Number.isInteger(maxWorkers) || maxWorkers < 1 || maxWorkers > 32) throw new ApiError('validation', `max workers must be a whole number between 1 and 32, not "${n}"`, 400);
+      const { client } = await session(command);
+      const reason = opts['reason'] ?? `set max workers to ${maxWorkers}`;
+      const result = await client.write({
+        tool: 'ac_role_set_max_workers', input: { id, maxWorkers, reason },
+        http: { method: 'PATCH', path: client.w(`/roles/${encodeURIComponent(id)}`), body: { patch: { maxWorkers }, reason } },
+      });
+      emit(result, () => write(`${style.ok('updated')} ${id}: max workers = ${maxWorkers}`));
+    }));
 
   for (const verb of ['pause', 'resume', 'retire'] as const) {
     role

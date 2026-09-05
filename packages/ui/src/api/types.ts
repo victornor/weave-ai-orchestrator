@@ -165,8 +165,12 @@ export interface RoleDetail {
   charter: string;
   revisions: Array<{ revision: number; createdAt: string; reason: string | null }>;
   workers: Agent[];
+  concurrency?: RoleConcurrency;
   usage?: UsageTotals;
 }
+
+/** What actually caps a role's workers: its own limit, its project's, and how much of it is in use. */
+export interface RoleConcurrency { roleMax: number; projectMax: number; effective: number; live: number; projectLive: number; free: number }
 
 export interface RunDetail {
   run: Run;

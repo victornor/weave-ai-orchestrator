@@ -240,7 +240,10 @@ export function useUpdateRole(): UseMutationResult<unknown, Error, { id: string;
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, patch, reason }) => api.ws(ws, `/roles/${id}`, { method: 'PATCH', body: { patch, reason } }),
-    onSuccess: (_d, v) => void qc.invalidateQueries({ queryKey: qk.role(ws, v.id) }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: qk.role(ws, v.id) });
+      void qc.invalidateQueries({ queryKey: qk.roles(ws) });   // the Team list renders maxWorkers too
+    },
   });
 }
 

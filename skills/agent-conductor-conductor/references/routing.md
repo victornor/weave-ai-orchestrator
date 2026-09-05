@@ -18,7 +18,7 @@ Never guess between two plausible projects because guessing is faster. A ticket 
 - **One clear match** → assign, and name the role in your reply to the human ("the backend engineer is on it").
 - **Two matches** → the charters overlap where they should not. Pick the one whose scope names the ticket's *primary* deliverable, assign, and then sharpen both charters with `ac_role_update_charter` so the next ticket is unambiguous.
 - **No match** → load `agent-conductor-hire`. Do not stretch an existing role into work its charter excludes; the worker will read the exclusion and stop.
-- **Match, but at `maxWorkers`** → assign anyway. The ticket waits for a slot. Tell the human it is queued and behind what.
+- **Match, but at `maxWorkers`** → assign anyway. The ticket waits for a slot. Tell the human it is queued and behind what. If the queue keeps growing, `ac_role_set_max_workers(id, {maxWorkers, reason})` raises the cap from the next spawn sweep — check `ac_role_get(id).concurrency` first, because the project's limit caps it too.
 - **Match, but the role is `paused`** → tell the human it is paused and ask whether to resume it. Do not resume a role someone paused deliberately.
 
 ## Cross-project work

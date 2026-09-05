@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Allow changing a hired role's max workers from the web app, CLI and
+  conductor tools
+skip_specs: true

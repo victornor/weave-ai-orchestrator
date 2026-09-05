@@ -14,7 +14,7 @@ export function roleRoutes(): Hono<AppEnv> {
     const id = c.req.param('id');
     return c.json({
       role: s.roles.get(id), charter: s.roles.charter(id), revisions: s.roles.revisions(id),
-      freeSlots: s.roles.freeSlots(id), workers: s.workers.list({ roleId: id }),
+      freeSlots: s.roles.freeSlots(id), concurrency: s.roles.concurrency(id), workers: s.workers.list({ roleId: id }),
     });
   });
 

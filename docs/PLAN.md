@@ -626,6 +626,7 @@ Conductor only:
 - `ac_role_list()`, `ac_role_get(id)` (spec, charter, scope, status, live workers, recent outcomes).
 - `ac_role_hire(spec)` → §10.4; returns a `pending_activation` role, or `active` when `hireApproval=none`.
 - `ac_role_update_charter(id, {charter, reason, applyToRunning?})` → new role revision.
+- `ac_role_set_max_workers(id, {maxWorkers, reason})` → new role revision; returns the role and its `concurrency`. Raising applies from the next spawn sweep; lowering never cancels a live worker. The project limit still applies, so the effective concurrency is the smaller of the two.
 - `ac_role_pause(id, reason)` / `ac_role_resume(id)` / `ac_role_retire(id, reason)` (retire with live workers requires a human decision).
 - `ac_worker_list(filter)`, `ac_worker_get(id)` (ticket, status, worktree state, last report, spend).
 - `ac_worker_message(workerId, message)` → steering: a comment on the worker's ticket plus a wake (`conductor_request`). The worker acknowledges by acting or by `ac_report`.

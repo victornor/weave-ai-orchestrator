@@ -443,6 +443,8 @@ woken. Manual overrides: `conductor worker relaunch <id> --note "..."`, `conduct
 If work is not starting at all: check `role_full` (a role's `maxWorkers`, or the project's
 `maxWorkers` across all roles), that the role is `active` (`conductor role list`), and that the workspace is
 not paused (`POST /api/w/<ws>/resume`; there is no `conductor workspace pause|resume` yet).
+`conductor role show <id>` prints the effective concurrency and which of the two limits is binding;
+`conductor role set-max-workers <id> <n>` raises the role's, and it applies from the next spawn sweep.
 
 ### Nothing is reachable
 

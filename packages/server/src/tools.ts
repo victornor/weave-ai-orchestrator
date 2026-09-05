@@ -354,8 +354,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'ac_role_get', scope: 'conductor', input: z.object({ id: z.string().min(1) }),
-    description: 'One role: spec, charter, free slots and revision history.',
-    handler: (ctx, i) => ({ role: svc(ctx).roles.get(i.id), charter: svc(ctx).roles.charter(i.id), freeSlots: svc(ctx).roles.freeSlots(i.id), revisions: svc(ctx).roles.revisions(i.id) }),
+    description: 'One role: spec, charter, free slots, concurrency limits and revision history.',
+    handler: (ctx, i) => ({ role: svc(ctx).roles.get(i.id), charter: svc(ctx).roles.charter(i.id), freeSlots: svc(ctx).roles.freeSlots(i.id), concurrency: svc(ctx).roles.concurrency(i.id), revisions: svc(ctx).roles.revisions(i.id) }),
   },
   {
     name: 'ac_role_hire', scope: 'conductor', input: RoleSpecSchema,
@@ -366,6 +366,12 @@ export const TOOLS: ToolDef[] = [
     name: 'ac_role_update_charter', scope: 'conductor', input: z.object({ id: z.string().min(1), charter: z.string().min(1), reason: z.string().min(1), applyToRunning: z.boolean().optional() }),
     description: 'Replace a role charter, creating a new role revision. applyToRunning re-briefs live workers on their next turn.',
     handler: (ctx, i) => svc(ctx).roles.updateCharter(ctx.actor, i.id, i.charter, i.reason, { applyToRunning: i.applyToRunning }),
+  },
+  {
+    name: 'ac_role_set_max_workers', scope: 'conductor',
+    input: z.object({ id: z.string().min(1), maxWorkers: z.number().int().min(1).max(32), reason: z.string().min(1) }),
+    description: 'Change how many workers a role may run at once, as a new role revision. Raising it takes effect on the next spawn sweep; lowering it never cancels a live worker, it only stops new spawns. The project limit still applies, so the effective concurrency is the smaller of the two.',
+    handler: async (ctx, i) => ({ role: await svc(ctx).roles.update(ctx.actor, i.id, { maxWorkers: i.maxWorkers }, i.reason), concurrency: svc(ctx).roles.concurrency(i.id) }),
   },
   {
     name: 'ac_role_pause', scope: 'conductor', input: z.object({ id: z.string().min(1), reason: z.string().min(1) }),

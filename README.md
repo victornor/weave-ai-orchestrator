@@ -323,6 +323,7 @@ Run `conductor <group> --help` for the full set. Global flags: `-w/--workspace`,
 | `conductor role list [-p project] \| show <id>` | roles and their live workers |
 | `conductor role activate <id> [--runtime] [--model]` | activate a hired role so it picks up tickets |
 | `conductor role set-runtime <id> <rt>` · `conductor role set-model <id> <model\|default>` | change where a role's workers run |
+| `conductor role set-max-workers <id> <n>` | change how many workers a role runs at once (1-32; the project limit still applies) |
 | `conductor role pause \| resume \| retire <id>` · `conductor role charter show \| rollback <id> <rev>` | role lifecycle and charter revisions |
 | `conductor worker list [-p] [-r] [-s] [--all]` · `conductor worker show <id>` · `conductor worker brief <id>` | live workers |
 | `conductor worker message <id> <text>` | direct message to a worker (wakes it) |

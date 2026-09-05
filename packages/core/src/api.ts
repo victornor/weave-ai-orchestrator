@@ -99,7 +99,10 @@ export interface RolesService {
   pause(actor: Actor, id: string, reason: string): S.Role; resume(actor: Actor, id: string): S.Role;
   retire(actor: Actor, id: string, reason: string): Promise<{ role: S.Role; decisionId: string | null }>;
   freeSlots(id: string): number;
+  concurrency(id: string): RoleConcurrency;
 }
+/** What actually caps a role's workers: its own limit, its project's, and how much of it is in use. */
+export interface RoleConcurrency { roleMax: number; projectMax: number; effective: number; live: number; projectLive: number; free: number }
 export interface WorkersService {
   list(filter?: { status?: S.AgentStatus[]; projectId?: string; roleId?: string; includeRetired?: boolean }): S.Agent[];
   get(id: string): S.Agent;

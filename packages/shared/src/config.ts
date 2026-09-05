@@ -166,6 +166,14 @@ export const DaemonConfigSchema = z.object({
     keep: z.number().int().min(1).default(3),
     /** Seconds to wait for running turns before restarting anyway. An agent turn can take many minutes. */
     drainTimeoutSec: z.number().int().min(0).default(900),
+    /**
+     * A deferred upgrade holds dispatch and waits for every running turn to finish. Bounded, because one
+     * wedged run would otherwise hold every workspace's dispatch silently and forever; on expiry the
+     * upgrade fails and dispatch resumes.
+     */
+    waitForIdleSec: z.number().int().min(0).default(3600),
+    /** How long the "is the source ahead" answer is cached before the source is resolved again. */
+    updateCheckIntervalSec: z.number().int().min(0).default(900),
   }).default({}),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   otlpEndpoint: z.string().optional(),

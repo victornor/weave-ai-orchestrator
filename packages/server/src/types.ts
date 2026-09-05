@@ -1,6 +1,8 @@
 import type { CoreServices, WorkspaceContext, AuthService, Actor, Registries } from '@agent-conductor/core';
 import type { DaemonConfig } from '@agent-conductor/shared';
 import type { RunTokenClaims } from './runtoken.js';
+import type { UpdateChecker } from './release-info.js';
+import type { UpgradeService } from './upgrade.js';
 import type { ChannelManager } from './channels.js';
 import type { WebhookDispatcher } from './webhooks.js';
 
@@ -26,6 +28,10 @@ export interface AppDeps {
   /** Absolute base URL of the public listener; used for CSRF origin checks. */
   publicUrl: string;
   version: string;
+  /** Is the configured release source ahead of the release this process runs from (PLAN §20)? */
+  updates: UpdateChecker;
+  /** The deferred upgrade: request one, watch it, cancel it (PLAN §20). */
+  upgrades: UpgradeService;
   /** Directory holding the built web UI (packages/ui/dist). */
   uiDir?: string | null;
   /** Called on daemon shutdown / used by tests to freeze time. */

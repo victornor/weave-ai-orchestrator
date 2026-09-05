@@ -11,6 +11,8 @@ import {
   type Briefing, type Decision, type Ticket, type TicketComment, type Wakeup,
 } from '@agent-conductor/shared';
 import type { AppDeps, WorkspaceRuntime } from '../src/types.js';
+import { createUpdateChecker } from '../src/release-info.js';
+import { createUpgradeService, type UpgradeDeps } from '../src/upgrade.js';
 
 initLogger(process.env.AC_LOG_LEVEL ?? 'silent');
 
@@ -82,7 +84,20 @@ export interface Harness {
   close(): void;
 }
 
-export function makeHarness(options: { listener?: 'public' | 'loopback'; workspaceId?: string; hasOperator?: boolean } = {}): Harness {
+export interface HarnessOptions {
+  listener?: 'public' | 'loopback';
+  workspaceId?: string;
+  hasOperator?: boolean;
+  /** Merged into `DaemonConfigSchema` for `deps.daemon`. */
+  daemon?: Record<string, unknown>;
+  /** The release directory the fake daemon reports running from. */
+  releaseRoot?: string;
+  resolveRemote?: (source: string, ref: string) => string;
+  /** Seams handed to the upgrade service; the defaults refuse to touch the host. */
+  upgrade?: Partial<UpgradeDeps>;
+}
+
+export function makeHarness(options: HarnessOptions = {}): Harness {
   const workspaceId = options.workspaceId ?? 'ws1';
   const calls: Call[] = [];
   const db = new Db(':memory:');
@@ -191,10 +206,25 @@ export function makeHarness(options: { listener?: 'public' | 'loopback'; workspa
     logout: () => undefined,
   });
 
+  const daemonCfg = DaemonConfigSchema.parse(options.daemon ?? {});
+  const releaseRoot = options.releaseRoot ?? '/tmp/release/20260101-120000-aaaaaaaaaa';
+  const updates = createUpdateChecker({
+    daemon: daemonCfg, version: '0.1.0-test', releaseRoot,
+    resolveRemote: options.resolveRemote ?? (() => 'f'.repeat(40)),
+  });
+  const workspaceMap = new Map([[workspaceId, runtime]]);
+  const upgrades = createUpgradeService({
+    db, daemon: daemonCfg, configDir: '/tmp/config', workspaces: workspaceMap, updates, version: '0.1.0-test', releaseRoot,
+    // Nothing in an app-level test may clone, build, back up or restart anything.
+    build: () => { throw new Error('build is not stubbed in this test'); },
+    backup: () => [], switchTo: () => ({ previous: null }), prune: () => [], spawnRunner: () => undefined,
+    ...options.upgrade,
+  });
   const deps: AppDeps = {
-    auth, daemon: DaemonConfigSchema.parse({}), workspaces: new Map([[workspaceId, runtime]]),
+    auth, daemon: daemonCfg, workspaces: workspaceMap,
     registries: createRegistries(), listener: options.listener ?? 'public',
     publicUrl: 'http://127.0.0.1:7433', version: '0.1.0-test', uiDir: null,
+    updates, upgrades,
   };
 
   return { runtime, deps, db, bus, calls, tickets, comments, tokens, impls, close: () => db.close() };

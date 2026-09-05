@@ -24,6 +24,7 @@ import type {
 export interface Health {
   ok: boolean;
   version: string;
+  release?: RunningRelease;
   workspaces: Array<{ id: string; name: string; status: string }>;
   operatorConfigured: boolean;
   tlsMode: string;
@@ -37,6 +38,55 @@ export interface Health {
     tools: Record<string, { id: string; available: boolean; version: string | null; need: 'required' | 'recommended'; purpose: string }>;
   };
 }
+
+/* ---- daemon updates and the deferred upgrade (PLAN §20) ---- */
+
+export interface RunningRelease {
+  version: string;
+  /** The release directory the daemon is executing from. */
+  path: string;
+  /** The commit it was built from; null when it could not be determined. */
+  sha: string | null;
+}
+
+export interface UpdateStatus {
+  /** False when no release source is configured: not an update, and not an error. */
+  configured: boolean;
+  running: RunningRelease;
+  source: string | null;
+  ref: string | null;
+  targetSha: string | null;
+  updateAvailable: boolean;
+  checkedAt: string | null;
+  error: string | null;
+}
+
+export type UpgradeState = 'queued' | 'waiting' | 'building' | 'switching' | 'restarting' | 'completed' | 'failed' | 'cancelled';
+
+export interface Upgrade {
+  id: string;
+  state: UpgradeState;
+  source: string;
+  ref: string;
+  targetSha: string | null;
+  fromRelease: string | null;
+  toRelease: string | null;
+  toSha: string | null;
+  requestedBy: string;
+  requestedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  reason: string | null;
+  message: string | null;
+  log: string[];
+  backups: string[];
+  cameBackVersion: string | null;
+}
+
+/** What a waiting upgrade is holding for, derived live rather than stored. */
+export interface WaitingRun { workspace: string; running: number; runIds: string[] }
+
+export interface UpgradeStatusResponse { upgrade: Upgrade | null; waitingFor: WaitingRun[] }
 
 export interface RuntimeModel { id: string; label: string; provider?: string; source?: 'detected' | 'static'; tier?: string; notes?: string }
 

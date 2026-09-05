@@ -68,9 +68,15 @@ importers:
 
   packages/cli:
     dependencies:
+      '@agent-conductor/db':
+        specifier: workspace:*
+        version: link:../db
       '@agent-conductor/presenter':
         specifier: workspace:*
         version: link:../presenter
+      '@agent-conductor/release':
+        specifier: workspace:*
+        version: link:../release
       '@agent-conductor/render':
         specifier: workspace:*
         version: link:../render
@@ -98,9 +104,6 @@ importers:
 
   packages/core:
     dependencies:
-      '@node-rs/argon2':
-        specifier: ^2.0.2
-        version: 2.2.0
       '@agent-conductor/channel-sdk':
         specifier: workspace:*
         version: link:../channel-sdk
@@ -119,6 +122,9 @@ importers:
       '@agent-conductor/surface-sdk':
         specifier: workspace:*
         version: link:../surface-sdk
+      '@node-rs/argon2':
+        specifier: ^2.0.2
+        version: 2.2.0
       execa:
         specifier: ^9.6.0
         version: 9.6.1
@@ -189,6 +195,8 @@ importers:
         specifier: ^4.0.0
         version: 4.1.1
 
+  packages/release: {}
+
   packages/render:
     dependencies:
       '@agent-conductor/shared':
@@ -257,12 +265,6 @@ importers:
 
   packages/server:
     dependencies:
-      '@hono/node-server':
-        specifier: ^1.19.1
-        version: 1.19.17(hono@4.13.5)
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.18.1
-        version: 1.30.0(zod@3.25.76)
       '@agent-conductor/channel-cli':
         specifier: workspace:*
         version: link:../channels/cli
@@ -284,6 +286,9 @@ importers:
       '@agent-conductor/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk
+      '@agent-conductor/release':
+        specifier: workspace:*
+        version: link:../release
       '@agent-conductor/runtime-claude':
         specifier: workspace:*
         version: link:../runtimes/claude
@@ -317,6 +322,12 @@ importers:
       '@agent-conductor/surface-tmux':
         specifier: workspace:*
         version: link:../surfaces/tmux
+      '@hono/node-server':
+        specifier: ^1.19.1
+        version: 1.19.17(hono@4.13.5)
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.18.1
+        version: 1.30.0(zod@3.25.76)
       hono:
         specifier: ^4.9.6
         version: 4.13.5

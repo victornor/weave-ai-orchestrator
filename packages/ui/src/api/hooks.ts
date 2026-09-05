@@ -5,6 +5,7 @@ import { listOf, api, qs } from './client';
 import { qk } from './keys';
 import { useWs } from './context';
 import type * as T from './types';
+import { upgradePollInterval } from '../lib/upgrade';
 
 /* ------------------------------------------------------------- shapes
  * The daemon answers in the shapes documented in docs/API.md (flat rows, `{ items, total }` pages,
@@ -159,6 +160,63 @@ export function useInitWorkspace(): UseMutationResult<{ id: string; path: string
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.workspaces() });
       void qc.invalidateQueries({ queryKey: qk.health() });
+    },
+  });
+}
+
+/* ---- daemon updates and the deferred upgrade (PLAN §20) ---- */
+
+/**
+ * Is the release source ahead of the running daemon? Cached daemon-side, so polling it is cheap; a
+ * refresh resolves the source again. A failed check is data, not an error state: the hook still
+ * resolves, with `error` set on the payload.
+ */
+export function useDaemonUpdate(): UseQueryResult<T.UpdateStatus> {
+  return useQuery({
+    queryKey: qk.daemonUpdate(),
+    queryFn: () => api.root<T.UpdateStatus>('/daemon/update'),
+    retry: false,
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
+  });
+}
+
+export function useRefreshDaemonUpdate(): UseMutationResult<T.UpdateStatus, Error, void> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.root<T.UpdateStatus>('/daemon/update?refresh=1'),
+    onSuccess: (status) => { qc.setQueryData(qk.daemonUpdate(), status); },
+  });
+}
+
+/**
+ * The upgrade record. Polled while it is in flight — the daemon restarts partway through, so the poll
+ * failing is expected and is also how the client notices it is back. Once terminal, polling stops.
+ */
+export function useDaemonUpgrade(): UseQueryResult<T.UpgradeStatusResponse> {
+  return useQuery({
+    queryKey: qk.daemonUpgrade(),
+    queryFn: () => api.root<T.UpgradeStatusResponse>('/daemon/upgrade'),
+    retry: false,
+    refetchInterval: (query) => upgradePollInterval(query.state.data?.upgrade?.state),
+  });
+}
+
+export function useRequestUpgrade(): UseMutationResult<T.Upgrade, Error, { ref?: string; source?: string; test?: boolean } | void> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => api.root<T.Upgrade>('/daemon/upgrade', { method: 'POST', body: body ?? {} }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: qk.daemonUpgrade() }); },
+  });
+}
+
+export function useCancelUpgrade(): UseMutationResult<T.Upgrade, Error, void> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.root<T.Upgrade>('/daemon/upgrade/cancel', { method: 'POST', body: {} }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.daemonUpgrade() });
+      void qc.invalidateQueries({ queryKey: qk.daemonUpdate() });
     },
   });
 }

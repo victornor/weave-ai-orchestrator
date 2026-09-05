@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { stateHome, configHome } from './contexts.js';
-import { currentLink } from './release.js';
+import { LAUNCHD_LABEL, SERVICE_NAME, currentLink } from './release.js';
 
 export function pidFile(): string { return join(stateHome(), 'daemon.pid'); }
 export function logFile(): string { return join(stateHome(), 'daemon.log'); }
@@ -117,7 +117,7 @@ export function followLog(onLine: (line: string) => void): { close(): void } {
   return { close() { child.kill(); } };
 }
 
-export const SERVICE_NAME = 'agent-conductor.service';
+export { LAUNCHD_LABEL, SERVICE_NAME };
 
 export function serviceUnitPath(): string {
   return join(process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config'), 'systemd', 'user', SERVICE_NAME);
@@ -144,8 +144,6 @@ export function renderServiceUnit(bin: string): string {
     '',
   ].join('\n');
 }
-
-export const LAUNCHD_LABEL = 'com.agentconductor.daemon';
 
 export function launchdPlistPath(): string {
   return join(homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);

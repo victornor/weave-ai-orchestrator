@@ -38,7 +38,8 @@ describe('command tree', () => {
   });
 
   it.each([
-    ['daemon', ['start', 'stop', 'status', 'logs', 'set-password', 'install-service']],
+    ['daemon', ['start', 'stop', 'status', 'logs', 'set-password', 'install-service', 'upgrade', 'update', 'releases', 'rollback']],
+    ['daemon update', ['apply', 'cancel']],
     ['context', ['list', 'use', 'remove', 'show']],
     ['devices', ['list', 'revoke']],
     ['project', ['add', 'list', 'show', 'remove', 'fetch', 'set-runtime', 'set-policy']],
@@ -56,7 +57,21 @@ describe('command tree', () => {
     ['worktree', ['list', 'verify', 'discard']],
     ['agent', ['inbox']],
   ])('%s has its subcommands', (group, subcommands) => {
-    for (const name of subcommands) expect(find(program, [group, name])?.name(), `${group} ${name}`).toBe(name);
+    const path = group.split(' ');
+    for (const name of subcommands) expect(find(program, [...path, name])?.name(), `${group} ${name}`).toBe(name);
+  });
+
+  it('keeps the upgrade runner out of the help: the daemon starts it, never a human', () => {
+    const runner = find(program, ['daemon', 'upgrade-runner']);
+    expect(runner?.name()).toBe('upgrade-runner');
+    expect(helpOf(find(program, ['daemon'])!)).not.toContain('upgrade-runner');
+  });
+
+  it('keeps `daemon upgrade` — the path that works when the daemon is not answering — alongside `daemon update`', () => {
+    const local = find(program, ['daemon', 'upgrade'])!;
+    const options = local.options.map((o) => o.long);
+    expect(options).toEqual(expect.arrayContaining(['--from', '--ref', '--test', '--no-restart', '--drain-timeout']));
+    expect(local.description()).toContain('build a release from git');
   });
 
   it('turns `workspace set-default` assignments into a nested patch', () => {

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-05
+goal: "Upgrade the daemon from the web app: update-available indicator,
+  one-click upgrade, deferred until no work is running"

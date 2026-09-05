@@ -13,6 +13,9 @@
       "path": "../../packages/shared"
     },
     {
+      "path": "../../packages/db"
+    },
+    {
       "path": "../../packages/render"
     },
     {
@@ -20,6 +23,9 @@
     },
     {
       "path": "../presenter"
+    },
+    {
+      "path": "../../packages/release"
     }
   ]
 }

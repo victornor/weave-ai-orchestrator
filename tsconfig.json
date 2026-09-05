@@ -23,6 +23,9 @@
       "path": "./packages/render"
     },
     {
+      "path": "./packages/release"
+    },
+    {
       "path": "./packages/core"
     },
     {

@@ -34,6 +34,9 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   app.get('/health', async (c) => c.json({
     ok: true,
     version: deps.version,
+    // The release this process is executing, so an upgrade's restart runner can tell whether the daemon
+    // that answered is the one it switched to. Derived from the process, never from `current`.
+    release: deps.updates.running(),
     workspaces: uniqueWorkspaces(deps).map((w) => ({ id: w.id, name: w.ctx.config.name, status: 'active' })),
     operatorConfigured: deps.auth.hasOperator(),
     tlsMode: deps.daemon.http.tls.mode,
@@ -92,6 +95,29 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   });
 
   app.post('/transcribe', (c) => transcribe(c, deps));
+
+  /**
+   * PLAN §20: is the configured release source ahead of the release this daemon runs from? `?refresh=1`
+   * resolves the source again instead of answering from the cache. Operator-only, like everything under
+   * `/api/daemon`: run tokens never reach this path (see `RUN_TOKEN_PATHS` in `auth.ts`).
+   */
+  app.get('/daemon/update', (c) => c.json(deps.updates.check({ refresh: c.req.query('refresh') === '1' })));
+
+  /**
+   * The deferred upgrade (PLAN §20). Requesting one records an intent and holds dispatch; the daemon
+   * waits for every running turn to finish before it builds anything, and a detached runner performs
+   * the restart. `waitingFor` is derived live while the upgrade is still cancellable.
+   */
+  app.get('/daemon/upgrade', (c) => c.json(deps.upgrades.status()));
+
+  app.post('/daemon/upgrade', async (c) => {
+    const input = await body(c, z.object({ ref: z.string().min(1).optional(), source: z.string().min(1).optional(), test: z.boolean().optional() }));
+    const principal = c.get('principal');
+    const requestedBy = principal.kind === 'operator' ? principal.operatorId : principal.kind;
+    return c.json(deps.upgrades.request({ ...input, requestedBy }), 202);
+  });
+
+  app.post('/daemon/upgrade/cancel', (c) => c.json(deps.upgrades.cancel()));
 
   /**
    * Upgrade support (PLAN §20 `conductor daemon upgrade`): stop dispatching new turns everywhere and

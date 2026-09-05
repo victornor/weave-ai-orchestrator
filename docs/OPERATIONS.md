@@ -277,12 +277,52 @@ The daemon runs from an immutable **release directory**, never from a checkout a
   previous -> releases/20260904-…         one `rollback` away
 ```
 
+There are two ways in. **`conductor daemon update apply`** (and the web app's Settings → Updates) asks
+the running daemon to upgrade itself, deferring until no turn is running. **`conductor daemon upgrade`**
+does it from this shell — the path that still works when the daemon is not answering.
+
 ```bash
-conductor daemon upgrade                      # source and ref from daemon.yaml `upgrade:`
+conductor daemon update                       # running version + commit vs the source at its ref
+conductor daemon update apply                 # queue it: the daemon waits for idle, then upgrades
+conductor daemon update apply --ref v0.2.0 --test
+conductor daemon update cancel                # only before the build starts
+
+conductor daemon upgrade                      # from this shell; source and ref from daemon.yaml
 conductor daemon upgrade --ref v0.2.0 --test  # any ref; --test runs the suite before switching
 conductor daemon releases
 conductor daemon rollback
 ```
+
+### The deferred upgrade (`update apply`)
+
+The record moves `queued → waiting → building → switching → restarting → completed | failed | cancelled`
+and survives the restart, which is how the outcome is still readable afterwards.
+
+| Stage | What happens | If it fails |
+|---|---|---|
+| `queued`/`waiting` | Dispatch is held in every loaded workspace the moment the record exists. Running turns are **never** cancelled; the upgrade waits for them, up to `upgrade.waitForIdleSec` (default 3600). | `wait_timeout`: dispatch resumes, nothing was built or switched. |
+| `building` | Clone, install, build (and `--test`) in a fresh release directory. Output is kept as a 200-line tail on the record. | `build_failed`: dispatch resumes, `current` untouched, the old daemon keeps serving. |
+| `switching` | Back up `daemon.sqlite` and every workspace db, then swing `current` and prune. | `backup_failed` before the symlink moves; `switch_failed` after the backups. Dispatch resumes either way. |
+| `restarting` | A **detached runner** — the new release's CLI — restarts the daemon and polls `/api/health` until it reports the target release. | `restart_failed`: the runner swung `current` back to `previous` and restarted. `restart_unverified`: nobody confirmed the restart (see below). |
+
+Cancel is possible from `queued` and `waiting` only; from `building` on the answer is `409 conflict`.
+Cancelling resumes dispatch on every workspace that was not paused in its own right.
+
+**What automatic rollback does and does not cover.** Every failure before the symlink swings leaves the
+previous release running, untouched — that is the large majority. After the swing, rolling back is the
+runner's job, and the runner has to outlive the restart it triggers. Restarting a systemd **user
+service kills that service's whole control group**, so the daemon starts the runner through
+`systemd-run --user --scope --collect` where that exists; on launchd and on a bare `daemon start`
+install a plain detached process already survives. On a host with systemd but no `systemd-run`, the
+runner dies with the restart: nothing rolls back automatically, the next daemon to boot marks the
+record `restart_unverified`, and **`conductor daemon rollback` is yours to run**.
+
+A daemon that boots while a record is unfinished reconciles it: `restarting` on the target release
+becomes `completed`; `restarting` on some other release, past ten minutes, becomes `restart_unverified`;
+anything earlier becomes `abandoned`, so a stale record cannot block the next upgrade.
+
+Requesting, cancelling and reading an upgrade all need an operator session. An agent's run token
+reaches neither — `/api/daemon/*` is not on the run-token path list.
 
 `upgrade` does, in order: clone `upgrade.source` at `upgrade.ref` into a new release dir and
 `pnpm install --frozen-lockfile && pnpm build` there (nothing running is touched yet) → online
@@ -298,7 +338,9 @@ upgrade:
   source: git@github.com:victornor/agent-conductor.git   # or a local checkout path
   ref: main
   keep: 3
-  drainTimeoutSec: 900
+  drainTimeoutSec: 900      # `daemon upgrade`: how long its drain waits before restarting anyway
+  waitForIdleSec: 3600      # `update apply`: how long it waits for running turns before giving up
+  updateCheckIntervalSec: 900   # how long "is the source ahead" is cached
 ```
 
 - Schema migrations run automatically when a database is opened. There is no down-migration; the
@@ -312,6 +354,9 @@ upgrade:
   exactly where they were. Nothing is ever reset.
 - `upgrade` and `rollback` refuse to run inside a worker (`AC_RUN_TOKEN` set). Agents developing
   AgentConductor propose the change in a ticket; a human runs the upgrade.
+- The difference in in-flight work between the two paths: `upgrade`'s drain **interrupts** whatever is
+  still running at `drainTimeoutSec`; `update apply` never interrupts anything — it waits, and fails
+  rather than cut a turn short.
 - After an upgrade, `conductor daemon status` and `conductor doctor` are the two things to look at.
 
 ---

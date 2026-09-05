@@ -1147,7 +1147,8 @@ Human commands:
 ```
 conductor init <dir> --prefix ACME [--name]          scaffold a workspace
 conductor daemon start|stop|restart|status|logs|set-password|install-service [--launchd]   daemon lifecycle; TLS/ACME and listen config in daemon.yaml
-conductor daemon upgrade [--from <url|path>] [--ref <ref>] [--test] [--no-restart]   build a release, back up, drain, switch `current`, restart
+conductor daemon upgrade [--from <url|path>] [--ref <ref>] [--test] [--no-restart]   build a release, back up, drain, switch `current`, restart (from this shell; works when the daemon is not answering)
+conductor daemon update | update apply [--ref <ref>] [--test] [--no-follow] | update cancel   ask the daemon: is the source ahead? queue an upgrade it defers until no turn is running; cancel a queued one
 conductor daemon releases | rollback             list releases (`*` current, `-` previous); switch back to `previous` and restart
 conductor login <url> [--name] [--pin] | conductor logout [--all] | conductor context list|use   remote contexts for the CLI
 conductor devices list|revoke                          sessions/devices on the daemon

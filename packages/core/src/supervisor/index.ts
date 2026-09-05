@@ -18,6 +18,12 @@ const CURATION_STALE_MS = 14 * DAY_MS;
 const CURATION_REQUEST_COOLDOWN_MS = DAY_MS;
 /** PLAN §7.5 reconciliation is hourly; PLAN §16.1 log retention is a daily sweep. */
 const RECONCILE_EVERY_MS = 60 * 60_000;
+/**
+ * PLAN §16.2: re-read each runtime's plan limits. Zero LLM tokens — one short-lived child process
+ * per runtime in use. Five minutes is ≤ 2 % stale against the shortest window that moves (Claude's
+ * rolling 5-hour session limit), which is well inside the precision of a percentage.
+ */
+const ACCOUNTS_EVERY_MS = 5 * 60_000;
 const RETENTION_EVERY_MS = DAY_MS;
 
 const SYSTEM: Actor = { kind: 'system', id: null };
@@ -466,6 +472,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }
         try { conductorDigest(); } catch (e) { log.error({ err: String(e) }, 'digest failed'); }
         if (due('supervisor:curation_at', CURATION_EVERY_MS)) await curationPass().catch((e) => log.error({ err: String(e) }, 'curation pass failed'));
+        if (due('supervisor:accounts_at', ACCOUNTS_EVERY_MS)) { try { await deps().accounts.refresh(); } catch (e) { log.error({ err: String(e) }, 'runtime account refresh failed'); } }
         if (due('supervisor:reconcile_at', RECONCILE_EVERY_MS)) await reconcilePass().catch((e) => log.error({ err: String(e) }, 'reconcile pass failed'));
         if (due('supervisor:retention_at', RETENTION_EVERY_MS)) { try { retentionPass(); } catch (e) { log.error({ err: String(e) }, 'retention pass failed'); } }
       } finally {

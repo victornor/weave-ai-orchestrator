@@ -8,7 +8,7 @@ import type { Actor, CoreServices, WorkspaceContext } from '@agent-conductor/cor
 import type { AuthService } from '@agent-conductor/core';
 import {
   DaemonConfigSchema, OcError, WorkspaceConfigSchema,
-  type Briefing, type Decision, type Ticket, type TicketComment, type Wakeup,
+  type Briefing, type Decision, type RuntimeAccount, type Ticket, type TicketComment, type Wakeup,
 } from '@agent-conductor/shared';
 import type { AppDeps, WorkspaceRuntime } from '../src/types.js';
 import { createUpdateChecker } from '../src/release-info.js';
@@ -97,6 +97,8 @@ export interface HarnessOptions {
   resolveRemote?: (source: string, ref: string) => string;
   /** Seams handed to the upgrade service; the defaults refuse to touch the host. */
   upgrade?: Partial<UpgradeDeps>;
+  /** Runtime account snapshots served by `GET /usage/accounts`. */
+  accounts?: RuntimeAccount[];
 }
 
 export function makeHarness(options: HarnessOptions = {}): Harness {
@@ -205,6 +207,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     specs: impl('specs', {}),
     openspec: impl('openspec', { statusFor: async () => null }),
     usage: impl('usage', {}),
+    accounts: impl('accounts', { list: () => options.accounts ?? [], get: () => null, refresh: async () => [] }),
     threads: impl('threads', { list: () => [], primaryThread: () => null }),
   } as unknown as CoreServices;
 

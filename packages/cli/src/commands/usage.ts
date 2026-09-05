@@ -1,8 +1,9 @@
 /** `conductor usage` — tokens are the headline, cost is labelled reported or estimated (PLAN §16.3). */
 import type { Command } from 'commander';
 import { USAGE_GRAINS, USAGE_WINDOWS } from '@agent-conductor/shared';
-import { usageRows, usageTotals, type UsageSeries } from '@agent-conductor/render';
+import { accountLimits, showCost, usageRows, usageTotals, type UsageSeries } from '@agent-conductor/render';
 import { emit, fields, heading, style, table, write } from '../output.js';
+import type { RuntimeAccount } from '@agent-conductor/shared';
 import { run, session } from './util.js';
 
 export function register(program: Command): void {
@@ -41,15 +42,30 @@ export function register(program: Command): void {
       }
 
       const series = await client.wget<UsageSeries>('/usage', query);
+      const accounts = await client.wget<RuntimeAccount[]>('/usage/accounts').catch(() => [] as RuntimeAccount[]);
       const totals = usageTotals(series);
-      emit(series, () => {
+      // Dollars only mean something when some of this window was billed per token; on a
+      // subscription the plan windows take their place (PLAN §16.3).
+      const withCost = showCost(series?.billingMix);
+      const plans = accountLimits(accounts, new Date());
+      emit({ ...series, accounts }, () => {
         heading(`${query.scope} · ${query.window}${series?.range?.grain ? ` · ${series.range.grain}` : ''}`);
         fields([
           ['tokens', `${totals.tokens}  ${style.dim(`in ${totals.tokensIn} · out ${totals.tokensOut} · cached ${totals.tokensCached}`)}`],
-          ['cost', `${totals.cost}${totals.reportedShare ? style.dim(`  ${totals.reportedShare}`) : ''}`],
+          ...(withCost ? [['cost', `${totals.cost}${totals.reportedShare ? style.dim(`  ${totals.reportedShare}`) : ''}`] as [string, string]] : []),
           ['runs', String(totals.runs)],
-          ['vs previous', `${totals.tokensDelta} tokens · ${totals.costDelta} cost`],
+          ['vs previous', `${totals.tokensDelta} tokens${withCost ? ` · ${totals.costDelta} cost` : ''}`],
         ]);
+
+        for (const plan of plans) {
+          write('');
+          heading(`${plan.runtimeId} · ${plan.plan} ${style.dim(plan.age)}`);
+          if (plan.limitsAvailable) {
+            fields(plan.windows.map((w) => [w.label, `${w.percent}%${w.resetsIn ? style.dim(`  ${w.resetsIn}`) : ''}`] as [string, string]));
+          } else {
+            write(style.dim(`  limits unavailable${plan.note ? ` — ${plan.note}` : ''}`));
+          }
+        }
         if (opts['series'] === true) {
           write('');
           table(usageRows(series), [
@@ -57,7 +73,7 @@ export function register(program: Command): void {
             { header: 'TOKENS', get: (r) => r.tokens, align: 'right' },
             { header: 'IN', get: (r) => r.tokensIn, align: 'right' },
             { header: 'OUT', get: (r) => r.tokensOut, align: 'right' },
-            { header: 'COST', get: (r) => r.cost, align: 'right' },
+            ...(withCost ? [{ header: 'COST', get: (r: ReturnType<typeof usageRows>[number]) => r.cost, align: 'right' as const }] : []),
             { header: 'RUNS', get: (r) => String(r.runs), align: 'right' },
           ], { empty: 'no buckets in this window' });
         }

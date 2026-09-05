@@ -18,6 +18,8 @@ import type {
   CostStatus,
   UsageGrain,
   UsageWindow,
+  RuntimeAccount,
+  UsageBillingMix,
   AuthSessionKind,
 } from '@agent-conductor/shared';
 
@@ -255,7 +257,12 @@ export interface UsageSeries {
   total: UsageTotals;
   previous?: UsageTotals;
   reportedShare?: number;
+  /** Tokens in this window per billing type; drives whether cost is shown at all. */
+  billingMix?: UsageBillingMix;
 }
+
+/** One runtime account snapshot as `GET /usage/accounts` serves it. */
+export interface UsageAccount extends RuntimeAccount { displayName: string }
 
 export interface UsageTopRow {
   key: string;

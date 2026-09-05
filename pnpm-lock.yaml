@@ -450,6 +450,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@agent-conductor/render':
+        specifier: workspace:*
+        version: link:../render
       '@agent-conductor/shared':
         specifier: workspace:*
         version: link:../shared

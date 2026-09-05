@@ -16,6 +16,9 @@ export function spawnLines(opts: SpawnOpts): { done: Promise<SpawnOutcome>; canc
   };
   child.stdout!.on('data', (c: Buffer) => feed('stdout', c));
   child.stderr!.on('data', (c: Buffer) => feed('stderr', c));
+  // A CLI that exits before reading stdin makes this write EPIPE; the outcome is already carried by
+  // the exit code, so swallow it rather than letting it surface as an unhandled stream error.
+  child.stdin!.on('error', () => { /* the child closed stdin first */ });
   if (opts.stdin != null) { child.stdin!.end(opts.stdin); } else { child.stdin!.end(); }
   const killGroup = (sig: NodeJS.Signals) => { try { if (child.pid) process.kill(-child.pid, sig); } catch { try { child.kill(sig); } catch { /* gone */ } } };
   const timer = setTimeout(() => { timedOut = true; killGroup('SIGINT'); setTimeout(() => killGroup('SIGKILL'), 15000).unref(); }, opts.timeoutMs);

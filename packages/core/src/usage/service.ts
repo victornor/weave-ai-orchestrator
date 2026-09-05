@@ -21,7 +21,7 @@ interface ScopeClause { sql: string; params: Param[] }
 interface RawRow {
   occurredAt: string; runId: string; agentId: string; model: string | null;
   inputTokens: number; cachedInputTokens: number; outputTokens: number;
-  durationMs: number; costCents: number | null; costStatus: S.CostStatus;
+  durationMs: number; costCents: number | null; costStatus: S.CostStatus; billingType: S.BillingType;
 }
 
 interface AggRow {
@@ -33,7 +33,7 @@ const SUBTREE_SQL =
   'WITH RECURSIVE sub(id) AS (SELECT id FROM tickets WHERE id = ? UNION SELECT t.id FROM tickets t JOIN sub ON t.parent_id = sub.id) SELECT id FROM sub';
 
 const RAW_COLUMNS =
-  'u.occurred_at, u.run_id, u.agent_id, u.model, u.input_tokens, u.cached_input_tokens, u.output_tokens, u.duration_ms, u.cost_cents, u.cost_status';
+  'u.occurred_at, u.run_id, u.agent_id, u.model, u.input_tokens, u.cached_input_tokens, u.output_tokens, u.duration_ms, u.cost_cents, u.cost_status, u.billing_type';
 
 const AGG_COLUMNS = [
   "COALESCE(SUM(u.input_tokens), 0) AS tokensIn",
@@ -72,6 +72,18 @@ function point(bucket: string, a: AggRow): UsageSeriesPoint {
     runs: Number(a.runs), durationMs: Number(a.durationMs),
     costCents: Number(a.costCents), costReportedCents: Number(a.costReportedCents),
   };
+}
+
+/** Tokens per billing type across a set of rows, so a caller can tell whether any metered spend occurred. */
+function billingMix(rows: RawRow[]): S.UsageBillingMix {
+  const mix: S.UsageBillingMix = { subscription: 0, metered: 0, unknown: 0 };
+  for (const r of rows) {
+    const tokens = r.inputTokens + r.outputTokens;
+    if (r.billingType === 'subscription_included') mix.subscription += tokens;
+    else if (r.billingType === 'metered_api') mix.metered += tokens;
+    else mix.unknown += tokens;
+  }
+  return mix;
 }
 
 /** Accumulator: costs sum with nulls treated as 0, runs are distinct run ids. */
@@ -182,7 +194,7 @@ export function createUsageService(ctx: WorkspaceContext): UsageService {
       const previous = aggregate(rawRows(r.prevStart, r.prevEnd, scope), r.prevStart);
       const costReportedShare = total.costCents === 0 ? 0 : total.costReportedCents / total.costCents;
       log.debug({ scope: q.scope, window: q.window, grain: r.grain, points: points.length, rows: rows.length }, 'usage series');
-      return { range: r, points, total, previous, costReportedShare };
+      return { range: r, points, total, previous, costReportedShare, billingMix: billingMix(rows) };
     },
 
     top(q) {
@@ -248,9 +260,19 @@ export interface RecordUsageInput {
   occurredAt?: string;
 }
 
+/** The billing mode of the runtime's current account snapshot (PLAN §16.2), or `unknown` when there is none. */
+function billingTypeFor(ctx: WorkspaceContext, runtimeId: string): S.BillingType {
+  const row = ctx.db.get<{ billingType: S.BillingType }>(
+    'SELECT billing_type FROM runtime_accounts WHERE workspace_id = ? AND runtime_id = ?',
+    [ctx.workspaceId, runtimeId],
+  );
+  return row?.billingType ?? 'unknown';
+}
+
 /**
  * Insert one `usage_events` row. Called by the run engine once per run (or per usage delta).
  * Cost precedence: runtime-reported → `reported`; pricing table → `estimated`; unknown model → `unpriced`.
+ * Billing type: the caller's, else the runtime's current account snapshot, else `unknown`.
  */
 export function recordUsage(ctx: WorkspaceContext, row: RecordUsageInput): S.UsageEvent {
   const inputTokens = row.inputTokens ?? 0;
@@ -274,7 +296,7 @@ export function recordUsage(ctx: WorkspaceContext, row: RecordUsageInput): S.Usa
     runtimeId: row.runtimeId,
     provider: row.provider ?? null,
     model: row.model ?? null,
-    billingType: row.billingType ?? 'unknown',
+    billingType: row.billingType ?? billingTypeFor(ctx, row.runtimeId),
     inputTokens,
     cachedInputTokens,
     outputTokens,

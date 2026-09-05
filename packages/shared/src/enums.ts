@@ -117,6 +117,10 @@ export type BillingType = (typeof BILLING_TYPES)[number];
 export const COST_STATUSES = ['reported', 'estimated', 'unpriced'] as const;
 export type CostStatus = (typeof COST_STATUSES)[number];
 
+/** Plan limit windows a runtime account can report (PLAN §16.2): the rolling session window, the weekly window, and a weekly window scoped to one model. */
+export const ACCOUNT_LIMIT_KINDS = ['session', 'weekly_all', 'weekly_scoped'] as const;
+export type AccountLimitKind = (typeof ACCOUNT_LIMIT_KINDS)[number];
+
 export const AUTH_SESSION_KINDS = ['web', 'cli', 'presenter'] as const;
 export type AuthSessionKind = (typeof AUTH_SESSION_KINDS)[number];
 

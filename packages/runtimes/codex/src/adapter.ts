@@ -1,10 +1,11 @@
 import { readFileSync, rmSync } from 'node:fs';
 import type {
-  AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter, RuntimeCapabilities, RuntimeDetection,
-  RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
+  AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
+  RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@agent-conductor/runtime-sdk';
 import { classifyError, detectBinary, installBundleFiles, runTmpDir, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
+import { describeCodexAccount } from './account.js';
 import { buildArgs, mcpConfigToml } from './args.js';
 import { createCodexParser } from './events.js';
 import { asCodexSession, type CodexSessionRef } from './session.js';
@@ -74,6 +75,9 @@ export const adapter: RuntimeAdapter = {
     const s = asCodexSession(ref);
     return { displayId: s?.threadId ?? 'unknown', exists: Boolean(s) };
   },
+
+  /** Billing mode only: Codex exposes no plan limits to a non-interactive run. */
+  async describeAccount(input: AccountProbeInput): Promise<AccountDescription> { return describeCodexAccount(input); },
 
   async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
     const tmpDir = runTmpDir(input.runId);

@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type {
-  AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter, RuntimeCapabilities, RuntimeDetection,
-  RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
+  AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
+  RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@agent-conductor/runtime-sdk';
 import { classifyError, detectBinary, installBundleFiles, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
+import { describeOpenCodeAccount } from './account.js';
 import { buildArgs, CONFIG_RELATIVE_PATH, opencodeConfig } from './args.js';
 import { createOpenCodeParser } from './events.js';
 import { asOpenCodeSession, type OpenCodeSessionRef } from './session.js';
@@ -97,6 +98,9 @@ export const adapter: RuntimeAdapter = {
     const s = asOpenCodeSession(ref);
     return { displayId: s?.sessionId ?? 'unknown', exists: Boolean(s) };
   },
+
+  /** Static: OpenCode bills through provider keys and has no plan limits. */
+  async describeAccount(): Promise<AccountDescription> { return describeOpenCodeAccount(); },
 
   async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
     const built = buildArgs(input);

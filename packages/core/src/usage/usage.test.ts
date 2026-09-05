@@ -267,3 +267,48 @@ describe('recordUsage', () => {
     expect(row).toMatchObject({ inputTokens: 11, cachedInputTokens: 3, outputTokens: 7, billingType: 'unknown', costStatus: 'unpriced' });
   });
 });
+
+describe('billing type attribution', () => {
+  /** Store a snapshot the way the accounts service does, so recordUsage can read it. */
+  function snapshot(runtimeId: string, billingType: string): void {
+    h.db.insert('runtime_accounts', {
+      workspaceId: h.workspaceId, runtimeId, billingType, planLabel: 'max',
+      limitsAvailable: 1, limitsJson: [], note: null, capturedAt: nowIso(),
+    });
+  }
+
+  it('takes the billing type from the runtime account snapshot', () => {
+    h = makeHarness();
+    snapshot('claude', 'subscription_included');
+    const ev = recordUsage(h.ctx, { agentId: h.conductorId, runId: 'r', runtimeId: 'claude', model: 'claude-opus-5', inputTokens: 10, outputTokens: 5 });
+    expect(ev.billingType).toBe('subscription_included');
+    expect(h.db.get<{ billingType: string }>('SELECT billing_type FROM usage_events WHERE id = ?', [ev.id])).toMatchObject({ billingType: 'subscription_included' });
+  });
+
+  it('falls back to unknown when the runtime has no snapshot', () => {
+    h = makeHarness();
+    snapshot('codex', 'metered_api');
+    expect(recordUsage(h.ctx, { agentId: h.conductorId, runId: 'r', runtimeId: 'claude', inputTokens: 1, outputTokens: 1 }).billingType).toBe('unknown');
+  });
+
+  it('lets an explicit billing type win over the snapshot', () => {
+    h = makeHarness();
+    snapshot('claude', 'subscription_included');
+    expect(recordUsage(h.ctx, { agentId: h.conductorId, runId: 'r', runtimeId: 'claude', billingType: 'metered_api', inputTokens: 1, outputTokens: 1 }).billingType).toBe('metered_api');
+  });
+
+  it('reports the billing mix of the queried window', () => {
+    h = makeHarness();
+    add({ occurredAt: `${DAY}T00:10:00.000Z`, billingType: 'subscription_included', inputTokens: 100, outputTokens: 10 });
+    add({ occurredAt: `${DAY}T00:20:00.000Z`, billingType: 'metered_api', inputTokens: 30, outputTokens: 2 });
+    add({ occurredAt: `${DAY}T00:30:00.000Z`, inputTokens: 5, outputTokens: 1 }); // no snapshot -> unknown
+    const s = usage().series({ scope: 'workspace', window: 'custom', grain: 'hour', start: `${DAY}T00:00:00.000Z`, end: `${DAY}T01:00:00.000Z` });
+    expect(s.billingMix).toEqual({ subscription: 110, metered: 32, unknown: 6 });
+  });
+
+  it('reports an all-zero mix for a window with no rows', () => {
+    h = makeHarness();
+    const s = usage().series({ scope: 'workspace', window: 'custom', grain: 'hour', start: `${DAY}T00:00:00.000Z`, end: `${DAY}T01:00:00.000Z` });
+    expect(s.billingMix).toEqual({ subscription: 0, metered: 0, unknown: 0 });
+  });
+});

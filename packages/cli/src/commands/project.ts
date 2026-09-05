@@ -1,6 +1,9 @@
 /** `conductor project add|list|show|remove|fetch|set-runtime|set-policy` (PLAN §20). */
 import type { Command } from 'commander';
-import { emit, fields, style, table, write } from '../output.js';
+import type { Job } from '@agent-conductor/shared';
+import { ApiError } from '../api.js';
+import { emit, fields, isJson, style, table, write, writeErr } from '../output.js';
+import { elapsed, failureReport, followJob, formatMs } from '../jobs.js';
 import { items, run, session } from './util.js';
 
 export function register(program: Command): void {
@@ -15,7 +18,8 @@ export function register(program: Command): void {
     .option('--branch <branch>', 'default branch')
     .option('--max-workers <n>', 'concurrent workers across all roles')
     .option('--setup <command>', 'setup command run once per new worktree')
-    .action(async (url: string, opts: Record<string, string>, command: Command) => run(async () => {
+    .option('--no-follow', 'return as soon as the job has started instead of watching it')
+    .action(async (url: string, opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const { client } = await session(command);
       const body: Record<string, unknown> = { url };
       if (opts['id']) body['id'] = opts['id'];
@@ -23,14 +27,22 @@ export function register(program: Command): void {
       if (opts['branch']) body['defaultBranch'] = opts['branch'];
       if (opts['maxWorkers']) body['maxWorkers'] = Number(opts['maxWorkers']);
       if (opts['setup']) body['setupCommand'] = opts['setup'];
-      const created = await client.write<Record<string, unknown>>({
+      const started = await client.write<Started>({
         tool: 'ac_project_add', input: body,
         http: { method: 'POST', path: client.w('/projects'), body },
       });
-      emit(created, () => {
-        write(`${style.ok('project added')} ${String(created?.['id'] ?? opts['id'] ?? url)}`);
-        fields([['status', String(created?.['status'] ?? '')], ['clone', String(created?.['clonePath'] ?? '')]]);
-      });
+      await reportJob(client, started, opts['follow'] === false, 'add');
+    }));
+
+  project
+    .command('retry')
+    .argument('<id>')
+    .description('re-run a failed add, reusing whatever is already on disk')
+    .option('--no-follow', 'return as soon as the job has started instead of watching it')
+    .action(async (id: string, opts: Record<string, boolean>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const started = await client.wpost<Started>(`/projects/${encodeURIComponent(id)}/retry`, {});
+      await reportJob(client, started, opts['follow'] === false, 'retry');
     }));
 
   project
@@ -156,4 +168,60 @@ function coerce(value: string): unknown {
   if (value === 'false') return false;
   if (/^-?\d+$/.test(value)) return Number(value);
   return value;
+}
+
+/** What `POST /projects` and `POST /projects/:id/retry` answer: the row, and the job doing the rest. */
+interface Started { project?: Record<string, unknown> | null; jobId?: string | null }
+
+/**
+ * Watch the job the daemon started and report it the way the command used to report the finished
+ * project — except that now the minutes in between are visible. `--json` still prints exactly one
+ * document: the project as it ended up.
+ */
+async function reportJob(
+  client: Awaited<ReturnType<typeof session>>['client'],
+  started: Started | null,
+  noFollow: boolean,
+  verb: 'add' | 'retry',
+): Promise<void> {
+  const project = started?.project ?? {};
+  const id = String(project['slug'] ?? project['id'] ?? '');
+  const jobId = started?.jobId ? String(started.jobId) : null;
+
+  if (!jobId || noFollow) {
+    emit(project, () => {
+      write(`${style.ok(verb === 'add' ? 'project add started' : 'project retry started')} ${id}`);
+      fields([['status', String(project['status'] ?? '')], ['job', jobId ?? '(none)'], ['follow', jobId ? `conductor project show ${id}` : '']]);
+    });
+    return;
+  }
+
+  const job = await followJob(client, jobId, { quiet: isJson() });
+  const finished = await client.wget<Record<string, unknown>>(`/projects/${encodeURIComponent(id || String(project['id'] ?? ''))}`).catch(() => project);
+
+  if (job.state === 'failed') {
+    if (!isJson()) {
+      for (const line of failureReport(job)) writeErr(line);
+      writeErr(`retry with ${style.mono(`conductor project retry ${id}`)}`);
+    }
+    throw new ApiError('internal', `project ${verb} failed at ${job.failedStep ?? 'an unknown step'}: ${job.message ?? 'no detail'}`, 500, { jobId, failedStep: job.failedStep });
+  }
+
+  emit(finished, () => {
+    const took = formatMs(Date.parse(job.finishedAt ?? '') - Date.parse(job.startedAt));
+    write(`${style.ok('project added')} ${String(finished?.['slug'] ?? finished?.['id'] ?? id)}${took ? style.dim(` in ${took}`) : ''}`);
+    fields([
+      ['status', String(finished?.['status'] ?? '')],
+      ['branch', String(finished?.['defaultBranch'] ?? '')],
+      ['clone', String(finished?.['clonePath'] ?? '')],
+      ['openspec', describeStep(job, 'openspec')],
+    ]);
+  });
+}
+
+function describeStep(job: Job, stepId: string): string {
+  const step = job.steps.find((s) => s.id === stepId);
+  if (!step) return '';
+  const took = elapsed(step);
+  return step.state === 'skipped' ? 'skipped' : `${step.state}${took ? ` (${took})` : ''}`;
 }

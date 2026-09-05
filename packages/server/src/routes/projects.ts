@@ -13,11 +13,18 @@ export function projectRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.get('/', (c) => c.json(c.get('ws').services.projects.list()));
   app.get('/:id', (c) => c.json(c.get('ws').services.projects.get(c.req.param('id'))));
+  /**
+   * 202, not 201: the clone, the OpenSpec adoption and the knowledge seed take minutes, and progress
+   * cannot be watched from inside the request producing it. The row exists when this answers; the job
+   * reports the rest (VS-37).
+   */
   app.post('/', async (c) => {
     const input = await body(c, AddSchema);
     const cfg = ProjectConfigSchema.parse({ ...input, id: input.id ?? slugFromUrl(input.url) });
-    return c.json(await c.get('ws').services.projects.add(c.get('actor'), cfg), 201);
+    return c.json(c.get('ws').services.projects.startAdd(c.get('actor'), cfg), 202);
   });
+  /** Re-run a failed add against whatever is already on disk. */
+  app.post('/:id/retry', (c) => c.json(c.get('ws').services.projects.retryAdd(c.get('actor'), c.req.param('id')), 202));
   app.patch('/:id', async (c) => c.json(await c.get('ws').services.projects.update(c.get('actor'), c.req.param('id'), await body(c, ProjectConfigSchema.partial()))));
   app.delete('/:id', async (c) => { await c.get('ws').services.projects.remove(c.get('actor'), c.req.param('id')); return c.json({ ok: true }); });
   app.post('/:id/fetch', async (c) => c.json(await c.get('ws').services.projects.fetch(c.req.param('id'))));

@@ -56,4 +56,30 @@ describe('migrations', () => {
     expect(row?.backups).toEqual([]);
     db.close();
   });
+
+  it('creates the workspace-scoped jobs table with its entity index', () => {
+    const db = openDb(join(dir, 'e.sqlite'));
+    const cols = db.all<{ name: string }>('PRAGMA table_info(jobs)').map((c) => c.name);
+    expect(cols).toEqual([
+      'id', 'workspace_id', 'kind', 'entity_type', 'entity_id', 'state',
+      'steps_json', 'log_json', 'log_seq', 'requested_by', 'started_at', 'finished_at', 'failed_step', 'message',
+    ]);
+    expect(db.all<{ name: string }>('PRAGMA index_list(jobs)').map((i) => i.name)).toContain('jobs_entity');
+    db.close();
+  });
+
+  it('round-trips a job steps and log JSON columns as arrays', () => {
+    const db = openDb(join(dir, 'f.sqlite'));
+    db.insert('jobs', {
+      id: 'j1', workspaceId: 'w1', kind: 'project_add', entityType: 'project', entityId: 'p1', state: 'running',
+      stepsJson: [{ id: 'clone', label: 'Clone the repository', state: 'running', startedAt: null, endedAt: null }],
+      logJson: [{ seq: 1, step: 'clone', stream: 'stderr', text: 'Cloning into…' }],
+      logSeq: 1, requestedBy: 'human:victor', startedAt: '2026-09-05T00:00:00.000Z',
+    });
+    const row = db.get<{ steps: Array<{ id: string }>; log: Array<{ text: string }>; logSeq: number }>('SELECT * FROM jobs WHERE id = ?', ['j1']);
+    expect(row?.steps.map((s) => s.id)).toEqual(['clone']);
+    expect(row?.log[0]?.text).toBe('Cloning into…');
+    expect(row?.logSeq).toBe(1);
+    db.close();
+  });
 });

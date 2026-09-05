@@ -80,10 +80,35 @@ export interface DecisionsService {
   expireDue(): Promise<S.Decision[]>;
 }
 
+// ---------- jobs ----------
+/** One item of a job's stream: a sub-step transition, an output line, or the job ending. */
+export type JobStreamItem =
+  | { kind: 'step'; jobId: string; step: S.JobStep; seq: number }
+  | { kind: 'log'; jobId: string; line: S.JobLogLine; seq: number }
+  | { kind: 'finished'; jobId: string; job: S.Job; seq: number };
+export interface JobFilter { kind?: S.JobKind; entityId?: string; limit?: number }
+export interface JobsService {
+  get(id: string): S.Job;
+  list(filter?: JobFilter): S.Job[];
+  /** The job still running for an entity, if any — what stops a second one from starting. */
+  running(entityId: string): S.Job | null;
+  start(kind: S.JobKind, entity: { type: string; id: string }, actor: Actor): S.Job;
+  step(jobId: string, stepId: string, state: S.JobStepState): void;
+  line(jobId: string, stepId: string, stream: S.JobLogStream, text: string): void;
+  finish(jobId: string, state: Exclude<S.JobState, 'running'>, extra?: { failedStep?: string | null; message?: string | null }): S.Job;
+  onItem(handler: (item: JobStreamItem) => void): () => void;
+  /** Startup: fail the jobs a previous process left running. */
+  reconcile(): void;
+}
+
 // ---------- projects / roles / agents ----------
 export interface ProjectsService {
   list(): S.Project[]; get(id: string): S.Project;
   add(actor: Actor, cfg: S.ProjectConfig): Promise<S.Project>;         // clone, worktrunk config, openspec init, seed KB, scout ticket
+  /** The same pipeline, answered immediately: the row exists, the job reports the rest. */
+  startAdd(actor: Actor, cfg: S.ProjectConfig): { project: S.Project; jobId: string };
+  /** Re-run the pipeline for a project left in `error`, reusing whatever is already on disk. */
+  retryAdd(actor: Actor, id: string): { project: S.Project; jobId: string };
   update(actor: Actor, id: string, patch: Partial<S.ProjectConfig>): Promise<S.Project>;
   remove(actor: Actor, id: string): Promise<void>;
   fetch(id: string): Promise<{ head: string; fastForwarded: boolean }>;   // git fetch + ff primary clone
@@ -262,5 +287,5 @@ export interface BriefingService { snapshot(): S.Briefing }
 export interface CoreServices {
   tickets: TicketsService; decisions: DecisionsService; projects: ProjectsService; roles: RolesService; workers: WorkersService;
   wake: WakeService; runs: RunsService; dispatcher: Dispatcher; supervisor: Supervisor; knowledge: KnowledgeService; specs: SpecsService;
-  openspec: OpenSpecService; usage: UsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService;
+  openspec: OpenSpecService; usage: UsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
 }

@@ -18,6 +18,7 @@ import { daemonRoutes, type WorkspaceAdmin } from './routes/daemon.js';
 import { workspaceRoutes } from './routes/workspace.js';
 import { eventRoutes } from './routes/events.js';
 import { projectRoutes } from './routes/projects.js';
+import { jobRoutes } from './routes/jobs.js';
 import { roleRoutes } from './routes/roles.js';
 import { workerRoutes, conductorRoutes } from './routes/workers.js';
 import { worktreeRoutes } from './routes/worktrees.js';
@@ -58,6 +59,7 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   ws.route('/', workspaceRoutes(deps));
   ws.route('/events', eventRoutes());
   ws.route('/projects', projectRoutes());
+  ws.route('/jobs', jobRoutes());
   ws.route('/roles', roleRoutes());
   ws.route('/workers', workerRoutes());
   ws.route('/conductor', conductorRoutes());

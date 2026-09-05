@@ -26,8 +26,18 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `ac_session` httpOn
 - `GET /api/w/:ws/briefing`
 
 ### Projects
-`GET /projects` · `POST /projects` `{ url, id?, runtime?, defaultBranch?, maxWorkers?, setupCommand? }` · `GET /projects/:id` · `PATCH /projects/:id` · `DELETE /projects/:id` · `POST /projects/:id/fetch`
+`GET /projects` · `POST /projects` `{ url, id?, runtime?, defaultBranch?, maxWorkers?, setupCommand? }` → **202** `{ project, jobId }` · `GET /projects/:id` · `PATCH /projects/:id` · `DELETE /projects/:id` · `POST /projects/:id/fetch`
+`POST /projects/:id/retry` → **202** `{ project, jobId }` — re-run a failed add against whatever is already on disk; `conflict` unless the project's status is `error` and no job for it is running.
+
+**BREAKING (VS-37):** `POST /projects` used to answer `201` with the finished project after the clone, the OpenSpec adoption and the knowledge seed — minutes of work. It now answers `202` as soon as the row exists, with the project in its `cloning` status and the id of the job doing the rest. Follow `GET /jobs/:id/stream` for progress, or poll `GET /projects/:id` until its status leaves `cloning`.
 `GET /projects/:id/merge-queue` → `{ projectId, concurrency, active: [MergeQueueEntry], waiting: [MergeQueueEntry] }` — the per-project merge queue (PLAN §11.4). `MergeQueueEntry` is `{ ticketId, identifier, title, projectId, position, queuedAt, startedAt, workerId }`; `position` is 1-based within `waiting` and `null` for an `active` entry. `concurrency` is the project's `mergeConcurrency` policy (default 1).
+
+### Jobs
+A job is one long-running workspace-setup operation, watchable while it runs (PLAN §5; `openspec/specs/workspace-setup/setup-jobs`). Kinds: `project_add`.
+`GET /jobs?kind=&entity=&limit=` → `[Job]` newest first — `entity` is the id of the thing the job acts on, which is how a client that lost its state finds the job still running for a project · `GET /jobs/:id` → `Job`
+`Job` is `{ id, workspaceId, kind, entityType, entityId, state: running|done|failed, steps: [JobStep], log: [JobLogLine], logSeq, requestedBy, startedAt, finishedAt, failedStep, message }`. `JobStep` is `{ id, label, state: pending|running|done|skipped|failed, startedAt, endedAt }` — the whole ordered list exists from the moment the job is created. `JobLogLine` is `{ seq, step, stream: stdout|stderr|daemon, text }`; only the last 200 lines are retained on the record.
+`GET /jobs/:id/stream` SSE — replays the job's steps and retained lines, then tails it. Frames are `event: job.step | job.log | job.finished`, `id: <seq>`, `data: JobStreamItem`; resume with `?after=<seq>` or `Last-Event-ID`. The stream closes once the job is terminal. A client attaching more than 200 lines late gets the tail, not the lines it missed.
+The workspace outbox carries `job.started` and `job.finished` only — never a line.
 
 ### Roles
 `GET /roles?project=` · `GET /roles/:id` (spec + charter + workers + revisions + `concurrency` `{roleMax, projectMax, effective, live, projectLive, free}`) · `POST /roles` (hire; body RoleSpec) · `POST /roles/:id/activate` `{ runtime?, model? }` · `PATCH /roles/:id` `{ patch, reason }` (`patch` is a partial RoleSpec and is strict — an unknown key is a `validation` 400, never a silent no-op; clear the model override with `model: null`) · `PUT /roles/:id/charter` `{ charter, reason, applyToRunning? }` · `POST /roles/:id/rollback` `{ revision }` · `POST /roles/:id/pause|resume|retire` `{ reason }`

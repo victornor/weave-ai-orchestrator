@@ -10,6 +10,9 @@ const state = vi.hoisted(() => ({
   queries: [] as Array<Record<string, unknown>>,
   answer: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   toasts: [] as Array<Record<string, unknown>>,
+  tickets: [] as Array<Record<string, unknown>>,
+  projects: [] as Array<Record<string, unknown>>,
+  config: {} as Record<string, unknown>,
 }));
 
 vi.mock('../api/context', () => ({
@@ -23,8 +26,10 @@ vi.mock('../api/hooks', () => ({
     return { data: p.owner === 'conductor' ? state.conductorOwned : state.decisions, isLoading: false, isError: false, refetch: vi.fn() };
   },
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
-  useTickets: () => ({ data: [] }),
+  useTickets: () => ({ data: state.tickets }),
   useWorkers: () => ({ data: [] }),
+  useProjects: () => ({ data: state.projects }),
+  useWorkspaceSummary: () => ({ data: { config: state.config } }),
   useTicketDocument: () => ({ data: state.planDoc ?? undefined, isLoading: false, isError: state.planDoc === null }),
 }));
 
@@ -54,6 +59,9 @@ beforeEach(() => {
   state.queries = [];
   state.answer = vi.fn();
   state.toasts = [];
+  state.tickets = [];
+  state.projects = [];
+  state.config = {};
 });
 
 describe('NeedsYouRoute', () => {
@@ -109,5 +117,60 @@ describe('NeedsYouRoute', () => {
     render(<NeedsYouRoute />);
     expect(screen.queryByText('File this as a ticket?')).not.toBeInTheDocument();
     expect(screen.getByText('Nothing needs you right now.')).toBeInTheDocument();
+  });
+});
+
+describe('NeedsYou — YOLO mode', () => {
+  /** A decision on a ticket in a project, so the mode can be resolved for it. */
+  const onTicket = (over: Partial<Decision>): Decision => {
+    state.tickets = [{ id: 't1', identifier: 'ACME-42', projectId: 'p1' }];
+    state.projects = [{ id: 'p1', slug: 'api', policies: {} }];
+    return decision({ id: 'd1', ticketId: 't1', ...over } as Partial<Decision>);
+  };
+
+  it('offers no approve action for a merge approval the daemon will grant', () => {
+    state.config = { defaults: { yolo: true } };
+    state.decisions = [onTicket({ kind: 'merge_approval', title: 'Approve the merge for ACME-42' })];
+    render(<NeedsYouRoute />);
+
+    expect(screen.getByLabelText('Auto-approved by YOLO mode')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve merge/i })).toBeNull();
+  });
+
+  it('offers no approve action for a plan approval either', () => {
+    state.config = { defaults: { yolo: true } };
+    state.decisions = [onTicket({ kind: 'plan_approval', title: 'Approve the plan for ACME-42' })];
+    render(<NeedsYouRoute />);
+
+    expect(screen.getByLabelText('Auto-approved by YOLO mode')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^approve$/i })).toBeNull();
+  });
+
+  it('leaves a kind the mode does not cover exactly as it is', () => {
+    state.config = { defaults: { yolo: true } };
+    state.decisions = [onTicket({ kind: 'hire_approval', title: 'Hire a Backend Engineer?' })];
+    render(<NeedsYouRoute />);
+
+    expect(screen.queryByLabelText('Auto-approved by YOLO mode')).toBeNull();
+    expect(screen.getByRole('button', { name: /hire/i })).toBeInTheDocument();
+  });
+
+  it('keeps the approve action when the ticket\'s project has opted out', () => {
+    state.config = { defaults: { yolo: true } };
+    const d = onTicket({ kind: 'merge_approval', title: 'Approve the merge for ACME-42' });
+    state.projects = [{ id: 'p1', slug: 'api', policies: { yolo: false } }];
+    state.decisions = [d];
+    render(<NeedsYouRoute />);
+
+    expect(screen.queryByLabelText('Auto-approved by YOLO mode')).toBeNull();
+    expect(screen.getByRole('button', { name: /approve merge/i })).toBeInTheDocument();
+  });
+
+  it('keeps the approve action while the mode is off', () => {
+    state.decisions = [onTicket({ kind: 'merge_approval', title: 'Approve the merge for ACME-42' })];
+    render(<NeedsYouRoute />);
+
+    expect(screen.queryByLabelText('Auto-approved by YOLO mode')).toBeNull();
+    expect(screen.getByRole('button', { name: /approve merge/i })).toBeInTheDocument();
   });
 });

@@ -11,6 +11,8 @@ export interface TicketCardProps {
   working?: boolean;
   usage?: { tokens: number; costCents: number | null } | null;
   needsYou?: boolean;
+  /** The daemon will grant this ticket's open approval, so it is not waiting on the human. */
+  autoApproving?: boolean;
   stalled?: boolean;
   onOpen?: () => void;
   selected?: boolean;
@@ -34,8 +36,8 @@ export function OutcomeChip({ ticket }: { ticket: Ticket }): React.ReactElement 
   return <Badge tone={o.tone === 'accent' ? 'accent' : o.tone === 'done' ? 'added' : o.tone === 'failed' ? 'removed' : 'neutral'}>{o.label}</Badge>;
 }
 
-export function TicketCard({ ticket, workerName, working, usage, needsYou, stalled, onOpen, selected, className }: TicketCardProps): React.ReactElement {
-  const ui = ticketBoardStatus(ticket.status, { live: working, needsYou, stalled });
+export function TicketCard({ ticket, workerName, working, usage, needsYou, autoApproving, stalled, onOpen, selected, className }: TicketCardProps): React.ReactElement {
+  const ui = ticketBoardStatus(ticket.status, { live: working, needsYou, autoApproving, stalled });
   return (
     <button
       type="button"
@@ -61,6 +63,7 @@ export function TicketCard({ ticket, workerName, working, usage, needsYou, stall
       <div className="flex items-center gap-2">
         <Badge>{ticket.kind}</Badge>
         {isFolded(ticket.status, { live: working }) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
+        {autoApproving ? <Badge tone="accent">auto-approving</Badge> : null}
         <OutcomeChip ticket={ticket} />
         {workerName ? <span className="ac-truncate text-micro text-text-3">{workerName}</span> : null}
         <div className="flex-1" />
@@ -71,8 +74,8 @@ export function TicketCard({ ticket, workerName, working, usage, needsYou, stall
 }
 
 /** Dense list row for the phone board and search results. */
-export function TicketRow({ ticket, workerName, working, needsYou, stalled, onOpen }: TicketCardProps): React.ReactElement {
-  const ui = ticketBoardStatus(ticket.status, { live: working, needsYou, stalled });
+export function TicketRow({ ticket, workerName, working, needsYou, autoApproving, stalled, onOpen }: TicketCardProps): React.ReactElement {
+  const ui = ticketBoardStatus(ticket.status, { live: working, needsYou, autoApproving, stalled });
   return (
     <button
       type="button"
@@ -85,6 +88,7 @@ export function TicketRow({ ticket, workerName, working, needsYou, stalled, onOp
         <div className="flex items-center gap-2">
           <span className="ac-mono text-micro text-text-3">{ticket.identifier}</span>
           {isFolded(ticket.status, { live: working }) ? <span className="ac-mono text-micro text-text-3">{statusText(ticket.status)}</span> : null}
+          {autoApproving ? <span className="ac-mono text-micro text-accent-link">auto-approving</span> : null}
           {workerName ? <span className="ac-truncate text-micro text-text-3">{workerName}</span> : null}
         </div>
       </div>

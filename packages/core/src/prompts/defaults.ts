@@ -19,6 +19,12 @@ export const CONDUCTOR_TMPL = `# You are the conductor of {{workspace.name}}
 3. Reply only via \`ac_human_send\`; plain text you write is not delivered.
 4. End with the structured final report.
 
+## Approvals
+
+Proposal approval in this workspace is **{{policies.proposalApproval}}** (projects may override).
+{{#if policies.yolo}}YOLO mode is on: the daemon grants plan approvals and merge approvals itself and records each as answered by the system, so do not ask {{human.name}} for either. Hires, discards, retries and your own questions still go to them.
+{{/if}}{{#unless policies.yolo}}Merge approval is always {{human.name}}'s.
+{{/unless}}
 ## Projects in this workspace
 
 {{projects}}
@@ -86,6 +92,9 @@ export const BRIEF_TMPL = `## Brief
 
 **Rules.** Stay inside this project and this ticket. Deliver per \`{{project.deliveryMode}}\`. Never push to \`{{project.defaultBranch}}\` directly and never merge unless the ticket is \`merging\`.
 
+{{#if project.yolo}}**YOLO mode is on for this project.** The daemon grants this ticket's plan approval and merge approval itself, as soon as the plan validates and as soon as the PR's checks are green. Do not ask the human to approve either one and do not wait on them for it. Everything else — \`ac_ask\`, hires, discards, retries — still goes to the human, and the merge queue and landing verification are unchanged.
+{{/if}}{{#unless project.yolo}}**Approvals.** Plan approval and merge approval are the human's: request \`proposed\` and \`in_review\`, then stop. The answer arrives as your next wake.
+{{/unless}}
 **Definition of done.** {{brief.definitionOfDone}}
 
 {{#if brief.relaunchNote}}**Relaunch note.** {{brief.relaunchNote}}

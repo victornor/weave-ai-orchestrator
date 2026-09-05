@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MERGE_CONCURRENCY, DaemonConfigSchema, ProjectPoliciesSchema, mergeConcurrencyOf } from './config.js';
+import { DEFAULT_MERGE_CONCURRENCY, DaemonConfigSchema, ProjectPoliciesSchema, WorkspaceDefaultsSchema, mergeConcurrencyOf, yoloEnabled } from './config.js';
 
 describe('project policies: mergeConcurrency', () => {
   it('leaves the value unset when the policies block does not mention it', () => {
@@ -23,6 +23,36 @@ describe('project policies: mergeConcurrency', () => {
     expect(mergeConcurrencyOf(undefined)).toBe(DEFAULT_MERGE_CONCURRENCY);
     expect(mergeConcurrencyOf({ mergeConcurrency: 0 })).toBe(DEFAULT_MERGE_CONCURRENCY);
     expect(mergeConcurrencyOf({ mergeConcurrency: 'two' })).toBe(DEFAULT_MERGE_CONCURRENCY);
+  });
+});
+
+describe('YOLO mode: the setting', () => {
+  it('is off unless the workspace turns it on', () => {
+    expect(WorkspaceDefaultsSchema.parse({}).yolo).toBe(false);
+    expect(WorkspaceDefaultsSchema.parse({ yolo: true }).yolo).toBe(true);
+  });
+
+  it('leaves the project override unset when the policies block does not mention it', () => {
+    expect(ProjectPoliciesSchema.parse({}).yolo).toBeUndefined();
+    expect(ProjectPoliciesSchema.parse({ yolo: false }).yolo).toBe(false);
+  });
+
+  it('inherits the workspace default when the project says nothing', () => {
+    expect(yoloEnabled({}, true)).toBe(true);
+    expect(yoloEnabled({}, false)).toBe(false);
+    expect(yoloEnabled(null, true)).toBe(true);
+    expect(yoloEnabled(undefined, false)).toBe(false);
+  });
+
+  it('lets a project override the workspace either way', () => {
+    expect(yoloEnabled({ yolo: false }, true)).toBe(false);
+    expect(yoloEnabled({ yolo: true }, false)).toBe(true);
+  });
+
+  it('inherits rather than guessing when the project value is unusable', () => {
+    expect(yoloEnabled({ yolo: 'yes' }, false)).toBe(false);
+    expect(yoloEnabled({ yolo: 'yes' }, true)).toBe(true);
+    expect(yoloEnabled({ yolo: 1 }, false)).toBe(false);
   });
 });
 

@@ -1,6 +1,6 @@
 import { newId, nowIso, ticketRow, type Db } from '@agent-conductor/db';
 import {
-  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, estimateTokens,
+  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, estimateTokens, yoloEnabled,
   type CommentKind, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
 } from '@agent-conductor/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
@@ -145,6 +145,31 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     return fromProject ?? ctx.config.defaults.proposalApproval;
   }
 
+  /**
+   * YOLO mode for this ticket (PLAN §15): the daemon grants its plan and merge approvals itself.
+   * Read at the moment the approval would be granted, never stamped on the decision, so turning the
+   * mode off stops every auto-approval that has not happened yet.
+   */
+  function yolo(t: Ticket): boolean {
+    return yoloEnabled(project(t.projectId)?.policies ?? null, ctx.config.defaults.yolo);
+  }
+
+  /** Answer an approval this ticket is waiting on as the daemon, naming the mode that granted it. */
+  async function autoApprove(t: Ticket, decisionId: string): Promise<void> {
+    await deps().decisions.answer({ kind: 'system', id: null }, decisionId, {
+      key: 'approve',
+      text: 'Auto-approved by YOLO mode: this workspace grants plan and merge approvals without the human.',
+    });
+  }
+
+  /** The open approval of `kind` on a ticket, if the human has not answered it first. */
+  function openApproval(ticketId: string, kind: 'plan_approval' | 'merge_approval'): string | null {
+    return db.get<{ id: string }>(
+      'SELECT id FROM decisions WHERE ticket_id = ? AND kind = ? AND status = ? ORDER BY created_at DESC LIMIT 1',
+      [ticketId, kind, 'open'],
+    )?.id ?? null;
+  }
+
   function systemComment(ticketId: string, body: string, actor: Actor, kind: CommentKind = 'status'): void {
     const id = newId();
     db.insert('ticket_comments', {
@@ -278,11 +303,12 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     });
 
     // Post-transition side effects (decisions and wakes; both are idempotent-ish and coalesce).
+    let autoApproved = false;
     if (to === 'proposed' && t.kind === 'change') {
       const owner = approvalOwner(next);
       if (owner === 'none') return transition(actor, t.id, { to: 'approved', note: 'plan auto-approved by policy' });
       const doc = db.get<{ id: string; currentRevision: number }>('SELECT id, current_revision FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, 'plan']);
-      deps().decisions.create(actor, {
+      const planApproval = deps().decisions.create(actor, {
         ticketId: t.id, kind: 'plan_approval', owner,
         title: `Approve the plan for ${next.identifier}: ${next.title}`,
         context: `OpenSpec change \`${next.openspecChangeName ?? ''}\` is planning-complete and validates. Review the plan document.`,
@@ -297,6 +323,13 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         askedByAgentId: next.workerId,
         askedInRunId: actor.runId ?? null,
       });
+      // The plan is ready the moment the decision exists — `validateForProposed` has already run —
+      // so under YOLO it is answered here rather than waiting for a click. `applyPlanApproval`
+      // transitions the ticket to `approved` and wakes the worker, exactly as a human answer does.
+      if (yolo(next)) {
+        await autoApprove(next, planApproval.id);
+        autoApproved = true;
+      }
     }
     if (to === 'in_review' && !next.autoMerge) {
       const wp = db.get<{ url: string | null; title: string | null }>('SELECT url, title FROM ticket_work_products WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1', [t.id]);
@@ -314,7 +347,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         askedInRunId: actor.runId ?? null,
       });
     }
-    if (to === 'in_review' && next.autoMerge) setTimeout(() => { service.autoMergeSweep().catch((e) => log.debug({ err: String(e) }, 'auto-merge sweep after in_review failed')); }, 50).unref();
+    // A YOLO ticket's merge decision stays open until its work is ready to land; the sweep is what
+    // knows how to wait for that, so it runs for a YOLO ticket as well as an `autoMerge` one.
+    if (to === 'in_review' && (next.autoMerge || yolo(next))) setTimeout(() => { service.autoMergeSweep().catch((e) => log.debug({ err: String(e) }, 'auto-merge sweep after in_review failed')); }, 50).unref();
     if (to === 'approved') wake(next.workerId, 'ticket_assigned', `plan approved for ${next.identifier}`, { ticketId: t.id });
     // Entering `merging` joins the project's merge queue instead of starting the merge (PLAN §11.4);
     // leaving it gives the slot back. Either way the queue decides who merges next, and it is the
@@ -324,8 +359,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     else if (t.status === 'merging') { await mergeQueue.leave(next.id); queued = true; }
     if (to === 'proposing' && t.status === 'proposed') wake(next.workerId, 'ticket_comment', `revision requested for ${next.identifier}`, { ticketId: t.id });
     if (TERMINAL.has(to)) propagateTerminal(next, actor);
-    // The queue wrote to the row after it was read, so the caller gets the ticket as it now stands.
-    return queued ? get(t.id) : next;
+    // The queue, or an auto-approval that moved the ticket on, wrote to the row after it was read,
+    // so the caller gets the ticket as it now stands rather than as it was mid-transition.
+    return queued || autoApproved ? get(t.id) : next;
   }
 
   // ---------- service ----------
@@ -728,7 +764,11 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     },
 
     async autoMergeSweep(): Promise<number> {
-      const rows = db.all<Record<string, unknown>>("SELECT * FROM tickets WHERE workspace_id = ? AND status = 'in_review' AND auto_merge = 1", [ws]).map((r) => ticketRow(r) as unknown as Ticket);
+      // Two kinds of ticket advance without a human: one carrying `auto_merge`, which never had a
+      // merge decision raised for it, and one under YOLO mode, whose decision is open and waiting.
+      const rows = db.all<Record<string, unknown>>("SELECT * FROM tickets WHERE workspace_id = ? AND status = 'in_review'", [ws])
+        .map((r) => ticketRow(r) as unknown as Ticket)
+        .filter((t) => t.autoMerge || yolo(t));
       let advanced = 0;
       for (const t of rows) {
         try {
@@ -745,7 +785,12 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
               if (state.ciState === 'failure') { systemComment(t.id, 'auto-merge is waiting: CI is red on the PR', { kind: 'system', id: null }); continue; }
             }
           }
-          await service.transition({ kind: 'system', id: null }, t.id, { to: 'merging', note: 'auto-merge: no approval required for this ticket' });
+          // The work is ready to land. A YOLO ticket has a real merge decision waiting: answer it,
+          // and `applyMergeApproval` puts the ticket into `merging` through the same door a human
+          // approval opens. An `auto_merge` ticket has none, so it transitions directly as before.
+          const pending = openApproval(t.id, 'merge_approval');
+          if (pending) await autoApprove(t, pending);
+          else await service.transition({ kind: 'system', id: null }, t.id, { to: 'merging', note: 'auto-merge: no approval required for this ticket' });
           advanced++;
         } catch (e) { log.warn({ ticket: t.identifier, err: String(e) }, 'auto-merge advance failed'); }
       }

@@ -86,6 +86,38 @@ describe('real core services over HTTP', () => {
     expect(services.tickets.comments(ticket.id).at(-1)?.body).toBe('checked out and working');
   });
 
+  it('changes a role max workers through the conductor tool, as a new revision', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const services = deps.workspaces.get(harness.workspaceId)!.services;
+    harness.ctx.config.defaults.hireApproval = 'none';
+    const { role } = await services.roles.hire({ kind: 'human', id: null }, {
+      id: 'api-backend', name: 'Backend Engineer', project: harness.projectSlug,
+      charterSummary: 'Owns the api service.', scope: 'Backend work in the api repo.',
+      responsibilities: [], capabilities: [], exclusions: [], rules: [],
+      runtime: 'claude', model: null, sessionPolicy: 'per_ticket', maxWorkers: 2,
+      permission: { mode: 'auto', allowed: [], denied: [] }, secrets: [], createdBy: 'human',
+    } as never);
+    expect(role.maxWorkers).toBe(2);
+
+    const token = await signRunToken(runTokenSecret(harness.ctx.db), {
+      workspaceId: harness.workspaceId, runId: 'run_c', agentId: harness.conductorId, agentKind: 'conductor', projectId: null, ticketId: null, roleId: null,
+    });
+    const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_role_set_max_workers`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ input: { id: role.id, maxWorkers: 6, reason: 'the queue is backing up' } }),
+    }));
+    const payload = await res.json();
+    expect(payload.ok).toBe(true);
+    expect(payload.data.role.maxWorkers).toBe(6);
+    // the project allows 4, so raising the role past it buys nothing
+    expect(payload.data.concurrency).toMatchObject({ roleMax: 6, projectMax: 4, effective: 4 });
+    expect(services.roles.revisions(role.id).at(-1)).toMatchObject({ reason: 'the queue is backing up', changedKeys: ['maxWorkers'] });
+
+    const detail = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/roles/${role.id}`, { headers: H }))).json();
+    expect(detail.concurrency).toMatchObject({ roleMax: 6, projectMax: 4, effective: 4, live: 0, free: 4 });
+  });
+
   it('exports the workspace as a portable package over POST /export', async () => {
     const { deps, harness } = boot();
     const app = createApp(deps);

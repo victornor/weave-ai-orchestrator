@@ -125,6 +125,48 @@ describe('roles', () => {
     expect(roles.resume(HUMAN, role.id).status).toBe('active');
   });
 
+  it('raises and lowers the worker limit as its own revision, without touching live workers', async () => {
+    h.ctx.config.defaults.hireApproval = 'none';
+    const { role } = await roles.hire(CONDUCTOR, spec({ maxWorkers: 2 }));
+    const workers = [h.addWorker(null, { roleId: role.id }), h.addWorker(null, { roleId: role.id })];
+    expect(roles.freeSlots(role.id)).toBe(0);
+
+    // raised: the extra slot is free immediately, so the next spawn sweep can use it
+    await roles.update(HUMAN, role.id, { maxWorkers: 4 }, 'the queue is backing up');
+    expect(roles.get(role.id).maxWorkers).toBe(4);
+    expect(roles.freeSlots(role.id)).toBe(2);
+
+    // lowered below the live count: no worker is touched, there is just no room for a new one
+    await roles.update(HUMAN, role.id, { maxWorkers: 1 }, 'too expensive');
+    expect(roles.get(role.id).maxWorkers).toBe(1);
+    expect(roles.freeSlots(role.id)).toBe(0);
+    for (const id of workers) expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [id])?.status).toBe('active');
+
+    // and both edits are in the history, rollback-able like a charter change
+    const revisions = roles.revisions(role.id);
+    expect(revisions.map((r) => r.reason)).toEqual(['hired', 'the queue is backing up', 'too expensive']);
+    expect(revisions.at(-1)?.changedKeys).toEqual(['maxWorkers']);
+    expect((await roles.rollback(HUMAN, role.id, 2)).maxWorkers).toBe(4);
+  });
+
+  it('reports the effective concurrency as the smaller of the role and project limits', async () => {
+    h.ctx.config.defaults.hireApproval = 'none';
+    const { role } = await roles.hire(CONDUCTOR, spec({ maxWorkers: 2 }));   // the harness project allows 4
+    expect(roles.concurrency(role.id)).toMatchObject({ roleMax: 2, projectMax: 4, effective: 2, live: 0, free: 2 });
+
+    h.addWorker(null, { roleId: role.id });
+    expect(roles.concurrency(role.id)).toMatchObject({ effective: 2, live: 1, free: 1 });
+
+    // above the project limit the project wins, and free counts every worker in the project
+    await roles.update(HUMAN, role.id, { maxWorkers: 8 }, 'raised past the project limit');
+    expect(roles.concurrency(role.id)).toMatchObject({ roleMax: 8, projectMax: 4, effective: 4, live: 1, projectLive: 1, free: 3 });
+
+    // free never goes negative once the limit drops below what is already running
+    await roles.update(HUMAN, role.id, { maxWorkers: 1 }, 'lowered below the live count');
+    h.addWorker(null, { roleId: role.id });
+    expect(roles.concurrency(role.id)).toMatchObject({ roleMax: 1, effective: 1, live: 2, free: 0 });
+  });
+
   it('asks the human before retiring a role that still has live workers', async () => {
     h.ctx.config.defaults.hireApproval = 'none';
     const { role } = await roles.hire(CONDUCTOR, spec());

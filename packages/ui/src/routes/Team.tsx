@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { agentUiStatus } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { WorkerCard } from '../components/WorkerCard';
@@ -11,6 +11,7 @@ import { Sheet } from '../components/Sheet';
 import { useConductor, useProjects, useRole, useRoleAction, useRoles, useRollbackCharter, useRuntimeModels, useRuntimes, useUpdateRole, useWorkers } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
+import type * as T from '../api/types';
 import { ago } from '../lib/format';
 
 export function TeamRoute(): React.ReactElement {
@@ -112,6 +113,52 @@ export function TeamRoute(): React.ReactElement {
   );
 }
 
+/**
+ * The role's own worker cap, plus what it actually buys: the project cap applies too, so the
+ * effective concurrency is the smaller of the two. Committed on blur or Enter, never per keystroke.
+ */
+function MaxWorkersField({ value, concurrency, pending, onCommit }: {
+  value: number;
+  concurrency: T.RoleConcurrency | undefined;
+  pending: boolean;
+  onCommit: (maxWorkers: number) => void;
+}): React.ReactElement {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+
+  const commit = (): void => {
+    const n = Math.round(Number(draft));
+    if (!Number.isFinite(n) || n < 1 || n > 32) { setDraft(String(value)); return; }
+    setDraft(String(n));
+    if (n !== value) onCommit(n);
+  };
+
+  const capped = concurrency !== undefined && concurrency.projectMax < concurrency.roleMax;
+  return (
+    <label className="flex items-center gap-2">
+      <span className="ac-label">max workers</span>
+      <input
+        type="number"
+        min={1}
+        max={32}
+        aria-label="max workers"
+        disabled={pending}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+        className="ac-mono h-7 w-14 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1"
+      />
+      {concurrency ? (
+        <span className="ac-mono text-nano text-text-4">
+          {concurrency.effective} effective · {concurrency.live} live · {concurrency.free} free
+          {capped ? ` · capped by the project limit of ${concurrency.projectMax}` : ''}
+        </span>
+      ) : null}
+    </label>
+  );
+}
+
 function RoleSheet({ roleId, onClose }: { roleId: string; onClose: () => void }): React.ReactElement {
   const role = useRole(roleId);
   const runtimes = useRuntimes();
@@ -156,6 +203,12 @@ function RoleSheet({ roleId, onClose }: { roleId: string; onClose: () => void })
                 ))}
               </select>
             </label>
+            <MaxWorkersField
+              value={role.data.role.maxWorkers}
+              concurrency={role.data.concurrency}
+              pending={update.isPending}
+              onCommit={(maxWorkers) => update.mutate({ id: roleId, patch: { maxWorkers }, reason: 'changed from the web app' })}
+            />
             <div className="flex-1" />
             {role.data.role.status === 'paused' ? (
               <Button size="sm" onClick={() => action.mutate({ id: roleId, action: 'resume', reason: 'resumed from the web app' })}>

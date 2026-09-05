@@ -4,7 +4,7 @@ import YAML from 'yaml';
 import { newId, nowIso } from '@agent-conductor/db';
 import { OcError, RoleSpecSchema, type Role, type RoleSpec, type Project } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
-import type { Actor, CoreServices, RolesService } from '../api.js';
+import type { Actor, CoreServices, RoleConcurrency, RolesService } from '../api.js';
 import { recordActivity } from '../events.js';
 import { renderCharter } from '../prompts/index.js';
 
@@ -54,6 +54,9 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
 
   const liveWorkers = (roleId: string): number =>
     ctx.db.get<{ n: number }>(`SELECT COUNT(*) n FROM agents WHERE role_id = ? AND status IN ${LIVE_WORKER_STATUSES}`, [roleId])?.n ?? 0;
+
+  const liveInProject = (projectId: string): number =>
+    ctx.db.get<{ n: number }>(`SELECT COUNT(*) n FROM agents WHERE project_id = ? AND kind = 'worker' AND status IN ${LIVE_WORKER_STATUSES}`, [projectId])?.n ?? 0;
 
   const writeRevision = (roleId: string, before: unknown, after: unknown, author: string, reason: string, changedKeys: string[]): number => {
     const last = ctx.db.get<{ revision: number }>('SELECT MAX(revision) revision FROM role_revisions WHERE role_id = ?', [roleId]);
@@ -257,6 +260,18 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
     freeSlots(id: string): number {
       const role = get(id);
       return Math.max(0, role.maxWorkers - liveWorkers(id));
+    },
+
+    concurrency(id: string): RoleConcurrency {
+      const role = get(id);
+      const projectMax = ctx.db.get<{ maxWorkers: number }>('SELECT max_workers FROM projects WHERE id = ?', [role.projectId])?.maxWorkers ?? role.maxWorkers;
+      const live = liveWorkers(id);
+      const projectLive = liveInProject(role.projectId);
+      return {
+        roleMax: role.maxWorkers, projectMax, effective: Math.min(role.maxWorkers, projectMax), live, projectLive,
+        // exactly what workers.spawn enforces: the role's own headroom and the project's, whichever runs out first
+        free: Math.max(0, Math.min(role.maxWorkers - live, projectMax - projectLive)),
+      };
     },
   };
   return service;

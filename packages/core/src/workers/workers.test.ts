@@ -115,6 +115,25 @@ describe('workers', () => {
     await expect(workers.spawnForTicket(SYSTEM, second.id)).rejects.toMatchObject({ code: 'role_full' });
   });
 
+  it('picks a new role limit up on the next spawn, and lowering it never cancels a live worker', async () => {
+    // roles.update writes the row; spawn re-reads it every time, so no restart is involved
+    h.db.update('roles', h.roleId, { maxWorkers: 1 });
+    const first = await workers.spawnForTicket(SYSTEM, seedTicket().id);
+    const second = seedTicket({ number: 2, identifier: 'TST-2', title: 'Second thing' });
+    await expect(workers.spawnForTicket(SYSTEM, second.id)).rejects.toMatchObject({ code: 'role_full' });
+
+    // raised: the very next spawn sees it, with nothing restarted in between
+    h.db.update('roles', h.roleId, { maxWorkers: 2 });
+    const spawned = await workers.spawnForTicket(SYSTEM, second.id);
+    expect(spawned.status).toBe('active');
+
+    // lowered under the live count: both workers keep running, only the next spawn is refused
+    h.db.update('roles', h.roleId, { maxWorkers: 1 });
+    for (const w of [first, spawned]) expect(workers.get(w.id).status).toBe('active');
+    const third = seedTicket({ number: 3, identifier: 'TST-3', title: 'Third thing' });
+    await expect(workers.spawnForTicket(SYSTEM, third.id)).rejects.toMatchObject({ code: 'role_full' });
+  });
+
   it('rolls back the agent row, the home and the ticket binding when the worktree fails', async () => {
     const failing: WorktreeProvider = {
       id: 'git',

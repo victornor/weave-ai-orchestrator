@@ -43,7 +43,7 @@ describe('command tree', () => {
     ['devices', ['list', 'revoke']],
     ['project', ['add', 'list', 'show', 'remove', 'fetch', 'set-runtime', 'set-policy']],
     ['runtime', ['list', 'detect', 'login', 'models']],
-    ['role', ['list', 'show', 'activate', 'set-runtime', 'set-model', 'pause', 'resume', 'retire', 'charter']],
+    ['role', ['list', 'show', 'activate', 'set-runtime', 'set-model', 'set-max-workers', 'pause', 'resume', 'retire', 'charter']],
     ['worker', ['list', 'show', 'pause', 'resume', 'relaunch', 'cancel', 'purge']],
     ['ticket', ['create', 'list', 'show', 'assign', 'set', 'transition', 'comment', 'cancel', 'discard', 'open']],
     ['decision', ['list', 'show', 'answer']],
@@ -260,6 +260,37 @@ describe('running commands against a stubbed daemon', () => {
     await buildProgram().parseAsync([...base, 'workspace', 'import', '/tmp/pkg', '--target', '/tmp/ws']);
     expect(seen).toContain('POST /api/workspaces/import');
     expect(JSON.parse(written.join(''))).toMatchObject({ id: 'acme', tickets: 3 });
+  });
+
+  it('sets a role max workers through the role patch route', async () => {
+    const seen = stubFetch({ '/api/w/acme/roles/backend': { id: 'backend', maxWorkers: 6 } });
+    await buildProgram().parseAsync([...base, 'role', 'set-max-workers', 'backend', '6', '--reason', 'the queue is backing up']);
+    expect(seen).toContain('PATCH /api/w/acme/roles/backend');
+    expect(JSON.parse(written.join(''))).toMatchObject({ maxWorkers: 6 });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('refuses a max workers value outside 1-32 without calling the daemon', async () => {
+    const seen = stubFetch({ '/api/w/acme/roles/backend': { id: 'backend' } });
+    await buildProgram().parseAsync([...base, 'role', 'set-max-workers', 'backend', '99']);
+    expect(seen).toHaveLength(0);
+    expect(JSON.parse(written.join(''))).toMatchObject({ error: { code: 'validation' } });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('shows the effective concurrency on a role', async () => {
+    stubFetch({
+      '/api/w/acme/roles/backend': {
+        role: { id: 'backend', name: 'Backend Engineer', maxWorkers: 8, status: 'active' },
+        charter: '# Charter', revisions: [], workers: [],
+        concurrency: { roleMax: 8, projectMax: 4, effective: 4, live: 1, projectLive: 1, free: 3 },
+      },
+    });
+    configureOutput({ json: false, color: false });
+    await buildProgram().parseAsync([...base.filter((a) => a !== '--json'), 'role', 'show', 'backend']);
+    const text = written.join('');
+    expect(text).toContain('4 concurrent');
+    expect(text).toContain('capped by the project limit of 4');
   });
 
   it('sets a project runtime', async () => {

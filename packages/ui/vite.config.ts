@@ -21,10 +21,11 @@ export default defineConfig({
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       treeshake: {
-        // @agent-conductor/shared is pure: constants, mappers and zod schemas
-        // the web app never touches. Declaring it side-effect-free lets the
-        // unused halves (config/report schemas, and zod with them) drop out.
-        moduleSideEffects: (id) => !id.includes('shared/dist/'),
+        // @agent-conductor/shared and /render are pure: constants, mappers, zod
+        // schemas and view-model functions the web app never touches. Declaring
+        // them side-effect-free lets the unused halves (config/report schemas,
+        // and zod with them) drop out.
+        moduleSideEffects: (id) => !id.includes('shared/dist/') && !id.includes('render/dist/'),
       },
     },
   },

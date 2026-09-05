@@ -20,6 +20,15 @@ export function usageRoutes(): Hono<AppEnv> {
     return c.json(c.get('ws').services.usage.top(q));
   });
   app.get('/models', (c) => c.json(c.get('ws').services.usage.models(query(c, UsageQuery))));
+  // The current runtime account snapshots (PLAN §16.2): billing mode and plan limit windows per
+  // runtime, each with the display name from the runtime registry and the time it was captured.
+  app.get('/accounts', (c) => {
+    const ws = c.get('ws');
+    return c.json(ws.services.accounts.list().map((a) => ({
+      ...a,
+      displayName: ws.ctx.registries.runtimes.get(a.runtimeId)?.displayName ?? a.runtimeId,
+    })));
+  });
   app.get('/ticket/:id', (c) => {
     const s = c.get('ws').services;
     return c.json(s.usage.ticket(s.tickets.get(c.req.param('id')).id));

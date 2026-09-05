@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import type {
-  AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter, RuntimeCapabilities, RuntimeDetection,
-  RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
+  AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
+  RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@agent-conductor/runtime-sdk';
 import { classifyError, detectBinary, installBundleFiles, runTmpDir, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
+import { probeAccount } from './account.js';
 import { buildArgs, RESTRICTED_TOOLS } from './args.js';
 import { createClaudeParser } from './events.js';
 import { asClaudeSession, type ClaudeSessionRef } from './session.js';
@@ -89,6 +90,9 @@ export const adapter: RuntimeAdapter = {
     const s = asClaudeSession(ref);
     return { displayId: s?.sessionId ?? 'unknown', exists: Boolean(s) };
   },
+
+  /** One `get_usage` control request: zero model tokens, no session, sub-second. */
+  describeAccount(input: AccountProbeInput): Promise<AccountDescription> { return probeAccount(input); },
 
   async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
     const tmpDir = runTmpDir(input.runId);

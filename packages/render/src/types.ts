@@ -1,5 +1,5 @@
 /** View models produced by this package. The web widget layer and the TUI widget layer render these and nothing else. */
-import type { DecisionKind, DecisionStatus, TicketKind, TicketPriority, TicketStatus, UiStatus, AgentStatus, CostStatus } from '@agent-conductor/shared';
+import type { BillingType, DecisionKind, DecisionStatus, TicketKind, TicketPriority, TicketStatus, UiStatus, AgentStatus, CostStatus } from '@agent-conductor/shared';
 
 // ---------------------------------------------------------------- transcript
 
@@ -225,6 +225,22 @@ export interface BriefingSections {
 }
 
 // ---------------------------------------------------------------- usage
+
+/** One plan limit window, ready to draw: a label, a percentage and when it resets. */
+export interface AccountLimitWindowView { key: string; label: string; percent: number; resetsIn: string | null }
+/** One runtime account's plan block (design contract: replaces the cost tile on a subscription). */
+export interface AccountLimitsView {
+  runtimeId: string;
+  billingType: BillingType;
+  /** The plan label the runtime reported, or a plain-language stand-in for the billing mode. */
+  plan: string;
+  limitsAvailable: boolean;
+  windows: AccountLimitWindowView[];
+  /** Why there are no windows, when there are none. */
+  note: string | null;
+  /** How long ago the snapshot was captured: `2m ago`. */
+  age: string;
+}
 
 export interface UsageTotalsView {
   tokens: string;

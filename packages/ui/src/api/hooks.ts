@@ -39,6 +39,7 @@ function usageSeries(v: unknown): T.UsageSeries {
     total: totals(r['total']),
     previous: r['previous'] ? totals(r['previous']) : undefined,
     reportedShare: typeof r['costReportedShare'] === 'number' ? (r['costReportedShare'] as number) : (r['reportedShare'] as number | undefined),
+    billingMix: r['billingMix'] as T.UsageSeries['billingMix'],
   } as T.UsageSeries;
 }
 
@@ -717,6 +718,15 @@ export function useUsageModels(params: UsageParams): UseQueryResult<T.UsageModel
   return useQuery({
     queryKey: qk.usageModels(ws, params),
     queryFn: () => api.ws<unknown>(ws, `/usage/models${qs(params)}`).then((r) => listOf<Record<string, unknown>>(r, 'models').map((m) => ({ ...topRow(m), model: String(m['model'] ?? m['key'] ?? ''), series: Array.isArray(m['series']) ? (m['series'] as Record<string, unknown>[]).map((p) => ({ ...totals(p), bucket: String(p['bucket'] ?? '') })) : undefined }))),
+  });
+}
+
+/** The current runtime account snapshots: billing mode and plan limits, refreshed daemon-side. */
+export function useUsageAccounts(): UseQueryResult<T.UsageAccount[]> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.usageAccounts(ws),
+    queryFn: () => api.ws<unknown>(ws, '/usage/accounts').then((r) => listOf<T.UsageAccount>(r, 'accounts')),
   });
 }
 

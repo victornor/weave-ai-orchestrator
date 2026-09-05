@@ -205,10 +205,18 @@ export interface OpenSpecService {
 export interface UsageQuery { scope: string; window: S.UsageWindow; grain?: S.UsageGrain; start?: string; end?: string }
 export interface UsageSeriesPoint { bucket: string; tokensIn: number; tokensOut: number; tokensCached: number; runs: number; durationMs: number; costCents: number; costReportedCents: number }
 export interface UsageService {
-  series(q: UsageQuery): { range: S.UsageRange; points: UsageSeriesPoint[]; total: UsageSeriesPoint; previous: UsageSeriesPoint; costReportedShare: number };
+  series(q: UsageQuery): { range: S.UsageRange; points: UsageSeriesPoint[]; total: UsageSeriesPoint; previous: UsageSeriesPoint; costReportedShare: number; billingMix: S.UsageBillingMix };
   top(q: UsageQuery & { by: 'model' | 'ticket' | 'role' | 'worker' | 'project' }): Array<UsageSeriesPoint & { key: string; label: string }>;
   ticket(ticketId: string): { total: UsageSeriesPoint; subtree: UsageSeriesPoint; turns: Array<UsageSeriesPoint & { runId: string; agentId: string; model: string | null; occurredAt: string }> };
   models(q: UsageQuery): Array<{ model: string; provider: string | null } & UsageSeriesPoint>;
+}
+
+/** The current runtime account snapshots (PLAN §16.2): billing mode and plan limit windows per runtime. */
+export interface AccountsService {
+  list(): S.RuntimeAccount[];
+  get(runtimeId: string): S.RuntimeAccount | null;
+  /** Re-probe the given runtimes (default: every runtime this workspace uses) and replace their snapshots. */
+  refresh(runtimeIds?: string[]): Promise<S.RuntimeAccount[]>;
 }
 
 // ---------- channels / threads ----------
@@ -246,5 +254,5 @@ export interface BriefingService { snapshot(): S.Briefing }
 export interface CoreServices {
   tickets: TicketsService; decisions: DecisionsService; projects: ProjectsService; roles: RolesService; workers: WorkersService;
   wake: WakeService; runs: RunsService; dispatcher: Dispatcher; supervisor: Supervisor; knowledge: KnowledgeService; specs: SpecsService;
-  openspec: OpenSpecService; usage: UsageService; threads: ThreadsService; briefing: BriefingService;
+  openspec: OpenSpecService; usage: UsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService;
 }

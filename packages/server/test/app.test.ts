@@ -336,3 +336,38 @@ describe('routes', () => {
     expect((await res.json()).error.code).toBe('not_found');
   });
 });
+
+describe('usage accounts', () => {
+  const snapshot = {
+    workspaceId: 'ws1', runtimeId: 'claude', billingType: 'subscription_included' as const, planLabel: 'max',
+    limitsAvailable: true,
+    limits: [{ kind: 'session' as const, label: 'Session', utilization: 42, resetsAt: '2026-09-05T18:09:59.000Z', scopeLabel: null }],
+    note: null, capturedAt: '2026-09-05T17:00:00.000Z',
+  };
+
+  it('serves the snapshots with their windows and capture time', async () => {
+    const { fetch } = app({ accounts: [snapshot] });
+    const res = await fetch('/api/w/ws1/usage/accounts', { headers: authed() });
+    expect(res.status).toBe(200);
+    const body = await res.json() as Array<Record<string, unknown>>;
+    expect(body).toHaveLength(1);
+    expect(body[0]).toMatchObject({ runtimeId: 'claude', billingType: 'subscription_included', planLabel: 'max', limitsAvailable: true, capturedAt: '2026-09-05T17:00:00.000Z' });
+    expect(body[0]?.['limits']).toEqual(snapshot.limits);
+  });
+
+  it('falls back to the runtime id when no adapter is registered for a display name', async () => {
+    const { fetch } = app({ accounts: [snapshot] });
+    const body = await (await fetch('/api/w/ws1/usage/accounts', { headers: authed() })).json() as Array<Record<string, unknown>>;
+    expect(body[0]?.['displayName']).toBe('claude');
+  });
+
+  it('returns an empty list when nothing has been probed yet', async () => {
+    const { fetch } = app();
+    expect(await (await fetch('/api/w/ws1/usage/accounts', { headers: authed() })).json()).toEqual([]);
+  });
+
+  it('is session-gated like the rest of the usage routes', async () => {
+    const { fetch } = app({ accounts: [snapshot] });
+    expect((await fetch('/api/w/ws1/usage/accounts')).status).toBe(401);
+  });
+});

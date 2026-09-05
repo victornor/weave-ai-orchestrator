@@ -1,4 +1,4 @@
-import type { RunErrorFamily, RunEventType, PermissionMode, SessionPolicy } from '@agent-conductor/shared';
+import type { AccountLimitWindow, BillingType, RunErrorFamily, RunEventType, PermissionMode, SessionPolicy } from '@agent-conductor/shared';
 export type { RunErrorFamily, RunEventType };
 
 export type JsonSchema = Record<string, unknown>;
@@ -32,6 +32,20 @@ export interface TurnResult {
 }
 export interface TurnHandle { pid: number | null; cancel(mode: 'interrupt' | 'kill'): Promise<void> }
 export interface AgentHome { path: string; kind: 'conductor' | 'worker' }
+
+/** Input to `describeAccount`: the workspace's per-runtime credential home, the env the CLI would run under, and how long the probe may take. */
+export interface AccountProbeInput { configHome?: string; env: Record<string, string>; timeoutMs: number }
+/**
+ * What a runtime can honestly say about the account its credentials belong to.
+ * `limits` is empty whenever `limitsAvailable` is false; `note` says why.
+ */
+export interface AccountDescription {
+  billingType: BillingType;
+  planLabel: string | null;
+  limitsAvailable: boolean;
+  limits: AccountLimitWindow[];
+  note: string | null;
+}
 export interface InstructionBundle { instructions: string; skills: Array<{ name: string; dir: string }> }
 
 export interface RuntimeAdapter {
@@ -43,6 +57,13 @@ export interface RuntimeAdapter {
   runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult>;
   forkSession?(base: SessionRef, cwd: string): Promise<SessionRef>;
   describeSession?(ref: SessionRef): Promise<{ displayId: string; exists: boolean }>;
+  /**
+   * The billing mode and plan limit windows of the account these credentials belong to.
+   * Optional: an adapter that cannot determine any of it omits the method rather than
+   * reporting zeros. Must never spend model tokens or start an agent session, and must
+   * resolve (never reject) — a failed probe is an `unknown` description with a note.
+   */
+  describeAccount?(input: AccountProbeInput): Promise<AccountDescription>;
   /** Directory names for skills per CLI, relative to the home. */
   skillsDir(): string;
   /** Instruction discovery file name at the home root (AGENTS.md, CLAUDE.md, GEMINI.md). */

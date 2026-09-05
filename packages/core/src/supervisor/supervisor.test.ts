@@ -24,6 +24,7 @@ describe('supervisor', () => {
   let wake: ReturnType<typeof fakeWake>;
   let spawnForTicket: ReturnType<typeof vi.fn>;
   let retireIfLanded: ReturnType<typeof vi.fn>;
+  let refreshAccounts: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     h = makeHarness();
@@ -35,6 +36,8 @@ describe('supervisor', () => {
     h.services.tickets = { livenessViolations: () => [] } as never;
     h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    refreshAccounts = vi.fn(async () => []);
+    h.services.accounts = { list: () => [], get: () => null, refresh: refreshAccounts } as never;
     supervisor = createSupervisor(h.ctx, h.deps);
   });
   afterEach(() => { supervisor.stop(); h.cleanup(); });
@@ -160,6 +163,7 @@ describe('supervisor scheduled passes', () => {
   let h: TestHarness;
   let supervisor: Supervisor;
   let wake: ReturnType<typeof fakeWake>;
+  let refreshAccounts: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     h = makeHarness();
@@ -169,6 +173,8 @@ describe('supervisor scheduled passes', () => {
     h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0 } as never;
     h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    refreshAccounts = vi.fn(async () => []);
+    h.services.accounts = { list: () => [], get: () => null, refresh: refreshAccounts } as never;
     supervisor = createSupervisor(h.ctx, h.deps);
   });
   afterEach(() => { supervisor.stop(); h.cleanup(); });
@@ -352,5 +358,56 @@ describe('supervisor scheduled passes', () => {
       expect(existsSync(join(h.ctx.paths.archive, worker))).toBe(true);
       expect(h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:retention_at'])!.value).toBe(at);
     });
+  });
+});
+
+describe('supervisor runtime account refresh', () => {
+  let h: TestHarness;
+  let supervisor: Supervisor;
+
+  beforeEach(() => {
+    h = makeHarness();
+    h.services.wake = fakeWake() as never;
+    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0 } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    supervisor = createSupervisor(h.ctx, h.deps);
+  });
+  afterEach(() => { supervisor.stop(); h.cleanup(); });
+
+  const withAccounts = (refresh: ReturnType<typeof vi.fn>): void => {
+    h.services.accounts = { list: () => [], get: () => null, refresh } as never;
+  };
+
+  it('refreshes the runtime account snapshots on the first tick', async () => {
+    const refresh = vi.fn(async () => []);
+    withAccounts(refresh);
+    await supervisor.tick();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refresh again before the interval has elapsed', async () => {
+    const refresh = vi.fn(async () => []);
+    withAccounts(refresh);
+    await supervisor.tick();
+    await supervisor.tick();
+    await supervisor.tick();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes again once the interval has elapsed', async () => {
+    const refresh = vi.fn(async () => []);
+    withAccounts(refresh);
+    await supervisor.tick();
+    // The pass persists its last run in `meta`, so a restart does not re-run it immediately.
+    h.db.run("UPDATE meta SET value = ? WHERE key = 'supervisor:accounts_at'", [String(Date.now() - 6 * 60_000)]);
+    await supervisor.tick();
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not fail the tick when the refresh throws', async () => {
+    withAccounts(vi.fn(async () => { throw new Error('the CLI is not logged in'); }));
+    await expect(supervisor.tick()).resolves.toBeUndefined();
   });
 });

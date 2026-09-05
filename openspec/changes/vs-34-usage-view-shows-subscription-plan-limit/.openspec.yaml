@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Usage view shows subscription plan limits and hides dollar cost for
+  subscription accounts

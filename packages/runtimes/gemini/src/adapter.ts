@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type {
-  AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter, RuntimeCapabilities, RuntimeDetection,
-  RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
+  AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
+  RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@agent-conductor/runtime-sdk';
 import { classifyError, detectBinary, installBundleFiles, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
+import { describeGeminiAccount } from './account.js';
 import { buildArgs, geminiSettings, SETTINGS_RELATIVE_PATH } from './args.js';
 import { createGeminiParser } from './events.js';
 import { asGeminiSession } from './session.js';
@@ -66,6 +67,9 @@ export const adapter: RuntimeAdapter = {
     const s = asGeminiSession(ref);
     return { displayId: s?.sessionId ?? 'unknown', exists: Boolean(s) };
   },
+
+  /** Billing mode only: Gemini CLI keeps its quota in memory. */
+  async describeAccount(input: AccountProbeInput): Promise<AccountDescription> { return describeGeminiAccount(input); },
 
   async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
     const built = buildArgs(input, { newSessionId: randomUUID() });

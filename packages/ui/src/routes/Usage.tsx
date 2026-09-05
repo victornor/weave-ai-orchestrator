@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import type { UsageGrain, UsageWindow } from '@agent-conductor/shared';
+import { accountLimits, showCost } from '@agent-conductor/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { WindowGrainPicker } from '../components/WindowGrainPicker';
 import { RankedBars, ShareBar, StackedBars, StatTile, LineSeries, seriesColor } from '../components/Chart';
+import { PlanLimits } from '../components/PlanLimits';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
-import { useProjects, useUsage, useUsageModels, useUsageTop } from '../api/hooks';
+import { useProjects, useUsage, useUsageAccounts, useUsageModels, useUsageTop } from '../api/hooks';
 import { dayLabel, cents, pct, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
 
@@ -27,10 +29,15 @@ export function UsageRoute(): React.ReactElement {
   const topRoles = useUsageTop({ ...params, by: 'role' });
   const topWorkers = useUsageTop({ ...params, by: 'worker' });
   const models = useUsageModels(params);
+  const accounts = useUsageAccounts();
 
   const total = series.data?.total;
   const headlineTokens = (total?.tokensIn ?? 0) + (total?.tokensOut ?? 0);
   const reportedShare = series.data?.reportedShare;
+  // Dollars only mean something when some of this window was billed per token; on a subscription
+  // the plan windows take their place (PLAN §16.3).
+  const withCost = showCost(series.data?.billingMix);
+  const plans = accountLimits(accounts.data ?? [], new Date());
 
   const projectKeys = (projects.data ?? []).map((p) => ({ key: p.id, label: p.slug }));
   const buckets = (series.data?.series ?? []).map((pt) => ({
@@ -68,11 +75,13 @@ export function UsageRoute(): React.ReactElement {
             {/* tokens are the headline; cost is secondary and always labelled */}
             <div className="flex flex-wrap gap-px overflow-hidden rounded-r6 border border-line-1 bg-line-1">
               <StatTile value={tokens(headlineTokens)} caption={`tokens this ${window}`} />
-              <StatTile
-                value={cents(total?.costCents ?? null)}
-                caption={reportedShare != null ? `cost · ${Math.round(reportedShare * 100)}% reported` : `cost · ${total?.costStatus ?? 'unpriced'}`}
-                muted
-              />
+              {withCost ? (
+                <StatTile
+                  value={cents(total?.costCents ?? null)}
+                  caption={reportedShare != null ? `cost · ${Math.round(reportedShare * 100)}% reported` : `cost · ${total?.costStatus ?? 'unpriced'}`}
+                  muted
+                />
+              ) : null}
               <StatTile value={String(total?.runs ?? 0)} caption="runs" muted />
               <StatTile
                 value={total ? pct(total.tokensCached, Math.max(1, total.tokensIn + total.tokensCached)) : '0%'}
@@ -80,6 +89,8 @@ export function UsageRoute(): React.ReactElement {
                 muted
               />
             </div>
+
+            <PlanLimits accounts={plans} />
 
             <section className="ac-card p-4">
               <div className="mb-3.5 text-meta font-medium text-text-soft">Tokens per {grain} by project</div>
@@ -89,14 +100,14 @@ export function UsageRoute(): React.ReactElement {
             <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
               <div className="flex flex-col gap-4">
                 <section className="ac-card p-4">
-                  <div className="mb-3.5 text-meta font-medium text-text-soft">Top tickets by cost · subtree rollup</div>
+                  <div className="mb-3.5 text-meta font-medium text-text-soft">Top tickets by {withCost ? 'cost' : 'tokens'} · subtree rollup</div>
                   <RankedBars
                     rows={(topTickets.data ?? []).slice(0, 8).map((r) => ({
                       key: r.key,
                       label: r.label,
                       sublabel: r.sublabel ?? null,
                       value: r.tokens,
-                      right: cents(r.costCents),
+                      ...(withCost ? { right: cents(r.costCents) } : {}),
                     }))}
                   />
                 </section>
@@ -104,11 +115,11 @@ export function UsageRoute(): React.ReactElement {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <section className="ac-card p-4">
                     <div className="mb-3.5 text-meta font-medium text-text-soft">By role</div>
-                    <RankedBars rows={(topRoles.data ?? []).slice(0, 6).map((r) => ({ key: r.key, label: r.label, value: r.tokens, right: cents(r.costCents) }))} />
+                    <RankedBars rows={(topRoles.data ?? []).slice(0, 6).map((r) => ({ key: r.key, label: r.label, value: r.tokens, ...(withCost ? { right: cents(r.costCents) } : {}) }))} />
                   </section>
                   <section className="ac-card p-4">
                     <div className="mb-3.5 text-meta font-medium text-text-soft">By worker</div>
-                    <RankedBars rows={(topWorkers.data ?? []).slice(0, 6).map((r) => ({ key: r.key, label: r.label, value: r.tokens, right: cents(r.costCents) }))} />
+                    <RankedBars rows={(topWorkers.data ?? []).slice(0, 6).map((r) => ({ key: r.key, label: r.label, value: r.tokens, ...(withCost ? { right: cents(r.costCents) } : {}) }))} />
                   </section>
                 </div>
 
@@ -131,7 +142,7 @@ export function UsageRoute(): React.ReactElement {
                         <span className="size-2 flex-none rounded-r4" style={{ background: seriesColor(i) }} />
                         <span className="ac-mono ac-truncate flex-1 text-micro text-text-soft">{m.model}</span>
                         <span className="ac-mono text-micro text-text-1">{tokens(m.tokens)}</span>
-                        <span className="ac-mono w-9 text-right text-micro text-text-nav">{cents(m.costCents)}</span>
+                        {withCost ? <span className="ac-mono w-9 text-right text-micro text-text-nav">{cents(m.costCents)}</span> : null}
                       </button>
                     ))}
                   </div>

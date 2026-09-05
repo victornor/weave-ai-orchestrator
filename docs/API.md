@@ -54,6 +54,10 @@ Linked documents: `GET /knowledge/docs?scope=&project=` → `[{ path, scope, pro
 ### Usage
 `GET /usage?scope=workspace|project:<id>|role:<id>|worker:<id>|ticket:<id>|model:<id>&window=&grain=&start=&end=` · `GET /usage/top?by=model|ticket|role|worker|project&...` · `GET /usage/models?...` · `GET /usage/ticket/:id`
 
+The `/usage` series answer carries `billingMix: { subscription, metered, unknown }` — tokens in the queried scope and window per `usage_events.billing_type` — so a client can tell whether any metered spend occurred without a second request. Rows recorded before a runtime had an account snapshot count as `unknown`.
+
+`GET /usage/accounts` → `[{ workspaceId, runtimeId, displayName, billingType (metered_api|subscription_included|unknown), planLabel, limitsAvailable, limits: [{ kind: session|weekly_all|weekly_scoped, label, utilization (0..100), resetsAt, scopeLabel }], note, capturedAt }]` — the current runtime account snapshots (PLAN §16.2), one per runtime, refreshed by the supervisor every 5 minutes. An empty array means nothing has been probed yet. `limits` is empty whenever `limitsAvailable` is false; `note` says why.
+
 ### Threads (chat)
 `GET /threads?channel=web` · `POST /threads` `{ channel: 'web', label? }` · `GET /threads/:id/messages?before=&limit=` · `POST /threads/:id/messages` `{ body, projectId?, replyToMessageId? }` (inbound from human; wakes the agent. `projectId` is the project the message was sent about — an id or a slug, stored on the message and carried in the wake payload; unknown ids are rejected with `not_found`. `replyToMessageId` is the message this one answers — it must name a message of the same thread, and one that does not is rejected with `not_found`; it is stored on the message and carried in the wake payload alongside `replyToExcerpt`, a bounded excerpt of that message's body. Reads return both `replyToMessageId` and `replyToExcerpt` on every message, the excerpt resolved from the referenced row so it is available even when that message is outside the requested page) · `POST /threads/:id/bind` `{ ticketId | null }`
 

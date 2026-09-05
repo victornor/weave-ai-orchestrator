@@ -224,6 +224,9 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       inv(qk.decisions(ws));
       inv(qk.decision(ws, id));
       inv(qk.briefing(ws));
+      // The sidebar badges every workspace from the workspace list, which carries this workspace's
+      // Needs-you count too; without this it would wait out the refetch interval for its own events.
+      inv(qk.workspaces());
       break;
     case 'run.started':
     case 'run.finished':

@@ -6,15 +6,17 @@ const state = vi.hoisted(() => ({
   projectPatches: [] as Array<{ id: string; patch: Record<string, unknown> }>,
   projects: [] as Array<Record<string, unknown>>,
   config: {} as Record<string, unknown>,
+  workspaces: [] as Array<Record<string, unknown>>,
+  went: [] as string[],
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
-vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
+vi.mock('../app/link', () => ({ useGo: () => (to: string) => { state.went.push(to); } }));
 vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
   useWorkspaceSummary: () => ({ data: { workspace: { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME' }, config: state.config }, isLoading: false }),
-  useWorkspaces: () => ({ data: [] }),
+  useWorkspaces: () => ({ data: state.workspaces }),
   usePatchConfig: () => ({ mutate: (body: Record<string, unknown>) => state.patches.push(body), isPending: false }),
   useProjects: () => ({ data: state.projects, isLoading: false }),
   useRuntimes: () => ({ data: [] }),
@@ -28,6 +30,8 @@ beforeEach(() => {
   state.patches = [];
   state.projectPatches = [];
   state.projects = [];
+  state.workspaces = [];
+  state.went = [];
   state.config = {
     defaults: { bootstrapBudgetTokens: 16000, turnTimeoutSec: 2700, knowledgeBudgetTokens: { workspace: 10000, shared: 2000, decisions: 4000, project: 10000, document: 10000 } },
   };
@@ -97,5 +101,41 @@ describe('Settings — YOLO mode', () => {
     state.projects = [{ ...state.projects[0]!, policies: { requireCi: true, yolo: false } }];
     fireEvent.change(screen.getByLabelText('YOLO mode for api'), { target: { value: 'inherit' } });
     expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { policies: { requireCi: true } } });
+  });
+});
+
+/** VS-46: the phone reaches the other workspaces through More, which opens Settings. */
+describe('Settings — the workspace list', () => {
+  const listItem = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'ws1', name: 'Acme', ticketPrefix: 'ACME', root: '/tmp/ws1', projects: [], needsYou: 0, ...over,
+  });
+
+  it('is the first section on the page', () => {
+    state.workspaces = [listItem()];
+    const { container } = render(<SettingsRoute />);
+    const labels = [...container.querySelectorAll('.ac-label')].map((el) => el.textContent);
+    expect(labels[0]).toBe('Workspaces');
+  });
+
+  it('lists every workspace and marks the current one', () => {
+    state.workspaces = [listItem(), listItem({ id: 'beta', name: 'Beta', ticketPrefix: 'BET' })];
+    render(<SettingsRoute />);
+    expect(screen.getByText('Acme')).toBeInTheDocument();
+    expect(screen.getByText('Beta')).toBeInTheDocument();
+    expect(screen.getByText('current')).toBeInTheDocument();
+  });
+
+  it('shows each workspace its Needs-you count, and nothing at zero', () => {
+    state.workspaces = [listItem(), listItem({ id: 'beta', name: 'Beta', needsYou: 4 })];
+    render(<SettingsRoute />);
+    expect(screen.getByLabelText('4 waiting for you')).toBeInTheDocument();
+    expect(screen.queryByLabelText('0 waiting for you')).not.toBeInTheDocument();
+  });
+
+  it('navigates to a workspace that is chosen', () => {
+    state.workspaces = [listItem(), listItem({ id: 'beta', name: 'Beta' })];
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByText('Beta'));
+    expect(state.went).toContain('/w/beta/needs');
   });
 });

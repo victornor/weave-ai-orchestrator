@@ -407,3 +407,31 @@ describe('presentation', () => {
     expect((await fetch('/api/w/ws1/presentation/surfaces')).status).toBe(401);
   });
 });
+
+describe('the workspace list', () => {
+  /** The sidebar shows every workspace at once, so the count travels with the list. */
+  const addDecision = (h: Harness, id: string, over: { owner?: string; status?: string } = {}): void => {
+    h.db.run(
+      "INSERT INTO decisions (id, workspace_id, ticket_id, kind, owner, title, status, created_at) VALUES (?,?,?,?,?,?,?,?)",
+      [id, 'ws1', null, 'question', over.owner ?? 'human', 'Needs a decision', over.status ?? 'open', '2026-09-01T00:00:00.000Z'],
+    );
+  };
+
+  it('reports how many open decisions are waiting on the human', async () => {
+    const { h, fetch } = app();
+    addDecision(h, 'd_1');
+    addDecision(h, 'd_2');
+    addDecision(h, 'd_3', { status: 'answered' });
+    addDecision(h, 'd_4', { owner: 'conductor' });
+
+    const body = await (await fetch('/api/workspaces', { headers: authed() })).json() as Array<Record<string, unknown>>;
+    expect(body).toHaveLength(1);
+    expect(body[0]).toMatchObject({ id: 'ws1', name: 'Test workspace', ticketPrefix: 'ACME', needsYou: 2 });
+  });
+
+  it('reports zero rather than omitting the count', async () => {
+    const { fetch } = app();
+    const body = await (await fetch('/api/workspaces', { headers: authed() })).json() as Array<Record<string, unknown>>;
+    expect(body[0]).toHaveProperty('needsYou', 0);
+  });
+});

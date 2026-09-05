@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Sidebar lists every workspace as an expandable section so the human can
+  jump between workspaces' chats and boards without switching

@@ -5,7 +5,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { OcError } from '@agent-conductor/shared';
 import { detectHostToolsCached, getLogger } from '@agent-conductor/core';
-import type { AppDeps, AppEnv } from '../types.js';
+import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { body } from '../http.js';
 
 const log = getLogger('http', { component: 'daemon-routes' });
@@ -28,6 +28,18 @@ function expandHome(p: string): string {
 /** A workspace is registered under both its slug and its db id; list it once. */
 const uniqueWorkspaces = (deps: AppDeps) => [...new Set(deps.workspaces.values())];
 
+/**
+ * Open decisions a workspace is waiting on the human for. The web app's sidebar shows every
+ * workspace at once, so this count travels with the workspace list rather than costing a request
+ * per workspace: it is an indexed read over `decisions_ws_status` against a database this process
+ * already has open, and it loads nothing that was not loaded already.
+ */
+const needsYouCount = (w: WorkspaceRuntime): number =>
+  w.ctx.db.get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM decisions WHERE workspace_id = ? AND status = 'open' AND owner = 'human'",
+    [w.ctx.workspaceId],
+  )?.n ?? 0;
+
 export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -48,6 +60,7 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   app.get('/workspaces', (c) => c.json(uniqueWorkspaces(deps).map((w) => ({
     id: w.id, name: w.ctx.config.name, ticketPrefix: w.ctx.config.ticketPrefix, root: w.ctx.paths.root,
     projects: w.ctx.config.projects.map((p) => p.id),
+    needsYou: needsYouCount(w),
   }))));
 
   app.post('/workspaces', async (c) => {

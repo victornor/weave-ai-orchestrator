@@ -4,6 +4,7 @@ import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } fro
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Composer } from '../components/Composer';
 import { DecisionCard } from '../components/DecisionCard';
+import { PlanPreview } from '../components/PlanPreview';
 import { DispatchLabel } from '../components/DispatchLabel';
 import { WorkerChip, CommandChip } from '../components/Chips';
 import { Skeleton } from '../components/Skeleton';
@@ -266,6 +267,7 @@ export function ChatRoute(): React.ReactElement {
                     asker="conductor"
                     ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
                     busy={answer.isPending}
+                    plan={<PlanPreview decision={d} />}
                     onAnswer={(a) => answerDecision(d.id, a)}
                   />
                 ))}
@@ -303,6 +305,7 @@ export function ChatRoute(): React.ReactElement {
               decision={d}
               ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
               busy={answer.isPending}
+              plan={<PlanPreview decision={d} />}
               onAnswer={(a) => answerDecision(d.id, a)}
             />
           ))}

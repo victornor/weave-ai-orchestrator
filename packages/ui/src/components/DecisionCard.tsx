@@ -15,6 +15,8 @@ export interface DecisionCardProps {
   asker?: 'conductor' | 'worker';
   busy?: boolean;
   queued?: boolean;
+  /** The plan under approval, rendered above the buttons on a `plan_approval` card. */
+  plan?: React.ReactNode;
   onAnswer: (answer: { key?: string; text?: string; remember?: boolean }) => void;
   className?: string;
 }
@@ -75,7 +77,7 @@ function answerLine(decision: Decision): string | null {
  * primary action sits bottom-left inside a 44 px thumb band. A decision that has
  * been answered renders the same card as an inert record of what was decided.
  */
-export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy, asker, busy, queued, onAnswer, className }: DecisionCardProps): React.ReactElement {
+export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy, asker, busy, queued, plan, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [freeText, setFreeText] = useState(false);
@@ -131,6 +133,9 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
             ))}
           </ul>
         ) : null}
+
+        {/* plan approval — the plan itself, so nothing is approved unread */}
+        {decision.kind === 'plan_approval' && !inert ? plan : null}
 
         {/* merge approval — CI and diff stats */}
         {decision.kind === 'merge_approval' ? (

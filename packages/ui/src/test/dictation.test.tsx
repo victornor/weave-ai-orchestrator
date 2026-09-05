@@ -143,6 +143,53 @@ describe('dictation — speech mode', () => {
     expect(alert).not.toHaveTextContent('No speech was detected.');
   });
 
+  it('stops the mic when the message is sent with the Send button', () => {
+    const onSubmit = vi.fn();
+    render(<Composer onSubmit={onSubmit} placeholder="Message…" />);
+
+    dictate();
+    const rec = FakeRecognition.last!;
+    act(() => rec.onresult!(said(['ship the release', true])));
+
+    fireEvent.click(screen.getByLabelText('Send'));
+
+    expect(onSubmit).toHaveBeenCalledWith('ship the release');
+    expect(rec.stop).toHaveBeenCalled();
+    expect(screen.getByLabelText('Dictate')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Stop dictation')).not.toBeInTheDocument();
+    expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
+  });
+
+  it('stops the mic when the message is sent with the keyboard', () => {
+    const onSubmit = vi.fn();
+    render(<Composer onSubmit={onSubmit} placeholder="Message…" />);
+    const box = screen.getByLabelText('Message…') as HTMLTextAreaElement;
+
+    dictate();
+    const rec = FakeRecognition.last!;
+    act(() => rec.onresult!(said(['ship the release', true])));
+
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    expect(onSubmit).toHaveBeenCalledWith('ship the release');
+    expect(rec.stop).toHaveBeenCalled();
+    expect(screen.getByLabelText('Dictate')).toBeInTheDocument();
+    expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
+  });
+
+  it('leaves a mic that was never opened alone when sending', () => {
+    const onSubmit = vi.fn();
+    render(<Composer onSubmit={onSubmit} placeholder="Message…" />);
+    const box = screen.getByLabelText('Message…') as HTMLTextAreaElement;
+
+    fireEvent.change(box, { target: { value: 'typed by hand' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+
+    expect(onSubmit).toHaveBeenCalledWith('typed by hand');
+    expect(FakeRecognition.last).toBeNull();
+    expect(screen.getByLabelText('Dictate')).toBeInTheDocument();
+  });
+
   it('keeps listening across the browser ending recognition on its own', () => {
     vi.useFakeTimers();
     render(<Composer onSubmit={() => undefined} placeholder="Message…" />);

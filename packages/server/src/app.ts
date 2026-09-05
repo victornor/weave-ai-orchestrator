@@ -4,7 +4,7 @@
  * whether run tokens are honoured).
  */
 import { Hono } from 'hono';
-import { OcError } from '@agent-conductor/shared';
+import { OcError, PUSH_BASE } from '@agent-conductor/shared';
 import type { AppDeps, AppEnv } from './types.js';
 import { authMiddleware } from './auth.js';
 import { onError } from './http.js';
@@ -74,7 +74,7 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   ws.route('/worktrees', worktreeRoutes());
   ws.route('/presentation', presentationRoutes(deps));
   ws.route('/presenter', presenterRoutes(deps));
-  ws.route('/push', pushRoutes());
+  ws.route(PUSH_BASE, pushRoutes(deps));
   ws.route('/agent', agentRoutes());
   app.route('/api/w/:ws', ws);
 

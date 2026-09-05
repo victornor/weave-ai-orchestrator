@@ -74,6 +74,9 @@ The `/usage` series answer carries `billingMix: { subscription, metered, unknown
 ### Presentation / presenter
 `GET /presentation` → the stored `{ default, conductor?, workers? }` · `PUT /presentation` (same shape; replaces it wholesale) · `GET /presentation/surfaces` → `{ surfaces: string[] }`, the surface kinds this daemon has adapters for (no availability flag: surfaces run on the presenter's machine) · `GET /presenter/desired` → `{ conductor, workers: AgentView[], config }` · `PUT /presenter/:presenterId/handles` `{ handles }`
 
+### Web push
+`GET /push/config` → `{ configured, vapidPublicKey }` — what the browser needs before it can subscribe at all; `configured` is false (and the key null) until `push.vapidPublicKey` is set in the daemon config, and the web app says so rather than failing silently · `GET /push/subscriptions` → `[{ id, endpoint, createdAt }]` · `POST /push/subscriptions` `{ endpoint, keys }` → `{ id }` (201; re-registering the same endpoint replaces the row) · `DELETE /push/subscriptions/:id`. Delivery itself is still a stub — `sendPush` logs and reports `skipped`.
+
 ### Agent endpoints (run token, loopback)
 `GET /api/w/:ws/agent/inbox` · everything the MCP tools do is also available as `POST /api/w/:ws/agent/tools/:tool` `{ input }` → `ToolResult` for `conductor` CLI use.
 

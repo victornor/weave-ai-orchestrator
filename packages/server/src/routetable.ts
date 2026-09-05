@@ -155,6 +155,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: `${W}/presenter/desired`, tag: 'presentation', summary: 'Conductor + worker views the presenter should show', auth: 'session' },
   { method: 'PUT', path: `${W}/presenter/{presenterId}/handles`, tag: 'presentation', summary: 'Store this presenter surface handles', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/presenter/{presenterId}/handles`, tag: 'presentation', summary: 'Read stored handles', auth: 'session' },
+  { method: 'GET', path: `${W}/push/config`, tag: 'push', summary: 'Whether push is configured, with the VAPID public key the browser subscribes with', auth: 'session' },
   { method: 'GET', path: `${W}/push/subscriptions`, tag: 'push', summary: 'Web push subscriptions', auth: 'session' },
   { method: 'POST', path: `${W}/push/subscriptions`, tag: 'push', summary: 'Register a web push subscription', auth: 'session', mutating: true },
   { method: 'DELETE', path: `${W}/push/subscriptions/{id}`, tag: 'push', summary: 'Remove a subscription', auth: 'session', mutating: true },

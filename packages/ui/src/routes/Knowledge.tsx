@@ -374,16 +374,16 @@ function CapabilityPage({
 
       <div className="grid gap-4 lg:grid-cols-[1fr_16rem]">
         <div className="flex flex-col gap-2">
-          {detail.data.requirements.map((r) => (
+          {detail.data.requirements.map((r, i) => (
             <article
-              key={r.id}
+              key={r.name || i}
               className={cx(
                 'rounded-r6 border p-3.5',
                 r.delta ? (r.delta.kind === 'ADDED' ? 'border-done/30 bg-done/5' : r.delta.kind === 'REMOVED' ? 'border-failed/30 bg-failed/5' : 'border-working/35 bg-working/5') : 'border-line-1 bg-bg-1',
               )}
             >
               <div className="mb-1.5 flex items-center gap-2">
-                <span className="ac-mono text-micro text-text-3">{r.name || r.id}</span>
+                <span className="ac-mono text-micro text-text-3">{r.name}</span>
                 {r.delta ? (
                   <>
                     <Badge tone={DELTA_TONE[r.delta.kind]}>{r.delta.kind}</Badge>
@@ -419,7 +419,6 @@ function CapabilityPage({
               <div className="ac-mono text-micro text-text-1">{h.changeName}</div>
               <div className="ac-mono mt-1 flex items-center gap-2 text-nano text-text-3">
                 {h.ticketIdentifier ? <span>{h.ticketIdentifier}</span> : null}
-                {h.prUrl ? <span>PR</span> : null}
                 <span className={h.state === 'archived' ? 'text-done' : 'text-working'}>{h.state}</span>
                 {h.archivedAt ? <span>{ago(h.archivedAt)}</span> : null}
               </div>

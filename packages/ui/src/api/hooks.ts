@@ -652,7 +652,7 @@ export function useCapabilities(project: string): UseQueryResult<T.CapabilitySum
   const ws = useWs();
   return useQuery({
     queryKey: qk.specs(ws, project),
-    queryFn: () => api.ws<T.CapabilitySummary[] | { capabilities: T.CapabilitySummary[] }>(ws, `/specs/${project}`).then((r) => listOf(r, 'capabilities')),
+    queryFn: () => api.ws<T.CapabilitySummary[] | { capabilities: T.CapabilitySummary[] }>(ws, `/specs/${encodeURIComponent(project)}`).then((r) => listOf(r, 'capabilities')),
     enabled: Boolean(project),
   });
 }
@@ -661,7 +661,7 @@ export function useCapability(project: string, capability: string): UseQueryResu
   const ws = useWs();
   return useQuery({
     queryKey: qk.capability(ws, project, capability),
-    queryFn: () => api.ws<T.CapabilityDetail>(ws, `/specs/${project}/capabilities/${capability}`),
+    queryFn: () => api.ws<T.CapabilityDetail>(ws, `/specs/${encodeURIComponent(project)}/capabilities/${encodeURIComponent(capability)}`),
     enabled: Boolean(project && capability),
   });
 }
@@ -670,7 +670,7 @@ export function useSpecChanges(project: string, state?: string): UseQueryResult<
   const ws = useWs();
   return useQuery({
     queryKey: qk.changes(ws, project, state),
-    queryFn: () => api.ws<T.SpecChangeSummary[] | { changes: T.SpecChangeSummary[] }>(ws, `/specs/${project}/changes${qs({ state })}`).then((r) => listOf(r, 'changes')),
+    queryFn: () => api.ws<T.SpecChangeSummary[] | { changes: T.SpecChangeSummary[] }>(ws, `/specs/${encodeURIComponent(project)}/changes${qs({ state })}`).then((r) => listOf(r, 'changes')),
     enabled: Boolean(project),
   });
 }
@@ -679,14 +679,14 @@ export function useSpecChange(project: string, name: string): UseQueryResult<T.S
   const ws = useWs();
   return useQuery({
     queryKey: qk.change(ws, project, name),
-    queryFn: () => api.ws<T.SpecChangeDetail>(ws, `/specs/${project}/changes/${name}`),
+    queryFn: () => api.ws<T.SpecChangeDetail>(ws, `/specs/${encodeURIComponent(project)}/changes/${encodeURIComponent(name)}`),
     enabled: Boolean(project && name),
   });
 }
 
 export function useSpecGraph(project: string): UseQueryResult<T.SpecGraph> {
   const ws = useWs();
-  return useQuery({ queryKey: qk.specGraph(ws, project), queryFn: () => api.ws<T.SpecGraph>(ws, `/specs/${project}/graph`), enabled: Boolean(project) });
+  return useQuery({ queryKey: qk.specGraph(ws, project), queryFn: () => api.ws<T.SpecGraph>(ws, `/specs/${encodeURIComponent(project)}/graph`), enabled: Boolean(project) });
 }
 
 /* ----------------------------------------------------------------- usage */

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Project, ThreadMessage } from '@agent-conductor/shared';
+import type { Decision, Project, ThreadMessage } from '@agent-conductor/shared';
 import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Composer } from '../components/Composer';
@@ -130,15 +130,6 @@ export function ChatRoute(): React.ReactElement {
     ),
   );
 
-  // One hook owns the list's two ends. New messages and streamed events follow the bottom only while
-  // the human is there; scrolled up, they land below the fold behind the scroll-to-bottom button
-  // instead of moving the viewport. At the other end, reaching the top pulls in the page before the
-  // loaded history and holds the viewport on what they were reading while it lands.
-  const stick = useStickToBottom([messages.data, liveEvents.length], {
-    ready: !messages.isLoading,
-    older: { hasOlder: messages.hasOlder, isLoadingOlder: messages.isLoadingOlder, loadOlder: messages.loadOlder },
-  });
-
   const ticketStatus = useCallback(
     (identifier: string) => {
       const t = tickets.data?.find((x) => x.identifier === identifier);
@@ -174,12 +165,37 @@ export function ChatRoute(): React.ReactElement {
 
   // Each message, followed by the dispatches its turn filed and the decisions it raised; work and
   // decisions with no anchor fall out.
-  const { entries, unattributed, unanchoredDecisions } = useMemo(
+  const { entries, unattributed } = useMemo(
     () => chatEntries(messages.data ?? [], tickets.data ?? [], workers.data ?? [], decisions.data ?? []),
     [messages.data, tickets.data, workers.data, decisions.data],
   );
-  // A decision below the conversation is a prompt, not a record: only the open ones belong there.
-  const waiting = useMemo(() => unanchoredDecisions.filter((d) => d.status === 'open'), [unanchoredDecisions]);
+  // Every open decision is pinned above the composer instead of sitting where it was asked, so one
+  // raised twenty messages ago is still the thing on screen. Oldest first: the longest wait reads
+  // first, and the order does not shuffle as answers come in.
+  const pinned = useMemo(
+    () =>
+      (decisions.data ?? [])
+        .filter((d) => d.status === 'open')
+        .sort((a, b) => (a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt))),
+    [decisions.data],
+  );
+  // Who is asking, for a card that no longer sits under the message that would have said so: the
+  // agent id settles it mid-turn, before the turn's message exists to anchor to.
+  const anchored = useMemo(() => new Set(entries.flatMap((e) => e.decisions.map((d) => d.id))), [entries]);
+  const askedByConductor = useCallback(
+    (d: Decision) => (conductorId !== null && d.askedByAgentId === conductorId) || anchored.has(d.id),
+    [conductorId, anchored],
+  );
+
+  // One hook owns the list's two ends. New messages and streamed events follow the bottom only while
+  // the human is there; scrolled up, they land below the fold behind the scroll-to-bottom button
+  // instead of moving the viewport. At the other end, reaching the top pulls in the page before the
+  // loaded history and holds the viewport on what they were reading while it lands. The pinned area
+  // counts as content too: it takes height off the list, so the newest message must be re-reached.
+  const stick = useStickToBottom([messages.data, liveEvents.length, pinned.length], {
+    ready: !messages.isLoading,
+    older: { hasOlder: messages.hasOlder, isLoadingOlder: messages.isLoadingOlder, loadOlder: messages.loadOlder },
+  });
 
   const answerDecision = (id: string, a: { key?: string; text?: string }): void =>
     answer.mutate(
@@ -296,17 +312,21 @@ export function ChatRoute(): React.ReactElement {
                       onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
                     />
                   ))}
-                  {entry.decisions.map((d) => (
-                    <DecisionCard
-                      key={d.id}
-                      decision={d}
-                      asker="conductor"
-                      ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
-                      busy={answer.isPending}
-                      plan={<PlanPreview decision={d} />}
-                      onAnswer={(a) => answerDecision(d.id, a)}
-                    />
-                  ))}
+                  {/* Answered here, open below: an open card is pinned above the composer, and the
+                      record of what was decided takes its place here once it has been answered. */}
+                  {entry.decisions
+                    .filter((d) => d.status !== 'open')
+                    .map((d) => (
+                      <DecisionCard
+                        key={d.id}
+                        decision={d}
+                        asker="conductor"
+                        ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
+                        busy={answer.isPending}
+                        plan={<PlanPreview decision={d} />}
+                        onAnswer={(a) => answerDecision(d.id, a)}
+                      />
+                    ))}
                 </div>
               ))
             )}
@@ -333,24 +353,32 @@ export function ChatRoute(): React.ReactElement {
               </div>
             ) : null}
 
-            {/* decisions no message in this thread accounts for: a worker's question, or one raised
-                in a turn that never replied. Anchored ones sit in the conversation above. */}
-            {waiting.map((d) => (
+            <div ref={stick.bottomRef} />
+          </div>
+        </PageBody>
+        {stick.atBottom ? null : <ScrollToBottomButton unread={stick.unread} onClick={stick.toBottom} />}
+      </div>
+
+      {/* Outside the scrolling body, so nothing the human has to answer can be scrolled away, and the
+          follow-the-bottom button keeps the list it belongs to. Capped and scrolled internally: a pile
+          of open decisions must never push the composer off screen. */}
+      {pinned.length ? (
+        <section aria-label="Open decisions" className="ac-scroll max-h-[45svh] flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-7">
+          <div className="mx-auto flex max-w-3xl flex-col gap-3">
+            {pinned.map((d) => (
               <DecisionCard
                 key={d.id}
                 decision={d}
+                {...(askedByConductor(d) ? { asker: 'conductor' as const } : {})}
                 ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
                 busy={answer.isPending}
                 plan={<PlanPreview decision={d} />}
                 onAnswer={(a) => answerDecision(d.id, a)}
               />
             ))}
-
-            <div ref={stick.bottomRef} />
           </div>
-        </PageBody>
-        {stick.atBottom ? null : <ScrollToBottomButton unread={stick.unread} onClick={stick.toBottom} />}
-      </div>
+        </section>
+      ) : null}
 
       <div className="flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-7">
         <div className="mx-auto max-w-3xl">

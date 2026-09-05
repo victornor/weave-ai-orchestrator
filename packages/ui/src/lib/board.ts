@@ -101,6 +101,46 @@ export function ticketBoardStatus(
 
 export const ALL_TICKET_STATUSES = TICKET_STATUSES;
 
+/* ------------------------------------------------------------ finished tickets
+ * The Done column is there by default, so it has to be a window rather than the whole
+ * history: what landed in the last week, capped so a busy day cannot bury the board.
+ * "Show all" widens it to every terminal ticket the query returned.
+ */
+
+export type FinishedMode = 'recent' | 'all' | 'hide';
+
+export const RECENT_FINISHED_DAYS = 7;
+export const RECENT_FINISHED_MAX = 20;
+
+export type Finishable = Pick<Ticket, 'completedAt' | 'cancelledAt' | 'updatedAt'>;
+
+/** When a ticket reached done or cancelled. `updatedAt` covers rows finished before those columns were written. */
+export function finishedAt(t: Finishable): string {
+  return t.completedAt ?? t.cancelledAt ?? t.updatedAt;
+}
+
+/** The finished tickets shown by default: the last {@link RECENT_FINISHED_DAYS} days, at most {@link RECENT_FINISHED_MAX}, newest first. */
+export function recentlyFinished<T extends Finishable>(tickets: readonly T[], now: Date = new Date()): T[] {
+  const cutoff = new Date(now.getTime() - RECENT_FINISHED_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  return tickets
+    .filter((t) => finishedAt(t) >= cutoff)
+    .sort((a, b) => finishedAt(b).localeCompare(finishedAt(a)))
+    .slice(0, RECENT_FINISHED_MAX);
+}
+
+/** `?done=` round-trip. The historical `1` meant "every finished ticket" and keeps that meaning. */
+export function finishedModeFromSearch(value: string | number | undefined): FinishedMode {
+  const v = String(value ?? '');
+  if (v === '1' || v === 'all') return 'all';
+  if (v === '0' || v === 'hide') return 'hide';
+  return 'recent';
+}
+
+/** The `?done=` value for a mode; `undefined` for the default, so the URL stays clean. */
+export function finishedModeSearch(mode: FinishedMode): string | undefined {
+  return mode === 'recent' ? undefined : mode === 'all' ? '1' : '0';
+}
+
 export interface BoardColumn<T> {
   key: BoardColumnKey;
   label: string;
@@ -111,7 +151,7 @@ export interface BoardColumn<T> {
 
 const ORDER = new Map<TicketStatus, number>(TICKET_STATUSES.map((s, i) => [s, i]));
 
-export function foldBoard<T extends Pick<Ticket, 'id' | 'status' | 'priority' | 'updatedAt'>>(
+export function foldBoard<T extends Pick<Ticket, 'id' | 'status' | 'priority' | 'updatedAt'> & Finishable>(
   tickets: readonly T[],
   live?: LiveLookup,
 ): Array<BoardColumn<T>> {
@@ -123,6 +163,11 @@ export function foldBoard<T extends Pick<Ticket, 'id' | 'status' | 'priority' | 
   }
   const prio = { critical: 0, high: 1, medium: 2, low: 3 } as const;
   for (const c of cols) {
+    // Done is a timeline, not a queue: priority stops meaning anything once a ticket has landed.
+    if (c.key === 'done') {
+      c.items.sort((a, b) => finishedAt(b).localeCompare(finishedAt(a)));
+      continue;
+    }
     c.items.sort((a, b) => {
       const p = prio[a.priority] - prio[b.priority];
       if (p !== 0) return p;

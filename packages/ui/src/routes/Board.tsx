@@ -14,7 +14,17 @@ import { MergeQueuePanel } from '../components/MergeQueue';
 import { useMergeQueue, useProjects, useRoles, useTickets, useWorkers } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
-import { filterTickets, foldBoard, isFolded, liveWorkersByTicket, ticketBoardStatus } from '../lib/board';
+import type { FinishedMode } from '../lib/board';
+import {
+  filterTickets,
+  finishedModeFromSearch,
+  finishedModeSearch,
+  foldBoard,
+  isFolded,
+  liveWorkersByTicket,
+  recentlyFinished,
+  ticketBoardStatus,
+} from '../lib/board';
 import { useListNav } from '../lib/hotkeys';
 import { ago, statusText } from '../lib/format';
 import { cx } from '../lib/cx';
@@ -26,9 +36,9 @@ export function BoardRoute(): React.ReactElement {
   const go = useGo();
   const search = useSearch({ strict: false }) as Record<string, string | undefined>;
   const [view, setView] = useState<View>('kanban');
-  // Finished tickets stay out of the way until asked for; `?done=1` keeps the choice in the URL.
-  // The router parses `?done=1` as the number 1, so compare as text.
-  const [showDone, setShowDone] = useState<boolean>(String(search['done'] ?? '') === '1');
+  // The Done column is on by default, showing what landed recently; `?done=` keeps the choice in
+  // the URL, and `1` still means the whole terminal history it always did.
+  const [finished, setFinished] = useState<FinishedMode>(finishedModeFromSearch(search['done']));
   const [project, setProject] = useState<string | undefined>(search['project']);
   // The sidebar links to /board?project=…; a second click on another project must re-filter, not be ignored.
   useEffect(() => { setProject(search['project']); }, [search['project']]);
@@ -37,7 +47,10 @@ export function BoardRoute(): React.ReactElement {
   const [priority, setPriority] = useState<string | undefined>();
   const [status, setStatus] = useState<TicketStatus | undefined>();
 
-  const tickets = useTickets({ limit: 300, ...(showDone ? { includeTerminal: true } : {}) });
+  const tickets = useTickets({ limit: 300 });
+  // Finished tickets come from their own query: folded into the 300 active ones they would be
+  // ordered by ticket number, and a busy project would push what landed today off the end.
+  const finishedTickets = useTickets({ status: 'done,cancelled', limit: 100, sort: 'finished' }, { enabled: finished !== 'hide' });
   const projects = useProjects();
   const roles = useRoles();
   // Worker liveness is what the columns are really about; the worker events the stream already
@@ -46,12 +59,27 @@ export function BoardRoute(): React.ReactElement {
   // The merge queue is per project, so it is shown once the board is filtered to one (PLAN §11.4).
   const mergeQueue = useMergeQueue(project);
 
+  // `recent` is a window on what the query returned; `all` is everything it returned.
+  const shownFinished = useMemo(() => {
+    if (finished === 'hide') return [];
+    const all = finishedTickets.data ?? [];
+    return finished === 'all' ? all : recentlyFinished(all);
+  }, [finished, finishedTickets.data]);
   const filtered = useMemo(
-    () => filterTickets(tickets.data ?? [], { project, role, kind, priority, status }),
-    [tickets.data, project, role, kind, priority, status],
+    () => filterTickets([...(tickets.data ?? []), ...shownFinished], { project, role, kind, priority, status }),
+    [tickets.data, shownFinished, project, role, kind, priority, status],
   );
   const live = useMemo(() => liveWorkersByTicket(workers.data ?? []), [workers.data]);
-  const columns = useMemo(() => foldBoard(filtered, live).filter((c) => showDone || c.key !== 'done'), [filtered, live, showDone]);
+  const columns = useMemo(
+    () => foldBoard(filtered, live).filter((c) => finished !== 'hide' || c.key !== 'done'),
+    [filtered, live, finished],
+  );
+  const hasFinished = useMemo(() => filtered.some((t) => t.status === 'done' || t.status === 'cancelled'), [filtered]);
+
+  const chooseFinished = (mode: FinishedMode): void => {
+    setFinished(mode);
+    go('/w/$ws/board', { params: { ws }, search: { ...search, done: finishedModeSearch(mode) }, replace: true });
+  };
 
   const nav = useListNav(filtered.length, {
     onOpen: (i) => {
@@ -78,14 +106,16 @@ export function BoardRoute(): React.ReactElement {
         title="Board"
         actions={
           <div className="flex items-center gap-2">
+            <span className="hidden text-micro text-text-3 md:inline">Finished</span>
             <Segmented
-              ariaLabel="Which tickets"
+              ariaLabel="Finished tickets"
               options={[
-                { value: 'active', label: 'Active' },
+                { value: 'recent', label: 'Recent' },
                 { value: 'all', label: 'All' },
+                { value: 'hide', label: 'Hidden' },
               ]}
-              value={showDone ? 'all' : 'active'}
-              onChange={(v) => { const on = v === 'all'; setShowDone(on); go('/w/$ws/board', { params: { ws }, search: { ...search, done: on ? '1' : undefined }, replace: true }); }}
+              value={finished}
+              onChange={chooseFinished}
             />
             <Segmented
               className="hidden md:flex"
@@ -158,6 +188,18 @@ export function BoardRoute(): React.ReactElement {
                         <StatusGlyph status={c.status} size="xs" />
                         <h2 className="text-micro font-medium text-text-soft">{c.label}</h2>
                         <span className="ac-mono text-nano text-text-4">{c.items.length}</span>
+                        {c.key === 'done' && finished === 'recent' ? (
+                          <>
+                            <div className="flex-1" />
+                            <button
+                              type="button"
+                              onClick={() => chooseFinished('all')}
+                              className="text-nano text-text-3 transition-colors duration-(--dur-fast) ease-ac hover:text-accent-link"
+                            >
+                              show all
+                            </button>
+                          </>
+                        ) : null}
                       </header>
                       <div className="ac-scroll flex flex-col gap-2 px-2 pb-4">
                         {c.items.map((t) => (
@@ -189,7 +231,7 @@ export function BoardRoute(): React.ReactElement {
                     { key: 'title', header: 'Title', render: (t) => <span className="text-text-1">{t.title}</span> },
                     { key: 'kind', header: 'Kind', width: '6rem', render: (t) => <Badge>{t.kind}</Badge> },
                     { key: 'priority', header: 'Priority', width: '6rem', mono: true, render: (t) => t.priority },
-                    ...(showDone ? [{ key: 'outcome', header: 'Outcome', width: '9rem', render: (t: Ticket) => <OutcomeChip ticket={t} /> }] : []),
+                    ...(hasFinished ? [{ key: 'outcome', header: 'Outcome', width: '9rem', render: (t: Ticket) => <OutcomeChip ticket={t} /> }] : []),
                     { key: 'age', header: 'Age', width: '5rem', align: 'right', mono: true, render: (t) => ago(t.updatedAt) },
                   ]}
                 />

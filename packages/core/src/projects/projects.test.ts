@@ -175,6 +175,28 @@ describe('projects', () => {
     expect(row.errorText).toBeTruthy();
   });
 
+  it('contains a detached add that fails instead of raising it out of the process', async () => {
+    // `startAdd` answers before the pipeline runs, so nothing awaits the promise: an add that fails
+    // has to end on the records and in the log, never as an unhandled rejection (VS-53).
+    const escaped: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => { escaped.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const { project, jobId } = projects.startAdd(HUMAN, quick('/definitely/not/a/repo', { id: 'ghost' }));
+      const job = await settled(jobId);
+      // Node reports an unhandled rejection at the end of the turn it went unhandled in; give it two.
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+
+      expect(escaped).toEqual([]);
+      expect(job.state).toBe('failed');
+      expect(job.message).toMatch(/git clone failed/);
+      expect(projects.get(project.id).status).toBe('error');
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('retries a failed add against the clone already on disk', async () => {
     const src = await sourceRepo();
     const first = await settled(projects.startAdd(HUMAN, quick(src)).jobId);

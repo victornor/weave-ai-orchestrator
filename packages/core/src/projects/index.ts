@@ -145,6 +145,18 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
   }
 
   /**
+   * `startAdd` and `retryAdd` answer before the pipeline finishes, so nothing awaits what `runAdd`
+   * returns. By the time it rejects the failure is already on both records and in the log — its own
+   * catch block does that before re-throwing, for the sake of `add`, which does await it — so all
+   * that is left here is to absorb the rejection instead of letting it escape the process as an
+   * unhandled one. Nothing is drained at shutdown: an add is minutes of cloning, and a daemon that
+   * waited for it would hang; a job left running by a stopped daemon is settled at the next startup.
+   */
+  function detach(slug: string, p: Promise<void>): void {
+    p.catch((e: unknown) => log.debug({ project: slug, err: String(e) }, 'detached project add failed'));
+  }
+
+  /**
    * The pipeline itself, one sub-step at a time (PROJECT_ADD_STEPS). Every failure lands on both
    * records — the job names the sub-step, the project keeps the error text — and the project only
    * becomes `ready` once all of it has run.
@@ -244,7 +256,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
      */
     startAdd(actor: Actor, rawCfg: ProjectConfig): { project: Project; jobId: string } {
       const { project, cfg, jobId } = createRow(actor, rawCfg);
-      void runAdd(project.id, cfg, jobId, actor);
+      detach(cfg.id, runAdd(project.id, cfg, jobId, actor));
       return { project, jobId };
     },
 
@@ -255,7 +267,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       const cfg = configFor(project);
       ctx.db.update('projects', project.id, { status: 'cloning', errorText: null, updatedAt: nowIso() });
       const job = deps().jobs.start('project_add', { type: 'project', id: project.id }, actor);
-      void runAdd(project.id, cfg, job.id, actor);
+      detach(cfg.id, runAdd(project.id, cfg, job.id, actor));
       return { project: get(project.id), jobId: job.id };
     },
 

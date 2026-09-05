@@ -19,7 +19,6 @@ export interface WorkspaceNavProps {
   needsCount: number;
   /** The active workspace's projects. A non-active workspace's are not loaded, so none are shown. */
   projects: Project[];
-  updateAvailable: boolean;
   onNewWorkspace: () => void;
 }
 
@@ -39,7 +38,7 @@ function Chevron({ open }: { open: boolean }): React.ReactElement {
  * with plain data instead of the wholesale `api/hooks` mock the shell's own test needs.
  */
 export function WorkspaceNav({
-  workspaces, activeWs, activePath, expanded, onToggle, needsCount, projects, updateAvailable, onNewWorkspace,
+  workspaces, activeWs, activePath, expanded, onToggle, needsCount, projects, onNewWorkspace,
 }: WorkspaceNavProps): React.ReactElement {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -75,9 +74,6 @@ export function WorkspaceNav({
                         <span className={cx('size-1.5 rounded-r4', current ? 'bg-needs-you' : 'bg-line-3')} aria-hidden />
                         <span className="flex-1 text-meta">{item.label}</span>
                         {item.key === 'needs' && count > 0 ? <span className="ac-mono text-nano text-needs-you">{count}</span> : null}
-                        {item.key === 'settings' && active && updateAvailable ? (
-                          <span role="status" aria-label="Daemon update available" title="Daemon update available" className="size-1.5 rounded-pill bg-needs-you" />
-                        ) : null}
                         {/* The number keys reach the active workspace only, so only it is hinted. */}
                         {active ? <span className="ac-mono text-nano text-text-4">{item.kbd}</span> : null}
                       </A>

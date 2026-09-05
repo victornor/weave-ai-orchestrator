@@ -110,9 +110,14 @@ Notifications: opt-in browser permission prompt phrased in outcomes; Settings to
 
 Updates (Settings → Updates, PLAN §20): the running version, commit and release directory; the source at
 its ref and the target commit; **Check again**, and **Upgrade** only when an update is actually available.
-A `size-1.5` `bg-needs-you` dot sits on the rail's Settings entry when one is — and nothing at all when the
-daemon is up to date, when `upgrade.source` is not configured (an EmptyState naming what to set), or when
-the check itself failed (the reason, no action). A requested upgrade reads as pending, never as done: the
+When one is, the rail carries a self-contained block between Start Work and the workspace list — a `size-1.5`
+`bg-needs-you` dot, "Update available", the ref and short target sha in `ac-mono`, and an "Open Updates"
+link to `settings?section=updates`, on `bg-accent-tint` inside `border-accent-edge`. While an upgrade is in
+flight the same block reads "Upgrading the daemon" with the stage and a `bg-merging` dot. On a phone it is
+a dot on the More tab, positioned out of flow like the Needs-you count, plus the same block at the top of
+Settings until Updates is the section shown. Nothing at all when the daemon is up to date, when
+`upgrade.source` is not configured (an EmptyState naming what to set), or when the check itself failed (the
+reason, no action). One fact, one entry: no second indicator anywhere. A requested upgrade reads as pending, never as done: the
 stage line, what it is waiting for while running turns finish, the build's log tail in a scrolling `pre`,
 and **Cancel upgrade** only while the state is `queued` or `waiting`. During `restarting` — including
 while the daemon is unreachable, which is the restart rather than an error — it says so and reconnects on

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
@@ -37,10 +37,10 @@ import { qk } from '../api/keys';
 import type { PresentationBlock } from '@agent-conductor/shared';
 import type { TotpSetup } from '../api/types';
 import { useWs } from '../api/context';
-import { useGo } from '../app/link';
+import { useGo, useSearchParams } from '../app/link';
 import { useTheme } from '../lib/theme';
 import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
-import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, shortSha } from '../lib/upgrade';
+import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, shortSha, updateEntry, updateEntryLabel } from '../lib/upgrade';
 import { cx } from '../lib/cx';
 import { workspaceYolo } from '../lib/yolo';
 
@@ -55,13 +55,49 @@ const SECTIONS = [
   { key: 'updates', label: 'Updates' },
 ] as const;
 
+/** A section is addressed by key, never by position, so `?section=updates` survives a reshuffle. */
+function sectionFromSearch(raw: string | undefined): string {
+  return SECTIONS.some((s) => s.key === raw) ? (raw as string) : 'workspace';
+}
+
 export function SettingsRoute(): React.ReactElement {
-  const [section, setSection] = useState<string>('workspace');
+  const ws = useWs();
+  const go = useGo();
+  const search = useSearchParams();
+  // The URL is the entry point and the tabs write back to it, but the tab click stays local state so
+  // the section switches on the click rather than a router round-trip. Same shape as the board filters.
+  const [section, setSection] = useState<string>(() => sectionFromSearch(search['section']));
+  useEffect(() => { setSection(sectionFromSearch(search['section'])); }, [search['section']]);
+  const choose = (key: string): void => {
+    setSection(key);
+    go('/w/$ws/settings', { params: { ws }, search: { ...search, section: key }, replace: true });
+  };
+
+  const update = useDaemonUpdate();
+  const upgrade = useDaemonUpgrade();
+  const entry = updateEntry(update.data, upgrade.data?.upgrade ?? null);
+
   return (
     <Page>
-      <PageHeader title="Settings" tabs={<Tabs items={SECTIONS} active={section} onChange={setSection} className="px-3 md:px-4" />} />
+      <PageHeader title="Settings" tabs={<Tabs items={SECTIONS} active={section} onChange={choose} className="px-3 md:px-4" />} />
       <PageBody className="p-4 md:p-5">
         <div className="mx-auto max-w-3xl">
+          {/* Phone only: the rail block carries this on desktop, and one fact gets one entry. */}
+          {entry && section !== 'updates' ? (
+            <button
+              type="button"
+              onClick={() => choose('updates')}
+              aria-label={updateEntryLabel(entry)}
+              className="mb-4 flex w-full items-center gap-2.5 rounded-r6 border border-accent-edge bg-accent-tint px-3.5 py-2.5 text-left md:hidden"
+            >
+              <span className={cx('size-1.5 flex-none rounded-pill', entry.state === 'upgrading' ? 'bg-merging' : 'bg-needs-you')} aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block text-meta font-medium text-text-1">{entry.title}</span>
+                <span className="ac-mono block truncate text-nano text-text-3">{entry.detail}</span>
+              </span>
+              <span className="flex-none text-micro font-medium text-accent-link">Open Updates</span>
+            </button>
+          ) : null}
           {section === 'workspace' ? <WorkspaceSection /> : null}
           {section === 'projects' ? <ProjectsSection /> : null}
           {section === 'conductor' ? <ConductorSection /> : null}

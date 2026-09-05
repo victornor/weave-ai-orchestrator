@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 
 export interface AProps {
   to: string;
@@ -24,4 +24,9 @@ export type Go = (to: string, opts?: { params?: Record<string, unknown>; search?
 export function useGo(): Go {
   const nav = useNavigate();
   return (to, opts) => void (nav as unknown as (o: Record<string, unknown>) => void)({ to, ...(opts ?? {}) });
+}
+
+/** The current URL search, loosened the same way `A` is: every route validates search by passthrough. */
+export function useSearchParams(): Record<string, string | undefined> {
+  return useSearch({ strict: false }) as Record<string, string | undefined>;
 }

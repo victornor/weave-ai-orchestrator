@@ -4,12 +4,16 @@ import type { NavItem } from './nav';
 import { href } from './nav';
 import { NavGlyph } from './NavGlyph';
 import { PlusGlyph } from './PlusGlyph';
+import { updateEntryLabel } from '../lib/upgrade';
+import type { UpdateEntry } from '../lib/upgrade';
 import { cx } from '../lib/cx';
 
 export interface BottomBarProps {
   ws: string;
   items: NavItem[];
   needsCount: number;
+  /** The daemon's release state, when there is something to say about it; badged on More. */
+  update?: UpdateEntry | null;
   isActive: (to: string) => boolean;
   onStartWork: () => void;
 }
@@ -21,7 +25,7 @@ export interface BottomBarProps {
  * button's lower half and the tab row share one column at the bar centre; the
  * two offsets have to be read together, and the test reads them off the DOM.
  */
-export function BottomBar({ ws, items, needsCount, isActive, onStartWork }: BottomBarProps): React.ReactElement {
+export function BottomBar({ ws, items, needsCount, update, isActive, onStartWork }: BottomBarProps): React.ReactElement {
   return (
     <nav
       aria-label="Sections"
@@ -36,6 +40,13 @@ export function BottomBar({ ws, items, needsCount, isActive, onStartWork }: Bott
             <span className={cx('text-nano font-medium', active ? 'text-text-1' : 'text-text-nav')}>{item.label}</span>
             {item.key === 'needs' && needsCount > 0 ? (
               <span className="ac-mono absolute -top-1 right-1/4 rounded-pill bg-needs-you px-1 text-nano text-bg-0">{needsCount}</span>
+            ) : null}
+            {/* Absolutely positioned, like the Needs-you count: the bar's geometry is unchanged. */}
+            {item.key === 'more' && update ? (
+              <span
+                aria-label={updateEntryLabel(update)}
+                className={cx('absolute -top-1 right-1/4 size-1.5 rounded-pill', update.state === 'upgrading' ? 'bg-merging' : 'bg-needs-you')}
+              />
             ) : null}
           </A>
         );

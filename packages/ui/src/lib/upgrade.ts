@@ -46,3 +46,27 @@ export const upgradePollInterval = (state: UpgradeState | undefined | null): num
   (!state || isTerminalUpgrade(state) ? false : UPGRADE_POLL_MS);
 
 export const shortSha = (sha: string | null | undefined): string => (sha ? sha.slice(0, 10) : '—');
+
+/**
+ * What the navigation says about the daemon's release, if anything: the sidebar entry and the phone
+ * badge are the same fact and are derived here once. An upgrade in flight wins over an available
+ * update — once one is queued, "update available" is no longer the thing to say.
+ */
+export interface UpdateEntry {
+  state: 'available' | 'upgrading';
+  title: string;
+  /** The target the entry is about: the ref and commit, or the stage the upgrade is in. */
+  detail: string;
+}
+
+export const updateEntry = (status: UpdateStatus | undefined, upgrade: Upgrade | null | undefined): UpdateEntry | null => {
+  if (upgrade && inFlight(upgrade)) {
+    return { state: 'upgrading', title: 'Upgrading the daemon', detail: UPGRADE_STAGE_LABEL[upgrade.state] };
+  }
+  if (!showsUpdateIndicator(status)) return null;
+  return { state: 'available', title: 'Update available', detail: `${status?.ref ?? '?'} · ${shortSha(status?.targetSha)}` };
+};
+
+/** One accessible name per state, so the entry and the phone badge announce the same thing. */
+export const updateEntryLabel = (entry: UpdateEntry): string =>
+  (entry.state === 'upgrading' ? 'Daemon upgrade in progress' : 'Daemon update available');

@@ -33,7 +33,6 @@ function nav(over: Partial<React.ComponentProps<typeof WorkspaceNav>> = {}): Rea
       onToggle={vi.fn()}
       needsCount={0}
       projects={[]}
-      updateAvailable={false}
       onNewWorkspace={vi.fn()}
       {...over}
     />

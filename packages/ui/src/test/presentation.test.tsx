@@ -10,7 +10,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
-vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
+vi.mock('../app/link', () => ({ useGo: () => vi.fn(), useSearchParams: () => ({}) }));
 vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
@@ -24,6 +24,8 @@ vi.mock('../api/hooks', () => ({
   useWorkspaceSummary: () => ({ data: undefined, isLoading: false }),
   useWorkspaces: () => ({ data: [] }),
   usePatchConfig: () => ({ mutate: vi.fn(), isPending: false }),
+  useDaemonUpdate: () => ({ data: undefined, isLoading: false, isError: false, refetch: vi.fn() }),
+  useDaemonUpgrade: () => ({ data: undefined, isError: false }),
 }));
 
 const { SettingsRoute } = await import('../routes/Settings');

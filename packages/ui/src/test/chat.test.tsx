@@ -85,6 +85,7 @@ function ev(over: Partial<RunEvent> & Pick<RunEvent, 'id' | 'seq' | 'type'>): Ru
 function message(over: Partial<ThreadMessage> & Pick<ThreadMessage, 'id' | 'body'>): ThreadMessage {
   return {
     threadId: 'th_1', direction: 'outbound', authorKind: 'agent', authorId: 'ag_conductor', runId: 'run_1', projectId: null,
+    replyToMessageId: null, replyToExcerpt: null,
     parts: [], externalMessageId: null, deliveryStatus: 'delivered', createdAt: '2026-09-01T09:00:00.000Z', ...over,
   };
 }
@@ -431,6 +432,118 @@ describe('project context', () => {
     state.messages = [message({ id: 'm1', body: 'old message', direction: 'inbound', projectId: 'p_gone' })];
     render(<ChatRoute />);
     expect(screen.getByText('old message').parentElement!.parentElement!).toHaveTextContent('p_gone');
+  });
+});
+
+describe('ChatRoute reply reference', () => {
+  const sent = (body: string): void => {
+    const box = screen.getByLabelText('Message the conductor…');
+    fireEvent.change(box, { target: { value: body } });
+    fireEvent.click(screen.getByLabelText('Send'));
+  };
+  const replyControls = (): HTMLElement[] => screen.queryAllByLabelText('Reply to this message');
+  /** The quote above the input, which is the one inside the composer's scope slot. */
+  const quote = (): HTMLElement | null => screen.queryByText('Replying to the conductor');
+
+  beforeEach(() => {
+    state.messages = [
+      message({ id: 'm1', body: 'Should I ship it behind a flag?' }),
+      message({ id: 'm2', body: 'and here is an unrelated note' }),
+      message({ id: 'm3', body: 'my own message', direction: 'inbound', authorKind: 'human' }),
+    ];
+  });
+
+  it('offers a reply control on conductor messages and not on the human’s own', () => {
+    render(<ChatRoute />);
+    expect(replyControls()).toHaveLength(2);
+    const mine = screen.getByText('my own message').parentElement!.parentElement!;
+    expect(mine.querySelector('[aria-label="Reply to this message"]')).toBeNull();
+  });
+
+  it('offers no reply control on a thread with no conductor messages, and still sends', () => {
+    state.messages = [message({ id: 'm3', body: 'only mine', direction: 'inbound', authorKind: 'human' })];
+    render(<ChatRoute />);
+    expect(replyControls()).toHaveLength(0);
+    sent('still works');
+    expect(state.posted).toEqual([{ threadId: 'th_1', body: 'still works', projectId: null }]);
+  });
+
+  it('quotes the chosen message above the input', () => {
+    render(<ChatRoute />);
+    expect(quote()).toBeNull();
+    fireEvent.click(replyControls()[0]!);
+    expect(quote()).not.toBeNull();
+    expect(quote()!.parentElement!).toHaveTextContent('Should I ship it behind a flag?');
+  });
+
+  it('replaces the quote rather than accumulating when another message is chosen', () => {
+    render(<ChatRoute />);
+    fireEvent.click(replyControls()[0]!);
+    fireEvent.click(replyControls()[1]!);
+
+    expect(screen.getAllByText('Replying to the conductor')).toHaveLength(1);
+    expect(quote()!.parentElement!).toHaveTextContent('and here is an unrelated note');
+    sent('about that one');
+    expect(state.posted[0]).toMatchObject({ replyToMessageId: 'm2' });
+  });
+
+  it('sends with no reference after the quote is dismissed', () => {
+    render(<ChatRoute />);
+    fireEvent.click(replyControls()[0]!);
+    fireEvent.click(screen.getByLabelText('Dismiss reply'));
+
+    expect(quote()).toBeNull();
+    sent('never mind');
+    expect(state.posted).toEqual([{ threadId: 'th_1', body: 'never mind', projectId: null }]);
+  });
+
+  it('sends the reference, then clears the quote so the next message carries none', () => {
+    render(<ChatRoute />);
+    fireEvent.click(replyControls()[0]!);
+    sent('yes, do it');
+
+    expect(state.posted[0]).toEqual({ threadId: 'th_1', body: 'yes, do it', projectId: null, replyToMessageId: 'm1' });
+    expect(quote()).toBeNull();
+
+    sent('and something else');
+    expect(state.posted[1]).toEqual({ threadId: 'th_1', body: 'and something else', projectId: null });
+  });
+
+  it('keeps the reference on a message queued while offline, and clears the quote', () => {
+    state.connection = 'offline';
+    render(<ChatRoute />);
+    fireEvent.click(replyControls()[0]!);
+    sent('later then');
+
+    expect(state.posted).toHaveLength(0);
+    expect(vi.mocked(enqueue).mock.calls[0]?.[0]).toMatchObject({
+      path: '/threads/th_1/messages',
+      body: { body: 'later then', replyToMessageId: 'm1' },
+    });
+    expect(quote()).toBeNull();
+  });
+
+  it('shows the quote on a sent message, and nothing on one that carried none', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'Should I ship it behind a flag?' }),
+      message({ id: 'm2', body: 'yes, do it', direction: 'inbound', authorKind: 'human', replyToMessageId: 'm1', replyToExcerpt: 'Should I ship it behind a flag?' }),
+      message({ id: 'm3', body: 'unprompted', direction: 'inbound', authorKind: 'human' }),
+    ];
+    render(<ChatRoute />);
+
+    const reply = screen.getByText('yes, do it').parentElement!.parentElement!;
+    expect(reply).toHaveTextContent('Should I ship it behind a flag?');
+    const plain = screen.getByText('unprompted').parentElement!.parentElement!;
+    expect(plain).not.toHaveTextContent('Should I ship it behind a flag?');
+  });
+
+  it('shows the quote from the message itself when the message it answers is not loaded', () => {
+    // The excerpt rides on the replying message, so a paged-out referent still renders.
+    state.messages = [
+      message({ id: 'm9', body: 'the second one', direction: 'inbound', authorKind: 'human', replyToMessageId: 'm_gone', replyToExcerpt: 'which one did you mean?' }),
+    ];
+    render(<ChatRoute />);
+    expect(screen.getByText('the second one').parentElement!.parentElement!).toHaveTextContent('which one did you mean?');
   });
 });
 

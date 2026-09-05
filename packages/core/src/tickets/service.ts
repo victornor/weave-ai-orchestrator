@@ -382,7 +382,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
             id, workspaceId: ws, projectId: input.projectId ?? null, number, identifier, kind: input.kind, title: input.title,
             description: input.description ?? '', status, priority: input.priority ?? 'medium', autoMerge: input.autoMerge ?? false,
             assigneeRoleId: input.assigneeRoleId ?? null, assigneeHuman: false, parentId: input.parentId ?? null,
-            createdByKind: actor.kind, createdById: actor.id, originKind: input.originKind ?? null,
+            createdByKind: actor.kind, createdById: actor.id, createdRunId: actor.runId ?? null, originKind: input.originKind ?? null,
             originFingerprint: input.originFingerprint ?? null, blockedTransitionAt: openBlockers.length ? now : null,
             createdAt: now, updatedAt: now,
           });

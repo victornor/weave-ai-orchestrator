@@ -4,6 +4,7 @@ import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } fro
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Composer } from '../components/Composer';
 import { DecisionCard } from '../components/DecisionCard';
+import { DispatchLabel } from '../components/DispatchLabel';
 import { WorkerChip, CommandChip } from '../components/Chips';
 import { Skeleton } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
@@ -24,6 +25,7 @@ import {
 } from '../api/hooks';
 import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
+import { chatEntries } from '../lib/dispatch';
 import { enqueue, useQueueCount } from '../lib/queue';
 import { useGo } from '../app/link';
 import { clock } from '../lib/format';
@@ -67,8 +69,9 @@ export function ChatRoute(): React.ReactElement {
   const post = usePostThreadMessage();
   const decisions = useDecisions({ status: 'open', owner: 'human' });
   const answer = useAnswerDecision();
-  const tickets = useTickets({ limit: 200 });
-  const workers = useWorkers({ status: 'running' });
+  // Terminal tickets and retired workers are exactly the dispatches whose labels must keep showing.
+  const tickets = useTickets({ limit: 200, includeTerminal: true });
+  const workers = useWorkers({ includeRetired: true });
   const projects = useProjects();
   const queuedCount = useQueueCount('thread');
   const conductor = useConductor();
@@ -129,6 +132,13 @@ export function ChatRoute(): React.ReactElement {
   );
 
   const openTicket = useCallback((identifier: string) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } }), [go, ws]);
+  const openWorker = useCallback((workerId: string) => go('/w/$ws/workers/$workerId', { params: { ws, workerId } }), [go, ws]);
+
+  // Each message, followed by the dispatches its turn filed; live work with no anchor falls out.
+  const { entries, unattributed } = useMemo(
+    () => chatEntries(messages.data ?? [], tickets.data ?? [], workers.data ?? []),
+    [messages.data, tickets.data, workers.data],
+  );
 
   const send = (text: string): void => {
     if (!threadId) return;
@@ -158,13 +168,15 @@ export function ChatRoute(): React.ReactElement {
   // Onboarding: the conductor's first-run interview is just Chat with a
   // progress bar, shown while the workspace has no projects.
   const onboarding = projects.isSuccess && (projects.data?.length ?? 0) === 0;
+  // The worker list is no longer filtered to running, so the header counts them itself.
+  const running = (workers.data ?? []).filter((w) => w.status === 'running').length;
   const answered = Math.min(5, (messages.data ?? []).filter((m) => m.direction === 'inbound').length);
 
   return (
     <Page>
       <PageHeader
         title="Conductor"
-        meta={`${workers.data?.length ?? 0} workers running · ${decisions.data?.length ?? 0} need you`}
+        meta={`${running} workers running · ${decisions.data?.length ?? 0} need you`}
         actions={<span className="ac-mono hidden text-micro text-text-nav md:block">/brief</span>}
       />
 
@@ -200,7 +212,20 @@ export function ChatRoute(): React.ReactElement {
               }
             />
           ) : (
-            (messages.data ?? []).map((m: ThreadMessage) => <ChatMessage key={m.id} message={m} onTicket={openTicket} ticketStatus={ticketStatus} />)
+            entries.map((entry) => (
+              <div key={entry.message.id} className="flex flex-col gap-2">
+                <ChatMessage message={entry.message} onTicket={openTicket} ticketStatus={ticketStatus} />
+                {entry.dispatches.map((d) => (
+                  <DispatchLabel
+                    key={d.ticket.id}
+                    identifier={d.ticket.identifier}
+                    name={d.worker?.name ?? d.ticket.title}
+                    status={d.status}
+                    onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
+                  />
+                ))}
+              </div>
+            ))
           )}
 
           {/* The turn in flight. Transient: it goes when the run finishes and the thread's
@@ -215,16 +240,12 @@ export function ChatRoute(): React.ReactElement {
             </section>
           ) : null}
 
-          {/* live worker chips */}
-          {(workers.data ?? []).length ? (
+          {/* Live work no message in this thread accounts for: a worker the human started, or a
+              ticket filed before the chat recorded creating runs. Everything else is a label above. */}
+          {unattributed.length ? (
             <div className="flex flex-wrap gap-2">
-              {(workers.data ?? []).map((w) => (
-                <WorkerChip
-                  key={w.id}
-                  name={w.name}
-                  status={agentUiStatus(w.status)}
-                  onClick={() => go('/w/$ws/workers/$workerId', { params: { ws, workerId: w.id } })}
-                />
+              {unattributed.map((w) => (
+                <WorkerChip key={w.id} name={w.name} status={agentUiStatus(w.status)} onClick={() => openWorker(w.id)} />
               ))}
             </div>
           ) : null}

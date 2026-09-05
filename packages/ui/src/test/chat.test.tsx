@@ -1,12 +1,17 @@
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RunEvent, ThreadMessage, WorkspaceEvent } from '@agent-conductor/shared';
+import type { Agent, RunEvent, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
+import { agent, ticket } from './factories';
 
 const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>() }));
 const state = vi.hoisted(() => ({
   conductor: { agent: { id: 'ag_conductor' }, lastRun: null as { id: string; status: string } | null },
   messages: [] as ThreadMessage[],
   persisted: [] as RunEvent[],
+  tickets: [] as Ticket[],
+  workers: [] as Agent[],
+  ticketQuery: null as Record<string, unknown> | null,
+  workerQuery: null as Record<string, unknown> | null,
 }));
 
 vi.mock('../api/context', async () => {
@@ -35,8 +40,8 @@ vi.mock('../api/hooks', () => ({
   usePostThreadMessage: () => ({ mutate: vi.fn() }),
   useDecisions: () => ({ data: [] }),
   useAnswerDecision: () => ({ mutate: vi.fn(), isPending: false }),
-  useTickets: () => ({ data: [] }),
-  useWorkers: () => ({ data: [] }),
+  useTickets: (p: Record<string, unknown>) => { state.ticketQuery = p; return { data: state.tickets }; },
+  useWorkers: (p: Record<string, unknown>) => { state.workerQuery = p; return { data: state.workers }; },
   useProjects: () => ({ data: [{ id: 'p1' }], isSuccess: true }),
 }));
 
@@ -85,6 +90,10 @@ beforeEach(() => {
   state.conductor = { agent: { id: 'ag_conductor' }, lastRun: null };
   state.messages = [];
   state.persisted = [];
+  state.tickets = [];
+  state.workers = [];
+  state.ticketQuery = null;
+  state.workerQuery = null;
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
@@ -167,5 +176,141 @@ describe('ChatRoute live turn', () => {
 
     expect(screen.queryByText('ac_human_send')).not.toBeInTheDocument();
     expect(screen.getAllByText(reply)).toHaveLength(1);
+  });
+});
+
+
+describe('ChatRoute dispatch labels', () => {
+  /** True when `a` comes before `b` in the rendered document. */
+  const precedes = (a: Element, b: Element): boolean =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  const dispatch = (over: Partial<Ticket> = {}): Ticket =>
+    ticket({ createdRunId: 'run_1', assigneeRoleId: 'r1', workerId: null, ...over });
+
+  const label = (identifier: string): HTMLElement =>
+    screen.getByRole('button', { name: new RegExp(`^${identifier}:`) });
+
+  it('asks for terminal tickets and retired workers, so a finished dispatch still reaches it', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    state.tickets = [dispatch({ id: 'tk_1', identifier: 'TST-1', status: 'done' })];
+    state.workers = [agent({ id: 'w1', ticketId: 'tk_1', name: 'Backend Engineer #1', status: 'retired' })];
+
+    render(<ChatRoute />);
+    expect(state.ticketQuery).toMatchObject({ includeTerminal: true });
+    expect(state.workerQuery).toMatchObject({ includeRetired: true });
+    expect(state.workerQuery).not.toHaveProperty('status');
+    expect(label('TST-1')).toBeInTheDocument();
+  });
+
+  it('renders the label directly after the message whose turn filed it', () => {
+    state.messages = [
+      message({ id: 'm0', body: 'Before the dispatch.', runId: 'run_0' }),
+      message({ id: 'm1', body: 'Filed it and put Ana on it.' }),
+      message({ id: 'm2', body: 'Anything else?', runId: 'run_2' }),
+    ];
+    state.tickets = [dispatch({ id: 'tk_1', identifier: 'TST-1' })];
+    state.workers = [agent({ id: 'w1', ticketId: 'tk_1', name: 'Backend Engineer #1', status: 'running' })];
+
+    render(<ChatRoute />);
+    const anchor = screen.getByText('Filed it and put Ana on it.');
+    const next = screen.getByText('Anything else?');
+    expect(precedes(anchor, label('TST-1'))).toBe(true);
+    expect(precedes(label('TST-1'), next)).toBe(true);
+    expect(screen.getByText('working')).toBeInTheDocument();
+  });
+
+  it('keeps its position when later messages arrive', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    state.tickets = [dispatch({ id: 'tk_1', identifier: 'TST-1' })];
+    state.workers = [agent({ id: 'w1', ticketId: 'tk_1', status: 'running' })];
+
+    const { rerender } = render(<ChatRoute />);
+    state.messages = [
+      ...state.messages,
+      message({ id: 'm2', body: 'And this one too?', direction: 'inbound', authorKind: 'human', runId: null }),
+      message({ id: 'm3', body: 'Filed that as well.', runId: 'run_2' }),
+    ];
+    state.tickets = [...state.tickets, dispatch({ id: 'tk_2', identifier: 'TST-2', createdRunId: 'run_2', createdAt: '2026-09-01T10:00:00.000Z' })];
+    rerender(<ChatRoute />);
+
+    // The first label did not slide to the bottom: it is still between its own message and the next.
+    expect(precedes(screen.getByText('Filed it.'), label('TST-1'))).toBe(true);
+    expect(precedes(label('TST-1'), screen.getByText('And this one too?'))).toBe(true);
+    expect(precedes(screen.getByText('Filed that as well.'), label('TST-2'))).toBe(true);
+  });
+
+  it('stays in place and switches to the outcome when the work ends', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    state.tickets = [dispatch({ id: 'tk_1', identifier: 'TST-1', status: 'in_progress' })];
+    state.workers = [agent({ id: 'w1', ticketId: 'tk_1', status: 'running' })];
+
+    const { rerender } = render(<ChatRoute />);
+    expect(screen.getByText('working')).toBeInTheDocument();
+
+    state.tickets = [dispatch({ id: 'tk_1', identifier: 'TST-1', status: 'done' })];
+    state.workers = [agent({ id: 'w1', ticketId: 'tk_1', status: 'retired' })];
+    rerender(<ChatRoute />);
+
+    expect(screen.queryByText('working')).not.toBeInTheDocument();
+    expect(screen.getByText('done')).toBeInTheDocument();
+    expect(precedes(screen.getByText('Filed it.'), label('TST-1'))).toBe(true);
+  });
+
+  it('shows a failed dispatch as failed', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    state.tickets = [dispatch({ id: 'tk_1', identifier: 'TST-1', status: 'cancelled' })];
+    state.workers = [agent({ id: 'w1', ticketId: 'tk_1', status: 'retired' })];
+
+    render(<ChatRoute />);
+    expect(screen.getByText('failed')).toBeInTheDocument();
+  });
+
+  it('gives every dispatch from one turn its own label, in the order they were filed', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed both.' })];
+    state.tickets = [
+      dispatch({ id: 'tk_2', identifier: 'TST-2', createdAt: '2026-09-01T09:00:02.000Z' }),
+      dispatch({ id: 'tk_1', identifier: 'TST-1', createdAt: '2026-09-01T09:00:01.000Z' }),
+    ];
+
+    render(<ChatRoute />);
+    expect(precedes(label('TST-1'), label('TST-2'))).toBe(true);
+  });
+
+  it('rebuilds the same labels from the same records on a fresh mount', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed it.' }), message({ id: 'm2', body: 'Anything else?', runId: 'run_2' })];
+    state.tickets = [dispatch({ id: 'tk_1', identifier: 'TST-1', status: 'done' })];
+    state.workers = [agent({ id: 'w1', ticketId: 'tk_1', status: 'retired' })];
+
+    const first = render(<ChatRoute />);
+    const before = first.container.innerHTML;
+    first.unmount();
+
+    // A reload is a fresh mount over the same persisted rows: same label, same place, same state.
+    const { container } = render(<ChatRoute />);
+    expect(container.innerHTML).toBe(before);
+    expect(precedes(screen.getByText('Filed it.'), label('TST-1'))).toBe(true);
+    expect(precedes(label('TST-1'), screen.getByText('Anything else?'))).toBe(true);
+    expect(screen.getByText('done')).toBeInTheDocument();
+  });
+
+  it('shows live work no message accounts for below the conversation, and nothing when there is none', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    state.tickets = [dispatch({ id: 'tk_1', identifier: 'TST-1' })];
+    state.workers = [
+      agent({ id: 'w1', ticketId: 'tk_1', name: 'Backend Engineer #1', status: 'running' }),
+      agent({ id: 'w2', ticketId: 'tk_loose', name: 'Backend Engineer #2', status: 'running' }),
+    ];
+
+    const { rerender } = render(<ChatRoute />);
+    expect(screen.getByRole('button', { name: /Backend Engineer #2/ })).toBeInTheDocument();
+    // The anchored worker is a label above, not also a chip below: it is on screen exactly once.
+    const anchored = screen.getAllByRole('button', { name: /Backend Engineer #1/ });
+    expect(anchored).toHaveLength(1);
+    expect(anchored[0]!.getAttribute('aria-label')).toMatch(/^TST-1:/);
+
+    state.workers = [state.workers[0]!];
+    rerender(<ChatRoute />);
+    expect(screen.queryByRole('button', { name: /Backend Engineer #2/ })).not.toBeInTheDocument();
   });
 });

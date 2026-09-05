@@ -102,6 +102,8 @@ export interface JobsService {
   onItem(handler: (item: JobStreamItem) => void): () => void;
   /** Startup: fail the jobs a previous process left running. */
   reconcile(): void;
+  /** Async: write every log tail still held in memory and cancel the timers waiting to do it. Never rejects; safe to call when idle and more than once. Drain before disposing of the workspace database. */
+  stop(): Promise<void>;
 }
 
 // ---------- projects / roles / agents ----------

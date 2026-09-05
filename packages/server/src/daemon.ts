@@ -136,6 +136,9 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
       await ws.services.dispatcher.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'dispatcher stop failed'));
       // Before the db closes below: the ticket service's post-merge follow-up work reads it.
       await ws.services.tickets.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'ticket follow-up drain failed'));
+      // Same reason: a running job's log tail is only in memory between flushes, and the timer that
+      // would write it must not fire against a closed database.
+      await ws.services.jobs.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'job log drain failed'));
       try { ws.services.supervisor.stop(); } catch (e) { log.warn({ err: e, ws: ws.id }, 'supervisor stop failed'); }
       await cancelRunningRuns(ws);
     }
@@ -245,6 +248,7 @@ function makeAdmin(
         try { ws.services.supervisor.stop(); } catch { /* ignore */ }
         try { await ws.channels?.stop(); } catch { /* ignore */ }
         try { await ws.webhooks?.stop(); } catch { /* ignore */ }
+        await ws.services.jobs.stop().catch(() => undefined);
         for (const [key, rt] of [...workspaces.entries()]) if (rt === ws) workspaces.delete(key);
         try { ws.ctx.db.close(); } catch { /* ignore */ }
       }

@@ -5,7 +5,7 @@ import { makeHarness, type Harness } from './fakes.js';
 
 let harness: Harness | null = null;
 let dispatcher: WebhookDispatcher | null = null;
-afterEach(async () => { await dispatcher?.stop(); dispatcher = null; harness?.close(); harness = null; });
+afterEach(async () => { await dispatcher?.stop(); dispatcher = null; await harness?.close(); harness = null; });
 
 interface Delivery { url: string; headers: Record<string, string>; body: string }
 

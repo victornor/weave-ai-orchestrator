@@ -9,8 +9,8 @@ import { authed, makeHarness, type Harness, type HarnessOptions } from './fakes.
 
 let harness: Harness | null = null;
 const tmps: string[] = [];
-afterEach(() => {
-  harness?.close(); harness = null;
+afterEach(async () => {
+  await harness?.close(); harness = null;
   while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true });
 });
 

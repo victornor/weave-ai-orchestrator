@@ -83,7 +83,8 @@ export interface Harness {
   tokens: Map<string, { sessionId: string; operatorId: string; kind: 'web' | 'cli' | 'presenter' }>;
   /** Live method tables behind the service proxies: mutate to stub a method mid-test. */
   impls: Record<string, Record<string, unknown>>;
-  close(): void;
+  /** Drains the real jobs service before closing the db: a pending log flush must not fire against it. */
+  close(): Promise<void>;
 }
 
 export interface HarnessOptions {
@@ -260,7 +261,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     updates, upgrades,
   };
 
-  return { runtime, deps, db, bus, calls, tickets, comments, documents, tokens, impls, close: () => db.close() };
+  return { runtime, deps, db, bus, calls, tickets, comments, documents, tokens, impls, close: async () => { await runtime.services.jobs.stop(); db.close(); } };
 }
 
 export const authed = (extra: Record<string, string> = {}): Record<string, string> => ({ authorization: 'Bearer sess-token', ...extra });

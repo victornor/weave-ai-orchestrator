@@ -3,7 +3,7 @@ import { createApp } from '../src/app.js';
 import { authed, makeHarness, ticket, type Harness } from './fakes.js';
 
 let harness: Harness | null = null;
-afterEach(() => { harness?.close(); harness = null; });
+afterEach(async () => { await harness?.close(); harness = null; });
 
 /** Reads SSE frames off a live stream until `count` `id:` lines have arrived, then cancels. */
 async function readFrames(res: Response, count: number, timeoutMs = 4000): Promise<string> {

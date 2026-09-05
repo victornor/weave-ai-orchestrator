@@ -8,7 +8,7 @@ import { createApp } from '../src/app.js';
 import { authed, makeHarness, type Harness } from './fakes.js';
 
 let harness: Harness | null = null;
-afterEach(() => { harness?.close(); harness = null; });
+afterEach(async () => { await harness?.close(); harness = null; });
 
 const HUMAN = { kind: 'human' as const, id: 'op1' };
 

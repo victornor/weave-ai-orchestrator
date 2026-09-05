@@ -6,7 +6,7 @@ import { makeHarness, decision, type Harness } from './fakes.js';
 
 let harness: Harness | null = null;
 let manager: ChannelManager | null = null;
-afterEach(async () => { await manager?.stop(); manager = null; harness?.close(); harness = null; });
+afterEach(async () => { await manager?.stop(); manager = null; await harness?.close(); harness = null; });
 
 /** Text-only adapter (no buttons) so `degrade()` is exercised on decision cards. */
 function fakeAdapter(): ChannelAdapter & { sent: OutboundMessage[]; inbound: ((m: InboundMessage) => Promise<void>) | null; fail: boolean } {

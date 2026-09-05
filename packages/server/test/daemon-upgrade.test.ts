@@ -5,7 +5,7 @@ import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import { authed, makeHarness, type Harness, type HarnessOptions } from './fakes.js';
 
 let harness: Harness | null = null;
-afterEach(() => { harness?.close(); harness = null; });
+afterEach(async () => { await harness?.close(); harness = null; });
 
 const app = (opts: HarnessOptions = {}) => {
   harness = makeHarness({ daemon: { upgrade: { source: '/src/agent-conductor', ref: 'main' } }, ...opts });

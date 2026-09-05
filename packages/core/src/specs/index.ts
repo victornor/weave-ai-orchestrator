@@ -280,7 +280,7 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
       return {
         id: row.id, capability: row.capability, title: row.title, body: row.body, requirements,
         pending: linked.filter((l) => l.state === 'active').map((l) => ({ changeName: l.changeName, ticketId: l.ticketId, ticketIdentifier: identifierOf(l.ticketId), deltaKind: l.deltaKind })),
-        history: linked.filter((l) => l.state === 'archived').map((l) => ({ changeName: l.changeName, ticketId: l.ticketId, archivedAs: l.archivedAs, archivedAt: l.archivedAt })),
+        history: linked.filter((l) => l.state === 'archived').map((l) => ({ changeName: l.changeName, ticketId: l.ticketId, ticketIdentifier: identifierOf(l.ticketId), state: l.state, archivedAs: l.archivedAs, archivedAt: l.archivedAt })),
       };
     },
 

@@ -43,7 +43,9 @@ export function knowledgeRoutes(): Hono<AppEnv> {
 export function specRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.get('/:project', (c) => c.json(c.get('ws').services.specs.listCapabilities(c.req.param('project'))));
-  app.get('/:project/capabilities/:capability', (c) => c.json(c.get('ws').services.specs.getCapability(c.req.param('project'), c.req.param('capability'))));
+  // Capability ids are OpenSpec paths and are routinely nested (`conductor-chat/dispatch-labels`), so the
+  // param has to swallow slashes: a plain `:capability` only matches a percent-encoded id and 404s the rest.
+  app.get('/:project/capabilities/:capability{.+}', (c) => c.json(c.get('ws').services.specs.getCapability(c.req.param('project'), c.req.param('capability'))));
   app.get('/:project/changes', (c) => c.json(c.get('ws').services.specs.listChanges(c.req.param('project'), c.req.query('state') as 'active' | 'archived' | undefined)));
   app.get('/:project/changes/:name', (c) => c.json(c.get('ws').services.specs.getChange(c.req.param('project'), c.req.param('name'))));
   app.get('/:project/graph', (c) => c.json(c.get('ws').services.specs.graph(c.req.param('project'))));

@@ -81,8 +81,8 @@ describe('spec index', () => {
     expect(cap.requirements.map((r) => r.name)).toEqual(['Password login', 'Dark mode toggle']);
     expect(cap.requirements[0]!.scenarios).toEqual([{ name: 'good password' }]);
     expect(cap.history).toEqual([
-      { changeName: 'tst-2-sso', ticketId: null, archivedAs: '2026-09-01-tst-2-sso', archivedAt: '2026-09-01T00:00:00.000Z' },
-      { changeName: 'tst-1-login', ticketId: null, archivedAs: '2026-08-01-tst-1-login', archivedAt: '2026-08-01T00:00:00.000Z' },
+      { changeName: 'tst-2-sso', ticketId: null, ticketIdentifier: null, state: 'archived', archivedAs: '2026-09-01-tst-2-sso', archivedAt: '2026-09-01T00:00:00.000Z' },
+      { changeName: 'tst-1-login', ticketId: null, ticketIdentifier: null, state: 'archived', archivedAs: '2026-08-01-tst-1-login', archivedAt: '2026-08-01T00:00:00.000Z' },
     ]);
 
     const archived = svc.listChanges(harness.projectId, 'archived');
@@ -106,6 +106,33 @@ describe('spec index', () => {
     expect(change.taskProgress).toEqual({ done: 1, total: 1 });
     expect(change.deltas).toEqual([{ capability: 'auth', kind: 'added', body: expect.stringContaining('Password login') }]);
     expect(() => svc.getChange(harness.projectId, 'nope')).toThrow(/not indexed/);
+  });
+
+  it('lists and opens a nested capability with the archived changes in its history', async () => {
+    const NESTED = 'conductor-chat/dispatch-labels';
+    const NESTED_SPEC = '# dispatch-labels Specification\n\n## Requirements\n### Requirement: Anchored labels\nThe label SHALL stay anchored to its message.\n';
+    const { harness, clone } = setup([
+      { match: ['list', '--specs'], json: { specs: [{ id: NESTED, title: 'Dispatch labels', path: `openspec/specs/${NESTED}/spec.md`, requirementCount: 1 }] } },
+      { match: ['show'], json: { id: NESTED, title: 'Dispatch labels', requirementCount: 1, requirements: [{ name: 'Anchored labels', text: 'The label SHALL stay anchored to its message.', scenarios: [] }] } },
+      { match: ['status', '--all'], json: { changes: [] } },
+    ]);
+    write(join(clone, 'openspec', 'specs', 'conductor-chat', 'dispatch-labels', 'spec.md'), NESTED_SPEC);
+    const archived = join(clone, 'openspec', 'changes', 'archive', '2026-09-05-tst-4-labels');
+    write(join(archived, 'proposal.md'), '## Why\nLabels drift when the transcript scrolls.\n');
+    write(join(archived, 'specs', 'conductor-chat', 'dispatch-labels', 'spec.md'), '## ADDED Requirements\n### Requirement: Anchored labels\nThe label SHALL stay anchored to its message.\n');
+
+    const svc = createSpecsService(harness.ctx, harness.deps);
+    expect(await svc.index(harness.projectId)).toEqual({ capabilities: 1, changes: 1 });
+
+    expect(svc.listCapabilities(harness.projectId).map((c) => c.capability)).toEqual([NESTED]);
+
+    const cap = svc.getCapability(harness.projectId, NESTED);
+    expect(cap.capability).toBe(NESTED);
+    expect(cap.body).toBe(NESTED_SPEC);
+    expect(cap.requirements.map((r) => r.name)).toEqual(['Anchored labels']);
+    expect(cap.history).toEqual([
+      { changeName: 'tst-4-labels', ticketId: null, ticketIdentifier: null, state: 'archived', archivedAs: '2026-09-05-tst-4-labels', archivedAt: '2026-09-05T00:00:00.000Z' },
+    ]);
   });
 
   it('is idempotent and keeps capability ids stable across reindexing', async () => {

@@ -187,7 +187,7 @@ export interface SpecChangeDetail extends SpecChangeSummary {
 export interface SpecsService {
   index(projectId: string): Promise<{ capabilities: number; changes: number }>;
   listCapabilities(projectId: string): Array<{ id: string; capability: string; title: string | null; requirementCount: number; lastArchivedChange: string | null; pendingChanges: PendingChange[]; updatedAt: string }>;
-  getCapability(projectId: string, capability: string): { id: string; capability: string; title: string | null; body: string; requirements: Array<{ name: string; text: string; scenarios: unknown[] }>; pending: PendingChange[]; history: Array<{ changeName: string; ticketId: string | null; archivedAs: string | null; archivedAt: string | null }> };
+  getCapability(projectId: string, capability: string): { id: string; capability: string; title: string | null; body: string; requirements: Array<{ name: string; text: string; scenarios: unknown[] }>; pending: PendingChange[]; history: Array<{ changeName: string; ticketId: string | null; ticketIdentifier: string | null; state: string; archivedAs: string | null; archivedAt: string | null }> };
   listChanges(projectId: string, state?: 'active' | 'archived'): SpecChangeSummary[];
   getChange(projectId: string, changeName: string): SpecChangeDetail;
   graph(projectId: string): { nodes: Array<{ id: string; kind: 'capability' | 'change' | 'ticket'; label: string; status?: string }>; edges: Array<{ from: string; to: string; kind: 'touches' | 'belongs_to' }> };

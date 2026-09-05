@@ -132,6 +132,19 @@ describe('routes', () => {
     expect(h.bus.since(0).map((e) => e.type)).toContain('ticket.created');
   });
 
+  it('opens a nested capability whether the client encodes the slash or not', async () => {
+    const { h, fetch } = app();
+    const seen: string[] = [];
+    h.impls.specs!.getCapability = (_project: string, capability: string) => { seen.push(capability); return { capability, requirements: [], pending: [], history: [] }; };
+
+    for (const path of ['/api/w/ws1/specs/proj1/capabilities/conductor-chat%2Fdispatch-labels', '/api/w/ws1/specs/proj1/capabilities/conductor-chat/dispatch-labels']) {
+      const res = await fetch(path, { headers: authed() });
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({ capability: 'conductor-chat/dispatch-labels' });
+    }
+    expect(seen).toEqual(['conductor-chat/dispatch-labels', 'conductor-chat/dispatch-labels']);
+  });
+
   it('patches one nested workspace default and leaves its siblings alone', async () => {
     const { h, fetch } = app();
     const saved: unknown[] = [];

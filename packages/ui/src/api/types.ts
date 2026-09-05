@@ -319,26 +319,40 @@ export interface SearchHit {
   snippet?: string | null;
 }
 
+export interface PendingChange {
+  changeName: string;
+  ticketId: string | null;
+  ticketIdentifier: string | null;
+  deltaKind: string;
+}
+
 export interface CapabilitySummary {
+  id: string;
   capability: string;
-  title: string;
+  title: string | null;
   requirementCount: number;
+  lastArchivedChange: string | null;
   updatedAt: string;
-  pendingChanges: Array<{ changeName: string; ticketId: string | null; ticketIdentifier: string | null; deltaKind: string }>;
+  pendingChanges: PendingChange[];
 }
 
 export interface Requirement {
-  id: string;
   name: string;
   text: string;
-  scenarios: Array<{ text: string; steps?: Array<{ word: string; text: string }> }>;
+  scenarios: Array<{ text?: string; steps?: Array<{ word: string; text: string }> }>;
+  /** Inline pending delta (PLAN §12.5). The API does not populate it yet; the page renders without it. */
   delta?: { kind: 'ADDED' | 'MODIFIED' | 'REMOVED' | 'RENAMED'; changeName: string; ticketIdentifier: string | null; state: string } | null;
 }
 
+/** `GET /specs/:project/capabilities/:capability` — flat, exactly as core `getCapability` returns it. */
 export interface CapabilityDetail {
-  capability: CapabilitySummary;
+  id: string;
+  capability: string;
+  title: string | null;
+  body: string;
   requirements: Requirement[];
-  history: Array<{ changeName: string; ticketIdentifier: string | null; prUrl: string | null; archivedAt: string | null; state: string }>;
+  pending: PendingChange[];
+  history: Array<{ changeName: string; ticketId: string | null; ticketIdentifier: string | null; state: string; archivedAs: string | null; archivedAt: string | null }>;
 }
 
 export interface SpecChangeSummary {

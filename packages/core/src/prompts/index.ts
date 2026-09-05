@@ -195,6 +195,23 @@ export function flattenWakes(wakes: S.Wakeup[]): BundledWake[] {
   return out;
 }
 
+/**
+ * What the merge queue means for this ticket's turn (PLAN §11.4): the admitted ticket is told it holds
+ * the project's merge slot and that its base moved while it waited; a waiting one is told to sit still.
+ */
+export function mergeQueueLine(ctx: WorkspaceContext, t: S.Ticket, defaultBranch: string): string | null {
+  if (t.status !== 'merging') return null;
+  if (t.mergeStartedAt) {
+    return `- **You hold the merge slot for this project.** Only one ticket merges at a time, and it is now yours. Your base moved while you waited: sync \`work/\` with \`${defaultBranch}\`, resolve the conflicts yourself, re-run the project's tests and lint, then merge and call \`ac_ticket_merge_done\`. The next ticket starts when you are done, so do not hold the slot longer than the merge needs.`;
+  }
+  if (!t.projectId) return null;
+  const ahead = ctx.db.get<{ n: number }>(
+    "SELECT COUNT(*) n FROM tickets WHERE project_id = ? AND status = 'merging' AND merge_started_at IS NULL AND (merge_queued_at < ? OR (merge_queued_at = ? AND number < ?))",
+    [t.projectId, t.mergeQueuedAt, t.mergeQueuedAt, t.number],
+  )?.n ?? 0;
+  return `- Waiting in this project's merge queue at position ${ahead + 1}. Nothing to merge until the queue admits you; you will be woken then.`;
+}
+
 function bounded<T>(items: T[], max: number, render: (t: T) => string, more: string): string {
   const head = items.slice(0, max).map(render);
   if (items.length > max) head.push(`- +${items.length - max} more, ${more}`);
@@ -232,6 +249,8 @@ export async function buildTurnPrompt(
       parts.push('\n## Your ticket');
       parts.push(`- ${t.identifier} [${t.status}] ${t.title}${wtLine}${lastStatus ? `; last status: ${lastStatus.body.slice(0, 160)}` : ''}`);
       if (t.openspecChangeName) parts.push(`- OpenSpec change: \`${t.openspecChangeName}\``);
+      const queue = mergeQueueLine(ctx, t, p?.defaultBranch ?? 'main');
+      if (queue) parts.push(queue);
     }
   }
 

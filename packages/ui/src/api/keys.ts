@@ -11,6 +11,7 @@ export const qk = {
   briefing: (ws: string) => ['w', ws, 'briefing'] as const,
   projects: (ws: string) => ['w', ws, 'projects'] as const,
   project: (ws: string, id: string) => ['w', ws, 'projects', id] as const,
+  mergeQueue: (ws: string, projectId: string) => ['w', ws, 'projects', projectId, 'merge-queue'] as const,
   roles: (ws: string) => ['w', ws, 'roles'] as const,
   role: (ws: string, id: string) => ['w', ws, 'roles', id] as const,
   workers: (ws: string) => ['w', ws, 'workers'] as const,

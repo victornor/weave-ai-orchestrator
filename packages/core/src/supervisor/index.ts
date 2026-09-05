@@ -151,8 +151,11 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
 
   async function spawnPending(): Promise<void> {
     const statuses = WORKER_STATUSES.map(() => '?').join(',');
+    // A ticket waiting in the merge queue needs no worker until the queue admits it (PLAN §11.4);
+    // the queue brings one itself at that moment, so spawning here would only burn a role slot.
     const tickets = ctx.db.all<Ticket>(
-      `SELECT * FROM tickets WHERE workspace_id = ? AND status IN (${statuses}) AND assignee_role_id IS NOT NULL AND worker_id IS NULL ORDER BY ${QUEUE_ORDER_SQL}`,
+      `SELECT * FROM tickets WHERE workspace_id = ? AND status IN (${statuses}) AND assignee_role_id IS NOT NULL AND worker_id IS NULL
+         AND NOT (status = 'merging' AND merge_started_at IS NULL) ORDER BY ${QUEUE_ORDER_SQL}`,
       [ctx.workspaceId, ...WORKER_STATUSES],
     );
     for (const ticket of tickets) {
@@ -195,6 +198,17 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         if (!r.retired) log.debug({ workerId: w.id, reason: r.reason }, 'worker kept: work has not landed');
       } catch (e) { log.warn({ workerId: w.id, err: String(e) }, 'retire attempt failed'); }
     }
+  }
+
+  /**
+   * Advance every project's merge queue (PLAN §11.4). Transitions pump their own project, so this is
+   * the recovery path: a queue whose head vanished with the daemon, or one left half-admitted by a
+   * restart, starts moving again on the next tick without anyone acting.
+   */
+  async function pumpMergeQueues(): Promise<void> {
+    const queue = deps().tickets.mergeQueue;
+    if (!queue) return;
+    await queue.pumpAll();
   }
 
   function livenessScan(): void {
@@ -446,6 +460,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         await watchdog().catch((e) => log.error({ err: String(e) }, 'watchdog failed'));
         await spawnPending().catch((e) => log.error({ err: String(e) }, 'spawn pass failed'));
         { const sweep = deps().tickets.autoMergeSweep; if (typeof sweep === 'function') await sweep.call(deps().tickets).catch((e: unknown) => log.error({ err: String(e) }, 'auto-merge sweep failed')); }
+        await pumpMergeQueues().catch((e) => log.error({ err: String(e) }, 'merge queue pump failed'));
         await retireFinished().catch((e) => log.error({ err: String(e) }, 'retire pass failed'));
         if (Date.now() - lastLiveness > LIVENESS_EVERY_MS) { lastLiveness = Date.now(); try { livenessScan(); } catch (e) { log.error({ err: String(e) }, 'liveness scan failed'); } }
         try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }

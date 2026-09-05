@@ -10,7 +10,8 @@ import { EmptyState, ErrorState } from '../components/States';
 import { Table } from '../components/Table';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
-import { useProjects, useRoles, useTickets, useWorkers } from '../api/hooks';
+import { MergeQueuePanel } from '../components/MergeQueue';
+import { useMergeQueue, useProjects, useRoles, useTickets, useWorkers } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import { filterTickets, foldBoard, isFolded, liveWorkersByTicket, ticketBoardStatus } from '../lib/board';
@@ -42,6 +43,8 @@ export function BoardRoute(): React.ReactElement {
   // Worker liveness is what the columns are really about; the worker events the stream already
   // tracks invalidate this query, so a spawn or a retirement re-folds the board on its own.
   const workers = useWorkers({});
+  // The merge queue is per project, so it is shown once the board is filtered to one (PLAN §11.4).
+  const mergeQueue = useMergeQueue(project);
 
   const filtered = useMemo(
     () => filterTickets(tickets.data ?? [], { project, role, kind, priority, status }),
@@ -113,6 +116,13 @@ export function BoardRoute(): React.ReactElement {
       </div>
 
       <PageBody>
+        {mergeQueue.data ? (
+          <MergeQueuePanel
+            className="m-4 mb-0"
+            queue={mergeQueue.data}
+            onOpen={(e) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: e.identifier } })}
+          />
+        ) : null}
         {tickets.isLoading ? (
           <SkeletonRows rows={7} />
         ) : tickets.isError ? (

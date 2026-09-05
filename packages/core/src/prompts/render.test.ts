@@ -95,6 +95,32 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('## What to do now');
   });
 
+  it('tells the admitted worker it holds the project merge slot and must re-sync', async () => {
+    h.db.update('tickets', ticketId, { status: 'merging', mergeQueuedAt: nowIso(), mergeStartedAt: nowIso() });
+    const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: worker.id, source: 'merge_approved', reason: 'front of the queue', payload: {}, status: 'claimed' } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).toContain('You hold the merge slot for this project');
+    expect(prompt).toContain('sync `work/` with `main`');
+    expect(prompt).toContain('ac_ticket_merge_done');
+  });
+
+  it('tells a waiting worker its position and that there is nothing to merge yet', async () => {
+    const ahead = newId();
+    const now = nowIso();
+    h.db.insert('tickets', {
+      id: ahead, workspaceId: h.workspaceId, projectId: h.projectId, number: 41, identifier: 'TST-41', kind: 'change',
+      title: 'Ahead in the queue', description: '', status: 'merging', priority: 'high', createdByKind: 'agent',
+      mergeQueuedAt: '2026-09-05T10:00:00.000Z', mergeStartedAt: now, createdAt: now, updatedAt: now,
+    });
+    h.db.update('tickets', ticketId, { status: 'merging', mergeQueuedAt: '2026-09-05T11:00:00.000Z', mergeStartedAt: null });
+    const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: worker.id, source: 'system', reason: 'liveness', payload: {}, status: 'claimed' } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).toContain("Waiting in this project's merge queue at position 1");
+    expect(prompt).not.toContain('You hold the merge slot');
+  });
+
   it('lists open work and pending decisions for the conductor', async () => {
     const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
     h.db.insert('decisions', {

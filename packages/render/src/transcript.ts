@@ -13,7 +13,7 @@
  * Payload shapes are read defensively: the runtime adapters normalise events, but a missing field
  * must degrade to a shorter line, never to a crash.
  */
-import type { RunEvent } from '@agent-conductor/shared';
+import { isHumanReplyToolEvent, type RunEvent } from '@agent-conductor/shared';
 import { formatDuration, formatTokens, formatDiffStat, oneLine } from './format.js';
 import { redact } from './redact.js';
 import type { ErrorBlock, FileBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock, TranscriptBlock, TranscriptOptions } from './types.js';
@@ -366,6 +366,18 @@ function elapsed(from: string | null | undefined, to: string | null | undefined)
   const b = Date.parse(to);
   if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return null;
   return b - a;
+}
+
+/**
+ * The transcript for a conductor *chat*: the same blocks, minus the tool that delivers the reply.
+ *
+ * `ac_human_send` is how the conductor's words reach the human, and they already render as the
+ * thread message it created — showing the call as well would put the reply on screen twice. Views
+ * of the raw turn (`attach`, the run page) call `runEventsToTranscript` directly and keep it.
+ */
+export function chatTranscript(events: readonly RunEvent[] | null | undefined, options: TranscriptOptions = {}): TranscriptBlock[] {
+  const list = Array.isArray(events) ? events.filter((e) => !isHumanReplyToolEvent(e)) : [];
+  return runEventsToTranscript(list, options);
 }
 
 /** `Read src/theme/tokens.ts 0.4s` / `Edit …/tokens.ts +18 −2 1.2s` / `Bash npm test failed 4m12s` */

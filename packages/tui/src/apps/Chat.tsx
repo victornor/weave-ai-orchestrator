@@ -5,12 +5,14 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
-import type { ChannelThread, Decision, ThreadMessage } from '@agent-conductor/shared';
-import { decisionToCard, formatRelative, type CardModel } from '@agent-conductor/render';
+import type { Agent, ChannelThread, Decision, Run, RunEvent, ThreadMessage } from '@agent-conductor/shared';
+import { isActiveRun } from '@agent-conductor/shared';
+import { chatTranscript, decisionToCard, formatRelative, type CardModel, type TranscriptBlock } from '@agent-conductor/render';
 import { DecisionCardView } from '../components/DecisionCard.js';
 import { StatusBar } from '../components/StatusBar.js';
 import { TextInput } from '../components/TextInput.js';
-import { items, type TuiClient } from '../client.js';
+import { TranscriptView } from '../components/Transcript.js';
+import { items, unwrap, type TuiClient } from '../client.js';
 import { useKeys, useStream } from '../hooks.js';
 import { setTerminalTitle } from '../terminal.js';
 
@@ -35,6 +37,10 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [boundTicket, setBoundTicket] = useState<string | null>(options.ticketId ?? null);
+  const [conductorId, setConductorId] = useState<string | null>(null);
+  /** The conductor run being streamed, or null when it is idle. */
+  const [runId, setRunId] = useState<string | null>(null);
+  const [events, setEvents] = useState<RunEvent[]>([]);
 
   const loadDecisions = useCallback(async () => {
     try {
@@ -67,6 +73,47 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
     return () => { cancelled = true; };
   }, [client, options.ticketId, loadDecisions]);
 
+  // Which agent is the conductor, and is it mid-turn right now? Opening the chat during a turn
+  // resumes it rather than showing nothing until the next one starts.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const payload = await client.wget<unknown>('/conductor');
+        if (cancelled) return;
+        const agent = unwrap<Agent>(payload, 'agent', 'worker');
+        setConductorId(agent?.id ?? null);
+        const last = (payload as { lastRun?: Run } | null)?.lastRun ?? null;
+        if (last?.id && isActiveRun(last.status)) setRunId((cur) => cur ?? last.id);
+      } catch {
+        /* the live view is an extra; the thread still works without it */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [client]);
+
+  // Persisted events for the run, so the transcript starts from what the turn has already done.
+  useEffect(() => {
+    if (!runId) { setEvents([]); return; }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const loaded = items<RunEvent>(await client.wget(`/runs/${encodeURIComponent(runId)}/events`, { limit: 400 }), 'events');
+        if (!cancelled) setEvents((prev) => (prev.length ? prev : loaded));
+      } catch {
+        /* the stream replays from the start anyway */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [client, runId]);
+
+  useStream(client, runId ? client.w(`/runs/${encodeURIComponent(runId)}/events/stream`) : null, (message) => {
+    const raw = message.json as RunEvent | { payload?: RunEvent } | null;
+    const event = (raw && typeof raw === 'object' && 'payload' in raw ? (raw as { payload?: RunEvent }).payload : raw) as RunEvent | null;
+    if (!event || typeof event.seq !== 'number') return;
+    setEvents((prev) => (prev.some((e) => e.id === event.id) ? prev : [...prev, event]));
+  });
+
   const connection = useStream(client, client.workspace ? client.w('/events') : null, (message) => {
     if (message.type === 'thread.message') {
       const payload = (message.json as { payload?: ThreadMessage } | null)?.payload;
@@ -75,14 +122,32 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
       if (payload.direction === 'outbound') setPending(false);
       return;
     }
+    // The conductor's turns are the ones we stream; the run id is the event's entity.
+    if (message.type === 'run.started' || message.type === 'run.finished') {
+      const frame = message.json as { entityId?: string; payload?: { agentId?: string } } | null;
+      if (!conductorId || frame?.payload?.agentId !== conductorId) return;
+      const id = String(frame?.entityId ?? '');
+      if (message.type === 'run.started') {
+        if (id) { setRunId(id); setEvents([]); }
+      } else {
+        setRunId((cur) => (cur === null || cur === id ? null : cur));
+        setPending(false);
+      }
+      return;
+    }
     if (message.type.startsWith('decision.')) void loadDecisions();
   });
+
+  // The reply renders as the thread message ac_human_send created; showing the call too would
+  // put the same words on screen twice.
+  const blocks: TranscriptBlock[] = useMemo(() => chatTranscript(events), [events]);
+  const working = pending || runId !== null;
 
   const cards: CardModel[] = useMemo(() => decisions.map((d) => decisionToCard(d, {})), [decisions]);
 
   useEffect(() => {
-    setTerminalTitle(['Conductor', boundTicket ?? undefined, cards.length ? 'needs you' : pending ? 'working' : 'idle'].filter(Boolean).join(' · '));
-  }, [boundTicket, cards.length, pending]);
+    setTerminalTitle(['Conductor', boundTicket ?? undefined, cards.length ? 'needs you' : working ? 'working' : 'idle'].filter(Boolean).join(' · '));
+  }, [boundTicket, cards.length, working]);
 
   const answer = useCallback(async (decisionId: string, raw: string) => {
     const card = cards.find((c) => c.id === decisionId || c.id.endsWith(decisionId));
@@ -175,8 +240,15 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
           <DecisionCardView card={card} index={index + 1} />
         </Box>
       ))}
+      {/* The turn in flight. Transient: it goes when the run finishes and the thread's
+          messages stand alone, so the reply is never on screen twice. */}
+      {working ? (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text dimColor>{runId ? 'conductor is working…' : 'conductor is starting…'}</Text>
+          {blocks.length ? <TranscriptView blocks={blocks} maxLines={12} /> : null}
+        </Box>
+      ) : null}
       {notice ? <Text color="yellow">{notice}</Text> : null}
-      {pending ? <Text dimColor>conductor is replying…</Text> : null}
       <TextInput
         value={input}
         onChange={setInput}

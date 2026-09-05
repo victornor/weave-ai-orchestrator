@@ -14,7 +14,7 @@ export function register(program: Command): void {
     .action(async (_opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
       const payload = await client.wget<unknown>('/conductor');
-      const agent = unwrap<Agent>(payload, 'agent');
+      const agent = unwrap<Agent>(payload, 'agent', 'worker');
       const card = workerToCard(agent, {});
       emit(payload, () => {
         fields([

@@ -27,11 +27,17 @@ export interface TuiClient {
   stream(path: string, options: TuiStreamOptions): TuiSubscription;
 }
 
-/** Responses may wrap the entity or be the entity. */
-export function unwrap<T>(payload: unknown, key: string): T {
+/**
+ * Responses may wrap the entity or be the entity. Several detail routes disagree on the key
+ * (`/workers/:id` and `/conductor` return `worker`, `/tickets/:id` returns `ticket`), so callers
+ * pass every key the route may use; the first one present wins.
+ */
+export function unwrap<T>(payload: unknown, ...keys: string[]): T {
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    const inner = (payload as Record<string, unknown>)[key];
-    if (inner && typeof inner === 'object' && !Array.isArray(inner)) return inner as T;
+    for (const key of keys) {
+      const inner = (payload as Record<string, unknown>)[key];
+      if (inner && typeof inner === 'object' && !Array.isArray(inner)) return inner as T;
+    }
   }
   return payload as T;
 }

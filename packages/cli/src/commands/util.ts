@@ -37,11 +37,17 @@ export function items<T>(payload: unknown, key?: string): T[] {
   return [];
 }
 
-/** Responses may wrap the entity (`{ ticket: {...}, comments: [...] }`) or be the entity itself. */
-export function unwrap<T>(payload: unknown, key: string): T {
+/**
+ * Responses may wrap the entity (`{ ticket: {...}, comments: [...] }`) or be the entity itself.
+ * Detail routes disagree on the key — `/workers/:id` and `/conductor` return `worker` — so callers
+ * pass every key the route may use; the first one present wins.
+ */
+export function unwrap<T>(payload: unknown, ...keys: string[]): T {
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    const inner = (payload as Record<string, unknown>)[key];
-    if (inner && typeof inner === 'object' && !Array.isArray(inner)) return inner as T;
+    for (const key of keys) {
+      const inner = (payload as Record<string, unknown>)[key];
+      if (inner && typeof inner === 'object' && !Array.isArray(inner)) return inner as T;
+    }
   }
   return payload as T;
 }

@@ -41,7 +41,7 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
           ? await client.wget<unknown>('/conductor')
           : await client.wget<unknown>(`/workers/${encodeURIComponent(agentId)}`);
         if (cancelled) return;
-        const agent = unwrap<Agent>(payload, 'agent');
+        const agent = unwrap<Agent>(payload, 'agent', 'worker');
         const record = (payload ?? {}) as WorkerDetail;
         setDetail({ ...record, agent });
         const resolvedRun = record.lastRun?.id

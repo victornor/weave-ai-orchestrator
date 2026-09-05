@@ -53,6 +53,9 @@ export type WakeStatus = (typeof WAKE_STATUSES)[number];
 
 export const RUN_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'timed_out', 'cancelled', 'interrupted'] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
+/** Runs the daemon has not finished with — the ones a live view streams. */
+export const ACTIVE_RUN_STATUSES: readonly RunStatus[] = ['queued', 'running'];
+export const isActiveRun = (status: string | null | undefined): boolean => ACTIVE_RUN_STATUSES.includes(status as RunStatus);
 
 export const RUN_ERROR_FAMILIES = ['transient_upstream', 'provider_quota', 'model_refusal', 'auth', 'tooling', 'unknown'] as const;
 export type RunErrorFamily = (typeof RUN_ERROR_FAMILIES)[number];

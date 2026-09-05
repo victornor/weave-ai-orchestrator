@@ -117,6 +117,8 @@ function WorkspaceSection(): React.ReactElement {
         </Field>
       </section>
 
+      <KnowledgeBudgetsSection config={summary.data?.config ?? {}} />
+
       <section>
         <div className="ac-label mb-2">Workspaces</div>
         <div className="ac-card divide-y divide-line-1">
@@ -135,6 +137,62 @@ function WorkspaceSection(): React.ReactElement {
         </div>
       </section>
     </div>
+  );
+}
+
+/** The knowledge budgets, in tokens. A budget is what curation is triggered at, so the human owns it. */
+const BUDGET_FIELDS = [
+  { key: 'project', label: 'Project knowledge base', hint: 'Each PROJECT.md. Injected in full into every worker of that project.' },
+  { key: 'document', label: 'Linked document', hint: 'Each [[slug]] page. Read on demand, never injected.' },
+  { key: 'workspace', label: 'Workspace knowledge base', hint: 'WORKSPACE.md. Conductor only.' },
+  { key: 'shared', label: 'Shared conventions', hint: 'SHARED.md. Read by every agent, so it costs the most per token.' },
+  { key: 'decisions', label: 'Decision log', hint: 'decisions.md. Appended by the daemon; only its last 30 lines reach a digest.' },
+] as const;
+
+function KnowledgeBudgetsSection({ config }: { config: Record<string, unknown> }): React.ReactElement {
+  const patch = usePatchConfig();
+  const toast = useToast();
+  const defaults = (config['defaults'] ?? {}) as Record<string, unknown>;
+  const budgets = (defaults['knowledgeBudgetTokens'] ?? {}) as Record<string, number | undefined>;
+
+  const save = (body: Record<string, unknown>, current: number | undefined, next: number): void => {
+    if (!Number.isInteger(next) || next < 500 || next === current) return;
+    patch.mutate(body, { onError: (e) => toast.push({ title: 'Could not save the budget', detail: e.message, status: 'failed' }) });
+  };
+
+  return (
+    <section>
+      <div className="ac-label mb-2">Knowledge budgets</div>
+      <p className="mb-1 text-micro text-text-3">
+        In tokens. A file over 80 % of its budget schedules a curation run; a write that would cross it is rejected.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {BUDGET_FIELDS.map((f) => (
+          <Field key={f.key} label={f.label} hint={f.hint}>
+            <input
+              type="number"
+              min={500}
+              step={500}
+              aria-label={f.label}
+              className={cx(inputCx, 'ac-mono')}
+              defaultValue={budgets[f.key] ?? ''}
+              onBlur={(e) => save({ defaults: { knowledgeBudgetTokens: { [f.key]: Number(e.target.value) } } }, budgets[f.key], Number(e.target.value))}
+            />
+          </Field>
+        ))}
+        <Field label="Bootstrap digest" hint="The knowledge injected on an agent's first turn. Keep it above shared + project.">
+          <input
+            type="number"
+            min={500}
+            step={1000}
+            aria-label="Bootstrap digest"
+            className={cx(inputCx, 'ac-mono')}
+            defaultValue={(defaults['bootstrapBudgetTokens'] as number | undefined) ?? ''}
+            onBlur={(e) => save({ defaults: { bootstrapBudgetTokens: Number(e.target.value) } }, defaults['bootstrapBudgetTokens'] as number | undefined, Number(e.target.value))}
+          />
+        </Field>
+      </div>
+    </section>
   );
 }
 

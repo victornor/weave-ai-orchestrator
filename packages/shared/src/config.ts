@@ -41,6 +41,18 @@ export const PresentationBlockSchema = z.object({
 }).partial();
 export type PresentationBlock = z.infer<typeof PresentationBlockSchema>;
 
+/** Token budget per knowledge file (PLAN §13.1): one per hub file, one shared by every linked document. */
+export const KnowledgeBudgetsSchema = z.object({
+  workspace: z.number().int().min(500).default(10000),
+  shared: z.number().int().min(500).default(2000),
+  decisions: z.number().int().min(500).default(4000),
+  project: z.number().int().min(500).default(10000),
+  document: z.number().int().min(500).default(10000),
+});
+export type KnowledgeBudgets = z.infer<typeof KnowledgeBudgetsSchema>;
+/** The budgets in force when no workspace config is in play (seeds, fallbacks, tests). */
+export const DEFAULT_KNOWLEDGE_BUDGETS: KnowledgeBudgets = KnowledgeBudgetsSchema.parse({});
+
 export const WorkspaceDefaultsSchema = z.object({
   runtime: z.string().default('claude'),
   model: z.string().nullable().default(null),
@@ -55,7 +67,8 @@ export const WorkspaceDefaultsSchema = z.object({
   spawnWaitWarnSec: z.number().int().default(600),
   conductorDigestIntervalSec: z.number().int().default(120),
   sessionMaxIdleDays: z.number().int().default(14),
-  bootstrapBudgetTokens: z.number().int().default(8000),
+  bootstrapBudgetTokens: z.number().int().default(16000),
+  knowledgeBudgetTokens: KnowledgeBudgetsSchema.default({}),
   workerArchiveDays: z.number().int().default(30),
   runLogRetentionDays: z.number().int().default(30),
   permissionMode: z.enum(PERMISSION_MODES).default('auto'),

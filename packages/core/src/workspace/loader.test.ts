@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
 import { DaemonConfigSchema, type WorkspaceConfig } from '@agent-conductor/shared';
 import { createRegistries } from '../context.js';
-import { loader } from './loader.js';
+import { loader, projectKnowledgeSkeleton } from './loader.js';
 
 describe('workspace loader', () => {
   let root: string;
@@ -45,6 +45,36 @@ describe('workspace loader', () => {
     expect(readFileSync(join(root, 'knowledge/workspace/SHARED.md'), 'utf8')).toContain('Shared conventions');
     expect(readFileSync(join(root, '.agent-conductor/wt.toml'), 'utf8')).toContain('json-schema = 2');
     await expect(loader.initWorkspace(root, { id: 'acme', name: 'Acme', ticketPrefix: 'ACME' })).rejects.toMatchObject({ code: 'conflict' });
+  });
+
+  it('gives a fresh workspace the default knowledge budgets and states them in the skeletons', async () => {
+    const config = await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+    expect(config.defaults.knowledgeBudgetTokens).toEqual({ workspace: 10000, shared: 2000, decisions: 4000, project: 10000, document: 10000 });
+    expect(config.defaults.bootstrapBudgetTokens).toBe(16000);
+    expect(readFileSync(join(root, 'knowledge/workspace/WORKSPACE.md'), 'utf8')).toContain('Budget 10000 tokens');
+    expect(readFileSync(join(root, 'knowledge/workspace/SHARED.md'), 'utf8')).toContain('Budget 2000 tokens');
+    expect(readFileSync(join(root, 'knowledge/workspace/decisions.md'), 'utf8')).toContain('Budget 4000 tokens');
+    expect(projectKnowledgeSkeleton('api', config.defaults.knowledgeBudgetTokens.project)).toContain('Budget 10000 tokens');
+  });
+
+  it('keeps an explicitly configured knowledge budget and defaults the rest', async () => {
+    await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+    const file = join(root, 'workspace.yaml');
+    const raw = YAML.parse(readFileSync(file, 'utf8')) as WorkspaceConfig;
+    writeFileSync(file, YAML.stringify({ ...raw, defaults: { ...raw.defaults, knowledgeBudgetTokens: { project: 25000 } } }), 'utf8');
+
+    const ctx = await load();
+    expect(ctx.config.defaults.knowledgeBudgetTokens.project).toBe(25000);
+    expect(ctx.config.defaults.knowledgeBudgetTokens.document).toBe(10000);
+    expect(ctx.config.defaults.knowledgeBudgetTokens.shared).toBe(2000);
+  });
+
+  it('rejects a knowledge budget that is not a sane token count', async () => {
+    await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+    const file = join(root, 'workspace.yaml');
+    const raw = YAML.parse(readFileSync(file, 'utf8')) as WorkspaceConfig;
+    writeFileSync(file, YAML.stringify({ ...raw, defaults: { ...raw.defaults, knowledgeBudgetTokens: { project: 0 } } }), 'utf8');
+    await expect(load(root)).rejects.toMatchObject({ code: 'validation' });
   });
 
   it('loads the workspace, opens the db, registers providers and creates runtime homes', async () => {

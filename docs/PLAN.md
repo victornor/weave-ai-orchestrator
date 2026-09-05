@@ -904,12 +904,14 @@ Two knowledge bases, both markdown, both budgeted, both curated. They are the me
 
 ### 13.1 Files, audiences, budgets
 
+Budgets are workspace settings: `defaults.knowledgeBudgetTokens` in `workspace.yaml`, one key per hub file plus `document`, editable from Settings → Workspace and `conductor workspace set-default`. The configured value is what the daemon enforces, reports and triggers curation on; the column `knowledge_files.budget_tokens` mirrors it. The numbers below are the defaults.
+
 | File | Audience | Written by | Budget (tokens) | Content |
 |---|---|---|---|---|
-| `knowledge/workspace/WORKSPACE.md` | conductor only | human (bootstrap interview) + conductor (`ac_knowledge_note`) | 3000 | what the business is, goals, people and how the human likes to work, the project portfolio (one line per project: id, purpose, default role), cross-project conventions and policies, standing instructions |
-| `knowledge/workspace/SHARED.md` | every agent | conductor | 800 | the project-agnostic subset: house conventions (commit style, PR etiquette, testing expectations), glossary, tone. **Never names projects**, so a worker learns nothing about the portfolio from it |
-| `knowledge/workspace/decisions.md` | conductor | daemon (answered decisions marked durable) | 1500 | one line per durable decision with date and ticket; older lines are archived by curation |
-| `knowledge/projects/<id>/PROJECT.md` | that project's workers and the conductor | workers (`ac_knowledge_note`), conductor (curation, focus updates), human | 1500 | sections: **Overview** (what it is, who uses it), **Stack & commands** (run, test, lint, build), **Conventions** (project-specific rules the repo docs do not state), **Current focus** (what is being worked toward this month), **Landmines** (things that bite), **Learnings** (dated, concise, perishable entries from workers) |
+| `knowledge/workspace/WORKSPACE.md` | conductor only | human (bootstrap interview) + conductor (`ac_knowledge_note`) | 10000 | what the business is, goals, people and how the human likes to work, the project portfolio (one line per project: id, purpose, default role), cross-project conventions and policies, standing instructions |
+| `knowledge/workspace/SHARED.md` | every agent | conductor | 2000 | the project-agnostic subset: house conventions (commit style, PR etiquette, testing expectations), glossary, tone. **Never names projects**, so a worker learns nothing about the portfolio from it |
+| `knowledge/workspace/decisions.md` | conductor | daemon (answered decisions marked durable) | 4000 | one line per durable decision with date and ticket; older lines are archived by curation |
+| `knowledge/projects/<id>/PROJECT.md` | that project's workers and the conductor | workers (`ac_knowledge_note`), conductor (curation, focus updates), human | 10000 | sections: **Overview** (what it is, who uses it), **Stack & commands** (run, test, lint, build), **Conventions** (project-specific rules the repo docs do not state), **Current focus** (what is being worked toward this month), **Landmines** (things that bite), **Learnings** (dated, concise, perishable entries from workers) |
 | `*/archive/` | nobody by default | curation | none | pruned entries with date, author and reason; grep-able, never injected |
 
 The repo's own `AGENTS.md`/`CLAUDE.md`, docs and OpenSpec specs remain the committed contributor knowledge; workers read them from the worktree and change them through PRs like any contributor. The OpenSpec specs are additionally indexed and explorable next to the knowledge bases (§12.5); the project KB should point at capabilities rather than restate them. The project KB holds what is *about* working on this project from the outside and what is not yet (or should not be) in the repo.
@@ -942,7 +944,7 @@ Curation is a scheduled, agent-performed rewrite of one knowledge file, run by t
 
 ### 13.5 Bootstrap digest
 
-On a worker's first turn (and on a conductor session reset or staleness), the turn prompt includes the injected set from §13.2 plus a five-line reminder of the status protocol. The total is measured and logged as `bootstrap_tokens`; the hard cap is `bootstrapBudgetTokens` (default 8000) and, because every file is itself budgeted, the cap is normally not reached. If it is, project KB **Learnings** are truncated first with an explicit "truncated, call ac_knowledge_get" line; never the brief, SHARED.md or the rules.
+On a worker's first turn (and on a conductor session reset or staleness), the turn prompt includes the injected set from §13.2 plus a five-line reminder of the status protocol. The total is measured and logged as `bootstrap_tokens`; the hard cap is `bootstrapBudgetTokens` (default 16000) and, because every file is itself budgeted, the cap is normally not reached. If it is, project KB **Learnings** are truncated first with an explicit "truncated, call ac_knowledge_get" line; never the brief, SHARED.md or the rules.
 
 ---
 
@@ -1164,6 +1166,7 @@ conductor top                                           fleet view
 conductor presentation set|open|reconcile|status       surfaces (§14b)
 conductor conductor set-model|set-runtime|show         conductor configuration
 conductor workspace list|use|register|unregister|pause|resume   multi-workspace registry
+conductor workspace set-default <key=value...>         workspace defaults, e.g. knowledgeBudgetTokens.project=20000
 conductor runs list|show|tail <runId>|cancel
 conductor usage [--scope workspace|project:<id>|ticket:<id>|role:<id>|model:<id>] [--window 24h|today|7d|week|month|all] [--grain hour|day|week]
 conductor knowledge show|edit|note|lint|curate|revert   knowledge bases: sizes, budgets, last curation, curation history

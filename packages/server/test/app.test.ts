@@ -132,6 +132,39 @@ describe('routes', () => {
     expect(h.bus.since(0).map((e) => e.type)).toContain('ticket.created');
   });
 
+  it('patches one nested workspace default and leaves its siblings alone', async () => {
+    const { h, fetch } = app();
+    const saved: unknown[] = [];
+    h.runtime.ctx.saveConfig = async (next) => { saved.push(next); h.runtime.ctx.config = next; };
+    h.runtime.ctx.config.defaults.turnTimeoutSec = 900;
+
+    const res = await fetch('/api/w/ws1/config', {
+      method: 'PATCH', headers: authed({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ defaults: { knowledgeBudgetTokens: { project: 25000 } } }),
+    });
+    expect(res.status).toBe(200);
+    const config = await res.json();
+    expect(config.defaults.knowledgeBudgetTokens).toMatchObject({ project: 25000, document: 10000, shared: 2000 });
+    expect(config.defaults.turnTimeoutSec).toBe(900);
+    expect(config.name).toBe('Test workspace');
+    expect(saved).toHaveLength(1);
+  });
+
+  it('rejects a knowledge budget that is not a sane token count and saves nothing', async () => {
+    const { h, fetch } = app();
+    const saved: unknown[] = [];
+    h.runtime.ctx.saveConfig = async (next) => { saved.push(next); };
+
+    const res = await fetch('/api/w/ws1/config', {
+      method: 'PATCH', headers: authed({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ defaults: { knowledgeBudgetTokens: { project: 0 } } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('validation');
+    expect(saved).toHaveLength(0);
+    expect(h.runtime.ctx.config.defaults.knowledgeBudgetTokens.project).toBe(10000);
+  });
+
   it('serves the briefing snapshot', async () => {
     const { fetch } = app();
     const res = await fetch('/api/w/ws1/briefing', { headers: authed() });

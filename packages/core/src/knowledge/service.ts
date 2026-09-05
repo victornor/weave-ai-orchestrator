@@ -10,8 +10,8 @@ import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
 import {
-  BUDGETS, DOC_BUDGET, DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, countWords, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
-  isDocPath, normalize, parseDoc, parseLinks, relPathFor, renderDoc, sectionSizes, seedBody, sha256, similarity, today,
+  DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, budgetOf, countWords, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
+  isDocPath, normalize, parseDoc, parseLinks, relPathFor, renderDoc, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated,
 } from './files.js';
 
 interface FileRow {
@@ -51,6 +51,18 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     return r ? (knowledgeRow(r) as unknown as FileRow) : null;
   }
 
+  /**
+   * The budget this file is held to. The workspace config is the source of truth, not the value
+   * `knowledge_files.budget_tokens` was created with: a budget the human changes has to bite on the
+   * next write, in every workspace, without a restart.
+   */
+  function budgetFor(scope: KnowledgeScope, path?: string): number {
+    return budgetOf(ctx.config.defaults.knowledgeBudgetTokens, scope, path ? isDocPath(path) : false);
+  }
+  function budgetOfRow(row: FileRow): number {
+    return budgetFor(row.scope, row.path);
+  }
+
   function currentRevision(fileId: string): number {
     return db.get<{ r: number }>('SELECT COALESCE(MAX(revision),0) r FROM knowledge_revisions WHERE file_id = ?', [fileId])?.r ?? 0;
   }
@@ -65,7 +77,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     let row = fileRow(rel);
     let body = readBody(abs);
     if (!existsSync(abs)) {
-      body = seedBody(scope, { workspaceName: ctx.config.name, projectName: projectName ?? undefined });
+      body = seedBody(scope, { workspaceName: ctx.config.name, projectName: projectName ?? undefined, budgetTokens: budgetFor(scope, rel) });
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, body, 'utf8');
     }
@@ -73,7 +85,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       const id = newId();
       db.insert('knowledge_files', {
         id, workspaceId: ws, projectId: projectRowId, path: rel, scope, tokenEstimate: estimateTokens(body),
-        budgetTokens: BUDGETS[scope], lastCuratedAt: null, curationPending: false, hash: sha256(body), updatedAt: nowIso(),
+        budgetTokens: budgetFor(scope, rel), lastCuratedAt: null, curationPending: false, hash: sha256(body), updatedAt: nowIso(),
       });
       db.insert('knowledge_revisions', {
         id: newId(), fileId: id, revision: 1, body, authorKind: 'system', authorId: null, runId: null, reason: 'seed',
@@ -90,10 +102,16 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       });
       const tokens = estimateTokens(body);
       db.update('knowledge_files', row.id, {
-        tokenEstimate: tokens, hash: sha256(body), curationPending: tokens > row.budgetTokens * 0.8, updatedAt: nowIso(),
+        tokenEstimate: tokens, hash: sha256(body), curationPending: tokens > budgetOfRow(row) * 0.8, updatedAt: nowIso(),
       });
       row = fileRow(rel)!;
       indexFile(row, body);
+    }
+    // The column mirrors the configured budget so events, the API and the database agree with it.
+    const budget = budgetOfRow(row);
+    if (row.budgetTokens !== budget) {
+      db.update('knowledge_files', row.id, { budgetTokens: budget, updatedAt: nowIso() });
+      row = fileRow(rel)!;
     }
     return { row, abs, body };
   }
@@ -151,7 +169,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
   function docSummaryOf(row: FileRow, body: string): KnowledgeDocSummary {
     return {
       path: row.path, scope: row.scope, projectId: row.projectId, projectSlug: projectSlugOf(row.projectId), slug: docSlugOf(row.path) ?? row.path,
-      title: docTitle(body) ?? docSlugOf(row.path) ?? row.path, summary: docSummary(body), tokenEstimate: row.tokenEstimate, budgetTokens: row.budgetTokens,
+      title: docTitle(body) ?? docSlugOf(row.path) ?? row.path, summary: docSummary(body), tokenEstimate: row.tokenEstimate, budgetTokens: budgetOfRow(row),
       links: db.get<{ n: number }>('SELECT COUNT(*) n FROM knowledge_links WHERE workspace_id = ? AND from_path = ?', [ws, row.path])?.n ?? 0,
       backlinks: db.get<{ n: number }>('SELECT COUNT(*) n FROM knowledge_links WHERE workspace_id = ? AND to_path = ?', [ws, row.path])?.n ?? 0,
       updatedAt: row.updatedAt,
@@ -178,10 +196,12 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     actor: Actor,
     row: FileRow,
     abs: string,
-    body: string,
+    next: string,
     reason: KnowledgeRevisionReason,
     removed: string[] = [],
   ): number {
+    const budget = budgetOfRow(row);
+    const body = isDocPath(row.path) ? next : withBudgetStated(next, budget);
     return tx(db, () => {
       const revision = currentRevision(row.id) + 1;
       const tokens = estimateTokens(body);
@@ -189,9 +209,9 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         id: newId(), fileId: row.id, revision, body, authorKind: actor.kind, authorId: actor.id, runId: actor.runId ?? null,
         reason, removedEntriesJson: removed, createdAt: nowIso(),
       });
-      const patch: Record<string, unknown> = { tokenEstimate: tokens, hash: sha256(body), updatedAt: nowIso() };
+      const patch: Record<string, unknown> = { tokenEstimate: tokens, hash: sha256(body), budgetTokens: budget, updatedAt: nowIso() };
       if (reason === 'curation') { patch.lastCuratedAt = nowIso(); patch.curationPending = false; }
-      else patch.curationPending = tokens > row.budgetTokens * 0.8;
+      else patch.curationPending = tokens > budget * 0.8;
       db.update('knowledge_files', row.id, patch);
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, body, 'utf8');
@@ -199,7 +219,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       indexFile(fresh, body);
       recordActivity(db, ws, actor, 'knowledge.write', 'knowledge_file', row.id, { path: row.path, reason, revision, tokens });
       ctx.events.emit(reason === 'curation' ? 'knowledge.curated' : 'knowledge.updated', 'knowledge_file', row.id, {
-        path: row.path, scope: row.scope, projectId: row.projectId, revision, tokenEstimate: tokens, budgetTokens: row.budgetTokens,
+        path: row.path, scope: row.scope, projectId: row.projectId, revision, tokenEstimate: tokens, budgetTokens: budget,
       });
       return revision;
     });
@@ -260,7 +280,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       const { row, abs, body } = ensure(scope, projectId);
       const fresh = fileRow(row.path)!;
       return {
-        path: abs, body, tokenEstimate: fresh.tokenEstimate, budgetTokens: fresh.budgetTokens,
+        path: abs, body, tokenEstimate: fresh.tokenEstimate, budgetTokens: budgetOfRow(fresh),
         lastCuratedAt: fresh.lastCuratedAt, curationPending: fresh.curationPending, revision: currentRevision(fresh.id),
       };
     },
@@ -283,17 +303,18 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       const entry = `- ${today()} · ${bare}`;
       const next = appendEntry(body, section, entry);
       const tokens = estimateTokens(next);
-      if (tokens > row.budgetTokens) {
+      const budget = budgetOfRow(row);
+      if (tokens > budget) {
         db.update('knowledge_files', row.id, { curationPending: true, updatedAt: nowIso() });
         fireCuration(scope, projectId);
-        const { over } = sectionSizes(next, row.budgetTokens);
-        throw new OcError('budget_exceeded', `${row.path} would be ${tokens} tokens over a budget of ${row.budgetTokens}; curation scheduled`, {
-          tokenEstimate: tokens, budgetTokens: row.budgetTokens, sectionsOverBudget: over,
+        const { over } = sectionSizes(next, budget);
+        throw new OcError('budget_exceeded', `${row.path} would be ${tokens} tokens over a budget of ${budget}; curation scheduled`, {
+          tokenEstimate: tokens, budgetTokens: budget, sectionsOverBudget: over,
         });
       }
       const revision = write(actor, row, abs, next, 'note');
-      if (tokens > row.budgetTokens * 0.8) fireCuration(scope, projectId);
-      return { remainingTokens: row.budgetTokens - tokens, revision };
+      if (tokens > budget * 0.8) fireCuration(scope, projectId);
+      return { remainingTokens: budget - tokens, revision };
     },
 
     replace(actor, scope, body, reason, projectId, removed) {
@@ -305,7 +326,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       archiveEntries(row, abs, all, reason);
       const revision = write(actor, row, abs, body.endsWith('\n') ? body : `${body}\n`, reason, all);
       const tokens = estimateTokens(body);
-      if (reason !== 'curation' && tokens > row.budgetTokens) fireCuration(scope, projectId);
+      if (reason !== 'curation' && tokens > budgetOfRow(row)) fireCuration(scope, projectId);
       return { revision };
     },
 
@@ -334,8 +355,8 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         .map((f) => ({
           path: f.path, scope: f.scope, projectId: f.projectId, projectSlug: projectSlugOf(f.projectId), kind: isDocPath(f.path) ? 'doc' : 'hub',
           title: db.get<{ title: string }>("SELECT title FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [f.path])?.title ?? null,
-          tokenEstimate: f.tokenEstimate, budgetTokens: f.budgetTokens,
-          pct: f.budgetTokens ? Math.round((f.tokenEstimate / f.budgetTokens) * 100) : 0,
+          tokenEstimate: f.tokenEstimate, budgetTokens: budgetOfRow(f),
+          pct: budgetOfRow(f) ? Math.round((f.tokenEstimate / budgetOfRow(f)) * 100) : 0,
           lastCuratedAt: f.lastCuratedAt, curationPending: f.curationPending,
         }));
     },
@@ -482,14 +503,15 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       const text = body.replace(/\r\n/g, '\n').trim() + '\n';
       if (!docTitle(text)) throw new OcError('validation', 'a document starts with a `# Title` line');
       const tokens = estimateTokens(text);
-      if (tokens > DOC_BUDGET) throw new OcError('budget_exceeded', `a document is at most ${DOC_BUDGET} tokens; this one is ${tokens}. Split it into linked documents.`, { tokenEstimate: tokens, budgetTokens: DOC_BUDGET });
+      const budget = ctx.config.defaults.knowledgeBudgetTokens.document;
+      if (tokens > budget) throw new OcError('budget_exceeded', `a document is at most ${budget} tokens; this one is ${tokens}. Split it into linked documents.`, { tokenEstimate: tokens, budgetTokens: budget });
       if (/(?:sk|ghp|xox[bp])-[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\s/]+:[^\s@/]+@/i.test(text)) throw new OcError('validation', 'documents never carry secrets, tokens or credentialed URLs');
       const { rel, abs, projectRowId } = locateDoc(scope, slug, projectId);
       let row = fileRow(rel);
       if (!row) {
         const id = newId();
         db.insert('knowledge_files', {
-          id, workspaceId: ws, projectId: projectRowId, path: rel, scope, tokenEstimate: 0, budgetTokens: DOC_BUDGET,
+          id, workspaceId: ws, projectId: projectRowId, path: rel, scope, tokenEstimate: 0, budgetTokens: budget,
           lastCuratedAt: null, curationPending: false, hash: '', updatedAt: nowIso(),
         });
         row = fileRow(rel)!;
@@ -498,7 +520,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       const fresh = fileRow(rel)!;
       const unresolved = db.all<{ toSlug: string }>('SELECT to_slug FROM knowledge_links WHERE workspace_id = ? AND from_path = ? AND to_path IS NULL', [ws, rel]).map((l) => l.toSlug);
       const backlinks = backlinksOf(rel).length;
-      return { path: rel, revision, tokenEstimate: fresh.tokenEstimate, budgetTokens: fresh.budgetTokens, unresolvedLinks: unresolved, backlinks, orphan: backlinks === 0 };
+      return { path: rel, revision, tokenEstimate: fresh.tokenEstimate, budgetTokens: budgetOfRow(fresh), unresolvedLinks: unresolved, backlinks, orphan: backlinks === 0 };
     },
 
     deleteDoc(actor, scope, slug, projectId) {
@@ -546,7 +568,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       if (entriesOf(body).some((e) => similarity(norm, e.normalized) >= 0.95)) return;
       const next = appendEntry(body, 'Decisions', line);
       write(SYSTEM, row, abs, next, 'note');
-      if (estimateTokens(next) > row.budgetTokens * 0.8) fireCuration('decisions');
+      if (estimateTokens(next) > budgetOfRow(row) * 0.8) fireCuration('decisions');
     },
   };
 

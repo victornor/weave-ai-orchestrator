@@ -4,8 +4,8 @@ import { join, resolve, dirname } from 'node:path';
 import YAML from 'yaml';
 import { openDb, newId, nowIso } from '@agent-conductor/db';
 import {
-  DaemonConfigSchema, WorkspaceConfigSchema, WorkspaceRegistrySchema, OcError,
-  type DaemonConfig, type WorkspaceConfig, type WorkspaceRegistry,
+  DaemonConfigSchema, DEFAULT_KNOWLEDGE_BUDGETS, WorkspaceConfigSchema, WorkspaceRegistrySchema, OcError,
+  type DaemonConfig, type KnowledgeBudgets, type WorkspaceConfig, type WorkspaceRegistry,
 } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import { workspacePaths } from '../context.js';
@@ -74,10 +74,10 @@ function unresolveEnvRefs<T>(value: T, back: Map<string, string>): T {
 
 // ---------- layout ----------
 
-const KNOWLEDGE_SKELETONS: Array<[string, (cfg: { name: string; humanName: string }) => string]> = [
+const KNOWLEDGE_SKELETONS: Array<[string, (cfg: { name: string; humanName: string; budgets: KnowledgeBudgets }) => string]> = [
   ['workspace/WORKSPACE.md', (c) => `# ${c.name}
 
-<!-- Conductor-only. Budget 3000 tokens. Curated; keep entries concise, dated and standalone. -->
+<!-- Conductor-only. Budget ${c.budgets.workspace} tokens. Curated; keep entries concise, dated and standalone. -->
 
 ## What this business is
 
@@ -95,9 +95,9 @@ const KNOWLEDGE_SKELETONS: Array<[string, (cfg: { name: string; humanName: strin
 
 (policies that apply across projects)
 `],
-  ['workspace/SHARED.md', () => `# Shared conventions
+  ['workspace/SHARED.md', (c) => `# Shared conventions
 
-<!-- Visible to every agent. Budget 800 tokens. Never name a project here. -->
+<!-- Visible to every agent. Budget ${c.budgets.shared} tokens. Never name a project here. -->
 
 ## House rules
 
@@ -109,9 +109,9 @@ const KNOWLEDGE_SKELETONS: Array<[string, (cfg: { name: string; humanName: strin
 
 (terms every agent should share)
 `],
-  ['workspace/decisions.md', () => `# Decision log
+  ['workspace/decisions.md', (c) => `# Decision log
 
-<!-- Appended by the daemon from answered decisions marked durable. Budget 1500 tokens. -->
+<!-- Appended by the daemon from answered decisions marked durable. Budget ${c.budgets.decisions} tokens. -->
 `],
 ];
 
@@ -126,15 +126,17 @@ const PROJECT_SECTION_HINTS: Record<(typeof PROJECT_SECTIONS)[number], string> =
   'Learnings': '(dated, concise entries from workers)',
 };
 
-const PROJECT_SKELETON = (id: string) => [
+const PROJECT_SKELETON = (id: string, budget: number) => [
   `# ${id}`,
   '',
-  '<!-- The project knowledge base. Budget 1500 tokens. Workers append concise dated learnings. -->',
+  `<!-- The project knowledge base. Budget ${budget} tokens. Workers append concise dated learnings. -->`,
   ...PROJECT_SECTIONS.flatMap((s) => ['', `## ${s}`, '', PROJECT_SECTION_HINTS[s]]),
   '',
 ].join('\n');
 
-export function projectKnowledgeSkeleton(id: string): string { return PROJECT_SKELETON(id); }
+export function projectKnowledgeSkeleton(id: string, budgetTokens = DEFAULT_KNOWLEDGE_BUDGETS.project): string {
+  return PROJECT_SKELETON(id, budgetTokens);
+}
 
 function ensureLayout(root: string, stateDir?: string): void {
   const p = workspacePaths(root);
@@ -162,7 +164,7 @@ class Loader implements WorkspaceLoader {
     const humanName = config.conductor.humanName ?? 'captain';
     for (const [rel, body] of KNOWLEDGE_SKELETONS) {
       const path = join(root, 'knowledge', rel);
-      if (!existsSync(path)) { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, body({ name: config.name, humanName }), 'utf8'); }
+      if (!existsSync(path)) { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, body({ name: config.name, humanName, budgets: config.defaults.knowledgeBudgetTokens }), 'utf8'); }
     }
     const gitignore = join(root, '.agent-conductor', '.gitignore');
     if (!existsSync(gitignore)) writeFileSync(gitignore, '*\n', 'utf8');

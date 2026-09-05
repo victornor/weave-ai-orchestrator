@@ -1,10 +1,21 @@
 import { createHash } from 'node:crypto';
-import { estimateTokens, OcError, type KnowledgeScope } from '@agent-conductor/shared';
+import { DEFAULT_KNOWLEDGE_BUDGETS, estimateTokens, OcError, type KnowledgeBudgets, type KnowledgeScope } from '@agent-conductor/shared';
 
-/** Budgets in tokens per file (PLAN §13.1). */
-export const BUDGETS: Record<KnowledgeScope, number> = { workspace: 3000, shared: 800, decisions: 1500, project: 1500 };
+/**
+ * Budgets in tokens per file (PLAN §13.1). These are the defaults a workspace that has not set
+ * `defaults.knowledgeBudgetTokens` runs on; the configured value is what the service enforces.
+ */
+export const BUDGETS: Record<KnowledgeScope, number> = {
+  workspace: DEFAULT_KNOWLEDGE_BUDGETS.workspace, shared: DEFAULT_KNOWLEDGE_BUDGETS.shared,
+  decisions: DEFAULT_KNOWLEDGE_BUDGETS.decisions, project: DEFAULT_KNOWLEDGE_BUDGETS.project,
+};
 /** Budget per linked document (PLAN §13): a topic page, not a wiki. */
-export const DOC_BUDGET = 1500;
+export const DOC_BUDGET = DEFAULT_KNOWLEDGE_BUDGETS.document;
+
+/** The budget a hub file or a document gets from a workspace's configured budgets. */
+export function budgetOf(budgets: KnowledgeBudgets, scope: KnowledgeScope, isDoc: boolean): number {
+  return isDoc ? budgets.document : budgets[scope];
+}
 
 export const PROJECT_SECTIONS = ['Overview', 'Stack & commands', 'Conventions', 'Current focus', 'Landmines', 'Documents', 'Learnings'] as const;
 export const WORKSPACE_SECTIONS = ['Overview', 'Goals', 'People & working style', 'Portfolio', 'Conventions', 'Standing instructions'] as const;
@@ -169,22 +180,40 @@ export function sectionSizes(body: string, budget: number): { sizes: Array<{ sec
 }
 
 /** A title, a one-line blurb and one empty heading per canonical section, in order. */
-function skeleton(title: string, blurb: string, sections: readonly string[]): string {
-  return [title, '', blurb, ...sections.flatMap((s) => ['', `## ${s}`]), ''].join('\n');
+function skeleton(title: string, blurb: string, sections: readonly string[], budget: number): string {
+  return [title, '', `<!-- ${blurb} Budget ${budget} tokens. -->`, ...sections.flatMap((s) => ['', `## ${s}`]), ''].join('\n');
 }
 
 /** Skeletons written when a knowledge file does not exist yet. */
-export function seedBody(scope: KnowledgeScope, opts: { workspaceName?: string; projectName?: string } = {}): string {
+export function seedBody(scope: KnowledgeScope, opts: { workspaceName?: string; projectName?: string; budgetTokens?: number } = {}): string {
+  const budget = opts.budgetTokens ?? BUDGETS[scope];
   switch (scope) {
     case 'workspace':
-      return skeleton(`# ${opts.workspaceName ?? 'Workspace'} — workspace knowledge`, 'Conductor-only. What this workspace is for, who works here, and the project portfolio.', WORKSPACE_SECTIONS);
+      return skeleton(`# ${opts.workspaceName ?? 'Workspace'} — workspace knowledge`, 'Conductor-only. What this workspace is for, who works here, and the project portfolio.', WORKSPACE_SECTIONS, budget);
     case 'shared':
-      return skeleton('# Shared knowledge', 'Read by every agent. Project-agnostic only: never name a project here.', SHARED_SECTIONS);
+      return skeleton('# Shared knowledge', 'Read by every agent. Project-agnostic only: never name a project here.', SHARED_SECTIONS, budget);
     case 'decisions':
-      return skeleton('# Durable decisions', 'One line per decision the workspace should remember. Appended by the daemon.', DECISION_SECTIONS);
+      return skeleton('# Durable decisions', 'One line per decision the workspace should remember. Appended by the daemon.', DECISION_SECTIONS, budget);
     case 'project':
-      return skeleton(`# ${opts.projectName ?? 'Project'} — project knowledge`, 'Written by this project\'s workers and the conductor. Concise, dated, durable entries only.', PROJECT_SECTIONS);
+      return skeleton(`# ${opts.projectName ?? 'Project'} — project knowledge`, 'Written by this project\'s workers and the conductor. Concise, dated, durable entries only.', PROJECT_SECTIONS, budget);
   }
+}
+
+/** `Budget N tokens` inside an HTML comment; the number is the only part rewritten. */
+const BUDGET_MARKER = /(\bBudget:?\s+)([\d,]+)(\s+tokens\b)/i;
+
+/**
+ * Restate the budget in a file's leading `<!-- … Budget N tokens … -->` marker. That line sits inside
+ * the knowledge base, so it reaches every agent: a stale number tells them a limit nobody enforces.
+ * Only the digits change, only in the preamble's first comment, and only when they disagree.
+ */
+export function withBudgetStated(body: string, budget: number): string {
+  const head = body.split(/^##\s/m)[0] ?? '';
+  const comment = /<!--[\s\S]*?-->/.exec(head);
+  if (!comment) return body;
+  const updated = comment[0].replace(BUDGET_MARKER, (_all, pre: string, _n: string, post: string) => `${pre}${budget}${post}`);
+  if (updated === comment[0]) return body;
+  return body.slice(0, comment.index) + updated + body.slice(comment.index + comment[0].length);
 }
 
 // ---------- linked documents ----------

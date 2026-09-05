@@ -184,6 +184,34 @@ export type ProjectAddStepId = (typeof PROJECT_ADD_STEPS)[number]['id'];
 /** Every kind's step list, so a job can be seeded complete-and-`pending` the moment it is created. */
 export const JOB_STEPS: Record<JobKind, ReadonlyArray<{ id: string; label: string }>> = { project_add: PROJECT_ADD_STEPS };
 
+/**
+ * The changelog (PLAN §13.6) is the human-facing record of what happened in a workspace: a projection
+ * over the `activity` table, not a log of its own. These are the only activity actions it shows —
+ * everything else `recordActivity` writes stays operational detail the changelog never surfaces.
+ */
+export const CHANGELOG_KINDS = ['filed', 'plan_approved', 'pr_opened', 'landed', 'cancelled', 'hired', 'upgraded'] as const;
+export type ChangelogKind = (typeof CHANGELOG_KINDS)[number];
+
+/**
+ * The activity action behind each changelog kind, and the `details_json` field that has to match when
+ * one action carries several meanings: `ticket.transition` fires on every status edge and only the one
+ * into `approved` is a plan approval; `ticket.work_product` records branches and reports as well as
+ * pull requests. `landed` reads `ticket.delivery_landed` rather than the transition into `done`,
+ * because that row is written once, by `mergeDone`, when the work actually reached the clone.
+ */
+export const CHANGELOG_SOURCES: Record<ChangelogKind, { action: string; detail?: { key: string; value: string } }> = {
+  filed: { action: 'ticket.create' },
+  plan_approved: { action: 'ticket.transition', detail: { key: 'to', value: 'approved' } },
+  pr_opened: { action: 'ticket.work_product', detail: { key: 'type', value: 'pull_request' } },
+  landed: { action: 'ticket.delivery_landed' },
+  cancelled: { action: 'ticket.cancel' },
+  hired: { action: 'role.hire' },
+  upgraded: { action: 'daemon.upgraded' },
+};
+
+/** The kind the changelog's productivity measure counts: work that reached the repository. */
+export const CHANGELOG_MEASURE_KIND: ChangelogKind = 'landed';
+
 export const LOG_DOMAINS = ['daemon', 'wake', 'run', 'runtime', 'ticket', 'openspec', 'decision', 'channel', 'knowledge', 'usage', 'plugin', 'http', 'auth', 'worktree', 'surface', 'supervisor'] as const;
 export type LogDomain = (typeof LOG_DOMAINS)[number];
 

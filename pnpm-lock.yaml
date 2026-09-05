@@ -113,6 +113,9 @@ importers:
       '@agent-conductor/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk
+      '@agent-conductor/render':
+        specifier: workspace:*
+        version: link:../render
       '@agent-conductor/runtime-sdk':
         specifier: workspace:*
         version: link:../runtime-sdk

@@ -242,4 +242,86 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0011_activity_project', () => {
+    /**
+     * The history a workspace already has when this migration runs: activity rows recorded before the
+     * column existed, one per way a row can reach a project (through its ticket, through its role,
+     * through the project itself) plus two that reach none.
+     */
+    function seedHistory(db: Db): void {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 2, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, runtime_id, created_at, updated_at)
+         VALUES ('p1', 'w1', 'app', 'App', 'https://example.invalid/app', '/tmp/app', 'claude', 't0', 't0')`);
+      db.run(
+        `INSERT INTO roles (id, workspace_id, project_id, slug, name, charter_summary, scope_text, runtime_id, created_at, updated_at)
+         VALUES ('r1', 'w1', 'p1', 'engineer', 'Engineer', 'Owns the app', 'The app', 'claude', 't0', 't0')`);
+      db.run(
+        `INSERT INTO tickets (id, workspace_id, project_id, number, identifier, kind, title, created_by_kind, created_at, updated_at)
+         VALUES ('t1', 'w1', 'p1', 1, 'VS-1', 'change', 'Add dark mode', 'human', 't0', 't0')`);
+      // A workspace-level ticket: no project, so nothing to backfill from.
+      db.run(
+        `INSERT INTO tickets (id, workspace_id, project_id, number, identifier, kind, title, created_by_kind, created_at, updated_at)
+         VALUES ('t2', 'w1', NULL, 2, 'VS-2', 'task', 'Tidy the workspace', 'human', 't0', 't0')`);
+
+      const activity = (id: string, action: string, entityType: string, entityId: string, ticketId: string | null) =>
+        db.run(
+          `INSERT INTO activity (id, workspace_id, actor_kind, actor_id, action, entity_type, entity_id, ticket_id, details_json, created_at)
+           VALUES (?, 'w1', 'human', 'victor', ?, ?, ?, ?, '{}', 't1')`, [id, action, entityType, entityId, ticketId]);
+      activity('a1', 'ticket.create', 'ticket', 't1', 't1');
+      activity('a2', 'role.hire', 'role', 'r1', null);
+      activity('a3', 'project.add', 'project', 'p1', null);
+      activity('a4', 'ticket.create', 'ticket', 't2', 't2');
+      activity('a5', 'wake.enqueue', 'wakeup', 'w-1', null);
+    }
+
+    const projectOf = (db: Db, id: string) =>
+      db.get<{ projectId: string | null }>('SELECT project_id FROM activity WHERE id = ?', [id])!.projectId;
+
+    it('backfills the project of history recorded before the column existed', () => {
+      const path = join(dir, 'k.sqlite');
+      const before = openDbAsOf(path, '0010_decision_kinds.sql');
+      seedHistory(before);
+      expect(before.all<{ name: string }>('PRAGMA table_info(activity)').map((c) => c.name)).not.toContain('project_id');
+      before.close();
+
+      const db = openDb(path);
+      expect(projectOf(db, 'a1')).toBe('p1');   // through its ticket
+      expect(projectOf(db, 'a2')).toBe('p1');   // through its role
+      expect(projectOf(db, 'a3')).toBe('p1');   // the project itself
+      expect(projectOf(db, 'a4')).toBeNull();   // a ticket with no project
+      expect(projectOf(db, 'a5')).toBeNull();   // reaches nothing with a project
+      expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+      db.close();
+    });
+
+    it('leaves a row whose project has since been removed unattached', () => {
+      const path = join(dir, 'l.sqlite');
+      const before = openDbAsOf(path, '0010_decision_kinds.sql');
+      seedHistory(before);
+      before.run(
+        `INSERT INTO activity (id, workspace_id, actor_kind, actor_id, action, entity_type, entity_id, ticket_id, details_json, created_at)
+         VALUES ('a6', 'w1', 'human', 'victor', 'project.remove', 'project', 'p-gone', NULL, '{}', 't1')`);
+      before.close();
+
+      const db = openDb(path);
+      expect(projectOf(db, 'a6')).toBeNull();
+      db.close();
+    });
+
+    it('indexes the changelog scans and stays a no-op on a second run', () => {
+      const path = join(dir, 'm.sqlite');
+      const db = openDb(path);
+      expect(db.all<{ name: string }>('PRAGMA index_list(activity)').map((i) => i.name))
+        .toEqual(expect.arrayContaining(['activity_changelog', 'activity_changelog_project']));
+      db.close();
+
+      const again = openDb(path);
+      expect(again.all("SELECT value FROM meta WHERE key = 'migration:0011_activity_project.sql'")).toHaveLength(1);
+      again.close();
+    });
+  });
 });

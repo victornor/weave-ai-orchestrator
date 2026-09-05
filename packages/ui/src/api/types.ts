@@ -5,6 +5,11 @@
 import type {
   Agent,
   Briefing,
+  ChangelogDay,
+  ChangelogEntry,
+  ChangelogHeatmap,
+  ChangelogKind,
+  ChangelogPage,
   Decision,
   KnowledgeFile,
   Project,
@@ -442,3 +447,4 @@ export interface PresentationSurfaces {
 export type { PresentationConfig };
 
 export type { Agent, Briefing, Decision, Project, Role, Run, RunEvent, Ticket, TicketComment, ThreadMessage, Workspace };
+export type { ChangelogDay, ChangelogEntry, ChangelogHeatmap, ChangelogKind, ChangelogPage };

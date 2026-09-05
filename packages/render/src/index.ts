@@ -9,3 +9,4 @@ export * from './decision.js';
 export * from './entities.js';
 export * from './briefing.js';
 export * from './usage.js';
+export * from './changelog.js';

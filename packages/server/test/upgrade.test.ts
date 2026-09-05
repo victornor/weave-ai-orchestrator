@@ -483,6 +483,49 @@ describe('reconciling at startup', () => {
     svc.reconcile();
     expect(state(svc)).toBe('completed');
   });
+
+  // An upgrade is recorded daemon-level, but the changelog (PLAN §13.6) is per workspace, so a
+  // completed upgrade has to be pushed outward into each one.
+  describe('the changelog entry a completed upgrade leaves', () => {
+    // Aliasing details_json would bypass the db wrapper's JSON decoding, so it is parsed here instead.
+    const upgradeRows = (id: string) =>
+      (fx.workspaces.get(id)!.ctx.db as Db).all<{ entityId: string; ticketId: string | null; projectId: string | null; actorKind: string; details: string }>(
+        "SELECT entity_id, ticket_id, project_id, actor_kind, details_json AS details FROM activity WHERE action = 'daemon.upgraded'")
+        .map((r) => ({ ...r, details: JSON.parse(r.details) as Record<string, unknown> }));
+
+    it('writes one entry in every registered workspace', () => {
+      fx.addWorkspace('ws1');
+      fx.addWorkspace('ws2');
+      const upgradeId = seed({ toRelease: '/rel/new', toSha: 'nnnn', fromRelease: '/rel/old' });
+      fx.service({ releaseRoot: '/rel/new', version: '1.1.0' }).reconcile();
+
+      for (const ws of ['ws1', 'ws2']) {
+        const rows = upgradeRows(ws);
+        expect(rows).toHaveLength(1);
+        // It belongs to no project and no ticket: it is a workspace-level event.
+        expect(rows[0]).toMatchObject({ entityId: upgradeId, ticketId: null, projectId: null, actorKind: 'system' });
+        expect(rows[0]!.details).toMatchObject({ fromRelease: '/rel/old', toRelease: '/rel/new', version: '1.1.0' });
+      }
+    });
+
+    it('writes nothing a second time when the same upgrade is reconciled again', () => {
+      fx.addWorkspace('ws1');
+      seed({ toRelease: '/rel/new', toSha: 'nnnn' });
+      const svc = fx.service({ releaseRoot: '/rel/new', version: '1.1.0' });
+      svc.reconcile();
+      svc.reconcile();
+      fx.service({ releaseRoot: '/rel/new', version: '1.1.0' }).reconcile();
+      expect(upgradeRows('ws1')).toHaveLength(1);
+    });
+
+    it('leaves no entry for an upgrade that did not complete', () => {
+      fx.addWorkspace('ws1');
+      seed({ toRelease: '/rel/new', toSha: 'nnnn', startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() });
+      fx.service({ releaseRoot: '/rel/other' }).reconcile();
+      expect(state(fx.service({ releaseRoot: '/rel/other' }))).toBe('failed');
+      expect(upgradeRows('ws1')).toEqual([]);
+    });
+  });
 });
 
 // ---------- the gate against the real dispatcher ----------

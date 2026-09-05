@@ -72,6 +72,10 @@ vi.mock('../api/hooks', () => ({
   useKnowledgeDocDetail: () => ({ data: null, isLoading: false }),
   useKnowledgeDocMutation: () => ({ mutate: vi.fn() }),
   useKnowledgeGraph: () => ({ data: { nodes: [], edges: [] }, isLoading: false }),
+  // The Changelog tab lives in this route now; the mock is wholesale, so it needs these too.
+  useChangelog: () => ({ data: [], isLoading: false, isError: false, hasOlder: false, isLoadingOlder: false, loadOlder: vi.fn(), loadUntil: vi.fn() }),
+  useChangelogHeatmap: () => ({ data: undefined, isLoading: false }),
+  readerTimezone: () => 'UTC',
   useCapabilities: () => ({ data: [CAPABILITY], isLoading: false, isError: false, refetch: vi.fn() }),
   useCapability: (project: string, capability: string) => {
     state.capabilityArgs = [project, capability];

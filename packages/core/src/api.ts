@@ -293,8 +293,24 @@ export interface AuthService {
 // ---------- briefing / conductor ----------
 export interface BriefingService { snapshot(): S.Briefing }
 
+// ---------- changelog ----------
+/** What a page of the changelog is asked for. `before` is the cursor a previous page returned. */
+export interface ChangelogQuery { projectId?: string | null; before?: string | null; limit?: number }
+/** A range of days to aggregate, in the timezone the caller names. `from`/`to` are `YYYY-MM-DD`. */
+export interface ChangelogHeatmapQuery { projectId?: string | null; from?: string | null; to?: string | null; timezone?: string | null }
+/**
+ * The human-facing record of what happened (PLAN §13.6): a read-only projection over the `activity`
+ * table. There is deliberately no write, edit or delete member — the record is append-only, and the
+ * only thing that appends to it is `recordActivity` on the path that caused the event.
+ */
+export interface ChangelogService {
+  list(q?: ChangelogQuery): S.ChangelogPage;
+  heatmap(q?: ChangelogHeatmapQuery): S.ChangelogHeatmap;
+}
+
 export interface CoreServices {
   tickets: TicketsService; decisions: DecisionsService; projects: ProjectsService; roles: RolesService; workers: WorkersService;
   wake: WakeService; runs: RunsService; dispatcher: Dispatcher; supervisor: Supervisor; knowledge: KnowledgeService; specs: SpecsService;
   openspec: OpenSpecService; usage: UsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
+  changelog: ChangelogService;
 }

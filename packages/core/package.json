@@ -16,6 +16,7 @@
   "dependencies": {
     "@agent-conductor/shared": "workspace:*",
     "@agent-conductor/db": "workspace:*",
+    "@agent-conductor/render": "workspace:*",
     "@agent-conductor/runtime-sdk": "workspace:*",
     "@agent-conductor/channel-sdk": "workspace:*",
     "@agent-conductor/surface-sdk": "workspace:*",

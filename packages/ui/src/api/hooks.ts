@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import type { RunEvent, TicketComment, Ticket, Decision, Agent, Role, Run, Project, UsageGrain, UsageWindow, Workspace } from '@agent-conductor/shared';
+import { dayKey } from '@agent-conductor/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
 import { useWs } from './context';
@@ -838,5 +839,76 @@ export function usePutPresentation(): UseMutationResult<T.PresentationConfig, Er
   return useMutation({
     mutationFn: (body) => api.ws<T.PresentationConfig>(ws, '/presentation', { method: 'PUT', body }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: qk.presentation(ws) }),
+  });
+}
+
+// ---------------------------------------------------------------- changelog
+
+const CHANGELOG_PAGE_SIZE = 50;
+
+/** The reader's own timezone: what decides which day an entry falls under, here and in the heatmap. */
+export function readerTimezone(): string {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
+  catch { return 'UTC'; }
+}
+
+export interface ChangelogHistory {
+  data: T.ChangelogEntry[] | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  /** False once the daemon has answered with no cursor: everything older is loaded. */
+  hasOlder: boolean;
+  isLoadingOlder: boolean;
+  loadOlder: () => void;
+  /** Load pages until `date` (a `YYYY-MM-DD` in the reader's timezone) is covered, or history runs out. */
+  loadUntil: (date: string) => Promise<void>;
+}
+
+/**
+ * The changelog, newest first, a page at a time. `GET /changelog` answers newest-first already and
+ * hands back the cursor for the page after it, so unlike the thread history no page needs reversing.
+ */
+export function useChangelog(project?: string): ChangelogHistory {
+  const ws = useWs();
+  const tz = readerTimezone();
+  const q = useInfiniteQuery({
+    queryKey: qk.changelog(ws, project),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      api.ws<T.ChangelogPage>(ws, `/changelog${qs({ project, limit: CHANGELOG_PAGE_SIZE, before: pageParam })}`),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+  });
+
+  const data = useMemo(() => (q.data ? q.data.pages.flatMap((p) => p.entries) : undefined), [q.data]);
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = q;
+
+  return {
+    data,
+    isLoading: q.isLoading,
+    isError: q.isError,
+    hasOlder: hasNextPage,
+    isLoadingOlder: isFetchingNextPage,
+    loadOlder: () => { if (hasNextPage && !isFetchingNextPage) void fetchNextPage(); },
+    // Jumping to a day the reader can see on the heatmap but has not scrolled to yet: page until the
+    // oldest loaded entry is at or before it, so the timeline has a separator to scroll to.
+    loadUntil: async (date: string) => {
+      for (let guard = 0; guard < 40; guard += 1) {
+        const loaded = q.data ? q.data.pages.flatMap((p) => p.entries) : [];
+        const oldest = loaded[loaded.length - 1];
+        if (oldest && dayKey(oldest.at, tz) <= date) return;
+        if (!q.hasNextPage) return;
+        const r = await fetchNextPage();
+        if (!r.hasNextPage) return;
+      }
+    },
+  };
+}
+
+export function useChangelogHeatmap(project?: string): UseQueryResult<T.ChangelogHeatmap> {
+  const ws = useWs();
+  const tz = readerTimezone();
+  return useQuery({
+    queryKey: qk.changelogHeatmap(ws, project, tz),
+    queryFn: () => api.ws<T.ChangelogHeatmap>(ws, `/changelog/heatmap${qs({ project, tz })}`),
   });
 }

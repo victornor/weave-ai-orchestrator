@@ -15,6 +15,7 @@ import { createRolesService } from './roles/index.js';
 import { createWorkersService } from './workers/index.js';
 import { createProjectsService } from './projects/index.js';
 import { createJobsService } from './jobs/index.js';
+import { createChangelogService } from './changelog/index.js';
 
 /** Assemble all services for one workspace. Services receive a lazy accessor to the full set to avoid construction-order cycles. */
 export function createCore(ctx: WorkspaceContext): CoreServices {
@@ -25,7 +26,7 @@ export function createCore(ctx: WorkspaceContext): CoreServices {
     openspec: createOpenSpecService(ctx, deps), usage: createUsageService(ctx, deps), accounts: createAccountsService(ctx), threads: createThreadsService(ctx, deps), briefing: createBriefingService(ctx, deps),
     wake: createWakeService(ctx, deps), runs: createRunsService(ctx, deps), dispatcher: createDispatcher(ctx, deps), supervisor: createSupervisor(ctx, deps),
     roles: createRolesService(ctx, deps), workers: createWorkersService(ctx, deps), projects: createProjectsService(ctx, deps),
-    jobs: createJobsService(ctx, deps),
+    jobs: createJobsService(ctx, deps), changelog: createChangelogService(ctx, deps),
   };
   return services;
 }

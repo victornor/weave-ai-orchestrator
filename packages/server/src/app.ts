@@ -26,6 +26,7 @@ import { ticketRoutes } from './routes/tickets.js';
 import { decisionRoutes } from './routes/decisions.js';
 import { runRoutes } from './routes/runs.js';
 import { knowledgeRoutes, specRoutes, searchRoute } from './routes/knowledge.js';
+import { changelogRoutes } from './routes/changelog.js';
 import { usageRoutes } from './routes/usage.js';
 import { threadRoutes } from './routes/threads.js';
 import { agentRoutes } from './routes/agent.js';
@@ -67,6 +68,7 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   ws.route('/decisions', decisionRoutes());
   ws.route('/runs', runRoutes());
   ws.route('/knowledge', knowledgeRoutes());
+  ws.route('/changelog', changelogRoutes());
   ws.route('/specs', specRoutes());
   ws.route('/search', searchRoute());
   ws.route('/usage', usageRoutes());

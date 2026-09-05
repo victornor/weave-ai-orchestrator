@@ -32,6 +32,8 @@ export interface TicketsService {
   putDocument(actor: Actor, id: string, key: string, body: string): { documentId: string; revision: number };
   getDocument(id: string, key: string, revision?: number): { documentId: string; revision: number; body: string; createdAt: string } | null;
   documentRevisions(id: string, key: string): Array<{ revision: number; authorKind: string; createdAt: string }>;
+  /** Every document on a ticket with its current revision — the catalogue an agent reads before asking for one by key. */
+  documents(id: string): Array<{ key: string; revision: number; updatedAt: string }>;
   addWorkProduct(actor: Actor, id: string, wp: { type: S.WorkProductType; url?: string; title?: string; state?: string; provider?: string; externalId?: string; isPrimary?: boolean; metadata?: Record<string, unknown> }): { id: string };
   workProducts(id: string): Array<Record<string, unknown>>;
   /** Async: archives the OpenSpec change after the merge is verified (PLAN §12.2). */

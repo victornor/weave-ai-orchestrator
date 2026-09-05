@@ -84,6 +84,59 @@ describe('MCP endpoint', () => {
     await client.close();
   });
 
+  it('reads a scout report on another ticket in the worker\'s own project', async () => {
+    const { client, h } = await connect();
+    h.tickets.set('tk_scout', { ...h.tickets.get('tk_1')!, id: 'tk_scout', identifier: 'ACME-24', kind: 'scout', parentId: null });
+    h.documents.set('tk_scout\0report', ['draft', 'the finding']);
+    const res = await client.callTool({ name: 'ac_ticket_document_get', arguments: { id: 'ACME-24' } });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.ok).toBe(true);
+    expect(payload.data).toMatchObject({ identifier: 'ACME-24', key: 'report', revision: 2, body: 'the finding' });
+    await client.close();
+  });
+
+  it('reads an earlier revision when asked for one', async () => {
+    const { client, h } = await connect();
+    h.documents.set('tk_1\0plan', ['v1', 'v2']);
+    const res = await client.callTool({ name: 'ac_ticket_document_get', arguments: { id: 'ACME-42', key: 'plan', revision: 1 } });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.data).toMatchObject({ revision: 1, body: 'v1' });
+    await client.close();
+  });
+
+  it('refuses a document on a ticket in another project', async () => {
+    const { client, h } = await connect();
+    h.tickets.set('tk_other', { ...h.tickets.get('tk_1')!, id: 'tk_other', identifier: 'ZED-7', projectId: 'proj2', parentId: null });
+    h.documents.set('tk_other\0report', ['not for you']);
+    const res = await client.callTool({ name: 'ac_ticket_document_get', arguments: { id: 'ZED-7' } });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.ok).toBe(false);
+    expect(payload.error.code).toBe('forbidden');
+    await client.close();
+  });
+
+  it('lets the conductor read a document in any project', async () => {
+    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', projectId: null, ticketId: null });
+    h.tickets.set('tk_other', { ...h.tickets.get('tk_1')!, id: 'tk_other', identifier: 'ZED-7', projectId: 'proj2', parentId: null });
+    h.documents.set('tk_other\0report', ['cross-project finding']);
+    const res = await client.callTool({ name: 'ac_ticket_document_get', arguments: { id: 'ZED-7' } });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.ok).toBe(true);
+    expect(payload.data.body).toBe('cross-project finding');
+    await client.close();
+  });
+
+  it('names the documents a ticket does have when the key is unknown', async () => {
+    const { client, h } = await connect();
+    h.documents.set('tk_1\0plan', ['the plan']);
+    const res = await client.callTool({ name: 'ac_ticket_document_get', arguments: { id: 'ACME-42', key: 'report' } });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.ok).toBe(false);
+    expect(payload.error.code).toBe('not_found');
+    expect(payload.error.details.availableKeys).toEqual(['plan']);
+    await client.close();
+  });
+
   it('rejects a run token minted for a different run', async () => {
     harness = makeHarness({ listener: 'loopback' });
     const app = createApp(harness.deps);

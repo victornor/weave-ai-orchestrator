@@ -615,6 +615,18 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       return { documentId: doc.id, revision: rev, body: r.body, createdAt: r.createdAt };
     },
 
+    documents(id) {
+      const t = get(id);
+      return db.all<{ key: string; revision: number; updatedAt: string }>(
+        `SELECT d.key AS key, d.current_revision AS revision, COALESCE(r.created_at, '') AS updated_at
+           FROM ticket_documents d
+           LEFT JOIN ticket_document_revisions r ON r.document_id = d.id AND r.revision = d.current_revision
+          WHERE d.ticket_id = ? AND d.current_revision > 0
+          ORDER BY d.key`,
+        [t.id],
+      );
+    },
+
     documentRevisions(id, key) {
       const t = get(id);
       const doc = db.get<{ id: string }>('SELECT id FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, key]);

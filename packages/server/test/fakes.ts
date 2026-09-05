@@ -78,6 +78,8 @@ export interface Harness {
   calls: Call[];
   tickets: Map<string, Ticket>;
   comments: TicketComment[];
+  /** Ticket documents keyed `<ticketId>\0<key>`; the value is every revision, oldest first. */
+  documents: Map<string, string[]>;
   tokens: Map<string, { sessionId: string; operatorId: string; kind: 'web' | 'cli' | 'presenter' }>;
   /** Live method tables behind the service proxies: mutate to stub a method mid-test. */
   impls: Record<string, Record<string, unknown>>;
@@ -108,6 +110,8 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
 
   const tickets = new Map<string, Ticket>([['tk_1', ticket()]]);
   const comments: TicketComment[] = [];
+  /** `<ticketId>\0<key>` → the revisions written so far, oldest first. */
+  const documents = new Map<string, string[]>();
   const decisions = new Map<string, Decision>([['dec_1', decision()]]);
 
   const getTicket = (id: string): Ticket => {
@@ -134,6 +138,28 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
         }),
       },
       comments: () => comments,
+      putDocument: (_actor: Actor, id: string, key: string, body: string) => {
+        const docKey = `${getTicket(id).id}\0${key}`;
+        const revisions = documents.get(docKey) ?? [];
+        revisions.push(body);
+        documents.set(docKey, revisions);
+        return { documentId: docKey, revision: revisions.length };
+      },
+      getDocument: (id: string, key: string, revision?: number) => {
+        const docKey = `${getTicket(id).id}\0${key}`;
+        const revisions = documents.get(docKey);
+        if (!revisions?.length) return null;
+        const rev = revision ?? revisions.length;
+        const body = revisions[rev - 1];
+        if (body === undefined) return null;
+        return { documentId: docKey, revision: rev, body, createdAt: '2026-09-01T00:00:00.000Z' };
+      },
+      documents: (id: string) => {
+        const prefix = `${getTicket(id).id}\0`;
+        return [...documents.entries()]
+          .filter(([k]) => k.startsWith(prefix))
+          .map(([k, revisions]) => ({ key: k.slice(prefix.length), revision: revisions.length, updatedAt: '2026-09-01T00:00:00.000Z' }));
+      },
       create: (_actor: Actor, input: { title: string; kind: Ticket['kind']; projectId?: string | null }) => {
         const created = ticket({ id: `tk_${tickets.size + 1}`, identifier: `ACME-${43 + tickets.size}`, title: input.title, kind: input.kind, projectId: input.projectId ?? null, status: 'backlog' });
         tickets.set(created.id, created);
@@ -227,7 +253,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     updates, upgrades,
   };
 
-  return { runtime, deps, db, bus, calls, tickets, comments, tokens, impls, close: () => db.close() };
+  return { runtime, deps, db, bus, calls, tickets, comments, documents, tokens, impls, close: () => db.close() };
 }
 
 export const authed = (extra: Record<string, string> = {}): Record<string, string> => ({ authorization: 'Bearer sess-token', ...extra });

@@ -17,7 +17,15 @@ export interface Rect {
   h: number;
 }
 
-export const BAR = {
+export interface BarGeometry {
+  height: number;
+  padX: number;
+  fabSize: number;
+  fabTop: number;
+  tabTop: number;
+}
+
+export const BAR: BarGeometry = {
   /** --bar-height, the bar chrome above the safe-area inset */
   height: 4.875,
   /** horizontal padding of the tab row */
@@ -28,9 +36,7 @@ export const BAR = {
   fabTop: -1.625,
   /** first row of the tab entries — below `fabTop + fabSize` */
   tabTop: 1.75,
-} as const;
-
-export type BarGeometry = typeof BAR;
+};
 
 export function rem(value: number, rootPx = 16): number {
   return value * rootPx;

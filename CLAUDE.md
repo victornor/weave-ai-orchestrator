@@ -102,7 +102,7 @@ pnpm --filter @agent-conductor/ui build     # only when you touched the web app
 pnpm test                                 # vitest run, whole repo
 pnpm vitest run packages/core             # one package
 pnpm lint                                 # boundary + console guards
-pnpm typecheck                            # tsc -b tsconfig.json
+pnpm typecheck                            # tsc -b tsconfig.json, then the web app
 ```
 
 Daemon, foreground, with a throwaway config dir:

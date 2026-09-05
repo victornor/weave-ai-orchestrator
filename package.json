@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "pnpm -r --filter './packages/**' run build",
-    "typecheck": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json && pnpm --filter @agent-conductor/ui typecheck",
     "test": "vitest run && pnpm --filter @agent-conductor/ui test",
     "lint": "node scripts/guard-boundaries.mjs && node scripts/guard-console.mjs",
     "dev": "pnpm --filter @agent-conductor/server run dev",

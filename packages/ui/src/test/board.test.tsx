@@ -14,7 +14,7 @@ describe('board folding', () => {
   });
 
   it('folds exactly backlog, proposing, approved, merging and cancelled', () => {
-    const folded = TICKET_STATUSES.filter(isFolded);
+    const folded = TICKET_STATUSES.filter((s) => isFolded(s));
     expect(folded).toEqual(['backlog', 'proposing', 'approved', 'merging', 'cancelled']);
   });
 

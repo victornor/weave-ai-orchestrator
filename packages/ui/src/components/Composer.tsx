@@ -140,10 +140,16 @@ export function Composer({
   const send = useCallback(() => {
     const t = text.trim();
     if (!t || disabled) return;
+    // Sending ends the utterance. A mic left open would keep appending to an input the human has
+    // already sent, so it closes here — button and ⏎ alike — before the input is cleared.
+    if (dictation.listening) {
+      startedByKey.current = false;
+      dictation.stop();
+    }
     void onSubmit(t);
     set('');
     base.current = '';
-  }, [text, disabled, onSubmit, set]);
+  }, [text, disabled, onSubmit, set, dictation]);
 
   const dictating = dictation.listening;
 

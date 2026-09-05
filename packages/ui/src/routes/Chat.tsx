@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ThreadMessage } from '@agent-conductor/shared';
-import { ticketUiStatus, agentUiStatus } from '@agent-conductor/shared';
+import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Composer } from '../components/Composer';
 import { DecisionCard } from '../components/DecisionCard';
@@ -8,8 +8,11 @@ import { WorkerChip, CommandChip } from '../components/Chips';
 import { Skeleton } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Markdown } from '../components/Markdown';
+import { StatusGlyph } from '../components/StatusGlyph';
+import { Transcript } from '../components/Transcript';
 import {
   useAnswerDecision,
+  useConductor,
   useCreateThread,
   useDecisions,
   usePostThreadMessage,
@@ -19,6 +22,7 @@ import {
   useTickets,
   useWorkers,
 } from '../api/hooks';
+import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import { enqueue, useQueueCount } from '../lib/queue';
 import { useGo } from '../app/link';
@@ -67,10 +71,20 @@ export function ChatRoute(): React.ReactElement {
   const workers = useWorkers({ status: 'running' });
   const projects = useProjects();
   const queuedCount = useQueueCount('thread');
-  const [midTurn, setMidTurn] = useState(false);
-  const [streaming, setStreaming] = useState<string>('');
+  const conductor = useConductor();
+  const conductorId = conductor.data?.agent.id ?? null;
+  /** The conductor run being streamed, or null when it is idle. */
+  const [runId, setRunId] = useState<string | null>(null);
+  /** Bridges the gap between posting and the daemon starting the run, so "working" shows at once. */
+  const [sending, setSending] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const offline = conn.state === 'offline' || conn.state === 'unreachable';
+
+  const runEvents = useRunEventStream(runId);
+  // The reply renders as the thread message ac_human_send created; showing the call too would
+  // put the same words on screen twice.
+  const liveEvents = useMemo(() => runEvents.filter((e) => !isHumanReplyToolEvent(e)), [runEvents]);
+  const working = sending || runId !== null;
 
   useEffect(() => {
     if (threadId) return;
@@ -79,31 +93,32 @@ export function ChatRoute(): React.ReactElement {
     else if (threads.isSuccess && !createThread.isPending && !createThread.data) createThread.mutate({}, { onSuccess: (t) => setThreadId(t.id) });
   }, [threads.data, threads.isSuccess, threadId, createThread]);
 
-  // Streamed replies: `thread.message` frames arrive as the conductor writes.
+  // Resume mid-turn: a chat that loads while the conductor is working streams the run in flight.
+  useEffect(() => {
+    const last = conductor.data?.lastRun;
+    if (last && isActiveRun(last.status)) setRunId((cur) => cur ?? last.id);
+  }, [conductor.data?.lastRun]);
+
+  // The conductor's turns are the ones we stream; `run.started` carries the agent it belongs to.
   useWorkspaceEvents(
     useCallback(
       (e) => {
-        if (e.type === 'thread.message') {
-          const p = e.payload as { threadId?: string; direction?: string; body?: string; partial?: boolean } | null;
-          if (p?.threadId && p.threadId !== threadId) return;
-          if (p?.direction === 'outbound') {
-            if (p.partial) setStreaming(p.body ?? '');
-            else {
-              setStreaming('');
-              setMidTurn(false);
-            }
-          }
+        if (e.type !== 'run.started' && e.type !== 'run.finished') return;
+        const p = e.payload as { agentId?: string } | null;
+        if (!conductorId || p?.agentId !== conductorId) return;
+        if (e.type === 'run.started') setRunId(e.entityId);
+        else {
+          setRunId((cur) => (cur === null || cur === e.entityId ? null : cur));
+          setSending(false);
         }
-        if (e.type === 'run.started') setMidTurn(true);
-        if (e.type === 'run.finished') setMidTurn(false);
       },
-      [threadId],
+      [conductorId],
     ),
   );
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages.data, streaming]);
+  }, [messages.data, liveEvents.length]);
 
   const ticketStatus = useCallback(
     (identifier: string) => {
@@ -136,7 +151,7 @@ export function ChatRoute(): React.ReactElement {
       enqueue({ kind: 'thread', path: `/threads/${threadId}/messages`, body: { body: text }, label: text.slice(0, 60) });
       return;
     }
-    setMidTurn(true);
+    setSending(true);
     post.mutate({ threadId, body: text });
   };
 
@@ -188,11 +203,16 @@ export function ChatRoute(): React.ReactElement {
             (messages.data ?? []).map((m: ThreadMessage) => <ChatMessage key={m.id} message={m} onTicket={openTicket} ticketStatus={ticketStatus} />)
           )}
 
-          {streaming ? (
-            <div className="flex flex-col gap-2">
-              <MessageBody body={streaming} onTicket={openTicket} ticketStatus={ticketStatus} />
-              <span className="inline-block h-3.5 w-0.5 bg-accent motion-safe:animate-[ac-blink_1s_steps(1)_infinite]" aria-hidden />
-            </div>
+          {/* The turn in flight. Transient: it goes when the run finishes and the thread's
+              messages stand alone, so the reply is never on screen twice. */}
+          {working ? (
+            <section aria-label="Conductor is working" className="flex flex-col gap-2">
+              <div className="flex items-center gap-2.5">
+                <StatusGlyph status="working" size="xs" />
+                <span className="ac-mono text-micro text-text-3">{runId ? 'working' : 'starting…'}</span>
+              </div>
+              {liveEvents.length ? <Transcript events={liveEvents} className="gap-2 p-0 opacity-90" /> : null}
+            </section>
           ) : null}
 
           {/* live worker chips */}
@@ -228,7 +248,7 @@ export function ChatRoute(): React.ReactElement {
         <div className="mx-auto max-w-3xl">
           <Composer
             placeholder="Message the conductor…"
-            queuedReason={offline ? 'Offline — your message is queued' : midTurn ? 'Conductor is replying — your message is queued' : null}
+            queuedReason={offline ? 'Offline — your message is queued' : working ? 'Conductor is replying — your message is queued' : null}
             queuedCount={queuedCount}
             onSubmit={send}
           />

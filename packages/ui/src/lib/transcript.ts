@@ -2,7 +2,7 @@ import type { RunEvent } from '@agent-conductor/shared';
 
 export type TranscriptBlock =
   | { id: string; type: 'text'; text: string; thinking?: boolean }
-  | { id: string; type: 'tool'; tool: string; target: string; durationMs: number | null; adds: number | null; dels: number | null; diff: string | null; error?: boolean }
+  | { id: string; type: 'tool'; tool: string; target: string; durationMs: number | null; adds: number | null; dels: number | null; diff: string | null; error?: boolean; pending?: boolean; denied?: boolean }
   | { id: string; type: 'phase'; phase: string; durationMs: number | null; tokens: number | null }
   | { id: string; type: 'status'; text: string; status: 'needs-you' | 'blocked' | 'failed' | 'done' | 'working' }
   | { id: string; type: 'command'; command: string; exitCode: number | null; output: string | null };
@@ -12,6 +12,27 @@ function str(v: unknown, fallback = ''): string {
 }
 function num(v: unknown): number | null {
   return typeof v === 'number' ? v : null;
+}
+
+/** The adapters disagree on which key carries a tool call's id, so try all of them. */
+function callKey(p: Record<string, unknown>, fallback: string): string {
+  for (const k of ['callId', 'id', 'toolCallId', 'toolUseId']) {
+    const v = p[k];
+    if (typeof v === 'string' && v) return v;
+  }
+  return fallback;
+}
+
+/** A tool result's body: a string, or whatever structure the runtime wrapped it in. */
+function resultText(p: Record<string, unknown>): string | null {
+  for (const k of ['content', 'output', 'result', 'text', 'stdout', 'reason', 'error']) {
+    const v = p[k];
+    if (typeof v === 'string' && v.trim()) return v;
+    if (v && typeof v === 'object') {
+      try { return JSON.stringify(v); } catch { /* circular: fall through */ }
+    }
+  }
+  return null;
 }
 
 /**
@@ -40,33 +61,56 @@ export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBl
         break;
       }
       case 'tool.call': {
-        const key = str(p['callId'], e.id);
+        const name = str(p['name'] ?? p['tool'] ?? p['toolName'], 'tool');
         out.push({
           id: e.id,
           type: 'tool',
-          tool: str(p['name'], 'tool'),
-          target: str(p['target']) || summariseInput(p['input']),
+          tool: name,
+          target: str(p['target']) || summariseInput(p['input'] ?? p['args'] ?? p['arguments']),
           durationMs: null,
           adds: null,
           dels: null,
           diff: null,
+          pending: true,
         });
-        openTools.set(key, out.length - 1);
+        openTools.set(callKey(p, e.id), out.length - 1);
         break;
       }
       case 'tool.result':
       case 'tool.denied': {
-        const key = str(p['callId'], '');
-        const idx = openTools.get(key);
+        const name = str(p['name'] ?? p['tool'] ?? p['toolName'], 'tool');
+        const key = callKey(p, '');
+        const idx = key ? openTools.get(key) : undefined;
         const block = idx != null ? out[idx] : undefined;
+        const denied = e.type === 'tool.denied';
+        const error = denied || p['isError'] === true;
+        // The result's body is what "a compact view of its result" means; it renders collapsed.
+        const detail = str(p['diff']) || resultText(p);
         if (block && block.type === 'tool') {
           block.durationMs = num(p['durationMs']);
           block.adds = num(p['additions']);
           block.dels = num(p['deletions']);
-          block.diff = str(p['diff']) || null;
-          block.error = e.type === 'tool.denied' || p['isError'] === true;
+          block.diff = detail;
+          block.error = error;
+          block.denied = denied;
+          block.pending = false;
+          openTools.delete(key);
+        } else {
+          // A result whose call we never saw (resumed session, truncated window): show it anyway.
+          out.push({
+            id: e.id,
+            type: 'tool',
+            tool: name,
+            target: '',
+            durationMs: num(p['durationMs']),
+            adds: num(p['additions']),
+            dels: num(p['deletions']),
+            diff: detail,
+            error,
+            denied,
+            pending: false,
+          });
         }
-        openTools.delete(key);
         break;
       }
       case 'file.changed': {

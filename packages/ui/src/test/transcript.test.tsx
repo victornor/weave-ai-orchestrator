@@ -38,6 +38,47 @@ describe('runEventsToTranscript', () => {
     expect(blocks[0]).toMatchObject({ type: 'tool', tool: 'Read', target: 'src/theme/tokens.ts', durationMs: 400 });
   });
 
+  // The adapters key the call id as `id`, not `callId` — correlating on `callId` alone left every
+  // tool permanently pending with no result.
+  it('merges a Claude-shaped tool result into its call and carries the result body', () => {
+    const blocks = runEventsToTranscript([
+      ev({ id: 'e1', type: 'tool.call', payload: { id: 'toolu_1', name: 'Read', input: { file_path: 'src/theme/tokens.ts' } } }),
+      ev({ id: 'e2', type: 'tool.result', payload: { id: 'toolu_1', name: 'Read', isError: false, content: 'export const tokens = {}' } }),
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      type: 'tool', tool: 'Read', target: 'src/theme/tokens.ts',
+      diff: 'export const tokens = {}', error: false, pending: false,
+    });
+  });
+
+  it('leaves a call with no result pending', () => {
+    const blocks = runEventsToTranscript([ev({ id: 'e1', type: 'tool.call', payload: { id: 'toolu_1', name: 'Bash', input: { command: 'pnpm test' } } })]);
+    expect(blocks[0]).toMatchObject({ type: 'tool', tool: 'Bash', target: 'pnpm test', pending: true });
+  });
+
+  it('marks an errored result and a denied call', () => {
+    const [errored] = runEventsToTranscript([
+      ev({ id: 'e1', type: 'tool.call', payload: { id: 't1', name: 'Bash' } }),
+      ev({ id: 'e2', type: 'tool.result', payload: { id: 't1', isError: true, content: 'exit 1' } }),
+    ]);
+    expect(errored).toMatchObject({ error: true, denied: false, diff: 'exit 1' });
+
+    const [denied] = runEventsToTranscript([
+      ev({ id: 'e3', type: 'tool.call', payload: { id: 't2', name: 'Write' } }),
+      ev({ id: 'e4', type: 'tool.denied', payload: { id: 't2', reason: 'not permitted' } }),
+    ]);
+    expect(denied).toMatchObject({ error: true, denied: true, diff: 'not permitted' });
+  });
+
+  it('still shows a result whose call is absent', () => {
+    const blocks = runEventsToTranscript([
+      ev({ id: 'e1', type: 'tool.result', payload: { id: 'orphan', name: 'Grep', content: '3 matches' } }),
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: 'tool', tool: 'Grep', diff: '3 matches', pending: false });
+  });
+
   it('emits phase and status lines', () => {
     const blocks = runEventsToTranscript([
       ev({ type: 'run.phase.timing', payload: { phase: 'implementing', durationMs: 252000, tokens: 18400 } }),

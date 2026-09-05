@@ -73,7 +73,18 @@ export function workerRoutes(): Hono<AppEnv> {
 /** `/conductor` lives beside `/workers` in the API but is one agent, not a collection. */
 export function conductorRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
-  app.get('/', (c) => c.json(c.get('ws').services.workers.conductor()));
+  /** Same envelope as `GET /workers/:id`, so one request tells a client which run to stream. */
+  app.get('/', (c) => {
+    const s = c.get('ws').services;
+    const worker = s.workers.conductor();
+    const runs = safe(() => s.runs.list({ agentId: worker.id, limit: 1 }));
+    return c.json({
+      worker,
+      ticket: worker.ticketId ? safe(() => s.tickets.get(worker.ticketId!)) : null,
+      lastRun: runs?.items[0] ?? null,
+      usage: safe(() => s.usage.series({ scope: `worker:${worker.id}`, window: '7d' })),
+    });
+  });
   app.post('/reset-session', async (c) => {
     const s = c.get('ws').services;
     const { reason } = await body(c, z.object({ reason: z.string().default('reset by operator') }));

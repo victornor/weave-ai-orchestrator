@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent, RunEventType } from '@agent-conductor/shared';
-import { runEventsToTranscript } from './transcript.js';
+import { chatTranscript, runEventsToTranscript } from './transcript.js';
 import type { FileBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock } from './types.js';
 
 let seq = 0;
@@ -223,5 +223,51 @@ describe('runEventsToTranscript', () => {
     expect((blocks[0] as StatusBlock).text).toBe('run started · claude · claude-fable-5-1');
     expect((blocks[1] as StatusBlock).text).toBe('turn 3 started');
     expect((blocks[3] as StatusBlock).tone).toBe('error');
+  });
+});
+
+describe('chatTranscript', () => {
+  it('renders streamed assistant text and a tool block, the same as the raw transcript', () => {
+    reset();
+    const blocks = chatTranscript([
+      ev('assistant.text', { text: 'Checking who is free.' }),
+      ev('tool.call', { id: 'tu_1', name: 'ac_briefing', input: {} }),
+      ev('tool.result', { id: 'tu_1', name: 'ac_briefing', content: '3 workers running' }),
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(['text', 'tool']);
+    expect((blocks[0] as TextBlock).text).toBe('Checking who is free.');
+    const tool = blocks[1] as ToolBlock;
+    expect(tool.name).toBe('ac_briefing');
+    expect(tool.status).toBe('ok');
+    expect(tool.detail).toBe('3 workers running');
+  });
+
+  // The reply already renders as the thread message the tool created.
+  it('drops the reply-delivery tool so the reply cannot appear twice', () => {
+    reset();
+    const blocks = chatTranscript([
+      ev('assistant.text', { text: 'Filed it.' }),
+      ev('tool.call', { id: 'tu_1', name: 'ac_human_send', input: { body: 'Filed it and put Ana on it.' } }),
+      ev('tool.result', { id: 'tu_1', name: 'ac_human_send', content: 'delivered' }),
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(['text']);
+    expect(JSON.stringify(blocks)).not.toContain('ac_human_send');
+    expect(JSON.stringify(blocks)).not.toContain('put Ana on it');
+  });
+
+  it('keeps every other tool, and leaves a call with no result pending', () => {
+    reset();
+    const blocks = chatTranscript([
+      ev('tool.call', { id: 'tu_1', name: 'ac_human_send', input: { body: 'on it' } }),
+      ev('tool.call', { id: 'tu_2', name: 'ac_ticket_create', input: { title: 'Add dark mode' } }),
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ kind: 'tool', name: 'ac_ticket_create', status: 'pending' });
+  });
+
+  it('tolerates empty and missing input', () => {
+    expect(chatTranscript([])).toEqual([]);
+    expect(chatTranscript(null)).toEqual([]);
+    expect(chatTranscript(undefined)).toEqual([]);
   });
 });

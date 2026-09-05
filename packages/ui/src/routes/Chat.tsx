@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Project, ThreadMessage } from '@agent-conductor/shared';
 import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
@@ -12,6 +12,7 @@ import { EmptyState, ErrorState } from '../components/States';
 import { Markdown } from '../components/Markdown';
 import { StatusGlyph } from '../components/StatusGlyph';
 import { Transcript } from '../components/Transcript';
+import { ScrollToBottomButton } from '../components/ScrollToBottom';
 import {
   useAnswerDecision,
   useConductor,
@@ -27,6 +28,7 @@ import {
 import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import { chatEntries } from '../lib/dispatch';
+import { useStickToBottom } from '../lib/stickToBottom';
 import { enqueue, useQueueCount } from '../lib/queue';
 import { useToast } from '../components/Toast';
 import { useGo } from '../app/link';
@@ -90,7 +92,6 @@ export function ChatRoute(): React.ReactElement {
   const [runId, setRunId] = useState<string | null>(null);
   /** Bridges the gap between posting and the daemon starting the run, so "working" shows at once. */
   const [sending, setSending] = useState(false);
-  const bottom = useRef<HTMLDivElement>(null);
   const offline = conn.state === 'offline' || conn.state === 'unreachable';
 
   const runEvents = useRunEventStream(runId);
@@ -129,9 +130,9 @@ export function ChatRoute(): React.ReactElement {
     ),
   );
 
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages.data, liveEvents.length]);
+  // New messages and streamed events follow the bottom only while the human is there; scrolled up,
+  // they land below the fold behind the scroll-to-bottom button instead of moving the viewport.
+  const stick = useStickToBottom([messages.data, liveEvents.length]);
 
   const ticketStatus = useCallback(
     (identifier: string) => {
@@ -239,99 +240,104 @@ export function ChatRoute(): React.ReactElement {
         </div>
       ) : null}
 
-      <PageBody className="px-4 py-5 md:px-7">
-        <div className="mx-auto flex max-w-3xl flex-col gap-5">
-          {messages.isLoading ? (
-            <>
-              <Skeleton className="ml-auto h-12 w-2/3 rounded-r10" />
-              <Skeleton className="h-16 w-4/5 rounded-r6" />
-              <Skeleton className="h-24 w-full rounded-r8" />
-            </>
-          ) : messages.isError ? (
-            <ErrorState code="CONDUCTOR_UNREACHABLE" message="Could not load the thread; the history below is the last known state." onRetry={() => void messages.refetch()} />
-          ) : (messages.data?.length ?? 0) === 0 ? (
-            <EmptyState
-              title="Tell me what you need."
-              detail={
-                <>
-                  Try “add dark mode to the dashboard in web”
-                  <br />
-                  or “what is everyone working on?”
-                </>
-              }
-            />
-          ) : (
-            entries.map((entry) => (
-              <div key={entry.message.id} className="flex flex-col gap-2">
-                <ChatMessage
-                  message={entry.message}
-                  onTicket={openTicket}
-                  ticketStatus={ticketStatus}
-                  projectName={projectName}
-                  onReply={entry.message.direction === 'outbound' ? () => setReplyToId(entry.message.id) : undefined}
-                />
-                {entry.dispatches.map((d) => (
-                  <DispatchLabel
-                    key={d.ticket.id}
-                    identifier={d.ticket.identifier}
-                    name={d.worker?.name ?? d.ticket.title}
-                    status={d.status}
-                    onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
+      {/* The button floats over the list, so it is anchored to this wrapper rather than to the
+          scrolled content, which would carry it away with the rest. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <PageBody scrollRef={stick.scrollRef} className="px-4 py-5 md:px-7">
+          <div className="mx-auto flex max-w-3xl flex-col gap-5">
+            {messages.isLoading ? (
+              <>
+                <Skeleton className="ml-auto h-12 w-2/3 rounded-r10" />
+                <Skeleton className="h-16 w-4/5 rounded-r6" />
+                <Skeleton className="h-24 w-full rounded-r8" />
+              </>
+            ) : messages.isError ? (
+              <ErrorState code="CONDUCTOR_UNREACHABLE" message="Could not load the thread; the history below is the last known state." onRetry={() => void messages.refetch()} />
+            ) : (messages.data?.length ?? 0) === 0 ? (
+              <EmptyState
+                title="Tell me what you need."
+                detail={
+                  <>
+                    Try “add dark mode to the dashboard in web”
+                    <br />
+                    or “what is everyone working on?”
+                  </>
+                }
+              />
+            ) : (
+              entries.map((entry) => (
+                <div key={entry.message.id} className="flex flex-col gap-2">
+                  <ChatMessage
+                    message={entry.message}
+                    onTicket={openTicket}
+                    ticketStatus={ticketStatus}
+                    projectName={projectName}
+                    onReply={entry.message.direction === 'outbound' ? () => setReplyToId(entry.message.id) : undefined}
                   />
-                ))}
-                {entry.decisions.map((d) => (
-                  <DecisionCard
-                    key={d.id}
-                    decision={d}
-                    asker="conductor"
-                    ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
-                    busy={answer.isPending}
-                    plan={<PlanPreview decision={d} />}
-                    onAnswer={(a) => answerDecision(d.id, a)}
-                  />
+                  {entry.dispatches.map((d) => (
+                    <DispatchLabel
+                      key={d.ticket.id}
+                      identifier={d.ticket.identifier}
+                      name={d.worker?.name ?? d.ticket.title}
+                      status={d.status}
+                      onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
+                    />
+                  ))}
+                  {entry.decisions.map((d) => (
+                    <DecisionCard
+                      key={d.id}
+                      decision={d}
+                      asker="conductor"
+                      ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
+                      busy={answer.isPending}
+                      plan={<PlanPreview decision={d} />}
+                      onAnswer={(a) => answerDecision(d.id, a)}
+                    />
+                  ))}
+                </div>
+              ))
+            )}
+
+            {/* The turn in flight. Transient: it goes when the run finishes and the thread's
+                messages stand alone, so the reply is never on screen twice. */}
+            {working ? (
+              <section aria-label="Conductor is working" className="flex flex-col gap-2">
+                <div className="flex items-center gap-2.5">
+                  <StatusGlyph status="working" size="xs" />
+                  <span className="ac-mono text-micro text-text-3">{runId ? 'working' : 'starting…'}</span>
+                </div>
+                {liveEvents.length ? <Transcript events={liveEvents} className="gap-2 p-0 opacity-90" /> : null}
+              </section>
+            ) : null}
+
+            {/* Live work no message in this thread accounts for: a worker the human started, or a
+                ticket filed before the chat recorded creating runs. Everything else is a label above. */}
+            {unattributed.length ? (
+              <div className="flex flex-wrap gap-2">
+                {unattributed.map((w) => (
+                  <WorkerChip key={w.id} name={w.name} status={agentUiStatus(w.status)} onClick={() => openWorker(w.id)} />
                 ))}
               </div>
-            ))
-          )}
+            ) : null}
 
-          {/* The turn in flight. Transient: it goes when the run finishes and the thread's
-              messages stand alone, so the reply is never on screen twice. */}
-          {working ? (
-            <section aria-label="Conductor is working" className="flex flex-col gap-2">
-              <div className="flex items-center gap-2.5">
-                <StatusGlyph status="working" size="xs" />
-                <span className="ac-mono text-micro text-text-3">{runId ? 'working' : 'starting…'}</span>
-              </div>
-              {liveEvents.length ? <Transcript events={liveEvents} className="gap-2 p-0 opacity-90" /> : null}
-            </section>
-          ) : null}
+            {/* decisions no message in this thread accounts for: a worker's question, or one raised
+                in a turn that never replied. Anchored ones sit in the conversation above. */}
+            {waiting.map((d) => (
+              <DecisionCard
+                key={d.id}
+                decision={d}
+                ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
+                busy={answer.isPending}
+                plan={<PlanPreview decision={d} />}
+                onAnswer={(a) => answerDecision(d.id, a)}
+              />
+            ))}
 
-          {/* Live work no message in this thread accounts for: a worker the human started, or a
-              ticket filed before the chat recorded creating runs. Everything else is a label above. */}
-          {unattributed.length ? (
-            <div className="flex flex-wrap gap-2">
-              {unattributed.map((w) => (
-                <WorkerChip key={w.id} name={w.name} status={agentUiStatus(w.status)} onClick={() => openWorker(w.id)} />
-              ))}
-            </div>
-          ) : null}
-
-          {/* decisions no message in this thread accounts for: a worker's question, or one raised
-              in a turn that never replied. Anchored ones sit in the conversation above. */}
-          {waiting.map((d) => (
-            <DecisionCard
-              key={d.id}
-              decision={d}
-              ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
-              busy={answer.isPending}
-              plan={<PlanPreview decision={d} />}
-              onAnswer={(a) => answerDecision(d.id, a)}
-            />
-          ))}
-
-          <div ref={bottom} />
-        </div>
-      </PageBody>
+            <div ref={stick.bottomRef} />
+          </div>
+        </PageBody>
+        {stick.atBottom ? null : <ScrollToBottomButton unread={stick.unread} onClick={stick.toBottom} />}
+      </div>
 
       <div className="flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-7">
         <div className="mx-auto max-w-3xl">

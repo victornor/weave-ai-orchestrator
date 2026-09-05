@@ -672,3 +672,105 @@ describe('ChatRoute decision cards', () => {
     expect(screen.getByText(/1 need you/)).toBeInTheDocument();
   });
 });
+
+describe('ChatRoute follow the bottom', () => {
+  const HEIGHT = 1000;
+  const CLIENT = 300;
+  const BOTTOM = HEIGHT - CLIENT;
+
+  // jsdom has no layout: scrollHeight and clientHeight are always 0 and scrollTop never moves. These
+  // stand in for the geometry the follow measures, so scrolling can be observed at all.
+  function scrollable(el: HTMLElement): (top: number) => void {
+    let top = 0;
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => HEIGHT });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => CLIENT });
+    Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = v; } });
+    return (to: number) => {
+      top = to;
+      fireEvent.scroll(el);
+    };
+  }
+
+  const list = (c: HTMLElement): HTMLElement => c.querySelector('.ac-scroll') as HTMLElement;
+  const scrolls = (): number =>
+    (window.HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+  const button = (): HTMLElement | null => screen.queryByRole('button', { name: /^Scroll to bottom/ });
+
+  it('keeps the list pinned to the bottom while the human is there', () => {
+    const { container, rerender } = render(<ChatRoute />);
+    scrollable(list(container));
+    const before = scrolls();
+
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    rerender(<ChatRoute />);
+
+    expect(scrolls()).toBeGreaterThan(before);
+    expect(button()).not.toBeInTheDocument();
+  });
+
+  it('stops following once the human scrolls up, and says content arrived', () => {
+    const { container, rerender } = render(<ChatRoute />);
+    const to = scrollable(list(container));
+    to(BOTTOM);
+    to(40);
+
+    expect(button()).toBeInTheDocument();
+    expect(button()!.getAttribute('aria-label')).toBe('Scroll to bottom');
+
+    const before = scrolls();
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    rerender(<ChatRoute />);
+
+    // The message rendered, but the viewport stayed where they left it.
+    expect(screen.getByText('Filed it.')).toBeInTheDocument();
+    expect(scrolls()).toBe(before);
+    expect(button()!.getAttribute('aria-label')).toBe('Scroll to bottom — new messages');
+  });
+
+  it('leaves a scrolled-up viewport alone while a turn streams', () => {
+    const { container } = render(<ChatRoute />);
+    const to = scrollable(list(container));
+    emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
+    to(BOTTOM);
+    to(40);
+
+    const before = scrolls();
+    act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
+
+    expect(screen.getByText('Reading the briefing.')).toBeInTheDocument();
+    expect(scrolls()).toBe(before);
+    expect(button()).toBeInTheDocument();
+  });
+
+  it('returns to the bottom on the button and follows again', () => {
+    const { container, rerender } = render(<ChatRoute />);
+    const to = scrollable(list(container));
+    to(BOTTOM);
+    to(40);
+
+    const before = scrolls();
+    fireEvent.click(button()!);
+    expect(scrolls()).toBe(before + 1);
+    expect(button()).not.toBeInTheDocument();
+
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    rerender(<ChatRoute />);
+    expect(scrolls()).toBe(before + 2);
+  });
+
+  it('follows again when they scroll back to the bottom by hand', () => {
+    const { container, rerender } = render(<ChatRoute />);
+    const to = scrollable(list(container));
+    to(BOTTOM);
+    to(40);
+    expect(button()).toBeInTheDocument();
+
+    to(BOTTOM);
+    expect(button()).not.toBeInTheDocument();
+
+    const before = scrolls();
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    rerender(<ChatRoute />);
+    expect(scrolls()).toBe(before + 1);
+  });
+});

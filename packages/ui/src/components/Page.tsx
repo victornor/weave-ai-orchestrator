@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { Ref, ReactNode } from 'react';
 import { cx } from '../lib/cx';
 
 export function PageHeader({
@@ -36,6 +36,19 @@ export function Page({ children, className }: { children: ReactNode; className?:
   return <div className={cx('flex h-full min-h-0 flex-col', className)}>{children}</div>;
 }
 
-export function PageBody({ children, className }: { children: ReactNode; className?: string }): React.ReactElement {
-  return <div className={cx('ac-scroll min-h-0 flex-1', className)}>{children}</div>;
+/** `scrollRef` reaches the scrolling element itself, for a body that follows its own bottom. */
+export function PageBody({
+  children,
+  className,
+  scrollRef,
+}: {
+  children: ReactNode;
+  className?: string;
+  scrollRef?: Ref<HTMLDivElement>;
+}): React.ReactElement {
+  return (
+    <div ref={scrollRef} className={cx('ac-scroll min-h-0 flex-1', className)}>
+      {children}
+    </div>
+  );
 }

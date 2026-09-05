@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { RunEvent } from '@agent-conductor/shared';
 import { runEventsToTranscript } from '../lib/transcript';
 import type { TranscriptBlock } from '../lib/transcript';
@@ -6,14 +6,47 @@ import { StatusGlyph } from './StatusGlyph';
 import { duration, tokens as fmtTokens } from '../lib/format';
 import { cx } from '../lib/cx';
 
-export function Transcript({ events, className }: { events: readonly RunEvent[]; className?: string }): React.ReactElement {
-  const blocks = runEventsToTranscript(events);
+/** How many blocks a transcript renders before the rest is behind "Show earlier". */
+const WINDOW = 150;
+
+/**
+ * A turn of any length renders as its newest `window` blocks. A long run is thousands of events and
+ * every one of them is a node with its own state; capping the window is what keeps a page holding
+ * several transcripts from paying for turns nobody is reading. Older blocks are a click away, not
+ * gone — the window only ever grows, so nothing scrolls out from under the human.
+ */
+export function Transcript({
+  events,
+  className,
+  window: windowSize = WINDOW,
+}: {
+  events: readonly RunEvent[];
+  className?: string;
+  window?: number;
+}): React.ReactElement {
+  const blocks = useMemo(() => runEventsToTranscript(events), [events]);
+  // Where the window starts, once the human has asked for more. An absolute index rather than a
+  // count from the end, because blocks only ever arrive at the end: a count would let the next
+  // event push back out of view exactly what they just revealed.
+  const [from, setFrom] = useState<number | null>(null);
+  const capped = Math.max(0, blocks.length - windowSize);
+  const hidden = Math.min(from ?? capped, capped);
+
   if (!blocks.length) {
     return <p className="px-4 py-6 text-center text-meta text-text-3">Nothing on the wire yet.</p>;
   }
   return (
     <div className={cx('flex flex-col gap-3 p-3.5', className)}>
-      {blocks.map((b) => (
+      {hidden ? (
+        <button
+          type="button"
+          onClick={() => setFrom(Math.max(0, hidden - windowSize))}
+          className="ac-mono self-center rounded-pill border border-line-2 px-2.5 py-1 text-nano text-text-3 hover:bg-bg-3 hover:text-text-1"
+        >
+          Show earlier ({hidden})
+        </button>
+      ) : null}
+      {blocks.slice(hidden).map((b) => (
         <TranscriptLine key={b.id} block={b} />
       ))}
     </div>

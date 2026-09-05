@@ -5,6 +5,10 @@
  * The endpoint replays before it tails, so a surface that mounts mid-turn gets the whole turn
  * without a separate catch-up path, and a reconnect resumes from the highest `seq` seen. Frames
  * are de-duplicated by event id, because the replay overlaps whatever the query already returned.
+ *
+ * A finished run has no tail to follow: `live: false` keeps the persisted query and opens no
+ * stream, so the same hook serves a turn being watched and a turn being read back, and a turn that
+ * finishes under a surface simply stops streaming while keeping everything it already showed.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RUN_EVENT_TYPES, type RunEvent } from '@agent-conductor/shared';
@@ -13,20 +17,20 @@ import { useRunEvents } from './hooks';
 
 const BACKOFF = [500, 1000, 2000, 4000, 8000, 15000];
 
-export function useRunEventStream(runId: string | null): RunEvent[] {
+export function useRunEventStream(runId: string | null, { live = true }: { live?: boolean } = {}): RunEvent[] {
   const ws = useWs();
   const persisted = useRunEvents(runId ?? '');
-  const [live, setLive] = useState<RunEvent[]>([]);
+  const [tail, setTail] = useState<RunEvent[]>([]);
   /** Highest seq rendered, so a reconnect asks for `?after=` it rather than replaying the turn. */
   const seq = useRef(0);
 
   useEffect(() => {
-    setLive([]);
+    setTail([]);
     seq.current = 0;
   }, [runId]);
 
   useEffect(() => {
-    if (!runId) return;
+    if (!runId || !live) return;
     let stopped = false;
     let es: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -42,7 +46,7 @@ export function useRunEventStream(runId: string | null): RunEvent[] {
       if (!evt || typeof evt.seq !== 'number') return;
       seq.current = Math.max(seq.current, evt.seq);
       attempts = 0;
-      setLive((xs) => (xs.some((x) => x.id === evt.id) ? xs : [...xs, evt]));
+      setTail((xs) => (xs.some((x) => x.id === evt.id) ? xs : [...xs, evt]));
     };
 
     const open = (): void => {
@@ -67,16 +71,16 @@ export function useRunEventStream(runId: string | null): RunEvent[] {
       es?.close();
       if (timer) clearTimeout(timer);
     };
-  }, [ws, runId]);
+  }, [ws, runId, live]);
 
   return useMemo(() => {
     const out: RunEvent[] = [];
     const seen = new Set<string>();
-    for (const e of [...(persisted.data ?? []), ...live]) {
+    for (const e of [...(persisted.data ?? []), ...tail]) {
       if (seen.has(e.id)) continue;
       seen.add(e.id);
       out.push(e);
     }
     return out.sort((a, b) => a.seq - b.seq);
-  }, [persisted.data, live]);
+  }, [persisted.data, tail]);
 }

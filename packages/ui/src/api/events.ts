@@ -229,11 +229,17 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       inv(qk.workspaces());
       break;
     case 'run.started':
-    case 'run.finished':
+    case 'run.finished': {
       inv(qk.runs(ws));
       inv(qk.run(ws, id));
       inv(qk.workers(ws));
+      // The ticket's own list of turns is keyed under the ticket, not under runs, so it would
+      // otherwise learn about a turn starting or ending only on a remount — and a live transcript
+      // that never hears the turn ended goes on waiting for a stream that has closed.
+      const ticketId = (evt.payload as { ticketId?: string | null } | null)?.ticketId;
+      if (ticketId) inv(qk.ticketRuns(ws, ticketId));
       break;
+    }
     case 'run.event':
       inv(qk.runEvents(ws, id));
       break;

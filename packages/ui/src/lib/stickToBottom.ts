@@ -53,10 +53,20 @@ const same = (a: readonly unknown[], b: readonly unknown[]): boolean =>
  * `signal` is whatever changes when content arrives — query data, event counts. It is compared by
  * value on every render rather than used as an effect dependency, so a caller can mix the two
  * without flattening them into one stable list.
+ *
+ * `follow` is what a list that is still growing wants and a finished one does not: a transcript
+ * read back after its turn ended must open on its first line, not be dragged to its last. Turning
+ * it off suppresses the scrolling only — the upward-scroll pause and the button still work, so a
+ * list whose content stops arriving simply stops moving on its own.
+ *
+ * `contained` is for a list nested inside another scrolling one — a turn's transcript in the
+ * ticket's feed. `scrollIntoView` walks every scrollable ancestor, so a box following its own
+ * bottom would drag the page it sits in down with it on every event; a contained list moves its own
+ * scroll offset and nothing else. There is no animation to sit through at that size.
  */
 export function useStickToBottom(
   signal: readonly unknown[],
-  { ready = true, older }: { ready?: boolean; older?: OlderPages } = {},
+  { ready = true, older, follow = true, contained = false }: { ready?: boolean; older?: OlderPages; follow?: boolean; contained?: boolean } = {},
 ): StickToBottom {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -75,9 +85,13 @@ export function useStickToBottom(
   olderRef.current = older;
 
   const scrollToBottom = useCallback((instant = false) => {
+    if (contained) {
+      if (el) el.scrollTop = el.scrollHeight;
+      return;
+    }
     const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     bottomRef.current?.scrollIntoView({ behavior: instant || reduced ? 'auto' : 'smooth', block: 'end' });
-  }, []);
+  }, [contained, el]);
 
   useEffect(() => {
     if (!el) return;
@@ -126,6 +140,9 @@ export function useStickToBottom(
   useEffect(() => {
     if (seen.current && same(seen.current, signal)) return;
     seen.current = signal;
+    // Marked seen first: a list that starts following later must not read everything it never
+    // scrolled to as one burst of new content.
+    if (!follow) return;
     if (!following.current) {
       setUnread(true);
       return;

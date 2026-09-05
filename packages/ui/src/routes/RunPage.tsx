@@ -1,16 +1,22 @@
 import { useParams } from '@tanstack/react-router';
+import { isActiveRun } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
-import { Transcript } from '../components/Transcript';
+import { RunTranscript } from '../components/RunTranscript';
 import { SkeletonRows } from '../components/Skeleton';
 import { ErrorState } from '../components/States';
 import { StatTile } from '../components/Chart';
-import { useRun, useRunEvents } from '../api/hooks';
+import { useRun } from '../api/hooks';
+import { useRunEventStream } from '../api/runStream';
 import { cents, duration, tokens } from '../lib/format';
 
 export function RunRoute(): React.ReactElement {
   const { runId } = useParams({ strict: false }) as { runId: string };
   const run = useRun(runId);
-  const events = useRunEvents(runId);
+  // A run page opened mid-turn follows the turn; one that is opened after it ended reads the
+  // persisted events and stays still. `run.finished` invalidates this query, so a turn that ends
+  // while the page is open closes its stream here without the human doing anything.
+  const live = isActiveRun(run.data?.run.status);
+  const events = useRunEventStream(runId, { live });
 
   if (run.isLoading) {
     return (
@@ -82,9 +88,12 @@ export function RunRoute(): React.ReactElement {
           </section>
         ) : null}
 
-        <section className="ac-card">
-          <div className="ac-label border-b border-line-1 px-3.5 py-2.5">Transcript</div>
-          {events.isLoading ? <SkeletonRows rows={5} /> : <Transcript events={events.data ?? []} />}
+        <section className="ac-card overflow-hidden">
+          <div className="ac-label flex items-center gap-2 border-b border-line-1 px-3.5 py-2.5">
+            Transcript
+            {live ? <span className="ac-mono text-nano text-working">· following</span> : null}
+          </div>
+          <RunTranscript events={events} live={live} label="Run transcript" />
         </section>
       </PageBody>
     </Page>

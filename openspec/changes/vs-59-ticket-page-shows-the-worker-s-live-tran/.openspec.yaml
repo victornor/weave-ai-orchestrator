@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Ticket page shows the worker's live transcript while a turn runs, and the
+  Run page follows a running turn live
+skip_specs: true

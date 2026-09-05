@@ -50,7 +50,7 @@ export function ticketRoutes(): Hono<AppEnv> {
       workProducts: s.tickets.workProducts(ticket.id),
       // Where this ticket stands in its project's merge queue: null once it is merging or elsewhere.
       mergeQueue: { position: s.tickets.mergeQueue.positionOf(ticket.id), concurrency: s.tickets.mergeQueue.limitFor(ticket.projectId) },
-      documents: [],
+      documents: s.tickets.documents(ticket.id),
     });
   });
 

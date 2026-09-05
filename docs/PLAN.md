@@ -607,7 +607,7 @@ Common (all agents):
 - `ac_inbox()` → wakes bundled into this run: messages, ticket events, answered decisions, mentions, steering from the conductor. Call first.
 - `ac_ticket_get(id)`, `ac_ticket_list(filter)`, `ac_ticket_comments(id, after?)`.
 - `ac_ticket_checkout(id)` → 409 on conflict (never retry). `ac_ticket_release(id, note)`.
-- `ac_ticket_comment(id, body, kind=comment)`; `ac_ticket_document_put(id, key, body)` (revisioned; plan/report).
+- `ac_ticket_comment(id, body, kind=comment)`; `ac_ticket_document_put(id, key, body)` (revisioned; plan/report); `ac_ticket_document_get(id, key=report, revision?)` (read scope: own project for a worker, everything for the conductor; `not_found` carries the keys that do exist).
 - `ac_ticket_transition(id, to, {note, unblock?: {owner, action}, blockedBy?: [ids]})` → applies guards.
 - `ac_ticket_work_product(id, {type, url, title, state})`.
 - `ac_ask(ticketId?, {title, context, options[], recommendation, allowFreeText, correlationKey})` → creates a decision owned per policy (human by default; the conductor may answer `gate_finding`s that are unambiguous). The run should end after asking; the answer arrives as a wake.

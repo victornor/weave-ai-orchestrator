@@ -190,6 +190,18 @@ describe('tickets', () => {
       expect(tickets.getDocument(t.id, 'plan', 1)?.body).toBe('v1');
     });
 
+    it('lists the documents on a ticket with their current revision', () => {
+      const t = make();
+      tickets.putDocument(AGENT, t.id, 'report', 'r1');
+      tickets.putDocument(AGENT, t.id, 'report', 'r2');
+      tickets.putDocument(AGENT, t.id, 'notes', 'n1');
+      expect(tickets.documents(t.id).map((d) => ({ key: d.key, revision: d.revision }))).toEqual([
+        { key: 'notes', revision: 1 },
+        { key: 'report', revision: 2 },
+      ]);
+      expect(tickets.documents(t.id)[1]?.updatedAt).not.toBe('');
+    });
+
     it('opens a merge_approval on in_review unless auto_merge is set', async () => {
       const t = make({ kind: 'task' });
       tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'u' });

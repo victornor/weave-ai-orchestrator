@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-05
+goal: A failed detached project add is contained instead of escaping as an
+  unhandled rejection

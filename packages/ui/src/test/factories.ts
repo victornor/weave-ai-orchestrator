@@ -1,4 +1,4 @@
-import type { Agent, Decision, Project, Ticket } from '@agent-conductor/shared';
+import type { Agent, Decision, Project, Run, Ticket } from '@agent-conductor/shared';
 
 export function ticket(over: Partial<Ticket> = {}): Ticket {
   return {
@@ -124,6 +124,39 @@ export function decision(over: Partial<Decision> = {}): Decision {
     expiresAt: null,
     target: { tasks: [{ text: 'Add semantic tokens' }, { text: 'ThemeProvider + OS fallback' }] },
     correlationKey: null,
+    createdAt: '2026-09-01T09:00:00.000Z',
+    ...over,
+  };
+}
+
+export function run(over: Partial<Run> = {}): Run {
+  return {
+    id: 'run_1',
+    workspaceId: 'ws1',
+    agentId: 'a1',
+    ticketId: 'tk_1',
+    sessionId: null,
+    wakeupIds: [],
+    runtimeId: 'claude-code',
+    model: 'sonnet-4.6',
+    status: 'running',
+    turnEpoch: 2,
+    cwd: '/w/workers/a1/work',
+    startedAt: '2026-09-01T09:00:00.000Z',
+    finishedAt: null,
+    exitCode: null,
+    signal: null,
+    pid: null,
+    pgid: null,
+    errorCode: null,
+    errorFamily: null,
+    retryOfRunId: null,
+    usage: null,
+    costCents: null,
+    result: null,
+    liveness: null,
+    logPath: null,
+    summary: null,
     createdAt: '2026-09-01T09:00:00.000Z',
     ...over,
   };

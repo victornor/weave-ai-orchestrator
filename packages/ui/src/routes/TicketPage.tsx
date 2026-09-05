@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import { ticketUiStatus } from '@agent-conductor/shared';
+import type { Run } from '@agent-conductor/shared';
+import { isActiveRun, ticketUiStatus } from '@agent-conductor/shared';
 import { workerPauseReason } from '@agent-conductor/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
@@ -13,6 +14,8 @@ import { Composer } from '../components/Composer';
 import { Button } from '../components/Button';
 import { Table } from '../components/Table';
 import { StatTile } from '../components/Chart';
+import { RunTranscript } from '../components/RunTranscript';
+import { useRunEventStream } from '../api/runStream';
 import {
   usePatchTicket,
   usePostComment,
@@ -319,26 +322,7 @@ function ActivityTab({ ticketId }: { ticketId: string }): React.ReactElement {
       });
     }
     for (const r of runs.data ?? []) {
-      const at = r.finishedAt ?? r.startedAt ?? r.createdAt;
-      const s = r.status === 'running' ? 'working' : r.status === 'succeeded' ? 'done' : r.status === 'interrupted' || r.status === 'cancelled' ? 'paused' : 'failed';
-      items.push({
-        at, key: `r-${r.id}`,
-        node: (
-          <div className="flex items-start gap-2.5 px-1 py-1">
-            <StatusGlyph status={s} size="xs" pulse={r.status === 'running'} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-micro text-text-3">
-                <span>turn {r.turnEpoch}</span>
-                <span>·</span>
-                <span className={cx(r.status === 'failed' && 'text-failed', r.status === 'interrupted' && 'text-text-2')}>{r.status}{r.errorCode ? ` (${r.errorCode})` : ''}</span>
-                <span>·</span>
-                <span className="ac-mono">{ago(at)}</span>
-              </div>
-              {r.summary ? <p className="mt-0.5 text-meta leading-relaxed text-text-body">{r.summary}</p> : null}
-            </div>
-          </div>
-        ),
-      });
+      items.push({ at: r.finishedAt ?? r.startedAt ?? r.createdAt, key: `r-${r.id}`, node: <RunTurn run={r} /> });
     }
     return items.sort((a, b) => a.at.localeCompare(b.at));
   }, [comments.data, runs.data, worker?.name]);
@@ -368,6 +352,65 @@ function ActivityTab({ ticketId }: { ticketId: string }): React.ReactElement {
         onChange={(text) => patch({ text })}
         onSubmit={(body) => post.mutate({ id: ticketId, body })}
       />
+    </div>
+  );
+}
+
+/**
+ * One turn in the ticket's feed.
+ *
+ * A turn in flight is the thing the human came to watch, so it arrives open and streaming — the
+ * eight minutes of "running" that used to be a clock and nothing else. When it finishes it folds
+ * back into its summary row: the record of what happened is the comment the worker left and the
+ * summary on the run, and a wall of finished transcripts would bury both. The transcript is still
+ * one click away, and only then is it fetched — a ticket with thirty turns must not ask the daemon
+ * for thirty transcripts to render its feed.
+ */
+function RunTurn({ run }: { run: Run }): React.ReactElement {
+  const live = isActiveRun(run.status);
+  const [open, setOpen] = useState(live);
+  // Tracks the run across refetches rather than mounting per state, so following a turn to its end
+  // is one block that changes rather than two that replace each other.
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (wasLive.current !== live) setOpen(live);
+    wasLive.current = live;
+  }, [live]);
+
+  const events = useRunEventStream(open ? run.id : null, { live });
+  const at = run.finishedAt ?? run.startedAt ?? run.createdAt;
+  const status = run.status === 'running' ? 'working' : run.status === 'succeeded' ? 'done' : run.status === 'interrupted' || run.status === 'cancelled' ? 'paused' : 'failed';
+
+  return (
+    <div className="flex items-start gap-2.5 px-1 py-1">
+      <StatusGlyph status={status} size="xs" pulse={live} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2 text-micro text-text-3">
+          <span>turn {run.turnEpoch}</span>
+          <span>·</span>
+          <span className={cx(run.status === 'failed' && 'text-failed', run.status === 'interrupted' && 'text-text-2')}>
+            {run.status}
+            {run.errorCode ? ` (${run.errorCode})` : ''}
+          </span>
+          <span>·</span>
+          <span className="ac-mono">{ago(at)}</span>
+          <div className="flex-1" />
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            className="rounded-r4 px-1.5 py-0.5 text-nano text-text-4 hover:bg-bg-3 hover:text-text-1"
+          >
+            {open ? 'hide transcript' : 'show transcript'}
+          </button>
+        </div>
+        {run.summary ? <p className="mt-0.5 text-meta leading-relaxed text-text-body">{run.summary}</p> : null}
+        {open ? (
+          <div className="ac-card mt-2 overflow-hidden">
+            <RunTranscript events={events} live={live} label={`Transcript of turn ${run.turnEpoch}`} />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

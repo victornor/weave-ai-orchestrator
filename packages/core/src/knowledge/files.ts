@@ -65,9 +65,30 @@ function trimTrailingBlank(lines: string[]): string[] {
   return out;
 }
 
+const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+/**
+ * Undo the HTML escaping a coding CLI can introduce into a tool argument on its way to us,
+ * so a section asked for as `Stack &amp; commands` still matches the heading `Stack & commands`.
+ */
+export function decodeEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, ref: string) => {
+    if (ref[0] === '#') {
+      const code = ref[1] === 'x' || ref[1] === 'X' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+    }
+    return NAMED_ENTITIES[ref.toLowerCase()] ?? m;
+  });
+}
+
+/** The form a section name is stored and compared in: entity-decoded, single-spaced, trimmed. */
+export function canonicalSection(name: string): string {
+  return decodeEntities(name).replace(/\s+/g, ' ').trim();
+}
+
 export function findSection(doc: Doc, name: string): Section | undefined {
-  const want = name.trim().toLowerCase();
-  return doc.sections.find((s) => s.name.trim().toLowerCase() === want);
+  const want = canonicalSection(name).toLowerCase();
+  return doc.sections.find((s) => canonicalSection(s.name).toLowerCase() === want);
 }
 
 /** Append one entry line under `section`, creating the section at the end when it is missing. */
@@ -75,7 +96,7 @@ export function appendEntry(body: string, section: string, entry: string): strin
   const doc = parseDoc(body);
   let s = findSection(doc, section);
   if (!s) {
-    s = { name: section.trim(), lines: [] };
+    s = { name: canonicalSection(section), lines: [] };
     doc.sections.push(s);
   }
   s.lines.push(entry);

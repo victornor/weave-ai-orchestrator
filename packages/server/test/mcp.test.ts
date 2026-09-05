@@ -7,7 +7,7 @@ import type { RunTokenClaims } from '../src/runtoken.js';
 import { makeHarness, type Harness } from './fakes.js';
 
 let harness: Harness | null = null;
-afterEach(() => { harness?.close(); harness = null; });
+afterEach(async () => { await harness?.close(); harness = null; });
 
 const WORKER: RunTokenClaims = { workspaceId: 'ws1', runId: 'run_1', agentId: 'ag_1', agentKind: 'worker', projectId: 'proj1', ticketId: 'tk_1', roleId: 'role_1' };
 

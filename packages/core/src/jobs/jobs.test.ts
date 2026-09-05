@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Job } from '@agent-conductor/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
-import { createJobsService, JOB_LOG_LINES } from './index.js';
+import type { WorkspaceContext } from '../context.js';
+import { createJobsService, JOB_LOG_FLUSH_MS, JOB_LOG_LINES } from './index.js';
 import type { Actor, JobsService, JobStreamItem } from '../api.js';
 
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
@@ -13,7 +15,7 @@ describe('jobs', () => {
     h = makeHarness({ bare: true });
     jobs = createJobsService(h.ctx, h.deps);
   });
-  afterEach(() => h.cleanup());
+  afterEach(async () => { await jobs.stop(); h.cleanup(); });
 
   const start = (): string => jobs.start('project_add', { type: 'project', id: 'p1' }, HUMAN).id;
 
@@ -104,5 +106,84 @@ describe('jobs', () => {
     expect(job.failedStep).toBe('clone');
     expect(job.message).toMatch(/daemon stopped/);
     expect(job.steps[0]!.state).toBe('failed');
+  });
+});
+
+/**
+ * VS-57: the deferred write behind the flush cadence must never reach a database the process has
+ * already closed — a timer that fires then is an uncaught exception, not a failed write.
+ */
+describe('job log flushes are drained, not abandoned', () => {
+  let h: TestHarness;
+  let jobs: JobsService;
+  let warnings: Array<{ fields: Record<string, unknown>; msg: string }>;
+
+  beforeEach(() => {
+    h = makeHarness({ bare: true });
+    warnings = [];
+    // The service takes its logger once, at creation: give it one that records instead of printing.
+    const record = warnings;
+    h.ctx.log = (() => ({
+      info: () => undefined,
+      debug: () => undefined,
+      error: () => undefined,
+      warn: (fields: Record<string, unknown>, msg: string) => { record.push({ fields, msg }); },
+    })) as unknown as WorkspaceContext['log'];
+    jobs = createJobsService(h.ctx, h.deps);
+  });
+  afterEach(async () => { await jobs.stop(); h.cleanup(); });
+
+  const start = (): string => jobs.start('project_add', { type: 'project', id: 'p1' }, HUMAN).id;
+  /** The row as written, not the hydrated read: `get` merges the in-memory tail over it. */
+  const row = (id: string): Job => h.db.get<Job>('SELECT * FROM jobs WHERE id = ?', [id])!;
+  const settle = (): Promise<unknown> => new Promise((r) => setTimeout(r, JOB_LOG_FLUSH_MS * 3));
+
+  it('writes the tail to the row once the flush delay has passed', async () => {
+    const id = start();
+    jobs.line(id, 'clone', 'stderr', 'receiving objects: 40%');
+
+    // Before the delay the line is only in memory — which is what the hydrated read is for.
+    expect(row(id).log).toEqual([]);
+    expect(jobs.get(id).log[0]!.text).toBe('receiving objects: 40%');
+
+    await settle();
+    expect(row(id).log[0]!.text).toBe('receiving objects: 40%');
+    expect(row(id).logSeq).toBe(1);
+  });
+
+  it('stop() writes a tail that has not been flushed yet', async () => {
+    const id = start();
+    jobs.line(id, 'clone', 'stderr', 'first');
+    jobs.line(id, 'clone', 'stderr', 'second');
+    expect(row(id).log).toEqual([]);
+
+    await jobs.stop();
+
+    expect(row(id).log.map((l) => l.text)).toEqual(['first', 'second']);
+    expect(row(id).logSeq).toBe(2);
+  });
+
+  it('stop() leaves no timer that could fire against a closed database', async () => {
+    const id = start();
+    jobs.line(id, 'clone', 'stderr', 'receiving objects: 40%');
+    await jobs.stop();
+    h.db.close();
+
+    // A line after the drain still reaches the in-memory tail and the stream, and arms nothing.
+    expect(() => jobs.line(id, 'clone', 'stderr', 'too late')).not.toThrow();
+    await settle();
+    expect(warnings).toEqual([]);
+  });
+
+  it('a flush against a closed database warns instead of throwing out of the timer', async () => {
+    const id = start();
+    jobs.line(id, 'clone', 'stderr', 'receiving objects: 40%');
+    h.db.close();
+
+    await settle();
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.fields['jobId']).toBe(id);
+    expect(warnings[0]!.msg).toContain('job log flush failed');
   });
 });

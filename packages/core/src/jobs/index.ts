@@ -32,6 +32,8 @@ export function createJobsService(ctx: WorkspaceContext, _deps: () => CoreServic
 
   /** Live state for the jobs this process is running: the tail as truth between flushes. */
   const live = new Map<string, { lines: JobLogLine[]; seq: number; dirty: boolean; timer: ReturnType<typeof setTimeout> | null }>();
+  /** Set by `stop()`. A line after that still reaches the tail and the stream, but arms no new timer. */
+  let stopped = false;
 
   const read = (id: string): Job => {
     const row = ctx.db.get<Job>('SELECT * FROM jobs WHERE workspace_id = ? AND id = ?', [ctx.workspaceId, id]);
@@ -55,12 +57,25 @@ export function createJobsService(ctx: WorkspaceContext, _deps: () => CoreServic
    */
   const publish = (item: JobStreamItem): void => { emitter.emit('item', item); };
 
+  /**
+   * Write the tail back to the row and disarm whatever timer was waiting to do it.
+   *
+   * Never throws. Most flushes run from a timer, where a throw is an uncaught exception that takes
+   * the process — or a test run — down with it, and the one failure that actually happens is a write
+   * arriving after the workspace database has closed. `stop()` is what keeps that from happening at
+   * all; this is the backstop for a caller that closed the database without draining first.
+   */
   function flush(jobId: string): void {
     const state = live.get(jobId);
-    if (!state || !state.dirty) return;
+    if (!state) return;
     if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+    if (!state.dirty) return;
     state.dirty = false;
-    ctx.db.update('jobs', jobId, { logJson: state.lines, logSeq: state.seq });
+    try {
+      ctx.db.update('jobs', jobId, { logJson: state.lines, logSeq: state.seq });
+    } catch (e) {
+      log.warn({ jobId, err: String(e) }, 'job log flush failed; the tail was not written to the row');
+    }
   }
 
   function forget(jobId: string): void {
@@ -122,7 +137,12 @@ export function createJobsService(ctx: WorkspaceContext, _deps: () => CoreServic
       state.lines.push(line);
       if (state.lines.length > JOB_LOG_LINES) state.lines.splice(0, state.lines.length - JOB_LOG_LINES);
       state.dirty = true;
-      if (!state.timer) state.timer = setTimeout(() => flush(jobId), JOB_LOG_FLUSH_MS);
+      // Tracked on the live entry so `stop()` and `forget()` can cancel it, and unref'd so a pending
+      // flush never holds the process (or a vitest worker) open by itself.
+      if (!state.timer && !stopped) {
+        state.timer = setTimeout(() => flush(jobId), JOB_LOG_FLUSH_MS);
+        state.timer.unref();
+      }
       publish({ kind: 'log', jobId, line, seq: line.seq });
     },
 
@@ -162,6 +182,19 @@ export function createJobsService(ctx: WorkspaceContext, _deps: () => CoreServic
         });
         log.warn({ jobId: job.id, kind: job.kind, entityId: job.entityId }, 'job left running by a previous process; failed');
       }
+    },
+
+    /**
+     * Shutdown: write every tail that is still only in memory and disarm every timer waiting to do
+     * it, so nothing touches the database after the caller closes it. A job still `running` is left
+     * running — `reconcile()` settles it on the next start; only its log tail is made durable here.
+     *
+     * The writes are synchronous, so there is nothing to await; `stop` is a promise to match the
+     * other services a shutdown drains, and to stay one if a flush ever becomes asynchronous.
+     */
+    async stop(): Promise<void> {
+      stopped = true;
+      for (const jobId of [...live.keys()]) flush(jobId);
     },
   };
 

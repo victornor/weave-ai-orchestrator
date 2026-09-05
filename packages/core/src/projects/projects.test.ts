@@ -38,7 +38,9 @@ describe('projects', () => {
     h.services.jobs = createJobsService(h.ctx, h.deps);
     projects = createProjectsService(h.ctx, h.deps);
   });
-  afterEach(() => { h.cleanup(); while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
+  // The jobs service is real here and holds the log tail of every add between flushes: drain it
+  // before `cleanup` closes the database, or the pending timer fires against a closed one.
+  afterEach(async () => { await jobs().stop(); h.cleanup(); while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
 
   const cfg = (url: string, over: Partial<ProjectConfig> = {}): ProjectConfig => ({
     id: 'web', url, defaultBranch: 'main', maxWorkers: 4, warmPaths: [], openspec: { enabled: true }, policies: {}, ...over,

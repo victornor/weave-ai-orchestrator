@@ -384,13 +384,16 @@ export interface TicketQuery extends Record<string, string | number | boolean | 
   limit?: number;
   offset?: number;
   includeTerminal?: boolean;
+  /** `finished` orders by when a ticket reached done or cancelled, not by when it was filed. */
+  sort?: 'number' | 'finished';
 }
 
-export function useTickets(params: TicketQuery = {}): UseQueryResult<Ticket[]> {
+export function useTickets(params: TicketQuery = {}, opts: { enabled?: boolean } = {}): UseQueryResult<Ticket[]> {
   const ws = useWs();
   return useQuery({
     queryKey: [...qk.tickets(ws), params],
     queryFn: () => api.ws<Ticket[] | { tickets: Ticket[] }>(ws, `/tickets${qs(params)}`).then((r) => listOf(r, 'tickets')),
+    enabled: opts.enabled ?? true,
   });
 }
 

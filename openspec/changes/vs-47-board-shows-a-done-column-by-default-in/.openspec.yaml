@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Board shows a Done column by default in kanban and table, with recently
+  finished tickets
+skip_specs: true

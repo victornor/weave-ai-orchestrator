@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import type { Agent } from '@agent-conductor/shared';
 import { TICKET_STATUSES } from '@agent-conductor/shared';
-import { BOARD_COLUMNS, STATUS_COLUMN, filterTickets, foldBoard, isFolded, isLiveWorker, liveWorkersByTicket, ticketBoardStatus } from '../lib/board';
+import {
+  BOARD_COLUMNS,
+  RECENT_FINISHED_MAX,
+  STATUS_COLUMN,
+  filterTickets,
+  finishedAt,
+  finishedModeFromSearch,
+  finishedModeSearch,
+  foldBoard,
+  isFolded,
+  isLiveWorker,
+  liveWorkersByTicket,
+  recentlyFinished,
+  ticketBoardStatus,
+} from '../lib/board';
 import { agent, ticket } from './factories';
 
 describe('board folding', () => {
@@ -110,5 +124,53 @@ describe('live workers on the board', () => {
   it('lets an open decision and a stall still win over a live worker', () => {
     expect(ticketBoardStatus('todo', { live: true, needsYou: true })).toBe('needs-you');
     expect(ticketBoardStatus('todo', { live: true, stalled: true })).toBe('stalled');
+  });
+});
+
+describe('finished tickets on the board', () => {
+  const now = new Date('2026-09-10T12:00:00.000Z');
+  const daysAgo = (n: number): string => new Date(now.getTime() - n * 24 * 60 * 60 * 1000).toISOString();
+
+  it('reads the finished mode out of ?done= and writes it back, keeping the old ?done=1 meaning', () => {
+    expect(finishedModeFromSearch(undefined)).toBe('recent');
+    expect(finishedModeFromSearch('')).toBe('recent');
+    expect(finishedModeFromSearch(1)).toBe('all');
+    expect(finishedModeFromSearch('all')).toBe('all');
+    expect(finishedModeFromSearch('0')).toBe('hide');
+    expect(finishedModeFromSearch('hide')).toBe('hide');
+    for (const mode of ['recent', 'all', 'hide'] as const) {
+      expect(finishedModeFromSearch(finishedModeSearch(mode))).toBe(mode);
+    }
+    expect(finishedModeSearch('recent')).toBeUndefined();
+  });
+
+  it('takes when a ticket finished from completedAt, then cancelledAt, then updatedAt', () => {
+    expect(finishedAt(ticket({ completedAt: daysAgo(1), cancelledAt: daysAgo(2), updatedAt: daysAgo(3) }))).toBe(daysAgo(1));
+    expect(finishedAt(ticket({ completedAt: null, cancelledAt: daysAgo(2), updatedAt: daysAgo(3) }))).toBe(daysAgo(2));
+    expect(finishedAt(ticket({ completedAt: null, cancelledAt: null, updatedAt: daysAgo(3) }))).toBe(daysAgo(3));
+  });
+
+  it('keeps the last seven days, newest first, capped at twenty', () => {
+    const recent = recentlyFinished(
+      [
+        ticket({ id: 'old', status: 'done', completedAt: daysAgo(9) }),
+        ticket({ id: 'mid', status: 'done', completedAt: daysAgo(3) }),
+        ticket({ id: 'new', status: 'cancelled', cancelledAt: daysAgo(1), completedAt: null }),
+      ],
+      now,
+    );
+    expect(recent.map((t) => t.id)).toEqual(['new', 'mid']);
+
+    const many = Array.from({ length: 25 }, (_, i) => ticket({ id: `t${i}`, status: 'done', completedAt: daysAgo(i / 25) }));
+    expect(recentlyFinished(many, now)).toHaveLength(RECENT_FINISHED_MAX);
+  });
+
+  it('sorts the Done column by when tickets finished, not by priority', () => {
+    const cols = foldBoard([
+      ticket({ id: 'a', status: 'done', priority: 'low', completedAt: daysAgo(0) }),
+      ticket({ id: 'b', status: 'cancelled', priority: 'critical', cancelledAt: daysAgo(1), completedAt: null }),
+      ticket({ id: 'c', status: 'done', priority: 'critical', completedAt: daysAgo(2) }),
+    ]);
+    expect(cols.find((c) => c.key === 'done')?.items.map((t) => t.id)).toEqual(['a', 'b', 'c']);
   });
 });

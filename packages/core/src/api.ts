@@ -9,7 +9,8 @@ export interface Page<T> { items: T[]; total: number }
 
 // ---------- tickets ----------
 export interface TicketCreateInput { projectId?: string | null; kind: S.TicketKind; title: string; description?: string; priority?: S.TicketPriority; parentId?: string | null; blockedBy?: string[]; assigneeRoleId?: string | null; autoMerge?: boolean; originKind?: string; originFingerprint?: string }
-export interface TicketFilter { projectId?: string; status?: S.TicketStatus[]; kind?: S.TicketKind[]; roleId?: string; workerId?: string; search?: string; limit?: number; offset?: number; includeTerminal?: boolean }
+/** `sort: 'finished'` orders by when a ticket reached done or cancelled, so a page of terminal tickets is the most recently finished ones rather than the most recently created. */
+export interface TicketFilter { projectId?: string; status?: S.TicketStatus[]; kind?: S.TicketKind[]; roleId?: string; workerId?: string; search?: string; limit?: number; offset?: number; includeTerminal?: boolean; sort?: 'number' | 'finished' }
 export interface TransitionInput { to: S.TicketStatus; note?: string; unblock?: { owner: 'conductor' | 'human'; action: string }; blockedBy?: string[] }
 export interface TicketsService {
   create(actor: Actor, input: TicketCreateInput): S.Ticket;

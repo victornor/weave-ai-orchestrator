@@ -432,7 +432,12 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       const total = db.get<{ n: number }>(`SELECT COUNT(*) n FROM tickets WHERE ${clause}`, params)?.n ?? 0;
       const limit = Math.min(filter.limit ?? 100, 500);
       const offset = filter.offset ?? 0;
-      const items = db.all<Record<string, unknown>>(`SELECT * FROM tickets WHERE ${clause} ORDER BY number DESC LIMIT ? OFFSET ?`, [...params, limit, offset]).map(row);
+      // A terminal ticket's number says when it was filed, not when it landed, so a page of
+      // finished tickets ordered by number can miss what actually finished today.
+      const order = filter.sort === 'finished'
+        ? 'COALESCE(completed_at, cancelled_at, updated_at) DESC, number DESC'
+        : 'number DESC';
+      const items = db.all<Record<string, unknown>>(`SELECT * FROM tickets WHERE ${clause} ORDER BY ${order} LIMIT ? OFFSET ?`, [...params, limit, offset]).map(row);
       return { items, total } satisfies Page<Ticket>;
     },
 

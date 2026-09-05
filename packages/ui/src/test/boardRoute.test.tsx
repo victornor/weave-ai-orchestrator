@@ -1,0 +1,118 @@
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Ticket } from '@agent-conductor/shared';
+import { ticket } from './factories';
+
+const state = vi.hoisted(() => ({
+  search: {} as Record<string, string | undefined>,
+  active: [] as Ticket[],
+  finished: [] as Ticket[],
+  queries: [] as Array<{ params: Record<string, unknown>; enabled: boolean }>,
+  go: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+}));
+
+vi.mock('@tanstack/react-router', () => ({ useSearch: () => state.search }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../app/link', () => ({ useGo: () => state.go }));
+vi.mock('../api/hooks', () => ({
+  useTickets: (params: Record<string, unknown> = {}, opts: { enabled?: boolean } = {}) => {
+    const enabled = opts.enabled ?? true;
+    state.queries.push({ params, enabled });
+    const terminal = params['status'] === 'done,cancelled';
+    return { data: enabled ? (terminal ? state.finished : state.active) : undefined, isLoading: false, isError: false, refetch: vi.fn() };
+  },
+  useProjects: () => ({ data: [] }),
+  useRoles: () => ({ data: [] }),
+  useWorkers: () => ({ data: [] }),
+  useMergeQueue: () => ({ data: null }),
+}));
+
+const { BoardRoute } = await import('../routes/Board');
+
+const NOW = new Date('2026-09-10T12:00:00.000Z');
+const daysAgo = (n: number): string => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000).toISOString();
+
+const doneColumn = (): HTMLElement => {
+  const heading = screen.getByRole('heading', { name: 'Done' });
+  const section = heading.closest('section');
+  if (!section) throw new Error('Done column has no section');
+  return section;
+};
+
+beforeEach(() => {
+  vi.setSystemTime(NOW);
+  state.search = {};
+  state.queries = [];
+  state.go = vi.fn();
+  state.active = [ticket({ id: 'tk_1', identifier: 'VS-1', title: 'Still going', status: 'in_progress' })];
+  state.finished = [
+    ticket({ id: 'tk_2', identifier: 'VS-2', title: 'Landed today', status: 'done', completedAt: daysAgo(0) }),
+    ticket({ id: 'tk_3', identifier: 'VS-3', title: 'Dropped yesterday', status: 'cancelled', completedAt: null, cancelledAt: daysAgo(1) }),
+    ticket({ id: 'tk_4', identifier: 'VS-4', title: 'Landed last month', status: 'done', completedAt: daysAgo(31) }),
+  ];
+});
+
+describe('BoardRoute finished tickets', () => {
+  it('shows a Done column of recently finished tickets by default, newest first', () => {
+    render(<BoardRoute />);
+    const done = doneColumn();
+    expect(within(done).getByText('Landed today')).toBeTruthy();
+    expect(within(done).getByText('Dropped yesterday')).toBeTruthy();
+    // Older than the recent window: only "show all" brings it back.
+    expect(within(done).queryByText('Landed last month')).toBeNull();
+    expect(within(done).getByText('2')).toBeTruthy();
+
+    const titles = within(done).getAllByRole('button').map((b) => b.textContent ?? '');
+    expect(titles.findIndex((t) => t.includes('Landed today'))).toBeLessThan(titles.findIndex((t) => t.includes('Dropped yesterday')));
+    // A cancelled ticket is chipped apart from a done one.
+    const landed = within(done).getByRole('button', { name: /Landed today/ });
+    expect(within(landed).getByText('done')).toBeTruthy();
+    expect(within(landed).queryByText('cancelled')).toBeNull();
+    expect(within(within(done).getByRole('button', { name: /Dropped yesterday/ })).getAllByText('cancelled').length).toBeGreaterThan(0);
+  });
+
+  it('asks the daemon for finished tickets ordered by when they finished', () => {
+    render(<BoardRoute />);
+    const terminal = state.queries.find((q) => q.params['status'] === 'done,cancelled');
+    expect(terminal?.params).toMatchObject({ status: 'done,cancelled', sort: 'finished' });
+    expect(terminal?.enabled).toBe(true);
+    // The active query is untouched by the Done column, so 300 active tickets still fit.
+    expect(state.queries.find((q) => !q.params['status'])?.params).toEqual({ limit: 300 });
+  });
+
+  it('expands to every finished ticket from the column, and puts the choice in the URL', () => {
+    render(<BoardRoute />);
+    fireEvent.click(within(doneColumn()).getByRole('button', { name: 'show all' }));
+
+    expect(within(doneColumn()).getByText('Landed last month')).toBeTruthy();
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/board', expect.objectContaining({ search: expect.objectContaining({ done: '1' }) }));
+    // Once expanded there is nothing left to expand to.
+    expect(within(doneColumn()).queryByRole('button', { name: 'show all' })).toBeNull();
+  });
+
+  it('honours ?done=1 from the URL as the full finished history', () => {
+    state.search = { done: '1' };
+    render(<BoardRoute />);
+    expect(within(doneColumn()).getByText('Landed last month')).toBeTruthy();
+  });
+
+  it('drops the Done column and the finished query when finished tickets are hidden', () => {
+    render(<BoardRoute />);
+    state.queries = [];
+    fireEvent.click(screen.getByRole('radio', { name: 'Hidden' }));
+
+    expect(screen.queryByRole('heading', { name: 'Done' })).toBeNull();
+    expect(screen.queryByText('Landed today')).toBeNull();
+    expect(state.queries.find((q) => q.params['status'] === 'done,cancelled')?.enabled).toBe(false);
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/board', expect.objectContaining({ search: expect.objectContaining({ done: '0' }) }));
+  });
+
+  it('shows the Outcome column in the table whenever a finished ticket is on the board', () => {
+    render(<BoardRoute />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Table' }));
+    expect(screen.getByRole('columnheader', { name: 'Outcome' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Hidden' }));
+    expect(screen.queryByRole('columnheader', { name: 'Outcome' })).toBeNull();
+  });
+});

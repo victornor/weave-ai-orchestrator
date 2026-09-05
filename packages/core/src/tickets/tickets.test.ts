@@ -347,4 +347,19 @@ describe('tickets', () => {
     expect(tickets.list({ kind: ['scout'], includeTerminal: true }).items[0]?.id).toBe(two.id);
     expect(tickets.list({ search: 'one' }).total).toBe(1);
   });
+
+  it('orders finished tickets by when they landed, not by ticket number', () => {
+    // Filed first but finished last, so number order and finish order disagree.
+    const old = make({ title: 'long runner' });
+    const fresh = make({ title: 'quick one' });
+    const dropped = make({ title: 'dropped' });
+    h.db.update('tickets', fresh.id, { status: 'done', completedAt: '2026-09-01T09:00:00.000Z' });
+    h.db.update('tickets', dropped.id, { status: 'cancelled', cancelledAt: '2026-09-02T09:00:00.000Z' });
+    h.db.update('tickets', old.id, { status: 'done', completedAt: '2026-09-03T09:00:00.000Z' });
+
+    const finished = tickets.list({ status: ['done', 'cancelled'], sort: 'finished' });
+    expect(finished.items.map((t) => t.id)).toEqual([old.id, dropped.id, fresh.id]);
+    // The default ordering is unchanged: newest ticket number first.
+    expect(tickets.list({ status: ['done', 'cancelled'] }).items.map((t) => t.id)).toEqual([dropped.id, fresh.id, old.id]);
+  });
 });

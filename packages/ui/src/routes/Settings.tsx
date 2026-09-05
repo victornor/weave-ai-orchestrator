@@ -22,6 +22,7 @@ import {
   usePatchConfig,
   usePatchProject,
   usePresentation,
+  usePresentationSurfaces,
   useProjects,
   usePutPresentation,
   useRefreshDaemonUpdate,
@@ -33,6 +34,7 @@ import {
 } from '../api/hooks';
 import { api, setToken } from '../api/client';
 import { qk } from '../api/keys';
+import type { PresentationBlock } from '@agent-conductor/shared';
 import type { TotpSetup } from '../api/types';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
@@ -456,32 +458,67 @@ function ChannelsSection(): React.ReactElement {
 
 function PresentationSection(): React.ReactElement {
   const presentation = usePresentation();
+  const surfaces = usePresentationSurfaces();
   const put = usePutPresentation();
   if (presentation.isLoading) return <SkeletonRows rows={3} />;
-  if (presentation.isError) return <ErrorState code="PRESENTATION_UNAVAILABLE" message="The daemon did not return a presentation config." onRetry={() => void presentation.refetch()} />;
+  if (presentation.isError || !presentation.data) {
+    return (
+      <ErrorState
+        code="PRESENTATION_UNAVAILABLE"
+        message="The daemon did not return a presentation config."
+        onRetry={() => void presentation.refetch()}
+      />
+    );
+  }
+
+  const config = presentation.data;
+  // The registry list plus whatever is already configured, so a plugin surface this daemon has not
+  // loaded still shows as the current choice instead of silently switching the select to something else.
+  const options = [...new Set([...(surfaces.data?.surfaces ?? []), config.default])];
 
   return (
     <div className="flex flex-col gap-3">
       <p className="text-meta leading-relaxed text-text-2">
-        Presentation surfaces run on the client. The daemon holds only the desired config; the presenter reconciles it locally.
+        Presentation surfaces run on the presenter&apos;s machine, which need not be the daemon&apos;s. The daemon stores only the desired
+        config; the presenter detects what is actually available there and reconciles windows locally.
       </p>
-      <div className="ac-card divide-y divide-line-1">
-        {(presentation.data?.available ?? []).map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            disabled={!s.detection.available}
-            onClick={() => put.mutate({ surface: s.id })}
-            className={cx('flex w-full items-center gap-3 px-3.5 py-2.5 text-left', s.detection.available ? 'hover:bg-bg-2' : 'opacity-50')}
-          >
-            <span className="flex-1 text-meta text-text-1">{s.displayName}</span>
-            <span className={cx('ac-mono text-micro', s.detection.available ? 'text-done' : 'text-text-3')}>
-              {s.detection.available ? 'detected' : (s.detection.reason ?? 'not found')}
-            </span>
-            {presentation.data?.surface === s.id ? <Badge tone="accent">selected</Badge> : null}
-          </button>
-        ))}
-      </div>
+      <Field label="Default surface" hint="Used for every agent that has no surface of its own.">
+        <select
+          className={cx(inputCx, 'ac-mono')}
+          value={config.default}
+          disabled={put.isPending}
+          onChange={(e) => put.mutate({ ...config, default: e.target.value })}
+        >
+          {options.map((kind) => (
+            <option key={kind} value={kind}>
+              {kind}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <dl className="ac-card divide-y divide-line-1">
+        <PresentationBlockRow label="Conductor" block={config.conductor} fallback={config.default} />
+        <PresentationBlockRow label="Workers" block={config.workers} fallback={config.default} />
+      </dl>
+    </div>
+  );
+}
+
+/** One override block, read-only: the surface it pins plus whatever knobs the block carries. */
+function PresentationBlockRow({ label, block, fallback }: { label: string; block?: PresentationBlock; fallback: string }): React.ReactElement {
+  const detail = block
+    ? Object.entries(block)
+        .filter(([key, value]) => key !== 'surface' && value !== undefined)
+        .map(([key, value]) => `${key}: ${String(value)}`)
+    : [];
+  return (
+    <div className="flex items-center gap-3 px-3.5 py-2.5">
+      <dt className="flex-1 text-meta text-text-1">{label}</dt>
+      <dd className="flex items-center gap-2">
+        {detail.length ? <span className="ac-mono text-micro text-text-3">{detail.join(' · ')}</span> : null}
+        <span className="ac-mono text-micro text-text-2">{block?.surface ?? fallback}</span>
+        {block?.surface ? null : <Badge tone="neutral">default</Badge>}
+      </dd>
     </div>
   );
 }

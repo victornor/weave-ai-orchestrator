@@ -4,23 +4,23 @@
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { PresentationBlockSchema, agentUiStatus } from '@agent-conductor/shared';
+import { PresentationConfigSchema, agentUiStatus } from '@agent-conductor/shared';
 import { nowIso } from '@agent-conductor/db';
 import type { AppDeps, AppEnv } from './types.js';
 import { body } from './http.js';
 
-const PresentationSchema = z.object({
-  default: z.string().default('headless'),
-  conductor: PresentationBlockSchema.optional(),
-  workers: PresentationBlockSchema.optional(),
-});
-
-export function presentationRoutes(): Hono<AppEnv> {
+export function presentationRoutes(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.get('/', (c) => c.json(c.get('ws').ctx.config.presentation));
+  /**
+   * Which surface kinds this daemon can hand to a presenter. Deliberately no availability flag:
+   * a surface runs on the presenter's machine, which need not be the daemon's, so `detect()` here
+   * would answer for the wrong host.
+   */
+  app.get('/surfaces', (c) => c.json({ surfaces: [...deps.registries.surfaces.keys()] }));
   app.put('/', async (c) => {
     const ws = c.get('ws');
-    const presentation = await body(c, PresentationSchema);
+    const presentation = await body(c, PresentationConfigSchema);
     const next = { ...ws.ctx.config, presentation };
     await ws.ctx.saveConfig(next);
     ws.ctx.events.emit('presentation.updated', 'workspace', ws.id, presentation);

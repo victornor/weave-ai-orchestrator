@@ -70,6 +70,14 @@ export const PresentationBlockSchema = z.object({
 }).partial();
 export type PresentationBlock = z.infer<typeof PresentationBlockSchema>;
 
+/** The stored desired presentation: what `GET /presentation` returns and `PUT /presentation` accepts. */
+export const PresentationConfigSchema = z.object({
+  default: z.string().default('headless'),
+  conductor: PresentationBlockSchema.optional(),
+  workers: PresentationBlockSchema.optional(),
+});
+export type PresentationConfig = z.infer<typeof PresentationConfigSchema>;
+
 /** Token budget per knowledge file (PLAN §13.1): one per hub file, one shared by every linked document. */
 export const KnowledgeBudgetsSchema = z.object({
   workspace: z.number().int().min(500).default(10000),
@@ -120,11 +128,7 @@ export const WorkspaceConfigSchema = z.object({
     heartbeatIntervalSec: z.number().int().optional(),
     humanName: z.string().optional(),
   }).default({}),
-  presentation: z.object({
-    default: z.string().default('headless'),
-    conductor: PresentationBlockSchema.optional(),
-    workers: PresentationBlockSchema.optional(),
-  }).default({}),
+  presentation: PresentationConfigSchema.default({}),
   channels: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
   webhooks: z.array(z.object({ url: z.string().url(), events: z.array(z.string()).default(['*']), secret: envRef.optional() })).default([]),
   pricingOverrides: z.record(z.string(), z.object({ inputPerMTok: z.number(), outputPerMTok: z.number(), cachedInputPerMTok: z.number().optional() })).default({}),

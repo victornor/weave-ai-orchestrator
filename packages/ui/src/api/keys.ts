@@ -60,4 +60,5 @@ export const qk = {
   threadMessages: (ws: string, id: string) => ['w', ws, 'threads', id, 'messages'] as const,
 
   presentation: (ws: string) => ['w', ws, 'presentation'] as const,
+  presentationSurfaces: (ws: string) => ['w', ws, 'presentation', 'surfaces'] as const,
 } as const;

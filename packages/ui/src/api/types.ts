@@ -21,6 +21,7 @@ import type {
   RuntimeAccount,
   UsageBillingMix,
   AuthSessionKind,
+  PresentationConfig,
 } from '@agent-conductor/shared';
 
 export interface Health {
@@ -406,10 +407,11 @@ export interface ThreadMessagesPage {
   hasMore?: boolean;
 }
 
-export interface PresentationConfig {
-  surface: string | null;
-  available: Array<{ id: string; displayName: string; detection: { available: boolean; reason?: string | null } }>;
-  blocks?: unknown;
+/** `GET /presentation/surfaces` — the surface kinds this daemon can hand to a presenter. */
+export interface PresentationSurfaces {
+  surfaces: string[];
 }
+
+export type { PresentationConfig };
 
 export type { Agent, Briefing, Decision, Project, Role, Run, RunEvent, Ticket, TicketComment, ThreadMessage, Workspace };

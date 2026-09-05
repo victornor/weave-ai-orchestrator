@@ -1,4 +1,4 @@
-import type { Agent, Decision, Ticket } from '@agent-conductor/shared';
+import type { Agent, Decision, Project, Ticket } from '@agent-conductor/shared';
 
 export function ticket(over: Partial<Ticket> = {}): Ticket {
   return {
@@ -35,6 +35,30 @@ export function ticket(over: Partial<Ticket> = {}): Ticket {
     cancelledAt: null,
     createdAt: '2026-09-01T09:00:00.000Z',
     updatedAt: '2026-09-01T09:00:00.000Z',
+    ...over,
+  };
+}
+
+export function project(over: Partial<Project> = {}): Project {
+  return {
+    id: 'p1',
+    workspaceId: 'ws',
+    slug: 'api',
+    name: 'API',
+    gitUrl: 'git@example.com:acme/api.git',
+    defaultBranch: 'main',
+    clonePath: '/tmp/api',
+    maxWorkers: 4,
+    setupCommand: null,
+    worktreeProvider: 'git',
+    runtimeId: 'claude',
+    model: null,
+    openspecEnabled: true,
+    openspecVersion: null,
+    policies: {},
+    status: 'ready',
+    lastFetchedAt: null,
+    errorText: null,
     ...over,
   };
 }

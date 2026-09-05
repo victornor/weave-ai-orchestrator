@@ -1,4 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
+import { OcError } from '@agent-conductor/shared';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import { authed, makeHarness, type Harness } from './fakes.js';
@@ -182,5 +183,40 @@ describe('routes', () => {
     const body = await res.json();
     expect(body.worker).toMatchObject({ id: 'ag_conductor' });
     expect(body.lastRun).toBeNull();
+  });
+
+  // The project the human picked beside the chat input rides on the message; the route only has to
+  // forward it, and to let the service's rejection surface as the error it is.
+  it('forwards the project a chat message was sent with', async () => {
+    const { h, fetch } = app();
+    const seen: Array<Record<string, unknown> | undefined> = [];
+    h.impls['threads']!['inbound'] = (_a: unknown, _t: unknown, body: string, opts?: Record<string, unknown>) => {
+      seen.push(opts);
+      return { id: 'tm_1', body, projectId: opts?.['projectId'] ?? null };
+    };
+
+    const withProject = await fetch('/api/w/ws1/threads/th_1/messages', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ body: 'ship it', projectId: 'p_api' }),
+    });
+    expect(withProject.status).toBe(201);
+    expect((await withProject.json()).projectId).toBe('p_api');
+
+    const without = await fetch('/api/w/ws1/threads/th_1/messages', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ body: 'no project' }),
+    });
+    expect(without.status).toBe(201);
+
+    expect(seen.map((o) => o?.['projectId'])).toEqual(['p_api', undefined]);
+  });
+
+  it('surfaces an unknown project on a chat message as not_found', async () => {
+    const { h, fetch } = app();
+    h.impls['threads']!['inbound'] = () => { throw new OcError('not_found', 'project nope not found'); };
+
+    const res = await fetch('/api/w/ws1/threads/th_1/messages', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ body: 'wrong project', projectId: 'nope' }),
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe('not_found');
   });
 });

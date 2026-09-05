@@ -52,15 +52,15 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     direction: 'inbound' | 'outbound',
     actor: Actor,
     body: string,
-    opts: { parts?: unknown[]; runId?: string | null; externalMessageId?: string; deliveryStatus?: string } = {},
+    opts: { parts?: unknown[]; runId?: string | null; externalMessageId?: string; deliveryStatus?: string; projectId?: string | null } = {},
   ): ThreadMessage {
     const msg: ThreadMessage = {
       id: newId(), threadId, direction, authorKind: actor.kind, authorId: actor.id, runId: opts.runId ?? actor.runId ?? null,
-      body, parts: opts.parts ?? [], externalMessageId: opts.externalMessageId ?? null,
+      projectId: opts.projectId ?? null, body, parts: opts.parts ?? [], externalMessageId: opts.externalMessageId ?? null,
       deliveryStatus: opts.deliveryStatus ?? 'received', createdAt: nowIso(),
     };
     db.insert('thread_messages', {
-      id: msg.id, threadId, direction, authorKind: msg.authorKind, authorId: msg.authorId, runId: msg.runId, body,
+      id: msg.id, threadId, direction, authorKind: msg.authorKind, authorId: msg.authorId, runId: msg.runId, projectId: msg.projectId, body,
       partsJson: msg.parts, externalMessageId: msg.externalMessageId, deliveryStatus: msg.deliveryStatus, createdAt: msg.createdAt,
     });
     db.run('UPDATE channel_threads SET last_message_at = ? WHERE id = ?', [msg.createdAt, threadId]);
@@ -115,8 +115,11 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     async inbound(actor, threadId, body, opts = {}) {
       const t = get(threadId);
       const human: Actor = { kind: 'human', id: actor.id ?? t.externalUserId ?? null };
+      // Resolved before anything is written, so a reference to a project this workspace does not
+      // have stores no message and wakes nobody. `get` takes an id or a slug and is workspace-scoped.
+      const project = opts.projectId ? deps().projects.get(opts.projectId) : null;
       return tx(db, () => {
-        const msg = insertMessage(t.id, 'inbound', human, body, { ...opts, deliveryStatus: 'received' });
+        const msg = insertMessage(t.id, 'inbound', human, body, { ...opts, projectId: project?.id ?? null, deliveryStatus: 'received' });
         recordActivity(db, ws, human, 'thread.inbound', 'thread_message', msg.id, { threadId: t.id }, t.ticketId);
         ctx.events.emit('thread.message', 'thread_message', msg.id, { ...msg, ticketId: t.ticketId });
         if (t.ticketId) {
@@ -126,8 +129,8 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
           try {
             deps().wake.enqueue(t.agentId, {
               source: 'human_message',
-              reason: `message from ${t.humanLabel ?? 'the human'}`,
-              payload: { threadId: t.id, messageId: msg.id, body: body.slice(0, 2000) },
+              reason: `message from ${t.humanLabel ?? 'the human'}${project ? ` about ${project.slug}` : ''}`,
+              payload: { threadId: t.id, messageId: msg.id, body: body.slice(0, 2000), projectId: project?.id ?? null, projectSlug: project?.slug ?? null },
               requestedBy: human,
             });
           } catch (e) {

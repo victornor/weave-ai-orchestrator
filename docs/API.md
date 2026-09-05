@@ -50,7 +50,7 @@ Linked documents: `GET /knowledge/docs?scope=&project=` → `[{ path, scope, pro
 `GET /usage?scope=workspace|project:<id>|role:<id>|worker:<id>|ticket:<id>|model:<id>&window=&grain=&start=&end=` · `GET /usage/top?by=model|ticket|role|worker|project&...` · `GET /usage/models?...` · `GET /usage/ticket/:id`
 
 ### Threads (chat)
-`GET /threads?channel=web` · `POST /threads` `{ channel: 'web', label? }` · `GET /threads/:id/messages?before=&limit=` · `POST /threads/:id/messages` `{ body }` (inbound from human; wakes the agent) · `POST /threads/:id/bind` `{ ticketId | null }`
+`GET /threads?channel=web` · `POST /threads` `{ channel: 'web', label? }` · `GET /threads/:id/messages?before=&limit=` · `POST /threads/:id/messages` `{ body, projectId? }` (inbound from human; wakes the agent. `projectId` is the project the message was sent about — an id or a slug, stored on the message and carried in the wake payload; unknown ids are rejected with `not_found`) · `POST /threads/:id/bind` `{ ticketId | null }`
 
 ### Presentation / presenter
 `GET /presentation` · `PUT /presentation` (PresentationBlocks) · `GET /presenter/desired` → `{ conductor, workers: AgentView[], config }` · `PUT /presenter/:presenterId/handles` `{ handles }`

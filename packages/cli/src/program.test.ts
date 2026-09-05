@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Command } from 'commander';
 import { buildProgram } from './program.js';
 import { configureOutput } from './output.js';
@@ -91,8 +94,14 @@ describe('command tree', () => {
 describe('running commands against a stubbed daemon', () => {
   const realFetch = globalThis.fetch;
   let written: string[];
+  // The CLI resolves its workspace by walking up from the working directory. A checkout that lives
+  // under a workspace (every worker worktree does) would find that `workspace.yaml` and change what
+  // these commands do, so each run happens in a temporary directory with no workspace above it.
+  let sandbox: string;
 
   beforeEach(() => {
+    sandbox = mkdtempSync(join(tmpdir(), 'ac-cli-'));
+    vi.spyOn(process, 'cwd').mockReturnValue(sandbox);
     written = [];
     vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => { written.push(String(chunk)); return true; });
     vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => { written.push(String(chunk)); return true; });
@@ -102,6 +111,7 @@ describe('running commands against a stubbed daemon', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    rmSync(sandbox, { recursive: true, force: true });
     globalThis.fetch = realFetch;
     process.exitCode = undefined;
   });

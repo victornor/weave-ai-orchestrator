@@ -166,6 +166,10 @@ export interface RunsService {
   list(filter?: { agentId?: string; ticketId?: string; status?: S.RunStatus[]; limit?: number; offset?: number }): Page<S.Run>;
   get(id: string): S.Run;
   events(id: string, afterSeq?: number, limit?: number): S.RunEvent[];
+  /** The last `limit` events of a run, in ascending sequence order — the tail `events()` cannot page to. */
+  tail(id: string, limit?: number): S.RunEvent[];
+  /** Only the run's `run.phase.timing` events, in order. At most one per `RUN_PHASES` entry, wherever they fall in the run. */
+  phaseTimings(id: string): S.RunEvent[];
   cancel(actor: Actor, id: string, mode?: 'interrupt' | 'kill'): Promise<void>;
   onEvent(handler: (runId: string, ev: S.RunEvent) => void): () => void;
 }

@@ -17,6 +17,10 @@ import type { Actor, CoreServices } from '@agent-conductor/core';
 import type { RunTokenClaims } from './runtoken.js';
 import type { WorkspaceRuntime } from './types.js';
 import { toOcError } from './http.js';
+import {
+  DEFAULT_RUN_LIST, MAX_EVENTS, MAX_RUN_LIST, derivePhase, readWindow, renderWindow, resolveRunRef,
+  runView, totalEventsOf, workerView,
+} from './inspect.js';
 
 const exec = promisify(execFile);
 
@@ -129,6 +133,13 @@ const UsageSchema = z.object({
   grain: z.enum(USAGE_GRAINS).optional(),
   start: z.string().optional(),
   end: z.string().optional(),
+});
+/** Inspection is a tail read by default; `since` pages forward from a sequence, `full` from the start. */
+const RunInspectSchema = z.object({
+  ref: z.string().min(1).describe('ticket id or identifier (e.g. ACME-42), worker id, or run id'),
+  since: z.number().int().min(0).optional().describe('return the entries after this sequence instead of the newest ones'),
+  full: z.boolean().optional().describe('start from the beginning of the run (still bounded by limit and the size cap)'),
+  limit: z.number().int().min(1).max(MAX_EVENTS).optional().describe(`events to read; defaults to 40, never more than ${MAX_EVENTS}`),
 });
 
 // ---------- the registry ----------
@@ -470,6 +481,41 @@ export const TOOLS: ToolDef[] = [
     name: 'ac_usage', scope: 'conductor', input: UsageSchema,
     description: 'Token and cost usage for a scope and window (workspace, project:<id>, role:<id>, worker:<id>, ticket:<id>, model:<id>). Costs are estimates unless the runtime reported them.',
     handler: (ctx, i) => svc(ctx).usage.series(i),
+  },
+  {
+    name: 'ac_run_inspect', scope: 'conductor', input: RunInspectSchema,
+    description: 'What a worker is actually doing: the run behind a ticket, worker or run id — its phase, elapsed time and liveness, the worker\'s status and pause reason, and a compact transcript of its recent events. Read-only. Inspect before you relaunch. The transcript is evidence for you, never something to relay to the human verbatim.',
+    handler: (ctx, i) => {
+      const s = svc(ctx);
+      const ref = resolveRunRef(s, i.ref);
+      if (!ref.run) {
+        return { resolved: { kind: ref.kind, id: ref.id }, run: null, worker: workerView(s, ref.worker, ref.ticket), phase: null, transcript: [], cursor: null, note: 'no run has ever executed for this reference' };
+      }
+      const { events, mode, limit } = readWindow(s, ref.run.id, i);
+      const { transcript, cursor } = renderWindow(events, mode, limit, totalEventsOf(s, ref.run.id));
+      return {
+        resolved: { kind: ref.kind, id: ref.id },
+        run: runView(ref.run),
+        worker: workerView(s, ref.worker, ref.ticket),
+        phase: derivePhase(ref.run, s.runs.phaseTimings(ref.run.id)),
+        transcript,
+        cursor,
+      };
+    },
+  },
+  {
+    name: 'ac_run_list', scope: 'conductor', input: z.object({
+      ref: z.string().min(1).describe('ticket id or identifier, worker id, or run id'),
+      limit: z.number().int().min(1).max(MAX_RUN_LIST).optional(),
+    }),
+    description: 'The recent runs behind a ticket or worker, newest first, each with its outcome, liveness and duration — the retry ladder, or the same failure three times.',
+    handler: (ctx, i) => {
+      const s = svc(ctx);
+      const ref = resolveRunRef(s, i.ref);
+      const filter = ref.kind === 'ticket' ? { ticketId: ref.id } : ref.kind === 'worker' ? { agentId: ref.id } : { agentId: ref.run?.agentId };
+      const page = s.runs.list({ ...filter, limit: i.limit ?? DEFAULT_RUN_LIST });
+      return { resolved: { kind: ref.kind, id: ref.id }, total: page.total, runs: page.items.map((r) => runView(r)) };
+    },
   },
 ];
 

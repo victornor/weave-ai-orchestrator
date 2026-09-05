@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
 import { FakeRuntime, type TurnInput, type TurnSink, type TurnResult } from '@agent-conductor/runtime-sdk';
-import type { Decision, Run, Wakeup } from '@agent-conductor/shared';
+import { RECORDED_RUN_PHASES, RUN_PHASES, type Decision, type Run, type Wakeup } from '@agent-conductor/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createDecisionsService } from '../decisions/service.js';
 import { createTicketsService } from '../tickets/service.js';
@@ -84,6 +84,21 @@ describe('run engine', () => {
     await tick();
     expect(h.events.filter((e) => e.type === 'run.started')).toHaveLength(1);
     expect(h.events.filter((e) => e.type === 'run.finished')).toHaveLength(1);
+  });
+
+  it('times exactly the phases RECORDED_RUN_PHASES declares, in that order', async () => {
+    // Anything deriving "which phase is this run in" from `run.phase.timing` walks that list, so a
+    // phase added to or dropped from the engine has to move the list with it. `RUN_PHASES` is wider:
+    // it declares `spawn` and `finalize`, which nothing records.
+    runtime.queue.push({ structured: { state: 'done', summary: 'done', tickets: [] } });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'anything' });
+    const run = await runOnce();
+
+    const timed = h.services.runs!.phaseTimings(run.id).map((e) => (e.payload as { phase: string }).phase);
+
+    // The conductor has no worktree, so it skips `prepare_worktree` — the one phase that is conditional.
+    expect(timed).toEqual(RECORDED_RUN_PHASES.filter((p) => p !== 'prepare_worktree'));
+    expect(RECORDED_RUN_PHASES.every((p) => RUN_PHASES.includes(p))).toBe(true);
   });
 
   it('injects the system prompt on the first turn only and resumes the session afterwards', async () => {

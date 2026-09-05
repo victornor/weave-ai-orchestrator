@@ -37,6 +37,21 @@ export function createRunsService(ctx: WorkspaceContext, _deps: () => CoreServic
       return ctx.db.all<RunEvent>('SELECT * FROM run_events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?', [id, afterSeq, limit]);
     },
 
+    /** The newest `limit` events, handed back oldest-first. Reads the tail without loading the run. */
+    tail(id: string, limit = 50): RunEvent[] {
+      const rows = ctx.db.all<RunEvent>('SELECT * FROM run_events WHERE run_id = ? ORDER BY seq DESC LIMIT ?', [id, limit]);
+      return rows.reverse();
+    },
+
+    /**
+     * The phase markers alone. The engine records one when a phase *ends*, so they are scattered
+     * across the run — `build_prompt` near the head, `turn` after everything the turn did — and
+     * neither the head nor the tail is guaranteed to hold them all. Bounded by `RUN_PHASES`.
+     */
+    phaseTimings(id: string): RunEvent[] {
+      return ctx.db.all<RunEvent>("SELECT * FROM run_events WHERE run_id = ? AND type = 'run.phase.timing' ORDER BY seq", [id]);
+    },
+
     async cancel(actor: Actor, id: string, mode: 'interrupt' | 'kill' = 'interrupt'): Promise<void> {
       const run = ctx.db.get<Run>('SELECT * FROM runs WHERE id = ? AND workspace_id = ?', [id, ctx.workspaceId]);
       if (!run) throw new OcError('not_found', `run ${id} not found`);

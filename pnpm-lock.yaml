@@ -292,6 +292,9 @@ importers:
       '@agent-conductor/release':
         specifier: workspace:*
         version: link:../release
+      '@agent-conductor/render':
+        specifier: workspace:*
+        version: link:../render
       '@agent-conductor/runtime-claude':
         specifier: workspace:*
         version: link:../runtimes/claude

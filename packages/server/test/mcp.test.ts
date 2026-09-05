@@ -34,6 +34,8 @@ describe('MCP endpoint', () => {
     expect(names).toContain('ac_ticket_create');       // WORKER_ONLY_TOOLS
     expect(names).not.toContain('ac_role_hire');        // conductor only
     expect(names).not.toContain('ac_human_send');
+    expect(names).not.toContain('ac_run_inspect');      // no worker reads another worker's transcript
+    expect(names).not.toContain('ac_run_list');
     expect(tools.find((t) => t.name === 'ac_ask')?.description).toContain('gate_finding');
     await client.close();
   });
@@ -44,6 +46,8 @@ describe('MCP endpoint', () => {
     expect(names).toContain('ac_role_hire');
     expect(names).toContain('ac_human_send');
     expect(names).toContain('ac_briefing');
+    expect(names).toContain('ac_run_inspect');
+    expect(names).toContain('ac_run_list');
     await client.close();
   });
 

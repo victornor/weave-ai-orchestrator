@@ -1,62 +1,63 @@
-import type { MergeQueue as MergeQueueData, MergeQueueEntry } from '../api/types';
-import { Card, CardBody, CardHeader } from './Card';
-import { Badge } from './StatusGlyph';
-import { ago } from '../lib/format';
+import { Badge, StatusGlyph } from './StatusGlyph';
 import { cx } from '../lib/cx';
 
 /**
- * A project's merge queue (PLAN §11.4): what is landing now, and who is waiting behind it, in order.
- * Presentational — the route fetches the queue and hands it over.
+ * The board's one line about landing (PLAN §11.4). It says how much is in flight and opens the merge
+ * queue view; it never holds the queue itself, and it keeps the same height whether or not anything
+ * is merging, so the board's geometry does not move with the queue's state.
  */
-export function MergeQueuePanel({
-  queue,
+export function MergeQueueStrip({
+  landing,
+  waiting,
   onOpen,
   className,
 }: {
-  queue: MergeQueueData;
-  onOpen?: (entry: MergeQueueEntry) => void;
+  landing: number;
+  waiting: number;
+  onOpen: () => void;
   className?: string;
-}): React.ReactElement | null {
-  const rows = [...queue.active, ...queue.waiting];
-  if (rows.length === 0) return null;
+}): React.ReactElement {
+  const busy = landing > 0 || waiting > 0;
   return (
-    <Card className={className}>
-      <CardHeader>
-        <span className="ac-label">Merge queue</span>
-        <span className="ac-mono text-nano text-text-4">
-          {queue.active.length}/{queue.concurrency} merging · {queue.waiting.length} waiting
-        </span>
-      </CardHeader>
-      <CardBody className="p-0">
-        <ul>
-          {rows.map((e) => (
-            <li key={e.ticketId}>
-              <button
-                type="button"
-                onClick={() => onOpen?.(e)}
-                disabled={!onOpen}
-                className={cx(
-                  'flex w-full items-center gap-2 border-b border-line-1 px-3.5 py-2 text-left last:border-b-0',
-                  onOpen && 'hover:bg-bg-3',
-                )}
-              >
-                <span className="ac-mono w-8 shrink-0 text-nano text-text-4">{e.position === null ? 'now' : `#${e.position}`}</span>
-                <span className="ac-mono shrink-0 text-nano text-text-3">{e.identifier}</span>
-                <span className="min-w-0 flex-1 truncate text-mini text-text-2">{e.title}</span>
-                {e.position === null ? <Badge tone="accent">merging</Badge> : <Badge tone="neutral">waiting</Badge>}
-                <span className="ac-mono shrink-0 text-nano text-text-4">{ago(e.startedAt ?? e.queuedAt ?? '')}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </CardBody>
-    </Card>
+    <button
+      type="button"
+      onClick={onOpen}
+      className={cx(
+        'flex h-6 w-full items-center gap-2 text-left transition-colors duration-(--dur-fast) ease-ac hover:text-text-2',
+        busy ? 'text-text-3' : 'text-text-4',
+        className,
+      )}
+    >
+      <StatusGlyph status={busy ? 'merging' : 'idle'} size="xs" />
+      <span className="text-micro font-medium">Merge queue</span>
+      <span className="ac-mono text-nano">
+        {busy ? `${landing} landing · ${waiting} waiting` : 'nothing landing'}
+      </span>
+      <span className="flex-1" />
+      <span aria-hidden="true" className="text-nano">
+        →
+      </span>
+    </button>
   );
 }
 
 /** The ticket page's own line: "#2 in the merge queue", or that it is the one merging now. */
-export function MergeQueueBadge({ position, merging }: { position: number | null; merging: boolean }): React.ReactElement | null {
-  if (merging) return <Badge tone="accent">merging now</Badge>;
-  if (position === null) return null;
-  return <Badge tone="neutral">#{position} in the merge queue</Badge>;
+export function MergeQueueBadge({
+  position,
+  merging,
+  onOpen,
+}: {
+  position: number | null;
+  merging: boolean;
+  /** Given, the badge opens the merge queue view for the ticket's project. */
+  onOpen?: () => void;
+}): React.ReactElement | null {
+  if (!merging && position === null) return null;
+  const badge = merging ? <Badge tone="accent">merging now</Badge> : <Badge tone="neutral">#{position} in the merge queue</Badge>;
+  if (!onOpen) return badge;
+  return (
+    <button type="button" onClick={onOpen} aria-label="Open the merge queue" className="transition-opacity duration-(--dur-fast) ease-ac hover:opacity-80">
+      {badge}
+    </button>
+  );
 }

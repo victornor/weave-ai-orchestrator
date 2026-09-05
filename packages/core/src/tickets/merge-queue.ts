@@ -9,13 +9,16 @@
  */
 import { nowIso, ticketRow, type Db } from '@agent-conductor/db';
 import { mergeConcurrencyOf, type Ticket } from '@agent-conductor/shared';
-import type { Actor, CoreServices, MergeQueueService, MergeQueueEntry, MergeQueueView } from '../api.js';
+import type { Actor, CoreServices, MergeQueueService, MergeQueueEntry, MergeQueueOutcome, MergeQueueView } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 
 const SYSTEM: Actor = { kind: 'system', id: null };
 
 /** Join order: the moment the ticket joined the queue, the ticket number breaking a tie. */
 const QUEUE_ORDER = 'merge_queued_at, number';
+
+/** How many recent outcomes a queue report carries. A window on what just happened, not a history. */
+const RECENT_LIMIT = 5;
 
 export function createMergeQueue(ctx: WorkspaceContext, deps: () => CoreServices): MergeQueueService {
   const db: Db = ctx.db;
@@ -65,12 +68,43 @@ export function createMergeQueue(ctx: WorkspaceContext, deps: () => CoreServices
     return idx < 0 ? null : idx + 1;
   }
 
+  /**
+   * What recently left this project's queue. Nothing stores queue history — `leave` clears both
+   * stamps — so it is read back from the activity the ticket service already writes: `ticket.merged`
+   * for a landing, a transition or a cancellation out of `merging` for everything else. Most recent
+   * first, one row per ticket.
+   */
+  function recentOf(projectId: string, limit: number = RECENT_LIMIT): MergeQueueOutcome[] {
+    const rows = db.all<{ action: string; details: { to?: string; mergeCommit?: string | null } | null; createdAt: string; ticketId: string; identifier: string; title: string }>(
+      `SELECT a.action, a.details_json, a.created_at, t.id AS ticket_id, t.identifier, t.title
+         FROM activity a JOIN tickets t ON t.id = a.ticket_id
+        WHERE a.workspace_id = ? AND t.project_id = ?
+          AND (a.action = 'ticket.merged'
+               OR (a.action IN ('ticket.transition','ticket.cancel') AND json_extract(a.details_json, '$.from') = 'merging'))
+        ORDER BY a.created_at DESC, a.rowid DESC`,
+      [ws, projectId],
+    );
+    const out: MergeQueueOutcome[] = [];
+    const seen = new Set<string>();
+    for (const r of rows) {
+      if (seen.has(r.ticketId)) continue;
+      seen.add(r.ticketId);
+      const to = r.details?.to;
+      const outcome: MergeQueueOutcome['outcome'] =
+        r.action === 'ticket.merged' || to === 'done' ? 'landed' : to === 'blocked' ? 'failed' : 'withdrawn';
+      out.push({ ticketId: r.ticketId, identifier: r.identifier, title: r.title, outcome, at: r.createdAt, mergeCommit: r.details?.mergeCommit ?? null });
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
   function forProject(projectId: string): MergeQueueView {
     return {
       projectId,
       concurrency: limitFor(projectId),
       active: activeOf(projectId).map((t) => entry(t, null)),
       waiting: waitingOf(projectId).map((t, i) => entry(t, i + 1)),
+      recent: recentOf(projectId),
     };
   }
 
@@ -180,5 +214,5 @@ export function createMergeQueue(ctx: WorkspaceContext, deps: () => CoreServices
     return admitted;
   }
 
-  return { limitFor, positionOf, forProject, join, leave, pump, pumpAll };
+  return { limitFor, positionOf, recentOf, forProject, join, leave, pump, pumpAll };
 }

@@ -13,9 +13,8 @@ import { ConnectionBanner } from '../components/ConnectionBanner';
 import { EmptyState, ErrorState } from '../components/States';
 import { ApiError } from '../api/client';
 import { PlanPreview } from '../components/PlanPreview';
-import { MergeQueueBadge, MergeQueuePanel } from '../components/MergeQueue';
+import { MergeQueueBadge, MergeQueueStrip } from '../components/MergeQueue';
 import { agent, decision, ticket } from './factories';
-import type { MergeQueue, MergeQueueEntry } from '../api/types';
 
 const planDoc = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 vi.mock('../api/hooks', () => ({
@@ -401,40 +400,24 @@ describe('PlanPreview', () => {
   });
 });
 
-describe('MergeQueuePanel', () => {
-  const entry = (over: Partial<MergeQueueEntry> = {}): MergeQueueEntry => ({
-    ticketId: 't1', identifier: 'ACME-42', title: 'Theme tokens', projectId: 'api',
-    position: null, queuedAt: '2026-09-04T11:00:00.000Z', startedAt: '2026-09-04T11:00:05.000Z', workerId: 'ag_1', ...over,
-  });
-  const queue = (over: Partial<MergeQueue> = {}): MergeQueue => ({
-    projectId: 'api', concurrency: 1,
-    active: [entry()],
-    waiting: [entry({ ticketId: 't2', identifier: 'ACME-43', title: 'Behind it', position: 1, startedAt: null })],
-    ...over,
+describe('MergeQueueStrip', () => {
+  it('says how much is landing and how much is waiting', () => {
+    render(<MergeQueueStrip landing={1} waiting={2} onOpen={vi.fn()} />);
+    expect(screen.getByText('Merge queue')).toBeInTheDocument();
+    expect(screen.getByText('1 landing \u00b7 2 waiting')).toBeInTheDocument();
   });
 
-  it('shows what is merging now and who is waiting, in order', () => {
-    render(<MergeQueuePanel queue={queue()} />);
-    expect(screen.getByText('1/1 merging · 1 waiting')).toBeInTheDocument();
-    expect(screen.getByText('now')).toBeInTheDocument();
-    expect(screen.getByText('#1')).toBeInTheDocument();
-    expect(screen.getByText('merging')).toBeInTheDocument();
-    expect(screen.getByText('waiting')).toBeInTheDocument();
-    const rows = screen.getAllByRole('button');
-    expect(rows[0]).toHaveTextContent('ACME-42');
-    expect(rows[1]).toHaveTextContent('ACME-43');
+  it('says nothing is landing when the queue is empty, rather than disappearing', () => {
+    render(<MergeQueueStrip landing={0} waiting={0} onOpen={vi.fn()} />);
+    expect(screen.getByText('Merge queue')).toBeInTheDocument();
+    expect(screen.getByText('nothing landing')).toBeInTheDocument();
   });
 
-  it('renders nothing when the queue is empty', () => {
-    const { container } = render(<MergeQueuePanel queue={queue({ active: [], waiting: [] })} />);
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('opens the ticket a row stands for', () => {
+  it('opens the merge queue view', () => {
     const onOpen = vi.fn();
-    render(<MergeQueuePanel queue={queue()} onOpen={onOpen} />);
-    fireEvent.click(screen.getAllByRole('button')[1]!);
-    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ identifier: 'ACME-43' }));
+    render(<MergeQueueStrip landing={0} waiting={1} onOpen={onOpen} />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(onOpen).toHaveBeenCalled();
   });
 });
 
@@ -452,5 +435,17 @@ describe('MergeQueueBadge', () => {
   it('renders nothing for a ticket that is neither', () => {
     const { container } = render(<MergeQueueBadge position={null} merging={false} />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('is not a control until it is given somewhere to go', () => {
+    render(<MergeQueueBadge position={3} merging={false} />);
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('opens the merge queue view when it has one', () => {
+    const onOpen = vi.fn();
+    render(<MergeQueueBadge position={3} merging={false} onOpen={onOpen} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open the merge queue' }));
+    expect(onOpen).toHaveBeenCalled();
   });
 });

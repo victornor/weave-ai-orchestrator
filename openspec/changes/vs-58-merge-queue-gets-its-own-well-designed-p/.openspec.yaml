@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Merge queue gets its own well-designed place instead of a panel wedged
+  into the Board page

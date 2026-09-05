@@ -96,7 +96,13 @@ export function TicketRoute(): React.ReactElement {
         meta={
           <span className="flex items-center gap-2">
             {isFolded(ticket.status) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
-            {ticket.status === 'merging' ? <MergeQueueBadge position={detail.data.mergeQueue.position} merging={detail.data.mergeQueue.position === null} /> : null}
+            {ticket.status === 'merging' ? (
+              <MergeQueueBadge
+                position={detail.data.mergeQueue.position}
+                merging={detail.data.mergeQueue.position === null}
+                onOpen={() => go('/w/$ws/merge-queue', { params: { ws }, search: ticket.projectId ? { project: ticket.projectId } : {} })}
+              />
+            ) : null}
             {project ? <span className="ac-mono">{project.slug}</span> : null}
             {worker ? <span>{worker.name}</span> : null}
           </span>

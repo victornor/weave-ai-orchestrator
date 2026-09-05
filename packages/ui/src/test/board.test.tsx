@@ -13,6 +13,7 @@ import {
   isFolded,
   isLiveWorker,
   liveWorkersByTicket,
+  mergeStrip,
   recentlyFinished,
   ticketBoardStatus,
 } from '../lib/board';
@@ -172,5 +173,22 @@ describe('finished tickets on the board', () => {
       ticket({ id: 'c', status: 'done', priority: 'critical', completedAt: daysAgo(2) }),
     ]);
     expect(cols.find((c) => c.key === 'done')?.items.map((t) => t.id)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('mergeStrip', () => {
+  it('splits merging tickets into what is landing and what is waiting', () => {
+    const counts = mergeStrip([
+      ticket({ id: 'a', status: 'merging', mergeQueuedAt: '2026-09-01T10:00:00.000Z', mergeStartedAt: '2026-09-01T10:00:01.000Z' }),
+      ticket({ id: 'b', status: 'merging', mergeQueuedAt: '2026-09-01T10:05:00.000Z' }),
+      ticket({ id: 'c', status: 'merging', mergeQueuedAt: '2026-09-01T10:06:00.000Z' }),
+      ticket({ id: 'd', status: 'in_review' }),
+    ]);
+    expect(counts).toEqual({ landing: 1, waiting: 2 });
+  });
+
+  it('counts nothing when nothing is merging', () => {
+    expect(mergeStrip([ticket({ status: 'in_progress' })])).toEqual({ landing: 0, waiting: 0 });
+    expect(mergeStrip([])).toEqual({ landing: 0, waiting: 0 });
   });
 });

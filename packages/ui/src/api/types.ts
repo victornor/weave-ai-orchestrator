@@ -185,11 +185,22 @@ export interface MergeQueueEntry {
   workerId: string | null;
 }
 
+/** A ticket that recently left a project's queue: `landed` merged, `failed` could not, `withdrawn` left without either. */
+export interface MergeQueueOutcome {
+  ticketId: string;
+  identifier: string;
+  title: string;
+  outcome: 'landed' | 'failed' | 'withdrawn';
+  at: string;
+  mergeCommit: string | null;
+}
+
 export interface MergeQueue {
   projectId: string;
   concurrency: number;
   active: MergeQueueEntry[];
   waiting: MergeQueueEntry[];
+  recent: MergeQueueOutcome[];
 }
 
 export interface WorkProduct {

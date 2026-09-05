@@ -203,3 +203,19 @@ export function filterTickets<T extends Pick<Ticket, 'status' | 'kind' | 'priori
       (!f.status || t.status === f.status),
   );
 }
+
+/**
+ * What the board's merge-queue line says (PLAN §11.4). Counted over every ticket the board loaded,
+ * not over the filtered view: the line is about the workspace's landing, and a number that changed
+ * with the project filter would be the old panel's problem in another shape.
+ */
+export function mergeStrip(tickets: readonly Pick<Ticket, 'status' | 'mergeStartedAt'>[]): { landing: number; waiting: number } {
+  let landing = 0;
+  let waiting = 0;
+  for (const t of tickets) {
+    if (t.status !== 'merging') continue;
+    if (t.mergeStartedAt) landing++;
+    else waiting++;
+  }
+  return { landing, waiting };
+}

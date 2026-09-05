@@ -203,6 +203,66 @@ describe('merge queue', () => {
     });
   });
 
+  describe('recent outcomes', () => {
+    const recent = (): Array<{ identifier: string; outcome: string }> =>
+      tickets.mergeQueue.recentOf(h.projectId).map((r) => ({ identifier: r.identifier, outcome: r.outcome }));
+
+    it('reports a landed ticket with the commit its merge produced', async () => {
+      const a = approved('First');
+      await approve(a);
+
+      await tickets.mergeDone(AGENT, a.id, { mergeCommit: 'abc1234', method: 'squash' });
+
+      const rows = tickets.mergeQueue.recentOf(h.projectId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ ticketId: a.id, identifier: a.identifier, outcome: 'landed', mergeCommit: 'abc1234' });
+      expect(rows[0]?.at).toEqual(expect.any(String));
+    });
+
+    it('reports a merge that could not complete as failed', async () => {
+      const a = approved('First');
+      await approve(a);
+
+      await tickets.transition(AGENT, a.id, { to: 'blocked', unblock: { owner: 'conductor', action: 'unresolvable conflict' } });
+
+      expect(recent()).toEqual([{ identifier: a.identifier, outcome: 'failed' }]);
+    });
+
+    it('reports a ticket sent back for changes as neither landed nor failed', async () => {
+      const a = approved('First');
+      await approve(a);
+
+      await tickets.transition(AGENT, a.id, { to: 'in_review' });
+
+      expect(recent()).toEqual([{ identifier: a.identifier, outcome: 'withdrawn' }]);
+    });
+
+    it('ignores a transition that never went through the queue', async () => {
+      const a = approved('First');
+      await tickets.transition(HUMAN, a.id, { to: 'in_progress' });
+
+      expect(recent()).toEqual([]);
+    });
+
+    it('reports the most recent first and no more than the limit', async () => {
+      const landed: string[] = [];
+      for (const title of ['First', 'Second', 'Third']) {
+        const t = approved(title);
+        await approve(t);
+        await tickets.mergeDone(AGENT, t.id, { mergeCommit: title.toLowerCase() });
+        landed.push(tickets.get(t.id).identifier);
+      }
+
+      expect(recent().map((r) => r.identifier)).toEqual([...landed].reverse());
+      expect(tickets.mergeQueue.recentOf(h.projectId, 2).map((r) => r.identifier)).toEqual([...landed].reverse().slice(0, 2));
+    });
+
+    it('reports an empty list for a project whose queue has never held anything', () => {
+      expect(tickets.mergeQueue.recentOf(h.projectId)).toEqual([]);
+      expect(tickets.mergeQueue.forProject(h.projectId)).toMatchObject({ active: [], waiting: [], recent: [] });
+    });
+  });
+
   describe('workers', () => {
     it('spawns no worker for a ticket that is waiting', async () => {
       const a = approved('First');

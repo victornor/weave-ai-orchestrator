@@ -195,7 +195,17 @@ describe('routes', () => {
     const { fetch } = app();
     const res = await fetch('/api/w/ws1/projects/proj1/merge-queue', { headers: authed() });
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({ projectId: 'proj1', concurrency: 1, active: [], waiting: [] });
+    await expect(res.json()).resolves.toMatchObject({ projectId: 'proj1', concurrency: 1, active: [], waiting: [], recent: [] });
+  });
+
+  it("serves what recently left a project's queue alongside it", async () => {
+    const { h, fetch } = app();
+    h.mergeOutcomes.push({ ticketId: 'tk_9', identifier: 'ACME-9', title: 'Landed earlier', outcome: 'landed', at: '2026-09-01T09:00:00.000Z', mergeCommit: 'abc1234' });
+
+    const res = await fetch('/api/w/ws1/projects/proj1/merge-queue', { headers: authed() });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.recent).toEqual([expect.objectContaining({ identifier: 'ACME-9', outcome: 'landed', mergeCommit: 'abc1234' })]);
   });
 
   it("carries a waiting ticket's own merge queue position on its detail payload", async () => {

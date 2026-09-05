@@ -10,8 +10,8 @@ import { EmptyState, ErrorState } from '../components/States';
 import { Table } from '../components/Table';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
-import { MergeQueuePanel } from '../components/MergeQueue';
-import { useDecisions, useMergeQueue, useProjects, useRoles, useTickets, useWorkers, useWorkspaceSummary } from '../api/hooks';
+import { MergeQueueStrip } from '../components/MergeQueue';
+import { useDecisions, useProjects, useRoles, useTickets, useWorkers, useWorkspaceSummary } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import type { FinishedMode } from '../lib/board';
@@ -22,6 +22,7 @@ import {
   foldBoard,
   isFolded,
   liveWorkersByTicket,
+  mergeStrip,
   recentlyFinished,
   ticketBoardStatus,
 } from '../lib/board';
@@ -57,8 +58,6 @@ export function BoardRoute(): React.ReactElement {
   // Worker liveness is what the columns are really about; the worker events the stream already
   // tracks invalidate this query, so a spawn or a retirement re-folds the board on its own.
   const workers = useWorkers({});
-  // The merge queue is per project, so it is shown once the board is filtered to one (PLAN §11.4).
-  const mergeQueue = useMergeQueue(project);
   // A ticket whose open approval the daemon will grant is not waiting on the human (PLAN §15).
   const openDecisions = useDecisions({ status: 'open', owner: 'human' });
   const summary = useWorkspaceSummary();
@@ -87,6 +86,8 @@ export function BoardRoute(): React.ReactElement {
     () => foldBoard(filtered, live).filter((c) => finished !== 'hide' || c.key !== 'done'),
     [filtered, live, finished],
   );
+  // The board's one line about landing, over every ticket it loaded (PLAN §11.4).
+  const strip = useMemo(() => mergeStrip(tickets.data ?? []), [tickets.data]);
   const hasFinished = useMemo(() => filtered.some((t) => t.status === 'done' || t.status === 'cancelled'), [filtered]);
 
   const chooseFinished = (mode: FinishedMode): void => {
@@ -156,16 +157,16 @@ export function BoardRoute(): React.ReactElement {
           ))}
         </div>
         <div className="hidden md:block">{filters}</div>
+        {/* The queue is a page of its own (PLAN §11.4); the board only says how much is landing. */}
+        <MergeQueueStrip
+          className="mt-2 border-t border-line-1 pt-2"
+          landing={strip.landing}
+          waiting={strip.waiting}
+          onOpen={() => go('/w/$ws/merge-queue', { params: { ws }, search: project ? { project } : {} })}
+        />
       </div>
 
       <PageBody>
-        {mergeQueue.data ? (
-          <MergeQueuePanel
-            className="m-4 mb-0"
-            queue={mergeQueue.data}
-            onOpen={(e) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: e.identifier } })}
-          />
-        ) : null}
         {tickets.isLoading ? (
           <SkeletonRows rows={7} />
         ) : tickets.isError ? (

@@ -53,12 +53,16 @@ export interface TicketsService {
 // ---------- merge queue ----------
 /** One ticket's place in a project's merge queue. `position` is null for a ticket already merging. */
 export interface MergeQueueEntry { ticketId: string; identifier: string; title: string; projectId: string | null; position: number | null; queuedAt: string | null; startedAt: string | null; workerId: string | null }
-export interface MergeQueueView { projectId: string; concurrency: number; active: MergeQueueEntry[]; waiting: MergeQueueEntry[] }
+/** A ticket that recently left a project's queue: `landed` merged, `failed` could not, `withdrawn` left without either. */
+export interface MergeQueueOutcome { ticketId: string; identifier: string; title: string; outcome: 'landed' | 'failed' | 'withdrawn'; at: string; mergeCommit: string | null }
+export interface MergeQueueView { projectId: string; concurrency: number; active: MergeQueueEntry[]; waiting: MergeQueueEntry[]; recent: MergeQueueOutcome[] }
 export interface MergeQueueService {
   /** How many tickets of the project may be in the active merge step at once (policy, default 1). */
   limitFor(projectId: string | null): number;
   /** The ticket's 1-based place among its project's waiting tickets, or null when it is not waiting. */
   positionOf(ticketId: string): number | null;
+  /** The tickets that recently left the project's queue, most recent first, read back from activity. */
+  recentOf(projectId: string, limit?: number): MergeQueueOutcome[];
   forProject(projectId: string): MergeQueueView;
   /** Async: join the queue and pump it. The join time is stamped once and never moved. */
   join(ticketId: string): Promise<void>;

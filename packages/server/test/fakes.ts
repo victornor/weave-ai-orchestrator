@@ -112,6 +112,8 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   const bus = new EventBus(db, workspaceId);
 
   const tickets = new Map<string, Ticket>([['tk_1', ticket()]]);
+  /** What the merge queue reports as having recently left it; a test pushes what it wants to see. */
+  const mergeOutcomes: Array<Record<string, unknown>> = [];
   const comments: TicketComment[] = [];
   /** `<ticketId>\0<key>` → the revisions written so far, oldest first. */
   const documents = new Map<string, string[]>();
@@ -135,10 +137,12 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       mergeQueue: {
         positionOf: (id: string) => (getTicket(id).status === 'merging' && !getTicket(id).mergeStartedAt ? 1 : null),
         limitFor: () => 1,
+        recentOf: () => mergeOutcomes,
         forProject: (projectId: string) => ({
           projectId, concurrency: 1,
           active: [...tickets.values()].filter((t) => t.status === 'merging' && t.mergeStartedAt).map((t) => queueEntry(t, null)),
           waiting: [...tickets.values()].filter((t) => t.status === 'merging' && !t.mergeStartedAt).map((t, i) => queueEntry(t, i + 1)),
+          recent: mergeOutcomes,
         }),
       },
       comments: () => comments,
@@ -261,7 +265,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     updates, upgrades,
   };
 
-  return { runtime, deps, db, bus, calls, tickets, comments, documents, tokens, impls, close: async () => { await runtime.services.jobs.stop(); db.close(); } };
+  return { runtime, deps, db, bus, calls, tickets, mergeOutcomes, comments, documents, tokens, impls, close: async () => { await runtime.services.jobs.stop(); db.close(); } };
 }
 
 export const authed = (extra: Record<string, string> = {}): Record<string, string> => ({ authorization: 'Bearer sess-token', ...extra });

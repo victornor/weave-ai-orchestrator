@@ -26,7 +26,6 @@ vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: [] }),
   useRoles: () => ({ data: [] }),
   useWorkers: () => ({ data: [] }),
-  useMergeQueue: () => ({ data: null }),
   useDecisions: () => ({ data: state.decisions }),
   useWorkspaceSummary: () => ({ data: { config: state.config } }),
 }));
@@ -120,5 +119,31 @@ describe('BoardRoute finished tickets', () => {
 
     fireEvent.click(screen.getByRole('radio', { name: 'Hidden' }));
     expect(screen.queryByRole('columnheader', { name: 'Outcome' })).toBeNull();
+  });
+});
+
+describe('BoardRoute merge queue', () => {
+  it('points at the merge queue instead of rendering it among the columns', () => {
+    state.active = [
+      ticket({ id: 'tk_5', identifier: 'VS-5', title: 'Landing', status: 'merging', mergeQueuedAt: daysAgo(0), mergeStartedAt: daysAgo(0) }),
+      ticket({ id: 'tk_6', identifier: 'VS-6', title: 'Behind it', status: 'merging', mergeQueuedAt: daysAgo(0) }),
+    ];
+    render(<BoardRoute />);
+
+    expect(screen.getByText('1 landing \u00b7 1 waiting')).toBeTruthy();
+    // The line belongs to the filter bar, not to the scrolling body the columns live in.
+    expect(screen.getByText('Merge queue').closest('section')).toBeNull();
+  });
+
+  it('keeps the line when nothing is landing, so the board does not change shape', () => {
+    render(<BoardRoute />);
+    expect(screen.getByText('nothing landing')).toBeTruthy();
+  });
+
+  it('opens the merge queue view, carrying the project the board is filtered to', () => {
+    state.search = { project: 'p1' };
+    render(<BoardRoute />);
+    fireEvent.click(screen.getByText('Merge queue'));
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/merge-queue', { params: { ws: 'ws1' }, search: { project: 'p1' } });
   });
 });

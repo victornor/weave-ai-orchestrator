@@ -170,12 +170,24 @@ export interface KnowledgeGraph {
   nodes: Array<{ id: string; kind: 'hub' | 'doc'; scope: S.KnowledgeScope; projectId: string | null; projectSlug: string | null; slug: string | null; title: string; tokens: number; updatedAt: string }>;
   edges: Array<{ from: string; to: string }>;
 }
+/** An active change touching a capability, as the capability lists show it. */
+export interface PendingChange { changeName: string; ticketId: string | null; ticketIdentifier: string | null; deltaKind: string }
+/** One indexed OpenSpec change, parsed for its clients: the raw folder lives in `artifacts_json`. */
+export interface SpecChangeSummary {
+  id: string; changeName: string; state: 'active' | 'archived'; ticketId: string | null; ticketIdentifier: string | null;
+  archivedAs: string | null; archivedAt: string | null; createdAt: string | null; updatedAt: string;
+  capabilities: Array<{ capability: string; deltaKind: string }>; taskProgress: { done: number; total: number };
+}
+export interface SpecChangeDetail extends SpecChangeSummary {
+  proposal: string | null; design: string | null; tasks: Array<{ text: string; done: boolean }>;
+  deltas: Array<{ capability: string; kind: 'added' | 'modified' | 'removed' | 'renamed'; body: string }>;
+}
 export interface SpecsService {
   index(projectId: string): Promise<{ capabilities: number; changes: number }>;
-  listCapabilities(projectId: string): Array<{ id: string; capability: string; title: string | null; requirementCount: number; lastArchivedChange: string | null; pendingChanges: number; updatedAt: string }>;
-  getCapability(projectId: string, capability: string): { id: string; capability: string; title: string | null; body: string; requirements: Array<{ name: string; text: string; scenarios: unknown[] }>; pending: Array<{ changeName: string; ticketId: string | null; deltaKind: string }>; history: Array<{ changeName: string; ticketId: string | null; archivedAs: string | null; archivedAt: string | null }> };
-  listChanges(projectId: string, state?: 'active' | 'archived'): Array<Record<string, unknown>>;
-  getChange(projectId: string, changeName: string): Record<string, unknown>;
+  listCapabilities(projectId: string): Array<{ id: string; capability: string; title: string | null; requirementCount: number; lastArchivedChange: string | null; pendingChanges: PendingChange[]; updatedAt: string }>;
+  getCapability(projectId: string, capability: string): { id: string; capability: string; title: string | null; body: string; requirements: Array<{ name: string; text: string; scenarios: unknown[] }>; pending: PendingChange[]; history: Array<{ changeName: string; ticketId: string | null; archivedAs: string | null; archivedAt: string | null }> };
+  listChanges(projectId: string, state?: 'active' | 'archived'): SpecChangeSummary[];
+  getChange(projectId: string, changeName: string): SpecChangeDetail;
   graph(projectId: string): { nodes: Array<{ id: string; kind: 'capability' | 'change' | 'ticket'; label: string; status?: string }>; edges: Array<{ from: string; to: string; kind: 'touches' | 'belongs_to' }> };
   search(query: string, projectId?: string | null): Array<{ kind: string; projectId: string; ref: string; title: string; snippet: string }>;
 }

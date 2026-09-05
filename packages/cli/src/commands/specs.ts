@@ -12,6 +12,12 @@ async function defaultProject(client: { wget: (p: string) => Promise<unknown> },
   throw new ApiError('validation', 'pass --project: this workspace has more than one', 400, { projects: projects.map((p) => String(p['id'])) });
 }
 
+/** `{ done, total }` from a change payload, printed as `done/total`. */
+function taskProgress(v: unknown): string {
+  const p = v as { done?: number; total?: number } | null | undefined;
+  return p && typeof p.total === 'number' ? `${p.done ?? 0}/${p.total}` : '';
+}
+
 export function register(program: Command): void {
   const specs = program.command('specs').description('capabilities, requirements and changes');
 
@@ -29,7 +35,7 @@ export function register(program: Command): void {
           { header: 'CAPABILITY', get: (r) => String(r['capability'] ?? '') },
           { header: 'TITLE', get: (r) => oneLine(String(r['title'] ?? ''), 50) },
           { header: 'REQS', get: (r) => String(r['requirementCount'] ?? 0), align: 'right' },
-          { header: 'PENDING', get: (r) => String(r['pendingChanges'] ?? 0), align: 'right' },
+          { header: 'PENDING', get: (r) => String(items<Record<string, unknown>>(r['pendingChanges']).length), align: 'right' },
           { header: 'UPDATED', get: (r) => String(r['updatedAt'] ?? '') },
         ], { empty: 'no capabilities indexed' });
       });
@@ -88,10 +94,10 @@ export function register(program: Command): void {
         const change = await client.wget<Record<string, unknown>>(`/specs/${encodeURIComponent(project)}/changes/${encodeURIComponent(name)}`);
         emit(change, () => {
           fields([
-            ['change', String(change['name'] ?? name)],
+            ['change', String(change['changeName'] ?? name)],
             ['state', String(change['state'] ?? '')],
-            ['ticket', String(change['ticketId'] ?? '')],
-            ['tasks', change['tasks'] ? `${String((change['tasks'] as Record<string, unknown>)['complete'] ?? 0)}/${String((change['tasks'] as Record<string, unknown>)['total'] ?? 0)}` : ''],
+            ['ticket', String(change['ticketIdentifier'] ?? change['ticketId'] ?? '')],
+            ['tasks', taskProgress(change['taskProgress'])],
           ]);
           if (change['proposal']) { write(''); write(String(change['proposal'])); }
         });
@@ -101,10 +107,10 @@ export function register(program: Command): void {
       const rows = items<Record<string, unknown>>(payload, 'changes');
       emit(payload, () => {
         table(rows, [
-          { header: 'CHANGE', get: (r) => String(r['name'] ?? '') },
+          { header: 'CHANGE', get: (r) => String(r['changeName'] ?? '') },
           { header: 'STATE', get: (r) => String(r['state'] ?? '') },
-          { header: 'TICKET', get: (r) => String(r['ticketId'] ?? '') },
-          { header: 'TASKS', get: (r) => String(r['taskProgress'] ?? '') },
+          { header: 'TICKET', get: (r) => String(r['ticketIdentifier'] ?? r['ticketId'] ?? '') },
+          { header: 'TASKS', get: (r) => taskProgress(r['taskProgress']) },
         ], { empty: 'no changes' });
       });
     }));

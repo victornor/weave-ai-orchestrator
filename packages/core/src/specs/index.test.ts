@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { writeFakeOpenspec, type FakeCase } from '../openspec/fakeBin.js';
-import { createSpecsService, deltaKindOf, ftsQuery, readArchivedChanges } from './index.js';
+import { createSpecsService, deltaKindOf, ftsQuery, parseTasks, readArchivedChanges } from './index.js';
 
 let h: TestHarness | null = null;
 const previousBin = process.env.AC_OPENSPEC_BIN;
@@ -74,7 +74,7 @@ describe('spec index', () => {
 
     const caps = svc.listCapabilities(harness.projectId);
     expect(caps).toHaveLength(1);
-    expect(caps[0]).toMatchObject({ capability: 'auth', title: 'Auth', requirementCount: 2, lastArchivedChange: 'tst-2-sso', pendingChanges: 0 });
+    expect(caps[0]).toMatchObject({ capability: 'auth', title: 'Auth', requirementCount: 2, lastArchivedChange: 'tst-2-sso', pendingChanges: [] });
 
     const cap = svc.getCapability(harness.projectId, 'auth');
     expect(cap.body).toBe(AUTH_SPEC);
@@ -88,16 +88,23 @@ describe('spec index', () => {
     const archived = svc.listChanges(harness.projectId, 'archived');
     expect(archived.map((c) => c.changeName)).toEqual(['tst-2-sso', 'tst-1-login']);
     expect(archived[0]!.capabilities).toEqual([{ capability: 'auth', deltaKind: 'modified' }, { capability: 'sso', deltaKind: 'added' }]);
+    expect(archived[0]).toMatchObject({ ticketIdentifier: null, archivedAs: '2026-09-01-tst-2-sso', taskProgress: { done: 0, total: 0 } });
+    expect(archived[0]).not.toHaveProperty('artifacts');
 
     const active = svc.listChanges(harness.projectId, 'active');
     expect(active).toHaveLength(1);
-    expect(active[0]).toMatchObject({ changeName: 'tst-3-dark-mode', state: 'active', ticketId, capabilities: [{ capability: 'theme', deltaKind: 'added' }] });
+    expect(active[0]).toMatchObject({
+      changeName: 'tst-3-dark-mode', state: 'active', ticketId, ticketIdentifier: 'TST-3',
+      capabilities: [{ capability: 'theme', deltaKind: 'added' }], taskProgress: { done: 0, total: 1 },
+    });
 
-    const change = svc.getChange(harness.projectId, 'tst-1-login') as { archivedAs: string; artifacts: { proposal: string; design: string | null; tasks: string; specs: Record<string, string> } };
+    const change = svc.getChange(harness.projectId, 'tst-1-login');
     expect(change.archivedAs).toBe('2026-08-01-tst-1-login');
-    expect(change.artifacts.proposal).toContain('People need to sign in.');
-    expect(change.artifacts.design).toBeNull();
-    expect(Object.keys(change.artifacts.specs)).toEqual(['auth']);
+    expect(change.proposal).toContain('People need to sign in.');
+    expect(change.design).toBeNull();
+    expect(change.tasks).toEqual([{ text: 'add the login form', done: true }]);
+    expect(change.taskProgress).toEqual({ done: 1, total: 1 });
+    expect(change.deltas).toEqual([{ capability: 'auth', kind: 'added', body: expect.stringContaining('Password login') }]);
     expect(() => svc.getChange(harness.projectId, 'nope')).toThrow(/not indexed/);
   });
 
@@ -186,6 +193,15 @@ describe('spec parsing helpers', () => {
     expect(deltaKindOf('## RENAMED Requirements\n')).toBe('renamed');
     expect(deltaKindOf('# Delta\n\n## REMOVED Requirements\n\n## ADDED Requirements\n')).toBe('removed');
     expect(deltaKindOf('nothing recognisable here')).toBe('modified');
+  });
+
+  it('reads the checklist of a tasks.md and ignores its prose', () => {
+    expect(parseTasks('## 1. Tokens\n\n- [x] add the tokens\n- [ ] wire the toggle\n  - [X] nested, done\n\nSome prose.\n')).toEqual([
+      { text: 'add the tokens', done: true },
+      { text: 'wire the toggle', done: false },
+      { text: 'nested, done', done: true },
+    ]);
+    expect(parseTasks(null)).toEqual([]);
   });
 
   it('splits archived directory names into a date and a change name', () => {

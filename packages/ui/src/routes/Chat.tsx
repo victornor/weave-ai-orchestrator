@@ -196,7 +196,10 @@ export function ChatRoute(): React.ReactElement {
   // loaded history and holds the viewport on what they were reading while it lands. The pinned area
   // counts as content too: it takes height off the list, so the newest message must be re-reached.
   const stick = useStickToBottom([messages.data, liveEvents.length, pinned.length], {
-    ready: !messages.isLoading,
+    // Loaded history, not "not loading": the query is disabled until the thread id is known, and a
+    // disabled query is idle rather than fetching, so `isLoading` is already false on the first
+    // render — before there is a thread, let alone a message to open on.
+    ready: messages.data !== undefined,
     older: { hasOlder: messages.hasOlder, isLoadingOlder: messages.isLoadingOlder, loadOlder: messages.loadOlder },
   });
 
@@ -206,29 +209,39 @@ export function ChatRoute(): React.ReactElement {
    * owning the measuring.
    */
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
-  const attachScroll = useCallback((el: HTMLDivElement | null) => { setScrollEl(el); stick.scrollRef(el); }, [stick]);
+  // Depends on the hook's own ref rather than on `stick`, which is a fresh object every render: a
+  // ref callback whose identity changes is detached and re-attached on every commit.
+  const attach = stick.scrollRef;
+  const attachScroll = useCallback((el: HTMLDivElement | null) => { setScrollEl(el); attach(el); }, [attach]);
 
   // Recorded as the human scrolls, not on the way out: by the time an unmount cleanup runs React has
   // already detached the ref, and a detached element reports no scroll position to record.
-  // `isAtBottom` is measured off the element rather than read off the follow, which only pauses on
-  // an upward scroll and so can still say "at the bottom" for a list that is not.
+  //
+  // Only a position the human chose is one: the follow's own scrolling moves the list too, and every
+  // frame of it is short of the bottom, so recording on the measurement alone stores the middle of an
+  // animation as a reading position and puts the next visit there. The follow says whose scroll this
+  // is; the measurement says whether it ended anywhere worth keeping. Both, or nothing is kept.
   useEffect(() => {
     if (!scrollEl) return;
-    const record = (): void => writeChatScroll(ws, scrollEl.scrollTop, isAtBottom(scrollEl));
+    const record = (): void => writeChatScroll(ws, scrollEl.scrollTop, stick.following.current || isAtBottom(scrollEl));
     scrollEl.addEventListener('scroll', record, { passive: true });
     return () => scrollEl.removeEventListener('scroll', record);
-  }, [scrollEl, ws]);
+  }, [scrollEl, ws, stick.following]);
 
   // Coming back to a workspace's chat: put the list back where it was left, but only when that was
   // away from the newest message. At the bottom there is nothing to restore — the hook opens there
   // anyway, and setting the offset ourselves would fight the scroll it is in the middle of.
-  const restored = useRef(false);
+  //
+  // Waits for the history for the same reason the hook does, and remembers which workspace it put
+  // back rather than merely that it ran: restoring onto the empty list the first render shows would
+  // spend the one restore on nothing, and the next workspace would get none at all.
+  const restored = useRef<string | null>(null);
   useEffect(() => {
-    if (restored.current || messages.isLoading || !scrollEl) return;
-    restored.current = true;
+    if (restored.current === ws || messages.data === undefined || !scrollEl) return;
+    restored.current = ws;
     const saved = readChatScroll(ws);
     if (saved !== null) scrollEl.scrollTop = saved;
-  }, [messages.isLoading, scrollEl, ws]);
+  }, [messages.data, scrollEl, ws]);
 
   const answerDecision = (id: string, a: { key?: string; text?: string }): void =>
     answer.mutate(
@@ -291,7 +304,10 @@ export function ChatRoute(): React.ReactElement {
               </div>
             ) : null}
 
-            {messages.isLoading ? (
+            {/* No history yet — including the renders before the thread id is known, where the query
+                is disabled and so reports neither loading nor data. Claiming an empty thread there
+                would put the opening pitch on screen for a moment on every visit. */}
+            {messages.data === undefined && !messages.isError ? (
               <>
                 <Skeleton className="ml-auto h-12 w-2/3 rounded-r10" />
                 <Skeleton className="h-16 w-4/5 rounded-r6" />

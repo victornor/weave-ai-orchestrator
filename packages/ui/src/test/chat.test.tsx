@@ -9,6 +9,8 @@ const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>()
 const state = vi.hoisted(() => ({
   conductor: { agent: { id: 'ag_conductor' }, lastRun: null as { id: string; status: string } | null },
   messages: [] as ThreadMessage[],
+  /** False while the history query is disabled or still fetching: `data` is undefined, not empty. */
+  messagesLoaded: true,
   hasOlder: false,
   isLoadingOlder: false,
   loadOlder: vi.fn() as unknown as ReturnType<typeof vi.fn>,
@@ -50,7 +52,7 @@ vi.mock('../api/hooks', () => ({
   useThreads: () => ({ data: [{ id: 'th_1' }], isSuccess: true }),
   useCreateThread: () => ({ mutate: vi.fn(), isPending: false, data: null }),
   useThreadMessages: () => ({
-    data: state.messages, isLoading: false, isError: false, refetch: vi.fn(),
+    data: state.messagesLoaded ? state.messages : undefined, isLoading: false, isError: false, refetch: vi.fn(),
     hasOlder: state.hasOlder, isLoadingOlder: state.isLoadingOlder, loadOlder: state.loadOlder,
   }),
   usePostThreadMessage: () => ({ mutate: (v: Record<string, unknown>) => state.posted.push(v) }),
@@ -115,6 +117,7 @@ beforeEach(() => {
   FakeEventSource.open = [];
   state.conductor = { agent: { id: 'ag_conductor' }, lastRun: null };
   state.messages = [];
+  state.messagesLoaded = true;
   state.hasOlder = false;
   state.isLoadingOlder = false;
   state.loadOlder = vi.fn();
@@ -999,6 +1002,50 @@ describe('ChatRoute history paging', () => {
   });
 });
 
+/**
+ * VS-63: the history query is disabled until the thread id is known, and a disabled query is idle
+ * rather than fetching — so it reports `isLoading: false` with no data on the renders before there
+ * is a thread. Those renders must not be taken for a loaded, empty chat.
+ */
+describe('ChatRoute opening position', () => {
+  const calls = (): unknown[][] => (window.HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mock.calls;
+  const lastScroll = (): unknown => calls()[calls().length - 1]?.[0];
+
+  it('waits for the history and jumps to the newest message when it lands', () => {
+    state.messagesLoaded = false;
+    const { rerender } = render(<ChatRoute />);
+    // Nothing has been positioned yet: the opening jump belongs to the first real content.
+    expect(calls()).toHaveLength(0);
+
+    state.messagesLoaded = true;
+    state.messages = [message({ id: 'm1', body: 'Oldest loaded.' }), message({ id: 'm2', body: 'Newest.' })];
+    rerender(<ChatRoute />);
+
+    expect(lastScroll()).toEqual({ behavior: 'auto', block: 'end' });
+    expect(screen.queryByRole('button', { name: /^Scroll to bottom/ })).not.toBeInTheDocument();
+  });
+
+  it('still animates the follow once the history has opened', () => {
+    state.messagesLoaded = false;
+    const { rerender } = render(<ChatRoute />);
+
+    state.messagesLoaded = true;
+    state.messages = [message({ id: 'm1', body: 'Newest.' })];
+    rerender(<ChatRoute />);
+
+    state.messages = [...state.messages, message({ id: 'm2', body: 'And one more.' })];
+    rerender(<ChatRoute />);
+
+    expect(lastScroll()).toEqual({ behavior: 'smooth', block: 'end' });
+  });
+
+  it('shows the history loading rather than an empty thread before it arrives', () => {
+    state.messagesLoaded = false;
+    render(<ChatRoute />);
+    expect(screen.queryByText('Tell me what you need.')).not.toBeInTheDocument();
+  });
+});
+
 describe('ChatRoute drafts', () => {
   const box = (): HTMLTextAreaElement => screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
   const type = (body: string): void => { fireEvent.change(box(), { target: { value: body } }); };
@@ -1159,5 +1206,29 @@ describe('ChatRoute reading position', () => {
 
     expect(readChatScroll('ws1')).toBe(380);
     expect(readChatScroll('other')).toBeNull();
+  });
+
+  it('keeps nothing from the follow’s own scrolling', () => {
+    const { container, unmount } = render(<ChatRoute />);
+    const el = list(container);
+    // A frame of the opening jump or of a follow in flight: the list moved itself, downwards, and
+    // stopped short of the bottom. That is not somewhere the human chose to be.
+    el.scrollTop = 900;
+    fireEvent.scroll(el);
+    unmount();
+
+    expect(readChatScroll('ws1')).toBeNull();
+  });
+
+  it('restores once the history is there, not onto the empty list before it', () => {
+    writeChatScroll('ws1', 420, false);
+    state.messagesLoaded = false;
+
+    const { container, rerender } = render(<ChatRoute />);
+    expect(list(container).scrollTop).toBe(0);
+
+    state.messagesLoaded = true;
+    rerender(<ChatRoute />);
+    expect(list(container).scrollTop).toBe(420);
   });
 });

@@ -40,6 +40,13 @@ export interface StickToBottom {
   bottomRef: React.RefObject<HTMLDivElement | null>;
   /** False once the human has scrolled up: the follow is paused and the button belongs on screen. */
   atBottom: boolean;
+  /**
+   * The same answer, live rather than a render behind. A caller with its own scroll listener is
+   * reading it inside the event this hook has just classified — a rendered value would still be
+   * describing the event before it — and the follow's own scrolling is exactly what such a caller
+   * has to tell apart from the human's.
+   */
+  following: React.RefObject<boolean>;
   /** Content arrived while they were scrolled up. */
   unread: boolean;
   /** Scroll to the bottom and resume following. */
@@ -53,6 +60,10 @@ const same = (a: readonly unknown[], b: readonly unknown[]): boolean =>
  * `signal` is whatever changes when content arrives — query data, event counts. It is compared by
  * value on every render rather than used as an effect dependency, so a caller can mix the two
  * without flattening them into one stable list.
+ *
+ * `ready` says the content this list opens on has loaded. A list is not positioned at all before
+ * then: the opening jump belongs to the first real content, and a caller whose query is disabled
+ * until it knows what to ask for must say so, or the jump is spent on the empty list it shows first.
  *
  * `follow` is what a list that is still growing wants and a finished one does not: a transcript
  * read back after its turn ended must open on its first line, not be dragged to its last. Turning
@@ -143,13 +154,17 @@ export function useStickToBottom(
     // Marked seen first: a list that starts following later must not read everything it never
     // scrolled to as one burst of new content.
     if (!follow) return;
+    // Nothing to be positioned against until the content this list opens on has loaded. A list that
+    // scrolls before then spends its one opening jump on an empty box, and the history it was
+    // waiting for arrives to an already-opened list — which animates in from the top instead.
+    if (!ready) return;
     if (!following.current) {
       setUnread(true);
       return;
     }
     // Opening is a jump; everything after it is the list following content the human watched arrive.
-    const opening = ready && !opened.current;
-    if (ready) opened.current = true;
+    const opening = !opened.current;
+    opened.current = true;
     scrollToBottom(opening);
   });
 
@@ -160,5 +175,5 @@ export function useStickToBottom(
     scrollToBottom();
   }, [scrollToBottom]);
 
-  return { scrollRef: setEl, bottomRef, atBottom, unread, toBottom };
+  return { scrollRef: setEl, bottomRef, atBottom, unread, toBottom, following };
 }

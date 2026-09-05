@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
 import { FakeRuntime, type TurnInput, type TurnSink, type TurnResult } from '@agent-conductor/runtime-sdk';
-import type { Run, Wakeup } from '@agent-conductor/shared';
+import type { Decision, Run, Wakeup } from '@agent-conductor/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
+import { createDecisionsService } from '../decisions/service.js';
+import { createTicketsService } from '../tickets/service.js';
 import { createWakeService } from '../wake/index.js';
 import { createRunsService } from './index.js';
 import { createDispatcher, type CoreDispatcher } from './dispatcher.js';
@@ -210,6 +212,149 @@ describe('run engine', () => {
     const run = await executeRun(h.ctx, h.deps, runId);
     expect(run.status).toBe('succeeded');
     expect(run.turnEpoch).toBe(7);
+  });
+
+  // A worker whose automatic retries are spent, or whose failure is not retryable at all, is parked
+  // and the choice is put to the human as a retry_approval decision. That decision could not be
+  // stored at all until VS-49 widened the kind CHECK, so the human never saw the card; these pin the
+  // whole path, storage included.
+  describe('parking a stuck worker for the human', () => {
+    beforeEach(() => {
+      h.services.knowledge = { appendDecision: vi.fn() } as never;
+      h.services.roles = { activate: vi.fn(async () => ({ id: 'role' })) } as never;
+      h.services.openspec = {
+        validateForProposed: vi.fn(async () => ({ ok: true as const, plan: '# Plan' })),
+        archiveAfterMerge: vi.fn(async () => ({ archivedAs: null, skipped: null })),
+      } as never;
+      h.services.tickets = createTicketsService(h.ctx, h.deps);
+      h.services.decisions = createDecisionsService(h.ctx, h.deps);
+      // A second runtime, so the card's "retry on another runtime" options have something to name.
+      h.ctx.registries.runtimes.set('other', new FakeRuntime());
+    });
+
+    /** Collect what the run logger records at error, leaving the real logger otherwise intact. */
+    function captureErrors(): Array<Record<string, unknown>> {
+      const errors: Array<Record<string, unknown>> = [];
+      const real = h.ctx.log;
+      const wrap = (l: ReturnType<typeof real>): ReturnType<typeof real> => new Proxy(l, {
+        get: (t, k) => {
+          if (k === 'error') return (o: Record<string, unknown>) => { errors.push(o); };
+          if (k === 'child') return (b: Record<string, unknown>) => wrap(t.child(b));
+          const v = Reflect.get(t, k) as unknown;
+          return typeof v === 'function' ? v.bind(t) : v;
+        },
+      });
+      h.ctx.log = ((domain: Parameters<typeof real>[0]) => wrap(real(domain))) as typeof real;
+      return errors;
+    }
+
+    /** A worker mid-ticket, woken once, whose turn fails the way `result` says. */
+    async function failOnce(result: Record<string, unknown> | ((input: TurnInput) => Record<string, unknown>)): Promise<{ ticketId: string; workerId: string }> {
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      runtime.queue.push(result as never);
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1: Add a README badge' });
+      await runOnce();
+      await tick();
+      return { ticketId, workerId };
+    }
+
+    const openFor = (ticketId: string): Decision[] => h.services.decisions!.list({ status: ['open'], ticketId });
+
+    it('raises a retry_approval card the human can answer, pauses the worker and blocks the ticket', async () => {
+      const { ticketId, workerId } = await failOnce({ error: { code: 'boom', family: 'unknown', message: 'the CLI died' } });
+
+      const open = openFor(ticketId);
+      expect(open).toHaveLength(1);
+      const card = open[0]!;
+      expect(card.kind).toBe('retry_approval');
+      expect(card.owner).toBe('human');
+      expect(card.title).toContain('TST-1');
+      expect(card.context).toContain('the CLI died');
+      expect(card.options.map((o: { key: string }) => o.key)).toEqual(['retry', 'retry_1h', 'runtime:other', 'cancel']);
+      expect(card.recommendation).toBe('retry');
+      expect(card.target).toMatchObject({ agentId: workerId, ticketId, family: 'unknown', code: 'boom' });
+
+      expect(h.db.get<{ status: string; pauseReason: string }>('SELECT status, pause_reason FROM agents WHERE id = ?', [workerId]))
+        .toMatchObject({ status: 'paused', pauseReason: 'boom: waiting for a human' });
+      expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('blocked');
+    });
+
+    // The retryable families park only once the ladder is spent, which `countRetries` measures by
+    // walking runs.retry_of_run_id. Nothing in the dispatcher writes that column (see the VS-49 PR),
+    // so the chain is staged here to reach the branch.
+    it('raises the card once the retry ladder is spent, and books one more attempt for a usage limit', async () => {
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      const earlier = ['r1', 'r2', 'r3'];
+      let previous: string | null = null;
+      for (const id of earlier) {
+        h.db.insert('runs', {
+          id, workspaceId: h.workspaceId, agentId: workerId, ticketId, wakeupIdsJson: [], runtimeId: 'fake',
+          status: 'failed', turnEpoch: 0, cwd: '/tmp', retryOfRunId: previous, createdAt: nowIso(),
+        });
+        previous = id;
+      }
+      runtime.queue.push((input: TurnInput) => {
+        h.db.update('runs', input.runId, { retryOfRunId: 'r3' });
+        return { error: { code: 'rate_limit', family: 'provider_quota', message: 'limit resets in 2 hours' } } as never;
+      });
+      h.services.wake!.enqueue(workerId, { source: 'retry', reason: 'retry after rate_limit' });
+      await runOnce();
+      await tick();
+
+      const card = openFor(ticketId)[0]!;
+      expect(card.kind).toBe('retry_approval');
+      expect(card.title).toContain('usage limit');
+      expect(card.recommendation).toBe('retry_1h');
+      expect(card.context).toContain('One more attempt is booked');
+      expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('blocked');
+
+      const booked = h.db.get<{ notBefore: string }>("SELECT not_before FROM wakeups WHERE agent_id = ? AND source = 'retry' AND not_before IS NOT NULL ORDER BY created_at DESC LIMIT 1", [workerId]);
+      expect(new Date(booked!.notBefore).getTime()).toBeGreaterThan(Date.now() + 90 * 60_000);
+    });
+
+    it('still blocks the ticket and logs at error when the card cannot be raised', async () => {
+      const errors = captureErrors();
+      h.services.decisions = {
+        ...h.services.decisions!,
+        create: () => { throw new Error('CHECK constraint failed: kind'); },
+      } as never;
+
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      runtime.queue.push({ error: { code: 'boom', family: 'unknown', message: 'the CLI died' } } as never);
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1: Add a README badge' });
+      await runOnce();
+      await tick();
+
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM decisions WHERE kind = 'retry_approval'")!.n).toBe(0);
+      expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('paused');
+      expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('blocked');
+      const raised = errors.find((e) => e.step === 'raise the decision');
+      expect(raised).toBeTruthy();
+      expect(raised).toMatchObject({ agentId: workerId, ticketId });
+      expect(String(raised!.err)).toContain('CHECK constraint failed');
+      // Blocking is the only thing left telling the human anything, so it carries the way out.
+      expect(errors.some((e) => e.step === 'block the ticket')).toBe(false);
+      expect(h.db.get<{ unblock: { owner: string; action: string } }>('SELECT unblock_json FROM tickets WHERE id = ?', [ticketId])!.unblock)
+        .toMatchObject({ owner: 'human' });
+    });
+
+    it('withdraws the card when the worker recovers on its own', async () => {
+      const { ticketId, workerId } = await failOnce({ error: { code: 'boom', family: 'unknown', message: 'the CLI died' } });
+      const card = openFor(ticketId)[0]!;
+      expect(card.kind).toBe('retry_approval');
+
+      h.db.update('agents', workerId, { status: 'active' });
+      runtime.queue.push({ structured: { state: 'working', summary: 'back on it', tickets: [] } });
+      h.services.wake!.enqueue(workerId, { source: 'retry', reason: 'retry after boom' });
+      await runOnce();
+      await tick();
+
+      expect(openFor(ticketId)).toHaveLength(0);
+      expect(h.db.get<{ status: string }>('SELECT status FROM decisions WHERE id = ?', [card.id])!.status).toBe('withdrawn');
+    });
   });
 });
 

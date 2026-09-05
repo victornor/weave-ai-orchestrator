@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-05
+goal: "Stuck-worker retry card can be created: the decisions table accepts the
+  retry_approval kind"

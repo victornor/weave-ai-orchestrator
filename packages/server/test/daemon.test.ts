@@ -46,6 +46,31 @@ describe('startDaemon', () => {
     expect(existsSync(pidFile)).toBe(false);
     daemon = null;
   }, 30_000);
+
+  it('drains the ticket service before it closes the workspace database', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'ac-cfg-'));
+    const wsDir = mkdtempSync(join(tmpdir(), 'ac-ws-'));
+    dirs = [configDir, wsDir];
+
+    await workspaceLoader.initWorkspace(wsDir, { id: 'drain', name: 'Drain', ticketPrefix: 'DRN' });
+    workspaceLoader.writeRegistry({ workspaces: [{ id: 'drain', path: wsDir }] }, configDir);
+    workspaceLoader.writeDaemonConfig({ ...workspaceLoader.readDaemonConfig(configDir), http: { listen: '127.0.0.1:0', trustProxy: false, tls: { mode: 'none', domains: [] } } }, configDir);
+
+    daemon = await startDaemon({ configDir });
+    const ws = daemon.workspaces.get('drain');
+    expect(ws).toBeDefined();
+
+    // The follow-up work a merge schedules reads the workspace db, so the drain has to come first.
+    const order: string[] = [];
+    const realStop = ws!.services.tickets.stop.bind(ws!.services.tickets);
+    ws!.services.tickets.stop = async () => { order.push('tickets.stop'); await realStop(); };
+    const realClose = ws!.ctx.db.close.bind(ws!.ctx.db);
+    ws!.ctx.db.close = () => { order.push('db.close'); realClose(); };
+
+    await daemon.stop('test');
+    daemon = null;
+    expect(order).toEqual(['tickets.stop', 'db.close']);
+  }, 30_000);
 });
 
 describe('plugin loading', () => {

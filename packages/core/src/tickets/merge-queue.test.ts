@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
 import type { Ticket } from '@agent-conductor/shared';
-import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
+import { makeHarness, fakeWake, fakeSpecs, type TestHarness } from '../testing/context.js';
 import { createTicketsService } from './service.js';
 import type { Actor, TicketsService } from '../api.js';
 
@@ -25,11 +25,11 @@ describe('merge queue', () => {
       validateForProposed: vi.fn(async () => ({ ok: true as const, plan: '# Plan' })),
       archiveAfterMerge: vi.fn(async () => ({ archivedAs: null, skipped: 'no change' })),
     } as never;
-    h.services.specs = { index: vi.fn(async () => undefined) } as never;
+    h.services.specs = fakeSpecs() as never;
     tickets = createTicketsService(h.ctx, h.deps);
     h.services.tickets = tickets;
   });
-  afterEach(() => h.cleanup());
+  afterEach(async () => { await tickets.stop(); h.cleanup(); });
 
   /** A ticket sitting in `in_review` with an answered merge approval, so `merging` is reachable. */
   function approved(title: string, opts: { worker?: boolean } = {}): Ticket {

@@ -31,6 +31,30 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   /** One delivery landing at a time per project: it mutates the clone every ticket shares (§11.4). */
   const serialize = createSerializer();
 
+  // Follow-up work a transition schedules but does not wait for. Every timer is tracked so `stop()`
+  // can cancel what has not fired and await what has, and the callback runs inside a try/catch: a
+  // synchronous throw (an unavailable service, say) would otherwise escape the timer as an uncaught
+  // exception and take the process — or a test run — down with it.
+  const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
+  const inFlight = new Set<Promise<unknown>>();
+
+  function schedule(delayMs: number, label: string, fn: () => Promise<unknown> | void): void {
+    const timer = setTimeout(() => {
+      pendingTimers.delete(timer);
+      let p: Promise<unknown>;
+      try {
+        p = Promise.resolve(fn());
+      } catch (e) {
+        log.debug({ err: String(e) }, `${label} failed`);
+        return;
+      }
+      const tracked = p.catch((e: unknown) => log.debug({ err: String(e) }, `${label} failed`)).finally(() => { inFlight.delete(tracked); });
+      inFlight.add(tracked);
+    }, delayMs);
+    timer.unref();
+    pendingTimers.add(timer);
+  }
+
   // ---------- reads ----------
 
   const row = (t: Record<string, unknown>): Ticket => ticketRow(t) as unknown as Ticket;
@@ -349,7 +373,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     }
     // A YOLO ticket's merge decision stays open until its work is ready to land; the sweep is what
     // knows how to wait for that, so it runs for a YOLO ticket as well as an `autoMerge` one.
-    if (to === 'in_review' && (next.autoMerge || yolo(next))) setTimeout(() => { service.autoMergeSweep().catch((e) => log.debug({ err: String(e) }, 'auto-merge sweep after in_review failed')); }, 50).unref();
+    if (to === 'in_review' && (next.autoMerge || yolo(next))) schedule(50, 'auto-merge sweep after in_review', () => service.autoMergeSweep());
     if (to === 'approved') wake(next.workerId, 'ticket_assigned', `plan approved for ${next.identifier}`, { ticketId: t.id });
     // Entering `merging` joins the project's merge queue instead of starting the merge (PLAN §11.4);
     // leaving it gives the slot back. Either way the queue decides who merges next, and it is the
@@ -758,7 +782,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       propagateTerminal(next, actor);
       // The slot this ticket held is free: the next ticket in the project's queue merges now (§11.4).
       await mergeQueue.pump(t.projectId);
-      if (t.projectId) { const pid = t.projectId; setTimeout(() => { deps().specs.index(pid).catch((e) => log.debug({ err: String(e) }, 'spec reindex after merge failed')); }, 100).unref(); }
+      if (t.projectId) { const pid = t.projectId; schedule(100, 'spec reindex after merge', () => deps().specs.index(pid)); }
       log.info({ ticketId: t.id, archivedAs, skipped }, 'ticket merged');
       return next;
     },
@@ -825,6 +849,14 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
 
     nextIdentifier() {
       return `${prefix()}-${allocateNumber()}`;
+    },
+
+    async stop() {
+      for (const timer of pendingTimers) clearTimeout(timer);
+      pendingTimers.clear();
+      // Every tracked promise already absorbs its own failure, but allSettled keeps `stop` a promise
+      // that resolves however the work ended — a caller draining before shutdown has nothing to catch.
+      await Promise.allSettled([...inFlight]);
     },
   };
 

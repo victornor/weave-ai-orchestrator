@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
 import { OcError, TICKET_KINDS, TICKET_STATUSES, canTransition, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
-import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
+import { makeHarness, fakeWake, fakeSpecs, type TestHarness } from '../testing/context.js';
 import { createTicketsService } from './service.js';
 import type { Actor, TicketsService } from '../api.js';
 
@@ -15,6 +15,7 @@ describe('tickets', () => {
   let wake: ReturnType<typeof fakeWake>;
   let decisions: { create: ReturnType<typeof vi.fn>; supersedeForTarget: ReturnType<typeof vi.fn> };
   let openspec: { validateForProposed: ReturnType<typeof vi.fn>; archiveAfterMerge: ReturnType<typeof vi.fn> };
+  let specs: ReturnType<typeof fakeSpecs>;
 
   beforeEach(() => {
     h = makeHarness();
@@ -24,15 +25,19 @@ describe('tickets', () => {
       validateForProposed: vi.fn(async () => ({ ok: true as const, plan: '# Plan\n\n## Proposal\nbody' })),
       archiveAfterMerge: vi.fn(async () => ({ archivedAs: '2026-09-04-tst-1-thing', skipped: null })),
     };
+    specs = fakeSpecs();
     h.services.wake = wake as never;
     h.services.decisions = decisions as never;
     h.services.openspec = openspec as never;
+    // A merge schedules a spec re-index; without this the harness proxy throws inside that timer.
+    h.services.specs = specs as never;
     // The merge queue brings a worker for the ticket it admits (PLAN §11.4).
     h.services.workers = { spawnForTicket: vi.fn(async (_a: Actor, ticketId: string) => ({ id: h.addWorker(ticketId) })) } as never;
     tickets = createTicketsService(h.ctx, h.deps);
     h.services.tickets = tickets;
   });
-  afterEach(() => h.cleanup());
+  // Drain the follow-up work a merge scheduled before the harness (and its db) goes away.
+  afterEach(async () => { await tickets.stop(); h.cleanup(); });
 
   const make = (over: Partial<Parameters<TicketsService['create']>[1]> = {}) =>
     tickets.create(HUMAN, { kind: 'change', title: 'Add dark mode', projectId: h.projectId, assigneeRoleId: h.roleId, ...over });
@@ -317,6 +322,92 @@ describe('tickets', () => {
     it('refuses when the ticket is not merging', async () => {
       const t = make();
       await expect(tickets.mergeDone(AGENT, t.id, {})).rejects.toMatchObject({ code: 'wrong_status' });
+    });
+  });
+
+  describe('post-merge follow-up work', () => {
+    /** Merge `t` and let the scheduled follow-up work fire and settle. */
+    const mergeAndDrain = async (t: { id: string }) => {
+      h.db.update('tickets', t.id, { status: 'merging' });
+      await tickets.mergeDone(AGENT, t.id, {});
+      vi.advanceTimersByTime(200);
+      await tickets.stop();
+    };
+
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('re-indexes the merged ticket\'s project', async () => {
+      const t = make();
+      await mergeAndDrain(t);
+      expect(specs.calls).toEqual([h.projectId]);
+    });
+
+    it('schedules nothing for a ticket without a project', async () => {
+      const t = make({ projectId: null, assigneeRoleId: null });
+      await mergeAndDrain(t);
+      expect(specs.calls).toEqual([]);
+    });
+
+    it('contains a re-index that throws before it returns a promise', async () => {
+      // `deps()` throws synchronously for a service the test did not stub, so the throw happens
+      // before `index()` is called — the reason this timer used to take the whole run down.
+      delete h.services.specs;
+      const t = make();
+      h.db.update('tickets', t.id, { status: 'merging' });
+      await tickets.mergeDone(AGENT, t.id, {});
+      expect(() => vi.advanceTimersByTime(200)).not.toThrow();
+      await expect(tickets.stop()).resolves.toBeUndefined();
+      expect(tickets.get(t.id).status).toBe('done');
+    });
+
+    it('contains a re-index that rejects, and still runs the next one', async () => {
+      specs.index = vi.fn()
+        .mockRejectedValueOnce(new Error('index failed'))
+        .mockResolvedValueOnce({ capabilities: 0, changes: 0 });
+      const first = make();
+      const second = make();
+      h.db.update('tickets', first.id, { status: 'merging' });
+      h.db.update('tickets', second.id, { status: 'merging' });
+      await tickets.mergeDone(AGENT, first.id, {});
+      await tickets.mergeDone(AGENT, second.id, {});
+      expect(() => vi.advanceTimersByTime(200)).not.toThrow();
+      await expect(tickets.stop()).resolves.toBeUndefined();
+      expect(specs.index).toHaveBeenCalledTimes(2);
+      expect(tickets.get(second.id).status).toBe('done');
+    });
+
+    it('cancels work that has not fired yet', async () => {
+      const t = make();
+      h.db.update('tickets', t.id, { status: 'merging' });
+      await tickets.mergeDone(AGENT, t.id, {});
+      await tickets.stop();
+      vi.advanceTimersByTime(1000);
+      expect(specs.calls).toEqual([]);
+    });
+
+    it('waits for work already in flight', async () => {
+      let release: () => void = () => {};
+      let finished = false;
+      specs.index = vi.fn(() => new Promise<{ capabilities: number; changes: number }>((resolve) => {
+        release = () => { finished = true; resolve({ capabilities: 0, changes: 0 }); };
+      })) as never;
+      const t = make();
+      h.db.update('tickets', t.id, { status: 'merging' });
+      await tickets.mergeDone(AGENT, t.id, {});
+      vi.advanceTimersByTime(200);
+      const stopped = tickets.stop();
+      expect(finished).toBe(false);
+      release();
+      await stopped;
+      expect(finished).toBe(true);
+    });
+
+    it('resolves when idle and when called twice', async () => {
+      await expect(tickets.stop()).resolves.toBeUndefined();
+      const t = make();
+      await mergeAndDrain(t);
+      await expect(tickets.stop()).resolves.toBeUndefined();
     });
   });
 

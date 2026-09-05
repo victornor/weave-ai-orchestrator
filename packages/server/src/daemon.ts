@@ -134,6 +134,8 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
       await ws.channels?.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'channel manager stop failed'));
       await ws.webhooks?.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'webhook dispatcher stop failed'));
       await ws.services.dispatcher.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'dispatcher stop failed'));
+      // Before the db closes below: the ticket service's post-merge follow-up work reads it.
+      await ws.services.tickets.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'ticket follow-up drain failed'));
       try { ws.services.supervisor.stop(); } catch (e) { log.warn({ err: e, ws: ws.id }, 'supervisor stop failed'); }
       await cancelRunningRuns(ws);
     }

@@ -24,6 +24,8 @@ import type { RuntimeAdapter } from '@agent-conductor/runtime-sdk';
 import type { AgentConductorPlugin, PluginHost, AgentToolDefinition, WorktreeProvider, ForgeAdapter } from '@agent-conductor/plugin-sdk';
 import { OcError, type DaemonConfig, type EventType, type WorkspaceEvent } from '@agent-conductor/shared';
 import { createApp, type WorkspaceAdmin } from './app.js';
+import { createUpdateChecker, runningReleaseRoot } from './release-info.js';
+import { createUpgradeService } from './upgrade.js';
 import { ChannelManager } from './channels.js';
 import { WebhookDispatcher } from './webhooks.js';
 import type { AppDeps, WorkspaceRuntime } from './types.js';
@@ -73,9 +75,14 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   // Assigned once the listeners are decided below; the loopback app copies `deps` now, so the hook
   // has to exist before that copy is taken.
   let onOperatorConfigured: (() => void) | null = null;
+  const updates = createUpdateChecker({ daemon: daemonCfg, version: VERSION });
+  const upgrades = createUpgradeService({
+    db: daemonDb, daemon: daemonCfg, configDir, workspaces, updates, version: VERSION, releaseRoot: runningReleaseRoot(),
+  });
   const deps: AppDeps = {
     auth, daemon: daemonCfg, workspaces, registries, listener: 'public',
     publicUrl, version: VERSION, uiDir: opts.uiDir ?? defaultUiDir(),
+    updates, upgrades,
     onOperatorConfigured: () => onOperatorConfigured?.(),
   };
   loopback.setDeps({ ...deps, listener: 'loopback' });
@@ -86,6 +93,10 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     try { await loadWorkspaceInto(workspaces, entry.path, { daemon: daemonCfg, registries, loopbackUrl: loopback.url, ...dirs() }, hooks); }
     catch (e) { log.error({ err: e, workspace: entry.id, path: entry.path }, 'workspace failed to load'); }
   }
+
+  // An upgrade record left behind by the process this one replaced: settle it now, before anything can
+  // request another one and be told a stale upgrade is still in flight.
+  try { upgrades.reconcile(); } catch (e) { log.error({ err: e }, 'upgrade reconciliation failed'); }
 
   const app = createApp(deps, admin);
   const pidFile = join(configDir, 'daemon.json');

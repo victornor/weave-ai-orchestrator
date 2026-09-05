@@ -26,6 +26,7 @@
     "@agent-conductor/core": "workspace:*",
     "@agent-conductor/db": "workspace:*",
     "@agent-conductor/plugin-sdk": "workspace:*",
+    "@agent-conductor/release": "workspace:*",
     "@agent-conductor/runtime-claude": "workspace:*",
     "@agent-conductor/runtime-codex": "workspace:*",
     "@agent-conductor/runtime-gemini": "workspace:*",

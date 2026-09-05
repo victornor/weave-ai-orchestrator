@@ -26,6 +26,8 @@ packages/
                   providers, forges, hooks, agent tools)
   render/         pure view-model functions shared by web and TUI (run events -> transcript,
                   decision -> card, briefing -> sections). Golden-tested.
+  release/        release directories on the daemon host: `<data>/releases/<stamp>-<sha>`, the
+                  `current`/`previous` symlinks, clone-and-build, prune. Leaf: imports nothing.
   core/           the daemon's brain: wake queue, dispatcher, run engine, supervisor, sessions,
                   tickets, decisions, roles, workers, worktrees, openspec, knowledge, specs,
                   usage, threads, briefing, prompts, auth, forge, workspace loader

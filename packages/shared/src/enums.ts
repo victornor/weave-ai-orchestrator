@@ -132,6 +132,19 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
 export const UI_STATUSES = ['idle', 'working', 'blocked', 'needs-you', 'merging', 'done', 'failed', 'paused', 'stalled'] as const;
 export type UiStatus = (typeof UI_STATUSES)[number];
 
+/** `conductor daemon update apply`: the deferred upgrade's lifecycle (PLAN §20). Forward-only. */
+export const UPGRADE_STATES = ['queued', 'waiting', 'building', 'switching', 'restarting', 'completed', 'failed', 'cancelled'] as const;
+export type UpgradeState = (typeof UPGRADE_STATES)[number];
+export const TERMINAL_UPGRADE_STATES: readonly UpgradeState[] = ['completed', 'failed', 'cancelled'];
+export const isTerminalUpgrade = (state: string | null | undefined): boolean => TERMINAL_UPGRADE_STATES.includes(state as UpgradeState);
+/** Cancellable only before anything has been built: `building` and later are past the point of no return. */
+export const CANCELLABLE_UPGRADE_STATES: readonly UpgradeState[] = ['queued', 'waiting'];
+export const isCancellableUpgrade = (state: string | null | undefined): boolean => CANCELLABLE_UPGRADE_STATES.includes(state as UpgradeState);
+
+/** Why an upgrade ended in `failed`. Never branch on the message; branch on this. */
+export const UPGRADE_FAILURE_REASONS = ['wait_timeout', 'build_failed', 'backup_failed', 'switch_failed', 'restart_unverified', 'restart_failed', 'abandoned'] as const;
+export type UpgradeFailureReason = (typeof UPGRADE_FAILURE_REASONS)[number];
+
 export const LOG_DOMAINS = ['daemon', 'wake', 'run', 'runtime', 'ticket', 'openspec', 'decision', 'channel', 'knowledge', 'usage', 'plugin', 'http', 'auth', 'worktree', 'surface', 'supervisor'] as const;
 export type LogDomain = (typeof LOG_DOMAINS)[number];
 

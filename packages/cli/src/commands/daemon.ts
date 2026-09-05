@@ -11,8 +11,9 @@ import { LAUNCHD_LABEL, SERVICE_NAME, followLog, installLaunchdAgent, installSer
 import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, switchRelease } from '../release.js';
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { AC_ENV } from '@agent-conductor/shared';
+import { AC_ENV, isTerminalUpgrade, type Upgrade } from '@agent-conductor/shared';
 import { run, session } from './util.js';
+import { runUpgradeRunner } from '../upgrade-runner.js';
 
 interface Health { ok?: boolean; version?: string; workspaces?: Array<{ id?: string; name?: string; status?: string }>; operatorConfigured?: boolean; tlsMode?: string; publicUrl?: string }
 interface DaemonYaml { upgrade?: { source?: string; ref?: string; keep?: number; drainTimeoutSec?: number } }
@@ -246,6 +247,61 @@ worker run (AC_RUN_TOKEN set): agents propose upgrades through tickets, humans r
       });
     }));
 
+  // ---- the deferred, daemon-side upgrade (PLAN §20) ----
+
+  const update = daemon
+    .command('update')
+    .description('is the release source ahead of the running daemon?')
+    .addHelpText('after', `
+\`daemon update\` asks the running daemon; \`daemon upgrade\` builds and restarts from this shell.
+Use \`update apply\` normally — it waits for every running turn to finish first. Use \`upgrade\`
+when the daemon is not answering and has to be replaced from here.`)
+    .action(async (_opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command, { workspace: 'none' });
+      const status = await client.get<UpdateStatus>('/api/daemon/update');
+      emit(status, () => renderUpdate(status));
+    }));
+
+  update
+    .command('apply')
+    .description('queue an upgrade on the daemon: it waits for every running turn, then builds and restarts')
+    .option('--ref <ref>', 'branch, tag or commit (default: the daemon\'s upgrade.ref)')
+    .option('--source <url|path>', 'git URL or local checkout (default: the daemon\'s upgrade.source)')
+    .option('--test', 'run the new release\'s test suite before switching to it')
+    .option('--no-follow', 'queue it and return instead of following it to a terminal state')
+    .action(async (opts: Record<string, string | boolean>, command: Command) => run(async () => {
+      const { client } = await session(command, { workspace: 'none' });
+      const queued = await client.post<Upgrade>('/api/daemon/upgrade', {
+        ...(typeof opts['ref'] === 'string' ? { ref: opts['ref'] } : {}),
+        ...(typeof opts['source'] === 'string' ? { source: opts['source'] } : {}),
+        ...(opts['test'] === true ? { test: true } : {}),
+      });
+      if (opts['follow'] === false) {
+        emit(queued, () => write(`${style.ok('queued')} ${queued.id} · ${queued.source} @ ${queued.ref}`));
+        return;
+      }
+      write(`${style.ok('queued')} ${queued.id} · ${queued.source} @ ${queued.ref}`);
+      const final = await followUpgrade(command, queued.id);
+      emit(final, () => renderUpgrade(final.upgrade, final.waitingFor));
+    }));
+
+  update
+    .command('cancel')
+    .description('cancel a queued or waiting upgrade and resume dispatch')
+    .action(async (_opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command, { workspace: 'none' });
+      const cancelled = await client.post<Upgrade>('/api/daemon/upgrade/cancel', {});
+      emit(cancelled, () => write(`${style.ok('cancelled')} ${cancelled.id} — dispatch resumed`));
+    }));
+
+  daemon
+    .command('upgrade-runner <upgradeId>', { hidden: true })
+    .description('internal: restart the daemon for a deferred upgrade and verify it came back')
+    .action(async (upgradeId: string) => run(async () => {
+      const verdict = await runUpgradeRunner(upgradeId);
+      emit(verdict, () => write(verdict.outcome === 'completed' ? `${style.ok('upgraded')} v${verdict.version ?? '?'}` : style.bad(verdict.message)));
+    }));
+
   daemon
     .command('releases')
     .description('list built releases and which one is current')
@@ -347,4 +403,83 @@ async function drainAndRestart(command: Command, drainTimeoutSec: number): Promi
     } catch { await new Promise((r) => setTimeout(r, 500)); }
   }
   return { how, version, interrupted };
+}
+
+// ---------- the deferred upgrade's client side ----------
+
+interface RunningRelease { version: string; path: string; sha: string | null }
+interface UpdateStatus {
+  configured: boolean; running: RunningRelease; source: string | null; ref: string | null;
+  targetSha: string | null; updateAvailable: boolean; checkedAt: string | null; error: string | null;
+}
+interface WaitingRun { workspace: string; running: number; runIds: string[] }
+interface UpgradeStatus { upgrade: Upgrade | null; waitingFor: WaitingRun[] }
+
+/** A human is watching `update apply` scroll; a second is responsive without hammering the daemon. */
+const FOLLOW_INTERVAL_MS = 1000;
+
+const short = (sha: string | null): string => (sha ? sha.slice(0, 10) : '?');
+
+function renderUpdate(status: UpdateStatus): void {
+  fields([
+    ['running', `v${status.running.version} · ${short(status.running.sha)}`],
+    ['release', status.running.path],
+    ['source', status.configured ? `${status.source} @ ${status.ref}` : style.warn('not configured — set upgrade.source in daemon.yaml')],
+    ['target', status.configured ? short(status.targetSha) : undefined],
+    ['checked', status.checkedAt ?? undefined],
+    ['error', status.error ? style.bad(status.error) : undefined],
+  ]);
+  if (!status.configured) return;
+  write('');
+  write(status.updateAvailable
+    ? `${style.ok('update available')} — \`conductor daemon update apply\``
+    : style.dim('up to date'));
+}
+
+function renderUpgrade(upgrade: Upgrade | null, waitingFor: WaitingRun[]): void {
+  if (!upgrade) { write(style.dim('no upgrade has been requested')); return; }
+  fields([
+    ['upgrade', upgrade.id],
+    ['state', upgrade.state],
+    ['source', `${upgrade.source} @ ${upgrade.ref}`],
+    ['target', short(upgrade.toSha ?? upgrade.targetSha)],
+    ['release', upgrade.toRelease ?? undefined],
+    ['version', upgrade.cameBackVersion ?? undefined],
+    ['reason', upgrade.reason ?? undefined],
+    ['message', upgrade.message ?? undefined],
+    ['waiting for', waitingFor.length ? waitingFor.map((w) => `${w.workspace}: ${w.running} run(s)`).join(', ') : undefined],
+  ]);
+  if (upgrade.log.length) {
+    write('');
+    for (const line of upgrade.log.slice(-20)) write(style.dim(line));
+  }
+}
+
+/**
+ * Follow an upgrade to a terminal state. The daemon restarts partway through, so an unreachable daemon
+ * is expected rather than an error: keep polling until it answers again or the deadline passes.
+ */
+async function followUpgrade(command: Command, upgradeId: string, timeoutMs = 30 * 60 * 1000, intervalMs = FOLLOW_INTERVAL_MS): Promise<UpgradeStatus> {
+  const deadline = Date.now() + timeoutMs;
+  let last: UpgradeStatus = { upgrade: null, waitingFor: [] };
+  let shown = '';
+  while (Date.now() < deadline) {
+    try {
+      const { client } = await session(command, { workspace: 'none' });
+      const status = await client.get<UpgradeStatus>('/api/daemon/upgrade');
+      if (status.upgrade?.id === upgradeId) {
+        last = status;
+        if (status.upgrade.state !== shown) {
+          shown = status.upgrade.state;
+          const waiting = status.waitingFor.map((w) => `${w.workspace}: ${w.running}`).join(', ');
+          write(style.dim(`${status.upgrade.state}${waiting ? ` (waiting for ${waiting})` : ''}`));
+        }
+        if (isTerminalUpgrade(status.upgrade.state)) return status;
+      }
+    } catch {
+      if (shown !== 'restarting') { shown = 'restarting'; write(style.dim('daemon unreachable — restarting')); }
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return last;
 }

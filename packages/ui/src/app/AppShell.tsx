@@ -11,10 +11,11 @@ import { CommandPalette } from '../components/CommandPalette';
 import type { Command } from '../components/CommandPalette';
 import { ConnectionBanner, UnreachableScreen } from '../components/ConnectionBanner';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
-import { useDecisions, useProjects, useTickets, useTransitionTicket, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
+import { useDaemonUpdate, useDecisions, useProjects, useTickets, useTransitionTicket, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
 import { useToast } from '../components/Toast';
 import { useHotkeys } from '../lib/hotkeys';
 import { flushQueue, useQueueCount } from '../lib/queue';
+import { showsUpdateIndicator } from '../lib/upgrade';
 import type { QueuedWrite } from '../lib/queue';
 import { api, ApiError, NetworkError, setWorkspaceId } from '../api/client';
 import { cx } from '../lib/cx';
@@ -35,10 +36,13 @@ export function AppShell(): React.ReactElement {
   const projects = useProjects();
   const tickets = useTickets({ limit: 100 });
   const workspaces = useWorkspaces();
+  const daemonUpdate = useDaemonUpdate();
   const transition = useTransitionTicket();
   const queuedCount = useQueueCount();
 
   const needsCount = decisions.data?.length ?? 0;
+  // Nothing is shown when the daemon is up to date, when checking is not configured, or when it failed.
+  const updateAvailable = showsUpdateIndicator(daemonUpdate.data);
 
   // Queued writes (offline, or taken while the conductor was mid-turn) are
   // flushed in order as soon as the stream is back.
@@ -196,6 +200,9 @@ export function AppShell(): React.ReactElement {
                 <span className={cx('size-1.5 rounded-r4', active ? 'bg-needs-you' : 'bg-line-3')} aria-hidden />
                 <span className="flex-1 text-meta">{item.label}</span>
                 {item.key === 'needs' && needsCount > 0 ? <span className="ac-mono text-nano text-needs-you">{needsCount}</span> : null}
+                {item.key === 'settings' && updateAvailable ? (
+                  <span role="status" aria-label="Daemon update available" title="Daemon update available" className="size-1.5 rounded-pill bg-needs-you" />
+                ) : null}
                 <span className="ac-mono text-nano text-text-4">{item.kbd}</span>
               </A>
             );

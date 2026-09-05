@@ -275,7 +275,10 @@ Run `conductor <group> --help` for the full set. Global flags: `-w/--workspace`,
 
 ### Daemon and access
 
-`conductor daemon upgrade` builds a release from git, backs up, drains and restarts; `releases` and `rollback` go with it (see docs/OPERATIONS.md §6).
+`conductor daemon update apply` asks the running daemon to upgrade itself: it holds dispatch, waits for
+every running turn to finish, then builds, backs up, switches `current` and restarts. The web app offers
+the same thing under Settings → Updates. `conductor daemon upgrade` is the from-this-shell path that
+still works when the daemon is not answering; `releases` and `rollback` go with it (see docs/OPERATIONS.md §6).
 
 | Command | Does |
 |---|---|
@@ -283,6 +286,9 @@ Run `conductor <group> --help` for the full set. Global flags: `-w/--workspace`,
 | `conductor daemon stop \| status \| logs [-f] [-n N]` | lifecycle and the local log |
 | `conductor daemon set-password [-u operator]` | first-run operator setup, or change the password |
 | `conductor daemon install-service [--print] [--launchd]` | write `~/.config/systemd/user/agent-conductor.service`, or with `--launchd` a macOS LaunchAgent plist (printed on any other platform) |
+| `conductor daemon update` | running version and commit, the source at its ref, and whether an update is available |
+| `conductor daemon update apply [--ref R] [--test] [--no-follow]` | queue an upgrade on the daemon; it starts only once no turn is running, and is followed to its outcome |
+| `conductor daemon update cancel` | cancel a queued or waiting upgrade and resume dispatch |
 | `conductor login <url> [--pin] [--insecure] [--device N] [--name N]` | sign in, store a context |
 | `conductor logout [--all] [--forget]` · `conductor context list\|use\|remove\|show` | sessions and contexts |
 | `conductor devices list \| revoke <id> \| revoke --all` | sessions signed in to the daemon |

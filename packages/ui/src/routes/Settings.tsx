@@ -13,6 +13,9 @@ import { useToast } from '../components/Toast';
 import {
   useAddProject,
   useAuthSessions,
+  useCancelUpgrade,
+  useDaemonUpdate,
+  useDaemonUpgrade,
   useConductor,
   useMe,
   usePatchConductor,
@@ -21,6 +24,8 @@ import {
   usePresentation,
   useProjects,
   usePutPresentation,
+  useRefreshDaemonUpdate,
+  useRequestUpgrade,
   useRuntimeModels,
   useRuntimes,
   useWorkspaceSummary,
@@ -32,6 +37,7 @@ import type { TotpSetup } from '../api/types';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import { useTheme } from '../lib/theme';
+import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, shortSha } from '../lib/upgrade';
 import { cx } from '../lib/cx';
 
 const SECTIONS = [
@@ -42,6 +48,7 @@ const SECTIONS = [
   { key: 'presentation', label: 'Presentation' },
   { key: 'security', label: 'Security & Devices' },
   { key: 'notifications', label: 'Notifications' },
+  { key: 'updates', label: 'Updates' },
 ] as const;
 
 export function SettingsRoute(): React.ReactElement {
@@ -58,6 +65,7 @@ export function SettingsRoute(): React.ReactElement {
           {section === 'presentation' ? <PresentationSection /> : null}
           {section === 'security' ? <SecuritySection /> : null}
           {section === 'notifications' ? <NotificationsSection /> : null}
+          {section === 'updates' ? <UpdatesSection /> : null}
         </div>
       </PageBody>
     </Page>
@@ -646,5 +654,157 @@ function NotificationsSection(): React.ReactElement {
         <p className="text-micro text-text-3">Push is on for this device.</p>
       )}
     </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ updates
+ * The daemon's own release: what it is running, whether the source it builds from is ahead, and the
+ * deferred upgrade — which waits for every running turn to finish before it touches anything, and
+ * restarts the daemon this app is talking to. See PLAN §20.
+ */
+
+function UpdatesSection(): React.ReactElement {
+  const update = useDaemonUpdate();
+  const status = useDaemonUpgrade();
+  const refresh = useRefreshDaemonUpdate();
+  const request = useRequestUpgrade();
+  const cancel = useCancelUpgrade();
+  const toast = useToast();
+
+  if (update.isLoading) return <SkeletonRows rows={3} />;
+  if (update.isError && !update.data) return <ErrorState message="Could not read the daemon's update state." onRetry={() => void update.refetch()} />;
+
+  const data = update.data;
+  const upgrade = status.data?.upgrade ?? null;
+  const pending = inFlight(upgrade);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <section>
+        <div className="ac-label mb-2">This daemon</div>
+        <div className="ac-card divide-y divide-line-1">
+          <Row label="Version" value={`v${data?.running.version ?? '?'}`} />
+          <Row label="Commit" value={shortSha(data?.running.sha)} mono />
+          <Row label="Release" value={data?.running.path ?? '—'} mono />
+        </div>
+      </section>
+
+      <section>
+        <div className="ac-label mb-2">Release source</div>
+        {!data?.configured ? (
+          <EmptyState
+            title="Update checking is not configured"
+            detail="Set upgrade.source (a git URL or a local checkout) in the daemon's daemon.yaml, and optionally upgrade.ref."
+          />
+        ) : (
+          <>
+            <div className="ac-card divide-y divide-line-1">
+              <Row label="Source" value={`${data.source} @ ${data.ref}`} mono />
+              <Row label="Target" value={shortSha(data.targetSha)} mono />
+              <Row label="Checked" value={data.checkedAt ?? '—'} />
+              {data.error ? <Row label="Error" value={data.error} tone="failed" /> : null}
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              {data.updateAvailable && !data.error ? (
+                <Badge tone="accent">Update available</Badge>
+              ) : data.error ? null : (
+                <span className="text-meta text-text-3">Up to date</span>
+              )}
+              <div className="flex-1" />
+              <Button onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+                {refresh.isPending ? 'Checking…' : 'Check again'}
+              </Button>
+              {data.updateAvailable && !data.error && !pending ? (
+                <Button
+                  variant="primary"
+                  disabled={request.isPending}
+                  onClick={() =>
+                    request.mutate(undefined, {
+                      onSuccess: () => toast.push({ title: 'Upgrade queued', detail: 'It starts once no turn is running.', status: 'merging', ttl: 6000 }),
+                      onError: (e) => toast.push({ title: 'Could not queue the upgrade', detail: e.message, status: 'failed', ttl: 8000 }),
+                    })
+                  }
+                >
+                  {request.isPending ? 'Queueing…' : 'Upgrade'}
+                </Button>
+              ) : null}
+            </div>
+          </>
+        )}
+      </section>
+
+      {upgrade ? <UpgradeProgress upgrade={upgrade} waitingFor={status.data?.waitingFor ?? []} unreachable={status.isError} onCancel={() => cancel.mutate()} cancelling={cancel.isPending} runningVersion={data?.running.version ?? null} /> : null}
+    </div>
+  );
+}
+
+function Row({ label, value, mono, tone }: { label: string; value: string; mono?: boolean; tone?: 'failed' }): React.ReactElement {
+  return (
+    <div className="flex items-baseline gap-3 px-3.5 py-2.5">
+      <span className="ac-label w-28 flex-none">{label}</span>
+      <span className={cx('min-w-0 flex-1 break-all text-meta', mono ? 'ac-mono' : '', tone === 'failed' ? 'text-failed' : 'text-text-2')}>{value}</span>
+    </div>
+  );
+}
+
+function UpgradeProgress({
+  upgrade, waitingFor, unreachable, onCancel, cancelling, runningVersion,
+}: {
+  upgrade: NonNullable<ReturnType<typeof useDaemonUpgrade>['data']>['upgrade'];
+  waitingFor: Array<{ workspace: string; running: number; runIds: string[] }>;
+  unreachable: boolean;
+  onCancel: () => void;
+  cancelling: boolean;
+  runningVersion: string | null;
+}): React.ReactElement | null {
+  if (!upgrade) return null;
+  const pending = inFlight(upgrade);
+  // While the daemon restarts the poll fails; that is the restart, not an error.
+  const restarting = isRestarting(upgrade.state) || (pending && unreachable);
+
+  return (
+    <section>
+      <div className="ac-label mb-2">Upgrade</div>
+      <div className="ac-card divide-y divide-line-1">
+        <div className="flex items-center gap-3 px-3.5 py-2.5">
+          <span className="flex-1 text-body text-text-1">
+            {restarting ? 'Restarting the daemon…' : UPGRADE_STAGE_LABEL[upgrade.state]}
+          </span>
+          {pending ? <Badge tone="accent">{upgrade.state}</Badge> : null}
+          {upgrade.state === 'completed' ? <Badge tone="added">completed</Badge> : null}
+          {upgrade.state === 'failed' ? <Badge tone="removed">failed</Badge> : null}
+        </div>
+
+        {restarting ? (
+          <div className="px-3.5 py-2.5 text-meta text-text-3">
+            Waiting for the daemon to answer again. This page reconnects on its own.
+          </div>
+        ) : null}
+
+        {upgrade.state === 'waiting' && waitingFor.length ? (
+          <div className="px-3.5 py-2.5 text-meta text-text-2">
+            Waiting for{' '}
+            {waitingFor.map((w) => `${w.running} run${w.running === 1 ? '' : 's'} in ${w.workspace}`).join(', ')}. No new run starts until the upgrade finishes or is cancelled.
+          </div>
+        ) : null}
+
+        <Row label="Target" value={`${upgrade.source} @ ${upgrade.ref} · ${shortSha(upgrade.toSha ?? upgrade.targetSha)}`} mono />
+        {upgrade.state === 'completed' ? <Row label="Now running" value={`v${upgrade.cameBackVersion ?? runningVersion ?? '?'}`} /> : null}
+        {upgrade.state === 'failed' ? <Row label="Reason" value={upgrade.reason ?? 'unknown'} tone="failed" /> : null}
+        {upgrade.state === 'failed' ? <Row label="Still running" value={`v${runningVersion ?? '?'}`} /> : null}
+        {upgrade.message ? <Row label="Detail" value={upgrade.message} tone={upgrade.state === 'failed' ? 'failed' : undefined} /> : null}
+
+        {upgrade.log.length ? (
+          <pre className="ac-mono max-h-56 overflow-auto px-3.5 py-2.5 text-micro text-text-3">{upgrade.log.join('\n')}</pre>
+        ) : null}
+      </div>
+
+      {isCancellableUpgrade(upgrade.state) ? (
+        <div className="mt-3 flex justify-end">
+          <Button onClick={onCancel} disabled={cancelling}>{cancelling ? 'Cancelling…' : 'Cancel upgrade'}</Button>
+        </div>
+      ) : null}
+    </section>
   );
 }

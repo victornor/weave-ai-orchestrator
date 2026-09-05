@@ -106,6 +106,17 @@ Login errors are typed: `AUTH_BAD_CREDENTIALS` (attempts left), `AUTH_LOCKED` (c
 
 Notifications: opt-in browser permission prompt phrased in outcomes; Settings toggles Decisions (on), Landed work (on), Everything else (off).
 
+Updates (Settings → Updates, PLAN §20): the running version, commit and release directory; the source at
+its ref and the target commit; **Check again**, and **Upgrade** only when an update is actually available.
+A `size-1.5` `bg-needs-you` dot sits on the rail's Settings entry when one is — and nothing at all when the
+daemon is up to date, when `upgrade.source` is not configured (an EmptyState naming what to set), or when
+the check itself failed (the reason, no action). A requested upgrade reads as pending, never as done: the
+stage line, what it is waiting for while running turns finish, the build's log tail in a scrolling `pre`,
+and **Cancel upgrade** only while the state is `queued` or `waiting`. During `restarting` — including
+while the daemon is unreachable, which is the restart rather than an error — it says so and reconnects on
+its own; the terminal states show the version the daemon came back on, or the failure reason with the
+version that is still running.
+
 ## 7. Designer's calls adopted into the plan
 
 1. Notifications: in-app arrival (toast + Needs-you badge) is the primary path; push is opt-in and nothing in any flow depends on it.

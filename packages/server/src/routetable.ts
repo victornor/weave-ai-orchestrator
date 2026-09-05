@@ -36,6 +36,10 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: '/api/runtimes', tag: 'daemon', summary: 'Registered runtimes with detection and capabilities', auth: 'session' },
   { method: 'GET', path: '/api/runtimes/{id}/models', tag: 'daemon', summary: 'Models a runtime reports', auth: 'session' },
   { method: 'POST', path: '/api/transcribe', tag: 'daemon', summary: 'Audio to text (501 unless a provider is configured)', auth: 'session', mutating: true },
+  { method: 'GET', path: '/api/daemon/update', tag: 'daemon', summary: 'Running release, the configured source at its ref, and whether an update is available', auth: 'session' },
+  { method: 'GET', path: '/api/daemon/upgrade', tag: 'daemon', summary: 'The latest upgrade record and, while it is still waiting, the work holding it', auth: 'session' },
+  { method: 'POST', path: '/api/daemon/upgrade', tag: 'daemon', summary: 'Queue an upgrade: hold dispatch, wait for zero running work, build, switch and restart', auth: 'session', mutating: true },
+  { method: 'POST', path: '/api/daemon/upgrade/cancel', tag: 'daemon', summary: 'Cancel a queued or waiting upgrade and resume dispatch', auth: 'session', mutating: true },
   { method: 'POST', path: '/api/daemon/drain', tag: 'daemon', summary: 'Stop dispatching and wait for in-flight turns (bounded) before an upgrade restart', auth: 'session', mutating: true },
   { method: 'POST', path: '/api/daemon/undrain', tag: 'daemon', summary: 'Resume dispatching after a drain whose restart did not happen', auth: 'session', mutating: true },
 

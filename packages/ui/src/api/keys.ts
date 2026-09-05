@@ -5,6 +5,8 @@ export const qk = {
   sessions: () => ['sessions'] as const,
   workspaces: () => ['workspaces'] as const,
   runtimes: () => ['runtimes'] as const,
+  daemonUpdate: () => ['daemon', 'update'] as const,
+  daemonUpgrade: () => ['daemon', 'upgrade'] as const,
   runtimeModels: (id: string) => ['runtimes', id, 'models'] as const,
 
   workspace: (ws: string) => ['w', ws] as const,

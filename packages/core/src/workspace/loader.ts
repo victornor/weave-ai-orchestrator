@@ -10,6 +10,7 @@ import {
 import type { WorkspaceContext } from '../context.js';
 import { workspacePaths } from '../context.js';
 import { EventBus } from '../events.js';
+import { PROJECT_SECTIONS } from '../knowledge/files.js';
 import { getLogger } from '../logger.js';
 import { registerBuiltinWorktreeProviders, writeWtConfig } from '../worktrees/index.js';
 import { registerBuiltinForges } from '../forge/index.js';
@@ -114,34 +115,24 @@ const KNOWLEDGE_SKELETONS: Array<[string, (cfg: { name: string; humanName: strin
 `],
 ];
 
-const PROJECT_SKELETON = (id: string) => `# ${id}
+/** The prompt under each canonical section of a fresh project knowledge base. */
+const PROJECT_SECTION_HINTS: Record<(typeof PROJECT_SECTIONS)[number], string> = {
+  'Overview': '(what this project is, who uses it)',
+  'Stack & commands': '(run, test, lint, build)',
+  'Conventions': '(project-specific rules the repo docs do not state)',
+  'Current focus': '(what is being worked toward this month)',
+  'Landmines': '(things that bite)',
+  'Documents': '(one line per linked document: `[[slug]] — what it covers`)',
+  'Learnings': '(dated, concise entries from workers)',
+};
 
-<!-- The project knowledge base. Budget 1500 tokens. Workers append concise dated learnings. -->
-
-## Overview
-
-(what this project is, who uses it)
-
-## Stack & commands
-
-(run, test, lint, build)
-
-## Conventions
-
-(project-specific rules the repo docs do not state)
-
-## Current focus
-
-(what is being worked toward this month)
-
-## Landmines
-
-(things that bite)
-
-## Learnings
-
-(dated, concise entries from workers)
-`;
+const PROJECT_SKELETON = (id: string) => [
+  `# ${id}`,
+  '',
+  '<!-- The project knowledge base. Budget 1500 tokens. Workers append concise dated learnings. -->',
+  ...PROJECT_SECTIONS.flatMap((s) => ['', `## ${s}`, '', PROJECT_SECTION_HINTS[s]]),
+  '',
+].join('\n');
 
 export function projectKnowledgeSkeleton(id: string): string { return PROJECT_SKELETON(id); }
 

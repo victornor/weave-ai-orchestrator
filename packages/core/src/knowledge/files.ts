@@ -168,62 +168,22 @@ export function sectionSizes(body: string, budget: number): { sizes: Array<{ sec
   return { sizes, over: sizes.filter((s) => s.tokens > share).map((s) => s.section) };
 }
 
+/** A title, a one-line blurb and one empty heading per canonical section, in order. */
+function skeleton(title: string, blurb: string, sections: readonly string[]): string {
+  return [title, '', blurb, ...sections.flatMap((s) => ['', `## ${s}`]), ''].join('\n');
+}
+
 /** Skeletons written when a knowledge file does not exist yet. */
 export function seedBody(scope: KnowledgeScope, opts: { workspaceName?: string; projectName?: string } = {}): string {
   switch (scope) {
     case 'workspace':
-      return [
-        `# ${opts.workspaceName ?? 'Workspace'} — workspace knowledge`,
-        '',
-        'Conductor-only. What this workspace is for, who works here, and the project portfolio.',
-        '',
-        '## Overview',
-        '',
-        '## Goals',
-        '',
-        '## People & working style',
-        '',
-        '## Portfolio',
-        '',
-        '## Conventions',
-        '',
-        '## Standing instructions',
-        '',
-      ].join('\n');
+      return skeleton(`# ${opts.workspaceName ?? 'Workspace'} — workspace knowledge`, 'Conductor-only. What this workspace is for, who works here, and the project portfolio.', WORKSPACE_SECTIONS);
     case 'shared':
-      return [
-        '# Shared knowledge',
-        '',
-        'Read by every agent. Project-agnostic only: never name a project here.',
-        '',
-        '## Conventions',
-        '',
-        '## Glossary',
-        '',
-        '## Tone',
-        '',
-      ].join('\n');
+      return skeleton('# Shared knowledge', 'Read by every agent. Project-agnostic only: never name a project here.', SHARED_SECTIONS);
     case 'decisions':
-      return ['# Durable decisions', '', 'One line per decision the workspace should remember. Appended by the daemon.', '', '## Decisions', ''].join('\n');
+      return skeleton('# Durable decisions', 'One line per decision the workspace should remember. Appended by the daemon.', DECISION_SECTIONS);
     case 'project':
-      return [
-        `# ${opts.projectName ?? 'Project'} — project knowledge`,
-        '',
-        'Written by this project\'s workers and the conductor. Concise, dated, durable entries only.',
-        '',
-        '## Overview',
-        '',
-        '## Stack & commands',
-        '',
-        '## Conventions',
-        '',
-        '## Current focus',
-        '',
-        '## Landmines',
-        '',
-        '## Learnings',
-        '',
-      ].join('\n');
+      return skeleton(`# ${opts.projectName ?? 'Project'} — project knowledge`, 'Written by this project\'s workers and the conductor. Concise, dated, durable entries only.', PROJECT_SECTIONS);
   }
 }
 

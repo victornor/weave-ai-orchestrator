@@ -439,10 +439,26 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
   const quota = family === 'provider_quota';
   const resetAt = quota ? parseResetTime(message ?? '') : null;
   const retryAt = quota ? (resetAt ?? new Date(Date.now() + 60 * 60_000)) : null;
-  try {
+  // Each step is guarded on its own: parking is the last thing that happens before a human has to
+  // notice by hand, so one step failing must not take the others with it, and none of it may fail
+  // quietly. VS-49: the decision could not be stored at all, and the single try that used to wrap
+  // this left the ticket unblocked and the quota retry unbooked behind one warn line.
+  const step = (name: string, fn: () => void): void => {
+    try { fn(); } catch (e) { log.error({ err: String(e), step: name, agentId: f.agent.id, ticketId }, `parking the worker for the human failed at ${name}`); }
+  };
+
+  step('pause the agent', () => {
     ctx.db.update('agents', f.agent.id, { status: 'paused', pauseReason: `${code ?? family ?? 'failed'}: waiting for a human`, updatedAt: nowIso() });
+  });
+
+  let identifier: { identifier: string; status: string } | undefined;
+  step('read the ticket', () => {
+    identifier = ticketId ? ctx.db.get<{ identifier: string; status: string }>('SELECT identifier, status FROM tickets WHERE id = ?', [ticketId]) : undefined;
+  });
+
+  let raised = false;
+  step('raise the decision', () => {
     const runtimes = [...ctx.registries.runtimes.keys()].filter((r) => r !== f.agent.runtimeId);
-    const identifier = ticketId ? ctx.db.get<{ identifier: string; status: string }>('SELECT identifier, status FROM tickets WHERE id = ?', [ticketId]) : null;
     deps().decisions.create({ kind: 'system', id: null }, {
       kind: 'retry_approval', owner: 'human', ticketId: ticketId ?? null,
       title: quota
@@ -463,18 +479,28 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
       correlationKey: `retry:${f.agent.id}`,
       target: { agentId: f.agent.id, ticketId: ticketId ?? null, runtime: f.agent.runtimeId, family, code },
     });
-    if (ticketId && identifier && !['blocked', 'done', 'cancelled', 'backlog'].includes(identifier.status)) {
-      void deps().tickets.transition({ kind: 'system', id: null }, ticketId, { to: 'blocked', note: `${f.agent.name} is parked after ${code ?? family}; waiting for you` }).catch(() => undefined);
-    }
-    if (retryAt) {
-      deps().wake.enqueue(f.agent.id, {
-        source: 'retry', reason: `retry after the ${f.agent.runtimeId} usage limit resets`, payload: { retryOfRunId: f.run.id, quotaReset: true },
-        notBefore: retryAt.toISOString(), idempotencyKey: `quota_retry:${f.run.id}`, requestedBy: { kind: 'system', id: null },
-      });
-    }
-  } catch (e) {
-    log.warn({ err: String(e) }, 'parking the worker for the human failed');
-  }
+    raised = true;
+  });
+
+  step('block the ticket', () => {
+    if (!ticketId || !identifier || ['blocked', 'done', 'cancelled', 'backlog'].includes(identifier.status)) return;
+    // `blocked` needs a routable path: the open card is that path, so it is only when the card could
+    // not be raised that this has to spell the way out itself. Without it the transition is refused
+    // and a stuck worker's ticket stays in the status it was working in.
+    void deps().tickets.transition({ kind: 'system', id: null }, ticketId, {
+      to: 'blocked',
+      note: `${f.agent.name} is parked after ${code ?? family}; waiting for you`,
+      ...(raised ? {} : { unblock: { owner: 'human' as const, action: `${f.agent.name} is parked after ${code ?? family} and its retry card could not be raised — relaunch it, move it to another runtime, or cancel the ticket.` } }),
+    }).catch((e: unknown) => log.error({ err: String(e), step: 'block the ticket', agentId: f.agent.id, ticketId }, 'parking the worker for the human failed at block the ticket'));
+  });
+
+  step('book the quota retry', () => {
+    if (!retryAt) return;
+    deps().wake.enqueue(f.agent.id, {
+      source: 'retry', reason: `retry after the ${f.agent.runtimeId} usage limit resets`, payload: { retryOfRunId: f.run.id, quotaReset: true },
+      notBefore: retryAt.toISOString(), idempotencyKey: `quota_retry:${f.run.id}`, requestedBy: { kind: 'system', id: null },
+    });
+  });
 }
 
 /** "resets at 3pm", "resets at 15:30", "reset in 2 hours", "try again in 45 minutes" → a Date, else null. */

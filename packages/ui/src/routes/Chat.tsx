@@ -6,7 +6,7 @@ import { Composer } from '../components/Composer';
 import { DecisionCard } from '../components/DecisionCard';
 import { PlanPreview } from '../components/PlanPreview';
 import { DispatchLabel } from '../components/DispatchLabel';
-import { WorkerChip, CommandChip } from '../components/Chips';
+import { WorkerChip } from '../components/Chips';
 import { Skeleton } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Markdown } from '../components/Markdown';
@@ -238,21 +238,6 @@ export function ChatRoute(): React.ReactElement {
 
   const send = (text: string): void => {
     if (!threadId) return;
-    // Slash commands are resolved client-side where they are pure navigation.
-    const talk = /^\/talk\s+(\S+)/.exec(text);
-    if (talk?.[1]) {
-      openTicket(talk[1].toUpperCase());
-      return;
-    }
-    if (/^\/conductor\b/.test(text)) {
-      go('/w/$ws/team', { params: { ws } });
-      return;
-    }
-    const d = /^\/d\s+(\S+)\s*(\S+)?/.exec(text);
-    if (d?.[1]) {
-      answerDecision(d[1], d[2] ? { key: d[2] } : {});
-      return;
-    }
     if (offline) {
       enqueue({
         kind: 'thread',
@@ -281,7 +266,6 @@ export function ChatRoute(): React.ReactElement {
       <PageHeader
         title="Conductor"
         meta={`${running} workers running · ${(decisions.data ?? []).filter((d) => d.status === 'open').length} need you`}
-        actions={<span className="ac-mono hidden text-micro text-text-nav md:block">/brief</span>}
       />
 
       {onboarding ? (
@@ -429,11 +413,6 @@ export function ChatRoute(): React.ReactElement {
             }
             onSubmit={send}
           />
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <CommandChip command="/talk ACME-42" />
-            <CommandChip command="/conductor" />
-            <CommandChip command="/d <id> approve" />
-          </div>
         </div>
       </div>
     </Page>

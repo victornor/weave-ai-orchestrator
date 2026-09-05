@@ -61,15 +61,3 @@ export function WorkerChip({
     </button>
   );
 }
-
-export function CommandChip({ command, onClick }: { command: string; onClick?: () => void }): React.ReactElement {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="ac-mono inline-flex items-center rounded-r4 border border-accent-edge bg-accent-tint px-2 py-1 text-micro text-accent-link"
-    >
-      {command}
-    </button>
-  );
-}

@@ -55,6 +55,21 @@ describe('knowledge', () => {
     expect(knowledge.get('project', h.projectId).body).toContain('## Deploy notes');
   });
 
+  it('appends under an existing section whose name arrives HTML-escaped', () => {
+    knowledge.note(WORKER, 'project', 'Stack &amp; commands', 'Node 26 and pnpm 11 come from mise.', h.projectId);
+    const body = knowledge.get('project', h.projectId).body;
+    expect(body).not.toContain('&amp;');
+    expect(body.match(/^## Stack & commands$/gm)).toHaveLength(1);
+    expect(body).toMatch(/## Stack & commands\n- \d{4}-\d{2}-\d{2} · Node 26 and pnpm 11 come from mise\./);
+  });
+
+  it('creates a missing section with an entity-decoded heading', () => {
+    knowledge.note(WORKER, 'project', 'Builds &amp; releases', 'Releases are cut from the release branch.', h.projectId);
+    const body = knowledge.get('project', h.projectId).body;
+    expect(body).toContain('## Builds & releases');
+    expect(body).not.toContain('&amp;');
+  });
+
   it('rejects entries over 60 words', () => {
     const long = Array.from({ length: 61 }, (_, i) => `word${i}`).join(' ');
     expect(() => knowledge.note(WORKER, 'project', 'Learnings', long, h.projectId)).toThrowError(expect.objectContaining({ code: 'entry_too_long' }));

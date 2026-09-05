@@ -3,12 +3,12 @@ import { agentUiStatus } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { WorkerCard } from '../components/WorkerCard';
 import { SkeletonRows } from '../components/Skeleton';
-import { EmptyState, ErrorState } from '../components/States';
+import { EmptyState, ErrorState, messageOf } from '../components/States';
 import { StatusBadge, Badge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
 import { Markdown } from '../components/Markdown';
 import { Sheet } from '../components/Sheet';
-import { useConductor, useProjects, useRole, useRoleAction, useRoles, useRollbackCharter, useRuntimeModels, useRuntimes, useUpdateRole, useWorkers } from '../api/hooks';
+import { useConductor, useProjects, useRole, useRoleAction, useRoles, useRollbackCharter, useRuntimeModels, useRuntimes, useUpdateRole, useWorkers, useWorkspaceSummary } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import type * as T from '../api/types';
@@ -166,6 +166,9 @@ function RoleSheet({ roleId, onClose }: { roleId: string; onClose: () => void })
   const update = useUpdateRole();
   const action = useRoleAction();
   const rollback = useRollbackCharter();
+  // With no role override the run falls back to the workspace default, then to whatever the
+  // runtime itself picks (`agent.model ?? role.model ?? config.defaults.model` in the engine).
+  const defaultModel = (((useWorkspaceSummary().data?.config['defaults'] ?? {}) as Record<string, unknown>)['model'] ?? null) as string | null;
 
   return (
     <Sheet open onClose={onClose} title={role.data?.role.name ?? 'Role'}>
@@ -178,7 +181,7 @@ function RoleSheet({ roleId, onClose }: { roleId: string; onClose: () => void })
               <span className="ac-label">runtime</span>
               <select
                 value={role.data.role.runtimeId}
-                onChange={(e) => update.mutate({ id: roleId, patch: { runtimeId: e.target.value }, reason: 'changed from the web app' })}
+                onChange={(e) => update.mutate({ id: roleId, patch: { runtime: e.target.value }, reason: 'changed from the web app' })}
                 className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1"
               >
                 {(runtimes.data ?? []).map((r) => (
@@ -192,10 +195,10 @@ function RoleSheet({ roleId, onClose }: { roleId: string; onClose: () => void })
               <span className="ac-label">model</span>
               <select
                 value={role.data.role.model ?? ''}
-                onChange={(e) => update.mutate({ id: roleId, patch: { model: e.target.value }, reason: 'changed from the web app' })}
+                onChange={(e) => update.mutate({ id: roleId, patch: { model: e.target.value === '' ? null : e.target.value }, reason: 'changed from the web app' })}
                 className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1"
               >
-                <option value="">default</option>
+                <option value="">{defaultModel ? `default · ${defaultModel}` : 'default'}</option>
                 {(models.data ?? []).map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label}
@@ -223,6 +226,14 @@ function RoleSheet({ roleId, onClose }: { roleId: string; onClose: () => void })
               Retire
             </Button>
           </div>
+
+          {update.isError ? (
+            <ErrorState
+              error={update.error}
+              message={`The role was not changed: ${messageOf(update.error)}`}
+              onRetry={() => update.reset()}
+            />
+          ) : null}
 
           <Markdown source={role.data.charter} />
 

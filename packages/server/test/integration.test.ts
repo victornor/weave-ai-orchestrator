@@ -118,6 +118,39 @@ describe('real core services over HTTP', () => {
     expect(detail.concurrency).toMatchObject({ roleMax: 6, projectMax: 4, effective: 4, live: 0, free: 4 });
   });
 
+  it('changes a role runtime and clears its model over PATCH /roles/:id, and rejects an unknown key', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+    const services = deps.workspaces.get(harness.workspaceId)!.services;
+    harness.ctx.config.defaults.hireApproval = 'none';
+    const { role } = await services.roles.hire({ kind: 'human', id: null }, {
+      id: 'api-backend', name: 'Backend Engineer', project: harness.projectSlug,
+      charterSummary: 'Owns the api service.', scope: 'Backend work in the api repo.',
+      responsibilities: [], capabilities: [], exclusions: [], rules: [],
+      runtime: 'claude', model: 'claude-opus-5', sessionPolicy: 'per_ticket', maxWorkers: 2,
+      permission: { mode: 'auto', allowed: [], denied: [] }, secrets: [], createdBy: 'human',
+    } as never);
+
+    const patch = (body: unknown): Promise<Response> =>
+      app.fetch(new Request(`${base}/roles/${role.id}`, { method: 'PATCH', headers: H, body: JSON.stringify(body) }));
+
+    const runtimeRes = await patch({ patch: { runtime: 'codex' }, reason: 'changed from the web app' });
+    expect(runtimeRes.status).toBe(200);
+    expect((await runtimeRes.json()).runtimeId).toBe('codex');
+    expect(services.roles.revisions(role.id).at(-1)).toMatchObject({ changedKeys: ['runtime'] });
+
+    const modelRes = await patch({ patch: { model: null }, reason: 'back to the default' });
+    expect(modelRes.status).toBe(200);
+    expect((await modelRes.json()).model).toBeNull();
+
+    // what the web app used to send: the column name, not the spec field. Stripped silently before.
+    const bad = await patch({ patch: { runtimeId: 'claude' }, reason: 'changed from the web app' });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error.code).toBe('validation');
+    expect(services.roles.get(role.id).runtimeId).toBe('codex');
+  });
+
   it('exports the workspace as a portable package over POST /export', async () => {
     const { deps, harness } = boot();
     const app = createApp(deps);

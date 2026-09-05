@@ -12,8 +12,23 @@ export const ProjectPoliciesSchema = z.object({
   taskApproval: z.enum(APPROVAL_OWNERS).default('none'),
   archiveCommit: z.enum(['push', 'pr', 'local']).default('push'),
   requireCi: z.boolean().default(true),
+  /** How many of this project's tickets may be in the active merge step at once (PLAN §11.4). */
+  mergeConcurrency: z.number().int().min(1).max(8).default(1),
 }).partial();
 export type ProjectPolicies = z.infer<typeof ProjectPoliciesSchema>;
+
+/** The default merge concurrency of a project that has not configured one: land one ticket at a time. */
+export const DEFAULT_MERGE_CONCURRENCY = 1;
+
+/**
+ * How many tickets of a project may be in the active merge step at once. Policies reach core as an
+ * untyped record, so an absent, malformed or out-of-range value falls back to the safe default.
+ */
+export function mergeConcurrencyOf(policies: Record<string, unknown> | null | undefined): number {
+  const raw = (policies as { mergeConcurrency?: unknown } | null | undefined)?.mergeConcurrency;
+  const parsed = ProjectPoliciesSchema.shape.mergeConcurrency.safeParse(raw);
+  return parsed.success && parsed.data !== undefined ? parsed.data : DEFAULT_MERGE_CONCURRENCY;
+}
 
 export const ProjectConfigSchema = z.object({
   id: slug,

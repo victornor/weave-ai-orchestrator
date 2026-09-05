@@ -8,6 +8,9 @@ import { emit, fields, heading, style, table, write } from '../output.js';
 import { promptTyped } from '../prompt.js';
 import { items, list, run, session, unwrap } from './util.js';
 
+interface MergeQueueEntry { ticketId: string; identifier: string; title: string; position: number | null; queuedAt: string | null; startedAt: string | null }
+interface MergeQueue { projectId: string; concurrency: number; active: MergeQueueEntry[]; waiting: MergeQueueEntry[] }
+
 function ticketUrl(baseUrl: string, workspace: string | null, ticket: Record<string, unknown>): string {
   const id = String(ticket['identifier'] ?? ticket['id'] ?? '');
   return `${baseUrl}/w/${workspace ?? ''}/tickets/${encodeURIComponent(id)}`;
@@ -83,6 +86,32 @@ export function register(program: Command): void {
           { header: 'PROJECT', get: (r) => r.project ?? '' },
           { header: 'AGE', get: (r) => r.age, align: 'right' },
         ], { empty: 'no tickets match' });
+      });
+    }));
+
+  ticket
+    .command('merge-queue')
+    .description("a project's merge queue: what is landing now and who is waiting")
+    .option('-p, --project <id>', 'project id or slug')
+    .action(async (opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const projects = opts['project']
+        ? [{ id: opts['project'] }]
+        : items<{ id: string }>(await client.wget<unknown>('/projects'), 'projects');
+      const queues: MergeQueue[] = [];
+      for (const p of projects) queues.push(await client.wget<MergeQueue>(`/projects/${encodeURIComponent(p.id)}/merge-queue`));
+      emit(queues.length === 1 ? queues[0] : queues, () => {
+        for (const q of queues) {
+          heading(`${q.projectId} — merging ${q.active.length}/${q.concurrency}, ${q.waiting.length} waiting`);
+          const rows = [...q.active, ...q.waiting];
+          table(rows, [
+            { header: '#', get: (e) => (e.position === null ? 'now' : String(e.position)) },
+            { header: 'ID', get: (e) => e.identifier },
+            { header: 'TITLE', get: (e) => oneLine(e.title, 60) },
+            { header: 'STATE', get: (e) => (e.startedAt ? 'merging' : 'waiting') },
+            { header: 'SINCE', get: (e) => formatRelative(e.startedAt ?? e.queuedAt ?? '') },
+          ], { empty: 'nothing in the merge queue' });
+        }
       });
     }));
 

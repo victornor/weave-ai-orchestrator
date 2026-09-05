@@ -15,6 +15,7 @@ import type { Actor, CoreServices, OpenSpecService, OpenSpecStatus } from '../ap
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { git } from '../util/git.js';
+import { createSerializer } from '../util/serialize.js';
 import * as cli from './cli.js';
 
 const SYSTEM: Actor = { kind: 'system', id: null };
@@ -68,7 +69,7 @@ function isMissingBinary(e: unknown): boolean { return e instanceof OcError && e
 export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreServices): OpenSpecService {
   const log = ctx.log('openspec');
   /** One archive at a time per project: `openspec archive` rewrites openspec/specs in the primary clone. */
-  const archiveLocks = new Map<string, Promise<unknown>>();
+  const serialize = createSerializer();
 
   const resolve = (ticketId: string): { ticket: ReturnType<CoreServices['tickets']['get']>; project: ProjectRow; changeName: string; cwd: string } | null => {
     const ticket = deps().tickets.get(ticketId);
@@ -81,12 +82,6 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
     return { ticket, project, changeName, cwd };
   };
 
-  const serialize = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
-    const prev = archiveLocks.get(key) ?? Promise.resolve();
-    const next = prev.then(fn, fn);
-    archiveLocks.set(key, next.then(() => undefined, () => undefined));
-    return next;
-  };
 
   return {
     async statusFor(ticketId) {

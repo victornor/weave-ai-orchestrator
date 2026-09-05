@@ -21,6 +21,13 @@ Same, without a remote: no push, no PR. Record `{type: "branch", title: "<branch
 
 `merging` is reachable only through the human's approval or the ticket's auto-merge flag. `ac_ticket_merge_done` is rejected from any other status. Never merge because CI is green, because the PR looks approved on the forge, or because the conductor asked you to.
 
+**The wake means you hold the project's merge slot.** Approved merges land one at a time per project: your ticket sat in the merge queue and has now reached the front, so the turn that starts with a `merge_approved` wake is the turn you merge in. Two consequences:
+
+- **Your base moved while you waited.** Whatever `main` looked like when the human approved, it is not that now. Always fetch and re-sync before anything else; never assume an earlier rebase still holds.
+- **Everyone else is waiting on you.** Do the merge, do not start unrelated work in the slot, and if it cannot complete, transition to `blocked` promptly — that releases the slot and the next ticket starts.
+
+While a ticket is waiting rather than merging, its turn prompt says so and gives its position; there is nothing to do then but end the turn.
+
 1. `ac_worktree_status()` — confirm the branch and how far behind you are.
 2. `git fetch origin`.
 3. Sync: `git rebase origin/<default>` (or merge it in, if that is the project's convention — check `work/AGENTS.md`).
@@ -28,8 +35,8 @@ Same, without a remote: no push, no PR. Record `{type: "branch", title: "<branch
 5. `git push --force-with-lease` (only ever your own ticket branch).
 6. Wait for CI when the project requires it. If CI goes red after the rebase, fix it here — that is still your job.
 7. `gh pr merge <n> --<mergeMethod>` (your brief names the method; default `squash`).
-8. `ac_ticket_merge_done(id, {mergeCommit: "<sha>", method: "<mergeMethod>"})`. The daemon verifies against the forge or the default branch before accepting.
-9. Stop there. The daemon fast-forwards the primary clone, archives the OpenSpec change, removes your worktree, retires you and moves the ticket to `done`.
+8. `ac_ticket_merge_done(id, {mergeCommit: "<sha>", method: "<mergeMethod>"})`. The daemon verifies that the default branch carries your branch's content — a merge commit, identical trees, a squash of however many commits, or every commit picked individually all count — before accepting.
+9. Stop there. The daemon fast-forwards the primary clone, archives the OpenSpec change, removes your worktree, retires you, moves the ticket to `done` — and admits the next ticket in the project's merge queue.
 
 For `local-branch`: steps 1–4, then `ac_ticket_merge_done` — the daemon fast-forwards `projects/<id>`. If it is not fast-forwardable, rebase again first.
 

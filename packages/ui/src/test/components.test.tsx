@@ -13,7 +13,9 @@ import { ConnectionBanner } from '../components/ConnectionBanner';
 import { EmptyState, ErrorState } from '../components/States';
 import { ApiError } from '../api/client';
 import { PlanPreview } from '../components/PlanPreview';
+import { MergeQueueBadge, MergeQueuePanel } from '../components/MergeQueue';
 import { agent, decision, ticket } from './factories';
+import type { MergeQueue, MergeQueueEntry } from '../api/types';
 
 const planDoc = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 vi.mock('../api/hooks', () => ({
@@ -383,6 +385,60 @@ describe('PlanPreview', () => {
   it('renders nothing for a decision that is not a plan approval', () => {
     planDoc.current = doc('# Plan');
     const { container } = render(<PlanPreview decision={decision({ kind: 'merge_approval' })} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe('MergeQueuePanel', () => {
+  const entry = (over: Partial<MergeQueueEntry> = {}): MergeQueueEntry => ({
+    ticketId: 't1', identifier: 'ACME-42', title: 'Theme tokens', projectId: 'api',
+    position: null, queuedAt: '2026-09-04T11:00:00.000Z', startedAt: '2026-09-04T11:00:05.000Z', workerId: 'ag_1', ...over,
+  });
+  const queue = (over: Partial<MergeQueue> = {}): MergeQueue => ({
+    projectId: 'api', concurrency: 1,
+    active: [entry()],
+    waiting: [entry({ ticketId: 't2', identifier: 'ACME-43', title: 'Behind it', position: 1, startedAt: null })],
+    ...over,
+  });
+
+  it('shows what is merging now and who is waiting, in order', () => {
+    render(<MergeQueuePanel queue={queue()} />);
+    expect(screen.getByText('1/1 merging · 1 waiting')).toBeInTheDocument();
+    expect(screen.getByText('now')).toBeInTheDocument();
+    expect(screen.getByText('#1')).toBeInTheDocument();
+    expect(screen.getByText('merging')).toBeInTheDocument();
+    expect(screen.getByText('waiting')).toBeInTheDocument();
+    const rows = screen.getAllByRole('button');
+    expect(rows[0]).toHaveTextContent('ACME-42');
+    expect(rows[1]).toHaveTextContent('ACME-43');
+  });
+
+  it('renders nothing when the queue is empty', () => {
+    const { container } = render(<MergeQueuePanel queue={queue({ active: [], waiting: [] })} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('opens the ticket a row stands for', () => {
+    const onOpen = vi.fn();
+    render(<MergeQueuePanel queue={queue()} onOpen={onOpen} />);
+    fireEvent.click(screen.getAllByRole('button')[1]!);
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ identifier: 'ACME-43' }));
+  });
+});
+
+describe('MergeQueueBadge', () => {
+  it('names the position of a waiting ticket', () => {
+    render(<MergeQueueBadge position={3} merging={false} />);
+    expect(screen.getByText('#3 in the merge queue')).toBeInTheDocument();
+  });
+
+  it('says the ticket is the one merging', () => {
+    render(<MergeQueueBadge position={null} merging />);
+    expect(screen.getByText('merging now')).toBeInTheDocument();
+  });
+
+  it('renders nothing for a ticket that is neither', () => {
+    const { container } = render(<MergeQueueBadge position={null} merging={false} />);
     expect(container).toBeEmptyDOMElement();
   });
 });

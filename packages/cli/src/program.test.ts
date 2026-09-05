@@ -150,6 +150,37 @@ describe('running commands against a stubbed daemon', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it('prints one project merge queue as json', async () => {
+    const seen = stubFetch({
+      '/api/w/acme/projects/api/merge-queue': {
+        projectId: 'api', concurrency: 1,
+        active: [{ ticketId: 't1', identifier: 'ACME-42', title: 'Theme tokens', position: null, queuedAt: '2026-09-04T11:00:00.000Z', startedAt: '2026-09-04T11:00:05.000Z' }],
+        waiting: [{ ticketId: 't2', identifier: 'ACME-43', title: 'Behind it', position: 1, queuedAt: '2026-09-04T11:30:00.000Z', startedAt: null }],
+      },
+    });
+    await buildProgram().parseAsync([...base, 'ticket', 'merge-queue', '--project', 'api']);
+    expect(seen[0]).toBe('GET /api/w/acme/projects/api/merge-queue');
+    expect(JSON.parse(written.join(''))).toMatchObject({ concurrency: 1, waiting: [{ identifier: 'ACME-43', position: 1 }] });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('prints the merge queue as a table with the merging ticket first', async () => {
+    stubFetch({
+      '/api/w/acme/projects/api/merge-queue': {
+        projectId: 'api', concurrency: 1,
+        active: [{ ticketId: 't1', identifier: 'ACME-42', title: 'Theme tokens', position: null, queuedAt: '2026-09-04T11:00:00.000Z', startedAt: '2026-09-04T11:00:05.000Z' }],
+        waiting: [{ ticketId: 't2', identifier: 'ACME-43', title: 'Behind it', position: 1, queuedAt: '2026-09-04T11:30:00.000Z', startedAt: null }],
+      },
+    });
+    configureOutput({ json: false, color: false });
+    await buildProgram().parseAsync([...base.filter((a) => a !== '--json'), 'ticket', 'merge-queue', '--project', 'api']);
+    const text = written.join('');
+    expect(text).toContain('merging 1/1, 1 waiting');
+    expect(text).toMatch(/now\s+ACME-42/);
+    expect(text).toMatch(/1\s+ACME-43/);
+    expect(text).toContain('waiting');
+  });
+
   it('renders the briefing from the render package', async () => {
     stubFetch({
       '/api/w/acme/briefing': {

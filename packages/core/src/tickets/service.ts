@@ -10,6 +10,8 @@ import { recordActivity } from '../events.js';
 import { checkTransition, openspecChangeName, type GuardFacts } from './guards.js';
 import { tx } from './tx.js';
 import { landDelivery, type LandResult } from './land.js';
+import { createMergeQueue } from './merge-queue.js';
+import { createSerializer } from '../util/serialize.js';
 import { existsSync } from 'node:fs';
 
 function ticketBranchFor(t: { identifier: string; title: string }): string {
@@ -25,6 +27,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   const db: Db = ctx.db;
   const log = ctx.log('ticket');
   const ws = ctx.workspaceId;
+  const mergeQueue = createMergeQueue(ctx, deps);
+  /** One delivery landing at a time per project: it mutates the clone every ticket shares (§11.4). */
+  const serialize = createSerializer();
 
   // ---------- reads ----------
 
@@ -311,10 +316,16 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     }
     if (to === 'in_review' && next.autoMerge) setTimeout(() => { service.autoMergeSweep().catch((e) => log.debug({ err: String(e) }, 'auto-merge sweep after in_review failed')); }, 50).unref();
     if (to === 'approved') wake(next.workerId, 'ticket_assigned', `plan approved for ${next.identifier}`, { ticketId: t.id });
-    if (to === 'merging') wake(next.workerId, 'merge_approved', `merge approved for ${next.identifier}`, { ticketId: t.id });
+    // Entering `merging` joins the project's merge queue instead of starting the merge (PLAN §11.4);
+    // leaving it gives the slot back. Either way the queue decides who merges next, and it is the
+    // queue — never this transition — that wakes a worker to merge.
+    let queued = false;
+    if (to === 'merging') { await mergeQueue.join(next.id); queued = true; }
+    else if (t.status === 'merging') { await mergeQueue.leave(next.id); queued = true; }
     if (to === 'proposing' && t.status === 'proposed') wake(next.workerId, 'ticket_comment', `revision requested for ${next.identifier}`, { ticketId: t.id });
     if (TERMINAL.has(to)) propagateTerminal(next, actor);
-    return next;
+    // The queue wrote to the row after it was read, so the caller gets the ticket as it now stands.
+    return queued ? get(t.id) : next;
   }
 
   // ---------- service ----------
@@ -651,7 +662,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         if (project && existsSync(project.clonePath)) {
           const wt = db.get<{ branch: string }>('SELECT branch FROM worktrees WHERE ticket_id = ? AND status != ? ORDER BY created_at DESC LIMIT 1', [t.id, 'removed']);
           const branch = wt?.branch ?? ticketBranchFor(t);
-          landInfo = await landDelivery(ctx.config, project, t, branch);
+          // One landing at a time per project: this checks out and fast-forwards the clone every
+          // ticket of the project shares, and reconciliation can call mergeDone outside the queue.
+          const p = project;
+          landInfo = await serialize(project.id, () => landDelivery(ctx.config, p, t, branch));
           recordActivity(db, ws, actor, 'ticket.delivery_landed', 'ticket', t.id, { ...landInfo }, t.id);
         } else log.warn({ ticketId: t.id }, 'mergeDone: no project clone available; skipping delivery landing');
       }
@@ -682,13 +696,15 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           });
         }
         const delivery = { ...(t.delivery ?? {}), merged: true, mergeCommit: info.mergeCommit ?? landInfo?.head ?? null, method: info.method ?? landInfo?.mode ?? null, archivedAs, landed: landInfo?.detail ?? null };
-        const updated = touch(t.id, { status: 'done', completedAt: nowIso(), deliveryJson: delivery, unblockJson: null });
+        const updated = touch(t.id, { status: 'done', completedAt: nowIso(), deliveryJson: delivery, unblockJson: null, mergeQueuedAt: null, mergeStartedAt: null });
         recordActivity(db, ws, actor, 'ticket.merged', 'ticket', t.id, { mergeCommit: info.mergeCommit ?? null, archivedAs, skipped }, t.id);
         ctx.events.emit('ticket.merged', 'ticket', t.id, { ticketId: t.id, mergeCommit: info.mergeCommit ?? null, archivedAs, skipped });
         ctx.events.emit('ticket.status', 'ticket', t.id, updated);
         return updated;
       });
       propagateTerminal(next, actor);
+      // The slot this ticket held is free: the next ticket in the project's queue merges now (§11.4).
+      await mergeQueue.pump(t.projectId);
       if (t.projectId) { const pid = t.projectId; setTimeout(() => { deps().specs.index(pid).catch((e) => log.debug({ err: String(e) }, 'spec reindex after merge failed')); }, 100).unref(); }
       log.info({ ticketId: t.id, archivedAs, skipped }, 'ticket merged');
       return next;
@@ -719,6 +735,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       return advanced;
     },
 
+    mergeQueue,
+
     livenessViolations() {
       const candidates = db
         .all<Record<string, unknown>>(
@@ -730,6 +748,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         if (t.assigneeHuman) return false;
         if (hasOpenDecision(t.id)) return false;
         if (t.monitorNextCheckAt) return false;
+        // Waiting in the merge queue is an action path: the queue wakes it when a slot frees (§11.4).
+        if (t.status === 'merging' && !t.mergeStartedAt) return false;
         const worker = db.get<{ id: string; status: string }>(
           "SELECT id, status FROM agents WHERE ticket_id = ? AND kind = 'worker' AND status NOT IN ('retired','done') ORDER BY created_at DESC LIMIT 1",
           [t.id],

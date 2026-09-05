@@ -36,11 +36,33 @@ export interface TicketsService {
   workProducts(id: string): Array<Record<string, unknown>>;
   /** Async: archives the OpenSpec change after the merge is verified (PLAN §12.2). */
   mergeDone(actor: Actor, id: string, info: { mergeCommit?: string; method?: string }): Promise<S.Ticket>;
+  /** The per-project merge queue that decides which approved ticket merges now (PLAN §11.4). */
+  mergeQueue: MergeQueueService;
   /** Liveness scan helper: tickets in active statuses without an action path. */
   livenessViolations(): S.Ticket[];
   /** Move `in_review` tickets with auto_merge on to `merging` once their delivery is ready (local-branch: immediately; pr: CI green or no CI). Returns how many advanced. */
   autoMergeSweep(): Promise<number>;
   nextIdentifier(): string;
+}
+
+// ---------- merge queue ----------
+/** One ticket's place in a project's merge queue. `position` is null for a ticket already merging. */
+export interface MergeQueueEntry { ticketId: string; identifier: string; title: string; projectId: string | null; position: number | null; queuedAt: string | null; startedAt: string | null; workerId: string | null }
+export interface MergeQueueView { projectId: string; concurrency: number; active: MergeQueueEntry[]; waiting: MergeQueueEntry[] }
+export interface MergeQueueService {
+  /** How many tickets of the project may be in the active merge step at once (policy, default 1). */
+  limitFor(projectId: string | null): number;
+  /** The ticket's 1-based place among its project's waiting tickets, or null when it is not waiting. */
+  positionOf(ticketId: string): number | null;
+  forProject(projectId: string): MergeQueueView;
+  /** Async: join the queue and pump it. The join time is stamped once and never moved. */
+  join(ticketId: string): Promise<void>;
+  /** Async: leave the queue, give the slot back, and admit the next waiting ticket. */
+  leave(ticketId: string): Promise<void>;
+  /** Async: admits waiting tickets up to the limit, spawning and waking their workers. */
+  pump(projectId: string | null): Promise<number>;
+  /** Async: pumps every project that holds a merging ticket. */
+  pumpAll(): Promise<number>;
 }
 
 // ---------- decisions ----------

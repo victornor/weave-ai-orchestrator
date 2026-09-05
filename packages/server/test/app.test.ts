@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { OcError } from '@agent-conductor/shared';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
-import { authed, makeHarness, type Harness } from './fakes.js';
+import { authed, makeHarness, ticket, type Harness } from './fakes.js';
 
 let harness: Harness | null = null;
 afterEach(() => { harness?.close(); harness = null; });
@@ -163,6 +163,41 @@ describe('routes', () => {
     expect((await res.json()).error.code).toBe('validation');
     expect(saved).toHaveLength(0);
     expect(h.runtime.ctx.config.defaults.knowledgeBudgetTokens.project).toBe(10000);
+  });
+
+  it("serves a project's merge queue with active and waiting tickets in order", async () => {
+    const { h, fetch } = app();
+    h.tickets.set('tk_1', ticket({ status: 'merging', mergeQueuedAt: '2026-09-01T10:00:00.000Z', mergeStartedAt: '2026-09-01T10:00:01.000Z' }));
+    h.tickets.set('tk_2', ticket({ id: 'tk_2', identifier: 'ACME-43', title: 'Behind it', status: 'merging', mergeQueuedAt: '2026-09-01T11:00:00.000Z' }));
+
+    const res = await fetch('/api/w/ws1/projects/proj1/merge-queue', { headers: authed() });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ projectId: 'proj1', concurrency: 1 });
+    expect(body.active.map((e: { ticketId: string }) => e.ticketId)).toEqual(['tk_1']);
+    expect(body.waiting).toEqual([expect.objectContaining({ ticketId: 'tk_2', identifier: 'ACME-43', position: 1 })]);
+  });
+
+  it('serves an empty merge queue for a project with nothing merging', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/projects/proj1/merge-queue', { headers: authed() });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ projectId: 'proj1', concurrency: 1, active: [], waiting: [] });
+  });
+
+  it("carries a waiting ticket's own merge queue position on its detail payload", async () => {
+    const { h, fetch } = app();
+    h.tickets.set('tk_1', ticket({ status: 'merging', mergeQueuedAt: '2026-09-01T11:00:00.000Z' }));
+
+    const res = await fetch('/api/w/ws1/tickets/tk_1', { headers: authed() });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ mergeQueue: { position: 1, concurrency: 1 } });
+  });
+
+  it('reports no merge queue position for a ticket that is not waiting', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/tickets/tk_1', { headers: authed() });
+    await expect(res.json()).resolves.toMatchObject({ mergeQueue: { position: null } });
   });
 
   it('serves the briefing snapshot', async () => {

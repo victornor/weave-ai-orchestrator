@@ -38,9 +38,15 @@ export function ticket(over: Partial<Ticket> = {}): Ticket {
     assigneeRoleId: null, workerId: null, assigneeHuman: false, parentId: null, createdByKind: 'human', createdById: null,
     originKind: null, originFingerprint: null, checkoutRunId: null, executionRunId: null, openspecChangeName: null,
     openspecState: null, delivery: null, unblock: null, monitorNextCheckAt: null, blockedTransitionAt: null,
+    mergeQueuedAt: null, mergeStartedAt: null,
     startedAt: null, completedAt: null, cancelledAt: null, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
     ...over,
   };
+}
+
+/** One entry of a merge-queue view, shaped like core's MergeQueueEntry. */
+function queueEntry(t: Ticket, position: number | null): Record<string, unknown> {
+  return { ticketId: t.id, identifier: t.identifier, title: t.title, projectId: t.projectId, position, queuedAt: t.mergeQueuedAt, startedAt: t.mergeStartedAt, workerId: t.workerId };
 }
 
 export function decision(over: Partial<Decision> = {}): Decision {
@@ -103,6 +109,15 @@ export function makeHarness(options: { listener?: 'public' | 'loopback'; workspa
       get: getTicket,
       list: () => ({ items: [...tickets.values()], total: tickets.size }),
       blockers: () => [], children: () => [], workProducts: () => [],
+      mergeQueue: {
+        positionOf: (id: string) => (getTicket(id).status === 'merging' && !getTicket(id).mergeStartedAt ? 1 : null),
+        limitFor: () => 1,
+        forProject: (projectId: string) => ({
+          projectId, concurrency: 1,
+          active: [...tickets.values()].filter((t) => t.status === 'merging' && t.mergeStartedAt).map((t) => queueEntry(t, null)),
+          waiting: [...tickets.values()].filter((t) => t.status === 'merging' && !t.mergeStartedAt).map((t, i) => queueEntry(t, i + 1)),
+        }),
+      },
       comments: () => comments,
       create: (_actor: Actor, input: { title: string; kind: Ticket['kind']; projectId?: string | null }) => {
         const created = ticket({ id: `tk_${tickets.size + 1}`, identifier: `ACME-${43 + tickets.size}`, title: input.title, kind: input.kind, projectId: input.projectId ?? null, status: 'backlog' });
@@ -143,7 +158,7 @@ export function makeHarness(options: { listener?: 'public' | 'loopback'; workspa
     workers: impl('workers', { list: () => [], conductor: () => ({ id: 'ag_conductor', kind: 'conductor' }) }),
     dispatcher: impl('dispatcher', { start: () => undefined, stop: async () => undefined, running: () => 0 }),
     supervisor: impl('supervisor', { start: () => undefined, stop: () => undefined }),
-    projects: impl('projects', { list: () => [] }),
+    projects: impl('projects', { list: () => [], get: (id: string) => ({ id, slug: id, defaultBranch: 'main' }) }),
     roles: impl('roles', { list: () => [] }),
     knowledge: impl('knowledge', { lint: () => [] }),
     specs: impl('specs', {}),

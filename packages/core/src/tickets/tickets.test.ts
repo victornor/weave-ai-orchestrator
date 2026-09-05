@@ -27,6 +27,8 @@ describe('tickets', () => {
     h.services.wake = wake as never;
     h.services.decisions = decisions as never;
     h.services.openspec = openspec as never;
+    // The merge queue brings a worker for the ticket it admits (PLAN §11.4).
+    h.services.workers = { spawnForTicket: vi.fn(async (_a: Actor, ticketId: string) => ({ id: h.addWorker(ticketId) })) } as never;
     tickets = createTicketsService(h.ctx, h.deps);
     h.services.tickets = tickets;
   });

@@ -329,6 +329,7 @@ Run `conductor <group> --help` for the full set. Global flags: `-w/--workspace`,
 | `conductor worker pause \| resume \| cancel \| relaunch \| purge <id>` | worker lifecycle |
 | `conductor ticket create <title...> [-p] [-k kind] [--priority] [-d desc] [--assign role] [--auto-merge] [--parent] [--blocked-by]` | create a ticket |
 | `conductor ticket list [-p] [-s] [-k] [-r] [--search] [--limit]` · `conductor ticket show <id>` | the board in the terminal |
+| `conductor ticket merge-queue [-p <project>]` | who is landing now and who is waiting behind them |
 | `conductor ticket assign <id> <roleId>` · `conductor ticket set <id> [--title] [--priority] [--auto-merge]` | edit |
 | `conductor ticket transition <id> <status> [--note] [--blocked-by]` | move through the state machine |
 | `conductor ticket comment <id> <body...>` · `conductor ticket comments <id>` | talk to the live worker on its ticket |

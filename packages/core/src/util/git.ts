@@ -1,7 +1,8 @@
 import { sh, type ExecResult } from './exec.js';
 
-export async function git(args: string[], cwd: string, timeoutMs = 60_000): Promise<ExecResult> {
-  return sh('git', args, { cwd, timeoutMs, env: { GIT_TERMINAL_PROMPT: '0' } });
+/** `input` feeds a command that reads stdin, such as `git patch-id`. */
+export async function git(args: string[], cwd: string, timeoutMs = 60_000, input?: string): Promise<ExecResult> {
+  return sh('git', args, { cwd, timeoutMs, env: { GIT_TERMINAL_PROMPT: '0' }, input });
 }
 
 export interface WorktreeState { exists: boolean; dirty: boolean; changedFiles: number; branch: string | null; ahead: number; behind: number; head: string | null }

@@ -96,6 +96,10 @@ function ticketDetail(v: unknown): T.TicketDetail {
     children: listOf<Ticket>(r['children'] ?? []),
     documents: docs.map((d) => ({ key: String(d['key'] ?? ''), revision: Number(d['revision'] ?? 0), updatedAt: String(d['updatedAt'] ?? d['createdAt'] ?? ''), title: d['title'] as string | undefined })),
     workProducts: listOf<T.WorkProduct>(r['workProducts'] ?? []),
+    mergeQueue: {
+      position: (((r['mergeQueue'] ?? {}) as Record<string, unknown>)['position'] as number | null | undefined) ?? null,
+      concurrency: Number(((r['mergeQueue'] ?? {}) as Record<string, unknown>)['concurrency'] ?? 1),
+    },
     openspecState: spec
       ? {
           changeName: (spec['changeName'] as string | null) ?? null,
@@ -335,6 +339,12 @@ export function useTicket(id: string): UseQueryResult<T.TicketDetail> {
         if (!d.role && d.ticket.assigneeRoleId) d.role = await api.ws<{ role: Role }>(ws, `/roles/${d.ticket.assigneeRoleId}`).then((r) => r.role ?? null).catch(() => null);
         return d;
       }), enabled: Boolean(id) });
+}
+
+/** A project's merge queue: what is landing now and who is waiting, in order (PLAN §11.4). */
+export function useMergeQueue(projectId: string | null | undefined): UseQueryResult<T.MergeQueue> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.mergeQueue(ws, projectId ?? ''), queryFn: () => api.ws<T.MergeQueue>(ws, `/projects/${projectId}/merge-queue`), enabled: Boolean(projectId) });
 }
 
 export function useCreateTicket(): UseMutationResult<Ticket, Error, Record<string, unknown>> {

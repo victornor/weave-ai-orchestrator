@@ -4,6 +4,7 @@ import { ticketUiStatus } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';
+import { MergeQueueBadge } from '../components/MergeQueue';
 import { Skeleton, SkeletonRows } from '../components/Skeleton';
 import { ErrorState, EmptyState } from '../components/States';
 import { Markdown } from '../components/Markdown';
@@ -94,6 +95,7 @@ export function TicketRoute(): React.ReactElement {
         meta={
           <span className="flex items-center gap-2">
             {isFolded(ticket.status) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
+            {ticket.status === 'merging' ? <MergeQueueBadge position={detail.data.mergeQueue.position} merging={detail.data.mergeQueue.position === null} /> : null}
             {project ? <span className="ac-mono">{project.slug}</span> : null}
             {worker ? <span>{worker.name}</span> : null}
           </span>

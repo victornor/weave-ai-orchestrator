@@ -93,7 +93,28 @@ export interface TicketDetail {
   documents: Array<{ key: string; revision: number; updatedAt: string; title?: string }>;
   workProducts: WorkProduct[];
   openspecState: OpenSpecState | null;
+  /** Where the ticket stands in its project's merge queue; `position` is null unless it is waiting. */
+  mergeQueue: { position: number | null; concurrency: number };
   usage?: UsageTotals;
+}
+
+/** One ticket's place in a project's merge queue (PLAN §11.4). `position` is null while it merges. */
+export interface MergeQueueEntry {
+  ticketId: string;
+  identifier: string;
+  title: string;
+  projectId: string | null;
+  position: number | null;
+  queuedAt: string | null;
+  startedAt: string | null;
+  workerId: string | null;
+}
+
+export interface MergeQueue {
+  projectId: string;
+  concurrency: number;
+  active: MergeQueueEntry[];
+  waiting: MergeQueueEntry[];
 }
 
 export interface WorkProduct {

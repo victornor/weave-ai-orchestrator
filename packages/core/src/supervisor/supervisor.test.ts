@@ -59,6 +59,23 @@ describe('supervisor', () => {
     expect(spawnForTicket).toHaveBeenCalledWith({ kind: 'system', id: null }, ticketId);
   });
 
+  it('spawns no worker for a ticket that is waiting in the merge queue, and one once it is admitted', async () => {
+    const ticketId = seedTicket(h, { status: 'merging', mergeQueuedAt: nowIso() });
+    await supervisor.tick();
+    expect(spawnForTicket).not.toHaveBeenCalled();
+
+    h.db.update('tickets', ticketId, { mergeStartedAt: nowIso() });
+    await supervisor.tick();
+    expect(spawnForTicket).toHaveBeenCalledWith({ kind: 'system', id: null }, ticketId);
+  });
+
+  it('pumps every project merge queue on the tick, with no transition having occurred', async () => {
+    const pumpAll = vi.fn(async () => 1);
+    h.services.tickets = { livenessViolations: () => [], mergeQueue: { pumpAll } } as never;
+    await supervisor.tick();
+    expect(pumpAll).toHaveBeenCalled();
+  });
+
   it('does not spawn when the role is not active or a worker already exists', async () => {
     seedTicket(h);
     h.db.update('roles', h.roleId, { status: 'paused' });

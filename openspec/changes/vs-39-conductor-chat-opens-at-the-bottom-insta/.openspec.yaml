@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Conductor chat opens at the bottom instantly, loads only recent messages,
+  and lazy-loads older history on scroll up
+skip_specs: true

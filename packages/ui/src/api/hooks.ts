@@ -1,4 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import type { RunEvent, TicketComment, Ticket, Decision, Agent, Role, Run, Project, UsageGrain, UsageWindow, Workspace } from '@agent-conductor/shared';
 import { listOf, api, qs } from './client';
@@ -749,14 +750,55 @@ export function useCreateThread(): UseMutationResult<T.ThreadSummary, Error, { l
   });
 }
 
-export function useThreadMessages(id: string | null): UseQueryResult<T.ThreadMessage[]> {
+/**
+ * One page of thread history. Small enough that opening a long thread costs one short request and
+ * one short render; the pages before it are fetched only when the human scrolls back to them.
+ */
+export const THREAD_PAGE_SIZE = 30;
+
+/** A thread's history, newest page first on the wire and oldest message first in `data`. */
+export interface ThreadHistory {
+  data: T.ThreadMessage[] | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  refetch: () => void;
+  /** True while the page before the loaded history is in flight. */
+  isLoadingOlder: boolean;
+  /** False once a short page has come back: that page began the thread. */
+  hasOlder: boolean;
+  loadOlder: () => void;
+}
+
+export function useThreadMessages(id: string | null): ThreadHistory {
   const ws = useWs();
-  return useQuery({
+  // `GET /threads/:id/messages` pages backwards on `created_at <` and answers oldest-first within a
+  // page, so the cursor for the page before one already loaded is that page's first message.
+  const q = useInfiniteQuery({
     queryKey: qk.threadMessages(ws, id ?? ''),
-    queryFn: () =>
-      api.ws<T.ThreadMessage[] | T.ThreadMessagesPage>(ws, `/threads/${id}/messages${qs({ limit: 200 })}`).then((r) => listOf(r, 'messages')),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      api
+        .ws<T.ThreadMessage[] | T.ThreadMessagesPage>(ws, `/threads/${id}/messages${qs({ limit: THREAD_PAGE_SIZE, before: pageParam })}`)
+        .then((r) => listOf<T.ThreadMessage>(r, 'messages')),
+    getNextPageParam: (page) => (page.length < THREAD_PAGE_SIZE ? undefined : page[0]?.createdAt),
     enabled: Boolean(id),
   });
+  // Invalidation (a sent message, a `thread.message` event) refetches the loaded pages in order,
+  // recomputing each cursor from the page before it, so a message arriving at the bottom shifts the
+  // window without tearing a hole in it.
+  const data = useMemo(() => (q.data ? [...q.data.pages].reverse().flat() : undefined), [q.data]);
+  const { hasNextPage, isFetchingNextPage, fetchNextPage, refetch } = q;
+  return {
+    data,
+    isLoading: q.isLoading,
+    isError: q.isError,
+    refetch: () => void refetch(),
+    isLoadingOlder: isFetchingNextPage,
+    hasOlder: hasNextPage,
+    loadOlder: () => {
+      if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+    },
+  };
 }
 
 export function usePostThreadMessage(): UseMutationResult<unknown, Error, { threadId: string; body: string; projectId?: string | null; replyToMessageId?: string | null }> {

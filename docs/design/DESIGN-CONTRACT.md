@@ -70,6 +70,7 @@ Rule: `needs-you` is the only coloured status that uses the accent family; every
 ## 3. Navigation
 
 - Phone: bottom bar with five tabs (Chat · Board · Team · Needs you · More) and **Start Work** as a circular action floating above the bar centre. "Six targets do not fit at 390px."
+- Bottom-bar layout rule: the Start Work button is 52 px and half-sunk, its lower edge 26 px into the bar; the tab row therefore starts 28 px down, so the button covers no entry. Five equal tabs put an entry dead centre at every phone width, and the centre tab must stay readable and tappable. The bar keeps its 78 px of chrome and grows by `env(safe-area-inset-bottom)`; the content above it holds the same gap open. Checked at 320 · 360 · 375 · 390 · 430 px.
 - Desktop: left rail with keyboard numbers: Chat `1`, Needs you `2` (badge count), Board `3`, Team `4`, Runs `5`, Usage `6`, Knowledge `7`, Settings `,`. Project list under the rail (web, api, infra) with per-project colour and open count; the rail is the only place all projects appear at once.
 - After sign-in the app lands on **Needs you**, not Chat ("signing in from a phone is almost always prompted by something waiting").
 - `⌘K` palette: Open ticket (⏎), Create ticket (C), Set status (S), Filter board (F), Switch workspace (⌘⇧O); `⇥` scopes to a project.
@@ -113,7 +114,7 @@ Notifications: opt-in browser permission prompt phrased in outcomes; Settings to
 4. Graph on phone = selected node then neighbours as a list, one hop at a time; same rendering for the TUI.
 5. Sign-in lands on Needs you.
 6. Offline writes and offline decisions queue like messages queued while the conductor is mid-turn; decisions are re-validated on reconnect.
-7. Bottom bar: five tabs plus a floating Start Work.
+7. Bottom bar: five tabs plus a floating Start Work that clears the tab row.
 8. Six board columns for eleven statuses; table view shows all.
 9. `needs-you` shares the accent hue.
 10. A worker question is a decision card; the answer is written back as a ticket comment.

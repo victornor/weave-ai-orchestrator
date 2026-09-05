@@ -5,6 +5,8 @@ import { TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
 import { RAIL, TABS, href } from './nav';
 import { NavGlyph } from './NavGlyph';
 import { StartWorkSheet } from './StartWorkSheet';
+import { BottomBar } from './BottomBar';
+import { PlusGlyph } from './PlusGlyph';
 import { CommandPalette } from '../components/CommandPalette';
 import type { Command } from '../components/CommandPalette';
 import { ConnectionBanner, UnreachableScreen } from '../components/ConnectionBanner';
@@ -16,14 +18,6 @@ import { flushQueue, useQueueCount } from '../lib/queue';
 import type { QueuedWrite } from '../lib/queue';
 import { api, ApiError, NetworkError, setWorkspaceId } from '../api/client';
 import { cx } from '../lib/cx';
-
-function PlusGlyph({ className }: { className?: string }): React.ReactElement {
-  return (
-    <svg viewBox="0 0 16 16" className={className} aria-hidden>
-      <path d="M7.2 0h1.6v7.2H16v1.6H8.8V16H7.2V8.8H0V7.2h7.2z" fill="currentColor" />
-    </svg>
-  );
-}
 
 export function AppShell(): React.ReactElement {
   const ws = useWs();
@@ -233,36 +227,11 @@ export function AppShell(): React.ReactElement {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <ConnectionBanner state={conn.state} capturedAt={conn.capturedAt} queuedCount={queuedCount} />
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden pb-bar md:pb-0">
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden ac-bar-pad md:pb-0">
           <Outlet />
         </main>
 
-        {/* phone bottom bar: five tabs plus a floating Start Work */}
-        <nav
-          aria-label="Sections"
-          className="ac-safe-bottom fixed inset-x-0 bottom-0 z-30 flex h-bar items-start border-t border-line-1 bg-bg-input px-1.5 pt-3 md:hidden"
-        >
-          {TABS.map((item) => {
-            const active = isActive(href(item, ws));
-            return (
-              <A key={item.key} to={href(item, ws)} className="relative flex flex-1 flex-col items-center gap-1.5">
-                <NavGlyph glyph={item.glyph} active={active} />
-                <span className={cx('text-nano font-medium', active ? 'text-text-1' : 'text-text-nav')}>{item.label}</span>
-                {item.key === 'needs' && needsCount > 0 ? (
-                  <span className="ac-mono absolute -top-1 right-1/4 rounded-pill bg-needs-you px-1 text-nano text-bg-0">{needsCount}</span>
-                ) : null}
-              </A>
-            );
-          })}
-          <button
-            type="button"
-            aria-label="Start work"
-            onClick={() => setStartOpen(true)}
-            className="absolute left-1/2 top-[-1.625rem] flex size-13 -translate-x-1/2 items-center justify-center rounded-pill border-[3px] border-bg-0 bg-accent text-accent-on shadow-float"
-          >
-            <PlusGlyph className="size-4" />
-          </button>
-        </nav>
+        <BottomBar ws={ws} items={TABS} needsCount={needsCount} isActive={isActive} onStartWork={() => setStartOpen(true)} />
       </div>
 
       <CommandPalette

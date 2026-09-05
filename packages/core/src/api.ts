@@ -178,7 +178,7 @@ export interface ThreadsService {
   get(id: string): S.ChannelThread;
   list(filter?: { channelKind?: string; agentId?: string; ticketId?: string }): S.ChannelThread[];
   bindTicket(actor: Actor, threadId: string, ticketId: string | null): S.ChannelThread;
-  inbound(actor: Actor, threadId: string, body: string, opts?: { externalMessageId?: string; parts?: unknown[] }): Promise<S.ThreadMessage>;  // stores + wakes
+  inbound(actor: Actor, threadId: string, body: string, opts?: { externalMessageId?: string; parts?: unknown[]; projectId?: string | null }): Promise<S.ThreadMessage>;  // stores + wakes
   outbound(actor: Actor, threadId: string, body: string, opts?: { parts?: unknown[]; runId?: string | null }): Promise<S.ThreadMessage>;
   messages(threadId: string, opts?: { before?: string; limit?: number }): S.ThreadMessage[];
   primaryThread(): S.ChannelThread | null;

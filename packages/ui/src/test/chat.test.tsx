@@ -1,7 +1,8 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, RunEvent, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
-import { agent, ticket } from './factories';
+import type { Agent, Project, RunEvent, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
+import { agent, project, ticket } from './factories';
+import { enqueue } from '../lib/queue';
 
 const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>() }));
 const state = vi.hoisted(() => ({
@@ -12,13 +13,16 @@ const state = vi.hoisted(() => ({
   workers: [] as Agent[],
   ticketQuery: null as Record<string, unknown> | null,
   workerQuery: null as Record<string, unknown> | null,
+  projects: [] as Project[],
+  posted: [] as Array<Record<string, unknown>>,
+  connection: 'connected' as string,
 }));
 
 vi.mock('../api/context', async () => {
   const { useEffect, useRef } = await import('react');
   return {
     useWs: () => 'ws1',
-    useConnection: () => ({ state: 'connected', capturedAt: null, lastSeq: 0, attempts: 0 }),
+    useConnection: () => ({ state: state.connection, capturedAt: null, lastSeq: 0, attempts: 0 }),
     useWorkspaceEvents: (fn: (e: WorkspaceEvent) => void) => {
       const ref = useRef(fn);
       ref.current = fn;
@@ -37,12 +41,12 @@ vi.mock('../api/hooks', () => ({
   useThreads: () => ({ data: [{ id: 'th_1' }], isSuccess: true }),
   useCreateThread: () => ({ mutate: vi.fn(), isPending: false, data: null }),
   useThreadMessages: () => ({ data: state.messages, isLoading: false, isError: false, refetch: vi.fn() }),
-  usePostThreadMessage: () => ({ mutate: vi.fn() }),
+  usePostThreadMessage: () => ({ mutate: (v: Record<string, unknown>) => state.posted.push(v) }),
   useDecisions: () => ({ data: [] }),
   useAnswerDecision: () => ({ mutate: vi.fn(), isPending: false }),
   useTickets: (p: Record<string, unknown>) => { state.ticketQuery = p; return { data: state.tickets }; },
   useWorkers: (p: Record<string, unknown>) => { state.workerQuery = p; return { data: state.workers }; },
-  useProjects: () => ({ data: [{ id: 'p1' }], isSuccess: true }),
+  useProjects: () => ({ data: state.projects, isSuccess: true }),
 }));
 
 vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
@@ -72,7 +76,7 @@ function ev(over: Partial<RunEvent> & Pick<RunEvent, 'id' | 'seq' | 'type'>): Ru
 
 function message(over: Partial<ThreadMessage> & Pick<ThreadMessage, 'id' | 'body'>): ThreadMessage {
   return {
-    threadId: 'th_1', direction: 'outbound', authorKind: 'agent', authorId: 'ag_conductor', runId: 'run_1',
+    threadId: 'th_1', direction: 'outbound', authorKind: 'agent', authorId: 'ag_conductor', runId: 'run_1', projectId: null,
     parts: [], externalMessageId: null, deliveryStatus: 'delivered', createdAt: '2026-09-01T09:00:00.000Z', ...over,
   };
 }
@@ -94,6 +98,10 @@ beforeEach(() => {
   state.workers = [];
   state.ticketQuery = null;
   state.workerQuery = null;
+  state.projects = [project({ id: 'p1', name: 'API' })];
+  state.posted = [];
+  state.connection = 'connected';
+  vi.mocked(enqueue).mockClear();
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
@@ -312,5 +320,104 @@ describe('ChatRoute dispatch labels', () => {
     state.workers = [state.workers[0]!];
     rerender(<ChatRoute />);
     expect(screen.queryByRole('button', { name: /Backend Engineer #2/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('project context', () => {
+  const picker = (): HTMLSelectElement => screen.getByLabelText('Project for this message') as HTMLSelectElement;
+  const sent = (body: string): void => {
+    const box = screen.getByLabelText('Message the conductor…');
+    fireEvent.change(box, { target: { value: body } });
+    fireEvent.click(screen.getByLabelText('Send'));
+  };
+
+  beforeEach(() => {
+    state.projects = [project({ id: 'p1', name: 'API' }), project({ id: 'p2', slug: 'web', name: 'Web' })];
+  });
+
+  it('offers every non-archived project plus "all projects"', () => {
+    state.projects = [...state.projects, project({ id: 'p3', slug: 'old', name: 'Retired', status: 'archived' })];
+    render(<ChatRoute />);
+    expect([...picker().options].map((o) => o.textContent)).toEqual(['All projects', 'API', 'Web']);
+  });
+
+  it('offers only "all projects" in a workspace with none, and still sends', () => {
+    state.projects = [];
+    render(<ChatRoute />);
+    expect([...picker().options].map((o) => o.textContent)).toEqual(['All projects']);
+    sent('set me up');
+    expect(state.posted).toEqual([{ threadId: 'th_1', body: 'set me up', projectId: null }]);
+  });
+
+  it('defaults to the project the thread last used', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'first', direction: 'inbound', projectId: 'p1' }),
+      message({ id: 'm2', body: 'reply' }),
+      message({ id: 'm3', body: 'second', direction: 'inbound', projectId: 'p2' }),
+    ];
+    render(<ChatRoute />);
+    expect(picker().value).toBe('p2');
+  });
+
+  it('defaults to "all projects" when the thread last used none, and on an empty thread', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'first', direction: 'inbound', projectId: 'p1' }),
+      message({ id: 'm2', body: 'second', direction: 'inbound', projectId: null }),
+    ];
+    const first = render(<ChatRoute />);
+    expect(picker().value).toBe('');
+    first.unmount();
+
+    state.messages = [];
+    render(<ChatRoute />);
+    expect(picker().value).toBe('');
+  });
+
+  it('sends the chosen project, and nothing when "all projects" is chosen', () => {
+    render(<ChatRoute />);
+    fireEvent.change(picker(), { target: { value: 'p2' } });
+    sent('do the thing');
+    expect(state.posted).toEqual([{ threadId: 'th_1', body: 'do the thing', projectId: 'p2' }]);
+
+    // The pick sticks for the next message until it is changed back.
+    sent('and this too');
+    expect(state.posted[1]).toMatchObject({ projectId: 'p2' });
+
+    fireEvent.change(picker(), { target: { value: '' } });
+    sent('workspace-wide');
+    expect(state.posted[2]).toMatchObject({ body: 'workspace-wide', projectId: null });
+  });
+
+  it('keeps the project on a message queued while offline', () => {
+    state.connection = 'offline';
+    render(<ChatRoute />);
+    fireEvent.change(picker(), { target: { value: 'p1' } });
+    sent('later then');
+
+    expect(state.posted).toHaveLength(0);
+    expect(vi.mocked(enqueue).mock.calls[0]?.[0]).toMatchObject({
+      path: '/threads/th_1/messages',
+      body: { body: 'later then', projectId: 'p1' },
+    });
+  });
+
+  it('shows the project a sent message carried, and nothing when it carried none', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'with a project', direction: 'inbound', projectId: 'p2' }),
+      message({ id: 'm2', body: 'without one', direction: 'inbound', projectId: null }),
+    ];
+    render(<ChatRoute />);
+
+    const withProject = screen.getByText('with a project').parentElement!.parentElement!;
+    expect(withProject).toHaveTextContent('Web');
+    const without = screen.getByText('without one').parentElement!.parentElement!;
+    expect(without).not.toHaveTextContent('Web');
+    expect(without).not.toHaveTextContent('API');
+  });
+
+  it('falls back to the raw reference when the project is gone from the list', () => {
+    state.messages = [message({ id: 'm1', body: 'old message', direction: 'inbound', projectId: 'p_gone' })];
+    render(<ChatRoute />);
+    expect(screen.getByText('old message').parentElement!.parentElement!).toHaveTextContent('p_gone');
   });
 });

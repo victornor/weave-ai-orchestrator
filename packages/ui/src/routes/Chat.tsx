@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ThreadMessage } from '@agent-conductor/shared';
+import type { Project, ThreadMessage } from '@agent-conductor/shared';
 import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Composer } from '../components/Composer';
@@ -74,6 +74,8 @@ export function ChatRoute(): React.ReactElement {
   const workers = useWorkers({ includeRetired: true });
   const projects = useProjects();
   const queuedCount = useQueueCount('thread');
+  /** The project chosen beside the input; `undefined` until the human touches it, so the thread decides. */
+  const [pickedProject, setPickedProject] = useState<string | null | undefined>(undefined);
   const conductor = useConductor();
   const conductorId = conductor.data?.agent.id ?? null;
   /** The conductor run being streamed, or null when it is idle. */
@@ -134,6 +136,20 @@ export function ChatRoute(): React.ReactElement {
   const openTicket = useCallback((identifier: string) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } }), [go, ws]);
   const openWorker = useCallback((workerId: string) => go('/w/$ws/workers/$workerId', { params: { ws, workerId } }), [go, ws]);
 
+  useEffect(() => setPickedProject(undefined), [threadId]);
+
+  // The default is the project the thread last used — read off its own messages, so it is the same
+  // on every device and needs no client-side storage.
+  const lastUsedProject = useMemo(() => {
+    const inbound = (messages.data ?? []).filter((m) => m.direction === 'inbound');
+    return inbound.length ? (inbound[inbound.length - 1]!.projectId ?? null) : null;
+  }, [messages.data]);
+  const projectId = pickedProject === undefined ? lastUsedProject : pickedProject;
+  const projectName = useCallback(
+    (id: string) => projects.data?.find((p) => p.id === id)?.name ?? id,
+    [projects.data],
+  );
+
   // Each message, followed by the dispatches its turn filed; live work with no anchor falls out.
   const { entries, unattributed } = useMemo(
     () => chatEntries(messages.data ?? [], tickets.data ?? [], workers.data ?? []),
@@ -158,11 +174,16 @@ export function ChatRoute(): React.ReactElement {
       return;
     }
     if (offline) {
-      enqueue({ kind: 'thread', path: `/threads/${threadId}/messages`, body: { body: text }, label: text.slice(0, 60) });
+      enqueue({
+        kind: 'thread',
+        path: `/threads/${threadId}/messages`,
+        body: { body: text, ...(projectId ? { projectId } : {}) },
+        label: text.slice(0, 60),
+      });
       return;
     }
     setSending(true);
-    post.mutate({ threadId, body: text });
+    post.mutate({ threadId, body: text, projectId });
   };
 
   // Onboarding: the conductor's first-run interview is just Chat with a
@@ -214,7 +235,7 @@ export function ChatRoute(): React.ReactElement {
           ) : (
             entries.map((entry) => (
               <div key={entry.message.id} className="flex flex-col gap-2">
-                <ChatMessage message={entry.message} onTicket={openTicket} ticketStatus={ticketStatus} />
+                <ChatMessage message={entry.message} onTicket={openTicket} ticketStatus={ticketStatus} projectName={projectName} />
                 {entry.dispatches.map((d) => (
                   <DispatchLabel
                     key={d.ticket.id}
@@ -271,6 +292,7 @@ export function ChatRoute(): React.ReactElement {
             placeholder="Message the conductor…"
             queuedReason={offline ? 'Offline — your message is queued' : working ? 'Conductor is replying — your message is queued' : null}
             queuedCount={queuedCount}
+            scope={<ProjectPicker projects={projects.data ?? []} value={projectId} onChange={setPickedProject} />}
             onSubmit={send}
           />
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -284,14 +306,51 @@ export function ChatRoute(): React.ReactElement {
   );
 }
 
+/**
+ * The project this message is about, chosen beside the input and sent with it. "All projects" is the
+ * absence of a choice, so it sends nothing and leaves the message exactly as it was before.
+ */
+function ProjectPicker({
+  projects,
+  value,
+  onChange,
+}: {
+  projects: Project[];
+  value: string | null;
+  onChange: (id: string | null) => void;
+}): React.ReactElement {
+  // Archived projects are not offered, but one the thread already used stays listed rather than
+  // leaving the control blank about what the next message would carry.
+  const choosable = projects.filter((p) => p.status !== 'archived' || p.id === value);
+  const orphan = value !== null && !choosable.some((p) => p.id === value);
+  return (
+    <select
+      aria-label="Project for this message"
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value || null)}
+      className="rounded-r4 border border-line-2 bg-bg-1 px-1.5 py-0.5 text-micro text-text-2 outline-none"
+    >
+      <option value="">All projects</option>
+      {orphan ? <option value={value}>{value}</option> : null}
+      {choosable.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function ChatMessage({
   message,
   onTicket,
   ticketStatus,
+  projectName,
 }: {
   message: ThreadMessage;
   onTicket: (id: string) => void;
   ticketStatus: (id: string) => ReturnType<typeof ticketUiStatus> | null;
+  projectName: (id: string) => string;
 }): React.ReactElement {
   const mine = message.direction === 'inbound';
   return (
@@ -303,7 +362,12 @@ function ChatMessage({
       >
         {mine ? message.body : <MessageBody body={message.body} onTicket={onTicket} ticketStatus={ticketStatus} />}
       </div>
-      <span className="ac-mono text-nano text-text-4">{clock(message.createdAt)}</span>
+      <span className="flex items-center gap-1.5">
+        {message.projectId ? (
+          <span className="rounded-r4 border border-line-2 bg-bg-2 px-1.5 py-0.5 text-nano text-text-3">{projectName(message.projectId)}</span>
+        ) : null}
+        <span className="ac-mono text-nano text-text-4">{clock(message.createdAt)}</span>
+      </span>
     </div>
   );
 }

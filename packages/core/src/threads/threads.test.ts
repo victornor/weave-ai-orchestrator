@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
+import { createProjectsService } from '../projects/index.js';
 import { createTicketsService } from '../tickets/service.js';
 import { createThreadsService } from './service.js';
 import type { Actor, ThreadsService, TicketsService } from '../api.js';
@@ -19,6 +20,7 @@ describe('threads', () => {
     wake = fakeWake();
     h.services.wake = wake as never;
     h.services.decisions = { create: vi.fn(() => ({ id: 'd' })), supersedeForTarget: vi.fn(() => 0) } as never;
+    h.services.projects = createProjectsService(h.ctx, h.deps);
     tickets = createTicketsService(h.ctx, h.deps);
     h.services.tickets = tickets;
     threads = createThreadsService(h.ctx, h.deps);
@@ -58,6 +60,48 @@ describe('threads', () => {
     expect(wake.calls).toEqual([
       expect.objectContaining({ agentId: workerId, input: expect.objectContaining({ source: 'ticket_comment' }) }),
     ]);
+  });
+
+  it('carries the project a message was sent with onto the message and into the wake payload', async () => {
+    const t = threads.bindOrGet('web', 'web-p1', null, 'Victor');
+    const msg = await threads.inbound(HUMAN, t.id, 'ship the selector', { projectId: h.projectId });
+
+    expect(msg.projectId).toBe(h.projectId);
+    expect(threads.messages(t.id).map((m) => m.projectId)).toEqual([h.projectId]);
+    expect(wake.calls[0]).toEqual(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          reason: expect.stringContaining(h.projectSlug),
+          payload: expect.objectContaining({ messageId: msg.id, projectId: h.projectId, projectSlug: h.projectSlug }),
+        }),
+      }),
+    );
+  });
+
+  it('normalises a project slug to the project id', async () => {
+    const t = threads.bindOrGet('web', 'web-p2', null);
+    const msg = await threads.inbound(HUMAN, t.id, 'by slug', { projectId: h.projectSlug });
+    expect(msg.projectId).toBe(h.projectId);
+  });
+
+  it('reports no project explicitly when a message carries none', async () => {
+    const t = threads.bindOrGet('web', 'web-p3', null);
+    const msg = await threads.inbound(HUMAN, t.id, 'no project here');
+
+    expect(msg.projectId).toBeNull();
+    expect(threads.messages(t.id)[0]?.projectId).toBeNull();
+    expect(wake.calls[0]?.input.payload).toEqual(
+      expect.objectContaining({ threadId: t.id, messageId: msg.id, body: 'no project here', projectId: null, projectSlug: null }),
+    );
+  });
+
+  it('rejects an unknown project, storing no message and waking nobody', async () => {
+    const t = threads.bindOrGet('web', 'web-p4', null);
+    await expect(threads.inbound(HUMAN, t.id, 'wrong project', { projectId: 'nope' })).rejects.toThrowError(
+      expect.objectContaining({ code: 'not_found' }),
+    );
+    expect(threads.messages(t.id)).toHaveLength(0);
+    expect(wake.calls).toHaveLength(0);
   });
 
   it('marks outbound web messages delivered and other channels pending', async () => {

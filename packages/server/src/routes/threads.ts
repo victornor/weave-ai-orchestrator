@@ -20,8 +20,8 @@ export function threadRoutes(): Hono<AppEnv> {
   });
 
   app.post('/:id/messages', async (c) => {
-    const { body: text } = await body(c, z.object({ body: z.string().min(1) }));
-    return c.json(await c.get('ws').services.threads.inbound(c.get('actor'), c.req.param('id'), text), 201);
+    const { body: text, projectId } = await body(c, z.object({ body: z.string().min(1), projectId: z.string().nullish() }));
+    return c.json(await c.get('ws').services.threads.inbound(c.get('actor'), c.req.param('id'), text, { projectId }), 201);
   });
 
   app.post('/:id/bind', async (c) => {

@@ -673,11 +673,11 @@ export function useThreadMessages(id: string | null): UseQueryResult<T.ThreadMes
   });
 }
 
-export function usePostThreadMessage(): UseMutationResult<unknown, Error, { threadId: string; body: string }> {
+export function usePostThreadMessage(): UseMutationResult<unknown, Error, { threadId: string; body: string; projectId?: string | null }> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ threadId, body }) => api.ws(ws, `/threads/${threadId}/messages`, { method: 'POST', body: { body } }),
+    mutationFn: ({ threadId, body, projectId }) => api.ws(ws, `/threads/${threadId}/messages`, { method: 'POST', body: { body, ...(projectId ? { projectId } : {}) } }),
     onSettled: (_d, _e, v) => void qc.invalidateQueries({ queryKey: qk.threadMessages(ws, v.threadId) }),
   });
 }

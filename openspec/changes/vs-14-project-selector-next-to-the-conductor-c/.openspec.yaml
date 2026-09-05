@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-05
+goal: Project selector next to the conductor chat input, passed as context to
+  the conductor

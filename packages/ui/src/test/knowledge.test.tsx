@@ -126,6 +126,18 @@ describe('Knowledge — archived change page', () => {
   });
 });
 
+describe('Knowledge — graph tab', () => {
+  it('does not load the graph renderer until its tab is opened', async () => {
+    render(<KnowledgeRoute />);
+    expect(screen.queryByLabelText('Search the graph')).toBeNull();
+
+    fireEvent.click(screen.getAllByRole('tab', { name: 'Graph' })[0]!);
+
+    // The lazy chunk resolves on the next microtask; the empty graph is what this mock draws.
+    expect(await screen.findByText('Nothing to draw yet.')).toBeInTheDocument();
+  });
+});
+
 describe('Knowledge — nested capability page', () => {
   it('opens a nested capability by its full id and renders its requirements and change history', () => {
     render(<KnowledgeRoute />);

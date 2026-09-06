@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented, Tabs } from '../components/Tabs';
 import { BudgetMeter } from '../components/BudgetMeter';
@@ -23,8 +23,11 @@ import {
 import { ago } from '../lib/format';
 import { cx } from '../lib/cx';
 import { DocsPanel, DocPanel, refFromPath, type DocRef } from './KnowledgeDocs';
-import { KnowledgeGraphView } from './KnowledgeGraph';
 import { ChangelogPanel } from './Changelog';
+
+// The graph is the only screen that needs a force-layout engine. Loading it on demand keeps
+// `d3-force` and the renderer out of the chunk every other page pays for.
+const KnowledgeGraphView = lazy(async () => ({ default: (await import('./KnowledgeGraph')).KnowledgeGraphView }));
 
 type Tab = 'knowledge' | 'changelog' | 'graph' | 'specs';
 
@@ -183,7 +186,9 @@ function GraphPanel({ project }: { project?: string }): React.ReactElement {
   };
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4">
-      <KnowledgeGraphView project={project} onOpen={openPath} />
+      <Suspense fallback={<SkeletonRows rows={6} />}>
+        <KnowledgeGraphView project={project} onOpen={openPath} />
+      </Suspense>
       {openDoc ? <DocPanel doc={openDoc} projects={projects.data ?? []} onOpen={(ref) => { setOpenHub(null); setOpenDoc(ref); }} onClose={() => setOpenDoc(null)} /> : null}
       {openHub ? <KnowledgeDocPanel scope={openHub.scope} project={openHub.project} onClose={() => setOpenHub(null)} onOpenDoc={(ref) => { setOpenHub(null); setOpenDoc(ref); }} /> : null}
     </div>

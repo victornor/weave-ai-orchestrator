@@ -42,6 +42,22 @@ if (!window.matchMedia) {
   })) as unknown as typeof window.matchMedia;
 }
 
+// jsdom has no PointerEvent either, so `fireEvent.pointerDown` falls back to a plain Event and every
+// `pointerId` arrives undefined — which makes two fingers indistinguishable from one. The knowledge
+// graph's pinch and drag handling is keyed on that id.
+if (!window.PointerEvent) {
+  class FakePointerEvent extends MouseEvent {
+    readonly pointerId: number;
+    readonly pointerType: string;
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 0;
+      this.pointerType = init.pointerType ?? 'mouse';
+    }
+  }
+  window.PointerEvent = FakePointerEvent as unknown as typeof window.PointerEvent;
+}
+
 class FakeEventSource {
   close = vi.fn();
   addEventListener = vi.fn();

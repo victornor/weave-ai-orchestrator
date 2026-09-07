@@ -701,13 +701,15 @@ export function ChatRoute(): React.ReactElement {
           ref={decisionsRef}
           aria-label="Open decisions"
           className="ac-scroll flex-none border-t border-line-1 bg-bg-0 px-4 pb-3 md:px-7"
-          // Unresized, the area is as tall as its contents up to the app's own share of the height.
-          // Resized, it is exactly what was chosen — and the cap keeps following `--ac-app-h`, so a
-          // height chosen before a keyboard opened is brought back inside the viewport it left.
+          // Always as tall as its contents, up to a cap — never padded out to fill it, so a strip
+          // holding only the hidden-card count is never taller than that line. Unresized, the cap
+          // is the app's own share of the height. Resized, it is the chosen height, but never past
+          // `--ac-app-h`'s larger share either, so a height chosen before a keyboard opened is
+          // still brought back inside the viewport it left.
           style={
             decisionHeight === null
               ? { maxHeight: 'calc(var(--ac-app-h) * 0.45)' }
-              : { height: `${decisionHeight}px`, maxHeight: 'calc(var(--ac-app-h) * 0.75)' }
+              : { maxHeight: `min(${decisionHeight}px, calc(var(--ac-app-h) * 0.75))` }
           }
         >
           {/* The top edge, as a handle. Sticky rather than absolute: the area scrolls within itself,

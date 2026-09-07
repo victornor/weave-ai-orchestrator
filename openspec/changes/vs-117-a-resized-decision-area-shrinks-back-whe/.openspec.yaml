@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: A resized decision area shrinks back when its cards are gone, instead of
+  holding a chosen height around an empty strip

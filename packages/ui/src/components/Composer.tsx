@@ -190,8 +190,12 @@ export function Composer({
             placeholder={placeholder}
             aria-label={placeholder}
             onChange={(e) => set(e.target.value)}
+            // Enter sends only where there is a modifier to hold for a newline. On touch the key is
+            // left entirely to the browser, so the textarea's own undo, IME composition and autosize
+            // keep working — inserting the '\n' by hand breaks all three (VS-89).
+            enterKeyHint={isTouch ? 'enter' : undefined}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (e.key === 'Enter' && !e.shiftKey && !isTouch) {
                 e.preventDefault();
                 send();
               }

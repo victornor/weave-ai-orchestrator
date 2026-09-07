@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: The project overview's History section shows a polished commit graph with
+  branch visualisation for the project's clone and its worker branches

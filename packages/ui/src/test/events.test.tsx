@@ -86,3 +86,20 @@ describe("a project's pull requests (VS-97)", () => {
     expect(invalidated(event('ticket.updated', { entityId: 'tk_1', entityType: 'ticket' }))).not.toContain(JSON.stringify(qk.pullRequestsRoot('ws1')));
   });
 });
+
+describe("a project's commit graph (VS-96)", () => {
+  it.each(['ticket.work_product', 'ticket.status', 'ticket.merged', 'worker.spawned', 'worker.retired', 'project.updated'] as const)(
+    'is made stale by %s',
+    (type) => {
+      expect(invalidated(event(type, { entityId: 'tk_1', entityType: 'ticket' }))).toContain(JSON.stringify(qk.historyRoot('ws1')));
+    },
+  );
+
+  it('is left alone by a worker event that cannot change which branches exist', () => {
+    expect(invalidated(event('worker.status', { entityId: 'ag_1', entityType: 'agent' }))).not.toContain(JSON.stringify(qk.historyRoot('ws1')));
+  });
+
+  it('is left alone by a ticket event that cannot change a branch', () => {
+    expect(invalidated(event('ticket.updated', { entityId: 'tk_1', entityType: 'ticket' }))).not.toContain(JSON.stringify(qk.historyRoot('ws1')));
+  });
+});

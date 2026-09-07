@@ -509,6 +509,23 @@ export interface PullRequestDetailResult {
   pullRequest: ProjectPullRequestDetail | null;
 }
 
+/** `GET /projects/:id/history` (VS-96). A branch the history covers — the default branch, a worker's, or an unfinished ticket's. */
+export interface ProjectRef {
+  name: string; sha: string; isDefault: boolean;
+  ticketId: string | null; ticketIdentifier: string | null;
+  agentId: string | null; agentName: string | null;
+}
+export interface HistoryCommit { sha: string; parents: string[]; author: string; authoredAt: string; subject: string; refs: string[] }
+/** `cursor` pins the ref tips the first page resolved; `null` means there is no more. */
+export interface HistoryPage { refs: ProjectRef[]; commits: HistoryCommit[]; cursor: string | null }
+
+/** `GET /projects/:id/commits/:sha`. A merge's files are reported against its first parent. */
+export interface CommitFile { path: string; previousPath: string | null; status: 'added' | 'modified' | 'deleted' | 'renamed'; additions: number; deletions: number }
+export interface CommitDetail {
+  sha: string; parents: string[]; author: string; email: string; authoredAt: string; committedAt: string;
+  message: string; files: CommitFile[]; truncatedFiles: number; forgeUrl: string | null;
+}
+
 export interface SpecGraph {
   nodes: Array<{ id: string; kind: 'capability' | 'change' | 'ticket'; label: string; status?: string | null; updatedAt?: string | null }>;
   edges: Array<{ from: string; to: string; kind: string }>;

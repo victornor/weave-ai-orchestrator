@@ -4,12 +4,12 @@
  */
 import { tmpdir } from 'node:os';
 import { Db } from '@agent-conductor/db';
-import { EventBus, createChangelogService, createJobsService, createModelsService, createPullRequestsService, createRegistries, getLogger, initLogger } from '@agent-conductor/core';
-import type { Actor, CoreServices, WorkspaceContext } from '@agent-conductor/core';
+import { EventBus, createChangelogService, createHistoryReader, createJobsService, createModelsService, createPullRequestsService, createRegistries, getLogger, initLogger } from '@agent-conductor/core';
+import type { Actor, CoreServices, HistoryQuery, WorkspaceContext } from '@agent-conductor/core';
 import type { AuthService } from '@agent-conductor/core';
 import {
   DaemonConfigSchema, OcError, WorkspaceConfigSchema,
-  type AccountSyncFailure, type AccountSyncThrottle, type Briefing, type Decision, type RuntimeAccount, type RuntimeCredential, type Ticket, type TicketComment, type Wakeup,
+  type AccountSyncFailure, type AccountSyncThrottle, type Briefing, type Decision, type Project, type RuntimeAccount, type RuntimeCredential, type Ticket, type TicketComment, type Wakeup,
 } from '@agent-conductor/shared';
 import type { AppDeps, WorkspaceRuntime } from '../src/types.js';
 import { createUpdateChecker } from '../src/release-info.js';
@@ -144,6 +144,13 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   const impls: Record<string, Record<string, unknown>> = {};
   const impl = <T extends object>(name: string, methods: Partial<T>): T => { impls[name] = methods as Record<string, unknown>; return unimplemented<T>(name, calls, methods); };
 
+  /** A row a test inserted with `h.db.run("INSERT INTO projects ...")`, else the same stub `projects.get` always returned. */
+  const getProject = (id: string): Project =>
+    db.get<Project>('SELECT * FROM projects WHERE id = ? OR slug = ?', [id, id])
+    ?? ({ id, slug: id, name: id, gitUrl: '', defaultBranch: 'main', clonePath: tmpdir(), maxWorkers: 4, setupCommand: null, worktreeProvider: 'git', openspecEnabled: true, openspecVersion: null, policies: {}, status: 'ready', lastFetchedAt: null, errorText: null } as Project);
+  // Real, like the changelog: read-only over this fake's real db and a real git clone a test points `clonePath` at.
+  const historyReader = createHistoryReader(db);
+
   const services = {
     tickets: impl('tickets', {
       stop: async () => {},
@@ -227,7 +234,11 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     workers: impl('workers', { list: () => [], conductor: () => ({ id: 'ag_conductor', kind: 'conductor' }) }),
     dispatcher: impl('dispatcher', { start: () => undefined, stop: async () => undefined, running: () => 0 }),
     supervisor: impl('supervisor', { start: () => undefined, stop: () => undefined, running: () => true }),
-    projects: impl('projects', { list: () => [], get: (id: string) => ({ id, slug: id, defaultBranch: 'main', clonePath: tmpdir() }) }),
+    projects: impl('projects', {
+      list: () => [], get: getProject,
+      history: (id: string, query?: HistoryQuery) => historyReader.history(getProject(id), query),
+      commit: (id: string, sha: string) => historyReader.commit(getProject(id), sha),
+    }),
     roles: impl('roles', {
       list: () => [],
       setSecrets: async (_actor: Actor, id: string, names: string[]) => {

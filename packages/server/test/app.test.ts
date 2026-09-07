@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
 import { OcError } from '@agent-conductor/shared';
 import { createApp } from '../src/app.js';
@@ -591,5 +595,98 @@ describe('the workspace list', () => {
     const { fetch } = app();
     const body = await (await fetch('/api/workspaces', { headers: authed() })).json() as Array<Record<string, unknown>>;
     expect(body[0]).toHaveProperty('needsYou', 0);
+  });
+});
+
+describe("a project's commit history (VS-96)", () => {
+  const repos: string[] = [];
+  afterEach(() => { while (repos.length) rmSync(repos.pop()!, { recursive: true, force: true }); });
+
+  function repo(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'ac-history-'));
+    repos.push(dir);
+    execFileSync('git', ['init', '-b', 'main'], { cwd: dir });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir });
+    return dir;
+  }
+  function commit(dir: string, file: string, content: string, message: string): string {
+    writeFileSync(join(dir, file), content, 'utf8');
+    execFileSync('git', ['add', '.'], { cwd: dir });
+    execFileSync('git', ['commit', '-m', message], { cwd: dir });
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir }).toString().trim();
+  }
+  function insertProject(h: Harness, clonePath: string, gitUrl = 'https://github.com/acme/api.git'): void {
+    h.db.run(
+      "INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at) VALUES ('proj1','ws1','api','API',?,'main',?,4,'git',1,'{}','ready','t0','t0')",
+      [gitUrl, clonePath],
+    );
+  }
+
+  it('serves a first page newest-first and pages on with a cursor', async () => {
+    const { h, fetch } = app();
+    const dir = repo();
+    commit(dir, 'a.txt', '1', 'first');
+    commit(dir, 'a.txt', '2', 'second');
+    commit(dir, 'a.txt', '3', 'third');
+    insertProject(h, dir);
+
+    const res1 = await fetch('/api/w/ws1/projects/proj1/history?limit=2', { headers: authed() });
+    expect(res1.status).toBe(200);
+    const page1 = await res1.json();
+    expect(page1.commits.map((c: { subject: string }) => c.subject)).toEqual(['third', 'second']);
+    expect(page1.cursor).toBeTruthy();
+    expect(page1.refs).toEqual([expect.objectContaining({ name: 'main', isDefault: true })]);
+
+    const res2 = await fetch(`/api/w/ws1/projects/proj1/history?limit=2&cursor=${encodeURIComponent(page1.cursor)}`, { headers: authed() });
+    const page2 = await res2.json();
+    expect(page2.commits.map((c: { subject: string }) => c.subject)).toEqual(['first']);
+    expect(page2.cursor).toBeNull();
+  });
+
+  it('clamps a non-positive or non-integer limit to a validation error', async () => {
+    const { h, fetch } = app();
+    insertProject(h, repo());
+    const res = await fetch('/api/w/ws1/projects/proj1/history?limit=0', { headers: authed() });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('validation');
+  });
+
+  it('404s an unknown project', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/projects/nope/history', { headers: authed() });
+    expect(res.status).toBe(404);
+  });
+
+  it('refuses a commit id that is not a plain object name', async () => {
+    const { h, fetch } = app();
+    insertProject(h, repo());
+    const res = await fetch('/api/w/ws1/projects/proj1/commits/not-a-sha!!', { headers: authed() });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('validation');
+  });
+
+  it("serves a commit's full detail with its changed files", async () => {
+    const { h, fetch } = app();
+    const dir = repo();
+    commit(dir, 'a.txt', '1', 'first');
+    const sha = commit(dir, 'a.txt', '2', 'second commit');
+    insertProject(h, dir);
+
+    const res = await fetch(`/api/w/ws1/projects/proj1/commits/${sha}`, { headers: authed() });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.message).toContain('second commit');
+    expect(body.files).toEqual([expect.objectContaining({ path: 'a.txt', status: 'modified' })]);
+    expect(body.forgeUrl).toBe(`https://github.com/acme/api/commit/${sha}`);
+  });
+
+  it('answers not found for an unknown commit', async () => {
+    const { h, fetch } = app();
+    const dir = repo();
+    commit(dir, 'a.txt', '1', 'first');
+    insertProject(h, dir);
+    const res = await fetch('/api/w/ws1/projects/proj1/commits/deadbeef1234', { headers: authed() });
+    expect(res.status).toBe(404);
   });
 });

@@ -213,6 +213,9 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       if (evt.type !== 'ticket.updated' && evt.type !== 'ticket.assigned') inv(qk.changelogRoot(ws));
       // Entering or leaving the queue is a status change, so this is the event that moves it.
       if (evt.type === 'ticket.status' || evt.type === 'ticket.merged') inv(qk.mergeQueueRoot(ws));
+      // A merge or a status change is what the daemon drops its forge cache on, so this is when the
+      // overview's Pull requests section has something new to read (VS-97).
+      if (evt.type === 'ticket.status' || evt.type === 'ticket.merged') inv(qk.pullRequestsRoot(ws));
       break;
     case 'ticket.comment':
       inv(qk.ticketComments(ws, id));
@@ -226,6 +229,8 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       inv(qk.ticketWorkProducts(ws, id));
       // A recorded pull request is a changelog entry of its own (`pr_opened`).
       inv(qk.changelogRoot(ws));
+      // It is also the pull request the overview's section is waiting for (VS-97).
+      inv(qk.pullRequestsRoot(ws));
       break;
     case 'decision.created':
     case 'decision.answered':

@@ -18,6 +18,7 @@ import type {
   RunEvent,
   Ticket,
   TicketComment,
+  TicketStatus,
   ThreadMessage,
   Workspace,
   CostStatus,
@@ -430,6 +431,66 @@ export interface SpecChangeDetail extends SpecChangeSummary {
   design: string | null;
   tasks: Array<{ text: string; done: boolean }>;
   deltas: Array<{ capability: string; kind: string; body: string }>;
+}
+
+/** `GET /projects/:id/pull-requests` (VS-97). Flat, exactly as the daemon joins it. */
+export type PullRequestUnavailable = 'no_forge' | 'not_authenticated' | 'no_clone' | 'unsupported' | 'unreachable';
+export type PullRequestChecks = 'pending' | 'success' | 'failure' | 'none';
+
+export interface PullRequestTicket { id: string; identifier: string; title: string; status: TicketStatus; hasPlan: boolean }
+
+export interface ProjectPullRequest {
+  number: number;
+  title: string;
+  url: string;
+  author: string | null;
+  state: 'open' | 'merged' | 'closed';
+  isDraft: boolean;
+  headRefName: string;
+  baseRefName: string;
+  createdAt: string;
+  updatedAt: string;
+  mergedAt: string | null;
+  closedAt: string | null;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  checks: PullRequestChecks;
+  reviewDecision: string | null;
+  mergeCommit: string | null;
+  ticket: PullRequestTicket | null;
+  /** The OpenSpec change its ticket implements; null when it has no ticket or the ticket names none. */
+  changeName: string | null;
+  queue: { state: 'landing' | 'waiting'; position: number | null } | null;
+}
+
+export interface ProjectPullRequestDetail extends ProjectPullRequest {
+  body: string;
+  files: Array<{ path: string; additions: number; deletions: number }>;
+  checkRuns: Array<{ name: string; state: PullRequestChecks; url: string | null }>;
+}
+
+/** `available: false` is a settled statement about the project, never a failed request. */
+export interface ProjectPullRequests {
+  projectId: string;
+  available: boolean;
+  reason: PullRequestUnavailable | null;
+  message: string | null;
+  stale: boolean;
+  capturedAt: string;
+  windowDays: number;
+  open: ProjectPullRequest[];
+  recent: ProjectPullRequest[];
+}
+
+export interface PullRequestDetailResult {
+  projectId: string;
+  available: boolean;
+  reason: PullRequestUnavailable | null;
+  message: string | null;
+  stale: boolean;
+  /** Null with `available: true` means the forge has no such pull request. */
+  pullRequest: ProjectPullRequestDetail | null;
 }
 
 export interface SpecGraph {

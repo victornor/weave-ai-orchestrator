@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Writing a plan document no longer silently kills a ticket's open plan
+  approval and strands it forever

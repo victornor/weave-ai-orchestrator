@@ -361,6 +361,36 @@ describe('supervisor scheduled passes', () => {
     });
   });
 
+  describe('approval integrity (VS-104)', () => {
+    it('wakes the conductor once, naming every ticket repaired', async () => {
+      const repairApprovals = vi.fn(async () => [
+        { id: 't1', identifier: 'TST-1', kind: 'plan_approval' as const },
+        { id: 't2', identifier: 'TST-2', kind: 'merge_approval' as const },
+      ]);
+      h.services.tickets = { livenessViolations: () => [], repairApprovals } as never;
+      await supervisor.tick();
+      expect(repairApprovals).toHaveBeenCalledOnce();
+      const woken = wake.calls.filter((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'approval_repaired');
+      expect(woken).toHaveLength(1);
+      expect(woken[0]!.agentId).toBe(h.conductorId);
+      expect((woken[0]!.input as { reason: string }).reason).toContain('TST-1');
+      expect((woken[0]!.input as { reason: string }).reason).toContain('TST-2');
+    });
+
+    it('wakes nobody when there is nothing to repair', async () => {
+      const repairApprovals = vi.fn(async () => []);
+      h.services.tickets = { livenessViolations: () => [], repairApprovals } as never;
+      await supervisor.tick();
+      expect(repairApprovals).toHaveBeenCalledOnce();
+      expect(wake.calls.some((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'approval_repaired')).toBe(false);
+    });
+
+    it('does not throw the tick when the repair scan itself fails', async () => {
+      h.services.tickets = { livenessViolations: () => [], repairApprovals: vi.fn(async () => { throw new Error('db unavailable'); }) } as never;
+      await expect(supervisor.tick()).resolves.toBeUndefined();
+    });
+  });
+
   describe('reconciliation', () => {
     function seedPrTicket(over: Record<string, unknown> = {}): string {
       const ticketId = seedTicket(h, { status: 'in_review', kind: 'change', ...over });

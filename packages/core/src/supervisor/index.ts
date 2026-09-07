@@ -266,6 +266,28 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   }
 
   /**
+   * `proposed` and `in_review` are deliberately outside `LIVENESS_STATUSES` (an open decision is
+   * their action path), but that means a ticket left with none open — VS-104: an overloaded document
+   * key silently closed one — is invisible to `livenessScan`. `repairApprovals` raises a fresh
+   * approval for any such ticket; this tells the conductor it happened, naming every ticket in one
+   * wake, the same as `knowledgeHealthPass` and the spawn-wait nudge.
+   */
+  async function approvalIntegrityScan(): Promise<void> {
+    let repaired: Array<{ id: string; identifier: string; kind: 'plan_approval' | 'merge_approval' }> = [];
+    try { repaired = await deps().tickets.repairApprovals(); } catch (e) { log.error({ err: String(e) }, 'approval integrity scan failed'); return; }
+    if (!repaired.length) return;
+    for (const r of repaired) log.warn({ ticket: r.identifier, kind: r.kind }, 'ticket had no open approval though it was waiting on one; raised a fresh one');
+    let conductor: Agent;
+    try { conductor = deps().workers.conductor(); } catch { return; }
+    deps().wake.enqueue(conductor.id, {
+      source: 'system',
+      reason: `${repaired.length} ticket(s) had no open approval though they were waiting on one — a fresh approval was raised: ${repaired.map((r) => `${r.identifier} (${r.kind})`).join(', ')}`,
+      payload: { kind: 'approval_repaired', tickets: repaired },
+      requestedBy: { kind: 'system', id: null },
+    });
+  }
+
+  /**
    * A workspace whose conductor has never taken a turn but already has unassigned open tickets
    * (projects added before the wake-on-add existed, or a restored export) gets one nudge per boot.
    */
@@ -598,7 +620,11 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         { const sweep = deps().tickets.autoMergeSweep; if (typeof sweep === 'function') await sweep.call(deps().tickets).catch((e: unknown) => log.error({ err: String(e) }, 'auto-merge sweep failed')); }
         await pumpMergeQueues().catch((e) => log.error({ err: String(e) }, 'merge queue pump failed'));
         await retireFinished().catch((e) => log.error({ err: String(e) }, 'retire pass failed'));
-        if (Date.now() - lastLiveness > LIVENESS_EVERY_MS) { lastLiveness = Date.now(); try { livenessScan(); } catch (e) { log.error({ err: String(e) }, 'liveness scan failed'); } }
+        if (Date.now() - lastLiveness > LIVENESS_EVERY_MS) {
+          lastLiveness = Date.now();
+          try { livenessScan(); } catch (e) { log.error({ err: String(e) }, 'liveness scan failed'); }
+          await approvalIntegrityScan().catch((e) => log.error({ err: String(e) }, 'approval integrity scan failed'));
+        }
         try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }
         try { conductorDigest(); } catch (e) { log.error({ err: String(e) }, 'digest failed'); }
         if (due('supervisor:curation_at', CURATION_EVERY_MS)) await curationPass().catch((e) => log.error({ err: String(e) }, 'curation pass failed'));

@@ -15,8 +15,8 @@ The `conductor` CLI mirrors every tool (`conductor ticket get`, `conductor ask`,
 | `ac_ticket_checkout` | `id` | ownership of the ticket for this run; `409` if held elsewhere |
 | `ac_ticket_release` | `id`, `note` | releases ownership |
 | `ac_ticket_comment` | `id`, `body` (markdown), `kind` = `comment` \| `status` \| `report` \| `relay` | the stored comment |
-| `ac_ticket_document_put` | `id`, `key` (`plan` \| `report` \| …), `body` | a new revision of that document |
-| `ac_ticket_document_get` | `id`, `key` (default `report`), `revision?` | the document's body and revision — a scout's report on any ticket in your project; `not_found` lists the keys that do exist |
+| `ac_ticket_document_put` | `id`, `key` (`report` \| …), `body` | a new revision of that document; `plan` is reserved for the daemon's own generated plan digest and refuses any other writer |
+| `ac_ticket_document_get` | `id`, `key` (default `report`), `revision?` | the document's body and revision — a scout's report, or the daemon's `plan` digest, on any ticket in your project; `not_found` lists the keys that do exist |
 | `ac_ticket_transition` | `id`, `to`, `{note?, unblock?: {owner, action}, blockedBy?: [ids]}` | the new status, or the guard's rejection reasons |
 | `ac_ticket_work_product` | `id`, `{type, url, title, state}` — type is `pull_request` \| `branch` \| `commit` \| `artifact` \| `preview_url` \| `report` | the recorded work product |
 | `ac_ask` | `ticketId?`, `{title, context, options: [{key, label, detail}], recommendation, allowFreeText, correlationKey}` | the created decision; **end the turn after asking** |

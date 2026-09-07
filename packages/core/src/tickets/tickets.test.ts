@@ -186,13 +186,24 @@ describe('tickets', () => {
       expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'ticket_assigned')).toBe(true);
     });
 
-    it('supersedes an open plan approval when a newer plan revision is written', () => {
+    it('supersedes an open plan approval when the daemon writes a newer plan revision', () => {
+      // `{ system: true }` simulates transition()'s own internal write — the one legitimate writer.
       const t = make();
-      tickets.putDocument(AGENT, t.id, 'plan', 'v1');
-      tickets.putDocument(AGENT, t.id, 'plan', 'v2');
+      tickets.putDocument(AGENT, t.id, 'plan', 'v1', { system: true });
+      tickets.putDocument(AGENT, t.id, 'plan', 'v2', { system: true });
       expect(decisions.supersedeForTarget).toHaveBeenCalledWith(expect.anything(), t.id, `plan_approval:${t.id}`);
       expect(tickets.getDocument(t.id, 'plan')?.revision).toBe(2);
       expect(tickets.getDocument(t.id, 'plan', 1)?.body).toBe('v1');
+    });
+
+    it('refuses an external write to the plan key, leaving any open approval untouched', () => {
+      const t = make();
+      tickets.putDocument(AGENT, t.id, 'plan', 'the daemon digest', { system: true });
+      decisions.supersedeForTarget.mockClear();
+      expect(() => tickets.putDocument(AGENT, t.id, 'plan', 'my own notes')).toThrow(expect.objectContaining({ code: 'forbidden' }));
+      expect(decisions.supersedeForTarget).not.toHaveBeenCalled();
+      expect(tickets.getDocument(t.id, 'plan')?.revision).toBe(1);
+      expect(tickets.getDocument(t.id, 'plan')?.body).toBe('the daemon digest');
     });
 
     it('lists the documents on a ticket with their current revision', () => {
@@ -426,6 +437,50 @@ describe('tickets', () => {
         payloadJson: {}, status: 'queued', createdAt: nowIso(),
       });
       expect(tickets.livenessViolations().map((t) => t.id)).not.toContain(stalled.id);
+    });
+  });
+
+  describe('repairApprovals', () => {
+    it('raises a fresh plan_approval for a proposed ticket with none open, and leaves one with an open approval alone', async () => {
+      const stranded = make({ title: 'stranded' });
+      h.db.update('tickets', stranded.id, { status: 'proposed' });
+
+      const fine = make({ title: 'fine' });
+      h.db.update('tickets', fine.id, { status: 'proposed' });
+      h.db.insert('decisions', {
+        id: newId(), workspaceId: h.workspaceId, ticketId: fine.id, kind: 'plan_approval', owner: 'human',
+        title: 'Approve?', context: '', status: 'open', correlationKey: `plan_approval:${fine.id}`, createdAt: nowIso(),
+      });
+      decisions.create.mockClear();
+
+      const repaired = await tickets.repairApprovals();
+      expect(repaired).toEqual([{ id: stranded.id, identifier: stranded.identifier, kind: 'plan_approval' }]);
+      expect(decisions.create).toHaveBeenCalledTimes(1);
+      expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ticketId: stranded.id, kind: 'plan_approval' }));
+    });
+
+    it('raises a fresh merge_approval for an in_review, non-auto_merge ticket with none open, and skips auto_merge tickets', async () => {
+      const stranded = make({ kind: 'task', title: 'stranded' });
+      h.db.update('tickets', stranded.id, { status: 'in_review' });
+
+      const auto = make({ kind: 'task', title: 'auto', autoMerge: true });
+      h.db.update('tickets', auto.id, { status: 'in_review' });
+      decisions.create.mockClear();
+
+      const repaired = await tickets.repairApprovals();
+      expect(repaired).toEqual([{ id: stranded.id, identifier: stranded.identifier, kind: 'merge_approval' }]);
+      expect(decisions.create).toHaveBeenCalledTimes(1);
+      expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ticketId: stranded.id, kind: 'merge_approval' }));
+    });
+
+    it('reports nothing when every waiting ticket already has an open approval', async () => {
+      const t = make();
+      h.db.update('tickets', t.id, { status: 'proposed' });
+      h.db.insert('decisions', {
+        id: newId(), workspaceId: h.workspaceId, ticketId: t.id, kind: 'plan_approval', owner: 'human',
+        title: 'Approve?', context: '', status: 'open', correlationKey: `plan_approval:${t.id}`, createdAt: nowIso(),
+      });
+      expect(await tickets.repairApprovals()).toEqual([]);
     });
   });
 

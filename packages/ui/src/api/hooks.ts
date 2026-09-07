@@ -487,6 +487,40 @@ export function usePullRequest(projectId: string | null | undefined, number: num
   });
 }
 
+/** A pull request's changed-file manifest (VS-107) — the cheap read a file tree opens from, no hunks. */
+export function usePullRequestDiffFiles(projectId: string | null | undefined, number: number | null): UseQueryResult<T.PullRequestDiffFilesResult> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.pullRequestDiffFiles(ws, projectId ?? '', number ?? 0),
+    queryFn: () => api.ws<T.PullRequestDiffFilesResult>(ws, `/projects/${encodeURIComponent(projectId ?? '')}/pull-requests/${number ?? 0}/diff`),
+    enabled: Boolean(projectId) && number !== null,
+  });
+}
+
+/** One file's hunks — requested only once that file is opened, the client-side half of per-file loading. */
+export function usePullRequestDiffFile(projectId: string | null | undefined, number: number | null, path: string | null): UseQueryResult<T.PullRequestDiffFileResult> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.pullRequestDiffFile(ws, projectId ?? '', number ?? 0, path ?? ''),
+    queryFn: () => api.ws<T.PullRequestDiffFileResult>(ws, `/projects/${encodeURIComponent(projectId ?? '')}/pull-requests/${number ?? 0}/diff/file?path=${encodeURIComponent(path ?? '')}`),
+    enabled: Boolean(projectId) && number !== null && path !== null,
+  });
+}
+
+/** A collapsed region's content, read on demand when the reader expands it. */
+export function usePullRequestDiffContext(
+  projectId: string | null | undefined, number: number | null, path: string | null, range: { start: number; end: number } | null,
+): UseQueryResult<T.PullRequestDiffContextResult> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: [...qk.pullRequestDiffFile(ws, projectId ?? '', number ?? 0, path ?? ''), 'context', range?.start ?? 0, range?.end ?? 0] as const,
+    queryFn: () => api.ws<T.PullRequestDiffContextResult>(
+      ws, `/projects/${encodeURIComponent(projectId ?? '')}/pull-requests/${number ?? 0}/diff/file/context?path=${encodeURIComponent(path ?? '')}&start=${range?.start ?? 0}&end=${range?.end ?? 0}`,
+    ),
+    enabled: Boolean(projectId) && number !== null && path !== null && range !== null,
+  });
+}
+
 const HISTORY_PAGE_SIZE = 30;
 
 export interface ProjectHistory {

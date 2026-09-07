@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: The PR explorer shows the diff itself, file by file, the way GitHub does,
+  and merge cards link straight to it

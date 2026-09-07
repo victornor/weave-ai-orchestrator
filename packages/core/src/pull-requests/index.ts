@@ -15,11 +15,15 @@ import { existsSync } from 'node:fs';
 import type { ForgeAdapter, ForgePullRequest, ForgePullRequestDetail } from '@agent-conductor/plugin-sdk';
 import { nowIso } from '@agent-conductor/db';
 import type { EventType, Project, TicketStatus, WorkspaceEvent } from '@agent-conductor/shared';
+import { parseUnifiedDiff, type ParsedDiffFile } from '@agent-conductor/render';
 import type {
-  CoreServices, ProjectPullRequest, ProjectPullRequestDetail, ProjectPullRequests,
-  PullRequestDetailResult, PullRequestTicket, PullRequestsService, PullRequestUnavailable,
+  CoreServices, DiffFileSummary, ProjectPullRequest, ProjectPullRequestDetail, ProjectPullRequests,
+  PullRequestDetailResult, PullRequestDiffContextResult, PullRequestDiffFileResult,
+  PullRequestDiffFilesResult, PullRequestTicket, PullRequestsService, PullRequestUnavailable,
 } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
+import { branchExists, resolveBaseRef } from '../util/git.js';
+import { computeCloneDiff, readFileAtRef } from './diff.js';
 
 /** Long enough that opening, closing and re-opening an overview is one `gh` call; short enough to be a number, not a snapshot. */
 export const PR_CACHE_TTL_MS = 180_000;
@@ -39,7 +43,13 @@ interface CacheEntry {
   message: string | null;
   capturedAt: string;
   details: Map<number, ForgePullRequestDetail | null>;
+  /** One PR's diff, parsed once and sliced per file from then on (VS-107). */
+  diffs: Map<number, DiffCacheEntry>;
+  /** A base-revision file's content, for the collapsed-region expand control — same clone read, whichever file asks. */
+  baseFiles: Map<string, string[] | null>;
 }
+
+type DiffCacheEntry = { ok: true; parsed: ParsedDiffFile[] } | { ok: false; reason: PullRequestUnavailable; message: string | null };
 
 interface WorkProductRow { url: string; ticketId: string; identifier: string; title: string; status: TicketStatus; changeName: string | null }
 interface TicketRow { id: string; identifier: string; title: string; status: TicketStatus; changeName: string | null }
@@ -99,7 +109,10 @@ export function createPullRequestsService(ctx: WorkspaceContext, deps: () => Cor
   /** Read the forge, or say why not. Never throws: an unreachable forge is a reason, not an error. */
   async function fetchEntry(p: Project): Promise<CacheEntry> {
     const capturedAt = nowIso();
-    const base = { at: Date.now(), capturedAt, details: new Map<number, ForgePullRequestDetail | null>() };
+    const base = {
+      at: Date.now(), capturedAt, details: new Map<number, ForgePullRequestDetail | null>(),
+      diffs: new Map<number, DiffCacheEntry>(), baseFiles: new Map<string, string[] | null>(),
+    };
     const forge = ctx.registries.forges.get('github');
     const why = await unavailable(p, forge);
     if (why) return { ...base, prs: null, reason: why, message: null };
@@ -255,5 +268,98 @@ export function createPullRequestsService(ctx: WorkspaceContext, deps: () => Cor
     return { projectId: p.id, available: true, reason: null, message: null, stale, pullRequest: full };
   }
 
-  return { list, get };
+  function toSummary(f: ParsedDiffFile): DiffFileSummary {
+    return { path: f.path, previousPath: f.previousPath, status: f.status, additions: f.additions, deletions: f.deletions, binary: f.binary, tooLarge: f.tooLarge };
+  }
+
+  /**
+   * The forge first, when it can supply a diff at all; the daemon's own clone otherwise, and only
+   * when the pull request's head branch actually lives there — true for every worker branch, false
+   * for a fork we never fetched. Neither source answering is `no_local_branch`, not an error: it is a
+   * settled statement about this particular pull request, the same rule `unavailable()` follows for
+   * the list as a whole.
+   */
+  async function diffTextFor(p: Project, pr: ForgePullRequest): Promise<{ ok: true; text: string } | { ok: false; reason: PullRequestUnavailable; message: string | null }> {
+    const forge = ctx.registries.forges.get('github');
+    if (forge?.pullRequestDiff) {
+      try {
+        const text = await forge.pullRequestDiff(p.clonePath, pr.number);
+        if (text !== null) return { ok: true, text };
+      } catch (e) {
+        log.warn({ project: p.slug, number: pr.number, err: String(e) }, 'reading a pull request diff from the forge failed');
+      }
+    }
+    if (existsSync(p.clonePath) && await branchExists(p.clonePath, pr.headRefName)) {
+      const base = (await resolveBaseRef(p.clonePath, pr.baseRefName)) ?? pr.baseRefName;
+      try {
+        const text = await computeCloneDiff(p.clonePath, base, pr.headRefName);
+        return { ok: true, text };
+      } catch (e) {
+        return { ok: false, reason: 'unreachable', message: String(e instanceof Error ? e.message : e).slice(0, 300) };
+      }
+    }
+    return { ok: false, reason: 'no_local_branch', message: null };
+  }
+
+  /** Fetched and parsed once per pull request per cache window; every file comes out of this one parse. */
+  async function diffEntryFor(p: Project, entry: CacheEntry, pr: ForgePullRequest): Promise<DiffCacheEntry> {
+    const held = entry.diffs.get(pr.number);
+    if (held) return held;
+    const result = await diffTextFor(p, pr);
+    const computed: DiffCacheEntry = result.ok ? { ok: true, parsed: parseUnifiedDiff(result.text) } : { ok: false, reason: result.reason, message: result.message };
+    entry.diffs.set(pr.number, computed);
+    return computed;
+  }
+
+  async function diffFiles(projectIdOrSlug: string, number: number): Promise<PullRequestDiffFilesResult> {
+    const p = project(projectIdOrSlug);
+    const { entry, stale } = await entryFor(p);
+    const shell = { projectId: p.id, number, stale };
+    if (!entry.prs) return { ...shell, available: false, reason: entry.reason, message: entry.message, files: [] };
+    const pr = entry.prs.find((x) => x.number === number);
+    if (!pr) return { ...shell, available: true, reason: null, message: null, files: [] };
+    const diff = await diffEntryFor(p, entry, pr);
+    if (!diff.ok) return { ...shell, available: false, reason: diff.reason, message: diff.message, files: [] };
+    return { ...shell, available: true, reason: null, message: null, files: diff.parsed.map(toSummary) };
+  }
+
+  async function diffFile(projectIdOrSlug: string, number: number, path: string): Promise<PullRequestDiffFileResult> {
+    const p = project(projectIdOrSlug);
+    const { entry } = await entryFor(p);
+    const shell = { projectId: p.id, number };
+    if (!entry.prs) return { ...shell, available: false, reason: entry.reason, message: entry.message, file: null };
+    const pr = entry.prs.find((x) => x.number === number);
+    if (!pr) return { ...shell, available: true, reason: null, message: null, file: null };
+    const diff = await diffEntryFor(p, entry, pr);
+    if (!diff.ok) return { ...shell, available: false, reason: diff.reason, message: diff.message, file: null };
+    const found = diff.parsed.find((f) => f.path === path);
+    if (!found) return { ...shell, available: true, reason: null, message: null, file: null };
+    return { ...shell, available: true, reason: null, message: null, file: { ...toSummary(found), hunks: found.hunks } };
+  }
+
+  async function diffContext(projectIdOrSlug: string, number: number, path: string, startLine: number, endLine: number): Promise<PullRequestDiffContextResult> {
+    const p = project(projectIdOrSlug);
+    const { entry } = await entryFor(p);
+    const shell = { projectId: p.id, number };
+    if (!entry.prs) return { ...shell, available: false, reason: entry.reason, lines: [] };
+    const pr = entry.prs.find((x) => x.number === number);
+    if (!pr) return { ...shell, available: true, reason: null, lines: [] };
+    if (!existsSync(p.clonePath)) return { ...shell, available: false, reason: 'no_clone', lines: [] };
+
+    const cacheKey = `${number}:${path}`;
+    let content = entry.baseFiles.get(cacheKey);
+    if (content === undefined) {
+      const baseRef = (await resolveBaseRef(p.clonePath, pr.baseRefName)) ?? pr.baseRefName;
+      content = await readFileAtRef(p.clonePath, baseRef, path);
+      entry.baseFiles.set(cacheKey, content);
+    }
+    if (!content) return { ...shell, available: true, reason: null, lines: [] };
+
+    const from = Math.max(1, startLine);
+    const to = Math.min(content.length, endLine);
+    if (from > to) return { ...shell, available: true, reason: null, lines: [] };
+    return { ...shell, available: true, reason: null, lines: content.slice(from - 1, to) };
+  }
+
+  return { list, get, diffFiles, diffFile, diffContext };
 }

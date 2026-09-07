@@ -21,8 +21,15 @@ const planDoc = vi.hoisted(() => ({ current: null as Record<string, unknown> | n
 vi.mock('../api/hooks', () => ({
   useTicketDocument: () => planDoc.current ?? { data: undefined, isLoading: false, isError: true },
 }));
+// DecisionCard's "Ask the worker" (VS-106) and "Show PR" (VS-107) links are the only things in this
+// file that reach a route; a plain anchor stands in so these tests keep running with no
+// RouterProvider, still carrying `to`/`params`/`search` as data attributes for tests that check them.
 vi.mock('../app/link', () => ({
-  A: ({ children, to }: { children?: React.ReactNode; to?: string }) => <a href={to}>{children}</a>,
+  A: ({ children, to, params, search, ...rest }: Record<string, unknown> & { children?: React.ReactNode }) => (
+    <a href={String(to)} data-to={String(to)} data-params={JSON.stringify(params ?? {})} data-search={JSON.stringify(search ?? {})} {...(rest as Record<string, unknown>)}>
+      {children}
+    </a>
+  ),
 }));
 
 describe('StatusGlyph', () => {
@@ -355,6 +362,40 @@ describe('DecisionCard', () => {
     );
     expect(screen.getByRole('link', { name: /PR #7/ })).toBeInTheDocument();
     expect(screen.getByText('ACME-42 · api')).toBeInTheDocument();
+  });
+
+  it('offers "Show PR" on a merge approval with a pull request, opening the explorer in place', () => {
+    render(
+      <DecisionCard
+        decision={decision({ kind: 'merge_approval', target: { prUrl: 'https://github.test/a/b/pull/7', prNumber: 7 } })}
+        projectSlug="api"
+        ws="ws1"
+        onAnswer={() => undefined}
+      />,
+    );
+    const link = screen.getByRole('link', { name: 'Show PR' });
+    expect(link.getAttribute('data-to')).toBe('/w/$ws/p/$project');
+    expect(JSON.parse(link.getAttribute('data-params') ?? '{}')).toEqual({ ws: 'ws1', project: 'api' });
+    expect(JSON.parse(link.getAttribute('data-search') ?? '{}')).toEqual({ pr: 7 });
+  });
+
+  it('offers no "Show PR" without a pull request, a project or a workspace to route it to', () => {
+    render(<DecisionCard decision={decision({ kind: 'merge_approval', target: {} })} projectSlug="api" ws="ws1" onAnswer={() => undefined} />);
+    expect(screen.queryByRole('link', { name: 'Show PR' })).not.toBeInTheDocument();
+
+    const { unmount } = render(
+      <DecisionCard decision={decision({ kind: 'merge_approval', target: { prNumber: 7 } })} ws="ws1" onAnswer={() => undefined} />,
+    );
+    expect(screen.queryByRole('link', { name: 'Show PR' })).not.toBeInTheDocument();
+    unmount();
+
+    render(<DecisionCard decision={decision({ kind: 'merge_approval', target: { prNumber: 7 } })} projectSlug="api" onAnswer={() => undefined} />);
+    expect(screen.queryByRole('link', { name: 'Show PR' })).not.toBeInTheDocument();
+  });
+
+  it('offers no "Show PR" on a card that is not a merge approval', () => {
+    render(<DecisionCard decision={decision({ target: { prNumber: 7 } })} projectSlug="api" ws="ws1" onAnswer={() => undefined} />);
+    expect(screen.queryByRole('link', { name: 'Show PR' })).not.toBeInTheDocument();
   });
 
   // ---------- VS-92: answer inputs ----------

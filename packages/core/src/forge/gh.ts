@@ -165,4 +165,14 @@ export class GhForge implements ForgeAdapter {
     try { doc = JSON.parse(r.stdout) as GhPr; } catch { throw new OcError('internal', 'gh pr view returned invalid JSON', { cwd, number }); }
     return pullRequestDetailFromGh(doc);
   }
+
+  /** One pull request's unified diff, exactly as `git diff` would print it. `null` when it has none. */
+  async pullRequestDiff(cwd: string, number: number): Promise<string | null> {
+    const r = await sh('gh', ['pr', 'diff', String(number)], { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
+    if (!r.ok) {
+      if (/no pull requests found|could not resolve to a pullrequest/i.test(r.stderr)) return null;
+      throw new OcError('internal', `gh pr diff failed: ${r.stderr.trim().slice(0, 300)}`, { cwd, number });
+    }
+    return r.stdout;
+  }
 }

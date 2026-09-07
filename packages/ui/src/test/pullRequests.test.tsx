@@ -30,6 +30,20 @@ vi.mock('../app/link', async () => {
 vi.mock('../api/hooks', () => ({
   usePullRequests: () => ({ data: state.list, isLoading: state.listLoading }),
   usePullRequest: () => ({ data: state.detail, isLoading: state.detailLoading }),
+  // The diff view's own manifest, derived from the same fixture files `opened()` already sets on the
+  // detail — VS-107 moved the "Files" list from a plain read of `pullRequest.files` to this endpoint,
+  // and every existing test here still only cares that a changed file's path and counts are on screen.
+  usePullRequestDiffFiles: () => ({
+    data: state.detail?.pullRequest
+      ? {
+          projectId: 'p1', number: state.detail.pullRequest.number, available: true, reason: null, message: null, stale: false,
+          files: state.detail.pullRequest.files.map((f) => ({ ...f, previousPath: null, status: 'modified' as const, binary: false, tooLarge: false })),
+        }
+      : null,
+    isLoading: false,
+  }),
+  usePullRequestDiffFile: () => ({ data: null, isLoading: false }),
+  usePullRequestDiffContext: () => ({ data: null, isLoading: false }),
 }));
 
 const { PullRequestsSection } = await import('../routes/project/PullRequestsSection');

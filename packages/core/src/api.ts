@@ -4,6 +4,7 @@
  */
 import type * as S from '@agent-conductor/shared';
 import type { ForgeChangedFile, ForgeCheck, ForgePullRequest } from '@agent-conductor/plugin-sdk';
+import type { DiffFileStatus, DiffHunk } from '@agent-conductor/render';
 
 export interface Actor { kind: 'human' | 'agent' | 'system'; id: string | null; runId?: string | null }
 export interface Page<T> { items: T[]; total: number }
@@ -413,7 +414,7 @@ export interface ChangelogService {
  * error status: a section cannot tell "this project has no forge" from "the request failed" out of
  * an HTTP code, and it must not show an error for the first.
  */
-export type PullRequestUnavailable = 'no_forge' | 'not_authenticated' | 'no_clone' | 'unsupported' | 'unreachable';
+export type PullRequestUnavailable = 'no_forge' | 'not_authenticated' | 'no_clone' | 'unsupported' | 'unreachable' | 'no_local_branch';
 /** The ticket a pull request belongs to, as a list entry shows it. */
 export interface PullRequestTicket { id: string; identifier: string; title: string; status: S.TicketStatus; hasPlan: boolean }
 /** One listed pull request with everything the daemon could join to it. */
@@ -442,10 +443,37 @@ export interface PullRequestDetailResult {
   /** Null with `available: true` means the forge has no such pull request. */
   pullRequest: ProjectPullRequestDetail | null;
 }
-/** Read-only (VS-97): there is no member here that writes, to the forge or to the database. */
+/** One changed file's identity and shape, from the diff itself rather than the forge's own file list (VS-107). */
+export interface DiffFileSummary {
+  path: string; previousPath: string | null; status: DiffFileStatus;
+  additions: number; deletions: number; binary: boolean; tooLarge: boolean;
+}
+export interface PullRequestDiffFilesResult {
+  projectId: string; number: number; available: boolean; reason: PullRequestUnavailable | null; message: string | null; stale: boolean;
+  files: DiffFileSummary[];
+}
+export interface DiffFileContent extends DiffFileSummary { hunks: DiffHunk[] }
+export interface PullRequestDiffFileResult {
+  projectId: string; number: number; available: boolean; reason: PullRequestUnavailable | null; message: string | null;
+  /** `available: true` with `file: null` means the diff has no such path. */
+  file: DiffFileContent | null;
+}
+export interface PullRequestDiffContextResult {
+  projectId: string; number: number; available: boolean; reason: PullRequestUnavailable | null;
+  /** Base-revision content for the requested range; empty when the file has none there (an added file, or past its end). */
+  lines: string[];
+}
+
+/** Read-only (VS-97, diff content VS-107): there is no member here that writes, to the forge or to the database. */
 export interface PullRequestsService {
   list(projectId: string): Promise<ProjectPullRequests>;
   get(projectId: string, number: number): Promise<PullRequestDetailResult>;
+  /** The changed-file manifest for a pull request's diff — cheap: never carries a hunk. */
+  diffFiles(projectId: string, number: number): Promise<PullRequestDiffFilesResult>;
+  /** One file's hunks, sliced from the same diff `diffFiles` already read and cached. */
+  diffFile(projectId: string, number: number, path: string): Promise<PullRequestDiffFileResult>;
+  /** Base-revision content for a collapsed region's expand control. */
+  diffContext(projectId: string, number: number, path: string, startLine: number, endLine: number): Promise<PullRequestDiffContextResult>;
 }
 
 // ---------- secrets ----------

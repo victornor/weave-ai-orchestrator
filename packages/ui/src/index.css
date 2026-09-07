@@ -512,3 +512,32 @@
   border-bottom: 1px dotted var(--accent-edge);
 }
 .ac-prose a.ac-doclink:hover { border-bottom-style: solid; }
+
+/* highlight.js token classes (VS-107 diff viewer): scoped under one class so a plain diff line
+   (no language recognised, or the grammar still loading) is unaffected. */
+.ac-diff-code .hljs-keyword,
+.ac-diff-code .hljs-selector-tag,
+.ac-diff-code .hljs-literal,
+.ac-diff-code .hljs-section,
+.ac-diff-code .hljs-tag { color: var(--accent-link); }
+.ac-diff-code .hljs-title,
+.ac-diff-code .hljs-title.function_,
+.ac-diff-code .hljs-title.class_,
+.ac-diff-code .hljs-built_in,
+.ac-diff-code .hljs-name,
+.ac-diff-code .hljs-attr,
+.ac-diff-code .hljs-attribute { color: var(--accent); }
+.ac-diff-code .hljs-string,
+.ac-diff-code .hljs-symbol,
+.ac-diff-code .hljs-regexp,
+.ac-diff-code .hljs-addition { color: var(--status-done); }
+.ac-diff-code .hljs-comment,
+.ac-diff-code .hljs-quote,
+.ac-diff-code .hljs-deletion { color: var(--text-4); font-style: italic; }
+.ac-diff-code .hljs-number,
+.ac-diff-code .hljs-type,
+.ac-diff-code .hljs-variable,
+.ac-diff-code .hljs-template-variable { color: var(--text-1); }
+.ac-diff-code .hljs-doctag,
+.ac-diff-code .hljs-strong { font-weight: 600; }
+.ac-diff-code .hljs-emphasis { font-style: italic; }

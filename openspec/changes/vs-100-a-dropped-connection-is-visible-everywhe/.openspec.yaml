@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: A dropped connection is visible everywhere it matters, including the
+  conductor chat's live stream, and recovers by itself

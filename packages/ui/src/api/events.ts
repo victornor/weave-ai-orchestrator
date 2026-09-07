@@ -1,21 +1,12 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { EventType, WorkspaceEvent } from '@agent-conductor/shared';
 import { qk } from './keys';
+import { BACKOFF, type ConnectionState, type ConnectionStatus } from './sseStream';
 
-export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'unreachable';
-
-export interface ConnectionStatus {
-  state: ConnectionState;
-  /** ISO time of the last event or successful open — the "showing the state from 09:38" stamp. */
-  capturedAt: string | null;
-  lastSeq: number;
-  attempts: number;
-}
+export type { ConnectionState, ConnectionStatus };
 
 type Listener = (s: ConnectionStatus) => void;
 type EventListener = (e: WorkspaceEvent) => void;
-
-const BACKOFF = [500, 1000, 2000, 4000, 8000, 15000];
 
 /**
  * SSE subscription to `GET /api/w/:ws/events?after=<seq>` with backoff and
@@ -114,7 +105,7 @@ export class EventStream {
     } catch {
       return;
     }
-    this.set({ lastSeq: Math.max(this.status.lastSeq, evt.seq ?? 0), capturedAt: evt.createdAt ?? new Date().toISOString(), state: 'connected' });
+    this.set({ lastSeq: Math.max(this.status.lastSeq ?? 0, evt.seq ?? 0), capturedAt: evt.createdAt ?? new Date().toISOString(), state: 'connected' });
     invalidateFor(this.qc, this.workspace, evt);
     for (const l of this.eventListeners) l(evt);
   }

@@ -12,6 +12,7 @@ import { useHealth, useInitWorkspace, useMe, useRuntimeModels, useRuntimes } fro
 import { Button } from '../components/Button';
 import { JobProgress } from '../components/JobProgress';
 import { Skeleton } from '../components/Skeleton';
+import { StreamStatusNotice } from '../components/StreamStatus';
 import { useJobStream } from '../api/jobStream';
 import { duration } from '../lib/format';
 import { cx } from '../lib/cx';
@@ -468,7 +469,7 @@ function StepRow({ step, now, workspaceId, onFinish, onRetry }: {
   onFinish: (state: 'done' | 'failed', detail?: string) => void;
   onRetry?: () => void;
 }): React.ReactElement {
-  const job = useJobStream(workspaceId, step.jobId ?? null);
+  const { job, status: jobStreamStatus, retryNow: retryJobStream } = useJobStream(workspaceId, step.jobId ?? null);
 
   // The job is the authority on whether a job-backed step ended.
   const jobState = job?.state;
@@ -496,6 +497,7 @@ function StepRow({ step, now, workspaceId, onFinish, onRetry }: {
         {job && job.steps.length ? (
           <JobProgress className="mt-2" steps={job.steps} log={job.log} failedStep={job.failedStep} message={failed ? job.message : null} now={now} />
         ) : null}
+        {step.jobId ? <StreamStatusNotice className="mt-2" status={jobStreamStatus} onRetry={retryJobStream} /> : null}
         {failed && onRetry ? (
           <span className="mt-2 block">
             <Button variant="secondary" size="sm" onClick={onRetry}>Retry</Button>

@@ -9,34 +9,46 @@
  * A finished run has no tail to follow: `live: false` keeps the persisted query and opens no
  * stream, so the same hook serves a turn being watched and a turn being read back, and a turn that
  * finishes under a surface simply stops streaming while keeping everything it already showed.
+ *
+ * The connection state and manual retry come from `useLiveStream` (`sseStream.ts`), the same
+ * state machine the workspace event stream uses. See `live-streams/connection-state`.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RUN_EVENT_TYPES, type RunEvent } from '@agent-conductor/shared';
 import { useWs } from './context';
 import { useRunEvents } from './hooks';
+import { useLiveStream } from './sseStream';
+import type { ConnectionStatus } from './sseStream';
 
-const BACKOFF = [500, 1000, 2000, 4000, 8000, 15000];
+export interface RunEventStream {
+  events: RunEvent[];
+  status: ConnectionStatus;
+  retryNow: () => void;
+}
 
-export function useRunEventStream(runId: string | null, { live = true }: { live?: boolean } = {}): RunEvent[] {
+export function useRunEventStream(runId: string | null, { live = true }: { live?: boolean } = {}): RunEventStream {
   const ws = useWs();
   const persisted = useRunEvents(runId ?? '');
   const [tail, setTail] = useState<RunEvent[]>([]);
   /** Highest seq rendered, so a reconnect asks for `?after=` it rather than replaying the turn. */
   const seq = useRef(0);
+  /** `null` while there is nothing to stream, so `useLiveStream` opens and retries nothing. */
+  const active = live && runId ? runId : null;
 
   useEffect(() => {
     setTail([]);
     seq.current = 0;
   }, [runId]);
 
-  useEffect(() => {
-    if (!runId || !live) return;
-    let stopped = false;
-    let es: EventSource | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let attempts = 0;
-
-    const handle = (m: MessageEvent<string>): void => {
+  const { status, retryNow } = useLiveStream({
+    resetKey: active,
+    eventTypes: RUN_EVENT_TYPES,
+    buildUrl: () => {
+      if (!active) return null;
+      const after = seq.current ? `?after=${seq.current}` : '';
+      return `/api/w/${encodeURIComponent(ws)}/runs/${encodeURIComponent(active)}/events/stream${after}`;
+    },
+    onFrame: (m) => {
       let evt: RunEvent;
       try {
         evt = JSON.parse(m.data) as RunEvent;
@@ -45,35 +57,11 @@ export function useRunEventStream(runId: string | null, { live = true }: { live?
       }
       if (!evt || typeof evt.seq !== 'number') return;
       seq.current = Math.max(seq.current, evt.seq);
-      attempts = 0;
       setTail((xs) => (xs.some((x) => x.id === evt.id) ? xs : [...xs, evt]));
-    };
+    },
+  });
 
-    const open = (): void => {
-      if (stopped) return;
-      const after = seq.current ? `?after=${seq.current}` : '';
-      const url = `/api/w/${encodeURIComponent(ws)}/runs/${encodeURIComponent(runId)}/events/stream${after}`;
-      es = new EventSource(url, { withCredentials: true });
-      es.onmessage = (m) => handle(m as MessageEvent<string>);
-      // The daemon names every frame `event: <run event type>`; onmessage only sees unnamed frames.
-      for (const type of RUN_EVENT_TYPES) es.addEventListener(type, (m) => handle(m as MessageEvent<string>));
-      es.onerror = () => {
-        es?.close();
-        if (stopped) return;
-        attempts += 1;
-        timer = setTimeout(open, BACKOFF[Math.min(attempts - 1, BACKOFF.length - 1)] ?? 15000);
-      };
-    };
-
-    open();
-    return () => {
-      stopped = true;
-      es?.close();
-      if (timer) clearTimeout(timer);
-    };
-  }, [ws, runId, live]);
-
-  return useMemo(() => {
+  const events = useMemo(() => {
     const out: RunEvent[] = [];
     const seen = new Set<string>();
     for (const e of [...(persisted.data ?? []), ...tail]) {
@@ -83,4 +71,6 @@ export function useRunEventStream(runId: string | null, { live = true }: { live?
     }
     return out.sort((a, b) => a.seq - b.seq);
   }, [persisted.data, tail]);
+
+  return { events, status, retryNow };
 }

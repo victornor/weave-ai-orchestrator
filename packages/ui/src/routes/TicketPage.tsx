@@ -377,7 +377,7 @@ function RunTurn({ run }: { run: Run }): React.ReactElement {
     wasLive.current = live;
   }, [live]);
 
-  const events = useRunEventStream(open ? run.id : null, { live });
+  const { events } = useRunEventStream(open ? run.id : null, { live });
   const at = run.finishedAt ?? run.startedAt ?? run.createdAt;
   const status = run.status === 'running' ? 'working' : run.status === 'succeeded' ? 'done' : run.status === 'interrupted' || run.status === 'cancelled' ? 'paused' : 'failed';
 

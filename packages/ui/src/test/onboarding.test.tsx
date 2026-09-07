@@ -38,7 +38,7 @@ vi.mock('../api/hooks', () => ({
 vi.mock('../api/jobStream', () => ({
   useJobStream: (_ws: string | null, jobId: string | null) => {
     state.attached.push(jobId);
-    return jobId ? state.job : null;
+    return { job: jobId ? state.job : null, status: { state: 'connected', capturedAt: null, attempts: 0 }, retryNow: vi.fn() };
   },
 }));
 

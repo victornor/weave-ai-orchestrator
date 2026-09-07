@@ -72,6 +72,13 @@ export const qk = {
   threads: (ws: string) => ['w', ws, 'threads'] as const,
   threadMessages: (ws: string, id: string) => ['w', ws, 'threads', id, 'messages'] as const,
 
+  // Its own root rather than a key under `projects` (VS-97): the events that make a pull request
+  // list stale are ticket events, and nothing under `projects` is reached by one — the mistake
+  // `qk.mergeQueue` made until VS-95.
+  pullRequestsRoot: (ws: string) => ['w', ws, 'pull-requests'] as const,
+  pullRequests: (ws: string, project: string) => ['w', ws, 'pull-requests', project] as const,
+  pullRequest: (ws: string, project: string, number: number) => ['w', ws, 'pull-requests', project, 'one', number] as const,
+
   presentation: (ws: string) => ['w', ws, 'presentation'] as const,
   presentationSurfaces: (ws: string) => ['w', ws, 'presentation', 'surfaces'] as const,
 } as const;

@@ -1,11 +1,12 @@
 /**
  * The project overview page (VS-95): the address it resolves, the header, every section that has
- * data, and the two sections reserved for VS-96 and VS-97.
+ * data, and the History section still reserved for VS-96. The Pull requests section has its own
+ * suite (`pullRequests.test.tsx`); here it only has to be present, named and rendering.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Decision, Project, Run, Ticket } from '@agent-conductor/shared';
-import type { ChangelogEntry, ChangelogHeatmap, KnowledgeDoc, KnowledgeDocSummary, MergeQueue } from '../api/types';
+import type { ChangelogEntry, ChangelogHeatmap, KnowledgeDoc, KnowledgeDocSummary, MergeQueue, ProjectPullRequests } from '../api/types';
 import { agent, decision, project as projectOf, run, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ const state = vi.hoisted(() => ({
   heatmap: null as ChangelogHeatmap | null,
   hub: null as KnowledgeDoc | null,
   docs: [] as KnowledgeDocSummary[],
+  pullRequests: null as ProjectPullRequests | null,
   go: vi.fn() as ReturnType<typeof vi.fn>,
 }));
 
@@ -42,7 +44,7 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
 vi.mock('../app/link', async () => {
   const router = await import('@tanstack/react-router');
-  return { A: (router as unknown as { Link: unknown }).Link, useGo: () => state.go };
+  return { A: (router as unknown as { Link: unknown }).Link, useGo: () => state.go, useSearchParams: () => ({}) };
 });
 vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: state.projects, isLoading: state.projectsLoading }),
@@ -56,6 +58,8 @@ vi.mock('../api/hooks', () => ({
   useChangelogHeatmap: () => ({ data: state.heatmap, isLoading: false }),
   useKnowledgeDoc: () => ({ data: state.hub, isLoading: false }),
   useKnowledgeDocs: () => ({ data: state.docs, isLoading: false }),
+  usePullRequests: () => ({ data: state.pullRequests, isLoading: false }),
+  usePullRequest: () => ({ data: null, isLoading: false }),
 }));
 
 const { ProjectOverviewRoute } = await import('../routes/project/ProjectOverview');
@@ -104,6 +108,7 @@ beforeEach(() => {
   state.heatmap = null;
   state.hub = null;
   state.docs = [];
+  state.pullRequests = null;
   state.go = vi.fn();
 });
 
@@ -303,7 +308,7 @@ describe('knowledge', () => {
   });
 });
 
-describe('the reserved sections (VS-96, VS-97)', () => {
+describe('the sections', () => {
   it('keeps History and Pull requests in the published order', () => {
     expect(PROJECT_SECTIONS.map((s) => s.key)).toEqual([
       'needs', 'work', 'landing', 'history', 'pulls', 'landings', 'activity', 'knowledge',
@@ -319,12 +324,12 @@ describe('the reserved sections (VS-96, VS-97)', () => {
     expect(within(card).queryByRole('alert')).toBeNull();
   });
 
-  it('names the Pull requests section and says what will be there, with nothing invented', () => {
+  // Its content is VS-97's; all this file asserts is that giving it content changed nothing else.
+  it('renders the Pull requests section without disturbing the page', () => {
+    state.pullRequests = { projectId: 'p1', available: false, reason: 'no_forge', message: null, stale: false, capturedAt: '2026-09-07T10:00:00.000Z', windowDays: 30, open: [], recent: [] };
     render(<ProjectOverviewRoute />);
     const card = section('Pull requests');
-    expect(within(card).getByText(/pull requests of api/)).toBeTruthy();
-    expect(within(card).queryByRole('list')).toBeNull();
-    expect(within(card).queryByRole('status')).toBeNull();
+    expect(within(card).getByText(/no forge/)).toBeTruthy();
     expect(within(card).queryByRole('alert')).toBeNull();
   });
 });

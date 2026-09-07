@@ -3,6 +3,7 @@
  * Every mutation writes an activity row and emits an event. Errors are OcError with a code from shared.
  */
 import type * as S from '@agent-conductor/shared';
+import type { ForgeChangedFile, ForgeCheck, ForgePullRequest } from '@agent-conductor/plugin-sdk';
 
 export interface Actor { kind: 'human' | 'agent' | 'system'; id: string | null; runId?: string | null }
 export interface Page<T> { items: T[]; total: number }
@@ -354,6 +355,48 @@ export interface ChangelogService {
   heatmap(q?: ChangelogHeatmapQuery): S.ChangelogHeatmap;
 }
 
+// ---------- pull requests ----------
+/**
+ * Why a project's pull requests cannot be listed (VS-97). Every one of these is a settled statement
+ * about the project rather than a failure, which is why the list answers with one instead of an
+ * error status: a section cannot tell "this project has no forge" from "the request failed" out of
+ * an HTTP code, and it must not show an error for the first.
+ */
+export type PullRequestUnavailable = 'no_forge' | 'not_authenticated' | 'no_clone' | 'unsupported' | 'unreachable';
+/** The ticket a pull request belongs to, as a list entry shows it. */
+export interface PullRequestTicket { id: string; identifier: string; title: string; status: S.TicketStatus; hasPlan: boolean }
+/** One listed pull request with everything the daemon could join to it. */
+export interface ProjectPullRequest extends ForgePullRequest {
+  ticket: PullRequestTicket | null;
+  /** The OpenSpec change its ticket implements, or null — including when it has no ticket. */
+  changeName: string | null;
+  queue: { state: 'landing' | 'waiting'; position: number | null } | null;
+}
+export interface ProjectPullRequestDetail extends ProjectPullRequest { body: string; files: ForgeChangedFile[]; checkRuns: ForgeCheck[] }
+export interface ProjectPullRequests {
+  projectId: string;
+  available: boolean;
+  reason: PullRequestUnavailable | null;
+  /** Only ever set for `unreachable`: what the forge said. */
+  message: string | null;
+  /** The forge could not be re-read and this is the previous answer, still being served. */
+  stale: boolean;
+  capturedAt: string;
+  windowDays: number;
+  open: ProjectPullRequest[];
+  recent: ProjectPullRequest[];
+}
+export interface PullRequestDetailResult {
+  projectId: string; available: boolean; reason: PullRequestUnavailable | null; message: string | null; stale: boolean;
+  /** Null with `available: true` means the forge has no such pull request. */
+  pullRequest: ProjectPullRequestDetail | null;
+}
+/** Read-only (VS-97): there is no member here that writes, to the forge or to the database. */
+export interface PullRequestsService {
+  list(projectId: string): Promise<ProjectPullRequests>;
+  get(projectId: string, number: number): Promise<PullRequestDetailResult>;
+}
+
 // ---------- secrets ----------
 /**
  * Registering a value the human supplied, and reading one back for the daemon alone (VS-92). The
@@ -373,5 +416,5 @@ export interface CoreServices {
   tickets: TicketsService; decisions: DecisionsService; projects: ProjectsService; roles: RolesService; workers: WorkersService;
   wake: WakeService; runs: RunsService; dispatcher: Dispatcher; supervisor: Supervisor; knowledge: KnowledgeService; specs: SpecsService;
   openspec: OpenSpecService; usage: UsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
-  changelog: ChangelogService; models: ModelsService; secrets: SecretsService;
+  changelog: ChangelogService; models: ModelsService; secrets: SecretsService; pullRequests: PullRequestsService;
 }

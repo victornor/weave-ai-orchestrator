@@ -74,3 +74,15 @@ describe('merge queue events', () => {
     expect(JSON.stringify(qk.mergeQueue('ws1', 'p1')).startsWith(JSON.stringify(qk.mergeQueueRoot('ws1')).slice(0, -1))).toBe(true);
   });
 });
+
+describe("a project's pull requests (VS-97)", () => {
+  // The daemon drops its forge cache on exactly these three, so these are when there is something
+  // new to read. A key nothing invalidates is a section frozen at mount — the VS-95 lesson.
+  it.each(['ticket.work_product', 'ticket.status', 'ticket.merged'] as const)('is made stale by %s', (type) => {
+    expect(invalidated(event(type, { entityId: 'tk_1', entityType: 'ticket' }))).toContain(JSON.stringify(qk.pullRequestsRoot('ws1')));
+  });
+
+  it('is left alone by a ticket event that cannot change a pull request', () => {
+    expect(invalidated(event('ticket.updated', { entityId: 'tk_1', entityType: 'ticket' }))).not.toContain(JSON.stringify(qk.pullRequestsRoot('ws1')));
+  });
+});

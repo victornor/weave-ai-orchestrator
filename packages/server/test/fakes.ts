@@ -2,8 +2,9 @@
  * In-memory doubles for the app-level tests: a real sqlite db + EventBus (so SSE, channels and
  * push exercise real SQL) with hand-written service fakes in front of them.
  */
+import { tmpdir } from 'node:os';
 import { Db } from '@agent-conductor/db';
-import { EventBus, createChangelogService, createJobsService, createModelsService, createRegistries, getLogger, initLogger } from '@agent-conductor/core';
+import { EventBus, createChangelogService, createJobsService, createModelsService, createPullRequestsService, createRegistries, getLogger, initLogger } from '@agent-conductor/core';
 import type { Actor, CoreServices, WorkspaceContext } from '@agent-conductor/core';
 import type { AuthService } from '@agent-conductor/core';
 import {
@@ -226,7 +227,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     workers: impl('workers', { list: () => [], conductor: () => ({ id: 'ag_conductor', kind: 'conductor' }) }),
     dispatcher: impl('dispatcher', { start: () => undefined, stop: async () => undefined, running: () => 0 }),
     supervisor: impl('supervisor', { start: () => undefined, stop: () => undefined, running: () => true }),
-    projects: impl('projects', { list: () => [], get: (id: string) => ({ id, slug: id, defaultBranch: 'main' }) }),
+    projects: impl('projects', { list: () => [], get: (id: string) => ({ id, slug: id, defaultBranch: 'main', clonePath: tmpdir() }) }),
     roles: impl('roles', {
       list: () => [],
       setSecrets: async (_actor: Actor, id: string, names: string[]) => {
@@ -294,6 +295,9 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   // And so are the model settings: `GET`/`PUT /models` is the whole of model selection, so a route
   // test asserts on what the service really stores rather than on a double (VS-77).
   (services as { models: CoreServices['models'] }).models = createModelsService(ctx, () => services);
+  // And the pull requests (VS-97): a read-only join over this fake's own db and forge registry, so a
+  // route test registers a fake forge to get a list and registers none to get the no-forge answer.
+  (services as { pullRequests: CoreServices['pullRequests'] }).pullRequests = createPullRequestsService(ctx, () => services as unknown as CoreServices);
 
   const runtime: WorkspaceRuntime = { id: workspaceId, ctx, services, channels: null, webhooks: null };
 

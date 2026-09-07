@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ProjectConfigSchema } from '@agent-conductor/shared';
+import { OcError, ProjectConfigSchema } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
 
@@ -34,6 +34,18 @@ export function projectRoutes(): Hono<AppEnv> {
   app.get('/:id/merge-queue', (c) => {
     const s = c.get('ws').services;
     return c.json(s.tickets.mergeQueue.forProject(s.projects.get(c.req.param('id')).id));
+  });
+  /**
+   * The project's pull requests, joined to their tickets, spec changes and queue place (VS-97).
+   * Read-only, and never an error status for a project that simply has no forge: the answer carries
+   * `available: false` with the reason, because a section cannot tell that from a failed request out
+   * of an HTTP code.
+   */
+  app.get('/:id/pull-requests', async (c) => c.json(await c.get('ws').services.pullRequests.list(c.req.param('id'))));
+  app.get('/:id/pull-requests/:number', async (c) => {
+    const number = Number(c.req.param('number'));
+    if (!Number.isInteger(number) || number <= 0) throw new OcError('validation', 'pull request number must be a positive integer', { number: c.req.param('number') });
+    return c.json(await c.get('ws').services.pullRequests.get(c.req.param('id'), number));
   });
   return app;
 }

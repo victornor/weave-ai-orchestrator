@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-07
+goal: The project overview's Pull requests section lists the project's PRs with
+  their ticket, spec change, checks and merge state, and opens each with its
+  diff summary

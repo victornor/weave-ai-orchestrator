@@ -14,6 +14,7 @@ import type { CoreServices } from '../api.js';
 import { createChangelogService } from '../changelog/index.js';
 import { createModelsService } from '../models/index.js';
 import { createSecretsService } from '../secrets/index.js';
+import { createPullRequestsService } from '../pull-requests/index.js';
 
 export interface TestHarness {
   ctx: WorkspaceContext;
@@ -106,6 +107,9 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
   // Real as well (VS-92): the harness root is a real temp directory, so the encrypted store writes
   // and reads exactly as it does in a workspace, and the run engine reaches it for a role's secrets.
   services.secrets = createSecretsService(ctx);
+  // Real as well (VS-97): it reads this harness's own db and its own (empty) forge registry, so a
+  // suite that has registered no forge gets the same `no_forge` answer a project without one gets.
+  services.pullRequests = createPullRequestsService(ctx, () => deps());
   const deps = (): CoreServices =>
     new Proxy({} as CoreServices, {
       get: (_t, prop: string | symbol) => {

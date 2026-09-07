@@ -432,6 +432,29 @@ export function useMergeQueue(projectId: string | null | undefined): UseQueryRes
   return useQuery({ queryKey: qk.mergeQueue(ws, projectId ?? ''), queryFn: () => api.ws<T.MergeQueue>(ws, `/projects/${projectId ?? ''}/merge-queue`), enabled: Boolean(projectId) });
 }
 
+/**
+ * A project's pull requests (VS-97). The daemon caches the forge behind this, and `invalidateFor`
+ * re-reads it on the ticket events the daemon drops that cache on, so there is nothing to poll.
+ */
+export function usePullRequests(projectId: string | null | undefined): UseQueryResult<T.ProjectPullRequests> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.pullRequests(ws, projectId ?? ''),
+    queryFn: () => api.ws<T.ProjectPullRequests>(ws, `/projects/${encodeURIComponent(projectId ?? '')}/pull-requests`),
+    enabled: Boolean(projectId),
+  });
+}
+
+/** One pull request with its description, its changed files and its checks. */
+export function usePullRequest(projectId: string | null | undefined, number: number | null): UseQueryResult<T.PullRequestDetailResult> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.pullRequest(ws, projectId ?? '', number ?? 0),
+    queryFn: () => api.ws<T.PullRequestDetailResult>(ws, `/projects/${encodeURIComponent(projectId ?? '')}/pull-requests/${number ?? 0}`),
+    enabled: Boolean(projectId) && number !== null,
+  });
+}
+
 export function useCreateTicket(): UseMutationResult<Ticket, Error, Record<string, unknown>> {
   const ws = useWs();
   const qc = useQueryClient();

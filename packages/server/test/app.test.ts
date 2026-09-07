@@ -208,6 +208,48 @@ describe('routes', () => {
     expect(body.recent).toEqual([expect.objectContaining({ identifier: 'ACME-9', outcome: 'landed', mergeCommit: 'abc1234' })]);
   });
 
+  it('serves a project\'s pull requests joined to their tickets and changes', async () => {
+    const { h, fetch } = app();
+    h.tickets.set('tk_1', ticket({ openspecChangeName: 'acme-42-dark-mode' }));
+    h.runtime.ctx.registries.forges.set('github', {
+      id: 'github',
+      detect: async () => true,
+      prState: async () => ({ state: 'open' as const }),
+      mergePr: async () => ({}),
+      listPullRequests: async () => [{
+        number: 12, title: 'Add dark mode', url: 'https://github.com/acme/api/pull/12', author: 'victornor',
+        state: 'open' as const, isDraft: false, headRefName: 'ac/acme-42-add-dark-mode', baseRefName: 'main',
+        createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T01:00:00.000Z', mergedAt: null, closedAt: null,
+        additions: 5, deletions: 1, changedFiles: 1, checks: 'success' as const, reviewDecision: 'approved', mergeCommit: null,
+      }],
+      pullRequest: async () => null,
+    });
+    // The join reads real rows: this fake's db is migrated sqlite, so the ticket needs its project.
+    h.db.run("INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at) VALUES ('proj1','ws1','api','API','git@example.com:acme/api.git','main','/tmp',4,'git',1,'{}','ready','t0','t0')");
+    h.db.run("INSERT INTO tickets (id, workspace_id, project_id, number, identifier, kind, title, description, status, priority, created_by_kind, openspec_change_name, created_at, updated_at) VALUES ('tk_1','ws1','proj1',42,'ACME-42','change','Add dark mode','','in_review','medium','agent','acme-42-dark-mode','t0','t0')");
+
+    const res = await fetch('/api/w/ws1/projects/proj1/pull-requests', { headers: authed() });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ projectId: 'proj1', available: true, windowDays: 30 });
+    expect(body.open[0]).toMatchObject({ number: 12, title: 'Add dark mode', changeName: 'acme-42-dark-mode' });
+    expect(body.open[0].ticket).toMatchObject({ identifier: 'ACME-42' });
+  });
+
+  it('answers 200 with a reason, not an error, for a project with no forge', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/projects/proj1/pull-requests', { headers: authed() });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ available: false, reason: 'no_forge', open: [], recent: [] });
+  });
+
+  it('rejects a pull request number that is not one', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/projects/proj1/pull-requests/nope', { headers: authed() });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('validation');
+  });
+
   it("carries a waiting ticket's own merge queue position on its detail payload", async () => {
     const { h, fetch } = app();
     h.tickets.set('tk_1', ticket({ status: 'merging', mergeQueuedAt: '2026-09-01T11:00:00.000Z' }));

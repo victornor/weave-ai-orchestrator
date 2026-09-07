@@ -119,6 +119,11 @@ Registering the secret SHALL happen before the answer is recorded, so that an an
 
 A card carrying a secret input SHALL be sent to the daemon directly and SHALL NOT be held in any client-side queue of unsent writes. When it cannot be sent, the human SHALL be told it was not sent and SHALL be able to send it again.
 
+A card carrying no secret input, on any surface that presents decision cards, SHALL instead be
+held in the client-side queue of unsent writes when it cannot be sent because the surface cannot
+reach the daemon, and SHALL be delivered automatically once the surface reconnects — the human
+SHALL NOT have to notice the failure and resend it by hand.
+
 The description of the asking tool SHALL state that a secret input's value is stored rather than answered, so that an agent has no reason to ask for a credential in prose instead.
 
 #### Scenario: A credential supplied on a card
@@ -140,6 +145,13 @@ The description of the asking tool SHALL state that a secret input's value is st
 
 - **WHEN** the human sends a card carrying a secret input and the send fails
 - **THEN** nothing is queued for later and the human is told it was not sent
+
+#### Scenario: A non-secret answer is queued, on whichever surface presented the card
+
+- **WHEN** the human answers a card carrying no secret input from any surface that presents
+  decision cards, and the surface cannot reach the daemon
+- **THEN** the answer is held in the client-side queue and sent automatically once the surface
+  reconnects, without the human resending it
 
 ### Requirement: A surface that cannot collect a value safely says so
 

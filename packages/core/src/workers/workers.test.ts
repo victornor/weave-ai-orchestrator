@@ -262,7 +262,41 @@ describe('workers', () => {
       expect(existsSync(worker.worktreePath!)).toBe(true);
       expect(wake.calls.filter((c) => c.agentId === worker.id)).toHaveLength(1);
       expect(wake.calls[0]).toMatchObject({ agentId: worker.id, input: expect.objectContaining({ source: 'system', reason: 'resumed' }) });
+      // This ticket was seeded straight into `blocked` with no `blockedFromStatus` recorded (that
+      // field is only ever set by `tickets.transition()` itself, VS-118), so `todo` here is the
+      // documented fallback for "no prior status known" — not the bug the tests below cover.
       expect(h.services.tickets!.transition).toHaveBeenCalledWith(HUMAN, ticket.id, expect.objectContaining({ to: 'todo' }));
+    });
+
+    // VS-118: resume used to pick `in_progress` vs `todo` from `ticket.executionRunId`, which
+    // `finalize()` always clears before a run can be parked — so it always read `todo` and a
+    // parked `change` ticket lost its approval, forcing a full re-approval of an unchanged plan.
+    it('restores an approved change ticket to approved, not todo', async () => {
+      const ticket = seedTicket({ status: 'blocked', blockedFromStatus: 'approved' });
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      h.db.update('agents', worker.id, {
+        status: 'paused', pauseReason: 'tooling: waiting for a human',
+        pauseDetailJson: { family: 'tooling', code: 'exit_143', message: 'the process was killed', resetAt: null, runId: 'r1' },
+      });
+      wake.calls.length = 0;
+
+      workers.resume(HUMAN, worker.id);
+
+      expect(h.services.tickets!.transition).toHaveBeenCalledWith(HUMAN, ticket.id, expect.objectContaining({ to: 'approved' }));
+    });
+
+    it('restores a parked in_progress task ticket to in_progress, not todo', async () => {
+      const ticket = seedTicket({ kind: 'task', status: 'blocked', blockedFromStatus: 'in_progress' });
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      h.db.update('agents', worker.id, {
+        status: 'paused', pauseReason: 'tooling: waiting for a human',
+        pauseDetailJson: { family: 'tooling', code: 'exit_143', message: 'the process was killed', resetAt: null, runId: 'r1' },
+      });
+      wake.calls.length = 0;
+
+      workers.resume(HUMAN, worker.id);
+
+      expect(h.services.tickets!.transition).toHaveBeenCalledWith(HUMAN, ticket.id, expect.objectContaining({ to: 'in_progress' }));
     });
 
     it('queues nothing for a worker that was not paused', async () => {

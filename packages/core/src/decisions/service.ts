@@ -1,5 +1,5 @@
 import { decisionRow, newId, nowIso, type Db } from '@agent-conductor/db';
-import { OcError, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus } from '@agent-conductor/shared';
+import { OcError, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type TicketStatus } from '@agent-conductor/shared';
 import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -235,7 +235,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     await deps().workers.relaunch(actor, target.agentId, 'the human asked for a retry');
     if (target.ticketId) {
       const t = deps().tickets.get(target.ticketId);
-      if (t.status === 'blocked') await deps().tickets.transition(actor, t.id, { to: t.executionRunId ? 'in_progress' : 'todo', note: 'retrying' }).catch(() => undefined);
+      if (t.status === 'blocked') await deps().tickets.transition(actor, t.id, { to: (t.blockedFromStatus ?? 'todo') as TicketStatus, note: 'retrying' }).catch(() => undefined);
     }
   }
 

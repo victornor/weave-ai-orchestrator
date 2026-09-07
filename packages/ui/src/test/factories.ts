@@ -29,6 +29,7 @@ export function ticket(over: Partial<Ticket> = {}): Ticket {
     openspecState: null,
     delivery: null,
     unblock: null,
+    blockedFromStatus: null,
     monitorNextCheckAt: null,
     blockedTransitionAt: null,
     mergeQueuedAt: null,

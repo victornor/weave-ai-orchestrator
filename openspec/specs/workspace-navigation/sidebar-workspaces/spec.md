@@ -156,11 +156,14 @@ dismissible dialog, containing:
 
 - a link to every destination the application has that the bar's tabs do not carry, including the
   merge queue, each named and addressing the active workspace;
+- the active workspace's projects, each named by its slug and opening that project's overview;
 - the workspace list, with each workspace's Needs-you count, where choosing a workspace navigates to
   it and makes it active;
 - the action that begins creating a new workspace;
 - the daemon's release state, when there is something to say about it, opening the section that
   shows it.
+
+A workspace with no projects SHALL contribute no project block to the menu.
 
 The menu SHALL be dismissed by choosing any of its items, by a tap outside it, by Escape, and by
 dragging it downwards past a threshold. While it is open, keyboard focus SHALL stay within it, and
@@ -187,6 +190,11 @@ other route still reaches the other workspaces.
 - **WHEN** the human opens More on a phone
 - **THEN** every destination the five tabs do not carry is listed, including the merge queue, and
   choosing one goes to that destination of the active workspace
+
+#### Scenario: Reaching a project on a phone
+
+- **WHEN** the human opens More on a phone and chooses a project
+- **THEN** that project's overview opens and the menu is dismissed
 
 #### Scenario: The tab bar is unchanged
 
@@ -260,3 +268,28 @@ Unsent composer text is outside this capability.
 - **WHEN** a chat with a kept position is opened and its history has not arrived
 - **THEN** nothing is put back until the history is there, and the position is then restored against
   it
+
+### Requirement: A workspace group lists its projects, each opening that project's overview
+
+The sidebar group of the workspace the app is currently showing SHALL list that workspace's
+projects, below its section links, each identified by the project's slug. Activating a project SHALL
+open that project's overview page.
+
+Projects SHALL be listed for the active workspace only, since another workspace's projects are not
+loaded; a workspace with no projects SHALL simply list none, without an empty block or an error.
+Following a project SHALL navigate within the running application, without a document reload.
+
+#### Scenario: Opening a project
+
+- **WHEN** the human activates a project in the active workspace's sidebar group
+- **THEN** that project's overview opens, without a document reload
+
+#### Scenario: A workspace with no projects
+
+- **WHEN** the active workspace has no projects
+- **THEN** its group shows its section links and no project list, and no error is shown
+
+#### Scenario: Another workspace's group
+
+- **WHEN** a non-active workspace's group is expanded
+- **THEN** it shows that workspace's section links and no project list

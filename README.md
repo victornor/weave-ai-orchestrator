@@ -304,10 +304,10 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | `conductor workspace pause \| resume` | stop and restart run dispatch for the workspace |
 | `conductor workspace export [--out <dir>]` | portable package on the daemon host: `workspace.yaml`, roles, knowledge, tickets as markdown — no db, no runs, no secrets |
 | `conductor workspace import <dir> --target <dir>` | copy an export into a new or existing workspace directory and register it; tickets land in `backlog` with an `[imported]` comment |
-| `conductor project add <git-url> [--id] [--runtime] [--branch] [--max-workers N] [--setup CMD] [--no-follow]` | clone, `openspec init`, seed the KB, create the scout ticket — each sub-step and its output stream to the terminal as it runs |
+| `conductor project add <git-url> [--id] [--branch] [--max-workers N] [--setup CMD] [--no-follow]` | clone, `openspec init`, seed the KB, create the scout ticket — each sub-step and its output stream to the terminal as it runs |
 | `conductor project retry <id> [--no-follow]` | re-run an add that failed, reusing whatever is already on disk |
 | `conductor project list \| show <id> \| remove <id> \| fetch [id]` | projects; `fetch` fast-forwards the primary clone |
-| `conductor project set-runtime <id> <runtime>` · `conductor project set-policy <id> <key>=<value>...` | per-project runtime and policies (`deliveryMode`, `mergeMethod`, `requireCi`, …) |
+| `conductor project set-policy <id> <key>=<value>...` | per-project policies (`deliveryMode`, `mergeMethod`, `requireCi`, …) |
 | `conductor runtime list \| detect \| models <id> \| login <id> [--print]` | coding CLIs and their auth |
 
 ### Talking and deciding
@@ -329,7 +329,6 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 |---|---|
 | `conductor role list [-p project] \| show <id>` | roles and their live workers |
 | `conductor role activate <id> [--runtime] [--model]` | activate a hired role so it picks up tickets |
-| `conductor role set-runtime <id> <rt>` · `conductor role set-model <id> <model\|default>` | change where a role's workers run |
 | `conductor role set-max-workers <id> <n>` | change how many workers a role runs at once (1-32; the project limit still applies) |
 | `conductor role pause \| resume \| retire <id>` · `conductor role charter show \| rollback <id> <rev>` | role lifecycle and charter revisions |
 | `conductor worker list [-p] [-r] [-s] [--all]` · `conductor worker show <id>` · `conductor worker brief <id>` | live workers |
@@ -354,7 +353,8 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | `conductor knowledge show \| edit \| note \| revisions \| revert \| curate <scope> [-p project]` | scopes: `workspace`, `shared`, `decisions`, `project` |
 | `conductor specs list \| show <capability> \| changes [name] \| search <q> \| explore [project]` | the spec index |
 | `conductor worktree list \| verify <id> \| discard <id> [--force]` | worktrees and landed-work verdicts |
-| `conductor conductor show \| set-runtime <rt> \| set-model <m> \| reset-session` | the conductor's own configuration |
+| `conductor conductor show \| reset-session` | the conductor agent |
+| `conductor models` · `conductor models set conductor\|workers --runtime <id> --model <id\|default> [--effort <e>]` | the workspace's two model settings — all of model selection |
 | `conductor presentation status \| set <path> <value> \| reconcile \| open` | where agents are shown |
 | `conductor presenter [--surface tmux\|hyprland\|herdr\|headless] [--once]` | run this on the machine you look at |
 
@@ -415,9 +415,15 @@ version: 1
 id: acme                      # kebab-case slug; this is `:ws` in the API
 name: Acme Labs
 ticketPrefix: ACME            # tickets are ACME-1, ACME-2, ...
+models:                       # all of model selection, per workspace (ADR 0011)
+  conductor:
+    runtime: claude
+    model: claude-fable-5-1   # null = the runtime's default
+  workers:
+    runtime: claude           # every worker, whatever its role or project
+    model: claude-opus-5
+    effort: high              # optional; the only place effort can be set
 defaults:
-  runtime: claude             # default runtime for new projects
-  model: null                 # null = the runtime's default
   proposalApproval: human     # human | conductor | none
   hireApproval: human
   deliveryMode: pr            # pr | local-branch
@@ -438,7 +444,6 @@ projects:
   - id: api
     url: git@github.com:acme/api.git
     defaultBranch: main
-    runtime: codex            # default runtime for roles hired into this project
     maxWorkers: 4             # concurrent workers across all roles in this project
     setupCommand: pnpm install   # run once per new worktree
     warmPaths: [node_modules]    # gitignored caches copied into a new worktree (git provider)
@@ -451,9 +456,7 @@ projects:
       autoMergeDefault: false
       archiveCommit: push        # push | pr | local
       requireCi: true
-conductor:
-  runtime: claude
-  model: null
+conductor:                    # its runtime and model are `models.conductor`, above
   channels: [web, cli, telegram]
   humanName: Victor            # how agents address you; "captain" when unset
 presentation:
@@ -475,10 +478,11 @@ plugins: []                   # npm package names, or ./paths relative to the wo
 
 ### `<workspace>/roles/<id>/role.yaml`
 
-Written by the daemon when the conductor hires a role; you normally edit it through
-`conductor role set-runtime|set-model` or the UI. Key fields: `id`, `name`, `project`, `charterSummary`,
-`scope`, `responsibilities[]`, `capabilities[]`, `exclusions[]`, `rules[]`, `runtime`, `model`,
-`sessionPolicy` (`per_ticket` by default), `maxWorkers`, `permission.{mode,allowed,denied}`.
+Written by the daemon when the conductor hires a role; you normally edit it through the UI. Key
+fields: `id`, `name`, `project`, `charterSummary`, `scope`, `responsibilities[]`, `capabilities[]`,
+`exclusions[]`, `rules[]`, `sessionPolicy` (`per_ticket` by default), `maxWorkers`,
+`permission.{mode,allowed,denied}`. A role names no runtime or model: every worker runs on the
+workspace's `models.workers` setting (ADR 0011).
 The prose charter lives beside it in `CHARTER.md` and is revisioned; `OVERRIDES.md` is yours.
 
 ---

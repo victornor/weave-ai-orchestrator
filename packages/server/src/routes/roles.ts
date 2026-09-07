@@ -20,10 +20,8 @@ export function roleRoutes(): Hono<AppEnv> {
 
   app.post('/', async (c) => c.json(await c.get('ws').services.roles.hire(c.get('actor'), await body(c, RoleSpecSchema)), 201));
 
-  app.post('/:id/activate', async (c) => {
-    const opts = await body(c, z.object({ runtime: z.string().optional(), model: z.string().nullish() }));
-    return c.json(await c.get('ws').services.roles.activate(c.get('actor'), c.req.param('id'), opts));
-  });
+  // No body: a role carries no runtime or model, so there is nothing to choose here (VS-77).
+  app.post('/:id/activate', async (c) => c.json(await c.get('ws').services.roles.activate(c.get('actor'), c.req.param('id'))));
 
   app.patch('/:id', async (c) => {
     // Strict: an unknown key would otherwise be stripped and the update would report success while

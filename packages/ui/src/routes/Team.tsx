@@ -8,7 +8,7 @@ import { StatusBadge, Badge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
 import { Markdown } from '../components/Markdown';
 import { Sheet } from '../components/Sheet';
-import { useConductor, useProjects, useRole, useRoleAction, useRoles, useRollbackCharter, useRuntimeModels, useRuntimes, useUpdateRole, useWorkerAction, useWorkers, useWorkspaceSummary } from '../api/hooks';
+import { useConductor, useProjects, useRole, useRoleAction, useRoles, useRollbackCharter, useUpdateRole, useWorkerAction, useWorkers } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import type * as T from '../api/types';
@@ -38,10 +38,7 @@ export function TeamRoute(): React.ReactElement {
               <div className="ac-card flex flex-wrap items-center gap-3 p-3.5">
                 <StatusBadge status={agentUiStatus(conductor.data.agent.status)} />
                 <span className="text-ui text-text-1">{conductor.data.agent.name}</span>
-                <span className="ac-mono text-micro text-text-3">
-                  {conductor.data.agent.runtimeId}
-                  {conductor.data.agent.model ? ` · ${conductor.data.agent.model}` : ''}
-                </span>
+                <span className="ac-mono text-micro text-text-3">{conductor.data.agent.runtimeId}</span>
                 <div className="flex-1" />
                 <Button variant="ghost" size="sm" onClick={() => go('/w/$ws/chat', { params: { ws } })}>
                   Open thread
@@ -72,10 +69,6 @@ export function TeamRoute(): React.ReactElement {
                             <div className="mb-2.5 flex flex-wrap items-center gap-2.5">
                               <span className="text-ui font-medium text-text-1">{r.name}</span>
                               <Badge>{r.status === 'pending_activation' ? 'awaiting hire approval' : r.status.replace(/_/g, ' ')}</Badge>
-                              <span className="ac-mono text-micro text-text-3">
-                                {r.runtimeId}
-                                {r.model ? ` · ${r.model}` : ''}
-                              </span>
                               <div className="flex-1" />
                               <span className="ac-mono text-nano text-text-4">
                                 {roleWorkers.length}/{r.maxWorkers} workers
@@ -164,14 +157,9 @@ function MaxWorkersField({ value, concurrency, pending, onCommit }: {
 
 function RoleSheet({ roleId, onClose }: { roleId: string; onClose: () => void }): React.ReactElement {
   const role = useRole(roleId);
-  const runtimes = useRuntimes();
-  const models = useRuntimeModels(role.data?.role.runtimeId);
   const update = useUpdateRole();
   const action = useRoleAction();
   const rollback = useRollbackCharter();
-  // With no role override the run falls back to the workspace default, then to whatever the
-  // runtime itself picks (`agent.model ?? role.model ?? config.defaults.model` in the engine).
-  const defaultModel = (((useWorkspaceSummary().data?.config['defaults'] ?? {}) as Record<string, unknown>)['model'] ?? null) as string | null;
 
   return (
     <Sheet open onClose={onClose} title={role.data?.role.name ?? 'Role'}>
@@ -180,35 +168,6 @@ function RoleSheet({ roleId, onClose }: { roleId: string; onClose: () => void })
       ) : role.data ? (
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-2">
-              <span className="ac-label">runtime</span>
-              <select
-                value={role.data.role.runtimeId}
-                onChange={(e) => update.mutate({ id: roleId, patch: { runtime: e.target.value }, reason: 'changed from the web app' })}
-                className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1"
-              >
-                {(runtimes.data ?? []).map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-2">
-              <span className="ac-label">model</span>
-              <select
-                value={role.data.role.model ?? ''}
-                onChange={(e) => update.mutate({ id: roleId, patch: { model: e.target.value === '' ? null : e.target.value }, reason: 'changed from the web app' })}
-                className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1"
-              >
-                <option value="">{defaultModel ? `default · ${defaultModel}` : 'default'}</option>
-                {(models.data ?? []).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </label>
             <MaxWorkersField
               value={role.data.role.maxWorkers}
               concurrency={role.data.concurrency}

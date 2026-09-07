@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MERGE_CONCURRENCY, DaemonConfigSchema, ProjectPoliciesSchema, WorkspaceDefaultsSchema, mergeConcurrencyOf, yoloEnabled } from './config.js';
+import { DEFAULT_MERGE_CONCURRENCY, DaemonConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, mergeConcurrencyOf, yoloEnabled } from './config.js';
 
 describe('project policies: mergeConcurrency', () => {
   it('leaves the value unset when the policies block does not mention it', () => {
@@ -79,5 +79,65 @@ describe('daemon config: upgrade', () => {
 
   it('rejects a negative wait', () => {
     expect(DaemonConfigSchema.safeParse({ upgrade: { waitForIdleSec: -1 } }).success).toBe(false);
+  });
+});
+
+describe('model selection: the two workspace settings', () => {
+  const base = { version: 1 as const, id: 'acme', name: 'Acme', ticketPrefix: 'ACME' };
+
+  it('gives a workspace that names no models both settings on the default runtime', () => {
+    const cfg = WorkspaceConfigSchema.parse(base);
+    expect(cfg.models.conductor).toEqual({ runtime: 'claude', model: null });
+    expect(cfg.models.workers).toEqual({ runtime: 'claude', model: null });
+  });
+
+  it('keeps effort, which is the only place it can still be set', () => {
+    const cfg = WorkspaceConfigSchema.parse({ ...base, models: { workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' } } });
+    expect(cfg.models.workers).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
+    // The setting the config did not name still exists, on the defaults.
+    expect(cfg.models.conductor).toEqual({ runtime: 'claude', model: null });
+  });
+
+  it('rejects a setting with an empty runtime', () => {
+    expect(WorkspaceConfigSchema.safeParse({ ...base, models: { workers: { runtime: '' } } }).success).toBe(false);
+  });
+
+  it('ignores the layered runtime and model keys an older workspace.yaml carries', () => {
+    const cfg = WorkspaceConfigSchema.parse({
+      ...base,
+      defaults: { runtime: 'codex', model: 'gpt-5' },
+      conductor: { runtime: 'opencode', model: 'grok', effort: 'low', humanName: 'captain' },
+      projects: [{ id: 'api', url: 'git@example.com:acme/api.git', runtime: 'gemini', model: 'flash' }],
+    });
+    expect(cfg.defaults).not.toHaveProperty('runtime');
+    expect(cfg.defaults).not.toHaveProperty('model');
+    expect(cfg.conductor).not.toHaveProperty('runtime');
+    expect(cfg.conductor).not.toHaveProperty('model');
+    expect(cfg.conductor).not.toHaveProperty('effort');
+    expect(cfg.conductor.humanName).toBe('captain');
+    expect(cfg.projects[0]).not.toHaveProperty('runtime');
+    expect(cfg.projects[0]).not.toHaveProperty('model');
+    // Nothing layered survives: the two settings are what a fresh parse produces.
+    expect(cfg.models).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } });
+  });
+});
+
+describe('model selection: a role carries no runtime', () => {
+  const role = {
+    id: 'backend', name: 'Backend Engineer', project: 'api',
+    charterSummary: 'Owns the API', scope: 'The api repo',
+  };
+
+  it('parses a role that names none of them', () => {
+    const spec = RoleSpecSchema.parse(role);
+    expect(spec).not.toHaveProperty('runtime');
+    expect(spec).not.toHaveProperty('model');
+    expect(spec).not.toHaveProperty('effort');
+  });
+
+  it('rejects a strict patch that tries to set one', () => {
+    for (const key of ['runtime', 'model', 'effort']) {
+      expect(RoleSpecSchema.partial().strict().safeParse({ [key]: 'claude' }).success).toBe(false);
+    }
   });
 });

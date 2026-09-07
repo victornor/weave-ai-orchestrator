@@ -12,6 +12,7 @@ import { createRegistries, workspacePaths, type WorkspaceContext } from '../cont
 import { getLogger } from '../logger.js';
 import type { CoreServices } from '../api.js';
 import { createChangelogService } from '../changelog/index.js';
+import { createModelsService } from '../models/index.js';
 
 export interface TestHarness {
   ctx: WorkspaceContext;
@@ -62,13 +63,13 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
     projectId = newId();
     db.insert('projects', {
       id: projectId, workspaceId, slug: projectSlug, name: 'API', gitUrl: 'git@example.com:acme/api.git', defaultBranch: 'main',
-      clonePath: join(paths.projects, projectSlug), maxWorkers: 4, worktreeProvider: 'git', runtimeId: 'claude', model: null,
+      clonePath: join(paths.projects, projectSlug), maxWorkers: 4, worktreeProvider: 'git',
       openspecEnabled: 1, policiesJson: {}, status: 'ready', createdAt: now, updatedAt: now,
     });
     roleId = newId();
     db.insert('roles', {
       id: roleId, workspaceId, projectId, slug: 'backend', name: 'Backend Engineer', charterSummary: 'Owns the api service.',
-      scopeText: 'Backend work in the api repo.', runtimeId: 'claude', sessionPolicy: 'per_ticket', maxWorkers: 2,
+      scopeText: 'Backend work in the api repo.', sessionPolicy: 'per_ticket', maxWorkers: 2,
       status: 'active', specRevision: 1, createdBy: 'conductor', createdAt: now, updatedAt: now,
     });
   }
@@ -89,13 +90,18 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
     loopbackUrl: 'http://127.0.0.1:7433',
     skillsDir: join(root, 'skills'),
     templatesDir: join(root, 'templates'),
-    saveConfig: async () => {},
+    // The real loader replaces `ctx.config` with what it validated, and code that changes a
+    // setting then reads it back through the context — so the fake has to do the same.
+    saveConfig: async (next) => { ctx.config = WorkspaceConfigSchema.parse(next); },
   };
 
   const services: Partial<CoreServices> = {};
   // Real, not a double: it is a read-only projection over this harness's own db, so every suite that
   // reaches it (and the proxy below would otherwise throw for) reads the activity its own calls wrote.
   services.changelog = createChangelogService(ctx, () => deps());
+  // Real too: it reads and writes this harness's own config and db, and every suite that runs a turn
+  // reaches it through the resolution path (VS-77).
+  services.models = createModelsService(ctx, () => deps());
   const deps = (): CoreServices =>
     new Proxy({} as CoreServices, {
       get: (_t, prop: string | symbol) => {

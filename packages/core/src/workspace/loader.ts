@@ -14,6 +14,10 @@ import { PROJECT_SECTIONS } from '../knowledge/files.js';
 import { getLogger } from '../logger.js';
 import { registerBuiltinWorktreeProviders, writeWtConfig } from '../worktrees/index.js';
 import { registerBuiltinForges } from '../forge/index.js';
+import {
+  ROLE_RUNTIMES_META_KEY, deriveModelSettings, hasModelSettings, migrationLogFields, migrationSummary,
+  recordPendingMigration, type RoleRuntimeRow,
+} from '../models/index.js';
 import type { LoadOptions, WorkspaceLoader } from './index.js';
 
 export const WORKSPACE_FILE = 'workspace.yaml';
@@ -204,8 +208,26 @@ class Loader implements WorkspaceLoader {
       db.update('workspaces', ws.id, { name: config.name, ticketPrefix: config.ticketPrefix, rootPath: root, updatedAt: now });
     }
 
+    // VS-77: bring a workspace configured under the old layered scheme onto the two model settings.
+    // Migration 0012 stashed what the roles were running on before it dropped the columns; the raw
+    // YAML still carries the keys Zod has already stripped from `config`. Writing the parsed config
+    // back is what removes them for good, so this runs once.
+    const stashed = db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', [ROLE_RUNTIMES_META_KEY]);
+    if (stashed) {
+      if (!hasModelSettings(raw as Record<string, unknown>)) {
+        let roleRows: RoleRuntimeRow[] = [];
+        try { roleRows = JSON.parse(stashed.value) as RoleRuntimeRow[]; } catch { roleRows = []; }
+        const migration = deriveModelSettings(raw as Record<string, unknown>, roleRows);
+        config.models = migration.models;
+        writeYamlFile(file, unresolveEnvRefs(config, envBack));
+        log.info(migrationLogFields(migration), `model settings derived: ${migrationSummary(migration)}`);
+        if (migration.ambiguous) recordPendingMigration(db, ws.id, migration);
+      }
+      db.run('DELETE FROM meta WHERE key = ?', [ROLE_RUNTIMES_META_KEY]);
+    }
+
     // Per-workspace runtime config homes (CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_CONFIG_HOME …).
-    const runtimeIds = new Set<string>([...opts.registries.runtimes.keys(), config.defaults.runtime, config.conductor.runtime, ...config.projects.map((p) => p.runtime ?? config.defaults.runtime)]);
+    const runtimeIds = new Set<string>([...opts.registries.runtimes.keys(), config.models.conductor.runtime, config.models.workers.runtime]);
     for (const id of runtimeIds) {
       if (!id) continue;
       mkdirSync(join(paths.runtimesHome, id), { recursive: true });

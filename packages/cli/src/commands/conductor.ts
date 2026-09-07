@@ -1,4 +1,5 @@
-/** `conductor conductor show|set-model|set-runtime|reset-session` (PLAN §10, §20). */
+/** `conductor conductor show|reset-session` (PLAN §10, §20). The runtime and the model are the
+ * workspace's two model settings — `conductor models` (VS-77), not a conductor-only knob. */
 import type { Command } from 'commander';
 import type { Agent } from '@agent-conductor/shared';
 import { workerToCard } from '@agent-conductor/render';
@@ -10,7 +11,7 @@ export function register(program: Command): void {
 
   conductor
     .command('show', { isDefault: true })
-    .description('conductor status, runtime and model')
+    .description('conductor status and the runtime it is on')
     .action(async (_opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
       const payload = await client.wget<unknown>('/conductor');
@@ -21,25 +22,12 @@ export function register(program: Command): void {
           ['conductor', `${card.glyph} ${card.name}`],
           ['id', card.id],
           ['runtime', card.runtime],
-          ['model', card.model ?? '(runtime default)'],
           ['status', card.statusLabel],
           ['turns', String(card.turn)],
           ['home', String(agent.homePath ?? '')],
         ]);
       });
     }));
-
-  for (const [name, field] of [['set-runtime', 'runtime'], ['set-model', 'model']] as const) {
-    conductor
-      .command(name)
-      .argument('<value>', field === 'model' ? 'model id, or "default"' : 'runtime id')
-      .description(`change the conductor ${field}`)
-      .action(async (value: string, _opts: unknown, command: Command) => run(async () => {
-        const { client } = await session(command);
-        const result = await client.patch(client.w('/conductor'), { [field]: field === 'model' && value === 'default' ? null : value });
-        emit(result, () => write(`${style.ok('updated')} conductor ${field} = ${value}`));
-      }));
-  }
 
   conductor
     .command('reset-session')

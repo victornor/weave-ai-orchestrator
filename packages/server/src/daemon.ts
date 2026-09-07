@@ -186,6 +186,8 @@ async function loadWorkspaceInto(
   await loadPlugins(ctx, opts.registries, hooks);
   // A job still `running` belongs to a process that is gone; fail it before anything reads it.
   try { services.jobs.reconcile(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'job reconciliation failed'); }
+  // Asks which runtime the workers setting should hold when the VS-77 migration could not settle it.
+  try { services.models.reconcile(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'model settings reconciliation failed'); }
   await services.workers.ensureConductor().catch((e: unknown) => log.error({ err: e, ws: ctx.workspaceId }, 'ensureConductor failed'));
   try { services.dispatcher.start(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'dispatcher failed to start'); }
   try { services.supervisor.start(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'supervisor failed to start'); }

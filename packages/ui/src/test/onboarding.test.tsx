@@ -83,7 +83,9 @@ describe('Onboarding create step', () => {
   it('attaches the project step to the job the daemon started', async () => {
     await createWithProject();
     await waitFor(() => expect(state.attached).toContain('j1'));
-    expect(state.posts.map((p) => p.path)).toEqual(['/config', '/projects']);
+    // The two model settings, then the project. No `/config` unless a human name was typed, and
+    // nothing per project: a project carries no runtime since VS-77.
+    expect(state.posts.map((p) => p.path)).toEqual(['/models', '/projects']);
   });
 
   it('shows the running sub-step and its output while the project is being added', async () => {

@@ -31,8 +31,6 @@ export function register(program: Command): void {
           { header: 'ID', get: (r) => String(r['id'] ?? '') },
           { header: 'NAME', get: (r) => String(r['name'] ?? '') },
           { header: 'PROJECT', get: (r) => String(r['projectId'] ?? '') },
-          { header: 'RUNTIME', get: (r) => String(r['runtimeId'] ?? '') },
-          { header: 'MODEL', get: (r) => String(r['model'] ?? '(default)') },
           { header: 'MAX', get: (r) => String(r['maxWorkers'] ?? ''), align: 'right' },
           { header: 'STATUS', get: (r) => String(r['status'] ?? '') },
         ], { empty: 'no roles yet — ask the conductor to hire one' });
@@ -53,8 +51,6 @@ export function register(program: Command): void {
           ['id', String(spec['id'] ?? '')],
           ['name', String(spec['name'] ?? '')],
           ['project', String(spec['projectId'] ?? '')],
-          ['runtime', String(spec['runtimeId'] ?? '')],
-          ['model', spec['model'] === null ? '(runtime default)' : String(spec['model'] ?? '')],
           ['session', String(spec['sessionPolicy'] ?? '')],
           ['max workers', String(spec['maxWorkers'] ?? '')],
           ['effective', conc['effective'] === undefined
@@ -93,42 +89,11 @@ export function register(program: Command): void {
     .command('activate')
     .argument('<id>')
     .description('activate a hired role so it can pick up tickets')
-    .option('--runtime <runtime>')
-    .option('--model <model>')
-    .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
+    .action(async (id: string, _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
-      const body: Record<string, unknown> = {};
-      if (opts['runtime']) body['runtime'] = opts['runtime'];
-      if (opts['model']) body['model'] = opts['model'];
-      const result = await client.wpost(`/roles/${encodeURIComponent(id)}/activate`, body);
+      const result = await client.wpost(`/roles/${encodeURIComponent(id)}/activate`, {});
       emit(result, () => write(`${style.ok('activated')} ${id}`));
     }));
-
-  const patch = (field: 'runtime' | 'model') => async (id: string, value: string, opts: Record<string, string>, command: Command) => run(async () => {
-    const { client } = await session(command);
-    const reason = opts['reason'] ?? `set ${field} to ${value}`;
-    const result = await client.patch(client.w(`/roles/${encodeURIComponent(id)}`), {
-      patch: { [field]: field === 'model' && value === 'default' ? null : value },
-      reason,
-    });
-    emit(result, () => write(`${style.ok('updated')} ${id}: ${field} = ${value}`));
-  });
-
-  role
-    .command('set-runtime')
-    .argument('<id>')
-    .argument('<runtime>')
-    .option('--reason <reason>')
-    .description('change the runtime for a role')
-    .action(patch('runtime'));
-
-  role
-    .command('set-model')
-    .argument('<id>')
-    .argument('<model>', 'model id, or "default" for the runtime default')
-    .option('--reason <reason>')
-    .description('change the model for a role')
-    .action(patch('model'));
 
   role
     .command('set-max-workers')

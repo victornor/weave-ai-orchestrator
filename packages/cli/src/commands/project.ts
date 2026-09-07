@@ -1,4 +1,5 @@
-/** `conductor project add|list|show|remove|fetch|set-runtime|set-policy` (PLAN §20). */
+/** `conductor project add|list|show|remove|fetch|set-policy` (PLAN §20). The runtime is the
+ * workspace's workers model setting — `conductor models` (VS-77), not a per-project choice. */
 import type { Command } from 'commander';
 import type { Job } from '@agent-conductor/shared';
 import { ApiError } from '../api.js';
@@ -14,7 +15,6 @@ export function register(program: Command): void {
     .argument('<git-url>')
     .description('clone a repo, init OpenSpec, seed the project KB')
     .option('--id <id>', 'project id (slug)')
-    .option('--runtime <runtime>', 'default runtime for roles in this project')
     .option('--branch <branch>', 'default branch')
     .option('--max-workers <n>', 'concurrent workers across all roles')
     .option('--setup <command>', 'setup command run once per new worktree')
@@ -23,7 +23,6 @@ export function register(program: Command): void {
       const { client } = await session(command);
       const body: Record<string, unknown> = { url };
       if (opts['id']) body['id'] = opts['id'];
-      if (opts['runtime']) body['runtime'] = opts['runtime'];
       if (opts['branch']) body['defaultBranch'] = opts['branch'];
       if (opts['maxWorkers']) body['maxWorkers'] = Number(opts['maxWorkers']);
       if (opts['setup']) body['setupCommand'] = opts['setup'];
@@ -56,7 +55,6 @@ export function register(program: Command): void {
         table(rows, [
           { header: 'ID', get: (r) => String(r['id'] ?? '') },
           { header: 'NAME', get: (r) => String(r['name'] ?? '') },
-          { header: 'RUNTIME', get: (r) => String(r['runtimeId'] ?? '') },
           { header: 'BRANCH', get: (r) => String(r['defaultBranch'] ?? '') },
           { header: 'MAX', get: (r) => String(r['maxWorkers'] ?? ''), align: 'right' },
           { header: 'STATUS', get: (r) => String(r['status'] ?? '') },
@@ -79,8 +77,6 @@ export function register(program: Command): void {
           ['git', String(p['gitUrl'] ?? '')],
           ['branch', String(p['defaultBranch'] ?? '')],
           ['clone', String(p['clonePath'] ?? '')],
-          ['runtime', String(p['runtimeId'] ?? '')],
-          ['model', p['model'] === null ? '(runtime default)' : String(p['model'] ?? '')],
           ['max workers', String(p['maxWorkers'] ?? '')],
           ['setup', String(p['setupCommand'] ?? '')],
           ['worktrees', String(p['worktreeProvider'] ?? '')],
@@ -120,17 +116,6 @@ export function register(program: Command): void {
           { header: 'FAST-FORWARDED', get: (r) => (r['fastForwarded'] === true ? 'yes' : 'no') },
         ], { empty: 'no projects' });
       });
-    }));
-
-  project
-    .command('set-runtime')
-    .argument('<project>', 'project id')
-    .argument('<runtime>', 'runtime id, e.g. claude, codex, opencode, gemini')
-    .description('change the default runtime for roles in a project')
-    .action(async (id: string, runtime: string, _opts: unknown, command: Command) => run(async () => {
-      const { client } = await session(command);
-      const updated = await client.patch<Record<string, unknown>>(client.w(`/projects/${encodeURIComponent(id)}`), { runtime });
-      emit(updated, () => write(`${style.ok('updated')} ${id} runtime = ${String(updated?.['runtimeId'] ?? runtime)}`));
     }));
 
   project

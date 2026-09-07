@@ -37,7 +37,6 @@ function rowToSpec(ctx: WorkspaceContext, role: Role): RoleSpec {
     title: role.title ?? undefined, icon: role.icon ?? undefined,
     charterSummary: role.charterSummary, scope: role.scopeText,
     responsibilities: role.responsibilities, capabilities: role.capabilities, rules: role.rules,
-    runtime: role.runtimeId, model: role.model, effort: role.effort ?? undefined,
     sessionPolicy: role.sessionPolicy, maxWorkers: role.maxWorkers,
     permission: role.permission, secrets: role.secrets, createdBy: role.createdBy,
   });
@@ -70,7 +69,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
     ctx.db.update('roles', role.id, {
       name: spec.name, title: spec.title ?? null, icon: spec.icon ?? null, charterSummary: spec.charterSummary, scopeText: spec.scope,
       responsibilitiesJson: spec.responsibilities, capabilitiesJson: spec.capabilities, rulesJson: spec.rules,
-      runtimeId: spec.runtime, model: spec.model, effort: spec.effort ?? null, sessionPolicy: spec.sessionPolicy,
+      sessionPolicy: spec.sessionPolicy,
       maxWorkers: spec.maxWorkers, permissionJson: spec.permission, secretsJson: spec.secrets,
       specRevision: role.specRevision + 1, updatedAt: nowIso(),
     });
@@ -95,7 +94,6 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
       if (ctx.db.get<{ id: string }>('SELECT id FROM roles WHERE workspace_id = ? AND (id = ? OR slug = ?)', [ctx.workspaceId, spec.id, spec.id])) {
         throw new OcError('conflict', `role ${spec.id} already exists`);
       }
-      if (!spec.runtime) spec.runtime = project.runtimeId;
       spec.createdAt = spec.createdAt ?? nowIso();
 
       const charter = renderCharter(ctx, spec);
@@ -106,7 +104,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
           id: spec.id, workspaceId: ctx.workspaceId, projectId: project.id, slug: spec.id, name: spec.name,
           title: spec.title ?? null, icon: spec.icon ?? null, charterSummary: spec.charterSummary, scopeText: spec.scope,
           responsibilitiesJson: spec.responsibilities, capabilitiesJson: spec.capabilities, rulesJson: spec.rules,
-          runtimeId: spec.runtime, model: spec.model ?? null, effort: spec.effort ?? null, permissionJson: spec.permission,
+          permissionJson: spec.permission,
           sessionPolicy: spec.sessionPolicy, maxWorkers: spec.maxWorkers, secretsJson: spec.secrets,
           status: autoActivate ? 'active' : 'pending_activation', specRevision: 1, createdBy: spec.createdBy,
           createdAt: now, updatedAt: now,
@@ -117,14 +115,14 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
 
       let decisionId: string | null = null;
       if (!autoActivate) {
-        const runtimeOptions = [...ctx.registries.runtimes.keys()].filter((r) => r !== spec.runtime).map((r) => ({ key: `runtime:${r}`, label: `Approve, but run on ${r}` }));
         try {
+          // Approve or decline, and nothing about a runtime (VS-77): a role does not carry one, and
+          // every worker it spawns runs on the workspace's workers setting.
           const decision = deps().decisions.create(actor, {
             kind: 'hire_approval', owner: 'human', title: `Hire ${spec.name} for ${project.slug}?`,
-            context: `${spec.charterSummary}\n\nScope: ${spec.scope}\n\nRuntime: ${spec.runtime}${spec.model ? ` (${spec.model})` : ''}, up to ${spec.maxWorkers} concurrent workers.`,
+            context: `${spec.charterSummary}\n\nScope: ${spec.scope}\n\nUp to ${spec.maxWorkers} concurrent workers, on the workspace's workers model setting.`,
             options: [
               { key: 'approve', label: 'Approve and activate', recommended: true },
-              ...runtimeOptions,
               { key: 'reject', label: 'Reject' },
             ],
             recommendation: 'approve',
@@ -145,22 +143,27 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
       return { role, decisionId };
     },
 
-    async activate(actor: Actor, id: string, opts: { runtime?: string; model?: string | null } = {}): Promise<Role> {
+    async activate(actor: Actor, id: string): Promise<Role> {
       const role = get(id);
       const spec = rowToSpec(ctx, role);
-      if (opts.runtime) spec.runtime = opts.runtime;
-      if (opts.model !== undefined) spec.model = opts.model;
-      ctx.db.update('roles', id, { status: 'active', runtimeId: spec.runtime, model: spec.model ?? null, pauseReason: null, updatedAt: nowIso() });
+      ctx.db.update('roles', id, { status: 'active', pauseReason: null, updatedAt: nowIso() });
       writeRoleFiles(ctx, spec);
       const updated = get(id);
-      recordActivity(ctx.db, ctx.workspaceId, actor, 'role.activate', 'role', id, { runtime: spec.runtime, model: spec.model });
-      ctx.events.emit('role.activated', 'role', id, { runtime: spec.runtime, model: spec.model });
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'role.activate', 'role', id, {});
+      ctx.events.emit('role.activated', 'role', id, {});
       return updated;
     },
 
     async update(actor: Actor, id: string, patch: Partial<RoleSpec>, reason: string, _opts: { applyToRunning?: boolean } = {}): Promise<Role> {
       const role = get(id);
       const before = rowToSpec(ctx, role);
+      // Strict on the patch, not on the merge: an unknown key would otherwise be stripped and the
+      // update would report success having changed nothing — the same silent no-op the route guards
+      // against (VS-32), and now the way a caller learns a role no longer carries a runtime (VS-77).
+      const checked = RoleSpecSchema.partial().strict().safeParse(patch);
+      if (!checked.success) {
+        throw new OcError('validation', `invalid role patch: ${checked.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
+      }
       const merged = RoleSpecSchema.parse({ ...before, ...patch, id: before.id, project: before.project });
       const changedKeys = Object.keys(patch).filter((k) => JSON.stringify((before as Record<string, unknown>)[k]) !== JSON.stringify((merged as Record<string, unknown>)[k]));
       const updated = persistSpec(role, merged);

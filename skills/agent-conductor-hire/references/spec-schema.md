@@ -15,9 +15,6 @@ Passed to `ac_role_hire(spec)`. The daemon validates it (`RoleSpecSchema`) and r
 | `capabilities` | string[] | Stack and tooling: `node`, `postgres`, `drizzle`, `vitest`. |
 | `exclusions` | string[] | What this role does not do, even when it could. |
 | `rules` | string[] | Project-specific rules, lifted from that project's `PROJECT.md`. |
-| `runtime` | string | The project's default CLI unless there is a reason. |
-| `model` | string \| null | `null` = the runtime's default. Prefer `null`. |
-| `effort` | string, optional | Runtime-specific reasoning effort. |
 | `sessionPolicy` | `per_ticket` \| `fresh` \| `persistent` | `per_ticket` for builders, `fresh` for reviewers. |
 | `maxWorkers` | 1–32 | Concurrent tickets this role runs. 2 is the sane default. |
 | `permission` | `{mode, allowed[], denied[]}` | `mode`: `auto` \| `restricted` \| `bypass`. `bypass` needs the human's explicit opt-in — never propose it yourself. |

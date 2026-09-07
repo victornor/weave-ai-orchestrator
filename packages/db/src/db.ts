@@ -19,11 +19,16 @@ export class Db {
     this.sqlite = new DatabaseSync(path);
     this.sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   }
-  migrate(): void {
+  /**
+   * Apply every migration this build carries, or — `through` — only those up to and including one
+   * file, which is how a test builds a database as it stood before a later migration was written.
+   */
+  migrate(through?: string): void {
     this.sqlite.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
     const applied = new Set(this.all<{ value: string }>("SELECT value FROM meta WHERE key LIKE 'migration:%'").map((r) => r.value));
     const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
     for (const f of files) {
+      if (through !== undefined && f > through) break;
       if (applied.has(f)) continue;
       const sql = readFileSync(join(MIGRATIONS_DIR, f), 'utf8');
       this.sqlite.exec('BEGIN');

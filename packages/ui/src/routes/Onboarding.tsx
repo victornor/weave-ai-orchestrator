@@ -17,15 +17,15 @@ import { duration } from '../lib/format';
 import { cx } from '../lib/cx';
 import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
 
-type Step = 'workspace' | 'conductor' | 'projects' | 'create';
+type Step = 'workspace' | 'models' | 'projects' | 'create';
 const STEPS: Array<{ key: Step; label: string }> = [
   { key: 'workspace', label: 'Workspace' },
-  { key: 'conductor', label: 'Conductor' },
+  { key: 'models', label: 'Models' },
   { key: 'projects', label: 'Projects' },
   { key: 'create', label: 'Create' },
 ];
 
-interface ProjectDraft { url: string; id: string; runtime: string; maxWorkers: number; setupCommand: string; idTouched: boolean }
+interface ProjectDraft { url: string; id: string; maxWorkers: number; setupCommand: string; idTouched: boolean }
 
 type StepState = 'pending' | 'running' | 'done' | 'failed';
 /**
@@ -120,7 +120,7 @@ export function OnboardingRoute(): React.ReactElement {
   const root = health.data?.host?.defaultWorkspaceRoot ?? '~/agent-conductor';
   useEffect(() => { if (!pathTouched) setPath(id ? `${root}/${id}` : ''); }, [id, root, pathTouched]);
 
-  // Step 2 — conductor
+  // Step 2 — the two model settings: the conductor's and every worker's (VS-77)
   const available = useMemo(() => (runtimes.data ?? []).filter(isRuntimeAvailable), [runtimes.data]);
   const [runtime, setRuntime] = useState<string>('');
   useEffect(() => { if (!runtime && available[0]) setRuntime(available[0].id); }, [available, runtime]);
@@ -130,7 +130,7 @@ export function OnboardingRoute(): React.ReactElement {
 
   // Step 3 — projects
   const [projects, setProjects] = useState<ProjectDraft[]>([]);
-  const addProject = (): void => setProjects((p) => [...p, { url: '', id: '', runtime: runtime || available[0]?.id || 'claude', maxWorkers: 2, setupCommand: '', idTouched: false }]);
+  const addProject = (): void => setProjects((p) => [...p, { url: '', id: '', maxWorkers: 2, setupCommand: '', idTouched: false }]);
   const patchProject = (i: number, patch: Partial<ProjectDraft>): void =>
     setProjects((p) => p.map((d, j) => {
       if (j !== i) return d;
@@ -165,7 +165,7 @@ export function OnboardingRoute(): React.ReactElement {
   }, []);
 
   const workspaceValid = name.trim().length > 0 && /^[a-z0-9][a-z0-9-]{0,39}$/.test(id) && PREFIX_RE.test(prefix) && path.trim().length > 0;
-  const conductorValid = runtime.length > 0;
+  const modelsValid = runtime.length > 0;
   const projectsValid = projects.every((p) => p.url.trim().length > 0 && /^[a-z0-9][a-z0-9-]*$/.test(p.id));
 
   /** One place that writes a step, so the resume record and the view never disagree. */
@@ -182,7 +182,7 @@ export function OnboardingRoute(): React.ReactElement {
     setCreating(true);
     const steps: StepView[] = [
       { label: `Create workspace ${name}`, state: 'pending' },
-      { label: `Configure the conductor (${runtime}${model ? ` · ${model}` : ''})`, state: 'pending' },
+      { label: `Set the models (${runtime}${model ? ` · ${model}` : ''})`, state: 'pending' },
       ...projects.map((p) => ({ label: `Add project ${p.id}`, state: 'pending' as const })),
     ];
     setProgress(steps);
@@ -201,9 +201,11 @@ export function OnboardingRoute(): React.ReactElement {
     }
     try {
       mark(1, { state: 'running', startedAt: Date.now() }, wsId);
-      const conductor: Record<string, unknown> = { runtime, model: model || null };
-      if (humanName.trim()) conductor['humanName'] = humanName.trim();
-      await api.ws(wsId, '/config', { method: 'PATCH', body: { conductor } });
+      // One choice, both settings: the conductor and every worker start on the same runtime and
+      // model, and Settings → Models is where they are told apart later (VS-77).
+      const setting = { runtime, model: model || null };
+      await api.ws(wsId, '/models', { method: 'PUT', body: { conductor: setting, workers: setting } });
+      if (humanName.trim()) await api.ws(wsId, '/config', { method: 'PATCH', body: { conductor: { humanName: humanName.trim() } } });
       mark(1, { state: 'done', endedAt: Date.now() }, wsId);
     } catch (e) {
       mark(1, { state: 'failed', detail: describe(e), endedAt: Date.now() }, wsId);
@@ -215,7 +217,7 @@ export function OnboardingRoute(): React.ReactElement {
         // 202: the row and its job exist, the clone has not finished. The step watches the job.
         const started = await api.ws<StartedAdd>(wsId, '/projects', {
           method: 'POST',
-          body: { url: p.url.trim(), id: p.id, runtime: p.runtime, maxWorkers: p.maxWorkers, ...(p.setupCommand.trim() ? { setupCommand: p.setupCommand.trim() } : {}) },
+          body: { url: p.url.trim(), id: p.id, maxWorkers: p.maxWorkers, ...(p.setupCommand.trim() ? { setupCommand: p.setupCommand.trim() } : {}) },
         });
         mark(2 + i, { jobId: started?.jobId ?? undefined, projectId: started?.project?.id ?? p.id }, wsId);
       } catch (e) {
@@ -308,12 +310,12 @@ export function OnboardingRoute(): React.ReactElement {
             <input value={path} onChange={(e) => { setPathTouched(true); setPath(e.target.value); }} className={cx(INPUT, 'ac-mono')} />
           </Field>
           <Actions>
-            <Button variant="primary" disabled={!workspaceValid} onClick={() => setStep('conductor')}>Continue</Button>
+            <Button variant="primary" disabled={!workspaceValid} onClick={() => setStep('models')}>Continue</Button>
           </Actions>
         </section>
       ) : null}
 
-      {step === 'conductor' ? (
+      {step === 'models' ? (
         <section className="flex flex-col gap-4">
           <Field group label="Runtime" hint="The coding CLI the conductor runs on. Only CLIs installed on the daemon host are offered; log in with `conductor runtime login <id>` if a run later fails with auth.">
             {runtimes.isLoading ? <Skeleton className="h-16 w-full rounded-r6" /> : available.length === 0 ? (
@@ -357,7 +359,7 @@ export function OnboardingRoute(): React.ReactElement {
           </Field>
           <Actions>
             <Button variant="ghost" onClick={() => setStep('workspace')}>Back</Button>
-            <Button variant="primary" disabled={!conductorValid} onClick={() => setStep('projects')}>Continue</Button>
+            <Button variant="primary" disabled={!modelsValid} onClick={() => setStep('projects')}>Continue</Button>
           </Actions>
         </section>
       ) : null}
@@ -372,16 +374,9 @@ export function OnboardingRoute(): React.ReactElement {
               <Field label="Git URL">
                 <input autoFocus value={p.url} onChange={(e) => patchProject(i, { url: e.target.value })} placeholder="git@github.com:acme/api.git" className={cx(INPUT, 'ac-mono')} />
               </Field>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <Field label="Id">
                   <input value={p.id} onChange={(e) => patchProject(i, { id: slugOf(e.target.value), idTouched: true })} className={cx(INPUT, 'ac-mono')} />
-                </Field>
-                <Field label="Runtime">
-                  <select value={p.runtime} onChange={(e) => patchProject(i, { runtime: e.target.value })} className={INPUT}>
-                    {(runtimes.data ?? []).map((r) => (
-                      <option key={r.id} value={r.id} disabled={!isRuntimeAvailable(r)}>{r.displayName}</option>
-                    ))}
-                  </select>
                 </Field>
                 <Field label="Max workers">
                   <input type="number" min={1} max={32} value={p.maxWorkers} onChange={(e) => patchProject(i, { maxWorkers: Math.max(1, Math.min(32, Number(e.target.value) || 1)) })} className={INPUT} />
@@ -399,7 +394,7 @@ export function OnboardingRoute(): React.ReactElement {
             <Button variant="secondary" onClick={addProject}>{projects.length ? 'Add another project' : 'Add a project'}</Button>
           </div>
           <Actions>
-            <Button variant="ghost" onClick={() => setStep('conductor')}>Back</Button>
+            <Button variant="ghost" onClick={() => setStep('models')}>Back</Button>
             <Button variant="primary" disabled={!projectsValid} onClick={() => setStep('create')}>{projects.length ? 'Continue' : 'Skip for now'}</Button>
           </Actions>
         </section>
@@ -412,9 +407,9 @@ export function OnboardingRoute(): React.ReactElement {
               <dl className="ac-card grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 p-4 text-meta">
                 <Row k="Workspace" v={`${name} · ${id} · ${prefix}-1`} />
                 <Row k="Directory" v={path} mono />
-                <Row k="Conductor" v={`${runtimes.data?.find((r) => r.id === runtime)?.displayName ?? runtime}${model ? ` · ${model}` : ' · default model'}`} />
+                <Row k="Models" v={`${runtimes.data?.find((r) => r.id === runtime)?.displayName ?? runtime}${model ? ` · ${model}` : ' · default model'} — conductor and workers`} />
                 <Row k="Addresses you as" v={humanName.trim() || 'captain'} />
-                <Row k="Projects" v={projects.length ? projects.map((p) => `${p.id} (${p.runtime})`).join(', ') : 'none yet'} />
+                <Row k="Projects" v={projects.length ? projects.map((p) => p.id).join(', ') : 'none yet'} />
               </dl>
               <Actions>
                 <Button variant="ghost" onClick={() => setStep('projects')}>Back</Button>

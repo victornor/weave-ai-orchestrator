@@ -11,6 +11,7 @@ import { recordActivity } from '../events.js';
 import { renderHome } from './home.js';
 import { renderBrief } from '../prompts/index.js';
 import { createSessions } from '../sessions/index.js';
+import { modelSettingFor } from '../models/resolve.js';
 import { landedWorkTest } from '../worktrees/landed.js';
 import { git, worktreeState } from '../util/git.js';
 
@@ -76,7 +77,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
 
     ctx.db.insert('agents', {
       id, workspaceId: ctx.workspaceId, kind: 'worker', projectId: project.id, roleId: role.id, roleRevision: role.specRevision,
-      ticketId: ticket.id, name: `${role.name} #${n}`, runtimeId: role.runtimeId, model: role.model, effort: role.effort,
+      ticketId: ticket.id, name: `${role.name} #${n}`, runtimeId: modelSettingFor(ctx.config, 'worker').runtime,
       status: 'provisioning', homePath: home, worktreePath: null, branch: opts.noWorktree ? null : branch,
       turnEpoch: 0, turnCount: 0, spawnedBy, spawnReason: opts.spawnReason ?? `ticket ${ticket.identifier}`,
       briefRevision: 1, createdAt: now, updatedAt: now,
@@ -114,7 +115,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const agent = get(id);
       await renderHome(ctx, deps, agent);
       ctx.db.update('agents', id, { status: 'active', updatedAt: nowIso() });
-      sessions.forTurn({ id, kind: 'worker', runtimeId: role.runtimeId }, role.sessionPolicy);
+      sessions.forTurn({ id, kind: 'worker', runtimeId: modelSettingFor(ctx.config, 'worker').runtime }, role.sessionPolicy);
       deps().wake.enqueue(id, { source: 'ticket_assigned', reason: `${ticket.identifier}: ${ticket.title}`, payload: { ticketId: ticket.id }, requestedBy: actor });
     } catch (e) {
       // Roll back the row, the home and the worktree; nothing half-created is left behind.
@@ -186,20 +187,23 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
 
     async ensureConductor(): Promise<Agent> {
       let a = ctx.db.get<Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'conductor'", [ctx.workspaceId]);
+      const setting = modelSettingFor(ctx.config, 'conductor');
       if (!a) {
         const id = newId();
         const now = nowIso();
         mkdirSync(ctx.paths.conductor, { recursive: true });
         ctx.db.insert('agents', {
           id, workspaceId: ctx.workspaceId, kind: 'conductor', projectId: null, roleId: null, roleRevision: null, ticketId: null,
-          name: 'Conductor', runtimeId: ctx.config.conductor.runtime, model: ctx.config.conductor.model, effort: ctx.config.conductor.effort ?? null,
+          name: 'Conductor', runtimeId: setting.runtime,
           status: 'active', homePath: ctx.paths.conductor, turnEpoch: 0, turnCount: 0, spawnedBy: 'system', spawnReason: 'workspace bootstrap',
           briefRevision: 1, createdAt: now, updatedAt: now,
         });
         a = get(id);
         ctx.events.emit('worker.spawned', 'agent', id, { name: 'Conductor', kind: 'conductor' });
-      } else if (a.runtimeId !== ctx.config.conductor.runtime || a.model !== ctx.config.conductor.model) {
-        ctx.db.update('agents', a.id, { runtimeId: ctx.config.conductor.runtime, model: ctx.config.conductor.model, updatedAt: nowIso() });
+      } else if (a.runtimeId !== setting.runtime) {
+        // The row records what the conductor is on; the setting decides. `forTurn` below retires a
+        // session that belonged to the runtime we are moving away from (VS-77).
+        ctx.db.update('agents', a.id, { runtimeId: setting.runtime, updatedAt: nowIso() });
         a = get(a.id);
       }
       await renderHome(ctx, deps, a);

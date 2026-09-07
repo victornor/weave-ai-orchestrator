@@ -4,6 +4,7 @@ import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from 
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
+import { WORKERS_RUNTIME_CORRELATION } from '../models/index.js';
 
 const asDecision = (r: Record<string, unknown>): Decision => decisionRow(r) as unknown as Decision;
 
@@ -132,8 +133,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       return;
     }
     if (key === 'reject' || key === 'decline') return;
-    const runtime = key.startsWith('runtime:') ? key.slice('runtime:'.length) : undefined;
-    await deps().roles.activate(actor, roleId, runtime ? { runtime } : undefined);
+    await deps().roles.activate(actor, roleId);
     // The new role's first job: the project's unassigned "describe" scout ticket, if any, starts now
     // rather than waiting for the conductor's next turn.
     try {
@@ -181,14 +181,21 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       });
       return;
     }
-    if (key.startsWith('runtime:')) {
-      db.update('agents', target.agentId, { runtimeId: key.slice('runtime:'.length), pauseReason: null, pauseDetailJson: null, updatedAt: nowIso() });
-    }
     await deps().workers.relaunch(actor, target.agentId, 'the human asked for a retry');
     if (target.ticketId) {
       const t = deps().tickets.get(target.ticketId);
       if (t.status === 'blocked') await deps().tickets.transition(actor, t.id, { to: t.executionRunId ? 'in_progress' : 'todo', note: 'retrying' }).catch(() => undefined);
     }
+  }
+
+  /**
+   * The one `question` the daemon asks itself: which runtime a mixed-runtime workspace's workers
+   * should use after the VS-77 migration. Any other question is a human's or an agent's, and its
+   * answer is the answer — nothing here to apply.
+   */
+  async function applyWorkersRuntimeQuestion(actor: Actor, d: Decision, key: string): Promise<void> {
+    if (d.correlationKey !== WORKERS_RUNTIME_CORRELATION || !key.startsWith('runtime:')) return;
+    await deps().models.settleWorkersRuntime(actor, key.slice('runtime:'.length));
   }
 
   function applyDiscardApproval(actor: Actor, d: Decision, key: string, text: string | null): void {
@@ -210,7 +217,9 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     const d = get(id);
     if (d.status !== 'open') throw new OcError('wrong_status', `decision ${id} is ${d.status}`);
     if (!ans.key && !ans.text) throw new OcError('validation', 'an answer needs a key or free text');
-    if (ans.key && d.options.length && !d.options.some((o) => o.key === ans.key) && !ans.key.startsWith('runtime:')) {
+    // No `runtime:` escape hatch (VS-77): a card cannot move one agent onto another runtime, so an
+    // answer that is not one of the offered options is a validation error again.
+    if (ans.key && d.options.length && !d.options.some((o) => o.key === ans.key)) {
       throw new OcError('validation', `unknown option "${ans.key}"`, { options: d.options.map((o) => o.key) });
     }
     if (!ans.key && !d.allowFreeText) throw new OcError('validation', 'this decision requires one of its options');
@@ -237,6 +246,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
         case 'hire_approval': await applyHireApproval(actor, answered, effective); break;
         case 'retry_approval': await applyRetryApproval(actor, answered, effective); break;
         case 'discard_approval': applyDiscardApproval(actor, answered, effective, text); break;
+        case 'question': await applyWorkersRuntimeQuestion(actor, answered, effective); break;
         default: break;
       }
     } catch (e) {

@@ -21,7 +21,7 @@ export type SettingsAreaKey = (typeof SETTINGS_AREAS)[number]['key'];
 export const SETTINGS_SECTIONS = [
   { key: 'workspace', label: 'Workspace', area: 'workspace' },
   { key: 'projects', label: 'Projects', area: 'workspace' },
-  { key: 'conductor', label: 'Conductor', area: 'workspace' },
+  { key: 'models', label: 'Models', area: 'workspace' },
   { key: 'channels', label: 'Channels', area: 'workspace' },
   { key: 'presentation', label: 'Presentation', area: 'workspace' },
   { key: 'updates', label: 'Updates', area: 'daemon' },

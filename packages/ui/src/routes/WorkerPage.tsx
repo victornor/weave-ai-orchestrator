@@ -97,7 +97,7 @@ export function WorkerRoute(): React.ReactElement {
         }
         meta={
           <span className="ac-mono">
-            {[project?.slug, ticket?.identifier, agent.runtimeId, agent.model].filter(Boolean).join(' · ')}
+            {[project?.slug, ticket?.identifier, agent.runtimeId].filter(Boolean).join(' · ')}
             {usage ? ` · ${tokens(usage.tokensIn + usage.tokensOut)} tok · ${cents(usage.costCents)}` : ''}
             {worktree ? ` · ${worktree.dirty ? 'dirty' : worktree.status} ↑${worktree.ahead} ↓${worktree.behind}` : ''}
             {pausedFor ? <span className="text-blocked"> · {pausedFor}</span> : null}

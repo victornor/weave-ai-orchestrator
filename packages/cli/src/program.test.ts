@@ -42,14 +42,16 @@ describe('command tree', () => {
     ['daemon update', ['apply', 'cancel']],
     ['context', ['list', 'use', 'remove', 'show']],
     ['devices', ['list', 'revoke']],
-    ['project', ['add', 'list', 'show', 'remove', 'fetch', 'set-runtime', 'set-policy']],
+    ['project', ['add', 'list', 'show', 'remove', 'fetch', 'set-policy']],
     ['runtime', ['list', 'detect', 'login', 'models']],
-    ['role', ['list', 'show', 'activate', 'set-runtime', 'set-model', 'set-max-workers', 'pause', 'resume', 'retire', 'charter']],
+    ['role', ['list', 'show', 'activate', 'set-max-workers', 'pause', 'resume', 'retire', 'charter']],
     ['worker', ['list', 'show', 'pause', 'resume', 'relaunch', 'cancel', 'purge']],
     ['ticket', ['create', 'list', 'show', 'assign', 'set', 'transition', 'comment', 'cancel', 'discard', 'open']],
     ['decision', ['list', 'show', 'answer']],
     ['presentation', ['set', 'open', 'reconcile', 'status']],
-    ['conductor', ['set-model', 'set-runtime', 'show', 'reset-session']],
+    ['conductor', ['show', 'reset-session']],
+    // Model selection, whole and entire (VS-77).
+    ['models', ['show', 'set']],
     ['workspace', ['list', 'use', 'register', 'unregister', 'set-default', 'pause', 'resume', 'export', 'import']],
     ['runs', ['list', 'show', 'tail', 'cancel']],
     ['knowledge', ['show', 'edit', 'note', 'lint', 'curate', 'revert']],
@@ -333,10 +335,36 @@ describe('running commands against a stubbed daemon', () => {
     expect(text).toContain('capped by the project limit of 4');
   });
 
-  it('sets a project runtime', async () => {
-    const seen = stubFetch({ '/api/w/acme/projects/api': { id: 'api', runtimeId: 'codex' } });
-    await buildProgram().parseAsync([...base, 'project', 'set-runtime', 'api', 'codex']);
-    expect(seen).toContain('PATCH /api/w/acme/projects/api');
+  it('shows both model settings', async () => {
+    const models = { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'codex', model: null, effort: 'high' } };
+    const seen = stubFetch({ '/api/w/acme/models': models });
+    await buildProgram().parseAsync([...base, 'models']);
+    expect(seen).toContain('GET /api/w/acme/models');
+  });
+
+  it('sends the whole block with one setting changed, so the other is not dropped', async () => {
+    const models = { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } };
+    let put: unknown = null;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') { put = JSON.parse(String(init?.body)); return new Response(JSON.stringify(put), { status: 200 }); }
+      return new Response(JSON.stringify(models), { status: 200 });
+    }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'models', 'set', 'workers', '--runtime', 'codex', '--model', 'gpt-5']);
+    expect(put).toEqual({
+      conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+      workers: { runtime: 'codex', model: 'gpt-5' },
+    });
+  });
+
+  it('clears a model back to the runtime default', async () => {
+    const models = { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: 'claude-opus-5' } };
+    let put: { workers?: { model?: string | null } } | null = null;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') { put = JSON.parse(String(init?.body)); return new Response(JSON.stringify(put), { status: 200 }); }
+      return new Response(JSON.stringify(models), { status: 200 });
+    }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'models', 'set', 'workers', '--model', 'default']);
+    expect(put!.workers!.model).toBeNull();
   });
 
   it('merges project policies instead of replacing them', async () => {

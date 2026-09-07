@@ -6,8 +6,6 @@ const state = vi.hoisted(() => ({
   updates: [] as Array<Record<string, unknown>>,
   role: {} as Record<string, unknown>,
   concurrency: {} as Record<string, unknown> | undefined,
-  models: [] as Array<Record<string, unknown>>,
-  defaults: {} as Record<string, unknown>,
   updateError: null as Error | null,
 }));
 
@@ -19,9 +17,6 @@ vi.mock('../api/hooks', () => ({
   useWorkers: () => ({ data: [] }),
   useConductor: () => ({ data: null, isLoading: false }),
   useRole: () => ({ data: { role: state.role, charter: '# Charter', revisions: [], workers: [], concurrency: state.concurrency }, isLoading: false }),
-  useRuntimes: () => ({ data: [{ id: 'claude', displayName: 'Claude' }, { id: 'codex', displayName: 'Codex' }] }),
-  useRuntimeModels: () => ({ data: state.models }),
-  useWorkspaceSummary: () => ({ data: { config: { defaults: state.defaults } } }),
   useUpdateRole: () => ({
     mutate: (v: Record<string, unknown>) => state.updates.push(v),
     isPending: false,
@@ -45,11 +40,9 @@ function openSheet(): HTMLElement {
 
 beforeEach(() => {
   state.updates = [];
-  state.models = [{ id: 'claude-opus-5', label: 'Opus 5' }];
-  state.defaults = {};
   state.updateError = null;
   state.role = {
-    id: 'backend', projectId: 'p1', name: 'Backend Engineer', status: 'active', runtimeId: 'claude', model: null,
+    id: 'backend', projectId: 'p1', name: 'Backend Engineer', status: 'active',
     maxWorkers: 2, charterSummary: 'Owns the api service.',
   };
   state.concurrency = { roleMax: 2, projectMax: 4, effective: 2, live: 1, projectLive: 1, free: 1 };
@@ -97,53 +90,24 @@ describe('Team — role max workers', () => {
   });
 });
 
-describe('Team — role runtime and model', () => {
-  /** The role sheet, opened; the runtime and model selects live next to max workers. */
-  function sheet(): { runtime: HTMLElement; model: HTMLElement } {
+describe('Team — a role offers no runtime or model', () => {
+  /** The role sheet, where the per-role runtime and model selects used to live (VS-77). */
+  function sheet(): void {
     render(<TeamRoute />);
     fireEvent.click(screen.getByText('Charter'));
-    return { runtime: screen.getByLabelText('runtime'), model: screen.getByLabelText('model') };
   }
 
-  it('patches `runtime`, the RoleSpec field name, not the `runtimeId` column name', () => {
-    const { runtime } = sheet();
-    expect(runtime).toHaveValue('claude');
-    fireEvent.change(runtime, { target: { value: 'codex' } });
-    expect(state.updates).toEqual([{ id: 'backend', patch: { runtime: 'codex' }, reason: 'changed from the web app' }]);
-  });
-
-  it('patches the chosen model', () => {
-    const { model } = sheet();
-    expect(model).toHaveValue('');
-    fireEvent.change(model, { target: { value: 'claude-opus-5' } });
-    expect(state.updates).toEqual([{ id: 'backend', patch: { model: 'claude-opus-5' }, reason: 'changed from the web app' }]);
-  });
-
-  it('clears an override with null rather than the empty string, which would be stored verbatim', () => {
-    state.role['model'] = 'claude-opus-5';
-    const { model } = sheet();
-    expect(model).toHaveValue('claude-opus-5');
-    fireEvent.change(model, { target: { value: '' } });
-    expect(state.updates).toEqual([{ id: 'backend', patch: { model: null }, reason: 'changed from the web app' }]);
-  });
-
-  it('names the model the default resolves to, when the workspace sets one', () => {
-    state.defaults = { model: 'claude-sonnet-5' };
+  it('offers neither control', () => {
     sheet();
-    expect(screen.getByRole('option', { name: 'default · claude-sonnet-5' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('runtime')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('model')).not.toBeInTheDocument();
   });
 
-  it('says only "default" when the workspace leaves the model to the runtime', () => {
-    sheet();
-    expect(screen.getByRole('option', { name: 'default' })).toBeInTheDocument();
-  });
-
-  it('shows the daemon error instead of pretending the change stuck', () => {
+  it('shows the daemon error instead of pretending a change stuck', () => {
     state.updateError = new ApiError(400, { code: 'validation', message: 'unrecognized key: "runtimeId"' });
-    const { runtime } = sheet();
+    sheet();
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent('VALIDATION');
     expect(alert).toHaveTextContent('The role was not changed: unrecognized key: "runtimeId"');
-    expect(runtime).toHaveValue('claude');   // still the stored runtime, not the one that failed
   });
 });

@@ -370,12 +370,25 @@ export function useConductor(): UseQueryResult<T.WorkerDetail> {
   return useQuery({ queryKey: qk.conductor(ws), queryFn: () => api.ws<unknown>(ws, '/conductor').then(workerDetail) });
 }
 
-export function usePatchConductor(): UseMutationResult<unknown, Error, { runtime?: string; model?: string }> {
+/** The workspace's two model settings: the whole of model selection (VS-77). */
+export function useModels(): UseQueryResult<T.WorkspaceModels> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.models(ws), queryFn: () => api.ws<T.WorkspaceModels>(ws, '/models') });
+}
+
+/**
+ * `PUT /models` replaces both settings, so the whole block goes back every time — a partial body
+ * would drop the setting that was not being changed.
+ */
+export function useSetModels(): UseMutationResult<T.WorkspaceModels, Error, T.WorkspaceModels> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body) => api.ws(ws, '/conductor', { method: 'PATCH', body }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.conductor(ws) }),
+    mutationFn: (body) => api.ws<T.WorkspaceModels>(ws, '/models', { method: 'PUT', body }),
+    onSuccess: (next) => {
+      qc.setQueryData(qk.models(ws), next);
+      void qc.invalidateQueries({ queryKey: qk.conductor(ws) });
+    },
   });
 }
 

@@ -106,11 +106,10 @@ export function workerToCard(agent: Agent, ctx: WorkerCardContext = {}): WorkerC
     pauseReason: workerPauseReason(a),
     worktree,
     runtime: a.runtimeId ?? 'unknown',
-    model: a.model ?? null,
     turn: a.turnCount ?? 0,
     tokens: tokensLabel,
     cost: cost === '—' ? null : cost,
-    meta: joinMeta(ctx.projectName ?? a.projectId, ticket?.identifier, a.runtimeId, a.model, tokensLabel, cost === '—' ? null : cost, workerPauseReason(a)),
+    meta: joinMeta(ctx.projectName ?? a.projectId, ticket?.identifier, a.runtimeId, tokensLabel, cost === '—' ? null : cost, workerPauseReason(a)),
     windowTitle: joinMeta(name, ticket?.identifier, statusLabel(uiStatus)),
   };
 }

@@ -51,7 +51,7 @@ AgentConductor turns a directory into a **workspace**: a virtual business made o
 
 - The human talks to the conductor (web, CLI, Telegram, anything with a channel adapter), or directly to a live worker through its ticket.
 - The conductor turns requests into **tickets**, hires **roles** when no suitable one exists, assigns tickets to roles, supervises the workers that spawn from them, and reports outcomes in plain language.
-- Project work is done by **workers**: disposable agents spawned from a hired **role** (a template: charter, runtime, model) for exactly one ticket, in their own git worktree, with one session that lasts the ticket's whole life (propose → approval → apply → merge). Workers never cross the project boundary and run on whatever coding CLI the human chose for that project (Claude Code, Codex, OpenCode, Gemini CLI). Concurrency is simply more workers. Familiarity with a project lives in the project's knowledge base and the repo's own instructions, not in a long-lived chat.
+- Project work is done by **workers**: disposable agents spawned from a hired **role** (a template: charter, runtime, model) for exactly one ticket, in their own git worktree, with one session that lasts the ticket's whole life (propose → approval → apply → merge). Workers never cross the project boundary and run on the one coding CLI the human chose for the workspace's workers (Claude Code, Codex, OpenCode, Gemini CLI; ADR 0011). Concurrency is simply more workers. Familiarity with a project lives in the project's knowledge base and the repo's own instructions, not in a long-lived chat.
 - Everything is logged: every run, event, token, and cent is attributed to a workspace, project, agent, ticket, and run.
 - **The daemon is a server.** It runs wherever the code should run (your workstation, a home server, a VPS), holds the workspaces, the coding CLIs and the git credentials, and is reached from anywhere: the web app on a phone, the `conductor` CLI on a laptop, Telegram. Nothing on the client needs to run for work to progress. Remote access is password-gated and encrypted by default; the only unauthenticated mode is an explicit loopback-only setting.
 - Everything is open: runtimes, channels, hooks, tools, storage and presentation surfaces are plugins behind small interfaces; the control plane is a documented HTTP + MCP API.
@@ -78,9 +78,9 @@ AgentConductor turns a directory into a **workspace**: a virtual business made o
 | Term | Definition | Notes |
 |---|---|---|
 | **Workspace** | A directory + database representing one virtual business. Contains projects, roles, tickets, knowledge, channels, usage records. | One daemon instance can host several workspaces; v1 targets one. |
-| **Project** | A git repository cloned into the workspace from a URL. Has a default runtime, a default branch, approval policies, and an OpenSpec root. | Project id is a kebab-case slug. |
+| **Project** | A git repository cloned into the workspace from a URL. Has a default branch, approval policies, and an OpenSpec root. | Project id is a kebab-case slug. |
 | **Conductor** | The single workspace-scoped agent the human talks to. Creates tickets, hires agents, assigns, supervises, reports. Read-only on projects. | Exactly one per workspace. It *is* an agent (role `conductor`) running on a runtime, with its own persistent session. |
-| **Role** | A hired template scoped to one project: charter (responsibilities, capabilities, rules), default runtime and model, concurrency limit. Roles do not run. | Hired by the conductor, confirmed by the human. Zero or more per project. |
+| **Role** | A hired template scoped to one project: charter (responsibilities, capabilities, rules), concurrency limit. A role names no runtime or model — those are the workspace's two settings (ADR 0011). Roles do not run. | Hired by the conductor, confirmed by the human. Zero or more per project. |
 | **Worker** | A disposable agent spawned from a role for exactly one ticket: its own home, brief, worktree, and session for the life of the ticket. Retired once the work has landed. | firstmate's crewmate. One worker per ticket; many workers per role. |
 | **Agent** | Anything that runs turns: the conductor or a worker. Has `id`, `kind` (`conductor` \| `worker`), `runtime`, `status`, home directory, session. | |
 | **Runtime** | An adapter that runs an agent turn on a specific CLI (`claude`, `codex`, `opencode`, `gemini`) and normalizes its events, session handle, and usage. | Plugin interface §8. |
@@ -275,9 +275,15 @@ version: 1
 id: acme                      # slug
 name: Acme Labs
 ticketPrefix: ACME
+models:                       # all of model selection, per workspace (VS-77, ADR 0011)
+  conductor:
+    runtime: claude
+    model: claude-fable-5-1   # chosen from the runtime's listModels(); null = runtime default
+  workers:
+    runtime: claude           # every worker in the workspace, whatever its role or project
+    model: claude-opus-5
+    effort: high              # optional; the only place effort can be set
 defaults:
-  runtime: claude             # default runtime for new projects
-  model: null                 # runtime-specific model id or null = runtime default
   proposalApproval: human     # human | conductor | none  (who approves OpenSpec proposals)
   autoMerge: false            # default for new tickets; per-ticket flag; the conductor may create tickets with it on when told to
   deliveryMode: pr            # pr | local-branch  (how workers deliver)
@@ -285,15 +291,12 @@ projects:
   - id: api
     url: git@github.com:acme/api.git
     defaultBranch: main
-    runtime: codex            # default runtime for roles hired into this project
     maxWorkers: 4             # concurrent workers across all roles in this project
     setupCommand: pnpm install   # run once per new worktree (worktrunk post-create hook)
     worktrees: worktrunk      # worktrunk | git  (worktree provider, §11.5)
     openspec: { enabled: true }
     policies: { proposalApproval: conductor }
-conductor:
-  runtime: claude
-  model: claude-fable-5-1     # chosen from the runtime's listModels(); null = runtime default
+conductor:                    # its runtime and model are `models.conductor`, above
   channels: [web, cli, telegram]
 presentation:                 # §14b; all optional, default headless + web
   default: headless
@@ -324,13 +327,13 @@ All tables carry `workspace_id`. Timestamps are ISO-8601 UTC text. Ids are ULIDs
 
 **workspaces** — `id, slug, name, ticket_prefix, ticket_counter, status (active|paused|archived), root_path, created_at, updated_at, settings_json`.
 
-**projects** — `id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers (default 4), setup_command (run once per new worktree, e.g. `pnpm install`), worktree_provider (worktrunk|git), runtime_id, model, openspec_enabled, openspec_version (pinned), policies_json {proposalApproval, mergeMethod (squash|merge|rebase), deliveryMode, autoMergeDefault}, status (cloning|ready|error|archived), last_fetched_at, error_text`.
+**projects** — `id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers (default 4), setup_command (run once per new worktree, e.g. `pnpm install`), worktree_provider (worktrunk|git), openspec_enabled, openspec_version (pinned), policies_json {proposalApproval, mergeMethod (squash|merge|rebase), deliveryMode, autoMergeDefault}, status (cloning|ready|error|archived), last_fetched_at, error_text`.
 
-**roles** — `id, workspace_id, project_id, slug, name (e.g. "Backend Engineer"), title, icon, charter_summary (one sentence; used in routing), scope_text (natural-language routing scope; exclusions explicit), responsibilities_json, capabilities_json, rules_json, runtime_id, model, effort, permission_json, session_policy (per_ticket|fresh, default per_ticket), max_workers (default 2), secrets_json, status (pending_activation|active|paused|retired), pause_reason, spec_revision, memory_budget_tokens, created_by (human|conductor), created_at, updated_at`.
+**roles** — `id, workspace_id, project_id, slug, name (e.g. "Backend Engineer"), title, icon, charter_summary (one sentence; used in routing), scope_text (natural-language routing scope; exclusions explicit), responsibilities_json, capabilities_json, rules_json, permission_json, session_policy (per_ticket|fresh, default per_ticket), max_workers (default 2), secrets_json, status (pending_activation|active|paused|retired), pause_reason, spec_revision, memory_budget_tokens, created_by (human|conductor), created_at, updated_at`.
 
 **role_revisions** — `id, role_id, revision, changed_keys_json, before_json, after_json, author (human|conductor|system), reason, created_at`. Every change to `role.yaml` or the charter writes one; rollback supported. Running workers keep the revision they were spawned with; a running worker's next turn prompt notes "your role's charter changed" only for rules marked `applyToRunning`.
 
-**agents** — everything that runs turns: `id, workspace_id, kind (conductor|worker), project_id (null for conductor), role_id (workers), role_revision, ticket_id (workers; always set), name (e.g. "Backend Engineer #7"), runtime_id, model, effort, status (provisioning|active|running|paused|error|done|retired), pause_reason, error_text, home_path, worktree_path, branch, turn_epoch, turn_count, spawned_by (conductor|human|system), spawn_reason, brief_revision, last_run_at, retired_at, created_at, updated_at`. Exactly one `kind=conductor` per workspace. Unique `(ticket_id)` among non-retired workers (one worker per ticket).
+**agents** — everything that runs turns: `id, workspace_id, kind (conductor|worker), project_id (null for conductor), role_id (workers), role_revision, ticket_id (workers; always set), name (e.g. "Backend Engineer #7"), runtime_id (a record of what it is running on, written from `models.workers`; never an override), status (provisioning|active|running|paused|error|done|retired), pause_reason, error_text, home_path, worktree_path, branch, turn_epoch, turn_count, spawned_by (conductor|human|system), spawn_reason, brief_revision, last_run_at, retired_at, created_at, updated_at`. Exactly one `kind=conductor` per workspace. Unique `(ticket_id)` among non-retired workers (one worker per ticket).
 
 **agent_sessions** — `id, agent_id, runtime_id, session_ref_json (opaque runtime handle), display_id, status (active|stale|closed), turn_count, last_run_id, last_error, cumulative_usage_json, created_at, updated_at`. One active session per agent.
 
@@ -406,7 +409,7 @@ Transitions are validated in `core/tickets/transitions.ts` (single owner). Agent
 
 ### 6.3 Agent state machine
 
-**Role:** `pending_activation` (hired, waiting for the human to confirm/switch runtime) → `active` → `paused` (by the human; no new workers spawn, live workers finish their turn and then wait) → `retired` (no live workers allowed; requires a human decision if any exist).
+**Role:** `pending_activation` (hired, waiting for the human to confirm) → `active` → `paused` (by the human; no new workers spawn, live workers finish their turn and then wait) → `retired` (no live workers allowed; requires a human decision if any exist).
 
 **Worker:** `provisioning` (home rendered, worktree created, skills installed, session placeholder) → `active` (idle, waiting for wakes) ⇄ `running` ; `paused` ; `error` (last run failed non-transiently; supervisor asks the conductor) → `done` (ticket terminal, work landed) → `retired` (worktree removed, home archived). A failed or cancelled ticket leaves its worker in `done` with a `dirty` worktree until discarded.
 
@@ -500,7 +503,7 @@ export interface RuntimeAdapter {
   readonly displayName: string;
   readonly capabilities: RuntimeCapabilities;
   detect(): Promise<RuntimeDetection>;       // { status: available|missing_binary|broken|unsupported, version?, path?, notes? }
-  listModels(): Promise<RuntimeModel[]>;    // { id, label, provider, source: detected | static, tier?, notes? } — feeds the model dropdown for every agent incl. the conductor
+  listModels(): Promise<RuntimeModel[]>;    // { id, label, provider, source: detected | static, tier?, notes? } — feeds the two model pickers in Settings → Models (ADR 0011)
   configSchema(): JsonSchema;                // per-agent runtime options (model, effort, permission mode, extraArgs)
   installInstructions(home: AgentHome, bundle: InstructionBundle): Promise<void>;
                                              // materialize AGENTS.md pointer files + skills into the home for THIS cli
@@ -581,7 +584,7 @@ Closed enum (`shared/src/run-events.ts`): `session.started, session.resumed, tur
 Decisions:
 - **Claude is the reference adapter** and the only one required for M1. It supports every capability.
 - Codex, OpenCode, Gemini use `file_only` prompt injection: the rendered charter+brief is the `AGENTS.md` (Codex, OpenCode) / `GEMINI.md` (Gemini) at the worker home, which is cwd, so every CLI discovers it natively; Claude additionally gets it via `--append-system-prompt-file` on the first turn of a session (its `CLAUDE.md` at home is a `@AGENTS.md` pointer). Because the worktree is `work/` under cwd, the project's own `AGENTS.md`/`CLAUDE.md` inside it is read by the CLIs as nested project instructions (Claude reads nested `CLAUDE.md`; for Codex/OpenCode/Gemini the `agent-conductor-worker` skill instructs the worker to read `work/AGENTS.md` first). Nothing is ever written into the project's discovery files. Implementer: verify nested-instruction behavior per CLI in M5 and record it in `docs/adr/`.
-- `listModels()` is mandatory. Claude: static alias list (`fable`, `opus`, `sonnet`, `haiku`) plus full ids, marked `static`; OpenCode: `opencode models` output (`detected`); Codex: static list from the pinned version plus any `-c model=` the human adds; Gemini: static. The UI and `conductor role set-model` show only models from the role's runtime, and the conductor's model is chosen the same way (`conductor conductor set-model`, or the workspace settings page).
+- `listModels()` is mandatory. Claude: static alias list (`fable`, `opus`, `sonnet`, `haiku`) plus full ids, marked `static`; OpenCode: `opencode models` output (`detected`); Codex: static list from the pinned version plus any `-c model=` the human adds; Gemini: static. Settings → Models and `conductor models set` show only models from that setting's runtime, plus free text for one the adapter does not list (ADR 0011).
 - Each runtime gets a **per-workspace config home** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) under `.agent-conductor/runtimes/<runtime>/` so agent runs never mutate the human's personal CLI config, and so session stores are per workspace. Authentication is inherited by copying/linking credential files on `conductor runtime login <id>` (documented per CLI; Claude: `claude setup-token` or OAuth in that config dir).
 - Permission posture default: `auto`-style with a deny list (`git push --force`, `rm -rf` outside worktree, network to non-allowlisted hosts where the CLI can express it). `bypass` is opt-in per agent and warned about in the UI.
 
@@ -740,7 +743,7 @@ Charter (`CHARTER.md`) is rendered from `templates/charter.md.tmpl` (see `docs/p
 Conductor's hiring procedure (skill `agent-conductor-hire`):
 1. Check overlap: list roles in the project; if a charter matches or highly overlaps, reuse; if partial overlap, hire and clarify the distinction in **both** charters (firstmate's rule). A role is a kind of work, not a person: one "Backend Engineer" role serves any number of concurrent backend tickets.
 2. Draft spec: role, one-sentence charter summary, natural-language scope (used for routing), responsibilities (5–9 bullets), capabilities, rules specific to this project (from the project KB), runtime = project default.
-3. `ac_role_hire(spec)` → daemon validates, writes files, creates a `pending_activation` role, creates a `hire_approval` decision for the human **if** `workspace.defaults.hireApproval=human` (default) — the decision card shows the spec and a "switch runtime" choice (claude/codex/opencode/gemini). Answering activates. With `hireApproval=none` the role activates immediately; the human can still switch runtime via `conductor role set-runtime` (applies to workers spawned afterwards).
+3. `ac_role_hire(spec)` → daemon validates, writes files, creates a `pending_activation` role, creates a `hire_approval` decision for the human **if** `workspace.defaults.hireApproval=human` (default) — the decision card shows the spec and offers approve or decline. Answering activates. With `hireApproval=none` the role activates immediately. A role names no runtime or model: every worker it spawns runs on `models.workers` (ADR 0011).
 4. Daemon writes the role directory transactionally (spec, charter, empty memory). Workers are provisioned later, per ticket (§11.2).
 5. When the conductor sees repeated mistakes across workers, it calls `ac_role_update_charter` with a reason; the daemon records a revision; the human can roll back.
 
@@ -1189,11 +1192,11 @@ conductor daemon releases | rollback             list releases (`*` current, `-`
 conductor login <url> [--name] [--pin] | conductor logout [--all] | conductor context list|use   remote contexts for the CLI
 conductor devices list|revoke                          sessions/devices on the daemon
 conductor presenter [--surface ...]                     client-side window manager for surfaces (§14b)
-conductor project add <git-url> [--id] [--runtime] [--branch] [--no-follow]   clone, init openspec, create the scout ticket that seeds the project KB; follows the job's sub-steps and output live
+conductor project add <git-url> [--id] [--branch] [--no-follow]              clone, init openspec, create the scout ticket that seeds the project KB; follows the job's sub-steps and output live
 conductor project retry <id> [--no-follow]              re-run a failed add against whatever is already on disk
-conductor project list|show|remove|fetch|set-runtime <runtime>|set-policy <key>=<value>...
+conductor project list|show|remove|fetch|set-policy <key>=<value>...
 conductor runtime list|detect|login <id>              runtime availability and auth per workspace
-conductor role list|show|activate|set-runtime|set-model|pause|resume|retire|charter show|charter rollback|memory show
+conductor role list|show|activate|pause|resume|retire|charter show|charter rollback|memory show
 conductor worker list|show|pause|resume|relaunch|cancel|purge
 conductor ticket create|list|show|merge-queue [-p <project>]|assign <role>|set --auto-merge|transition|comment|cancel|discard --force|open (browser)
 conductor decision list|show|answer <id> <key|text>
@@ -1203,7 +1206,9 @@ conductor briefing                                     four-section briefing (no
 conductor attach <workerId|conductor>                   live transcript + steering for one agent (TUI)
 conductor top                                           fleet view
 conductor presentation set|open|reconcile|status       surfaces (§14b)
-conductor conductor set-model|set-runtime|show         conductor configuration
+conductor conductor show|reset-session                 the conductor agent
+conductor models [show]|set conductor|workers --runtime <id> --model <id|default> [--effort <e>]
+                                                       all of model selection (ADR 0011)
 conductor workspace list|use|register|unregister|pause|resume   multi-workspace registry
 conductor workspace set-default <key=value...>         workspace defaults, e.g. knowledgeBudgetTokens.project=20000
 conductor runs list|show|tail <runId>|cancel
@@ -1304,7 +1309,7 @@ Each milestone ends with a demo script in `docs/demos/M<n>.md` that the implemen
 | # | Question | Decision |
 |---|---|---|
 | 1 | Single or multi-workspace daemon | **Multi-workspace from M1.** One daemon per host, registry of workspaces, one SQLite DB each, workspace-scoped API. |
-| 2 | Conductor model | **Human-configured.** A dropdown of models from the conductor's runtime (`listModels()`), in settings and `conductor conductor set-model`. |
+| 2 | Conductor model | **Human-configured.** `models.conductor` — a dropdown of models from its runtime (`listModels()`), in Settings → Models and `conductor models set conductor` (ADR 0011). |
 | 3 | Where OpenSpec artifacts live / when to archive | **Artifacts on the ticket branch; archive on the default branch after merge**, by the daemon. |
 | 4 | Merge authority | **The implementing worker merges its own ticket once the human approves, and resolves merge conflicts itself.** New `merging` status; daemon verifies. Superseded in part by #18. |
 | 5 | Direct chat with workers | Allowed, through the worker's ticket only (superseded by #17). |
@@ -1359,4 +1364,4 @@ None at the moment. New ones are added here as they arise.
 - `docs/demos/M1..M6.md` scripts pass.
 - Research files in `docs/research/` are the reference when a rule's rationale is unclear; the plan wins on conflict.
 
-**Gaps closed in the final pass (2026-09-04).** Webhook dispatch (HMAC-signed, at-least-once, per-webhook cursor); supervisor curation (10 min), forge reconciliation + archive backfill (hourly) and retention (daily) with persisted stamps; workspace export/import; `conductor workspace pause|resume|export|import`, `conductor project set-runtime|set-policy`, `conductor daemon install-service --launchd`; `/help` on every channel; plugin loader resolving relative `plugins:` paths against the workspace root; Dockerfile + `docs/DOCKER.md`; `examples/plugins/echo-channel`. `ac_report` with `state: done` closes `question` tickets, and tickets can be created by project slug. Verified live on the Claude Code and OpenCode runtimes.
+**Gaps closed in the final pass (2026-09-04).** Webhook dispatch (HMAC-signed, at-least-once, per-webhook cursor); supervisor curation (10 min), forge reconciliation + archive backfill (hourly) and retention (daily) with persisted stamps; workspace export/import; `conductor workspace pause|resume|export|import`, `conductor project set-policy`, `conductor daemon install-service --launchd`; `/help` on every channel; plugin loader resolving relative `plugins:` paths against the workspace root; Dockerfile + `docs/DOCKER.md`; `examples/plugins/echo-channel`. `ac_report` with `state: done` closes `question` tickets, and tickets can be created by project slug. Verified live on the Claude Code and OpenCode runtimes.

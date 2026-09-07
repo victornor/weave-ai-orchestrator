@@ -17,6 +17,7 @@ import { ensureHomeCurrent } from '../workers/home.js';
 import { recordUsage } from '../usage/index.js';
 import { git } from '../util/git.js';
 import { emitRunEvent, runState } from './active.js';
+import { modelSettingFor } from '../models/resolve.js';
 import { runTokenSecret, signRunToken } from './runtoken.js';
 
 const PAYLOAD_LIMIT = 8 * 1024;
@@ -150,8 +151,17 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     try { return await fn(); } finally { record('run.phase.timing', { phase: name, ms: Date.now() - t0 }, 'system'); }
   };
 
-  ctx.db.update('runs', runId, { status: 'running', startedAt: nowIso() });
-  ctx.db.update('agents', agent.id, { status: 'running', updatedAt: nowIso() });
+  // The one place a turn's runtime, model and effort come from (VS-77). The agent row records the
+  // runtime it is on so the worker pages and the account probe can read it; it is corrected here
+  // rather than consulted, so a stale row can never decide what this turn launches.
+  const setting = modelSettingFor(ctx.config, agent.kind);
+
+  ctx.db.update('runs', runId, { status: 'running', startedAt: nowIso(), runtimeId: setting.runtime, model: setting.model ?? null });
+  ctx.db.update('agents', agent.id, { status: 'running', runtimeId: setting.runtime, updatedAt: nowIso() });
+  // The row was loaded before that update; finalize reads it for what this turn ran on, so it has to
+  // carry the resolved values rather than what the dispatcher queued the run with.
+  Object.assign(run, { runtimeId: setting.runtime, model: setting.model ?? null });
+  Object.assign(agent, { runtimeId: setting.runtime });
   if (ticket) ctx.db.run('UPDATE tickets SET execution_run_id = ?, execution_locked_at = ? WHERE id = ?', [runId, nowIso(), ticket.id]);
   ctx.events.emit('run.started', 'run', runId, { agentId: agent.id, ticketId: agent.ticketId, turnEpoch: run.turnEpoch });
   record('run.started', { agentId: agent.id, turnEpoch: run.turnEpoch, wakeups: run.wakeupIds ?? [] }, 'system');
@@ -178,7 +188,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
 
     // 3. build the turn prompt
     const policy = sessionPolicyFor(agent, role);
-    const turnSession = sessions.forTurn({ id: agent.id, kind: agent.kind, runtimeId: agent.runtimeId }, policy);
+    const turnSession = sessions.forTurn({ id: agent.id, kind: agent.kind, runtimeId: setting.runtime }, policy);
     promptOptions = { ...promptOptions, isFirstTurn: promptOptions.isFirstTurn ?? turnSession.isFirstTurn, sessionStale: turnSession.stale, turnEpoch: run.turnEpoch };
     const prompt = await phase('build_prompt', async () => {
       const text = await buildTurnPrompt(ctx, deps, agent, wakes, promptOptions);
@@ -210,8 +220,8 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       ...secrets.env,
     };
 
-    const runtime = ctx.registries.runtimes.get(agent.runtimeId);
-    if (!runtime) throw Object.assign(new Error(`runtime ${agent.runtimeId} is not registered`), { ocFamily: 'tooling' as RunErrorFamily, ocCode: 'runtime_unreachable' });
+    const runtime = ctx.registries.runtimes.get(setting.runtime);
+    if (!runtime) throw Object.assign(new Error(`runtime ${setting.runtime} is not registered`), { ocFamily: 'tooling' as RunErrorFamily, ocCode: 'runtime_unreachable' });
 
     const permission = (role?.permission ?? {}) as { mode?: PermissionMode; allowed?: string[]; denied?: string[] };
     const instructionsPath = join(agent.homePath, 'AGENTS.md');
@@ -232,9 +242,9 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       options: {},
       limits: { timeoutMs: (ctx.config.defaults.turnTimeoutSec ?? 2700) * 1000 },
       permission: { mode: permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto', allowedTools: permission.allowed, deniedTools: permission.denied },
-      model: agent.model ?? role?.model ?? ctx.config.defaults.model ?? null,
-      effort: agent.effort ?? role?.effort ?? null,
-      configHome: (reconcileRuntimeCredential(agent.runtimeId, join(ctx.paths.runtimesHome, agent.runtimeId), { readCredential: credentialReaderFor(ctx.registries, agent.runtimeId) }), join(ctx.paths.runtimesHome, agent.runtimeId)),
+      model: setting.model ?? null,
+      effort: setting.effort ?? null,
+      configHome: (reconcileRuntimeCredential(setting.runtime, join(ctx.paths.runtimesHome, setting.runtime), { readCredential: credentialReaderFor(ctx.registries, setting.runtime) }), join(ctx.paths.runtimesHome, setting.runtime)),
     };
 
     // 5. spawn + stream
@@ -309,7 +319,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   } else if (f.cancelled) { status = 'cancelled'; errorCode = errorCode ?? 'cancelled'; errorFamily = errorFamily ?? 'tooling'; }
 
   const usage = r?.usage ?? null;
-  const model = r?.model ?? f.agent.model ?? f.role?.model ?? null;
+  const model = r?.model ?? f.run.model ?? null;
   let costCents: number | null = null;
   let costStatus: 'reported' | 'estimated' | 'unpriced' = 'unpriced';
   if (r?.cost && typeof r.cost.usd === 'number') { costCents = Math.round(r.cost.usd * 100); costStatus = r.cost.status === 'reported' ? 'reported' : 'estimated'; }
@@ -358,7 +368,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
 
     if (usage) {
       recordUsage(ctx, {
-        agentId: f.agent.id, runId, runtimeId: f.agent.runtimeId, projectId: f.agent.projectId, roleId: f.agent.roleId,
+        agentId: f.agent.id, runId, runtimeId: f.run.runtimeId, projectId: f.agent.projectId, roleId: f.agent.roleId,
         ticketId: f.agent.ticketId, provider: r?.provider ?? null, model,
         inputTokens: usage.inputTokens, cachedInputTokens: usage.cachedInputTokens ?? 0, outputTokens: usage.outputTokens,
         // Only a runtime-reported cost is passed through; otherwise recordUsage estimates from the pricing table.
@@ -379,7 +389,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   // rewrites the credential — there is no second copy to restore, and the owner may have renewed it
   // since this turn failed.
   if (errorFamily === 'auth') {
-    gateRuntimeForLogin(ctx, deps, { runtimeId: f.agent.runtimeId, agentId: f.agent.id, runId }, f.failure?.message ?? r?.error?.message ?? null);
+    gateRuntimeForLogin(ctx, deps, { runtimeId: f.run.runtimeId, agentId: f.agent.id, runId }, f.failure?.message ?? r?.error?.message ?? null);
   } else if (errorFamily && RETRYABLE.includes(errorFamily)) {
     // Retry the transient family with backoff (30 s / 2 min / 10 min, max 3).
     // A usage limit is not in RETRYABLE and falls through to parking below.
@@ -494,18 +504,23 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
 
   let raised = false;
   step('raise the decision', () => {
-    const runtimes = [...ctx.registries.runtimes.keys()].filter((r) => r !== f.agent.runtimeId);
+    // No per-runtime options (VS-77): answering one used to write this agent's own runtime, which is
+    // the override the two settings replaced. Where the runtime is the problem, the way out is the
+    // workspace setting, so the card names it instead of offering to change it for one worker.
+    const runtime = f.run.runtimeId;
+    const setting = f.agent.kind === 'conductor' ? 'models.conductor' : 'models.workers';
     deps().decisions.create({ kind: 'system', id: null }, {
       kind: 'retry_approval', owner: 'human', ticketId: ticketId ?? null,
       title: quota
-        ? `${f.agent.name} hit the ${f.agent.runtimeId} usage limit${identifier ? ` on ${identifier.identifier}` : ''}`
+        ? `${f.agent.name} hit the ${runtime} usage limit${identifier ? ` on ${identifier.identifier}` : ''}`
         : `${f.agent.name} failed${identifier ? ` on ${identifier.identifier}` : ''}: ${code ?? family ?? 'unknown error'}`,
       context: [
         `Failure: ${family ?? 'unknown'}${code ? ` (${code})` : ''}`,
         message ? `Last error: ${message.slice(0, 400)}` : null,
         quota
-          ? `${resetAt ? `The runtime says the limit resets at ${fmtUtc(resetAt)} UTC. ` : ''}A usage limit is not retried automatically, so nothing will run until you answer: retry now, ${resetAt ? 'retry when it resets' : 'retry in an hour'}, switch the runtime, or cancel.`
-          : 'Automatic retries are spent. Retry, switch the runtime, or cancel the ticket.',
+          ? `${resetAt ? `The runtime says the limit resets at ${fmtUtc(resetAt)} UTC. ` : ''}A usage limit is not retried automatically, so nothing will run until you answer: retry now, ${resetAt ? 'retry when it resets' : 'retry in an hour'}, or cancel.`
+          : 'Automatic retries are spent. Retry or cancel the ticket.',
+        `This ran on ${runtime}. The runtime is the workspace's ${setting} setting — change it there and retry, and every ${f.agent.kind === 'conductor' ? 'conductor turn' : 'worker'} follows.`,
         'Retrying resumes the same session on the same branch.',
       ].filter(Boolean).join('\n\n'),
       options: [
@@ -513,12 +528,11 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
         resetAt
           ? { key: 'retry_at_reset', label: `Retry when the limit resets (${fmtUtc(resetAt)} UTC)`, recommended: true }
           : { key: 'retry_1h', label: 'Retry in an hour', recommended: quota },
-        ...runtimes.map((r) => ({ key: `runtime:${r}`, label: `Retry on ${r}` })),
         { key: 'cancel', label: 'Cancel the ticket' },
       ],
       recommendation: quota ? (resetAt ? 'retry_at_reset' : 'retry_1h') : 'retry',
       correlationKey: `retry:${f.agent.id}`,
-      target: { agentId: f.agent.id, ticketId: ticketId ?? null, runtime: f.agent.runtimeId, family, code, resetAt: resetAt ? resetAt.toISOString() : null },
+      target: { agentId: f.agent.id, ticketId: ticketId ?? null, runtime, family, code, resetAt: resetAt ? resetAt.toISOString() : null },
     });
     raised = true;
   });

@@ -540,7 +540,7 @@ describe('the idle gate against a real dispatcher', () => {
     h = makeCoreHarness();
     runtime = new FakeRuntime();
     h.ctx.registries.runtimes.set('fake', runtime);
-    h.db.update('agents', h.conductorId, { runtimeId: 'fake' });
+    h.ctx.config.models = { conductor: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null } };
     h.services.wake = createWakeService(h.ctx, h.deps);
     h.services.runs = createRunsService(h.ctx, h.deps);
     dispatcher = createDispatcher(h.ctx, h.deps);

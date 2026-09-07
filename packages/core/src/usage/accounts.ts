@@ -54,15 +54,18 @@ function toAccount(row: AccountRow): S.RuntimeAccount {
 export function createAccountsService(ctx: WorkspaceContext): AccountsService {
   const log = ctx.log('usage');
 
-  /** Every runtime this workspace actually uses: its agents, projects and roles. A runtime nothing uses is never probed. */
+  /** Every runtime this workspace spends on: its two model settings and any agent still live on another. */
   const runtimesInUse = (): string[] => {
+    // The two model settings say what the workspace spends on from here (VS-77). A worker that is
+    // still finishing a turn on a runtime a setting has since moved away from is still burning that
+    // runtime's quota, so a live agent's own runtime counts too.
     const rows = ctx.db.all<{ runtimeId: string }>(
-      `SELECT DISTINCT runtime_id AS runtime_id FROM agents WHERE workspace_id = ? AND retired_at IS NULL
-       UNION SELECT DISTINCT runtime_id FROM projects WHERE workspace_id = ?
-       UNION SELECT DISTINCT runtime_id FROM roles WHERE workspace_id = ?`,
-      [ctx.workspaceId, ctx.workspaceId, ctx.workspaceId],
+      'SELECT DISTINCT runtime_id AS runtime_id FROM agents WHERE workspace_id = ? AND retired_at IS NULL',
+      [ctx.workspaceId],
     );
-    return rows.map((r) => r.runtimeId).filter((id): id is string => Boolean(id));
+    const ids = new Set<string>([ctx.config.models.conductor.runtime, ctx.config.models.workers.runtime]);
+    for (const r of rows) if (r.runtimeId) ids.add(r.runtimeId);
+    return [...ids].filter(Boolean).sort();
   };
 
   const service: AccountsService = {

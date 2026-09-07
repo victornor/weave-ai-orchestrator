@@ -29,7 +29,6 @@ Fields and constraints: `references/spec-schema.md`. Worked examples for backend
 - **capabilities** — the stack and tooling the work needs.
 - **exclusions** — the adjacent things a worker would otherwise absorb.
 - **rules** — project-specific rules, pulled from that project's `PROJECT.md` (Conventions and Landmines), not invented.
-- **runtime** — the project's default. The human may switch it before the first worker runs; do not choose against the project default without a reason.
 - **maxWorkers** — how many tickets this role should run at once. 2 unless the project's throughput says otherwise.
 - **sessionPolicy** — `per_ticket` for anything that builds; `fresh` for reviewers, so each review starts unbiased.
 

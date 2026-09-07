@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { MORE_ITEMS, RAIL, TABS, href } from '../app/nav';
 import { SWIPE_CLOSE_PX } from '../components/Sheet';
 import type { WorkspaceListItem } from '../api/types';
+import { project } from './factories';
 
 vi.mock('../app/link', () => ({
   A: ({ to, params, search, children, onClick, ...rest }: {
@@ -46,6 +47,7 @@ function open(over: Partial<React.ComponentProps<typeof MoreSheet>> = {}): void 
       ws="ws1"
       activeWs="ws1"
       workspaces={[listItem()]}
+      projects={[]}
       needsCount={0}
       isActive={() => false}
       onNewWorkspace={onNewWorkspace}
@@ -77,6 +79,7 @@ describe('what the More menu lists', () => {
         ws="ws1"
         activeWs="ws1"
         workspaces={[listItem()]}
+        projects={[]}
         needsCount={0}
         isActive={() => false}
         onNewWorkspace={onNewWorkspace}
@@ -201,5 +204,32 @@ describe('reaching the More menu with a keyboard', () => {
 
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(last);
+  });
+});
+
+/**
+ * VS-95: the sidebar is desktop-only, so without this the project overview would be unreachable on a
+ * phone. Projects are not a rail destination, so `MORE_ITEMS` is deliberately untouched — the
+ * assertion above still pins it against `RAIL` and `TABS`.
+ */
+describe('the projects block', () => {
+  const web = project({ id: 'p1', slug: 'web', defaultBranch: 'main' });
+
+  it('lists the active workspace"s projects, each opening its overview', () => {
+    open({ projects: [web] });
+    const block = within(sheet()).getByRole('region', { name: 'Projects' });
+    // The mock substitutes `$param` into the path, so the href is the address the human lands on.
+    expect(within(block).getByText('web').closest('a')?.getAttribute('href')).toBe('/w/ws1/p/web');
+  });
+
+  it('dismisses the menu when a project is chosen', () => {
+    open({ projects: [web] });
+    fireEvent.click(within(sheet()).getByText('web'));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('contributes no block at all for a workspace with no projects', () => {
+    open({ projects: [] });
+    expect(within(sheet()).queryByRole('region', { name: 'Projects' })).toBeNull();
   });
 });

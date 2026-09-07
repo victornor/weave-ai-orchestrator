@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Clicking a project in the sidebar opens a project overview page that
+  aggregates its tickets, workers, landings, changelog and knowledge, with room
+  for the git and PR viewers

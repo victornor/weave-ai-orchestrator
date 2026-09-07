@@ -429,7 +429,7 @@ export function useTicket(id: string): UseQueryResult<T.TicketDetail> {
 /** A project's merge queue: what is landing now and who is waiting, in order (PLAN §11.4). */
 export function useMergeQueue(projectId: string | null | undefined): UseQueryResult<T.MergeQueue> {
   const ws = useWs();
-  return useQuery({ queryKey: qk.mergeQueue(ws, projectId ?? ''), queryFn: () => api.ws<T.MergeQueue>(ws, `/projects/${projectId}/merge-queue`), enabled: Boolean(projectId) });
+  return useQuery({ queryKey: qk.mergeQueue(ws, projectId ?? ''), queryFn: () => api.ws<T.MergeQueue>(ws, `/projects/${projectId ?? ''}/merge-queue`), enabled: Boolean(projectId) });
 }
 
 export function useCreateTicket(): UseMutationResult<Ticket, Error, Record<string, unknown>> {
@@ -981,6 +981,22 @@ export function useChangelog(project?: string): ChangelogHistory {
       }
     },
   };
+}
+
+/** How many of the newest entries a bounded reader takes: two weeks of landings, with room over. */
+const CHANGELOG_RECENT_LIMIT = 100;
+
+/**
+ * A bounded page of the newest changelog entries, for a surface that shows a few rather than pages
+ * of them (the project overview's Activity and Recent landings). Keyed under `changelogRoot`, so
+ * the ticket events that write changelog rows refresh it (VS-95).
+ */
+export function useChangelogRecent(project?: string, limit = CHANGELOG_RECENT_LIMIT): UseQueryResult<T.ChangelogPage> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: [...qk.changelog(ws, project), 'recent', limit] as const,
+    queryFn: () => api.ws<T.ChangelogPage>(ws, `/changelog${qs({ project, limit })}`),
+  });
 }
 
 export function useChangelogHeatmap(project?: string): UseQueryResult<T.ChangelogHeatmap> {

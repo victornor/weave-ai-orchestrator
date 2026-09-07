@@ -17,7 +17,10 @@ export interface WorkspaceNavProps {
    * old, so where the two disagree for the workspace being shown, this one is the truth.
    */
   needsCount: number;
-  /** The active workspace's projects. A non-active workspace's are not loaded, so none are shown. */
+  /**
+   * The active workspace's projects. A non-active workspace's are not loaded, so none are shown.
+   * Each opens that project's overview (VS-95); the board's project filter is one click on from it.
+   */
   projects: Project[];
   onNewWorkspace: () => void;
 }
@@ -86,9 +89,8 @@ export function WorkspaceNav({
                   {projects.map((p, i) => (
                     <A
                       key={p.id}
-                      to="/w/$ws/board"
-                      params={{ ws: w.id }}
-                      search={{ project: p.id }}
+                      to="/w/$ws/p/$project"
+                      params={{ ws: w.id, project: p.slug }}
                       className="flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5 hover:bg-bg-2"
                     >
                       <span className="size-1.5 rounded-r4" style={{ background: `var(--status-${PROJECT_DOT[i % PROJECT_DOT.length] ?? 'done'})` }} aria-hidden />

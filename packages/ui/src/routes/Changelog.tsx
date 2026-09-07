@@ -19,8 +19,8 @@ import { A } from '../app/link';
 import { useWs } from '../api/context';
 import { cx } from '../lib/cx';
 
-/** What each kind reads as, and the badge tone that carries it. */
-const KIND_LABEL: Record<ChangelogKind, string> = {
+/** What each kind reads as, and the badge tone that carries it. Shared with the project overview. */
+export const KIND_LABEL: Record<ChangelogKind, string> = {
   filed: 'filed',
   plan_approved: 'plan approved',
   pr_opened: 'PR opened',
@@ -29,7 +29,7 @@ const KIND_LABEL: Record<ChangelogKind, string> = {
   hired: 'hired',
   upgraded: 'upgraded',
 };
-const KIND_TONE: Record<ChangelogKind, 'added' | 'modified' | 'removed' | 'neutral'> = {
+export const KIND_TONE: Record<ChangelogKind, 'added' | 'modified' | 'removed' | 'neutral'> = {
   filed: 'neutral',
   plan_approved: 'modified',
   pr_opened: 'modified',

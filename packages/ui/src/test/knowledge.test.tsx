@@ -59,7 +59,19 @@ const CAPABILITY_PENDING: CapabilityDetail = {
   pending: [{ changeName: 'tst-3-labels', ticketId: 'tk_3', ticketIdentifier: 'TST-3', deltaKind: 'modified' }],
 };
 
-const state = vi.hoisted(() => ({ change: {} as Record<string, unknown>, capabilityArgs: [] as string[], capability: null as CapabilityDetail | null }));
+const state = vi.hoisted(() => ({
+  change: {} as Record<string, unknown>,
+  capabilityArgs: [] as string[],
+  capability: null as CapabilityDetail | null,
+  // The route reads `?project=` and `?tab=` off the URL (VS-95).
+  url: {} as Record<string, string | undefined>,
+}));
+
+vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../app/link', () => ({
+  useSearchParams: () => state.url,
+  A: ({ to, children, ...rest }: { to: string; children?: React.ReactNode }) => <a href={to} {...rest}>{children}</a>,
+}));
 
 vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: [{ id: 'p1', slug: 'api' }] }),
@@ -106,6 +118,7 @@ beforeEach(() => {
   state.change = { ...ARCHIVED };
   state.capabilityArgs = [];
   state.capability = CAPABILITY_DETAIL;
+  state.url = {};
 });
 
 describe('Knowledge — archived change page', () => {
@@ -172,5 +185,35 @@ describe('Knowledge — pending deltas on a capability', () => {
     expect(screen.queryByText('MODIFIED')).not.toBeInTheDocument();
     expect(screen.queryByText('ADDED')).not.toBeInTheDocument();
     expect(screen.queryByText(/· pending/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * VS-95: the project overview links into this area, so it has to be able to arrive at a project's
+ * changelog or knowledge rather than at the workspace's.
+ */
+describe('the address', () => {
+  it('opens the tab the URL names', () => {
+    state.url = { tab: 'changelog' };
+    render(<KnowledgeRoute />);
+    expect(screen.getByRole('tab', { name: 'Changelog' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('selects the project the URL names', () => {
+    state.url = { project: 'p1' };
+    render(<KnowledgeRoute />);
+    expect((screen.getByLabelText('Project') as HTMLSelectElement).value).toBe('p1');
+  });
+
+  it('ignores a tab name it does not have, rather than showing nothing', () => {
+    state.url = { tab: 'nonsense' };
+    render(<KnowledgeRoute />);
+    expect(screen.getByRole('tab', { name: 'Knowledge' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('still switches tabs on a click, without the URL having changed', () => {
+    render(<KnowledgeRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Specs' }));
+    expect(screen.getByRole('tab', { name: 'Specs' }).getAttribute('aria-selected')).toBe('true');
   });
 });

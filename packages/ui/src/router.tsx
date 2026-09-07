@@ -15,6 +15,7 @@ import { RunsRoute } from './routes/Runs';
 import { RunRoute } from './routes/RunPage';
 import { UsageRoute } from './routes/Usage';
 import { KnowledgeRoute } from './routes/Knowledge';
+import { ProjectOverviewRoute } from './routes/project/ProjectOverview';
 import { SettingsRoute } from './routes/Settings';
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
@@ -72,6 +73,8 @@ const runsRoute = child('/runs', RunsRoute, searchPassthrough);
 const runRoute = child('/runs/$runId', RunRoute);
 const usageRoute = child('/usage', UsageRoute, searchPassthrough);
 const knowledgeRoute = child('/knowledge', KnowledgeRoute, searchPassthrough);
+// A project is addressed by its slug; its id resolves to the same page, as `GET /projects/:id` does.
+const projectRoute = child('/p/$project', ProjectOverviewRoute, searchPassthrough);
 const settingsRoute = child('/settings', SettingsRoute, searchPassthrough);
 
 const routeTree = rootRoute.addChildren([
@@ -91,6 +94,7 @@ const routeTree = rootRoute.addChildren([
     runRoute,
     usageRoute,
     knowledgeRoute,
+    projectRoute,
     settingsRoute,
   ]),
 ]);

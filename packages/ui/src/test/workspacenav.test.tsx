@@ -7,7 +7,11 @@ import { project } from './factories';
 // The rail assembles hrefs at runtime; rendering them as plain anchors is what lets a test read
 // where each link actually points.
 vi.mock('../app/link', () => ({
-  A: ({ to, children, ...rest }: { to: string; children: React.ReactNode }) => <a href={to} {...rest}>{children}</a>,
+  // `params` are substituted into the path rather than spread onto the anchor, so a test reads the
+  // address the human actually lands on.
+  A: ({ to, params, children, ...rest }: { to: string; params?: Record<string, string>; children: React.ReactNode }) => (
+    <a href={Object.entries(params ?? {}).reduce((acc, [k, v]) => acc.replace(`$${k}`, v), to)} {...rest}>{children}</a>
+  ),
   useGo: () => vi.fn(),
 }));
 
@@ -115,6 +119,14 @@ describe('the active workspace and section', () => {
     render(nav({ projects: [project()], expanded: ['beta'] }));
     expect(screen.getByLabelText('Alpha projects')).toBeInTheDocument();
     expect(screen.queryByLabelText('Beta projects')).not.toBeInTheDocument();
+  });
+
+  // VS-95: a project used to open the board with its filter set; it now opens its own overview,
+  // from which the board is one click on.
+  it('opens a project"s overview, addressed by its slug', () => {
+    render(nav({ projects: [project({ id: 'p1', slug: 'web' })] }));
+    const link = within(screen.getByLabelText('Alpha projects')).getByText('web').closest('a');
+    expect(link?.getAttribute('href')).toBe('/w/alpha/p/web');
   });
 });
 

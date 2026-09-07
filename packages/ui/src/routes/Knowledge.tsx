@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented, Tabs } from '../components/Tabs';
 import { BudgetMeter } from '../components/BudgetMeter';
@@ -24,6 +24,7 @@ import { ago } from '../lib/format';
 import { cx } from '../lib/cx';
 import { DocsPanel, DocPanel, refFromPath, type DocRef } from './KnowledgeDocs';
 import { ChangelogPanel } from './Changelog';
+import { useSearchParams } from '../app/link';
 
 // The graph is the only screen that needs a force-layout engine. Loading it on demand keeps
 // `d3-force` and the renderer out of the chunk every other page pays for.
@@ -31,11 +32,20 @@ const KnowledgeGraphView = lazy(async () => ({ default: (await import('./Knowled
 
 type Tab = 'knowledge' | 'changelog' | 'graph' | 'specs';
 
+const TABS: readonly Tab[] = ['knowledge', 'changelog', 'graph', 'specs'];
+const asTab = (v: string | undefined): Tab | null => (TABS.includes(v as Tab) ? (v as Tab) : null);
+
 export function KnowledgeRoute(): React.ReactElement {
-  const [tab, setTab] = useState<Tab>('knowledge');
+  // `?project=` and `?tab=` are read from the URL and mirrored into state, the way the board reads
+  // `?project=` and Settings reads `?section=` — so a link can arrive at a project's changelog, and
+  // a click still switches tabs without a router round-trip (VS-95).
+  const url = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => asTab(url['tab']) ?? 'knowledge');
   const [q, setQ] = useState('');
   const projects = useProjects();
-  const [project, setProject] = useState<string>('');
+  const [project, setProject] = useState<string>(url['project'] ?? '');
+  useEffect(() => { setProject(url['project'] ?? ''); }, [url['project']]);
+  useEffect(() => { const t = asTab(url['tab']); if (t) setTab(t); }, [url['tab']]);
   const search = useSearch(q, project || undefined);
   const activeProject = project || projects.data?.[0]?.id || '';
 

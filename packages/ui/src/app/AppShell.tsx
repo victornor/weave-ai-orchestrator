@@ -258,6 +258,7 @@ export function AppShell(): React.ReactElement {
         ws={ws}
         activeWs={activeWs}
         workspaces={listed}
+        projects={projects.data ?? []}
         needsCount={needsCount}
         update={update}
         isActive={isActive}

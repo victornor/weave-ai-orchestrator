@@ -52,6 +52,8 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: `${W}/briefing`, tag: 'workspace', summary: 'Deterministic briefing snapshot', auth: 'session' },
   { method: 'POST', path: `${W}/transcribe`, tag: 'workspace', summary: 'Audio to text for this workspace', auth: 'session', mutating: true },
 
+  { method: 'GET', path: `${W}/models`, tag: 'workspace', summary: 'The two model settings: conductor and workers', auth: 'session' },
+  { method: 'PUT', path: `${W}/models`, tag: 'workspace', summary: 'Replace both model settings', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/projects`, tag: 'projects', summary: 'List projects', auth: 'session' },
   { method: 'POST', path: `${W}/projects`, tag: 'projects', summary: 'Add a project — 202 with the cloning row and the job doing the work', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/projects/{id}`, tag: 'projects', summary: 'One project', auth: 'session' },
@@ -85,7 +87,6 @@ export const ROUTES: RouteRow[] = [
   { method: 'POST', path: `${W}/workers/{id}/resume`, tag: 'workers', summary: 'Resume a worker', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/conductor`, tag: 'workers', summary: 'The conductor agent', auth: 'session' },
   { method: 'POST', path: `${W}/conductor/reset-session`, tag: 'workers', summary: 'Drop the conductor session', auth: 'session', mutating: true },
-  { method: 'PATCH', path: `${W}/conductor`, tag: 'workers', summary: 'Set conductor runtime/model', auth: 'session', mutating: true },
 
   { method: 'GET', path: `${W}/tickets`, tag: 'tickets', summary: 'List tickets', auth: 'session' },
   { method: 'POST', path: `${W}/tickets`, tag: 'tickets', summary: 'Create a ticket', auth: 'session', mutating: true },

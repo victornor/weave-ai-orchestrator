@@ -32,7 +32,8 @@ vi.mock('../api/hooks', () => ({
   useRuntimeModels: () => ({ data: [] }),
   useAddProject: () => ({ mutate: vi.fn(), isPending: false }),
   usePatchProject: () => ({ mutate: vi.fn(), isPending: false }),
-  useConductor: () => ({ data: { agent: { runtimeId: 'claude', model: null } }, isLoading: false }),
+  useModels: () => ({ data: { conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } }, isLoading: false }),
+  useSetModels: () => ({ mutate: vi.fn(), isPending: false, error: null }),
   usePatchConductor: () => ({ mutate: vi.fn(), isPending: false }),
   usePresentation: () => ({ data: { default: 'headless' }, isLoading: false, isError: false, refetch: vi.fn() }),
   usePresentationSurfaces: () => ({ data: { surfaces: ['headless'] } }),
@@ -79,7 +80,7 @@ describe('the area model', () => {
 
   it('puts each setting in the area its data actually belongs to', () => {
     const areaOf = (key: string): string | undefined => SETTINGS_SECTIONS.find((s) => s.key === key)?.area;
-    for (const key of ['workspace', 'projects', 'conductor', 'channels', 'presentation']) expect(areaOf(key)).toBe('workspace');
+    for (const key of ['workspace', 'projects', 'models', 'channels', 'presentation']) expect(areaOf(key)).toBe('workspace');
     for (const key of ['updates', 'security', 'device']) expect(areaOf(key)).toBe('daemon');
   });
 
@@ -103,7 +104,7 @@ describe('the two areas', () => {
     renderSettings();
     expect(areaSwitch('This workspace')).toHaveAttribute('aria-checked', 'true');
     expect(areaSwitch('This daemon')).toHaveAttribute('aria-checked', 'false');
-    expect(tabNames()).toEqual(['Workspace', 'Projects', 'Conductor', 'Channels', 'Presentation']);
+    expect(tabNames()).toEqual(['Workspace', 'Projects', 'Models', 'Channels', 'Presentation']);
 
     fireEvent.click(areaSwitch('This daemon'));
     expect(areaSwitch('This daemon')).toHaveAttribute('aria-checked', 'true');

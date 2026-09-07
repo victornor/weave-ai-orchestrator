@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-07
+goal: "Model selection is exactly two per-workspace settings: conductor runtime
+  and model, worker runtime and model; every other model-affecting setting is
+  removed"

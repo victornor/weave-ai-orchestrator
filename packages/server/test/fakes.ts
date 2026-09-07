@@ -3,7 +3,7 @@
  * push exercise real SQL) with hand-written service fakes in front of them.
  */
 import { Db } from '@agent-conductor/db';
-import { EventBus, createChangelogService, createJobsService, createRegistries, getLogger, initLogger } from '@agent-conductor/core';
+import { EventBus, createChangelogService, createJobsService, createModelsService, createRegistries, getLogger, initLogger } from '@agent-conductor/core';
 import type { Actor, CoreServices, WorkspaceContext } from '@agent-conductor/core';
 import type { AuthService } from '@agent-conductor/core';
 import {
@@ -243,6 +243,9 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   // So is the changelog: it is a read-only projection over this fake's real db, so a route test can
   // insert activity rows and assert on what the route serves rather than on a hand-written double.
   (services as { changelog: CoreServices['changelog'] }).changelog = createChangelogService(ctx, () => services);
+  // And so are the model settings: `GET`/`PUT /models` is the whole of model selection, so a route
+  // test asserts on what the service really stores rather than on a double (VS-77).
+  (services as { models: CoreServices['models'] }).models = createModelsService(ctx, () => services);
 
   const runtime: WorkspaceRuntime = { id: workspaceId, ctx, services, channels: null, webhooks: null };
 

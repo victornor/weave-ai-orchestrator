@@ -118,7 +118,7 @@ describe('real core services over HTTP', () => {
     expect(detail.concurrency).toMatchObject({ roleMax: 6, projectMax: 4, effective: 4, live: 0, free: 4 });
   });
 
-  it('changes a role runtime and clears its model over PATCH /roles/:id, and rejects an unknown key', async () => {
+  it('refuses a runtime, a model or an effort in a PATCH /roles/:id, and still rejects an unknown key', async () => {
     const { deps, harness } = boot();
     const app = createApp(deps);
     const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
@@ -128,27 +128,81 @@ describe('real core services over HTTP', () => {
       id: 'api-backend', name: 'Backend Engineer', project: harness.projectSlug,
       charterSummary: 'Owns the api service.', scope: 'Backend work in the api repo.',
       responsibilities: [], capabilities: [], exclusions: [], rules: [],
-      runtime: 'claude', model: 'claude-opus-5', sessionPolicy: 'per_ticket', maxWorkers: 2,
+      sessionPolicy: 'per_ticket', maxWorkers: 2,
       permission: { mode: 'auto', allowed: [], denied: [] }, secrets: [], createdBy: 'human',
     } as never);
 
     const patch = (body: unknown): Promise<Response> =>
       app.fetch(new Request(`${base}/roles/${role.id}`, { method: 'PATCH', headers: H, body: JSON.stringify(body) }));
 
-    const runtimeRes = await patch({ patch: { runtime: 'codex' }, reason: 'changed from the web app' });
-    expect(runtimeRes.status).toBe(200);
-    expect((await runtimeRes.json()).runtimeId).toBe('codex');
-    expect(services.roles.revisions(role.id).at(-1)).toMatchObject({ changedKeys: ['runtime'] });
-
-    const modelRes = await patch({ patch: { model: null }, reason: 'back to the default' });
-    expect(modelRes.status).toBe(200);
-    expect((await modelRes.json()).model).toBeNull();
+    // A role carries none of the three since VS-77: each is refused rather than quietly dropped, so a
+    // caller cannot believe it chose a model for one role.
+    for (const key of ['runtime', 'model', 'effort']) {
+      const res = await patch({ patch: { [key]: 'codex' }, reason: 'changed from the web app' });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe('validation');
+    }
 
     // what the web app used to send: the column name, not the spec field. Stripped silently before.
     const bad = await patch({ patch: { runtimeId: 'claude' }, reason: 'changed from the web app' });
     expect(bad.status).toBe(400);
     expect((await bad.json()).error.code).toBe('validation');
-    expect(services.roles.get(role.id).runtimeId).toBe('codex');
+
+    // A key the role does carry still works, so strictness has not frozen the whole patch.
+    const ok = await patch({ patch: { maxWorkers: 5 }, reason: 'more parallelism' });
+    expect(ok.status).toBe(200);
+    expect(services.roles.get(role.id).maxWorkers).toBe(5);
+    // Nothing on the response looks like a model knob any more.
+    for (const key of ['runtimeId', 'model', 'effort']) expect(await ok.clone().json()).not.toHaveProperty(key);
+  });
+
+  // VS-77: `GET`/`PUT /models` is the whole of model selection over HTTP.
+  it('reads both model settings and replaces them whole over PUT /models', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+
+    const before = await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json();
+    expect(before).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } });
+
+    const next = {
+      conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+      workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' },
+    };
+    const put = await app.fetch(new Request(`${base}/models`, { method: 'PUT', headers: H, body: JSON.stringify(next) }));
+    expect(put.status).toBe(200);
+    expect(await put.json()).toEqual(next);
+    expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json()).toEqual(next);
+  });
+
+  it('refuses a model setting with no runtime rather than storing it', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+    const res = await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H,
+      body: JSON.stringify({ conductor: { runtime: '', model: null }, workers: { runtime: 'claude', model: null } }),
+    }));
+    expect(res.status).toBe(400);
+    expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json())
+      .toMatchObject({ conductor: { runtime: 'claude' } });
+  });
+
+  it('routes no way to set a runtime or a model anywhere else', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+
+    // The conductor's runtime and model moved to /models; PATCH /conductor is gone.
+    const patched = await app.fetch(new Request(`${base}/conductor`, { method: 'PATCH', headers: H, body: JSON.stringify({ runtime: 'codex' }) }));
+    expect(patched.status).toBe(404);
+
+    // A project no longer takes one either.
+    const added = await app.fetch(new Request(`${base}/projects`, {
+      method: 'POST', headers: H,
+      body: JSON.stringify({ url: 'git@github.com:acme/web.git', id: 'web', runtime: 'codex' }),
+    }));
+    expect(added.status).toBe(400);
   });
 
   it('exports the workspace as a portable package over POST /export', async () => {

@@ -124,7 +124,7 @@ export function renderCharter(ctx: WorkspaceContext, spec: S.RoleSpec): string {
     role: {
       id: spec.id, name: spec.name, charterSummary: spec.charterSummary, scope: spec.scope,
       responsibilities: spec.responsibilities, capabilities: spec.capabilities, exclusions: spec.exclusions,
-      rules: spec.rules, notes: spec.notes ?? '', runtime: spec.runtime, model: spec.model,
+      rules: spec.rules, notes: spec.notes ?? '',
     },
     project: { id: spec.project },
   });

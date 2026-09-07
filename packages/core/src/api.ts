@@ -126,7 +126,7 @@ export interface ProjectsService {
 export interface RolesService {
   list(projectId?: string): S.Role[]; get(id: string): S.Role;
   hire(actor: Actor, spec: S.RoleSpec, opts?: { autoActivate?: boolean }): Promise<{ role: S.Role; decisionId: string | null }>;
-  activate(actor: Actor, id: string, opts?: { runtime?: string; model?: string | null }): Promise<S.Role>;
+  activate(actor: Actor, id: string): Promise<S.Role>;
   update(actor: Actor, id: string, patch: Partial<S.RoleSpec>, reason: string, opts?: { applyToRunning?: boolean }): Promise<S.Role>;
   updateCharter(actor: Actor, id: string, charter: string, reason: string, opts?: { applyToRunning?: boolean }): Promise<S.Role>;
   charter(id: string): string;
@@ -266,6 +266,18 @@ export interface UsageService {
   models(q: UsageQuery): Array<{ model: string; provider: string | null } & UsageSeriesPoint>;
 }
 
+/**
+ * The workspace's two model settings (VS-77, ADR 0011): the whole of model selection. `reconcile` is
+ * called once per workspace at startup and raises the card a mixed-runtime migration left owing.
+ */
+export interface ModelsService {
+  get(): S.WorkspaceModels;
+  set(actor: Actor, next: S.WorkspaceModels): Promise<S.WorkspaceModels>;
+  reconcile(): void;
+  /** Answer the migration's question: write the workers runtime and close the matter for good. */
+  settleWorkersRuntime(actor: Actor, runtime: string): Promise<S.WorkspaceModels>;
+}
+
 /** The current runtime account snapshots (PLAN §16.2): billing mode and plan limit windows per runtime. */
 export interface AccountsService {
   list(): S.RuntimeAccount[];
@@ -337,5 +349,5 @@ export interface CoreServices {
   tickets: TicketsService; decisions: DecisionsService; projects: ProjectsService; roles: RolesService; workers: WorkersService;
   wake: WakeService; runs: RunsService; dispatcher: Dispatcher; supervisor: Supervisor; knowledge: KnowledgeService; specs: SpecsService;
   openspec: OpenSpecService; usage: UsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
-  changelog: ChangelogService;
+  changelog: ChangelogService; models: ModelsService;
 }

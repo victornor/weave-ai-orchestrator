@@ -8,6 +8,7 @@ import { recordActivity } from '../events.js';
 import { binaryExists, type OnLine } from '../util/exec.js';
 import { git } from '../util/git.js';
 import { projectKnowledgeSkeleton } from '../workspace/loader.js';
+import { modelSettingFor } from '../models/resolve.js';
 
 function looksLocal(url: string): boolean {
   if (/^[a-z+]+:\/\//i.test(url)) return false;
@@ -59,7 +60,9 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
     const r = await git(['rev-parse', '--is-inside-work-tree'], project.clonePath, 10_000);
     if (!r.ok) return false;
     const { sh } = await import('../util/exec.js');
-    const init = await sh('openspec', ['init', '--tools', project.runtimeId], {
+    // The workers setting's runtime: openspec generates its skill files for the CLI that will read
+    // them, and every worker in the workspace runs on that one (VS-77).
+    const init = await sh('openspec', ['init', '--tools', modelSettingFor(ctx.config, 'worker').runtime], {
       cwd: project.clonePath, timeoutMs: 120_000,
       env: { CI: '1', OPENSPEC_TELEMETRY: '0', OPENSPEC_NO_UPDATE_CHECK: '1', NO_COLOR: '1' },
       onLine,
@@ -117,7 +120,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
     if (declared) return declared;
     return ProjectConfigSchema.parse({
       id: project.slug, url: project.gitUrl, name: project.name, defaultBranch: project.defaultBranch,
-      runtime: project.runtimeId, model: project.model, maxWorkers: project.maxWorkers,
+      maxWorkers: project.maxWorkers,
       ...(project.setupCommand ? { setupCommand: project.setupCommand } : {}),
       worktrees: project.worktreeProvider, openspec: { enabled: project.openspecEnabled }, policies: project.policies,
     });
@@ -136,8 +139,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
     ctx.db.insert('projects', {
       id, workspaceId: ctx.workspaceId, slug: cfg.id, name: cfg.name ?? cfg.id, gitUrl: cfg.url, defaultBranch: cfg.defaultBranch,
       clonePath: join(ctx.paths.projects, cfg.id), maxWorkers: cfg.maxWorkers, setupCommand: cfg.setupCommand ?? null, warmPathsJson: cfg.warmPaths,
-      worktreeProvider: cfg.worktrees ?? ctx.config.defaults.worktrees, runtimeId: cfg.runtime ?? ctx.config.defaults.runtime,
-      model: cfg.model ?? ctx.config.defaults.model, openspecEnabled: cfg.openspec.enabled, policiesJson: cfg.policies,
+      worktreeProvider: cfg.worktrees ?? ctx.config.defaults.worktrees, openspecEnabled: cfg.openspec.enabled, policiesJson: cfg.policies,
       status: 'cloning', createdAt: now, updatedAt: now,
     });
     const job = deps().jobs.start('project_add', { type: 'project', id }, actor);
@@ -278,7 +280,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       ctx.db.update('projects', project.id, {
         name: merged.name ?? project.name, defaultBranch: merged.defaultBranch, maxWorkers: merged.maxWorkers,
         setupCommand: merged.setupCommand ?? null, warmPathsJson: merged.warmPaths, worktreeProvider: merged.worktrees ?? project.worktreeProvider,
-        runtimeId: merged.runtime ?? project.runtimeId, model: merged.model ?? project.model, openspecEnabled: merged.openspec.enabled,
+        openspecEnabled: merged.openspec.enabled,
         policiesJson: merged.policies, updatedAt: nowIso(),
       });
       await upsertConfigBlock(merged);

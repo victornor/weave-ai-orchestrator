@@ -18,7 +18,7 @@ describe('changelog', () => {
     otherProject = newId();
     h.db.insert('projects', {
       id: otherProject, workspaceId: h.workspaceId, slug: 'web', name: 'Web', gitUrl: 'git@example.com:acme/web.git',
-      defaultBranch: 'main', clonePath: '/tmp/web', maxWorkers: 4, worktreeProvider: 'git', runtimeId: 'claude',
+      defaultBranch: 'main', clonePath: '/tmp/web', maxWorkers: 4, worktreeProvider: 'git',
       openspecEnabled: 1, policiesJson: {}, status: 'ready', createdAt: 't0', updatedAt: 't0',
     });
   });

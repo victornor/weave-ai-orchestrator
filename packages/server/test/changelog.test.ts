@@ -19,8 +19,8 @@ describe('the changelog routes', () => {
     harness = makeHarness();
     h = harness;
     fetch = (path, init) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433${path}`, init));
-    h.db.run("INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, runtime_id, created_at, updated_at) VALUES ('p1','ws1','api','API','git@x:a/b.git','/tmp/api','claude','t0','t0')");
-    h.db.run("INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, runtime_id, created_at, updated_at) VALUES ('p2','ws1','web','Web','git@x:a/w.git','/tmp/web','claude','t0','t0')");
+    h.db.run("INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, created_at, updated_at) VALUES ('p1','ws1','api','API','git@x:a/b.git','/tmp/api','t0','t0')");
+    h.db.run("INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, created_at, updated_at) VALUES ('p2','ws1','web','Web','git@x:a/w.git','/tmp/web','t0','t0')");
   });
 
   let n = 0;

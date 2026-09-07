@@ -180,7 +180,7 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
         <Text dimColor>i type · p pause/resume · o open ticket · r relaunch · c cancel run · q quit</Text>
       )}
       <StatusBar
-        left={card ? `${card.glyph} ${card.name} · ${card.role ?? '—'} · ${card.ticket?.identifier ?? 'no ticket'} · ${card.runtime}${card.model ? `/${card.model}` : ''}` : `attaching to ${agentId}…`}
+        left={card ? `${card.glyph} ${card.name} · ${card.role ?? '—'} · ${card.ticket?.identifier ?? 'no ticket'} · ${card.runtime}` : `attaching to ${agentId}…`}
         right={card ? `turn ${card.turn} · ${card.worktree?.label ?? 'no worktree'} · ${card.tokens ?? '—'} · ${card.cost ?? '—'}` : ''}
         connection={connection}
       />

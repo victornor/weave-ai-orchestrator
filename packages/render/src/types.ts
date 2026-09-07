@@ -183,8 +183,8 @@ export interface WorkerCardModel {
   /** Why a paused worker stopped: `provider_quota · limit resets in 2 hours · resets 2026-09-05 14:30 UTC`. Null unless it is paused. */
   pauseReason: string | null;
   worktree: WorktreeView | null;
+  /** The runtime the agent is on, from the workspace model setting that governs it. */
   runtime: string;
-  model: string | null;
   turn: number;
   tokens: string | null;
   cost: string | null;

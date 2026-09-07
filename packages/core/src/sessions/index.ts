@@ -1,7 +1,8 @@
 import { newId, nowIso } from '@agent-conductor/db';
-import type { SessionPolicy } from '@agent-conductor/shared';
+import type { AgentKind, SessionPolicy } from '@agent-conductor/shared';
 import type { SessionRef } from '@agent-conductor/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
+import { modelSettingFor } from '../models/resolve.js';
 
 export interface SessionRow {
   id: string; agentId: string; runtimeId: string; sessionRef: SessionRef | null; displayId: string | null;
@@ -54,6 +55,15 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
         ctx.db.update('agent_sessions', session.id, { status: 'closed', updatedAt: nowIso() });
         session = null;
       }
+      // A session handle belongs to the CLI that issued it, so a workspace model setting that now
+      // names another runtime cannot resume this one — it is retired and the next turn starts fresh
+      // (VS-77). Changing only the model or the effort keeps the session.
+      if (session && session.runtimeId !== agent.runtimeId) {
+        ctx.db.update('agent_sessions', session.id, { status: 'stale', updatedAt: nowIso() });
+        log.info({ agentId: agent.id, from: session.runtimeId, to: agent.runtimeId }, 'runtime changed; starting a new session');
+        session = null;
+        stale = true;
+      }
       if (!session) session = create(agent.id, agent.runtimeId);
       const ref = policy === 'fresh' ? null : (session.sessionRef ?? null);
       return { session, ref, isFirstTurn: session.turnCount === 0 || ref === null, stale, policy };
@@ -82,9 +92,9 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
     reset(agentId, reason) {
       const cur = get(agentId);
       if (cur) ctx.db.update('agent_sessions', cur.id, { status: 'closed', lastError: reason, updatedAt: nowIso() });
-      const agent = ctx.db.get<{ runtimeId: string }>('SELECT runtime_id FROM agents WHERE id = ?', [agentId]);
+      const agent = ctx.db.get<{ kind: AgentKind; runtimeId: string }>('SELECT kind, runtime_id FROM agents WHERE id = ?', [agentId]);
       log.info({ agentId, reason }, 'session reset');
-      return create(agentId, agent?.runtimeId ?? ctx.config.defaults.runtime);
+      return create(agentId, agent?.runtimeId ?? modelSettingFor(ctx.config, agent?.kind ?? 'worker').runtime);
     },
 
     close(agentId) {

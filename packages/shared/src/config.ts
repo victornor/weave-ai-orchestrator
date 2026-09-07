@@ -49,8 +49,6 @@ export const ProjectConfigSchema = z.object({
   url: z.string().min(1),
   name: z.string().optional(),
   defaultBranch: z.string().default('main'),
-  runtime: z.string().optional(),
-  model: z.string().nullable().optional(),
   maxWorkers: z.number().int().min(1).max(32).default(4),
   setupCommand: z.string().optional(),
   warmPaths: z.array(z.string()).default([]),
@@ -90,9 +88,29 @@ export type KnowledgeBudgets = z.infer<typeof KnowledgeBudgetsSchema>;
 /** The budgets in force when no workspace config is in play (seeds, fallbacks, tests). */
 export const DEFAULT_KNOWLEDGE_BUDGETS: KnowledgeBudgets = KnowledgeBudgetsSchema.parse({});
 
-export const WorkspaceDefaultsSchema = z.object({
-  runtime: z.string().default('claude'),
+/**
+ * One of the two model settings a workspace holds (VS-77, ADR 0011): what an agent of that kind is
+ * launched with. `model: null` means the runtime picks; `effort` is optional and is the only place
+ * it can still be set — the claude, codex and opencode adapters each turn it into a CLI flag.
+ */
+export const ModelSettingSchema = z.object({
+  runtime: z.string().min(1).default('claude'),
   model: z.string().nullable().default(null),
+  effort: z.string().optional(),
+});
+export type ModelSetting = z.infer<typeof ModelSettingSchema>;
+
+/** The whole of model selection for a workspace: one setting for the conductor, one for its workers. */
+export const WorkspaceModelsSchema = z.object({
+  conductor: ModelSettingSchema.default({}),
+  workers: ModelSettingSchema.default({}),
+});
+export type WorkspaceModels = z.infer<typeof WorkspaceModelsSchema>;
+
+/** The two settings in force when no workspace config is in play (seeds, fallbacks, tests). */
+export const DEFAULT_WORKSPACE_MODELS: WorkspaceModels = WorkspaceModelsSchema.parse({});
+
+export const WorkspaceDefaultsSchema = z.object({
   proposalApproval: z.enum(APPROVAL_OWNERS).default('human'),
   hireApproval: z.enum(APPROVAL_OWNERS).default('human'),
   deliveryMode: z.enum(DELIVERY_MODES).default('pr'),
@@ -119,11 +137,10 @@ export const WorkspaceConfigSchema = z.object({
   name: z.string().min(1),
   ticketPrefix: z.string().regex(/^[A-Z][A-Z0-9]{1,9}$/),
   defaults: WorkspaceDefaultsSchema.default({}),
+  /** Model selection, whole and entire: nothing else in this file names a runtime or a model. */
+  models: WorkspaceModelsSchema.default({}),
   projects: z.array(ProjectConfigSchema).default([]),
   conductor: z.object({
-    runtime: z.string().default('claude'),
-    model: z.string().nullable().default(null),
-    effort: z.string().optional(),
     channels: z.array(z.string()).default(['web', 'cli']),
     heartbeatIntervalSec: z.number().int().optional(),
     humanName: z.string().optional(),
@@ -148,9 +165,6 @@ export const RoleSpecSchema = z.object({
   capabilities: z.array(z.string()).default([]),
   exclusions: z.array(z.string()).default([]),
   rules: z.array(z.string()).default([]),
-  runtime: z.string(),
-  model: z.string().nullable().default(null),
-  effort: z.string().optional(),
   sessionPolicy: z.enum(SESSION_POLICIES).default('per_ticket'),
   maxWorkers: z.number().int().min(1).max(32).default(2),
   permission: z.object({ mode: z.enum(PERMISSION_MODES).default('auto'), allowed: z.array(z.string()).default([]), denied: z.array(z.string()).default([]) }).default({}),

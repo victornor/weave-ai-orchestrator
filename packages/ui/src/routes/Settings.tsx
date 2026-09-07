@@ -16,9 +16,8 @@ import {
   useCancelUpgrade,
   useDaemonUpdate,
   useDaemonUpgrade,
-  useConductor,
   useMe,
-  usePatchConductor,
+  useModels,
   usePatchConfig,
   usePatchProject,
   usePresentation,
@@ -29,12 +28,14 @@ import {
   useRequestUpgrade,
   useRuntimeModels,
   useRuntimes,
+  useSetModels,
   useWorkspaceSummary,
   useWorkspaces,
 } from '../api/hooks';
 import { api, setToken } from '../api/client';
 import { qk } from '../api/keys';
 import type { PresentationBlock } from '@agent-conductor/shared';
+import type * as T from '../api/types';
 import type { TotpSetup } from '../api/types';
 import { useWs } from '../api/context';
 import { useGo, useSearchParams } from '../app/link';
@@ -111,7 +112,7 @@ export function SettingsRoute(): React.ReactElement {
           ) : null}
           {section === 'workspace' ? <WorkspaceSection /> : null}
           {section === 'projects' ? <ProjectsSection /> : null}
-          {section === 'conductor' ? <ConductorSection /> : null}
+          {section === 'models' ? <ModelsSection /> : null}
           {section === 'channels' ? <ChannelsSection /> : null}
           {section === 'presentation' ? <PresentationSection /> : null}
           {section === 'security' ? <SecuritySection /> : null}
@@ -310,12 +311,10 @@ function KnowledgeBudgetsSection({ config }: { config: Record<string, unknown> }
 
 function ProjectsSection(): React.ReactElement {
   const projects = useProjects();
-  const runtimes = useRuntimes();
   const add = useAddProject();
   const patch = usePatchProject();
   const toast = useToast();
   const [url, setUrl] = useState('');
-  const [runtime, setRuntime] = useState('');
   const [maxWorkers, setMaxWorkers] = useState(2);
   const [setupCommand, setSetupCommand] = useState('');
   const [autoMerge, setAutoMerge] = useState(false);
@@ -328,18 +327,7 @@ function ProjectsSection(): React.ReactElement {
         <Field label="Git URL" hint="Cloned into projects/<id>; nobody works in that clone.">
           <input className={cx(inputCx, 'ac-mono')} placeholder="git@github.com:acme/api.git" value={url} onChange={(e) => setUrl(e.target.value)} />
         </Field>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Runtime">
-            <select className={cx(inputCx, 'ac-mono')} value={runtime} onChange={(e) => setRuntime(e.target.value)}>
-              <option value="">default</option>
-              {(runtimes.data ?? []).map((r) => (
-                <option key={r.id} value={r.id} disabled={!isRuntimeAvailable(r)}>
-                  {r.displayName}
-                  {isRuntimeAvailable(r) ? '' : ` (${runtimeStatusLabel(r)})`}
-                </option>
-              ))}
-            </select>
-          </Field>
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Max workers">
             <input type="number" min={1} max={16} className={cx(inputCx, 'ac-mono')} value={maxWorkers} onChange={(e) => setMaxWorkers(Number(e.target.value))} />
           </Field>
@@ -358,7 +346,7 @@ function ProjectsSection(): React.ReactElement {
           disabled={!url || add.isPending}
           onClick={() =>
             add.mutate(
-              { url, ...(runtime ? { runtime } : {}), maxWorkers, ...(setupCommand ? { setupCommand } : {}), autoMerge },
+              { url, maxWorkers, ...(setupCommand ? { setupCommand } : {}), autoMerge },
               {
                 onSuccess: () => {
                   toast.push({ title: 'Cloning…', detail: url, status: 'working' });
@@ -419,47 +407,111 @@ function ProjectsSection(): React.ReactElement {
   );
 }
 
-function ConductorSection(): React.ReactElement {
-  const conductor = useConductor();
+/**
+ * The whole of model selection (VS-77): two settings, each a runtime and a model. Nothing else in
+ * the app offers a runtime or a model to choose, so this section is where an operator comes.
+ */
+function ModelsSection(): React.ReactElement {
+  const models = useModels();
   const runtimes = useRuntimes();
-  const [runtime, setRuntime] = useState('');
-  const models = useRuntimeModels(runtime || conductor.data?.agent.runtimeId);
-  const patch = usePatchConductor();
+  const save = useSetModels();
 
-  if (conductor.isLoading) return <SkeletonRows rows={3} />;
-  if (!conductor.data) return <ErrorState code="CONDUCTOR_UNREACHABLE" message="The conductor agent is not registered." />;
+  if (models.isLoading) return <SkeletonRows rows={4} />;
+  if (!models.data) return <ErrorState code="MODELS_UNREACHABLE" message="The workspace's model settings could not be read." />;
+
+  const current = models.data;
+  const set = (kind: 'conductor' | 'workers', next: T.ModelSetting): void => save.mutate({ ...current, [kind]: next });
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-5">
+      <ModelSettingFields
+        label="Conductor"
+        hint="The agent you talk to. One per workspace."
+        setting={current.conductor}
+        runtimes={runtimes.data ?? []}
+        onChange={(next) => set('conductor', next)}
+      />
+      <ModelSettingFields
+        label="Workers"
+        hint="Every worker in this workspace, whatever its role or project."
+        setting={current.workers}
+        runtimes={runtimes.data ?? []}
+        onChange={(next) => set('workers', next)}
+      />
+      {save.error ? <ErrorState code="MODELS_NOT_SAVED" message={save.error.message} /> : null}
+      <p className="text-micro leading-relaxed text-text-3">
+        A change applies to the next turn each agent takes; a turn already running is not interrupted. Changing a runtime starts that agent on a
+        new session, because a session belongs to the CLI that issued it.
+      </p>
+    </div>
+  );
+}
+
+function ModelSettingFields({ label, hint, setting, runtimes, onChange }: {
+  label: string;
+  hint: string;
+  setting: T.ModelSetting;
+  runtimes: T.RuntimeInfo[];
+  onChange: (next: T.ModelSetting) => void;
+}): React.ReactElement {
+  const models = useRuntimeModels(setting.runtime);
+  const known = models.data ?? [];
+  // A model the adapter does not list is still valid — several runtimes list nothing useful — so the
+  // picker carries a "something else" entry that reveals a text box rather than losing the value.
+  const [freeText, setFreeText] = useState(false);
+  const custom = freeText || (setting.model !== null && known.length > 0 && !known.some((m) => m.id === setting.model));
+
+  return (
+    <div className="flex flex-col gap-1">
+      <h3 className="ac-label text-text-1">{label}</h3>
+      <p className="text-micro text-text-3">{hint}</p>
       <Field label="Runtime">
         <select
           className={cx(inputCx, 'ac-mono')}
-          value={runtime || conductor.data.agent.runtimeId}
-          onChange={(e) => {
-            setRuntime(e.target.value);
-            patch.mutate({ runtime: e.target.value });
-          }}
+          aria-label={`${label} runtime`}
+          value={setting.runtime}
+          onChange={(e) => onChange({ ...setting, runtime: e.target.value })}
         >
-          {(runtimes.data ?? []).map((r) => (
-            <option key={r.id} value={r.id}>
+          {runtimes.map((r) => (
+            <option key={r.id} value={r.id} disabled={!isRuntimeAvailable(r)}>
               {r.displayName}
+              {isRuntimeAvailable(r) ? '' : ` (${runtimeStatusLabel(r)})`}
             </option>
           ))}
+          {runtimes.some((r) => r.id === setting.runtime) ? null : <option value={setting.runtime}>{setting.runtime} (not installed)</option>}
         </select>
       </Field>
       <Field label="Model">
-        <select className={cx(inputCx, 'ac-mono')} value={conductor.data.agent.model ?? ''} onChange={(e) => patch.mutate({ model: e.target.value })}>
-          <option value="">default</option>
-          {(models.data ?? []).map((m) => (
+        <select
+          className={cx(inputCx, 'ac-mono')}
+          aria-label={`${label} model`}
+          value={custom ? '__other' : setting.model ?? ''}
+          onChange={(e) => {
+            if (e.target.value === '__other') { setFreeText(true); return; }
+            setFreeText(false);
+            onChange({ ...setting, model: e.target.value === '' ? null : e.target.value });
+          }}
+        >
+          <option value="">default (the runtime chooses)</option>
+          {known.map((m) => (
             <option key={m.id} value={m.id}>
               {m.label}
             </option>
           ))}
+          <option value="__other">something else…</option>
         </select>
       </Field>
-      <p className="text-micro leading-relaxed text-text-3">
-        Transcription for voice dictation is configured on the daemon host. With no provider, the composer keeps the mic visible, dimmed with a slash, and says so on tap.
-      </p>
+      {custom ? (
+        <Field label={`${label} model id`} hint="A model this runtime offers that is not in the list.">
+          <input
+            className={cx(inputCx, 'ac-mono')}
+            aria-label={`${label} model id`}
+            defaultValue={setting.model ?? ''}
+            onBlur={(e) => onChange({ ...setting, model: e.target.value.trim() === '' ? null : e.target.value.trim() })}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+          />
+        </Field>
+      ) : null}
     </div>
   );
 }

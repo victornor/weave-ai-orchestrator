@@ -55,7 +55,7 @@ describe('YOLO mode', () => {
     const now = nowIso();
     h.db.insert('projects', {
       id, workspaceId: h.workspaceId, slug: 'web', name: 'Web', gitUrl: 'git@example.com:acme/web.git', defaultBranch: 'main',
-      clonePath: '/tmp/web', maxWorkers: 4, worktreeProvider: 'git', runtimeId: 'claude', model: null,
+      clonePath: '/tmp/web', maxWorkers: 4, worktreeProvider: 'git',
       openspecEnabled: 1, policiesJson: {}, status: 'ready', createdAt: now, updatedAt: now,
     });
     return id;

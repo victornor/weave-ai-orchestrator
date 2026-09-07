@@ -38,7 +38,8 @@ describe('run engine', () => {
     h = makeHarness();
     runtime = new FakeRuntime();
     h.ctx.registries.runtimes.set('fake', runtime);
-    h.db.update('agents', h.conductorId, { runtimeId: 'fake' });
+    // Both settings, because a suite here runs conductor turns and worker turns (VS-77).
+    h.ctx.config.models = { conductor: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null } };
     h.services.wake = createWakeService(h.ctx, h.deps);
     h.services.runs = createRunsService(h.ctx, h.deps);
     dispatcher = createDispatcher(h.ctx, h.deps);
@@ -184,7 +185,7 @@ describe('run engine', () => {
   });
 
   it('fails cleanly when the runtime is not registered', async () => {
-    h.db.update('agents', h.conductorId, { runtimeId: 'nope' });
+    h.ctx.config.models = { ...h.ctx.config.models, conductor: { runtime: 'nope', model: null } };
     h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
     const run = await runOnce();
     expect(run.status).toBe('failed');
@@ -229,6 +230,127 @@ describe('run engine', () => {
     const run = await executeRun(h.ctx, h.deps, runId);
     expect(run.status).toBe('succeeded');
     expect(run.turnEpoch).toBe(7);
+  });
+
+  // VS-77: a turn's runtime, model and effort come from the workspace's two model settings, and
+  // from nothing else. These are the tests that keep the old fallback chain from growing back.
+  describe('resolving what a turn runs on', () => {
+    /** A second adapter, so "the other runtime" is a real registration rather than a missing one. */
+    let other: FakeRuntime;
+    beforeEach(() => { other = new FakeRuntime(); h.ctx.registries.runtimes.set('other', other); });
+
+    it('launches the conductor on the conductor setting', async () => {
+      h.ctx.config.models.conductor = { runtime: 'fake', model: 'claude-fable-5-1', effort: 'low' };
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      await runOnce();
+      expect(runtime.inputs.at(-1)).toMatchObject({ model: 'claude-fable-5-1', effort: 'low' });
+    });
+
+    it('launches a worker on the workers setting', async () => {
+      h.ctx.config.models.workers = { runtime: 'fake', model: 'claude-opus-5', effort: 'high' };
+      const ticketId = seedTicket(h);
+      const workerId = h.addWorker(ticketId, { worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      await runOnce();
+      expect(runtime.inputs.at(-1)).toMatchObject({ model: 'claude-opus-5', effort: 'high' });
+    });
+
+    it('sends the two kinds to their own settings in the same workspace', async () => {
+      h.ctx.config.models = {
+        conductor: { runtime: 'fake', model: 'the-conductor-model' },
+        workers: { runtime: 'other', model: 'the-worker-model' },
+      };
+      const ticketId = seedTicket(h);
+      const workerId = h.addWorker(ticketId, { worktreePath: null });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      await runOnce();
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      await runOnce();
+
+      expect(runtime.inputs.at(-1)!.model).toBe('the-conductor-model');
+      expect(other.inputs.at(-1)!.model).toBe('the-worker-model');
+    });
+
+    it('lets no role, project or agent row influence the choice', async () => {
+      h.ctx.config.models.workers = { runtime: 'fake', model: 'the-setting-model', effort: 'high' };
+      const ticketId = seedTicket(h);
+      // Everything the old chain read, pointed somewhere else, written straight to the rows.
+      const workerId = h.addWorker(ticketId, { runtimeId: 'other', worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      await runOnce();
+
+      expect(other.inputs).toHaveLength(0);
+      expect(runtime.inputs.at(-1)).toMatchObject({ model: 'the-setting-model', effort: 'high' });
+      // And the row is corrected to what it really ran on, rather than left disagreeing.
+      expect(h.db.get<{ runtimeId: string }>('SELECT runtime_id FROM agents WHERE id = ?', [workerId])!.runtimeId).toBe('fake');
+    });
+
+    it('changes what the next turn launches with when the setting changes', async () => {
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'first' });
+      await runOnce();
+      expect(runtime.inputs.at(-1)!.model).toBeNull();
+
+      h.ctx.config.models.conductor = { runtime: 'other', model: 'the-new-model' };
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'second' });
+      const second = await runOnce();
+
+      expect(other.inputs.at(-1)!.model).toBe('the-new-model');
+      expect(second.runtimeId).toBe('other');
+    });
+
+    it('records on the run what it really ran on, and leaves it there when the setting moves on', async () => {
+      h.ctx.config.models.conductor = { runtime: 'fake', model: 'the-model-it-ran-on' };
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      const run = await runOnce();
+      expect(run.runtimeId).toBe('fake');
+
+      h.ctx.config.models.conductor = { runtime: 'other', model: 'something-else' };
+      const stored = h.db.get<Run>('SELECT * FROM runs WHERE id = ?', [run.id])!;
+      expect(stored.runtimeId).toBe('fake');
+      // The adapter reported `fake-1`, and what the runtime says beats what the setting asked for.
+      expect(stored.model).toBe('fake-1');
+    });
+
+    it('fails the turn naming the runtime the setting points at, rather than using another', async () => {
+      h.ctx.config.models.conductor = { runtime: 'nope', model: null };
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      const run = await runOnce();
+      expect(run.status).toBe('failed');
+      expect(run.errorCode).toBe('runtime_unreachable');
+      expect(other.inputs).toHaveLength(0);
+    });
+
+    it('retires a session the old runtime issued rather than handing its handle to the new one', async () => {
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'first' });
+      await runOnce();
+      const first = h.db.get<{ id: string; runtimeId: string }>("SELECT id, runtime_id FROM agent_sessions WHERE agent_id = ? AND status = 'active'", [h.conductorId])!;
+      expect(first.runtimeId).toBe('fake');
+
+      h.ctx.config.models.conductor = { runtime: 'other', model: null };
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'second' });
+      await runOnce();
+
+      // Nothing from the old CLI is passed to the new one, and the turn is told it started over.
+      expect(other.inputs.at(-1)!.session.ref).toBeNull();
+      expect(other.inputs.at(-1)!.session.isFirstTurn).toBe(true);
+      const now = h.db.get<{ id: string; runtimeId: string }>("SELECT id, runtime_id FROM agent_sessions WHERE agent_id = ? AND status = 'active'", [h.conductorId])!;
+      expect(now.id).not.toBe(first.id);
+      expect(now.runtimeId).toBe('other');
+      expect(h.db.get<{ status: string }>('SELECT status FROM agent_sessions WHERE id = ?', [first.id])!.status).toBe('stale');
+    });
+
+    it('keeps the session when only the model changes', async () => {
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'first' });
+      await runOnce();
+      const before = h.db.get<{ id: string }>("SELECT id FROM agent_sessions WHERE agent_id = ? AND status = 'active'", [h.conductorId])!;
+
+      h.ctx.config.models.conductor = { runtime: 'fake', model: 'a-different-model' };
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'second' });
+      await runOnce();
+
+      expect(runtime.inputs.at(-1)!.session.ref).not.toBeNull();
+      expect(h.db.get<{ id: string }>("SELECT id FROM agent_sessions WHERE agent_id = ? AND status = 'active'", [h.conductorId])!.id).toBe(before.id);
+    });
   });
 
   // The dispatcher records, on the run it opens, which run it is retrying — the one writer of
@@ -419,7 +541,9 @@ describe('run engine', () => {
       expect(card.owner).toBe('human');
       expect(card.title).toContain('TST-1');
       expect(card.context).toContain('the CLI died');
-      expect(card.options.map((o: { key: string }) => o.key)).toEqual(['retry', 'retry_1h', 'runtime:other', 'cancel']);
+      // No per-runtime option: the runtime is a workspace setting, and the card says which (VS-77).
+      expect(card.context).toContain('models.workers');
+      expect(card.options.map((o: { key: string }) => o.key)).toEqual(['retry', 'retry_1h', 'cancel']);
       expect(card.recommendation).toBe('retry');
       expect(card.target).toMatchObject({ agentId: workerId, ticketId, family: 'unknown', code: 'boom' });
 
@@ -488,11 +612,12 @@ describe('run engine', () => {
       expect(card.context).toContain('provider_quota');
       expect(card.context).toContain('limit resets in 2 hours');
       expect(card.context).toContain('nothing will run until you answer');
+      expect(card.context).toContain('models.workers');
       // The reset time is offered, never booked.
       expect(card.recommendation).toBe('retry_at_reset');
       const reset = card.options.find((o: { key: string }) => o.key === 'retry_at_reset')!;
       expect(reset.label).toContain('Retry when the limit resets');
-      expect(card.options.map((o: { key: string }) => o.key)).toEqual(['retry', 'retry_at_reset', 'runtime:other', 'cancel']);
+      expect(card.options.map((o: { key: string }) => o.key)).toEqual(['retry', 'retry_at_reset', 'cancel']);
 
       const agent = h.db.get<{ status: string; pauseReason: string; pauseDetail: Record<string, unknown> }>(
         'SELECT status, pause_reason, pause_detail_json FROM agents WHERE id = ?', [workerId])!;
@@ -506,7 +631,7 @@ describe('run engine', () => {
     it('falls back to the hour offer when the runtime names no reset time', async () => {
       const { ticketId, workerId } = await failOnce({ error: { code: 'rate_limit', family: 'provider_quota', message: 'you are out of credits' } });
       const card = openFor(ticketId)[0]!;
-      expect(card.options.map((o: { key: string }) => o.key)).toEqual(['retry', 'retry_1h', 'runtime:other', 'cancel']);
+      expect(card.options.map((o: { key: string }) => o.key)).toEqual(['retry', 'retry_1h', 'cancel']);
       expect(card.recommendation).toBe('retry_1h');
       expect(h.db.get<{ pauseDetail: { resetAt: string | null } }>('SELECT pause_detail_json FROM agents WHERE id = ?', [workerId])!.pauseDetail.resetAt).toBeNull();
       expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND source = 'retry'", [workerId])!.n).toBe(0);
@@ -584,7 +709,6 @@ describe('dispatcher', () => {
     runtime = new FakeRuntime();
     runtime.delayMs = 30;
     h.ctx.registries.runtimes.set('fake', runtime);
-    h.db.update('agents', h.conductorId, { runtimeId: 'fake' });
     h.services.wake = createWakeService(h.ctx, h.deps);
     h.services.runs = createRunsService(h.ctx, h.deps);
     dispatcher = createDispatcher(h.ctx, h.deps);

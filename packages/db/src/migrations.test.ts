@@ -324,4 +324,60 @@ describe('migrations', () => {
       again.close();
     });
   });
+  // VS-77: model selection becomes two per-workspace settings, so every column that could override
+  // them is dropped. One-way, and the rows themselves survive untouched.
+  describe('the model override columns', () => {
+    const cols = (db: Db, table: string): string[] => db.all<{ name: string }>(`PRAGMA table_info(${table})`).map((c) => c.name);
+
+    const seedOverrides = (db: Db): void => {
+      seedTicket(db, { workspace: 'ws1', ticket: 't1' });
+      db.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, runtime_id, model, created_at, updated_at)
+         VALUES ('p1', 'ws1', 'api', 'API', 'git@example.com:a/api.git', '/tmp/api', 'codex', 'gpt-5', 't0', 't0')`);
+      db.run(
+        `INSERT INTO roles (id, workspace_id, project_id, slug, name, charter_summary, scope_text, runtime_id, model, effort, max_workers, created_at, updated_at)
+         VALUES ('r1', 'ws1', 'p1', 'backend', 'Backend Engineer', 'Owns the API', 'The api repo', 'codex', 'gpt-5', 'high', 3, 't0', 't0')`);
+      db.run(
+        `INSERT INTO agents (id, workspace_id, kind, project_id, role_id, ticket_id, name, runtime_id, model, effort, home_path, turn_count, created_at, updated_at)
+         VALUES ('a1', 'ws1', 'worker', 'p1', 'r1', 't1', 'Backend Engineer #1', 'codex', 'gpt-5', 'high', '/tmp/a1', 7, 't0', 't0')`);
+    };
+
+    it('drops the overrides and keeps every other value on the row', () => {
+      const path = join(dir, 'models.sqlite');
+      const before = openDbAsOf(path, '0011_agent_pause_detail.sql');
+      seedOverrides(before);
+      expect(cols(before, 'roles')).toEqual(expect.arrayContaining(['runtime_id', 'model', 'effort']));
+      before.close();
+
+      const db = openDb(path);
+      for (const c of ['runtime_id', 'model']) expect(cols(db, 'projects')).not.toContain(c);
+      for (const c of ['runtime_id', 'model', 'effort']) expect(cols(db, 'roles')).not.toContain(c);
+      for (const c of ['model', 'effort']) expect(cols(db, 'agents')).not.toContain(c);
+
+      expect(db.get('SELECT slug, max_workers FROM roles WHERE id = ?', ['r1'])).toMatchObject({ slug: 'backend', maxWorkers: 3 });
+      expect(db.get('SELECT slug, clone_path FROM projects WHERE id = ?', ['p1'])).toMatchObject({ slug: 'api', clonePath: '/tmp/api' });
+      // The agent keeps the runtime it is on: a record of what it runs, never an override.
+      expect(db.get('SELECT runtime_id, turn_count FROM agents WHERE id = ?', ['a1'])).toMatchObject({ runtimeId: 'codex', turnCount: 7 });
+      expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+      db.close();
+    });
+
+    it('leaves what records a real run alone', () => {
+      const db = openDb(join(dir, 'kept.sqlite'));
+      expect(cols(db, 'runs')).toEqual(expect.arrayContaining(['runtime_id', 'model']));
+      expect(cols(db, 'agent_sessions')).toContain('runtime_id');
+      expect(cols(db, 'usage_events')).toEqual(expect.arrayContaining(['runtime_id', 'model']));
+      db.close();
+    });
+
+    it('is a no-op on a second open', () => {
+      const path = join(dir, 'twice.sqlite');
+      const db = openDb(path);
+      db.close();
+      const again = openDb(path);
+      expect(again.all("SELECT value FROM meta WHERE key = 'migration:0012_model_settings.sql'")).toHaveLength(1);
+      expect(again.all<{ name: string }>('PRAGMA table_info(roles)').map((c) => c.name)).not.toContain('runtime_id');
+      again.close();
+    });
+  });
 });

@@ -39,7 +39,7 @@ describe('roles', () => {
   });
   afterEach(() => h.cleanup());
 
-  it('hires a role: files on disk, pending_activation, hire_approval decision with runtime options', async () => {
+  it('hires a role: files on disk, pending_activation, a hire_approval decision that offers no runtime', async () => {
     const { role, decisionId } = await roles.hire(CONDUCTOR, spec());
     expect(role.status).toBe('pending_activation');
     expect(role.specRevision).toBe(1);
@@ -56,9 +56,9 @@ describe('roles', () => {
 
     expect(created[0]).toMatchObject({ kind: 'hire_approval', owner: 'human', correlationKey: 'hire:api-backend' });
     const options = (created[0]!.options as Array<{ key: string }>).map((o) => o.key);
-    expect(options).toContain('approve');
-    expect(options).toContain('reject');
-    expect(options).toContain('runtime:codex');
+    // Approve or decline and nothing else: a role carries no runtime since VS-77, so there is no
+    // "approve, but run on codex" to offer.
+    expect(options).toEqual(['approve', 'reject']);
     expect(h.db.get<{ n: number }>('SELECT COUNT(*) n FROM role_revisions WHERE role_id = ?', ['api-backend'])!.n).toBe(1);
   });
 
@@ -77,13 +77,12 @@ describe('roles', () => {
     await expect(roles.hire(CONDUCTOR, spec())).rejects.toMatchObject({ code: 'conflict' });
   });
 
-  it('activates on a switched runtime and writes it back to role.yaml', async () => {
+  it('activates without choosing anything, and the spec on disk names no runtime', async () => {
     await roles.hire(CONDUCTOR, spec());
-    const role = await roles.activate(HUMAN, 'api-backend', { runtime: 'codex' });
+    const role = await roles.activate(HUMAN, 'api-backend');
     expect(role.status).toBe('active');
-    expect(role.runtimeId).toBe('codex');
-    const yaml = YAML.parse(readFileSync(join(h.ctx.paths.roles, 'api-backend', 'role.yaml'), 'utf8')) as RoleSpec;
-    expect(yaml.runtime).toBe('codex');
+    const yaml = YAML.parse(readFileSync(join(h.ctx.paths.roles, 'api-backend', 'role.yaml'), 'utf8')) as Record<string, unknown>;
+    for (const key of ['runtime', 'model', 'effort']) expect(yaml).not.toHaveProperty(key);
   });
 
   it('records a revision on update and can roll it back', async () => {
@@ -100,20 +99,14 @@ describe('roles', () => {
     expect(roles.revisions('api-backend')).toHaveLength(3);
   });
 
-  it('changes the runtime and clears the model override, on the row the next spawn reads', async () => {
-    await roles.hire(CONDUCTOR, spec({ model: 'claude-opus-5' }));
-    const onCodex = await roles.update(HUMAN, 'api-backend', { runtime: 'codex' }, 'changed from the web app');
-    // `runtimeId` is the column; `runtime` is the spec field, and it is the column that spawn copies
-    expect(onCodex.runtimeId).toBe('codex');
-    expect(onCodex.model).toBe('claude-opus-5');
-    expect(roles.revisions('api-backend').at(-1)).toMatchObject({ changedKeys: ['runtime'], reason: 'changed from the web app' });
-
-    const cleared = await roles.update(HUMAN, 'api-backend', { model: null }, 'back to the default');
-    expect(cleared.model).toBeNull();
-    expect(roles.revisions('api-backend').at(-1)).toMatchObject({ changedKeys: ['model'] });
-
-    const yaml = YAML.parse(readFileSync(join(h.ctx.paths.roles, 'api-backend', 'role.yaml'), 'utf8')) as RoleSpec;
-    expect(yaml).toMatchObject({ runtime: 'codex', model: null });
+  it('refuses a patch that tries to set a runtime, a model or an effort', async () => {
+    await roles.hire(CONDUCTOR, spec());
+    for (const key of ['runtime', 'model', 'effort']) {
+      await expect(roles.update(HUMAN, 'api-backend', { [key]: 'codex' } as never, 'changed from the web app'))
+        .rejects.toMatchObject({ code: 'validation' });
+    }
+    // Nothing was written on the way to being refused.
+    expect(roles.revisions('api-backend')).toHaveLength(1);
   });
 
   it('updates the charter as its own revision and renders one on demand', async () => {

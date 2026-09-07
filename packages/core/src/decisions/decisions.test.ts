@@ -127,14 +127,18 @@ describe('decisions', () => {
     expect(tickets.get(t.id).status).toBe('in_progress');
   });
 
-  it('hire approval activates the role, honouring a runtime switch in the answer key', async () => {
+  it('hire approval activates the role, and nothing in the answer can name a runtime', async () => {
     const d = decisions.create(HUMAN, { kind: 'hire_approval', title: 'Hire a backend engineer', target: { roleId: h.roleId } });
-    await decisions.answer(HUMAN, d.id, { key: 'runtime:codex' });
-    expect(roles.activate).toHaveBeenCalledWith(HUMAN, h.roleId, { runtime: 'codex' });
+    await decisions.answer(HUMAN, d.id, { key: 'approve' });
+    expect(roles.activate).toHaveBeenCalledWith(HUMAN, h.roleId);
 
-    const d2 = decisions.create(HUMAN, { kind: 'hire_approval', title: 'Hire again', target: { roleId: h.roleId }, correlationKey: 'hire:2' });
-    await decisions.answer(HUMAN, d2.id, { key: 'approve' });
-    expect(roles.activate).toHaveBeenLastCalledWith(HUMAN, h.roleId, undefined);
+    // A `runtime:` key was the per-role override (VS-77): with no such option offered it is now an
+    // unknown answer, refused rather than silently acted on.
+    const d2 = decisions.create(HUMAN, {
+      kind: 'hire_approval', title: 'Hire again', target: { roleId: h.roleId }, correlationKey: 'hire:2',
+      options: [{ key: 'approve', label: 'Approve' }, { key: 'reject', label: 'Reject' }],
+    });
+    await expect(decisions.answer(HUMAN, d2.id, { key: 'runtime:codex' })).rejects.toMatchObject({ code: 'validation' });
   });
 
   it('discard approval marks the ticket and notifies the conductor', async () => {

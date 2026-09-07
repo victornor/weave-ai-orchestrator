@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
 import { DaemonConfigSchema, type WorkspaceConfig } from '@agent-conductor/shared';
 import { createRegistries } from '../context.js';
+import { openDbAsOf } from '@agent-conductor/db';
 import { loader, projectKnowledgeSkeleton } from './loader.js';
 
 describe('workspace loader', () => {
@@ -129,6 +130,104 @@ describe('workspace loader', () => {
     const toml = readFileSync(join(root, '.agent-conductor/wt.toml'), 'utf8');
     expect(toml).toContain('[projects."github.com/acme/api"]');
     expect(toml).toContain('setup = "pnpm install"');
+  });
+
+  // VS-77: a workspace written under the layered scheme is migrated on load, once, using the roles
+  // the database still holds — migration 0012 stashes them before it drops the columns.
+  describe('migrating onto the two model settings', () => {
+    /** A workspace.yaml as it looked before this change, plus the roles it had hired. */
+    async function legacy(over: Record<string, unknown>, roles: Array<{ id: string; runtime: string; model?: string | null; effort?: string | null }> = []): Promise<void> {
+      await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      const file = join(root, 'workspace.yaml');
+      const raw = YAML.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      delete raw['models'];
+      writeFileSync(file, YAML.stringify({ ...raw, ...over }), 'utf8');
+      if (!roles.length) return;
+
+      // Seed the rows on the schema as it stood before 0012, then let the load migrate both.
+      const db = openDbAsOf(join(root, '.agent-conductor', 'db.sqlite'), '0011_agent_pause_detail.sql');
+      db.run(`INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+              VALUES ('ws1', 'acme', 'Acme Labs', 'ACME', 1, 'active', ?, 't0', 't0')`, [root]);
+      db.run(`INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, runtime_id, created_at, updated_at)
+              VALUES ('p1', 'ws1', 'api', 'API', 'git@x:a/api.git', '/tmp/api', 'claude', 't0', 't0')`);
+      for (const r of roles) {
+        db.run(`INSERT INTO roles (id, workspace_id, project_id, slug, name, charter_summary, scope_text, runtime_id, model, effort, status, created_at, updated_at)
+                VALUES (?, 'ws1', 'p1', ?, ?, 'Owns it', 'The api repo', ?, ?, ?, 'active', 't0', 't0')`,
+          [r.id, r.id, r.id, r.runtime, r.model ?? null, r.effort ?? null]);
+      }
+      db.close();
+    }
+
+    const yamlOf = (): Record<string, unknown> => YAML.parse(readFileSync(join(root, 'workspace.yaml'), 'utf8')) as Record<string, unknown>;
+
+    it('derives both settings from what the workspace was running on, and drops the keys they replace', async () => {
+      await legacy(
+        { defaults: { runtime: 'claude', model: null }, conductor: { runtime: 'claude', model: 'claude-fable-5-1', channels: ['web'] } },
+        [{ id: 'backend', runtime: 'codex', model: 'gpt-5' }, { id: 'docs', runtime: 'codex', model: 'gpt-5' }],
+      );
+
+      const ctx = await load();
+      expect(ctx.config.models).toEqual({
+        conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+        workers: { runtime: 'codex', model: 'gpt-5' },
+      });
+
+      // Written back, and the layered keys are gone from the file for good.
+      const written = yamlOf();
+      expect(written['models']).toEqual(ctx.config.models);
+      expect(written['defaults']).not.toHaveProperty('runtime');
+      expect(written['defaults']).not.toHaveProperty('model');
+      expect(written['conductor']).not.toHaveProperty('runtime');
+      expect(written['conductor']).not.toHaveProperty('model');
+      expect((written['conductor'] as Record<string, unknown>)['channels']).toEqual(['web']);
+    });
+
+    it('takes the workspace default when no role was ever hired', async () => {
+      await legacy({ defaults: { runtime: 'gemini', model: 'flash' } });
+      expect((await load()).config.models.workers).toEqual({ runtime: 'gemini', model: 'flash' });
+    });
+
+    it('runs once: a second load rewrites nothing', async () => {
+      await legacy({ defaults: { runtime: 'codex', model: 'gpt-5' } });
+      await load();
+      const afterFirst = readFileSync(join(root, 'workspace.yaml'), 'utf8');
+      const ctx = await load();
+      expect(readFileSync(join(root, 'workspace.yaml'), 'utf8')).toBe(afterFirst);
+      expect(ctx.config.models.workers).toEqual({ runtime: 'codex', model: 'gpt-5' });
+    });
+
+    it('leaves a workspace that already names its models alone', async () => {
+      await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      const file = join(root, 'workspace.yaml');
+      const raw = YAML.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      writeFileSync(file, YAML.stringify({ ...raw, defaults: { ...(raw['defaults'] as object), runtime: 'codex' }, models: { conductor: { runtime: 'opencode', model: 'grok' }, workers: { runtime: 'gemini', model: null } } }), 'utf8');
+
+      const ctx = await load();
+      expect(ctx.config.models).toEqual({ conductor: { runtime: 'opencode', model: 'grok' }, workers: { runtime: 'gemini', model: null } });
+    });
+
+    it('writes the most used runtime and leaves the question open when the roles disagreed', async () => {
+      await legacy({}, [
+        { id: 'backend', runtime: 'codex' },
+        { id: 'docs', runtime: 'codex' },
+        { id: 'infra', runtime: 'claude' },
+      ]);
+
+      const ctx = await load();
+      expect(ctx.config.models.workers.runtime).toBe('codex');
+      const settings = ctx.db.get<{ settings: Record<string, unknown> }>('SELECT settings_json FROM workspaces WHERE id = ?', [ctx.workspaceId])!.settings;
+      expect(settings['modelsMigration']).toMatchObject({
+        ambiguous: true, chosen: 'codex',
+        counts: [{ runtime: 'codex', roles: 2 }, { runtime: 'claude', roles: 1 }],
+      });
+    });
+
+    it('records nothing to ask about when every role agreed', async () => {
+      await legacy({}, [{ id: 'backend', runtime: 'codex' }, { id: 'docs', runtime: 'codex' }]);
+      const ctx = await load();
+      const settings = ctx.db.get<{ settings: Record<string, unknown> }>('SELECT settings_json FROM workspaces WHERE id = ?', [ctx.workspaceId])!.settings;
+      expect(settings['modelsMigration']).toBeUndefined();
+    });
   });
 
   it('reads and writes the daemon registry and config under XDG_CONFIG_HOME', () => {

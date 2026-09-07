@@ -70,7 +70,10 @@ export function workerRoutes(): Hono<AppEnv> {
   return app;
 }
 
-/** `/conductor` lives beside `/workers` in the API but is one agent, not a collection. */
+/**
+ * `/conductor` lives beside `/workers` in the API but is one agent, not a collection. Its runtime and
+ * model are the workspace's conductor model setting — `GET`/`PUT /models` (VS-77), not a patch here.
+ */
 export function conductorRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   /** Same envelope as `GET /workers/:id`, so one request tells a client which run to stream. */
@@ -90,14 +93,6 @@ export function conductorRoutes(): Hono<AppEnv> {
     const { reason } = await body(c, z.object({ reason: z.string().default('reset by operator') }));
     await s.workers.resetSession(c.get('actor'), s.workers.conductor().id, reason);
     return c.json({ ok: true });
-  });
-  app.patch('/', async (c) => {
-    const ws = c.get('ws');
-    const patch = await body(c, z.object({ runtime: z.string().optional(), model: z.string().nullish(), effort: z.string().optional() }));
-    const next = { ...ws.ctx.config, conductor: { ...ws.ctx.config.conductor, ...(patch.runtime ? { runtime: patch.runtime } : {}), ...(patch.model !== undefined ? { model: patch.model ?? null } : {}), ...(patch.effort ? { effort: patch.effort } : {}) } };
-    await ws.ctx.saveConfig(next);
-    ws.ctx.events.emit('workspace.updated', 'workspace', ws.id, { conductor: next.conductor });
-    return c.json(next.conductor);
   });
   return app;
 }

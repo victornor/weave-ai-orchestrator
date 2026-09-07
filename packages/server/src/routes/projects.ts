@@ -5,9 +5,11 @@ import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
 
 const AddSchema = z.object({
-  url: z.string().min(1), id: z.string().optional(), name: z.string().optional(), runtime: z.string().optional(),
+  url: z.string().min(1), id: z.string().optional(), name: z.string().optional(),
   defaultBranch: z.string().optional(), maxWorkers: z.number().int().min(1).max(32).optional(), setupCommand: z.string().optional(),
-});
+// Strict: a project carries no runtime or model since VS-77, and a body that still sends one is a
+// caller that would otherwise believe it had chosen something.
+}).strict();
 
 export function projectRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -25,7 +27,7 @@ export function projectRoutes(): Hono<AppEnv> {
   });
   /** Re-run a failed add against whatever is already on disk. */
   app.post('/:id/retry', (c) => c.json(c.get('ws').services.projects.retryAdd(c.get('actor'), c.req.param('id')), 202));
-  app.patch('/:id', async (c) => c.json(await c.get('ws').services.projects.update(c.get('actor'), c.req.param('id'), await body(c, ProjectConfigSchema.partial()))));
+  app.patch('/:id', async (c) => c.json(await c.get('ws').services.projects.update(c.get('actor'), c.req.param('id'), await body(c, ProjectConfigSchema.partial().strict()))));
   app.delete('/:id', async (c) => { await c.get('ws').services.projects.remove(c.get('actor'), c.req.param('id')); return c.json({ ok: true }); });
   app.post('/:id/fetch', async (c) => c.json(await c.get('ws').services.projects.fetch(c.req.param('id'))));
   // The project's merge queue: what is landing now and who is waiting, in order (PLAN §11.4).

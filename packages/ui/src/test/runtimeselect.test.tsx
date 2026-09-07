@@ -1,4 +1,4 @@
-/** The runtime selector in Settings → Projects reads detection.status, not a boolean (VS-45). */
+/** The runtime selector in Settings → Models reads detection.status, not a boolean (VS-45, VS-77). */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeInfo } from '../api/types';
@@ -11,6 +11,9 @@ vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
   useRuntimes: () => ({ data: state.runtimes }),
+  useModels: () => ({ data: { conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } }, isLoading: false }),
+  useSetModels: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+  useRuntimeModels: () => ({ data: [] }),
   useProjects: () => ({ data: [], isLoading: false }),
   useAddProject: () => ({ mutate: vi.fn(), isPending: false }),
   usePatchProject: () => ({ mutate: vi.fn(), isPending: false }),
@@ -27,35 +30,37 @@ const runtime = (id: string, detection: RuntimeInfo['detection']): RuntimeInfo =
   id, displayName: id, detection, capabilities: {},
 });
 
-/** Render Settings and switch to the Projects tab, the way the operator gets there. */
-function openProjects(): void {
+/** Render Settings and switch to the Models tab, the way the operator gets there. */
+function openModels(): void {
   render(<SettingsRoute />);
-  fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Models' }));
+}
+
+/** Both settings offer the same runtimes, so a name matches twice; the conductor's is the first. */
+function option(name: string): HTMLOptionElement {
+  return screen.getAllByRole('option', { name })[0] as HTMLOptionElement;
 }
 
 beforeEach(() => {
   state.runtimes = [];
 });
 
-describe('Settings — runtime selector', () => {
+describe('Settings — the model settings runtime picker', () => {
   it('enables a runtime the daemon host detected', () => {
     state.runtimes = [runtime('claude', { status: 'available', version: '2.1.0' })];
-    openProjects();
-    const option = screen.getByRole('option', { name: 'claude' }) as HTMLOptionElement;
-    expect(option.disabled).toBe(false);
+    openModels();
+    expect(option('claude').disabled).toBe(false);
   });
 
   it('disables and labels a runtime whose binary is missing', () => {
     state.runtimes = [runtime('codex', { status: 'missing_binary' })];
-    openProjects();
-    const option = screen.getByRole('option', { name: 'codex (not installed)' }) as HTMLOptionElement;
-    expect(option.disabled).toBe(true);
+    openModels();
+    expect(option('codex (not installed)').disabled).toBe(true);
   });
 
   it('says why a detected but broken runtime cannot be used', () => {
     state.runtimes = [runtime('gemini', { status: 'broken', notes: 'exited 1' })];
-    openProjects();
-    const option = screen.getByRole('option', { name: 'gemini (installed but not working)' }) as HTMLOptionElement;
-    expect(option.disabled).toBe(true);
+    openModels();
+    expect(option('gemini (installed but not working)').disabled).toBe(true);
   });
 });

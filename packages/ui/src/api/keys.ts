@@ -20,6 +20,7 @@ export const qk = {
   worker: (ws: string, id: string) => ['w', ws, 'workers', id] as const,
   workerBrief: (ws: string, id: string) => ['w', ws, 'workers', id, 'brief'] as const,
   conductor: (ws: string) => ['w', ws, 'conductor'] as const,
+  models: (ws: string) => ['w', ws, 'models'] as const,
 
   tickets: (ws: string) => ['w', ws, 'tickets'] as const,
   ticket: (ws: string, id: string) => ['w', ws, 'tickets', id] as const,

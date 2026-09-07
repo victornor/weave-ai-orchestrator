@@ -4,6 +4,7 @@ import type { WorkspaceContext } from '../context.js';
 import type { CoreServices, Dispatcher } from '../api.js';
 import { executeRun } from './engine.js';
 import { runState } from './active.js';
+import { modelSettingFor } from '../models/resolve.js';
 
 export interface CoreDispatcher extends Dispatcher {
   /** Await every run this dispatcher started (tests and shutdown). */
@@ -72,9 +73,12 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
       const ids = queued.map((w) => w.id);
       for (const id of ids) ctx.db.update('wakeups', id, { status: 'claimed', claimedAt: now });
       const runId = newId();
+      // Queued with what the setting says now; the engine re-reads it at launch and corrects the row
+      // if the setting moved between queueing and spawning (VS-77).
+      const setting = modelSettingFor(ctx.config, agent.kind);
       ctx.db.insert('runs', {
         id: runId, workspaceId: ctx.workspaceId, agentId: agent.id, ticketId: agent.ticketId,
-        wakeupIdsJson: ids, runtimeId: agent.runtimeId, model: agent.model, status: 'queued',
+        wakeupIdsJson: ids, runtimeId: setting.runtime, model: setting.model, status: 'queued',
         turnEpoch: agent.turnEpoch + 1, cwd: agent.homePath, retryOfRunId: retryOf(queued), createdAt: now,
       });
       for (const id of ids) ctx.db.update('wakeups', id, { runId });

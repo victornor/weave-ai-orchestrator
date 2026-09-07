@@ -99,6 +99,10 @@ export interface UpgradeStatusResponse { upgrade: Upgrade | null; waitingFor: Wa
 
 export interface RuntimeModel { id: string; label: string; provider?: string; source?: 'detected' | 'static'; tier?: string; notes?: string; contextWindowTokens?: number }
 
+/** One of the two model settings a workspace holds (VS-77): `GET`/`PUT /models`. */
+export interface ModelSetting { runtime: string; model: string | null; effort?: string }
+export interface WorkspaceModels { conductor: ModelSetting; workers: ModelSetting }
+
 export interface LoginResponse {
   token?: string;
   sessionId?: string;

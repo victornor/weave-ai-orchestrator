@@ -226,6 +226,28 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       return spawn(actor, ticket.id, { noWorktree: true, spawnReason: 'knowledge curation' });
     },
 
+    /**
+     * Start an interactive session (VS-101): a session always has a ticket, so this is the ordinary
+     * `spawn` with one extra step — mark the ticket as a session, either an existing one or one
+     * created in the same action. Nothing about provisioning differs from a worker's.
+     */
+    async startInteractiveSession(actor: Actor, input: { ticketId: string } | { projectId: string; roleId: string; kind: Ticket['kind']; title: string; description?: string }): Promise<Agent> {
+      let ticket: Ticket;
+      if ('ticketId' in input) {
+        ticket = ticketOf(input.ticketId);
+        if (!ticket.interactiveSession) {
+          ctx.db.update('tickets', ticket.id, { interactiveSession: true, updatedAt: nowIso() });
+          ticket = ticketOf(ticket.id);
+        }
+      } else {
+        ticket = deps().tickets.create(actor, {
+          projectId: input.projectId, kind: input.kind, title: input.title, description: input.description,
+          assigneeRoleId: input.roleId, interactiveSession: true,
+        });
+      }
+      return spawn(actor, ticket.id);
+    },
+
     async message(actor: Actor, workerId: string, body: string, opts: { live?: boolean } = {}): Promise<WorkerMessageOutcome> {
       const agent = get(workerId);
       if (!agent.ticketId) throw new OcError('validation', `${agent.name} has no ticket to talk on`);
@@ -234,6 +256,13 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       // Reopening the ticket with a plain comment is the real way back in (VS-106).
       if (agent.status === 'retired') {
         throw new OcError('wrong_status', `${agent.name} has retired; reply on the ticket to reopen it instead`);
+      }
+      const ticket = ticketOf(agent.ticketId);
+      // The conductor already has a live path to any worker (`ac_worker_message`) — an interactive
+      // session is the human's own conversation, so the conductor is refused here, not given a
+      // narrower tool list (VS-101). A human actor is never affected by this check.
+      if (actor.kind === 'agent' && ticket.interactiveSession) {
+        throw new OcError('forbidden', `${agent.name}'s ticket is an interactive session; the conductor cannot message it directly`);
       }
       // Attribution first (VS-99): the human's words are on the ticket before any delivery is
       // attempted, so a failed or throwing send still leaves a durable record.

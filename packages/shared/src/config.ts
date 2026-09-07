@@ -124,6 +124,13 @@ export const WorkspaceDefaultsSchema = z.object({
   spawnWaitWarnSec: z.number().int().default(600),
   conductorDigestIntervalSec: z.number().int().default(120),
   sessionMaxIdleDays: z.number().int().default(14),
+  /**
+   * How long an interactive session's ticket (VS-101) may go with no human message and no turn
+   * running before the daemon cancels its worker itself — always leaving the worktree kept, never
+   * discarded. Named apart from `sessionMaxIdleDays`, which is unrelated: that one is a runtime
+   * CLI's own resumable-session handle going stale, not a human's interactive session.
+   */
+  interactiveSessionIdleTimeoutMinutes: z.number().int().min(1).default(240),
   bootstrapBudgetTokens: z.number().int().default(16000),
   knowledgeBudgetTokens: KnowledgeBudgetsSchema.default({}),
   workerArchiveDays: z.number().int().default(30),

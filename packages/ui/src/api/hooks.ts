@@ -335,9 +335,12 @@ export function useRollbackCharter(): UseMutationResult<unknown, Error, { id: st
 
 /* --------------------------------------------------------------- workers */
 
-export function useWorkers(params: { status?: string; project?: string; role?: string; includeRetired?: boolean } = {}): UseQueryResult<Agent[]> {
+/** `GET /workers` marks which ticket is an interactive session (VS-101) — joined server-side, not part of `Agent` itself. */
+export type WorkerListItem = Agent & { interactiveSession: boolean };
+
+export function useWorkers(params: { status?: string; project?: string; role?: string; includeRetired?: boolean } = {}): UseQueryResult<WorkerListItem[]> {
   const ws = useWs();
-  return useQuery({ queryKey: [...qk.workers(ws), params], queryFn: () => api.ws<Agent[]>(ws, `/workers${qs(params)}`) });
+  return useQuery({ queryKey: [...qk.workers(ws), params], queryFn: () => api.ws<WorkerListItem[]>(ws, `/workers${qs(params)}`) });
 }
 
 export function useWorker(id: string): UseQueryResult<T.WorkerDetail> {
@@ -377,6 +380,20 @@ export function useWorkerMessage(): UseMutationResult<T.WorkerMessageOutcome, Er
       void qc.invalidateQueries({ queryKey: qk.worker(ws, v.id) });
       void qc.invalidateQueries({ queryKey: qk.ticketComments(ws, v.ticketId) });
     },
+  });
+}
+
+/**
+ * Start an interactive session (VS-101): always against a ticket, either an existing one or one
+ * created in this same call. The session's agent is that ticket's worker, provisioned exactly as
+ * `spawn` provisions any worker's.
+ */
+export function useStartSession(): UseMutationResult<Agent, Error, { ticketId: string } | { projectId: string; roleId: string; kind: string; title: string; description?: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => api.ws<Agent>(ws, '/workers/start-session', { method: 'POST', body }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.workers(ws) }),
   });
 }
 

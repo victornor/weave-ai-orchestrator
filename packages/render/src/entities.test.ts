@@ -8,7 +8,7 @@ function ticket(over: Partial<Ticket> = {}): Ticket {
   return {
     id: 'tkt_1', workspaceId: 'ws', projectId: 'web', number: 42, identifier: 'ACME-42', kind: 'change',
     title: 'Theme tokens', description: '', status: 'in_progress', priority: 'high', autoMerge: false,
-    assigneeRoleId: 'role_1', workerId: 'ag_1', assigneeHuman: false, parentId: null, createdByKind: 'human',
+    assigneeRoleId: 'role_1', workerId: 'ag_1', assigneeHuman: false, interactiveSession: false, parentId: null, createdByKind: 'human',
     createdById: null, createdRunId: null, originKind: null, originFingerprint: null, checkoutRunId: null, executionRunId: null,
     openspecChangeName: null, openspecState: null, delivery: null, unblock: null, monitorNextCheckAt: null,
     blockedTransitionAt: null, mergeQueuedAt: null, mergeStartedAt: null, startedAt: null, completedAt: null, cancelledAt: null,

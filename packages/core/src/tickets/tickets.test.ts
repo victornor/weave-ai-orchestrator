@@ -55,6 +55,11 @@ describe('tickets', () => {
     expect(make({ assigneeRoleId: null }).status).toBe('backlog');
   });
 
+  it('stores interactiveSession from the input, defaulting false (VS-101)', () => {
+    expect(make().interactiveSession).toBe(false);
+    expect(make({ interactiveSession: true }).interactiveSession).toBe(true);
+  });
+
   it('records the run that created the ticket, and nothing when there is no run', () => {
     expect(tickets.create(AGENT, { kind: 'change', title: 'From a turn', projectId: h.projectId, assigneeRoleId: h.roleId }).createdRunId).toBe('run-1');
     expect(make().createdRunId).toBeNull();

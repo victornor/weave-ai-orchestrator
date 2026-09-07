@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: A human can start an interactive session bound to a ticket, converse with
+  the agent directly, and have it manage that ticket throughout

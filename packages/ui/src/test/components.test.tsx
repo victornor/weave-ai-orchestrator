@@ -133,6 +133,15 @@ describe('WorkerCard', () => {
     expect(screen.queryByText(/provider_quota/)).not.toBeInTheDocument();
   });
 
+  it('marks an interactive session, and nothing when it is not one (VS-101)', () => {
+    const { unmount } = render(<WorkerCard agent={agent()} interactive />);
+    expect(screen.getByText('interactive')).toBeInTheDocument();
+    unmount();
+
+    render(<WorkerCard agent={agent()} />);
+    expect(screen.queryByText('interactive')).not.toBeInTheDocument();
+  });
+
   it('shows the last line and the worktree state', () => {
     render(
       <WorkerCard

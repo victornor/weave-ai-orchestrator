@@ -248,8 +248,10 @@ export async function buildTurnPrompt(
   parts.push('\n## Why you were woken');
   parts.push(bounded(flat, 12, (w) => `- ${w.source}: ${w.reason || '(no reason given)'}`, 'call `ac_inbox` for the rest'));
 
+  let workerTicket: S.Ticket | null = null;
   if (agent.kind === 'worker' && agent.ticketId) {
     const t = ticket(ctx, agent.ticketId);
+    workerTicket = t;
     const p = project(ctx, agent.projectId);
     if (t) {
       let wtLine = '';
@@ -307,9 +309,13 @@ export async function buildTurnPrompt(
   }
   if (notes.length) { parts.push('\n## Notes'); parts.push(notes.join('\n')); }
 
+  const isInteractiveFirstTurn = Boolean(workerTicket?.interactiveSession) && agent.turnCount === 0;
+
   parts.push('\n## What to do now');
   parts.push(agent.kind === 'conductor'
     ? 'Call `ac_inbox` if you need details. Handle human messages first, then ticket events. Reply to the human only through `ac_human_send`. Finish with the structured final report.'
-    : 'Call `ac_inbox` if you need details, do the phase your ticket status asks for, leave durable progress on the ticket, and finish with the structured final report. Ask with `ac_ask` instead of guessing; report `blocked` with a routable path if you are stuck.');
+    : isInteractiveFirstTurn
+      ? 'This is an interactive session: a human is about to work with you directly on this ticket. Read the ticket and its existing context, then post exactly one `ac_ticket_comment` stating what you understand the ticket to be and what you are ready to do. Do not edit anything, run anything, transition the ticket, or take any other action this turn — only the tools needed to read and to post that one comment are available to you right now. Stop after posting it and wait for the human\'s first message; the tools you need for the rest return on your next turn.'
+      : 'Call `ac_inbox` if you need details, do the phase your ticket status asks for, leave durable progress on the ticket, and finish with the structured final report. Ask with `ac_ask` instead of guessing; report `blocked` with a routable path if you are stuck.');
   return parts.join('\n') + '\n';
 }

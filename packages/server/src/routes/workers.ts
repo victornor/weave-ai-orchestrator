@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { describeLiveInput } from '@agent-conductor/core';
+import { TICKET_KINDS } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
 
@@ -11,7 +12,15 @@ export function workerRoutes(): Hono<AppEnv> {
 
   app.get('/', (c) => {
     const q = query(c, ListQuery);
-    return c.json(c.get('ws').services.workers.list({ status: q.status as never, projectId: q.project, roleId: q.role, includeRetired: q.includeRetired === 'true' }));
+    const ws = c.get('ws');
+    const workers = ws.services.workers.list({ status: q.status as never, projectId: q.project, roleId: q.role, includeRetired: q.includeRetired === 'true' });
+    // A worker's own row carries no ticket data; mark which ones are interactive sessions (VS-101)
+    // so the list is where they are visible, not only a per-worker detail fetch.
+    const ticketIds = [...new Set(workers.map((w) => w.ticketId).filter((id): id is string => Boolean(id)))];
+    const interactive = ticketIds.length
+      ? new Set(ws.ctx.db.all<{ id: string }>(`SELECT id FROM tickets WHERE interactive_session = 1 AND id IN (${ticketIds.map(() => '?').join(',')})`, ticketIds).map((r) => r.id))
+      : new Set<string>();
+    return c.json(workers.map((w) => ({ ...w, interactiveSession: w.ticketId ? interactive.has(w.ticketId) : false })));
   });
 
   app.get('/:id', (c) => {
@@ -31,6 +40,16 @@ export function workerRoutes(): Hono<AppEnv> {
       // fresh one — orthogonal to `input.midTurn`, which is about a turn executing right now.
       sessionResumable: safe(() => s.workers.sessionResumable(worker.id)) ?? false,
     });
+  });
+
+  // Registered above the `/:id/...` routes per Hono's registration-order matching, though a
+  // distinct literal path avoids any real collision with them.
+  app.post('/start-session', async (c) => {
+    const input = await body(c, z.union([
+      z.object({ ticketId: z.string().min(1) }),
+      z.object({ projectId: z.string().min(1), roleId: z.string().min(1), kind: z.enum(TICKET_KINDS), title: z.string().min(1), description: z.string().optional() }),
+    ]));
+    return c.json(await c.get('ws').services.workers.startInteractiveSession(c.get('actor'), input), 201);
   });
 
   app.get('/:id/brief', (c) => c.text(c.get('ws').services.workers.brief(c.req.param('id'))));

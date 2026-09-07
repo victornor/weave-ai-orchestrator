@@ -433,4 +433,37 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0015_ticket_interactive_session', () => {
+    it('adds interactive_session defaulting to 0, with no CHECK or FK', () => {
+      const db = openDb(join(dir, 'tis1.sqlite'));
+      const cols = db.all<{ name: string }>('PRAGMA table_info(tickets)').map((c) => c.name);
+      expect(cols).toContain('interactive_session');
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.insert('tickets', {
+        id: 't1', workspaceId: 'w1', number: 1, identifier: 'VS-1', kind: 'task', title: 'x',
+        createdByKind: 'human', createdAt: 't0', updatedAt: 't0',
+      });
+      const row = db.get<{ interactiveSession: number }>('SELECT * FROM tickets WHERE id = ?', ['t1'])!;
+      expect(row.interactiveSession).toBe(0);
+      db.close();
+    });
+
+    it('migrates an existing database with real ticket rows cleanly', () => {
+      const db = openDbAsOf(join(dir, 'tis2.sqlite'), '0014_knowledge_provenance.sql');
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(
+        `INSERT INTO tickets (id, workspace_id, number, identifier, kind, title, created_by_kind, created_at, updated_at)
+         VALUES ('t1', 'w1', 1, 'VS-1', 'task', 'Add dark mode', 'human', 't0', 't0')`);
+      db.close();
+      const reopened = openDb(join(dir, 'tis2.sqlite'));
+      const row = reopened.get<{ interactiveSession: number }>('SELECT * FROM tickets WHERE id = ?', ['t1'])!;
+      expect(row.interactiveSession).toBe(0);
+      reopened.close();
+    });
+  });
 });

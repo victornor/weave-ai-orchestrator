@@ -20,6 +20,7 @@ import {
   usePatchTicket,
   usePostComment,
   useRetryTicket,
+  useStartSession,
   useTicket,
   useTicketComments,
   useTicketDocument,
@@ -65,6 +66,7 @@ export function TicketRoute(): React.ReactElement {
   const detail = useTicket(ticketId);
   const patch = usePatchTicket();
   const retry = useRetryTicket();
+  const startSession = useStartSession();
 
   if (detail.isLoading) {
     return (
@@ -114,6 +116,7 @@ export function TicketRoute(): React.ReactElement {
         }
         meta={
           <span className="flex items-center gap-2">
+            {ticket.interactiveSession ? <Badge tone="accent">interactive</Badge> : null}
             {isFolded(ticket.status) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
             {ticket.status === 'merging' ? (
               <MergeQueueBadge
@@ -132,6 +135,20 @@ export function TicketRoute(): React.ReactElement {
             {canRetry ? (
               <Button size="sm" variant="primary" onClick={() => retry.mutate({ id: ticket.id })} disabled={retry.isPending}>
                 {worker?.status === 'paused' ? 'Resume' : 'Retry'}
+              </Button>
+            ) : null}
+            {!ticket.interactiveSession && !worker ? (
+              <Button
+                size="sm"
+                onClick={() =>
+                  startSession.mutate(
+                    { ticketId: ticket.id },
+                    { onSuccess: (agent) => go('/w/$ws/workers/$workerId', { params: { ws, workerId: agent.id } }) },
+                  )
+                }
+                disabled={startSession.isPending}
+              >
+                Start interactive session
               </Button>
             ) : null}
           <label className="flex items-center gap-2">

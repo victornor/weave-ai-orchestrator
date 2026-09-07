@@ -8,7 +8,7 @@ import { StatusBadge, Badge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
 import { Markdown } from '../components/Markdown';
 import { Sheet } from '../components/Sheet';
-import { useConductor, useProjects, useRole, useRoleAction, useRoles, useRollbackCharter, useUpdateRole, useWorkerAction, useWorkers } from '../api/hooks';
+import { useConductor, useProjects, useRole, useRoleAction, useRoles, useRollbackCharter, useStartSession, useUpdateRole, useWorkerAction, useWorkers } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import type * as T from '../api/types';
@@ -22,7 +22,9 @@ export function TeamRoute(): React.ReactElement {
   const workers = useWorkers({});
   const conductor = useConductor();
   const workerAction = useWorkerAction();
+  const startSession = useStartSession();
   const [openRole, setOpenRole] = useState<string | null>(null);
+  const [startingFor, setStartingFor] = useState<string | null>(null);
 
   return (
     <Page>
@@ -76,8 +78,23 @@ export function TeamRoute(): React.ReactElement {
                               <Button variant="ghost" size="sm" onClick={() => setOpenRole(r.id)}>
                                 Charter
                               </Button>
+                              <Button variant="ghost" size="sm" onClick={() => setStartingFor(startingFor === r.id ? null : r.id)}>
+                                Start session
+                              </Button>
                             </div>
                             <p className="mb-3 text-meta leading-relaxed text-text-2">{r.charterSummary}</p>
+                            {startingFor === r.id ? (
+                              <StartSessionForm
+                                pending={startSession.isPending}
+                                onCancel={() => setStartingFor(null)}
+                                onStart={(title, description) => {
+                                  startSession.mutate(
+                                    { projectId: p.id, roleId: r.id, kind: 'task', title, description: description || undefined },
+                                    { onSuccess: (agent) => { setStartingFor(null); go('/w/$ws/workers/$workerId', { params: { ws, workerId: agent.id } }); } },
+                                  );
+                                }}
+                              />
+                            ) : null}
                             {roleWorkers.length ? (
                               <div className="grid gap-2 sm:grid-cols-2">
                                 {roleWorkers.map((w) => (
@@ -86,6 +103,7 @@ export function TeamRoute(): React.ReactElement {
                                     agent={w}
                                     projectSlug={p.slug}
                                     ticketIdentifier={w.ticketId}
+                                    interactive={w.interactiveSession}
                                     onOpen={() => go('/w/$ws/workers/$workerId', { params: { ws, workerId: w.id } })}
                                     onResume={() => workerAction.mutate({ id: w.id, action: 'resume' })}
                                     resuming={workerAction.isPending}
@@ -106,6 +124,51 @@ export function TeamRoute(): React.ReactElement {
       </PageBody>
       {openRole ? <RoleSheet roleId={openRole} onClose={() => setOpenRole(null)} /> : null}
     </Page>
+  );
+}
+
+/**
+ * Start an interactive session against this role (VS-101): a title (and optional description) is
+ * all that's needed — the project and role are already this card's own, so there is nothing to pick.
+ * Creates a fresh ticket marked as a session and starts its worker in the same call.
+ */
+function StartSessionForm({ pending, onCancel, onStart }: {
+  pending: boolean;
+  onCancel: () => void;
+  onStart: (title: string, description: string) => void;
+}): React.ReactElement {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  return (
+    <form
+      className="mb-3 flex flex-col gap-2 rounded-r4 border border-line-2 bg-bg-2 p-3"
+      onSubmit={(e) => { e.preventDefault(); if (title.trim()) onStart(title.trim(), description.trim()); }}
+    >
+      <input
+        autoFocus
+        placeholder="What do you want to work on?"
+        aria-label="Session title"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        className="h-8 rounded-r4 border border-line-2 bg-bg-input px-2.5 text-ui text-text-1"
+      />
+      <textarea
+        placeholder="Anything else it should know (optional)"
+        aria-label="Session description"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        rows={2}
+        className="rounded-r4 border border-line-2 bg-bg-input px-2.5 py-1.5 text-meta text-text-1"
+      />
+      <div className="flex items-center gap-2">
+        <Button type="submit" size="sm" variant="primary" disabled={pending || !title.trim()}>
+          Start
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={pending}>
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }
 

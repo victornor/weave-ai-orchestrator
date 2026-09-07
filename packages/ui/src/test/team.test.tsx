@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   role: {} as Record<string, unknown>,
   concurrency: {} as Record<string, unknown> | undefined,
   updateError: null as Error | null,
+  startSession: vi.fn(),
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
@@ -26,6 +27,7 @@ vi.mock('../api/hooks', () => ({
   }),
   useRoleAction: () => ({ mutate: vi.fn() }),
   useWorkerAction: () => ({ mutate: vi.fn(), isPending: false }),
+  useStartSession: () => ({ mutate: state.startSession, isPending: false }),
   useRollbackCharter: () => ({ mutate: vi.fn() }),
 }));
 
@@ -46,6 +48,37 @@ beforeEach(() => {
     maxWorkers: 2, charterSummary: 'Owns the api service.',
   };
   state.concurrency = { roleMax: 2, projectMax: 4, effective: 2, live: 1, projectLive: 1, free: 1 };
+  state.startSession = vi.fn();
+});
+
+describe('Team — start an interactive session (VS-101)', () => {
+  it('opens the form, requires a title, and starts against the role\'s own project and role', () => {
+    render(<TeamRoute />);
+    expect(screen.queryByLabelText('Session title')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+    const startButton = screen.getByRole('button', { name: 'Start' });
+    expect(startButton).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Session title'), { target: { value: 'Debug the flaky test' } });
+    expect(startButton).not.toBeDisabled();
+    fireEvent.click(startButton);
+
+    expect(state.startSession).toHaveBeenCalledWith(
+      { projectId: 'p1', roleId: 'backend', kind: 'task', title: 'Debug the flaky test', description: undefined },
+      expect.anything(),
+    );
+  });
+
+  it('cancel closes the form without starting anything', () => {
+    render(<TeamRoute />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+    fireEvent.change(screen.getByLabelText('Session title'), { target: { value: 'Something' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByLabelText('Session title')).not.toBeInTheDocument();
+    expect(state.startSession).not.toHaveBeenCalled();
+  });
 });
 
 describe('Team — role max workers', () => {

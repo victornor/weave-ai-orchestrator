@@ -83,10 +83,12 @@ export interface Briefing { needsYou: Array<{ decisionId: string; ticketId: stri
 /**
  * A deferred daemon upgrade (PLAN §20). Daemon-level: it lives in `daemon.sqlite`, not in a workspace.
  * `drainedRuns` is what was still executing when the upgrade began holding dispatch, counted then
- * because nothing can count it afterwards; `announcedAt` is the once-only marker of VS-76's
- * announcement, set by the daemon that reports the finished upgrade to the workspace.
+ * because nothing can count it afterwards; `interruptedRuns` is how many of those were still executing
+ * when the bounded wait for idle expired and the upgrade proceeded anyway (VS-115) — `null` when the
+ * wait never expired; `announcedAt` is the once-only marker of VS-76's announcement, set by the daemon
+ * that reports the finished upgrade to the workspace.
  */
-export interface Upgrade { id: string; state: E.UpgradeState; source: string; ref: string; runTest: number; targetSha: string | null; fromRelease: string | null; toRelease: string | null; toSha: string | null; requestedBy: string; requestedAt: string; startedAt: string | null; finishedAt: string | null; reason: E.UpgradeFailureReason | null; message: string | null; log: string[]; backups: string[]; cameBackVersion: string | null; drainedRuns: number | null; announcedAt: string | null }
+export interface Upgrade { id: string; state: E.UpgradeState; source: string; ref: string; runTest: number; targetSha: string | null; fromRelease: string | null; toRelease: string | null; toSha: string | null; requestedBy: string; requestedAt: string; startedAt: string | null; finishedAt: string | null; reason: E.UpgradeFailureReason | null; message: string | null; log: string[]; backups: string[]; cameBackVersion: string | null; drainedRuns: number | null; interruptedRuns: number | null; announcedAt: string | null }
 
 /** One health check the upgrade announcement makes before it claims the daemon is back up (VS-76). */
 export interface UpgradeHealthCheck { name: 'database' | 'supervisor' | 'runtimes'; ok: boolean; detail: string }
@@ -112,8 +114,12 @@ export interface UpgradeAnnouncement {
   finishedAt: string | null;
   /** When the daemon making the announcement was serving again. */
   backUpAt: string;
-  /** `drained`: runs waited out before the switch. `resumed`: wakes queued in this workspace now. */
-  runs: { drained: number; resumed: number };
+  /**
+   * `drained`: runs waited out before the switch. `interrupted`: of those, how many were still
+   * executing when the bounded wait expired and were ended and resumed like any interrupted run
+   * (VS-115). `resumed`: wakes queued in this workspace now.
+   */
+  runs: { drained: number; interrupted: number; resumed: number };
   /** Work that landed between the previous release being built and the new one being built. */
   tickets: Array<{ identifier: string; title: string; at: string }>;
   /** Migration files applied when this process opened the daemon and workspace databases. */

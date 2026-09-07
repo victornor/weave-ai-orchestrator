@@ -80,7 +80,7 @@ export function buildAnnouncement(row: Upgrade, facts: AnnouncementFacts): Upgra
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
     backUpAt: facts.now,
-    runs: { drained: row.drainedRuns ?? 0, resumed: facts.queuedWakes() },
+    runs: { drained: row.drainedRuns ?? 0, interrupted: row.interruptedRuns ?? 0, resumed: facts.queuedWakes() },
     tickets: window.since ? facts.landed(window).slice(0, ANNOUNCED_TICKETS) : [],
     migrations: facts.migrations,
     health: { ok: facts.checks.every((c) => c.ok), checks: facts.checks },

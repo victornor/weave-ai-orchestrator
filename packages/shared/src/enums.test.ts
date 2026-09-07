@@ -48,7 +48,7 @@ describe('upgrade states', () => {
   });
 
   it('names every failure reason the daemon can record', () => {
-    expect(UPGRADE_FAILURE_REASONS).toEqual(['wait_timeout', 'build_failed', 'backup_failed', 'switch_failed', 'restart_unverified', 'restart_failed', 'abandoned']);
+    expect(UPGRADE_FAILURE_REASONS).toEqual(['build_failed', 'backup_failed', 'switch_failed', 'restart_unverified', 'restart_failed', 'abandoned']);
   });
 });
 

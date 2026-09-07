@@ -182,7 +182,7 @@ export const CANCELLABLE_UPGRADE_STATES: readonly UpgradeState[] = ['queued', 'w
 export const isCancellableUpgrade = (state: string | null | undefined): boolean => CANCELLABLE_UPGRADE_STATES.includes(state as UpgradeState);
 
 /** Why an upgrade ended in `failed`. Never branch on the message; branch on this. */
-export const UPGRADE_FAILURE_REASONS = ['wait_timeout', 'build_failed', 'backup_failed', 'switch_failed', 'restart_unverified', 'restart_failed', 'abandoned'] as const;
+export const UPGRADE_FAILURE_REASONS = ['build_failed', 'backup_failed', 'switch_failed', 'restart_unverified', 'restart_failed', 'abandoned'] as const;
 export type UpgradeFailureReason = (typeof UPGRADE_FAILURE_REASONS)[number];
 
 /**

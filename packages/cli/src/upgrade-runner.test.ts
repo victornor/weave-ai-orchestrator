@@ -19,6 +19,7 @@ function io(over: Partial<RunnerIo> & { answers?: Array<HealthProbe | null> } = 
     previousRelease: (): string | null => '/rel/20260101-120000-aaaaaaaaaa',
     now: (): number => state.clock,
     sleep: async (ms: number): Promise<void> => { state.clock += ms; },
+    alreadyCompleted: async (): Promise<boolean> => false,
     ...over,
   };
   return state;
@@ -75,6 +76,17 @@ describe('driveRestart', () => {
     await driveRestart(TARGET, host);
     expect(host.clock - started).toBeGreaterThanOrEqual(HEALTH_DEADLINE_MS);
   });
+
+  it('does not roll back once boot-time reconciliation has already recorded the upgrade completed (VS-115)', async () => {
+    // The probe never answers ok, as if a transient hiccup were hiding an otherwise healthy daemon —
+    // but reconciliation, a faster and more reliable in-process fact, got there first.
+    let checks = 0;
+    const host = io({ probe: async () => null, alreadyCompleted: async () => { checks += 1; return checks >= 2; } });
+    const verdict = await driveRestart(TARGET, host);
+    expect(verdict).toEqual({ outcome: 'completed', version: null });
+    expect(host.rollbacks).toEqual([]);
+    expect(host.restarts).toBe(1);
+  });
 });
 
 describe('recordVerdict', () => {
@@ -108,6 +120,14 @@ describe('recordVerdict', () => {
     const { db, id } = seed();
     recordVerdict(db, id, { outcome: 'gone', message: 'no previous release' });
     expect(db.get('SELECT * FROM upgrades WHERE id = ?', [id])).toMatchObject({ state: 'failed', reason: 'restart_unverified' });
+    db.close();
+  });
+
+  it('leaves an already-terminal record unchanged (VS-115): reconciliation, or an earlier call, won already', () => {
+    const { db, id } = seed();
+    db.update('upgrades', id, { state: 'completed', finishedAt: nowIso(), cameBackVersion: '1.1.0' });
+    recordVerdict(db, id, { outcome: 'rolled_back', to: '/rel/old', message: 'no healthy daemon' });
+    expect(db.get('SELECT * FROM upgrades WHERE id = ?', [id])).toMatchObject({ state: 'completed', cameBackVersion: '1.1.0', reason: null });
     db.close();
   });
 });

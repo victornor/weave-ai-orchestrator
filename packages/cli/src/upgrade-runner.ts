@@ -38,6 +38,15 @@ export interface RunnerIo {
   previousRelease(): string | null;
   now(): number;
   sleep(ms: number): Promise<void>;
+  /**
+   * Whether the daemon's own boot-time reconciliation has already recorded this upgrade completed
+   * (VS-115) — a fact only the daemon process itself ever writes, and only once its own release
+   * directory matches the target. Checked alongside the HTTP health probe because that probe can time
+   * out on a transient hiccup even though the daemon is in fact healthy on target; reconciliation is
+   * the faster and more reliable signal, so it takes priority and the runner never rolls back once it
+   * has fired.
+   */
+  alreadyCompleted(): Promise<boolean>;
 }
 
 export type RunnerVerdict =
@@ -57,6 +66,9 @@ export async function driveRestart(target: { release: string; sha: string | null
   while (io.now() < deadline) {
     const health = await io.probe();
     if (health?.ok && onTarget(health, target)) return { outcome: 'completed', version: health.version };
+    // The daemon's own boot-time reconciliation beat this probe to a verdict: trust it over a probe
+    // that has not (yet) answered, rather than rolling back a release that is in fact serving.
+    if (await io.alreadyCompleted()) return { outcome: 'completed', version: null };
     await io.sleep(PROBE_INTERVAL_MS);
   }
 
@@ -76,14 +88,27 @@ function onTarget(health: HealthProbe, target: { release: string; sha: string | 
 
 // ---------- writing the verdict ----------
 
+/**
+ * Guarded on the record still being `restarting` (VS-115): a verdict decided after the record has
+ * already reached a terminal state — by reconciliation, or by an earlier call racing this one — must
+ * not overwrite it. `recordVerdict` is not the only writer of this row's terminal state; `reconcile()`
+ * (`packages/server/src/upgrade.ts`) is the other, and this guard is what keeps whichever one is
+ * slower from clobbering the one that already landed.
+ */
 export function recordVerdict(db: Db, upgradeId: string, verdict: RunnerVerdict): void {
   const finishedAt = nowIso();
   if (verdict.outcome === 'completed') {
-    db.update('upgrades', upgradeId, { state: 'completed', finishedAt, cameBackVersion: verdict.version, reason: null, message: null });
+    db.run(
+      "UPDATE upgrades SET state = 'completed', finished_at = ?, came_back_version = ?, reason = NULL, message = NULL WHERE id = ? AND state = 'restarting'",
+      [finishedAt, verdict.version, upgradeId],
+    );
     return;
   }
   const reason = verdict.outcome === 'rolled_back' ? 'restart_failed' : 'restart_unverified';
-  db.update('upgrades', upgradeId, { state: 'failed', finishedAt, reason, message: verdict.message });
+  db.run(
+    "UPDATE upgrades SET state = 'failed', finished_at = ?, reason = ?, message = ? WHERE id = ? AND state = 'restarting'",
+    [finishedAt, reason, verdict.message, upgradeId],
+  );
 }
 
 // ---------- the host-facing wiring ----------
@@ -141,6 +166,7 @@ export async function runUpgradeRunner(upgradeId: string): Promise<RunnerVerdict
       previousRelease: () => readLink(previousLink()),
       now: () => Date.now(),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      alreadyCompleted: async () => db.get<{ state: string }>('SELECT state FROM upgrades WHERE id = ?', [upgradeId])?.state === 'completed',
     });
     recordVerdict(db, upgradeId, verdict);
     return verdict;

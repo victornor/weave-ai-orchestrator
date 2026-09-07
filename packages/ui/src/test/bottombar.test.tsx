@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { BAR, rem, tabRects } from '../app/barGeometry';
-import { BottomBar } from '../app/BottomBar';
+import { BottomBar, SWIPE_SHOW_PX } from '../app/BottomBar';
 import { TABS } from '../app/nav';
 
 vi.mock('../app/link', () => ({
@@ -27,6 +27,14 @@ describe('bottom bar geometry', () => {
   it('starts the tab row at the bar\u2019s own padding, with nothing sunk into it', () => {
     expect(BAR.tabTop).toBeLessThan(1);
   });
+
+  it('fits the bar chrome into 56px', () => {
+    expect(rem(BAR.height)).toBeLessThanOrEqual(56);
+  });
+
+  it('gives most of the bar back when it collapses to its handle', () => {
+    expect(BAR.handle).toBeLessThan(BAR.height / 2);
+  });
 });
 
 /** jsdom has no layout, so the rendered geometry is read off the inline styles. */
@@ -38,7 +46,7 @@ function remStyle(value: string): number {
 
 describe('BottomBar', () => {
   function renderBar(): void {
-    render(<BottomBar ws="ws1" items={TABS} needsCount={2} isActive={(to) => to.endsWith('/chat')} onMore={vi.fn()} />);
+    render(<BottomBar ws="ws1" items={TABS} needsCount={2} isActive={(to) => to.endsWith('/chat')} onMore={vi.fn()} onToggleHidden={vi.fn()} />);
   }
 
   it('renders every tab and nothing else', () => {
@@ -47,14 +55,16 @@ describe('BottomBar', () => {
     // Four tabs navigate; More opens the menu, so it is a button rather than a link.
     expect(within(nav).getAllByRole('link')).toHaveLength(TABS.length - 1);
     for (const item of TABS) expect(within(nav).getByText(item.label)).toBeInTheDocument();
-    // VS-81: work is asked for in the chat, so the bar carries no action of its own.
-    expect(within(nav).getAllByRole('button')).toHaveLength(1);
+    // VS-81: work is asked for in the chat, so the bar carries no action of its own — the only two
+    // buttons are More and, from VS-80, the nub that folds the bar away.
+    expect(within(nav).getAllByRole('button')).toHaveLength(2);
+    expect(within(nav).getByRole('button', { name: 'Hide the tab bar' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /start work/i })).toBeNull();
   });
 
   it('opens the More menu instead of navigating to Settings', () => {
     const onMore = vi.fn();
-    render(<BottomBar ws="ws1" items={TABS} needsCount={0} isActive={() => false} onMore={onMore} />);
+    render(<BottomBar ws="ws1" items={TABS} needsCount={0} isActive={() => false} onMore={onMore} onToggleHidden={vi.fn()} />);
     const nav = screen.getByRole('navigation', { name: 'Sections' });
     const more = within(nav).getByText('More').closest('button') as HTMLButtonElement;
     expect(more).toHaveAttribute('aria-haspopup', 'dialog');
@@ -65,13 +75,13 @@ describe('BottomBar', () => {
   });
 
   it('reports the menu as expanded while it is open', () => {
-    render(<BottomBar ws="ws1" items={TABS} needsCount={0} isActive={() => false} onMore={vi.fn()} moreOpen />);
+    render(<BottomBar ws="ws1" items={TABS} needsCount={0} isActive={() => false} onMore={vi.fn()} onToggleHidden={vi.fn()} moreOpen />);
     expect(screen.getByText('More').closest('button')).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('marks More active on a page the menu leads to', () => {
     render(
-      <BottomBar ws="ws1" items={TABS} needsCount={0} isActive={(to) => to === '/w/ws1/usage'} onMore={vi.fn()} moreOpen={false} />,
+      <BottomBar ws="ws1" items={TABS} needsCount={0} isActive={(to) => to === '/w/ws1/usage'} onMore={vi.fn()} onToggleHidden={vi.fn()} moreOpen={false} />,
     );
     expect(screen.getByText('More')).toHaveClass('text-text-1');
     expect(screen.getByText('Chat')).toHaveClass('text-text-nav');
@@ -85,7 +95,7 @@ describe('BottomBar', () => {
 
   it('badges More with what the other workspaces are waiting on', () => {
     render(
-      <BottomBar ws="ws1" items={TABS} needsCount={0} otherWorkspacesNeed={3} isActive={() => false} onMore={vi.fn()} />,
+      <BottomBar ws="ws1" items={TABS} needsCount={0} otherWorkspacesNeed={3} isActive={() => false} onMore={vi.fn()} onToggleHidden={vi.fn()} />,
     );
     const nav = screen.getByRole('navigation', { name: 'Sections' });
     const badge = within(nav).getByLabelText('3 waiting for you in other workspaces');
@@ -103,6 +113,7 @@ describe('BottomBar', () => {
         update={{ state: 'available', title: 'Update available', detail: 'main · bbbbbbbbbb' }}
         isActive={() => false}
         onMore={vi.fn()}
+        onToggleHidden={vi.fn()}
       />,
     );
     expect(screen.getByLabelText('Daemon update available')).toBeInTheDocument();
@@ -118,6 +129,7 @@ describe('BottomBar', () => {
         update={{ state: 'available', title: 'Update available', detail: 'main · bbbbbbbbbb' }}
         isActive={() => false}
         onMore={vi.fn()}
+        onToggleHidden={vi.fn()}
       />,
     );
     const nav = screen.getByRole('navigation', { name: 'Sections' });
@@ -142,5 +154,75 @@ describe('BottomBar', () => {
     for (const tab of tabRects(390, TABS.length, { ...BAR, tabTop: top / 16 })) {
       expect(tab.h).toBeGreaterThanOrEqual(44);
     }
+  });
+});
+
+describe('hiding the bar', () => {
+  function renderHidden(onToggleHidden = vi.fn()): { onToggleHidden: ReturnType<typeof vi.fn>; handle: HTMLElement } {
+    render(
+      <BottomBar ws="ws1" items={TABS} needsCount={0} isActive={() => false} onMore={vi.fn()} hidden onToggleHidden={onToggleHidden} />,
+    );
+    return { onToggleHidden, handle: screen.getByRole('button', { name: 'Show the tab bar' }) };
+  }
+
+  it('folds the bar away from a nub on its top edge', () => {
+    const onToggleHidden = vi.fn();
+    render(
+      <BottomBar ws="ws1" items={TABS} needsCount={0} isActive={() => false} onMore={vi.fn()} onToggleHidden={onToggleHidden} />,
+    );
+    const hide = screen.getByRole('button', { name: 'Hide the tab bar' });
+    // Straddling the top edge, on the left — clear of More's badge on the far side.
+    expect(hide.className).toContain('bottom-full');
+    expect(hide.className).toContain('left-2.5');
+    expect(hide.className).toContain('bottom-full');
+    fireEvent.click(hide);
+    expect(onToggleHidden).toHaveBeenCalledWith(true);
+  });
+
+  it('leaves nothing but the handle once it is hidden', () => {
+    renderHidden();
+    expect(screen.queryByRole('navigation', { name: 'Sections' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Hide the tab bar' })).toBeNull();
+    for (const item of TABS) expect(screen.queryByText(item.label)).toBeNull();
+  });
+
+  it('spans the bottom edge, so the way back is not a target to hunt for', () => {
+    const { handle } = renderHidden();
+    expect(handle.className).toContain('inset-x-0');
+    expect(handle.className).toContain('ac-bar-handle');
+  });
+
+  it('comes back on a tap', () => {
+    const { onToggleHidden, handle } = renderHidden();
+    fireEvent.click(handle);
+    expect(onToggleHidden).toHaveBeenCalledWith(false);
+  });
+
+  it('comes back on a swipe up, without waiting for the finger to lift', () => {
+    const { onToggleHidden, handle } = renderHidden();
+    fireEvent.pointerDown(handle, { clientY: 800 });
+    fireEvent.pointerMove(handle, { clientY: 800 - SWIPE_SHOW_PX - 1 });
+    expect(onToggleHidden).toHaveBeenCalledWith(false);
+  });
+
+  it('reads a short drag as a press rather than a swipe', () => {
+    const { onToggleHidden, handle } = renderHidden();
+    fireEvent.pointerDown(handle, { clientY: 800 });
+    fireEvent.pointerMove(handle, { clientY: 800 - SWIPE_SHOW_PX + 1 });
+    expect(onToggleHidden).not.toHaveBeenCalled();
+  });
+
+  it('ignores a drag that never started on the handle', () => {
+    const { onToggleHidden, handle } = renderHidden();
+    fireEvent.pointerMove(handle, { clientY: 100 });
+    expect(onToggleHidden).not.toHaveBeenCalled();
+  });
+
+  it('does not fire twice while the finger keeps moving', () => {
+    const { onToggleHidden, handle } = renderHidden();
+    fireEvent.pointerDown(handle, { clientY: 800 });
+    fireEvent.pointerMove(handle, { clientY: 700 });
+    fireEvent.pointerMove(handle, { clientY: 600 });
+    expect(onToggleHidden).toHaveBeenCalledTimes(1);
   });
 });

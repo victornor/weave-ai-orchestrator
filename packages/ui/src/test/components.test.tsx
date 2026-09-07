@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { UI_STATUSES } from '@agent-conductor/shared';
 import { StatusGlyph, StatusBadge } from '../components/StatusGlyph';
@@ -307,10 +307,48 @@ describe('Composer', () => {
   it('submits on Enter and clears', () => {
     const onSubmit = vi.fn();
     render(<Composer onSubmit={onSubmit} placeholder="Message the conductor…" />);
-    const box = screen.getByLabelText('Message the conductor…');
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: 'add dark mode' } });
     fireEvent.keyDown(box, { key: 'Enter' });
     expect(onSubmit).toHaveBeenCalledWith('add dark mode');
+    expect(box.value).toBe('');
+  });
+
+  it('leaves the line break to Shift+Enter at a desk', () => {
+    hoverNone(false);
+    const onSubmit = vi.fn();
+    render(<Composer onSubmit={onSubmit} placeholder="Message the conductor…" />);
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'first line' } });
+
+    expect(fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(box.value).toBe('first line');
+    expect(box).not.toHaveAttribute('enterkeyhint');
+  });
+
+  // On a phone there is no modifier to hold, so Enter has to be the newline and the button the send.
+  // The handler must not touch the event at all: the browser inserts the break itself (VS-89).
+  it('leaves Enter to the browser on touch, and still sends from the button', () => {
+    hoverNone(true);
+    const onSubmit = vi.fn();
+    render(<Composer onSubmit={onSubmit} placeholder="Message the conductor…" />);
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'first line' } });
+
+    // `fireEvent` returns false only when a listener called preventDefault.
+    expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(true);
+    expect(fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText('Send'));
+    expect(onSubmit).toHaveBeenCalledWith('first line');
+  });
+
+  it('asks the on-screen keyboard for a newline key on touch', () => {
+    hoverNone(true);
+    render(<Composer onSubmit={() => undefined} placeholder="Message the conductor…" />);
+    expect(screen.getByLabelText('Message the conductor…')).toHaveAttribute('enterkeyhint', 'enter');
   });
 
   it('explains the queued state when the conductor is mid-turn', () => {
@@ -346,6 +384,25 @@ describe('Composer', () => {
 
     expect(box.scrollTop).toBe(420);
   });
+
+  // The composer reads `(hover: none)` at render to tell a phone from a desk. jsdom answers every
+  // query `false` from the shared setup stub, which is the desk; a touch case has to say so.
+  function hoverNone(touch: boolean): void {
+    const real = window.matchMedia;
+    window.matchMedia = ((q: string) => ({
+      matches: q.includes('hover: none') ? touch : false,
+      media: q,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    onTestFinished(() => {
+      window.matchMedia = real;
+    });
+  }
 
   // jsdom has no layout: scrollHeight is always 0 and scrollTop never moves. These stand in for the
   // measurements a browser would make, so the autosize effect can be observed at all.

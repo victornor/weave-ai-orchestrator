@@ -86,6 +86,11 @@ without occupying it: activating the meter SHALL open a detail showing the plan 
 the account reports with its utilisation and its reset time, and the snapshot's age. The detail
 SHALL present those windows exactly as the usage view presents them.
 
+The detail SHALL show the snapshot's age beside the numbers, worded as the time since the account
+was last synced, and SHALL offer the same on-demand sync of the conductor's runtime that the usage
+view offers, with the same in-flight, failed and refused-as-too-recent behaviour. A sync made from
+the detail SHALL update the header meter as well, without a reload.
+
 The header SHALL fit on a phone without wrapping onto a second line, and the detail SHALL be
 reachable by tapping it there.
 
@@ -99,6 +104,12 @@ reachable by tapping it there.
 
 - **WHEN** the chat is shown at a phone width
 - **THEN** the meter is on the header's single line, and tapping it opens the detail
+
+#### Scenario: Syncing from the detail
+
+- **WHEN** the human uses the sync control in the detail
+- **THEN** the conductor's runtime is synced on demand, and the detail and the header meter both
+  show the returned snapshot without a reload
 
 ### Requirement: A plan the header cannot honestly meter is not drawn
 

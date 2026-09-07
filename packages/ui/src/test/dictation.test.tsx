@@ -43,6 +43,7 @@ function said(...parts: [string, boolean][]): { resultIndex: number; results: Re
 
 const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
 const getUserMedia = vi.fn();
+const writeText = vi.fn();
 
 beforeEach(() => {
   FakeRecognition.last = null;
@@ -50,6 +51,9 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } });
   // The hook probes /api/health for a daemon transcriber; keep it out of the network.
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+  writeText.mockReset().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  localStorage.removeItem('conductor.dictationDiagnostics');
 });
 
 afterEach(() => {
@@ -57,6 +61,7 @@ afterEach(() => {
   delete w.webkitSpeechRecognition;
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  localStorage.removeItem('conductor.dictationDiagnostics');
 });
 
 function dictate(): void {
@@ -281,5 +286,120 @@ describe('dictation — speech mode', () => {
     expect(rec.start).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Stop dictation')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Ground truth capture (VS-121): no worker can dictate on a real phone, so a second guess at a fix
+ * from a reconstructed event sequence is the same mistake VS-70 already made once. This records the
+ * raw recognizer events instead, off by default, exported only by a deliberate copy.
+ */
+describe('dictation diagnostics', () => {
+  beforeEach(() => {
+    w.webkitSpeechRecognition = FakeRecognition;
+  });
+
+  function copyButton(): HTMLElement | null {
+    return screen.queryByText(/Copy dictation diagnostics/);
+  }
+
+  function capturedLog(): unknown[] {
+    fireEvent.click(copyButton()!);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    return JSON.parse(writeText.mock.calls[0]![0] as string) as unknown[];
+  }
+
+  it('records nothing while the toggle is off', () => {
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+
+    dictate();
+    const rec = FakeRecognition.last!;
+    act(() => rec.onresult!(said(['is H', false])));
+    act(() => rec.onresult!(said(['is H2', true])));
+    fireEvent.click(screen.getByLabelText('Stop dictation'));
+
+    expect(copyButton()).not.toBeInTheDocument();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('captures the raw sequence, including a restart, exactly', async () => {
+    const { writeDictationDiagnosticsEnabled } = await import('../lib/dictationDiagnostics');
+    writeDictationDiagnosticsEnabled(true);
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+
+    dictate();
+    const first = FakeRecognition.last!;
+    act(() => first.onresult!(said(['is H', false])));
+    act(() => first.onresult!(said(['is H2', true])));
+    act(() => first.onend!());
+    const second = FakeRecognition.last!;
+    expect(second).toBe(first); // onend restarts the same instance, not a new one
+    act(() => second.onresult!(said(['main', true])));
+
+    // Not stopped: the fake recognizer's `.stop()` is a bare mock and never fires `onend` on its
+    // own, exactly like the browser between a real stop and its eventual end event — the log is
+    // asserted as of what has actually happened, not a simulated teardown this harness cannot give.
+    expect(capturedLog()).toEqual([
+      { kind: 'start' },
+      { kind: 'result', resultIndex: 0, entries: [{ isFinal: false, transcript: 'is H' }], sessionTextAfter: 'is H', handedToComposer: 'is H', final: false },
+      { kind: 'result', resultIndex: 0, entries: [{ isFinal: true, transcript: 'is H2' }], sessionTextAfter: 'is H2', handedToComposer: 'is H2', final: true },
+      { kind: 'end', restarted: true, committedAfter: 'is H2' },
+      { kind: 'result', resultIndex: 0, entries: [{ isFinal: true, transcript: 'main' }], sessionTextAfter: 'main', handedToComposer: 'is H2 main', final: true },
+    ]);
+  });
+
+  it('turning diagnostics on mid-session starts an empty log rather than backfilling', async () => {
+    const { writeDictationDiagnosticsEnabled } = await import('../lib/dictationDiagnostics');
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+
+    // A first session, entirely before diagnostics is turned on.
+    dictate();
+    act(() => FakeRecognition.last!.onresult!(said(['before', true])));
+    fireEvent.click(screen.getByLabelText('Stop dictation'));
+    expect(copyButton()).not.toBeInTheDocument();
+
+    act(() => writeDictationDiagnosticsEnabled(true));
+    dictate();
+    act(() => FakeRecognition.last!.onresult!(said(['after', true])));
+
+    const log = capturedLog();
+    expect(log).toHaveLength(2); // start, one result — nothing carried over from the first session
+    expect(log).not.toEqual(expect.arrayContaining([expect.objectContaining({ sessionTextAfter: 'before' })]));
+  });
+
+  it('caps the log, dropping the oldest entries first', async () => {
+    const { writeDictationDiagnosticsEnabled, DICTATION_DIAGNOSTICS_CAP } = await import('../lib/dictationDiagnostics');
+    writeDictationDiagnosticsEnabled(true);
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+
+    dictate();
+    const rec = FakeRecognition.last!;
+    const overflow = 10;
+    for (let i = 0; i < DICTATION_DIAGNOSTICS_CAP + overflow; i++) {
+      act(() => rec.onresult!(said([`word ${i}`, true])));
+    }
+    fireEvent.click(screen.getByLabelText('Stop dictation'));
+
+    const log = capturedLog();
+    expect(log).toHaveLength(DICTATION_DIAGNOSTICS_CAP);
+    // `1 + overflow` entries were pushed before the cap started dropping: the `start` entry plus
+    // the first `overflow` results — so the oldest survivor is the result right after those.
+    expect(log[0]).toMatchObject({ kind: 'result', sessionTextAfter: `word ${overflow}` });
+  });
+
+  it('shows the copy control once something is captured, and copies only what was captured', async () => {
+    const { writeDictationDiagnosticsEnabled } = await import('../lib/dictationDiagnostics');
+    writeDictationDiagnosticsEnabled(true);
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+
+    expect(copyButton()).not.toBeInTheDocument();
+    dictate();
+    expect(copyButton()).toHaveTextContent('1 event'); // the start entry alone
+    act(() => FakeRecognition.last!.onresult!(said(['word', true])));
+    expect(copyButton()).toHaveTextContent('2 events');
+
+    fireEvent.click(copyButton()!);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Copied')).toBeInTheDocument();
   });
 });

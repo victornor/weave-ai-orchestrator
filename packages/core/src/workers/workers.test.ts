@@ -419,6 +419,42 @@ describe('workers', () => {
     });
   });
 
+  describe('message: refuses a retired worker (VS-106)', () => {
+    it('throws wrong_status and records no comment and no wake', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      h.db.update('agents', worker.id, { status: 'retired', updatedAt: nowIso() });
+      wake.calls.length = 0;
+      vi.mocked(h.services.tickets!.comment).mockClear();
+
+      await expect(workers.message(HUMAN, worker.id, 'are you still there', { live: true }))
+        .rejects.toMatchObject({ code: 'wrong_status' });
+      expect(h.services.tickets!.comment).not.toHaveBeenCalled();
+      expect(wake.calls).toHaveLength(0);
+    });
+
+    it('a non-retired worker is unaffected', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+
+      const outcome = await workers.message(HUMAN, worker.id, 'still here', { live: true });
+      expect(outcome.delivery).toBe('queued');
+      expect(h.services.tickets!.comment).toHaveBeenCalledWith(expect.anything(), ticket.id, 'still here', 'relay', 'trusted');
+    });
+  });
+
+  describe('sessionResumable (VS-106)', () => {
+    it('is true for a worker with an active session and false once it is closed', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      expect(workers.sessionResumable(worker.id)).toBe(true);
+
+      h.db.run("UPDATE agent_sessions SET status = 'closed' WHERE agent_id = ?", [worker.id]);
+      expect(workers.sessionResumable(worker.id)).toBe(false);
+    });
+  });
+
   it('cancel keeps the worktree and marks it dirty', async () => {
     const ticket = seedTicket();
     const worker = await workers.spawnForTicket(SYSTEM, ticket.id);

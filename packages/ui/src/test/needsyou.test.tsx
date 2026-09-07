@@ -35,7 +35,7 @@ vi.mock('../api/hooks', () => ({
   useTicketDocument: () => ({ data: state.planDoc ?? undefined, isLoading: false, isError: state.planDoc === null }),
 }));
 
-vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
+vi.mock('../app/link', () => ({ useGo: () => vi.fn(), A: ({ children }: { children?: React.ReactNode }) => <a href="#">{children}</a> }));
 const enqueueMock = vi.hoisted(() => vi.fn());
 vi.mock('../lib/queue', () => ({ enqueue: enqueueMock, useQueue: () => [] }));
 vi.mock('../components/Toast', () => ({

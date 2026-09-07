@@ -121,6 +121,7 @@ export function NeedsYouRoute(): React.ReactElement {
                     ticketIdentifier={t?.identifier ?? d.ticketId}
                     projectSlug={projects.data?.find((p) => p.id === (d.projectId ?? t?.projectId))?.slug ?? null}
                     askedBy={d.askedByAgentId}
+                    ws={ws}
                     busy={answer.isPending}
                     queued={isQueued}
                     plan={<PlanPreview decision={d} />}

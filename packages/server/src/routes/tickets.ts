@@ -45,7 +45,10 @@ export function ticketRoutes(): Hono<AppEnv> {
       ticket,
       blockers: s.tickets.blockers(ticket.id),
       children: s.tickets.children(ticket.id),
-      worker: ticket.workerId ? safe(() => s.workers.get(ticket.workerId!)) : null,
+      worker: (() => {
+        const workerId = ticket.workerId ?? s.tickets.lastWorker(ticket.id)?.id ?? null;
+        return workerId ? safe(() => s.workers.get(workerId)) : null;
+      })(),
       openspecState,
       workProducts: s.tickets.workProducts(ticket.id),
       // Where this ticket stands in its project's merge queue: null once it is merging or elsewhere.

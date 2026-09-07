@@ -5,12 +5,15 @@ import { Composer } from './Composer';
 import { StatusGlyph } from './StatusGlyph';
 import { clock } from '../lib/format';
 import { cx } from '../lib/cx';
+import { A } from '../app/link';
 
 export interface DecisionCardProps {
   decision: Decision;
   ticketIdentifier?: string | null;
   projectSlug?: string | null;
   askedBy?: string | null;
+  /** The workspace slug — needed only to link a `merge_approval` card to its ticket's conversation (VS-106). */
+  ws?: string | null;
   /** Who raised a question: the conductor asking the human reads differently from a worker asking. */
   asker?: 'conductor' | 'worker';
   busy?: boolean;
@@ -165,7 +168,7 @@ function answerLine(decision: Decision): string | null {
  * primary action sits bottom-left inside a 44 px thumb band. A decision that has
  * been answered renders the same card as an inert record of what was decided.
  */
-export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy, asker, busy, queued, plan, autoApproving, onHide, onAnswer, className }: DecisionCardProps): React.ReactElement {
+export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy, asker, ws, busy, queued, plan, autoApproving, onHide, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [freeText, setFreeText] = useState(false);
@@ -427,6 +430,16 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
               <Button variant="secondary" size="thumb" className="w-24" disabled={busy} onClick={() => answer('hold')}>
                 Hold
               </Button>
+              {ws && decision.ticketId ? (
+                <A
+                  to="/w/$ws/tickets/$ticketId"
+                  params={{ ws, ticketId: decision.ticketId }}
+                  search={{ tab: 'activity' }}
+                  className="text-micro text-accent-link hover:underline"
+                >
+                  Ask the worker
+                </A>
+              ) : null}
             </>
           ) : decision.kind === 'hire_approval' ? (
             <>

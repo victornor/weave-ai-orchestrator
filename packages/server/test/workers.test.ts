@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { FakeRuntime } from '@agent-conductor/runtime-sdk';
-import type { Agent } from '@agent-conductor/shared';
+import { OcError, type Agent } from '@agent-conductor/shared';
 import { createApp } from '../src/app.js';
 import { authed, makeHarness, type Harness } from './fakes.js';
 
@@ -48,6 +48,41 @@ describe('GET /workers/:id — input.midTurn (VS-99)', () => {
     const res = await fetch('/api/w/ws1/workers/ag_1', { headers: authed() });
     const detail = await res.json();
     expect(detail.input).toEqual({ midTurn: false, reason: expect.stringMatching(/no turn is currently running/) });
+  });
+});
+
+describe('GET /workers/:id — sessionResumable (VS-106)', () => {
+  it('reports whether the worker has a resumable session', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['get'] = () => worker();
+    h.impls.workers!['sessionResumable'] = () => true;
+
+    const res = await fetch('/api/w/ws1/workers/ag_1', { headers: authed() });
+    expect((await res.json()).sessionResumable).toBe(true);
+  });
+
+  it('reports false once the session has closed', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['get'] = () => worker({ status: 'retired', retiredAt: '2026-09-07T00:00:00.000Z' });
+    h.impls.workers!['sessionResumable'] = () => false;
+
+    const res = await fetch('/api/w/ws1/workers/ag_1', { headers: authed() });
+    expect((await res.json()).sessionResumable).toBe(false);
+  });
+});
+
+describe('POST /workers/:id/message — refuses a retired worker (VS-106)', () => {
+  it('surfaces wrong_status rather than a 202', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['message'] = async () => {
+      throw new OcError('wrong_status', 'Backend Engineer #1 has retired; reply on the ticket to reopen it instead');
+    };
+
+    const res = await fetch('/api/w/ws1/workers/ag_1/message', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ body: 'still there?', live: true }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe('wrong_status');
   });
 });
 

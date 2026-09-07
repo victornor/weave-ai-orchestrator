@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: The human can question the worker that built a PR from the review surface,
+  and end the conversation by approving or asking for revisions

@@ -29,9 +29,11 @@ import {
   useTicketWorkProducts,
   useAnswerDecision,
   useDecisions,
+  useWorker,
+  useWorkerMessage,
 } from '../api/hooks';
 import { useWs } from '../api/context';
-import { useGo } from '../app/link';
+import { useGo, useSearchParams } from '../app/link';
 import { ago, cents, duration, statusText, tokens } from '../lib/format';
 import { isFolded } from '../lib/board';
 import { draftKey, useDraft } from '../lib/drafts';
@@ -44,12 +46,22 @@ const TABS = [
   { key: 'work', label: 'Work' },
   { key: 'usage', label: 'Usage' },
 ] as const;
+const TAB_KEYS: readonly string[] = TABS.map((t) => t.key);
+const resolveTab = (key: string | undefined): string => (key && TAB_KEYS.includes(key) ? key : 'overview');
 
 export function TicketRoute(): React.ReactElement {
   const ws = useWs();
   const go = useGo();
+  const search = useSearchParams();
   const { ticketId } = useParams({ strict: false }) as { ticketId: string };
-  const [tab, setTab] = useState<string>('overview');
+  // The merge-approval card and the pull request view both deep-link here with `?tab=activity`
+  // (VS-106) — same pattern as Settings' `?section=`: link by key, never by tab position.
+  const [tab, setTab] = useState<string>(() => resolveTab(search['tab']));
+  useEffect(() => setTab(resolveTab(search['tab'])), [search['tab']]);
+  const chooseTab = (key: string) => {
+    setTab(key);
+    go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId }, search: { ...search, tab: key }, replace: true });
+  };
   const detail = useTicket(ticketId);
   const patch = usePatchTicket();
   const retry = useRetryTicket();
@@ -140,12 +152,12 @@ export function TicketRoute(): React.ReactElement {
           </label>
           </span>
         }
-        tabs={<Tabs items={TABS} active={tab} onChange={setTab} className="px-3 md:px-4" />}
+        tabs={<Tabs items={TABS} active={tab} onChange={chooseTab} className="px-3 md:px-4" />}
       />
       <PageBody className="p-4 md:p-5">
         {tab === 'overview' ? <Overview ticketId={ticketId} /> : null}
         {tab === 'plan' ? <PlanTab ticketId={ticketId} ticketIdentifier={ticket.identifier} /> : null}
-        {tab === 'activity' ? <ActivityTab ticketId={ticket.id} /> : null}
+        {tab === 'activity' ? <ActivityTab ticketId={ticket.id} ticketIdentifier={ticket.identifier} /> : null}
         {tab === 'work' ? <WorkTab ticketId={ticket.id} /> : null}
         {tab === 'usage' ? <UsageTab ticketId={ticket.id} /> : null}
       </PageBody>
@@ -289,7 +301,7 @@ function PlanTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdent
   );
 }
 
-function ActivityTab({ ticketId }: { ticketId: string }): React.ReactElement {
+function ActivityTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdentifier: string }): React.ReactElement {
   const ws = useWs();
   const detail = useTicket(ticketId);
   const comments = useTicketComments(ticketId);
@@ -297,6 +309,22 @@ function ActivityTab({ ticketId }: { ticketId: string }): React.ReactElement {
   const post = usePostComment();
   const status = detail.data?.ticket.status;
   const worker = detail.data?.worker ?? null;
+  const retired = worker?.status === 'retired';
+  // A live worker (VS-106): talk to it through the same live-input path WorkerPage uses, not a
+  // plain comment. Paused/error keep the plain composer below — that path's ticket_comment wake is
+  // what relaunches a parked worker; the live path's queued wake is a different source and must not
+  // stand in for it.
+  const canConverse = Boolean(worker) && !retired && worker!.status !== 'paused' && worker!.status !== 'error';
+  const workerDetail = useWorker(canConverse ? worker!.id : '');
+  const message = useWorkerMessage();
+  const [lastOutcome, setLastOutcome] = useState<string | null>(null);
+  useEffect(() => setLastOutcome(null), [worker?.id]);
+
+  const decisions = useDecisions({ status: 'open', owner: 'human' });
+  const answer = useAnswerDecision();
+  const [revising, setRevising] = useState(false);
+  const mergeDecision = decisions.data?.find((d) => d.kind === 'merge_approval' && (d.ticketId === ticketId || d.ticketId === ticketIdentifier));
+
   // Keyed by the ticket's own id, so the reply drafted here is the one the worker page offers too:
   // both composers post to the same conversation.
   const { draft, patch } = useDraft(detail.data ? draftKey(ws, `ticket:${detail.data.ticket.id}`) : null);
@@ -336,8 +364,42 @@ function ActivityTab({ ticketId }: { ticketId: string }): React.ReactElement {
           ? `Reply — ${worker.name} is woken by this…`
           : 'Reply — a worker is started for this ticket…';
 
+  const ended = status === 'done' || status === 'cancelled';
+  const steerLabel = canConverse && workerDetail.data
+    ? lastOutcome ?? (workerDetail.data.input.midTurn ? 'Reaches the running turn immediately.' : `Queued for the next turn${workerDetail.data.input.reason ? ` — ${workerDetail.data.input.reason}` : ''}.`)
+    : undefined;
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
+      {mergeDecision ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-r6 border border-accent-edge bg-accent-tint px-3.5 py-2.5">
+          <StatusGlyph status="needs-you" size="sm" />
+          <span className="flex-1 text-meta text-text-1">This merge is waiting on you.</span>
+          <Button variant="primary" size="sm" onClick={() => answer.mutate({ id: mergeDecision.id, key: 'approve' })}>
+            Approve merge
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setRevising((v) => !v)}>
+            Ask for revisions…
+          </Button>
+        </div>
+      ) : null}
+
+      {revising && mergeDecision ? (
+        <Composer
+          rows={3}
+          autoFocus
+          scope={<span>Asking {worker?.name ?? 'the worker'} for revisions on {ticketIdentifier}.</span>}
+          placeholder="What should change?"
+          submitLabel="Send"
+          onSubmit={(t) => {
+            // merge_approval's real options are approve/changes (service.ts) — unlike plan_approval,
+            // there is no `revise` key; `changes` is the non-approve path `applyMergeApproval` takes.
+            answer.mutate({ id: mergeDecision.id, key: 'changes', text: t });
+            setRevising(false);
+          }}
+        />
+      ) : null}
+
       {comments.isLoading || runs.isLoading ? (
         <SkeletonRows rows={4} />
       ) : feed.length === 0 ? (
@@ -345,13 +407,35 @@ function ActivityTab({ ticketId }: { ticketId: string }): React.ReactElement {
       ) : (
         <div className="flex flex-col gap-3">{feed.map((f) => <div key={f.key}>{f.node}</div>)}</div>
       )}
-      <Composer
-        placeholder={placeholder}
-        submitLabel="Reply"
-        value={draft.text}
-        onChange={(text) => patch({ text })}
-        onSubmit={(body) => post.mutate({ id: ticketId, body })}
-      />
+
+      {retired ? (
+        <div className="ac-card px-3.5 py-2.5 text-meta text-text-3">
+          {worker!.name} has retired — its session is gone.
+          {ended ? null : ' Reply below to bring a worker back to this ticket.'}
+        </div>
+      ) : null}
+
+      {retired && ended ? null : canConverse ? (
+        <Composer
+          placeholder={`Ask ${worker!.name}…`}
+          submitLabel="Send"
+          queuedReason={steerLabel}
+          value={draft.text}
+          onChange={(text) => patch({ text })}
+          onSubmit={async (body) => {
+            const outcome = await message.mutateAsync({ id: worker!.id, ticketId, body, live: true });
+            setLastOutcome(outcome.delivery === 'mid_turn' ? 'Delivered to the running turn.' : 'Queued for the next turn.');
+          }}
+        />
+      ) : (
+        <Composer
+          placeholder={placeholder}
+          submitLabel="Reply"
+          value={draft.text}
+          onChange={(text) => patch({ text })}
+          onSubmit={(body) => post.mutate({ id: ticketId, body })}
+        />
+      )}
     </div>
   );
 }

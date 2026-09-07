@@ -69,6 +69,7 @@ function workerDetail(v: unknown): T.WorkerDetail {
     usage: usage ? totals(usage['total'] ?? usage) : null,
     worktree: (r['worktree'] as T.WorkerDetail['worktree'] | undefined) ?? (agent.worktreePath ? { status: 'unknown', dirty: false, ahead: 0, behind: 0, path: agent.worktreePath } : null),
     input: (r['input'] as T.WorkerDetail['input'] | undefined) ?? { midTurn: false },
+    sessionResumable: Boolean(r['sessionResumable']),
   };
 }
 

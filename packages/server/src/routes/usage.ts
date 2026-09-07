@@ -29,6 +29,25 @@ export function usageRoutes(): Hono<AppEnv> {
       displayName: ws.ctx.registries.runtimes.get(a.runtimeId)?.displayName ?? a.runtimeId,
     })));
   });
+  /**
+   * The credential state per runtime (VS-75): present, when it expires, when it was last verified,
+   * when a refresh last failed, and whether a login is needed. Never carries the token — the
+   * `RuntimeCredential` shape has nowhere to put one.
+   *
+   * Composed over the runtimes this workspace actually touches: one that has been probed, and one
+   * that has a recorded credential state (a gated runtime may have no account snapshot at all).
+   */
+  app.get('/credentials', (c) => {
+    const ws = c.get('ws');
+    const ids = [...new Set([
+      ...ws.services.accounts.list().map((a) => a.runtimeId),
+      ...ws.services.accounts.credentials().map((x) => x.runtimeId),
+    ])].sort();
+    return c.json(ids.map((runtimeId) => ({
+      ...ws.services.accounts.credential(runtimeId),
+      displayName: ws.ctx.registries.runtimes.get(runtimeId)?.displayName ?? runtimeId,
+    })));
+  });
   app.get('/ticket/:id', (c) => {
     const s = c.get('ws').services;
     return c.json(s.usage.ticket(s.tickets.get(c.req.param('id')).id));

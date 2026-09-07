@@ -272,6 +272,18 @@ export interface AccountsService {
   get(runtimeId: string): S.RuntimeAccount | null;
   /** Re-probe the given runtimes (default: every runtime this workspace uses) and replace their snapshots. */
   refresh(runtimeIds?: string[]): Promise<S.RuntimeAccount[]>;
+
+  // ---- credential state (VS-75). Never returns a token; `RuntimeCredential` has nowhere to put one.
+  /** The credential state of every runtime this workspace has recorded one for. */
+  credentials(): S.RuntimeCredential[];
+  /** One runtime's credential state, refreshed from the credential file itself (no CLI is spawned). */
+  credential(runtimeId: string): S.RuntimeCredential;
+  /** The runtimes currently gated: no turn may be started for an agent on any of them. */
+  gatedRuntimes(): string[];
+  /** Record that a turn on this runtime could not authenticate, and raise the gate. */
+  noteAuthFailure(runtimeId: string, detail: string | null): S.RuntimeCredential;
+  /** Record that a turn or a probe on this runtime worked, and clear the gate. */
+  noteVerified(runtimeId: string): S.RuntimeCredential;
 }
 
 // ---------- channels / threads ----------

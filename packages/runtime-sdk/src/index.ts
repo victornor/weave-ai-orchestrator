@@ -48,6 +48,19 @@ export interface AccountDescription {
   /** How the probe was launched, for the daemon's log when it failed. Never stored, never shown. */
   diagnostics?: Record<string, string>;
 }
+/** Input to `readCredential`: the config home whose credential file is to be described. */
+export interface CredentialProbeInput { configHome: string }
+/**
+ * What a runtime can say about its credential file without opening a session or spawning anything.
+ * Deliberately has no field that could carry a token: the type is the guarantee (VS-75).
+ */
+export interface CredentialFacts {
+  /** Is there a credential file at all? */
+  present: boolean;
+  /** When the credential says it expires, ISO-8601. `null` when it is present but unreadable — never guessed. */
+  expiresAt: string | null;
+}
+
 export interface InstructionBundle { instructions: string; skills: Array<{ name: string; dir: string }> }
 
 export interface RuntimeAdapter {
@@ -66,6 +79,14 @@ export interface RuntimeAdapter {
    * resolve (never reject) — a failed probe is an `unknown` description with a note.
    */
   describeAccount?(input: AccountProbeInput): Promise<AccountDescription>;
+  /**
+   * Facts about the credential file in a config home, read from the file itself (VS-75).
+   * Synchronous and spawn-free by contract: this is how the daemon learns a credential's expiry
+   * without launching the CLI, so it may be called from the dispatcher's path. Must never throw —
+   * an unreadable or absent credential is `{present, expiresAt: null}`, never an exception — and
+   * must never return the token or any part of it.
+   */
+  readCredential?(input: CredentialProbeInput): CredentialFacts;
   /** Directory names for skills per CLI, relative to the home. */
   skillsDir(): string;
   /** Instruction discovery file name at the home root (AGENTS.md, CLAUDE.md, GEMINI.md). */

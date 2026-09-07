@@ -1,8 +1,9 @@
 import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { accountLimits, MIXED_BILLING_NOTE } from '@agent-conductor/render';
-import type { RuntimeAccount, UsageBillingMix } from '@agent-conductor/shared';
+import type { RuntimeAccount, RuntimeCredential, UsageBillingMix } from '@agent-conductor/shared';
 import { PlanLimits } from '../components/PlanLimits';
+import { RuntimeCredentials } from '../components/RuntimeCredentials';
 
 const NOW = new Date('2026-09-05T17:35:00.000Z');
 
@@ -75,13 +76,14 @@ describe('PlanLimits', () => {
 
 const totals = { tokensIn: 900, tokensOut: 100, tokensCached: 0, runs: 3, workerTurns: 3, durationMs: 0, costCents: 250, costStatus: 'estimated' as const };
 
-function mockHooks(billingMix: UsageBillingMix | undefined, accounts: RuntimeAccount[]): void {
+function mockHooks(billingMix: UsageBillingMix | undefined, accounts: RuntimeAccount[], credentials: RuntimeCredential[] = []): void {
   vi.doMock('../api/hooks', () => ({
     useProjects: () => ({ data: [] }),
     useUsage: () => ({ data: { scope: 'workspace', window: 'week', grain: 'day', start: '', end: '', series: [{ ...totals, bucket: '2026-09-05' }], total: totals, billingMix }, isLoading: false, isError: false, refetch: () => undefined }),
     useUsageTop: () => ({ data: [] }),
     useUsageModels: () => ({ data: [] }),
     useUsageAccounts: () => ({ data: accounts.map((a) => ({ ...a, displayName: a.runtimeId })) }),
+    useUsageCredentials: () => ({ data: credentials.map((c) => ({ ...c, displayName: c.runtimeId })) }),
   }));
 }
 
@@ -126,5 +128,56 @@ describe('the usage route decides cost from the window it is showing', () => {
     await renderUsage();
     expect(screen.getByText(/^cost · /)).toBeTruthy();
     expect(screen.queryByText('Plan limits')).toBeNull();
+  });
+});
+
+/* --------------------------------------- runtime credentials (VS-75) */
+
+const CREDENTIAL: RuntimeCredential = {
+  workspaceId: 'ws1', runtimeId: 'claude', present: true, expiresAt: '2026-09-05T22:00:00.000Z',
+  lastVerifiedAt: '2026-09-05T17:00:00.000Z', refreshFailedAt: null, needsLogin: false, detail: null,
+  updatedAt: '2026-09-05T17:00:00.000Z',
+};
+
+describe('the runtime credential panel', () => {
+  const view = (c: RuntimeCredential) => render(<RuntimeCredentials credentials={[{ ...c, displayName: c.runtimeId }]} now={NOW} />);
+
+  it('shows a valid credential with when it expires', () => {
+    const { container } = view(CREDENTIAL);
+    const row = container.querySelector('[data-testid="credential-claude"]')!;
+    expect(row.textContent).toContain('valid');
+    expect(row.textContent).toContain('expires in');
+    expect(row.textContent).toContain('last verified');
+  });
+
+  it('shows an expired login with when the refresh failed and what to run', () => {
+    const { container } = view({ ...CREDENTIAL, needsLogin: true, refreshFailedAt: '2026-09-05T16:07:00.000Z' });
+    const row = container.querySelector('[data-testid="credential-claude"]')!;
+    expect(row.textContent).toContain('login expired');
+    expect(row.textContent).toContain('2026-09-05 16:07 UTC');
+    expect(row.textContent).toContain('claude /login');
+    expect(row.textContent).toContain('resumes on its own');
+  });
+
+  it('says so rather than guessing when a credential carries no expiry', () => {
+    const { container } = view({ ...CREDENTIAL, expiresAt: null });
+    expect(container.querySelector('[data-testid="credential-claude"]')!.textContent).toContain('no expiry');
+  });
+
+  it('renders nothing when no credential state is known', () => {
+    const { container } = render(<RuntimeCredentials credentials={[]} now={NOW} />);
+    expect(container.innerHTML).toBe('');
+  });
+
+  // The panel sits above the "no usage in this window" branch: a gated runtime has no usage
+  // precisely because everything on it is stopped, which is exactly when it must be visible.
+  it('is shown on the usage route even when the window has no usage at all', async () => {
+    mockHooks(undefined, [], [{ ...CREDENTIAL, needsLogin: true }]);
+    const { UsageRoute } = await import('../routes/Usage');
+    const { container } = render(<UsageRoute />);
+    expect(container.querySelector('[data-testid="runtime-credentials"]')).toBeTruthy();
+    expect(container.textContent).toContain('login expired');
+    vi.resetModules();
+    vi.doUnmock('../api/hooks');
   });
 });

@@ -382,6 +382,59 @@ describe('usage accounts', () => {
   });
 });
 
+/**
+ * The credential state surface (VS-75, runtime-credentials/credential-visibility). The hard rule
+ * this pins: the response says everything about the credential except what it is.
+ */
+describe('usage credentials', () => {
+  const valid = {
+    workspaceId: 'ws1', runtimeId: 'claude', present: true, expiresAt: '2026-09-08T10:00:00.000Z',
+    lastVerifiedAt: '2026-09-07T09:00:00.000Z', refreshFailedAt: null, needsLogin: false, detail: null,
+    updatedAt: '2026-09-07T09:00:00.000Z',
+  };
+  const expired = {
+    ...valid, needsLogin: true, refreshFailedAt: '2026-09-07T09:07:00.000Z',
+    detail: 'OAuth session expired and could not be refreshed', lastVerifiedAt: '2026-09-07T08:00:00.000Z',
+  };
+
+  it('serves a valid credential with its expiry and last verification', async () => {
+    const { fetch } = app({ credentials: [valid] });
+    const res = await fetch('/api/w/ws1/usage/credentials', { headers: authed() });
+    expect(res.status).toBe(200);
+    const body = await res.json() as Array<Record<string, unknown>>;
+    expect(body).toHaveLength(1);
+    expect(body[0]).toMatchObject({
+      runtimeId: 'claude', present: true, expiresAt: '2026-09-08T10:00:00.000Z',
+      lastVerifiedAt: '2026-09-07T09:00:00.000Z', refreshFailedAt: null, needsLogin: false,
+    });
+  });
+
+  it('serves an expired login with when the refresh failed', async () => {
+    const { fetch } = app({ credentials: [expired] });
+    const body = await (await fetch('/api/w/ws1/usage/credentials', { headers: authed() })).json() as Array<Record<string, unknown>>;
+    expect(body[0]).toMatchObject({ needsLogin: true, refreshFailedAt: '2026-09-07T09:07:00.000Z' });
+    expect(body[0]?.['detail']).toContain('expired');
+  });
+
+  it('carries no token-shaped field at all', async () => {
+    const { fetch } = app({ credentials: [expired] });
+    const raw = await (await fetch('/api/w/ws1/usage/credentials', { headers: authed() })).text();
+    for (const forbidden of ['accessToken', 'refreshToken', 'sk-ant', 'claudeAiOauth', 'token']) {
+      expect(raw).not.toContain(forbidden);
+    }
+  });
+
+  it('returns an empty list when nothing is recorded', async () => {
+    const { fetch } = app();
+    expect(await (await fetch('/api/w/ws1/usage/credentials', { headers: authed() })).json()).toEqual([]);
+  });
+
+  it('is session-gated like the rest of the usage routes', async () => {
+    const { fetch } = app({ credentials: [valid] });
+    expect((await fetch('/api/w/ws1/usage/credentials')).status).toBe(401);
+  });
+});
+
 describe('presentation', () => {
   it('returns the stored config, not a surface pick-list (VS-50)', async () => {
     const { fetch } = app();

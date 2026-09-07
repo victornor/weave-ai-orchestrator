@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Agents share one Claude credential with the owner's CLI instead of a copy,
+  and a failed token refresh raises one card immediately

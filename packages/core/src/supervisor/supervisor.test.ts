@@ -442,7 +442,7 @@ describe('supervisor runtime account refresh', () => {
   afterEach(() => { supervisor.stop(); h.cleanup(); });
 
   const withAccounts = (refresh: ReturnType<typeof vi.fn>): void => {
-    h.services.accounts = { list: () => [], get: () => null, refresh } as never;
+    h.services.accounts = { list: () => [], get: () => null, refresh, gatedRuntimes: () => [] } as never;
   };
 
   it('refreshes the runtime account snapshots on the first tick', async () => {
@@ -473,6 +473,81 @@ describe('supervisor runtime account refresh', () => {
 
   it('does not fail the tick when the refresh throws', async () => {
     withAccounts(vi.fn(async () => { throw new Error('the CLI is not logged in'); }));
+    await expect(supervisor.tick()).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * The login recheck (VS-75): while a runtime is gated the whole workspace is stopped on it, so the
+ * supervisor probes it on a fast clock and releases everything the moment the credential works.
+ * "Works" is deliberately narrow — `unknown` also means a missing binary, and un-gating on that
+ * would walk straight into a second outage.
+ */
+describe('supervisor runtime login recheck', () => {
+  let h: TestHarness;
+  let supervisor: Supervisor;
+  let refresh: ReturnType<typeof vi.fn>;
+  let noteVerified: ReturnType<typeof vi.fn>;
+  let credential: { present: boolean; expiresAt: string | null; refreshFailedAt: string | null };
+
+  beforeEach(() => {
+    h = makeHarness();
+    h.services.wake = fakeWake() as never;
+    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0 } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), list: () => [], withdraw: vi.fn() } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    refresh = vi.fn(async () => []);
+    noteVerified = vi.fn();
+    // The credential was renewed after the failure: expiry later than the failure time, so the
+    // cheap pre-check lets the probe run.
+    credential = { present: true, expiresAt: '2026-09-08T10:00:00.000Z', refreshFailedAt: '2026-09-07T09:07:00.000Z' };
+    h.services.accounts = {
+      list: () => [], get: () => null, refresh,
+      gatedRuntimes: () => ['claude'],
+      credential: () => credential,
+      noteVerified,
+    } as never;
+    supervisor = createSupervisor(h.ctx, h.deps);
+  });
+  afterEach(() => { supervisor.stop(); h.cleanup(); });
+
+  it('probes a gated runtime and clears the gate when the probe describes the account', async () => {
+    refresh.mockResolvedValue([{ runtimeId: 'claude', billingType: 'subscription_included' }] as never);
+    await supervisor.tick();
+    expect(refresh).toHaveBeenCalledWith(['claude']);
+    expect(noteVerified).toHaveBeenCalledWith('claude');
+  });
+
+  it('leaves the gate up while the probe still cannot describe the account', async () => {
+    refresh.mockResolvedValue([{ runtimeId: 'claude', billingType: 'unknown' }] as never);
+    await supervisor.tick();
+    expect(noteVerified).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a missing binary as a restored login', async () => {
+    // A probe that could not launch the CLI reports `unknown` too. Un-gating on it would start
+    // every agent again into the same failure.
+    refresh.mockResolvedValue([{ runtimeId: 'claude', billingType: 'unknown', note: 'claude: not found on PATH' }] as never);
+    await supervisor.tick();
+    expect(noteVerified).not.toHaveBeenCalled();
+  });
+
+  it('skips the probe when nobody has logged in since the failure', async () => {
+    // The credential's expiry has not moved past the failure, so it is still the dead one.
+    credential = { present: true, expiresAt: '2026-09-07T09:00:00.000Z', refreshFailedAt: '2026-09-07T09:07:00.000Z' };
+    await supervisor.tick();
+    expect(refresh).not.toHaveBeenCalledWith(['claude']);
+  });
+
+  it('skips a runtime whose credential is gone entirely', async () => {
+    credential = { present: false, expiresAt: null, refreshFailedAt: '2026-09-07T09:07:00.000Z' };
+    await supervisor.tick();
+    expect(refresh).not.toHaveBeenCalledWith(['claude']);
+  });
+
+  it('does not fail the tick when the probe throws', async () => {
+    refresh.mockRejectedValue(new Error('the CLI is not logged in'));
     await expect(supervisor.tick()).resolves.toBeUndefined();
   });
 });

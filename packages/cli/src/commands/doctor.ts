@@ -13,6 +13,8 @@ import { isInstallable, planInstalls, type InstallStep, type InstallableId } fro
 import { items, run, session } from './util.js';
 
 interface Check { name: string; ok: boolean | null; detail: string; fix?: string; install?: InstallableId }
+/** `GET /usage/credentials` (VS-75). Deliberately has no token-bearing field. */
+interface CredentialState { runtimeId: string; present: boolean; expiresAt: string | null; lastVerifiedAt: string | null; refreshFailedAt: string | null; needsLogin: boolean }
 interface HostTool { id: string; available: boolean; version: string | null; need: 'required' | 'recommended'; purpose: string }
 interface HealthHost { platform?: string; hostname?: string; tools?: Record<string, HostTool> }
 
@@ -114,6 +116,28 @@ export function register(program: Command): void {
               fix: tool.available ? undefined : `install ${tool.id} on ${remoteHost} (run \`conductor doctor --install\` there)`,
             });
           }
+        }
+
+        // Each runtime's credential state (VS-75). A workspace is optional for `doctor`, and the
+        // credential state is workspace-scoped, so this is best-effort: no workspace selected, or a
+        // daemon too old to serve the route, simply means no credential checks rather than a
+        // failure. Never prints the token — the route does not carry one.
+        const credentials = await client
+          .wget<CredentialState[]>('/usage/credentials')
+          .catch(() => [] as CredentialState[]);
+        for (const cred of credentials) {
+          const id = String(cred.runtimeId ?? '?');
+          const expiry = cred.expiresAt ? `expires ${cred.expiresAt.slice(0, 16).replace('T', ' ')} UTC` : 'no expiry';
+          checks.push({
+            name: `credential ${id}`,
+            ok: cred.needsLogin ? false : cred.present ? true : null,
+            detail: cred.needsLogin
+              ? `login expired${cred.refreshFailedAt ? ` at ${cred.refreshFailedAt.slice(0, 16).replace('T', ' ')} UTC` : ''} — every agent on ${id} is stopped`
+              : cred.present
+                ? `valid · ${expiry}${cred.lastVerifiedAt ? ` · last verified ${cred.lastVerifiedAt.slice(0, 16).replace('T', ' ')} UTC` : ''}`
+                : 'no credential on the daemon host',
+            fix: cred.needsLogin || !cred.present ? `run \`${id} /login\` on the daemon host — the paused work resumes on its own` : undefined,
+          });
         }
 
         const runtimes = items<Record<string, unknown>>(await client.get('/api/runtimes'), 'runtimes');

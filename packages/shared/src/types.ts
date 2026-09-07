@@ -5,6 +5,16 @@ export interface Project { id: string; workspaceId: string; slug: string; name: 
 export interface Role { id: string; workspaceId: string; projectId: string; slug: string; name: string; title: string | null; icon: string | null; charterSummary: string; scopeText: string; responsibilities: string[]; capabilities: string[]; rules: string[]; runtimeId: string; model: string | null; effort: string | null; permission: Record<string, unknown>; sessionPolicy: E.SessionPolicy; maxWorkers: number; secrets: string[]; status: E.RoleStatus; pauseReason: string | null; specRevision: number; createdBy: string; createdAt: string; updatedAt: string }
 /** Why a paused worker stopped, when a failure paused it (VS-56). Every field is optional: a worker a human paused carries a `pauseReason` and no detail. */
 export interface AgentPauseDetail { family: E.RunErrorFamily | null; code: string | null; message: string | null; resetAt: string | null; runId: string | null }
+/**
+ * The pause code marking an agent as waiting on its runtime's expired login rather than broken
+ * (VS-75). Lives here because core raises it, render reads it and the surfaces branch on it: a
+ * worker waiting on a login must not be offered a resume that could only fail again.
+ */
+export const LOGIN_PAUSE_CODE = 'runtime_login_expired';
+/** Is this agent stopped because its runtime's login expired, rather than by a failure of its own? */
+export function waitingOnRuntimeLogin(agent: { status?: string; pauseDetail?: AgentPauseDetail | null } | null | undefined): boolean {
+  return agent?.status === 'paused' && agent.pauseDetail?.code === LOGIN_PAUSE_CODE;
+}
 export interface Agent { id: string; workspaceId: string; kind: E.AgentKind; projectId: string | null; roleId: string | null; roleRevision: number | null; ticketId: string | null; name: string; runtimeId: string; model: string | null; effort: string | null; status: E.AgentStatus; pauseReason: string | null; pauseDetail: AgentPauseDetail | null; errorText: string | null; homePath: string; worktreePath: string | null; branch: string | null; turnEpoch: number; turnCount: number; spawnedBy: string; spawnReason: string | null; briefRevision: number; lastRunAt: string | null; retiredAt: string | null; createdAt: string; updatedAt: string }
 export interface Ticket { id: string; workspaceId: string; projectId: string | null; number: number; identifier: string; kind: E.TicketKind; title: string; description: string; status: E.TicketStatus; priority: E.TicketPriority; autoMerge: boolean; assigneeRoleId: string | null; workerId: string | null; assigneeHuman: boolean; parentId: string | null; createdByKind: string; createdById: string | null; createdRunId: string | null; originKind: string | null; originFingerprint: string | null; checkoutRunId: string | null; executionRunId: string | null; openspecChangeName: string | null; openspecState: Record<string, unknown> | null; delivery: Record<string, unknown> | null; unblock: { owner: string; action: string } | null; monitorNextCheckAt: string | null; blockedTransitionAt: string | null; mergeQueuedAt: string | null; mergeStartedAt: string | null; startedAt: string | null; completedAt: string | null; cancelledAt: string | null; createdAt: string; updatedAt: string }
 export interface TicketComment { id: string; ticketId: string; authorKind: E.AuthorKind; authorId: string | null; runId: string | null; body: string; kind: E.CommentKind; sourceTrust: E.SourceTrust; createdAt: string }
@@ -25,6 +35,12 @@ export interface UsageEvent { id: string; workspaceId: string; projectId: string
 export interface AccountLimitWindow { kind: E.AccountLimitKind; label: string; utilization: number; resetsAt: string | null; scopeLabel: string | null }
 /** The current account snapshot for one runtime in one workspace (PLAN §16.2). */
 export interface RuntimeAccount { workspaceId: string; runtimeId: string; billingType: E.BillingType; planLabel: string | null; limitsAvailable: boolean; limits: AccountLimitWindow[]; note: string | null; capturedAt: string }
+/**
+ * The state of the one credential this host shares for a runtime (VS-75). `needsLogin` is the gate:
+ * while it is true no turn is started for any agent on that runtime. Deliberately has no field that
+ * could carry a token, and none may ever be added.
+ */
+export interface RuntimeCredential { workspaceId: string; runtimeId: string; present: boolean; expiresAt: string | null; lastVerifiedAt: string | null; refreshFailedAt: string | null; needsLogin: boolean; detail: string | null; updatedAt: string }
 /** Tokens in a usage window split by how they were billed, so a client can tell whether any metered spend occurred. */
 export interface UsageBillingMix { subscription: number; metered: number; unknown: number }
 

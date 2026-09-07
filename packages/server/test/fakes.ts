@@ -8,7 +8,7 @@ import type { Actor, CoreServices, WorkspaceContext } from '@agent-conductor/cor
 import type { AuthService } from '@agent-conductor/core';
 import {
   DaemonConfigSchema, OcError, WorkspaceConfigSchema,
-  type Briefing, type Decision, type RuntimeAccount, type Ticket, type TicketComment, type Wakeup,
+  type Briefing, type Decision, type RuntimeAccount, type RuntimeCredential, type Ticket, type TicketComment, type Wakeup,
 } from '@agent-conductor/shared';
 import type { AppDeps, WorkspaceRuntime } from '../src/types.js';
 import { createUpdateChecker } from '../src/release-info.js';
@@ -100,6 +100,8 @@ export interface HarnessOptions {
   upgrade?: Partial<UpgradeDeps>;
   /** Runtime account snapshots served by `GET /usage/accounts`. */
   accounts?: RuntimeAccount[];
+  /** Runtime credential state served by `GET /usage/credentials` (VS-75). */
+  credentials?: RuntimeCredential[];
 }
 
 export function makeHarness(options: HarnessOptions = {}): Harness {
@@ -213,7 +215,15 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     specs: impl('specs', {}),
     openspec: impl('openspec', { statusFor: async () => null }),
     usage: impl('usage', {}),
-    accounts: impl('accounts', { list: () => options.accounts ?? [], get: () => null, refresh: async () => [] }),
+    accounts: impl('accounts', {
+      list: () => options.accounts ?? [], get: () => null, refresh: async () => [],
+      credentials: () => options.credentials ?? [],
+      credential: (runtimeId: string) => (options.credentials ?? []).find((c) => c.runtimeId === runtimeId)
+        ?? { workspaceId: 'ws1', runtimeId, present: false, expiresAt: null, lastVerifiedAt: null, refreshFailedAt: null, needsLogin: false, detail: null, updatedAt: '2026-09-07T09:00:00.000Z' },
+      gatedRuntimes: () => (options.credentials ?? []).filter((c) => c.needsLogin).map((c) => c.runtimeId),
+      noteAuthFailure: (runtimeId: string) => ({ workspaceId: 'ws1', runtimeId, present: true, expiresAt: null, lastVerifiedAt: null, refreshFailedAt: '2026-09-07T09:07:00.000Z', needsLogin: true, detail: null, updatedAt: '2026-09-07T09:07:00.000Z' }),
+      noteVerified: (runtimeId: string) => ({ workspaceId: 'ws1', runtimeId, present: true, expiresAt: null, lastVerifiedAt: '2026-09-07T10:00:00.000Z', refreshFailedAt: null, needsLogin: false, detail: null, updatedAt: '2026-09-07T10:00:00.000Z' }),
+    }),
     threads: impl('threads', { list: () => [], primaryThread: () => null }),
   } as unknown as CoreServices;
 

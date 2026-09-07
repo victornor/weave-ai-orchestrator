@@ -61,6 +61,7 @@ export const qk = {
   usageTop: (ws: string, params: Record<string, unknown>) => ['w', ws, 'usage', 'top', params] as const,
   usageModels: (ws: string, params: Record<string, unknown>) => ['w', ws, 'usage', 'models', params] as const,
   usageAccounts: (ws: string) => ['w', ws, 'usage', 'accounts'] as const,
+  usageCredentials: (ws: string) => ['w', ws, 'usage', 'credentials'] as const,
 
   threads: (ws: string) => ['w', ws, 'threads'] as const,
   threadMessages: (ws: string, id: string) => ['w', ws, 'threads', id, 'messages'] as const,

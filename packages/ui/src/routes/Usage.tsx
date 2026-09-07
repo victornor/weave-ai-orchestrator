@@ -5,9 +5,10 @@ import { Page, PageBody, PageHeader } from '../components/Page';
 import { WindowGrainPicker } from '../components/WindowGrainPicker';
 import { RankedBars, ShareBar, StackedBars, StatTile, LineSeries, seriesColor } from '../components/Chart';
 import { PlanLimits } from '../components/PlanLimits';
+import { RuntimeCredentials } from '../components/RuntimeCredentials';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
-import { useProjects, useUsage, useUsageAccounts, useUsageModels, useUsageTop } from '../api/hooks';
+import { useProjects, useUsage, useUsageAccounts, useUsageCredentials, useUsageModels, useUsageTop } from '../api/hooks';
 import { dayLabel, cents, pct, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
 
@@ -30,6 +31,7 @@ export function UsageRoute(): React.ReactElement {
   const topWorkers = useUsageTop({ ...params, by: 'worker' });
   const models = useUsageModels(params);
   const accounts = useUsageAccounts();
+  const credentials = useUsageCredentials();
 
   const total = series.data?.total;
   const headlineTokens = (total?.tokensIn ?? 0) + (total?.tokensOut ?? 0);
@@ -63,6 +65,10 @@ export function UsageRoute(): React.ReactElement {
             filtered to {model} — clear
           </button>
         ) : null}
+
+        {/* Above the usage conditional on purpose: a runtime whose login expired has no usage
+            precisely because everything on it is stopped, and that is when this matters most. */}
+        <RuntimeCredentials credentials={credentials.data ?? []} />
 
         {series.isLoading ? (
           <SkeletonRows rows={6} />

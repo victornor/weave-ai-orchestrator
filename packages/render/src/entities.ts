@@ -1,6 +1,6 @@
 /** Ticket and worker view models (design contract §4 "Ticket card" / "Worker card"). */
 import type { Agent, CostStatus, Ticket } from '@agent-conductor/shared';
-import { agentUiStatus, ticketUiStatus } from '@agent-conductor/shared';
+import { agentUiStatus, ticketUiStatus, waitingOnRuntimeLogin } from '@agent-conductor/shared';
 import { formatAge, formatCost, formatTokens, initials, joinMeta, oneLine } from './format.js';
 import { redact } from './redact.js';
 import { statusGlyph, statusLabel } from './status.js';
@@ -71,6 +71,9 @@ export interface WorkerCardContext {
 export function workerPauseReason(agent: Agent): string | null {
   if (agent?.status !== 'paused') return null;
   const d = agent.pauseDetail;
+  // A worker waiting on its runtime's login is not broken and has nothing for the human to answer:
+  // say what it is waiting for, not which failure family it landed in (VS-75).
+  if (waitingOnRuntimeLogin(agent)) return `waiting on the ${agent.runtimeId} login · resumes on its own`;
   if (!d) return agent.pauseReason ?? null;
   const parts = [d.family, d.message ? oneLine(redact(d.message), 160) : null, d.resetAt ? `resets ${d.resetAt.slice(0, 16).replace('T', ' ')} UTC` : null].filter(Boolean);
   return parts.length ? parts.join(' · ') : agent.pauseReason ?? null;

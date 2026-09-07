@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 
 import { join } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
 import {
-  OcError, type Agent, type Project, type Role, type Ticket, type Wakeup,
+  OcError, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type Wakeup,
 } from '@agent-conductor/shared';
 import type { WorktreeProvider } from '@agent-conductor/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
@@ -161,6 +161,10 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     return bits.join(' ');
   }
 
+  /** Is this runtime stopped for an expired login? Read directly: the accounts service may be absent in a harness. */
+  const gatedRuntime = (runtimeId: string): boolean =>
+    Boolean(ctx.db.get<{ runtimeId: string }>('SELECT runtime_id FROM runtime_credentials WHERE workspace_id = ? AND runtime_id = ? AND needs_login = 1', [ctx.workspaceId, runtimeId]));
+
   const service: WorkersService = {
     list(filter = {}): Agent[] {
       const where = ["workspace_id = ?", "kind = 'worker'"];
@@ -281,6 +285,12 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
      */
     resume(actor: Actor, id: string): Agent {
       const agent = get(id);
+      // A worker stopped by its runtime's expired login cannot be resumed into a working turn: the
+      // dispatcher will not start one while the runtime is gated, and the credential is still the
+      // dead one. It resumes by itself when the login is restored (VS-75).
+      if (waitingOnRuntimeLogin(agent) && gatedRuntime(agent.runtimeId)) {
+        throw new OcError('conflict', `${agent.name} is waiting on the ${agent.runtimeId} login, not on you. Log that CLI in again and it resumes on its own.`, { runtimeId: agent.runtimeId }, true);
+      }
       const wasPaused = agent.status === 'paused';
       ctx.db.update('agents', id, { status: 'active', pauseReason: null, pauseDetailJson: null, updatedAt: nowIso() });
       recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.resume', 'agent', id, {});

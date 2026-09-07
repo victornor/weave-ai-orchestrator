@@ -7,12 +7,18 @@
  *
  * The workspace is a parameter, not `useWs()`: the first caller is onboarding, which is watching a
  * workspace it has only just created and is mounted outside any WorkspaceProvider.
+ *
+ * The connection state and manual retry come from `useLiveStream` (`sseStream.ts`), the same
+ * state machine the workspace event stream uses. See `live-streams/connection-state`.
  */
 import { useEffect, useRef, useState } from 'react';
 import type { Job, JobLogLine, JobStep } from '@agent-conductor/shared';
+import { useLiveStream } from './sseStream';
+import type { ConnectionStatus } from './sseStream';
 
+/** Stable reference: an inline array literal here would reopen the stream on every render. */
+const JOB_EVENT_TYPES = ['job.step', 'job.log', 'job.finished'] as const;
 
-const BACKOFF = [500, 1000, 2000, 4000, 8000, 15000];
 /** What the view keeps on screen; the daemon retains the same number on the record. */
 export const JOB_LOG_VIEW_LINES = 200;
 
@@ -33,21 +39,29 @@ export interface LiveJob {
 
 const EMPTY: LiveJob = { steps: [], log: [], state: 'running', failedStep: null, message: null, finishedAt: null };
 
-export function useJobStream(ws: string | null, jobId: string | null): LiveJob | null {
+export interface JobStream {
+  job: LiveJob | null;
+  status: ConnectionStatus;
+  retryNow: () => void;
+}
+
+export function useJobStream(ws: string | null, jobId: string | null): JobStream {
   const [job, setJob] = useState<LiveJob | null>(null);
   /** Highest seq rendered, so a reconnect asks for `?after=` it rather than replaying the tail. */
   const seq = useRef(0);
+  const active = ws && jobId ? jobId : null;
 
   useEffect(() => { setJob(null); seq.current = 0; }, [jobId]);
 
-  useEffect(() => {
-    if (!jobId || !ws) return;
-    let stopped = false;
-    let es: EventSource | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let attempts = 0;
-
-    const handle = (m: MessageEvent<string>): void => {
+  const { status, retryNow } = useLiveStream({
+    resetKey: active,
+    eventTypes: JOB_EVENT_TYPES,
+    buildUrl: () => {
+      if (!ws || !jobId) return null;
+      const after = seq.current ? `?after=${seq.current}` : '';
+      return `/api/w/${encodeURIComponent(ws)}/jobs/${encodeURIComponent(jobId)}/stream${after}`;
+    },
+    onFrame: (m) => {
       let item: JobStreamItem;
       try {
         item = JSON.parse(m.data) as JobStreamItem;
@@ -56,34 +70,11 @@ export function useJobStream(ws: string | null, jobId: string | null): LiveJob |
       }
       if (!item || typeof item.seq !== 'number') return;
       seq.current = Math.max(seq.current, item.seq);
-      attempts = 0;
       setJob((prev) => reduce(prev ?? EMPTY, item));
-    };
+    },
+  });
 
-    const open = (): void => {
-      if (stopped) return;
-      const after = seq.current ? `?after=${seq.current}` : '';
-      es = new EventSource(`/api/w/${encodeURIComponent(ws)}/jobs/${encodeURIComponent(jobId)}/stream${after}`, { withCredentials: true });
-      es.onmessage = (m) => handle(m as MessageEvent<string>);
-      // The daemon names every frame; onmessage only sees unnamed ones.
-      for (const type of ['job.step', 'job.log', 'job.finished']) es.addEventListener(type, (m) => handle(m as MessageEvent<string>));
-      es.onerror = () => {
-        es?.close();
-        if (stopped) return;
-        attempts += 1;
-        timer = setTimeout(open, BACKOFF[Math.min(attempts - 1, BACKOFF.length - 1)] ?? 15000);
-      };
-    };
-
-    open();
-    return () => {
-      stopped = true;
-      es?.close();
-      if (timer) clearTimeout(timer);
-    };
-  }, [ws, jobId]);
-
-  return job;
+  return { job, status, retryNow };
 }
 
 /** Fold one frame in. Exported for the tests, which drive it without an EventSource. */

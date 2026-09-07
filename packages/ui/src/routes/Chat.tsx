@@ -11,6 +11,7 @@ import { Skeleton } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Markdown } from '../components/Markdown';
 import { StatusGlyph } from '../components/StatusGlyph';
+import { StreamStatusNotice } from '../components/StreamStatus';
 import { Transcript } from '../components/Transcript';
 import { TurnTrace } from '../components/TurnTrace';
 import { ScrollToBottomButton } from '../components/ScrollToBottom';
@@ -36,6 +37,7 @@ import {
 } from '../api/hooks';
 import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
+import { NetworkError } from '../api/client';
 import { contextStrip, resolveModel, runtimeLimitStrip } from '@agent-conductor/render';
 import { chatEntries, chatRows } from '../lib/dispatch';
 import { useShowSilentTurns } from '../lib/chatPrefs';
@@ -47,6 +49,7 @@ import type { HeightBounds } from '../lib/decisionHeight';
 import { isAtBottom, useStickToBottom } from '../lib/stickToBottom';
 import { readChatScroll, writeChatScroll } from '../lib/chatScroll';
 import { enqueue, useQueueCount } from '../lib/queue';
+import { decisionCarriesSecret } from '../lib/decisionSecrets';
 import { useToast } from '../components/Toast';
 import { useGo } from '../app/link';
 import { clock } from '../lib/format';
@@ -151,7 +154,7 @@ export function ChatRoute(): React.ReactElement {
   const [sending, setSending] = useState(false);
   const offline = conn.state === 'offline' || conn.state === 'unreachable';
 
-  const runEvents = useRunEventStream(runId, { live: live?.running ?? false });
+  const { events: runEvents, status: runStreamStatus, retryNow: retryRunStream } = useRunEventStream(runId, { live: live?.running ?? false });
   // The reply renders as the thread message ac_human_send created; showing the call too would
   // put the same words on screen twice.
   const liveEvents = useMemo(() => runEvents.filter((e) => !isHumanReplyToolEvent(e)), [runEvents]);
@@ -460,13 +463,42 @@ export function ChatRoute(): React.ReactElement {
     if (saved !== null) scrollEl.scrollTop = saved;
   }, [messages.data, scrollEl, ws]);
 
-  const answerDecision = (id: string, a: { key?: string; text?: string; inputs?: DecisionAnswerInputs }): void =>
+  // Mirrors NeedsYou.tsx's offline handling (VS-92, VS-100): a card holding a secret is never
+  // queued, whatever happens to it — it goes to the daemon or nowhere, and the human is told it
+  // was not sent. A non-secret answer is queued like any other write, both when the chat already
+  // knows it is offline and when the send itself fails because the daemon could not be reached.
+  const answerDecision = (id: string, a: { key?: string; text?: string; inputs?: DecisionAnswerInputs }): void => {
+    const carriesSecret = decisionCarriesSecret(decisions.data?.find((d) => d.id === id));
+    const queueThisAnswer = (): void => {
+      enqueue({ kind: 'decision', path: `/decisions/${id}/answer`, body: a, label: a.key ?? a.text ?? 'decision' });
+      toast.push({ title: 'Answer queued', detail: 'Re-validated against the ticket when the connection returns.', status: 'working' });
+    };
+    const refuse = (detail: string): void => {
+      toast.push({
+        title: carriesSecret ? 'Not sent' : 'Could not record that answer',
+        detail: carriesSecret ? `${detail} — nothing was stored on this device; send it again.` : detail,
+        status: 'failed',
+      });
+    };
+
+    if (offline && carriesSecret) {
+      refuse('This card holds a secret, so it is never stored on this device.');
+      return;
+    }
+    if (offline) {
+      queueThisAnswer();
+      return;
+    }
     answer.mutate(
       { id, ...a },
-      // Never queued, whatever it carries: the chat's decision answers go to the daemon or nowhere,
-      // and a card holding a secret says so rather than leaving the value on the device (VS-92).
-      { onError: (e) => toast.push({ title: 'Could not record that answer', detail: e.message, status: 'failed' }) },
+      {
+        onError: (e) => {
+          if (!carriesSecret && e instanceof NetworkError) queueThisAnswer();
+          else refuse(e.message);
+        },
+      },
     );
+  };
 
   /** The project a card belongs to, named or — for a workspace-wide question — left for the card to label. */
   const projectSlugOf = (d: { projectId: string | null; ticketId: string | null }): string | null =>
@@ -474,19 +506,34 @@ export function ChatRoute(): React.ReactElement {
 
   const send = (text: string): void => {
     if (!threadId) return;
-    if (offline) {
+    const queueThisMessage = (): void => {
       enqueue({
         kind: 'thread',
         path: `/threads/${threadId}/messages`,
         body: { body: text, ...(projectId ? { projectId } : {}), ...(replyToId ? { replyToMessageId: replyToId } : {}) },
         label: text.slice(0, 60),
       });
+    };
+    if (offline) {
+      queueThisMessage();
       // Cleared on both paths: the next message must not be silently attributed to the same question.
       patch({ replyToId: null });
       return;
     }
     setSending(true);
-    post.mutate({ threadId, body: text, projectId, ...(replyToId ? { replyToMessageId: replyToId } : {}) });
+    post.mutate(
+      { threadId, body: text, projectId, ...(replyToId ? { replyToMessageId: replyToId } : {}) },
+      {
+        // The daemon being unreachable — not a validation failure — is the same condition the
+        // `offline` branch above queues for; the device just has not noticed it yet. Anything else
+        // is a real refusal, so the human is told rather than left assuming it went through.
+        onError: (e) => {
+          setSending(false);
+          if (e instanceof NetworkError) queueThisMessage();
+          else toast.push({ title: 'Message not sent', detail: e.message, status: 'failed' });
+        },
+      },
+    );
     patch({ replyToId: null });
   };
 
@@ -621,6 +668,10 @@ export function ChatRoute(): React.ReactElement {
                   <StatusGlyph status="working" size="xs" />
                   <span className="ac-mono text-micro text-text-3">{runId ? 'working' : 'starting…'}</span>
                 </div>
+                {/* Where the streaming output itself is, per `conductor-chat/live-turn-stream` — not
+                    only the app-level `ConnectionBanner`, which a human on a flaky connection may not
+                    associate with this one turn having gone quiet. */}
+                {runId ? <StreamStatusNotice status={runStreamStatus} onRetry={retryRunStream} /> : null}
                 {liveEvents.length ? <Transcript events={liveEvents} className="gap-2 p-0 opacity-90" /> : null}
               </section>
             ) : null}

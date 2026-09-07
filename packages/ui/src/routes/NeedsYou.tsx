@@ -9,6 +9,7 @@ import { Button } from '../components/Button';
 import { useAnswerDecision, useDecisions, useProjects, useTickets, useWorkers, useWorkspaceSummary } from '../api/hooks';
 import { useConnection, useWs } from '../api/context';
 import { enqueue, useQueue } from '../lib/queue';
+import { decisionCarriesSecret } from '../lib/decisionSecrets';
 import { useToast } from '../components/Toast';
 import { useGo } from '../app/link';
 import { useListNav } from '../lib/hotkeys';
@@ -50,7 +51,7 @@ export function NeedsYouRoute(): React.ReactElement {
   const onAnswer = (id: string, a: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }): void => {
     // The queue is localStorage. A card that collected a credential must never go into it, so this
     // answer goes to the daemon or nowhere, and the human is told it was not sent (VS-92).
-    const carriesSecret = (decisions.data?.find((d) => d.id === id)?.inputs ?? []).some((i) => i.type === 'secret');
+    const carriesSecret = decisionCarriesSecret(decisions.data?.find((d) => d.id === id));
     if (offline && carriesSecret) {
       toast.push({ title: 'Not sent', detail: 'This card holds a secret, so it is never stored on this device. Send it again when you are back online.', status: 'failed' });
       return;

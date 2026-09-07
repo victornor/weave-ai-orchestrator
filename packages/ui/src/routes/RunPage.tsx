@@ -16,7 +16,7 @@ export function RunRoute(): React.ReactElement {
   // persisted events and stays still. `run.finished` invalidates this query, so a turn that ends
   // while the page is open closes its stream here without the human doing anything.
   const live = isActiveRun(run.data?.run.status);
-  const events = useRunEventStream(runId, { live });
+  const { events } = useRunEventStream(runId, { live });
 
   if (run.isLoading) {
     return (

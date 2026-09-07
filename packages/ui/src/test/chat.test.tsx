@@ -33,6 +33,8 @@ const state = vi.hoisted(() => ({
   workerQuery: null as Record<string, unknown> | null,
   projects: [] as Project[],
   posted: [] as Array<Record<string, unknown>>,
+  /** Set to make the next `usePostThreadMessage` mutate reject instead of succeeding. */
+  postError: null as Error | null,
   connection: 'connected' as string,
   decisions: [] as Decision[],
   decisionQuery: null as Record<string, unknown> | null,
@@ -73,7 +75,12 @@ vi.mock('../api/hooks', () => ({
     data: state.messagesLoaded ? state.messages : undefined, isLoading: false, isError: false, refetch: vi.fn(),
     hasOlder: state.hasOlder, isLoadingOlder: state.isLoadingOlder, loadOlder: state.loadOlder,
   }),
-  usePostThreadMessage: () => ({ mutate: (v: Record<string, unknown>) => state.posted.push(v) }),
+  usePostThreadMessage: () => ({
+    mutate: (v: Record<string, unknown>, opts?: { onError?: (e: Error) => void }) => {
+      if (state.postError) opts?.onError?.(state.postError);
+      else state.posted.push(v);
+    },
+  }),
   useDecisions: (p: Record<string, unknown>) => { state.decisionQuery = p; return { data: state.decisions }; },
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
   useTickets: (p: Record<string, unknown>) => { state.ticketQuery = p; return { data: state.tickets }; },
@@ -93,6 +100,7 @@ const { ChatRoute } = await import('../routes/Chat');
 class FakeEventSource {
   static open: FakeEventSource[] = [];
   readonly listeners = new Map<string, Array<(m: MessageEvent<string>) => void>>();
+  onopen: (() => void) | null = null;
   onmessage: ((m: MessageEvent<string>) => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
@@ -104,6 +112,8 @@ class FakeEventSource {
   emit(event: RunEvent): void {
     for (const fn of this.listeners.get(event.type) ?? []) fn({ data: JSON.stringify(event) } as MessageEvent<string>);
   }
+  connect(): void { this.onopen?.(); }
+  fail(): void { this.onerror?.(); }
 }
 
 function ev(over: Partial<RunEvent> & Pick<RunEvent, 'id' | 'seq' | 'type'>): RunEvent {
@@ -161,6 +171,7 @@ beforeEach(() => {
   state.workerQuery = null;
   state.projects = [project({ id: 'p1', name: 'API' })];
   state.posted = [];
+  state.postError = null;
   state.connection = 'connected';
   vi.mocked(enqueue).mockClear();
   state.decisions = [];
@@ -256,6 +267,64 @@ describe('ChatRoute live turn', () => {
 
     expect(screen.queryByText('ac_human_send')).not.toBeInTheDocument();
     expect(screen.getAllByText(reply)).toHaveLength(1);
+  });
+
+  it('shows a connection notice when the run stream drops, and it clears on reconnect without duplicating the transcript', () => {
+    vi.useFakeTimers();
+    try {
+      render(<ChatRoute />);
+      emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
+      act(() => { stream().connect(); });
+      act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
+      expect(screen.queryByText('Reconnecting…')).not.toBeInTheDocument();
+
+      const dropped = stream();
+      act(() => { dropped.fail(); });
+      expect(screen.getByText('Reconnecting…')).toBeInTheDocument();
+      expect(screen.getByText('Reading the briefing.')).toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(500); });
+      act(() => { stream().connect(); });
+      expect(screen.queryByText('Reconnecting…')).not.toBeInTheDocument();
+
+      act(() => { stream().emit(ev({ id: 'e2', seq: 2, type: 'assistant.text', payload: { text: ' Nearly done.' } })); });
+      expect(screen.getAllByText(/Reading the briefing\./)).toHaveLength(1);
+      expect(screen.getByText('Reading the briefing. Nearly done.')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets the human retry the run stream immediately from the notice', () => {
+    render(<ChatRoute />);
+    emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
+    act(() => { stream().connect(); });
+
+    const dropped = stream();
+    act(() => { dropped.fail(); });
+    expect(screen.getByText('Reconnecting…')).toBeInTheDocument();
+    expect(live()).toHaveLength(0);
+
+    act(() => { screen.getByRole('button', { name: 'Retry now' }).click(); });
+    expect(live()).toHaveLength(1);
+  });
+
+  it('renders the notice inside the scrolling list, never over the composer or the bottom bar', () => {
+    render(<ChatRoute />);
+    emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
+    act(() => { stream().connect(); });
+    act(() => { stream().fail(); });
+
+    const notice = screen.getByText('Reconnecting…');
+    // The scrolling message list (`PageBody`, `.ac-scroll`) is where the streaming output lives; a
+    // notice inside it is carried along by ordinary document flow and cannot sit over the composer
+    // or the phone bottom bar, which are laid out after it, outside the scroll region.
+    const scrollBody = notice.closest('.ac-scroll');
+    expect(scrollBody).not.toBeNull();
+    expect(notice.closest('[aria-label="Conductor is working"]')).not.toBeNull();
+
+    const composer = screen.getByPlaceholderText('Message the conductor…');
+    expect(scrollBody!.contains(composer)).toBe(false);
   });
 });
 
@@ -592,6 +661,42 @@ describe('project context', () => {
   });
 });
 
+describe('ChatRoute sending while the daemon is unreachable', () => {
+  const sent = (body: string): void => {
+    const box = screen.getByLabelText('Message the conductor…');
+    fireEvent.change(box, { target: { value: body } });
+    fireEvent.click(screen.getByLabelText('Send'));
+  };
+
+  it('queues the message and clears the working indicator when the send fails to reach the daemon', async () => {
+    const { NetworkError } = await import('../api/client');
+    state.postError = new NetworkError();
+    render(<ChatRoute />);
+
+    sent('are you there?');
+
+    // A real network failure arrives after "working" already shows; this mock rejects
+    // synchronously, so what is observable here is that the indicator never sticks around.
+    expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
+    expect(state.posted).toHaveLength(0);
+    expect(vi.mocked(enqueue).mock.calls[0]?.[0]).toMatchObject({
+      path: '/threads/th_1/messages',
+      body: { body: 'are you there?' },
+    });
+  });
+
+  it('tells the human rather than dropping it, when the send is refused for another reason', () => {
+    state.postError = Object.assign(new Error('body too long'), { name: 'ApiError' });
+    render(<ChatRoute />);
+
+    sent('a very long message');
+
+    expect(state.posted).toHaveLength(0);
+    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+    expect(state.toasts[0]).toMatchObject({ title: 'Message not sent', status: 'failed' });
+  });
+});
+
 describe('ChatRoute reply reference', () => {
   const sent = (body: string): void => {
     const box = screen.getByLabelText('Message the conductor…');
@@ -837,6 +942,74 @@ describe('ChatRoute decision cards', () => {
     fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
     expect(state.toasts).toEqual([{ title: 'Could not record that answer', detail: 'decision d1 is answered', status: 'failed' }]);
+  });
+
+  it('queues a non-secret answer while offline, the same way Needs You does', () => {
+    state.connection = 'offline';
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked()];
+
+    render(<ChatRoute />);
+    fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+
+    expect(state.answer).not.toHaveBeenCalled();
+    expect(vi.mocked(enqueue).mock.calls[0]?.[0]).toMatchObject({
+      kind: 'decision',
+      path: '/decisions/d1/answer',
+      body: { key: 'file' },
+    });
+  });
+
+  it('never queues a secret-carrying answer while offline, and tells the human it was not sent', () => {
+    state.connection = 'offline';
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked({
+      options: [],
+      inputs: [{ key: 'token', label: 'Read-only token', type: 'secret', required: true, secretName: 'CF_READONLY_TOKEN' }],
+    })];
+
+    render(<ChatRoute />);
+    fireEvent.change(screen.getByLabelText(/Read-only token/), { target: { value: 'cf-not-a-real-token-0000000000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+
+    expect(state.answer).not.toHaveBeenCalled();
+    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+    expect(state.toasts.at(-1)).toMatchObject({ title: 'Not sent', status: 'failed' });
+  });
+
+  it('queues a non-secret answer when the send fails to reach the daemon', async () => {
+    const { NetworkError } = await import('../api/client');
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked()];
+    state.answer = vi.fn((_vars: unknown, opts: { onError: (e: Error) => void }) => opts.onError(new NetworkError()));
+
+    render(<ChatRoute />);
+    fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+
+    expect(vi.mocked(enqueue).mock.calls[0]?.[0]).toMatchObject({
+      kind: 'decision',
+      path: '/decisions/d1/answer',
+      body: { key: 'file' },
+    });
+  });
+
+  it('never queues a secret-carrying answer even when the send fails to reach the daemon', async () => {
+    const { NetworkError } = await import('../api/client');
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked({
+      options: [],
+      inputs: [{ key: 'token', label: 'Read-only token', type: 'secret', required: true, secretName: 'CF_READONLY_TOKEN' }],
+    })];
+    state.answer = vi.fn((_vars: unknown, opts: { onError: (e: Error) => void }) => opts.onError(new NetworkError()));
+
+    render(<ChatRoute />);
+    fireEvent.change(screen.getByLabelText(/Read-only token/), { target: { value: 'cf-not-a-real-token-0000000000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+
+    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+    expect(state.toasts.at(-1)).toMatchObject({ title: 'Not sent', status: 'failed' });
   });
 
   it('renders an answered decision in place, inert, showing what was chosen', () => {

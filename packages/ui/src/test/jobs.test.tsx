@@ -68,6 +68,7 @@ describe('JobProgress', () => {
 class FakeEventSource {
   static open: FakeEventSource[] = [];
   readonly listeners = new Map<string, Array<(m: MessageEvent<string>) => void>>();
+  onopen: (() => void) | null = null;
   onmessage: ((m: MessageEvent<string>) => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
@@ -80,12 +81,18 @@ class FakeEventSource {
     const m = { data: JSON.stringify(payload) } as MessageEvent<string>;
     for (const fn of this.listeners.get(type) ?? []) fn(m);
   }
+  connect(): void { this.onopen?.(); }
   fail(): void { this.onerror?.(); }
+}
+
+function setOnline(value: boolean): void {
+  Object.defineProperty(navigator, 'onLine', { value, configurable: true });
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   FakeEventSource.open = [];
+  setOnline(true);
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 });
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
@@ -96,17 +103,17 @@ describe('useJobStream', () => {
   it('opens the job stream and folds steps and lines in as they arrive', () => {
     const { result } = renderHook(() => useJobStream('ws1', 'j1'));
     expect(last().url).toBe('/api/w/ws1/jobs/j1/stream');
-    expect(result.current).toBeNull();
+    expect(result.current.job).toBeNull();
 
     act(() => { last().emit('job.step', { kind: 'step', jobId: 'j1', seq: 0, step: step('clone', 'Clone the repository', 'running', [0, 0]) }); });
-    expect(result.current?.steps.map((s) => s.id)).toEqual(['clone']);
+    expect(result.current.job?.steps.map((s) => s.id)).toEqual(['clone']);
 
     act(() => { last().emit('job.log', { kind: 'log', jobId: 'j1', seq: 1, line: line(1, 'clone', 'Receiving objects: 40%') }); });
-    expect(result.current?.log.map((l) => l.text)).toEqual(['Receiving objects: 40%']);
+    expect(result.current.job?.log.map((l) => l.text)).toEqual(['Receiving objects: 40%']);
 
     act(() => { last().emit('job.step', { kind: 'step', jobId: 'j1', seq: 1, step: step('clone', 'Clone the repository', 'done', [0, 900]) }); });
-    expect(result.current?.steps[0]!.state).toBe('done');
-    expect(result.current?.steps).toHaveLength(1);
+    expect(result.current.job?.steps[0]!.state).toBe('done');
+    expect(result.current.job?.steps).toHaveLength(1);
   });
 
   it('takes the final record from the finish frame', () => {
@@ -118,7 +125,7 @@ describe('useJobStream', () => {
       startedAt: T0, finishedAt: at(500), failedStep: 'clone', message: 'git clone failed',
     };
     act(() => { last().emit('job.finished', { kind: 'finished', jobId: 'j1', seq: 1, job }); });
-    expect(result.current).toMatchObject({ state: 'failed', failedStep: 'clone', message: 'git clone failed' });
+    expect(result.current.job).toMatchObject({ state: 'failed', failedStep: 'clone', message: 'git clone failed' });
   });
 
   it('resumes after the highest seq it saw and never duplicates a line', () => {
@@ -129,11 +136,58 @@ describe('useJobStream', () => {
     expect(last().url).toBe('/api/w/ws1/jobs/j1/stream?after=4');
 
     act(() => { last().emit('job.log', { kind: 'log', jobId: 'j1', seq: 4, line: line(4, 'clone', 'four') }); });
-    expect(result.current?.log).toHaveLength(1);
+    expect(result.current.job?.log).toHaveLength(1);
   });
 
   it('opens nothing without a job', () => {
-    renderHook(() => useJobStream('ws1', null));
+    const { result } = renderHook(() => useJobStream('ws1', null));
     expect(FakeEventSource.open).toHaveLength(0);
+    expect(result.current.job).toBeNull();
+  });
+});
+
+/**
+ * The connection-state machine itself is covered exhaustively in `sseStream.test.tsx`. These cases
+ * prove the wiring: that `useJobStream` surfaces that same state and that its own URL/seq logic
+ * keeps working through a drop and a manual retry.
+ */
+describe('useJobStream connection state', () => {
+  it('reports connecting, then connected once the stream opens', () => {
+    const { result } = renderHook(() => useJobStream('ws1', 'j1'));
+    expect(result.current.status.state).toBe('connecting');
+    act(() => { last().connect(); });
+    expect(result.current.status.state).toBe('connected');
+  });
+
+  it('reports reconnecting on a drop while online, and offline while the device is offline', () => {
+    const { result } = renderHook(() => useJobStream('ws1', 'j1'));
+    act(() => { last().connect(); last().fail(); });
+    expect(result.current.status.state).toBe('reconnecting');
+
+    setOnline(false);
+    const { result: r2 } = renderHook(() => useJobStream('ws1', 'j2'));
+    act(() => { last().fail(); });
+    expect(r2.current.status.state).toBe('offline');
+  });
+
+  it('reconnects at once on the browser online event', () => {
+    renderHook(() => useJobStream('ws1', 'j1'));
+    act(() => { last().connect(); last().fail(); });
+    expect(FakeEventSource.open).toHaveLength(1);
+
+    act(() => { window.dispatchEvent(new Event('online')); });
+    expect(FakeEventSource.open).toHaveLength(2);
+  });
+
+  it('retryNow reopens immediately, carrying the last seq seen', () => {
+    const { result } = renderHook(() => useJobStream('ws1', 'j1'));
+    act(() => { last().connect(); });
+    act(() => { last().emit('job.log', { kind: 'log', jobId: 'j1', seq: 3, line: line(3, 'clone', 'three') }); });
+    act(() => { last().fail(); });
+    expect(FakeEventSource.open).toHaveLength(1);
+
+    act(() => { result.current.retryNow(); });
+    expect(FakeEventSource.open).toHaveLength(2);
+    expect(last().url).toBe('/api/w/ws1/jobs/j1/stream?after=3');
   });
 });

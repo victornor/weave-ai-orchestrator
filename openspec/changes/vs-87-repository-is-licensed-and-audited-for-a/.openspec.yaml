@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-07
+goal: The repository is legally publishable — AGPL-3.0 core, a commercial ee/
+  directory, a contributor licence agreement, and an audit of history and
+  dependencies
+skip_specs: true

@@ -503,3 +503,15 @@ plugin: implement `RuntimeAdapter` from `@agent-conductor/runtime-sdk` and list 
 
 Channels shipped: `web`, `cli`, `telegram`. Surfaces shipped: `headless`, `tmux`, `herdr`,
 `hyprland`. Worktree providers: `worktrunk` (default) and `git` (fallback). Forge support is `gh`.
+
+---
+
+## Licence and contributing
+
+AgentConductor is licensed under the **GNU Affero General Public License v3.0** ([`LICENSE`](LICENSE)).
+Paid features live in [`ee/`](ee/) under a separate commercial licence ([`ee/LICENSE`](ee/LICENSE)):
+free to read, build, modify and test, but production use needs a licence key.
+
+Contributions are welcome. By submitting one you accept the contributor licence agreement in
+[`CLA.md`](CLA.md), which lets the project relicense your work — including into `ee/`. Read
+[`CLAUDE.md`](CLAUDE.md) for the repo's conventions before you open a pull request.

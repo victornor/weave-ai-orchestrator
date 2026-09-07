@@ -7,6 +7,7 @@ import { Badge } from '../components/StatusGlyph';
 import { updateEntryLabel } from '../lib/upgrade';
 import type { UpdateEntry } from '../lib/upgrade';
 import type { WorkspaceListItem } from '../api/types';
+import type { Project } from '@agent-conductor/shared';
 import { cx } from '../lib/cx';
 
 export interface MoreSheetProps {
@@ -17,6 +18,12 @@ export interface MoreSheetProps {
   /** The daemon's canonical id for that workspace, which is what a listed workspace is compared against. */
   activeWs: string;
   workspaces: WorkspaceListItem[];
+  /**
+   * The active workspace's projects, each opening its overview (VS-95). They are not a rail
+   * destination, so they are not in `MORE_ITEMS` — that list is the rail's leftovers and a test
+   * pins it against `RAIL` and `TABS`.
+   */
+  projects: Project[];
   /** The active workspace's live Needs-you count; the listed one is a refetch behind. */
   needsCount: number;
   update?: UpdateEntry | null;
@@ -32,7 +39,7 @@ export interface MoreSheetProps {
  * like `WorkspaceNav`. Dismissal, Escape, the focus trap and the grab handle come from `Sheet`.
  */
 export function MoreSheet({
-  open, onClose, ws, activeWs, workspaces, needsCount, update, isActive, onNewWorkspace,
+  open, onClose, ws, activeWs, workspaces, projects, needsCount, update, isActive, onNewWorkspace,
 }: MoreSheetProps): React.ReactElement {
   return (
     <Sheet open={open} onClose={onClose} title="More" swipeToClose>
@@ -77,6 +84,27 @@ export function MoreSheet({
             );
           })}
         </nav>
+
+        {/* The sidebar is desktop-only, so this is the phone's way to a project's overview. */}
+        {projects.length > 0 ? (
+          <section aria-label="Projects">
+            <div className="ac-label mb-2">Projects</div>
+            <div className="ac-card divide-y divide-line-1">
+              {projects.map((p) => (
+                <A
+                  key={p.id}
+                  to="/w/$ws/p/$project"
+                  params={{ ws, project: p.slug }}
+                  onClick={onClose}
+                  className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-bg-2"
+                >
+                  <span className="ac-mono min-w-0 flex-1 truncate text-meta text-text-1">{p.slug}</span>
+                  <span className="ac-mono text-nano text-text-4">{p.defaultBranch}</span>
+                </A>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {/* The bottom bar addresses the active workspace only, so this is where the others are
             reached on a phone. It stays at the top of Settings as well — the same list, one tap

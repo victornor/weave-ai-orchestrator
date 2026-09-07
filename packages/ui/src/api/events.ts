@@ -187,6 +187,8 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
     case 'role.retired':
       inv(qk.roles(ws));
       inv(qk.role(ws, id));
+      // Hiring is a changelog kind of its own; the other five record nothing it reads.
+      if (evt.type === 'role.hired') inv(qk.changelogRoot(ws));
       break;
     case 'worker.spawned':
     case 'worker.status':
@@ -205,6 +207,12 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       inv(qk.tickets(ws));
       inv(qk.ticket(ws, id));
       inv(qk.briefing(ws));
+      // The changelog is derived from activity rows these events write, and until VS-95 nothing
+      // here made it stale — the Changelog view and the project overview both showed whatever they
+      // fetched on mount. `ticket.updated` and `ticket.assigned` record nothing the changelog reads.
+      if (evt.type !== 'ticket.updated' && evt.type !== 'ticket.assigned') inv(qk.changelogRoot(ws));
+      // Entering or leaving the queue is a status change, so this is the event that moves it.
+      if (evt.type === 'ticket.status' || evt.type === 'ticket.merged') inv(qk.mergeQueueRoot(ws));
       break;
     case 'ticket.comment':
       inv(qk.ticketComments(ws, id));
@@ -216,6 +224,8 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       break;
     case 'ticket.work_product':
       inv(qk.ticketWorkProducts(ws, id));
+      // A recorded pull request is a changelog entry of its own (`pr_opened`).
+      inv(qk.changelogRoot(ws));
       break;
     case 'decision.created':
     case 'decision.answered':

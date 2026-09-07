@@ -13,7 +13,12 @@ export const qk = {
   briefing: (ws: string) => ['w', ws, 'briefing'] as const,
   projects: (ws: string) => ['w', ws, 'projects'] as const,
   project: (ws: string, id: string) => ['w', ws, 'projects', id] as const,
-  mergeQueue: (ws: string, projectId: string) => ['w', ws, 'projects', projectId, 'merge-queue'] as const,
+  /**
+   * Deliberately not under `projects`: what a project's queue holds is decided by ticket events, and
+   * nested there only `project.*` reached it — so the queue sat on whatever it fetched on mount.
+   */
+  mergeQueueRoot: (ws: string) => ['w', ws, 'merge-queue'] as const,
+  mergeQueue: (ws: string, projectId: string) => ['w', ws, 'merge-queue', projectId] as const,
   roles: (ws: string) => ['w', ws, 'roles'] as const,
   role: (ws: string, id: string) => ['w', ws, 'roles', id] as const,
   workers: (ws: string) => ['w', ws, 'workers'] as const,

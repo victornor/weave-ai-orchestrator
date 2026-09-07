@@ -4,7 +4,8 @@
  * 30 s timeout and a fixed non-interactive env, and asserts that OpenSpec resolved the root we expect —
  * its root walk can escalate to an ancestor repo, which would silently read/write the wrong project.
  *
- * The exact JSON shapes are documented (docs/research/openspec.md) but not guaranteed, so every reader here
+ * The exact JSON shapes are documented by OpenSpec itself (`docs/agent-contract.md`, `docs/cli.md` in its
+ * repository) but not guaranteed, so every reader here
  * is defensive: unknown or missing fields degrade to null / empty rather than throwing.
  */
 import { execa } from 'execa';

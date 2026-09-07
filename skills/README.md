@@ -43,5 +43,5 @@ OpenSpec's own generated skills (`openspec-*`) live in the **project worktree**,
 - **Rules over prose.** Tables, imperatives, and the exact tool call shape. If a rule has a "why", give it one clause.
 - **Tool names are API.** They come from `packages/shared/src/tools.ts`; never invent one, never rename one in prose.
 - **Statuses, kinds, states and report fields** come from `packages/shared/src/enums.ts` and `report.ts`. Spell them exactly as they appear there.
-- Rules lifted from the research files (`docs/research/`) keep close to their original wording — they were chosen for their phrasing.
+- Rules lifted from the prior-art research keep close to their original wording — they were chosen for their phrasing.
 - Adding a skill means adding it to `manifest.json` and to the table above, and naming its trigger in whichever template should load it.

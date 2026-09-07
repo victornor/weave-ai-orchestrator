@@ -5,3 +5,7 @@ dist/
 .agent-conductor/
 coverage/
 .env
+
+# Design and research material is kept outside the repository (VS-91).
+docs/design/
+docs/research/

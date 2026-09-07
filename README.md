@@ -27,7 +27,6 @@ rather than in a long chat, so bootstrap cost per worker stays flat over the lif
 - [`docs/DOCKER.md`](docs/DOCKER.md) — the container image: one `/data` volume, what it does and does not carry.
 - [`docs/SCENARIOS.md`](docs/SCENARIOS.md) — end-to-end walkthroughs of what each participant sees.
 - [`docs/demos/`](docs/demos/) — reproducible M1–M6 demo scripts against the real commands.
-- [`docs/design/DESIGN-CONTRACT.md`](docs/design/DESIGN-CONTRACT.md) — tokens, components, screens, states.
 - [`skills/README.md`](skills/README.md) — the agent-facing instruction layer.
 - [`CLAUDE.md`](CLAUDE.md) — conventions for coding agents working on this repo.
 

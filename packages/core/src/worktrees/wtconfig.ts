@@ -6,7 +6,7 @@ import { projectKeyFromUrl } from '../util/git.js';
 function tomlString(s: string): string { return JSON.stringify(s); }
 
 /**
- * Generate the per-workspace worktrunk user config (docs/research/worktrunk.md).
+ * Generate the per-workspace worktrunk user config (PLAN §11.5).
  * Every `wt` invocation passes `--config <this file>`, so the human's own worktrunk config is never read or written.
  */
 export function renderWtConfig(projects: Array<Pick<ProjectConfig, 'url' | 'defaultBranch' | 'setupCommand'>>): string {

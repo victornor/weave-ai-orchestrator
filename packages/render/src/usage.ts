@@ -225,24 +225,35 @@ export function resolveModel<T extends { id: string }>(models: T[] | null | unde
   return prefixed[0] ?? null;
 }
 
-/** The live context size of a resumed session: what the last turn sent, plus what it read from cache. */
-export function contextTokens(usage: { inputTokens?: number | null; cachedInputTokens?: number | null } | null | undefined): number {
-  return n(usage?.inputTokens) + n(usage?.cachedInputTokens);
+/**
+ * The live context size of a resumed session: the size of the last API request the turn made, as
+ * the runtime reported it for that request alone.
+ *
+ * Deliberately not `inputTokens + cachedInputTokens`. Those are the turn's totals across every
+ * request it made, and a turn re-sends or cache-reads the whole conversation on each one, so their
+ * sum is roughly the context size multiplied by the request count — for a turn with twenty tool
+ * round-trips it is several times the window, which is how the meter came to read 100 % for almost
+ * every turn (VS-98). Zero when the runtime reported no per-request figure; the caller says so
+ * rather than measuring a total against the window.
+ */
+export function contextTokens(usage: { contextTokens?: number | null } | null | undefined): number {
+  return n(usage?.contextTokens);
 }
 
 /**
  * How full the conductor's context is: the last turn's context size as a fraction of the model's
  * window, and how far that is towards the point the runtime compacts at.
  *
- * The turn's own `inputTokens + cachedInputTokens` is the context size because the session is
- * resumed — everything the conversation holds is re-sent or read back from cache on every turn.
+ * The size is one request's, from `contextTokens` — see there for why the turn's totals are not a
+ * context measurement.
  *
  * Null when there is no finished turn to measure, which is not a failure and needs no line. A turn
- * that reported nothing usable, and a model whose window we cannot state, both come back with a
- * `reason` and no meter rather than a percentage of a number we invented.
+ * whose runtime reported no per-request size, and a model whose window we cannot state, both come
+ * back with a `reason` and no meter rather than a percentage of a number we invented.
  */
 export function contextStrip(input: {
-  usage: { inputTokens?: number | null; cachedInputTokens?: number | null } | null | undefined;
+  /** The run's recorded usage. Only its `contextTokens` is read: the turn's totals are not a size. */
+  usage: { contextTokens?: number | null } | null | undefined;
   /** The model's own context window, from the runtime's model list. */
   contextWindowTokens: number | null | undefined;
   /** The runtime's compaction point as a fraction of the window, from its capabilities. */

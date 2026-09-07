@@ -29,6 +29,8 @@ describe('claude stream-json parser', () => {
     expect(state.model).toBe('claude-haiku-4-5-20251001');
     expect(state.finalText).toBe('pong');
     expect(state.usage).toEqual({ inputTokens: 12333, outputTokens: 43, cachedInputTokens: 13615 });
+    // One request, so its size and the turn's totals happen to agree: 10 + 12323 + 13615.
+    expect(state.contextTokens).toBe(25_948);
     expect(state.costUsd).toBeCloseTo(0.0262325, 6);
     expect(state.isError).toBe(false);
     // unknown CLI events are kept, never dropped
@@ -51,6 +53,31 @@ describe('claude stream-json parser', () => {
     expect(state.structured).toEqual({ state: 'done', summary: 'said pong' });
     expect(state.finalText).toBe('{"state":"done","summary":"said pong"}');
     expect(state.usage).toEqual({ inputTokens: 17962, outputTokens: 257, cachedInputTokens: 17739 });
+  });
+
+  it('measures the context from the last request, while usage stays the turn\u2019s total', () => {
+    // This fixture is a two-request turn: the first assistant message reports 10 + 17,739 + 0 and
+    // the second 8 + 205 + 17,739. The `result` block sums them, which is what cost is computed
+    // from — and what the context meter used to be computed from, reading 35,701 tokens for a
+    // conversation that never held more than 17,952 (VS-98).
+    const { state } = run('turn-tool-structured');
+    expect(state.contextTokens).toBe(17_952);
+    const cumulative = state.usage!.inputTokens + state.usage!.cachedInputTokens!;
+    expect(cumulative).toBe(35_701);
+    expect(state.contextTokens).toBeLessThan(cumulative);
+  });
+
+  it('ignores a sub-agent\u2019s requests, which measure a different conversation', () => {
+    const p = createClaudeParser();
+    const msg = (parent: string | null, cacheRead: number) => JSON.stringify({
+      type: 'assistant', session_id: 's1', parent_tool_use_id: parent,
+      message: { model: 'm', content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: cacheRead } },
+    });
+    p.handle(msg(null, 80_000));
+    expect(p.state.contextTokens).toBe(80_005);
+    // A Task tool's own turn: far smaller, and not this session's context.
+    p.handle(msg('toolu_sub', 900));
+    expect(p.state.contextTokens).toBe(80_005);
   });
 
   it('reports session.resumed when the turn resumed a session', () => {

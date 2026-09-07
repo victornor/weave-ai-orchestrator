@@ -34,7 +34,16 @@ export interface RuntimeEvent { seq?: number; ts: string; type: RunEventType; pa
 export interface TurnSink { onSpawn(info: { pid: number; pgid: number | null }): void; onEvent(ev: RuntimeEvent): void; onRaw(stream: 'stdout' | 'stderr', chunk: string): void }
 export interface TurnResult {
   exitCode: number | null; signal: string | null; timedOut: boolean; session: SessionRef | null; finalText: string | null; structured?: unknown;
-  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number; basis: 'per_turn' | 'session_cumulative' };
+  /**
+   * The turn's token counts, summed over every API request it made — what cost and the usage
+   * records are computed from. `contextTokens` is the odd one out: the size of the turn's **last**
+   * request alone (its input, its cache creation and its cache reads), which is the only one of
+   * these numbers that measures how full the context window is. A turn re-sends or cache-reads the
+   * whole conversation on every request, so the cumulative fields are roughly the context size
+   * multiplied by the request count and are not a context measurement. Omitted by an adapter whose
+   * CLI reports no per-request figure — better unreported than a total read as a size.
+   */
+  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number; contextTokens?: number; basis: 'per_turn' | 'session_cumulative' };
   cost?: { usd: number; status: 'reported' | 'estimated' }; model?: string; provider?: string;
   error?: { code: string; family: RunErrorFamily; message: string; retryAfterMs?: number };
 }

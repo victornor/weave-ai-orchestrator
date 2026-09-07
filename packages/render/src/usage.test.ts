@@ -270,9 +270,12 @@ describe('resolveModel', () => {
 });
 
 describe('contextStrip', () => {
-  const usage = { inputTokens: 12_000, cachedInputTokens: 70_000, outputTokens: 900 };
+  // A realistic turn: eight or so API requests, each re-sending or cache-reading the whole
+  // conversation, so the cumulative counts come to 987,790 tokens — the shape of the two conductor
+  // runs that made the meter read 100 % (VS-98). The context is one request of it: 82,000.
+  const usage = { inputTokens: 320_119, cachedInputTokens: 667_671, outputTokens: 1_022, contextTokens: 82_000 };
 
-  it('reads the context as the turn\u2019s input plus its cache reads', () => {
+  it('reads the context as the last request\u2019s size, not the turn\u2019s totals', () => {
     expect(contextTokens(usage)).toBe(82_000);
     expect(contextTokens(null)).toBe(0);
   });
@@ -287,6 +290,15 @@ describe('contextStrip', () => {
     });
   });
 
+  it('cannot exceed 100 % for a turn whose totals dwarf the window', () => {
+    // The regression: 987,790 cumulative tokens against a 200k window is 494 %, clamped to 100 %.
+    // Measured one request at a time it is 41 %, and no arrangement of the totals can reach the top.
+    const v = contextStrip({ usage, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true });
+    expect(v?.meter?.percent).toBe(41);
+    expect(v?.meter?.percent).toBeLessThan(100);
+    expect(v?.tokens).toBeLessThan(usage.inputTokens + usage.cachedInputTokens);
+  });
+
   it('measures against a larger window without a special case', () => {
     expect(contextStrip({ usage, contextWindowTokens: 1_000_000, compactionAt: 0.92, hasRun: true })?.meter)
       .toEqual({ percent: 8, toCompaction: 9, tone: 'ok' });
@@ -294,7 +306,7 @@ describe('contextStrip', () => {
 
   it('takes its tone from the distance to compaction, not from the raw window', () => {
     const at = (tokens: number): string | undefined =>
-      contextStrip({ usage: { inputTokens: tokens, cachedInputTokens: 0 }, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true })?.meter?.tone;
+      contextStrip({ usage: { contextTokens: tokens }, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true })?.meter?.tone;
     // 147.2k of 184k is 80 % of the way to compaction but only 74 % of the window.
     expect(at(147_200)).toBe('warn');
     expect(at(146_000)).toBe('ok');
@@ -307,7 +319,7 @@ describe('contextStrip', () => {
   });
 
   it('clamps a context that has outgrown the numbers we were given', () => {
-    expect(contextStrip({ usage: { inputTokens: 500_000, cachedInputTokens: 0 }, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true })?.meter)
+    expect(contextStrip({ usage: { contextTokens: 500_000 }, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true })?.meter)
       .toEqual({ percent: 100, toCompaction: 100, tone: 'over' });
   });
 
@@ -324,6 +336,15 @@ describe('contextStrip', () => {
   it('gives one quiet reason, and no percentage, when the turn reported no tokens', () => {
     expect(contextStrip({ usage: null, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true }))
       .toMatchObject({ tokens: 0, meter: null, reason: 'Context size unreported' });
-    expect(contextStrip({ usage: { inputTokens: 0, cachedInputTokens: 0 }, contextWindowTokens: 200_000, hasRun: true })?.reason).toBe('Context size unreported');
+    expect(contextStrip({ usage: { contextTokens: 0 }, contextWindowTokens: 200_000, hasRun: true })?.reason).toBe('Context size unreported');
+  });
+
+  it('reports nothing rather than a total for a runtime that cannot measure one request', () => {
+    // opencode, gemini and codex report only what the whole turn consumed. Measuring that against
+    // the window is what produced the wrong number, so it is not measured at all.
+    const cumulativeOnly: { inputTokens: number; cachedInputTokens: number; outputTokens: number; contextTokens?: number } =
+      { inputTokens: 320_119, cachedInputTokens: 667_671, outputTokens: 1_022 };
+    expect(contextStrip({ usage: cumulativeOnly, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true }))
+      .toMatchObject({ tokens: 0, meter: null, reason: 'Context size unreported' });
   });
 });

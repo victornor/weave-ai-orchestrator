@@ -123,8 +123,9 @@ export function ChatRoute(): React.ReactElement {
   const planSync = usePlanSync();
   // How full the conductor's context is. The window is the model's own, from the runtime's model
   // list; the compaction point is the runtime's own capability — neither is decided in the UI. The
-  // size itself is the last finished turn's input plus cache reads, refreshed because `run.finished`
-  // invalidates the conductor detail.
+  // size itself is the last finished turn's *last API request*, which the runtime reported for that
+  // request alone; the turn's totals cover every request it made and are not a size. Refreshed
+  // because `run.finished` invalidates the conductor detail.
   const runtimes = useRuntimes();
   const conductorModels = useRuntimeModels(conductorRuntime);
   const lastRun = conductor.data?.lastRun ?? null;

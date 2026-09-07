@@ -9,6 +9,13 @@ export interface ClaudeParseState {
   assistantText: string;
   structured: unknown;
   usage: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } | null;
+  /**
+   * The size of the last API request this turn made, from the last `assistant` message that carried
+   * a usage block: what it sent, what it wrote to cache and what it read back. That is the context
+   * window's fill. The `result` message's usage is the same fields summed over every request the
+   * turn made, so it is the turn's cost and not a size — see `usage` above.
+   */
+  contextTokens: number | null;
   costUsd: number | null;
   isError: boolean;
   errorMessage: string | null;
@@ -31,7 +38,7 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 export function createClaudeParser(opts: { resumed: boolean } = { resumed: false }) {
   const state: ClaudeParseState = {
     sessionId: null, model: null, finalText: null, assistantText: '', structured: undefined,
-    usage: null, costUsd: null, isError: false, errorMessage: null, numTurns: null,
+    usage: null, contextTokens: null, costUsd: null, isError: false, errorMessage: null, numTurns: null,
   };
   /** tool_use id -> tool name, so tool_result lines can be classified. */
   const toolNames = new Map<string, string>();
@@ -73,6 +80,17 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
     const m = obj(msg['message']);
     if (!m) return [raw('assistant', msg, ts)];
     state.model = str(m['model']) ?? state.model;
+    // Each assistant message carries the usage of the request that produced it, so the last one is
+    // the turn's final context size. A message nested under a tool call is a sub-agent's: its
+    // request measures a different conversation, and a turn that ends inside sub-agent work would
+    // otherwise report the sub-agent's much smaller context as this session's.
+    if (msg['parent_tool_use_id'] == null) {
+      const u = obj(m['usage']);
+      if (u) {
+        state.contextTokens =
+          (num(u['input_tokens']) ?? 0) + (num(u['cache_creation_input_tokens']) ?? 0) + (num(u['cache_read_input_tokens']) ?? 0);
+      }
+    }
     const content = Array.isArray(m['content']) ? m['content'] : [];
     for (const blockRaw of content) {
       const b = obj(blockRaw);

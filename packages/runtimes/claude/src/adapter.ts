@@ -162,7 +162,9 @@ export const adapter: RuntimeAdapter = {
       session: { sessionId },
       finalText: st.finalText,
       ...(structured !== undefined ? { structured } : {}),
-      ...(st.usage ? { usage: { ...st.usage, basis: 'per_turn' as const } } : {}),
+      ...(st.usage
+        ? { usage: { ...st.usage, ...(st.contextTokens != null ? { contextTokens: st.contextTokens } : {}), basis: 'per_turn' as const } }
+        : {}),
       ...(st.costUsd != null ? { cost: { usd: st.costUsd, status: 'reported' as const } } : {}),
       ...(st.model ? { model: st.model } : {}),
       provider: 'anthropic',

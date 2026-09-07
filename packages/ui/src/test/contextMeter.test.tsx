@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { contextStrip } from '@agent-conductor/render';
 import { ContextMeter } from '../components/ContextMeter';
 
-const usage = { inputTokens: 12_000, cachedInputTokens: 70_000, outputTokens: 900 };
+const usage = { inputTokens: 320_119, cachedInputTokens: 667_671, outputTokens: 1_022, contextTokens: 82_000 };
 const view = (over: Partial<Parameters<typeof contextStrip>[0]> = {}) =>
   contextStrip({ usage, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true, ...over });
 

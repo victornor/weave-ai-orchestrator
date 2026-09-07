@@ -54,7 +54,9 @@ The workspace outbox carries `job.started` and `job.finished` only — never a l
 `GET /tickets/:id/comments?after=` · `POST /tickets/:id/comments` `{ body }` (human; wakes worker) · `GET /tickets/:id/documents/:key?revision=` · `PUT /tickets/:id/documents/:key` `{ body }` · `GET /tickets/:id/documents/:key/revisions` · `GET /tickets/:id/work-products` · `GET /tickets/:id/runs` · `GET /tickets/:id/usage` · `POST /tickets/:id/discard` `{ force: true }` (creates discard_approval unless already approved)
 
 ### Decisions
-`GET /decisions?status=&owner=` · `GET /decisions/:id` · `POST /decisions/:id/answer` `{ key?, text?, remember? }` · `POST /decisions/:id/withdraw`
+`GET /decisions?status=&owner=` · `GET /decisions/:id` · `POST /decisions/:id/answer` `{ key?, text?, remember?, inputs? }` · `POST /decisions/:id/withdraw`
+
+A decision carries `projectId` (the ticket's project, else the one the asker named, else `null` — surfaces label that as `Workspace`) and `inputs`: values the card collects as well as, or instead of, an option. `inputs` on the answer is a map keyed by input key, whose value is a string or, for a `multiselect`, the chosen keys; it is recorded on the decision as `answerInputs` and delivered to the asker in its wake. A `secret` input is the exception: its value is registered as a workspace secret under the input's `secretName` and **only that name** is recorded, so the value never reaches the decision, the chat, a ticket, a log, a transcript or an export. Clients must not put an answer carrying a secret input into any client-side retry queue.
 
 ### Runs
 `GET /runs?agent=&ticket=&status=&limit=&offset=` · `GET /runs/traces?ids=&agent=&since=&limit=` (per-run counts of tool calls, distinct files, errors and assistant text plus timing, oldest first; `ids` and the agent window are a union; unknown ids omitted) · `GET /runs/:id` · `GET /runs/:id/events?after=&limit=` · `GET /runs/:id/events/stream` (SSE) · `POST /runs/:id/cancel` `{ mode }` · `GET /runs/:id/log` (raw jsonl)

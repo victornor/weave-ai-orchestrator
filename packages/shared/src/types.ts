@@ -18,7 +18,29 @@ export function waitingOnRuntimeLogin(agent: { status?: string; pauseDetail?: Ag
 export interface Agent { id: string; workspaceId: string; kind: E.AgentKind; projectId: string | null; roleId: string | null; roleRevision: number | null; ticketId: string | null; name: string; runtimeId: string; status: E.AgentStatus; pauseReason: string | null; pauseDetail: AgentPauseDetail | null; errorText: string | null; homePath: string; worktreePath: string | null; branch: string | null; turnEpoch: number; turnCount: number; spawnedBy: string; spawnReason: string | null; briefRevision: number; lastRunAt: string | null; retiredAt: string | null; createdAt: string; updatedAt: string }
 export interface Ticket { id: string; workspaceId: string; projectId: string | null; number: number; identifier: string; kind: E.TicketKind; title: string; description: string; status: E.TicketStatus; priority: E.TicketPriority; autoMerge: boolean; assigneeRoleId: string | null; workerId: string | null; assigneeHuman: boolean; parentId: string | null; createdByKind: string; createdById: string | null; createdRunId: string | null; originKind: string | null; originFingerprint: string | null; checkoutRunId: string | null; executionRunId: string | null; openspecChangeName: string | null; openspecState: Record<string, unknown> | null; delivery: Record<string, unknown> | null; unblock: { owner: string; action: string } | null; monitorNextCheckAt: string | null; blockedTransitionAt: string | null; mergeQueuedAt: string | null; mergeStartedAt: string | null; startedAt: string | null; completedAt: string | null; cancelledAt: string | null; createdAt: string; updatedAt: string }
 export interface TicketComment { id: string; ticketId: string; authorKind: E.AuthorKind; authorId: string | null; runId: string | null; body: string; kind: E.CommentKind; sourceTrust: E.SourceTrust; createdAt: string }
-export interface Decision { id: string; workspaceId: string; ticketId: string | null; kind: E.DecisionKind; owner: E.DecisionOwner; askedByAgentId: string | null; askedInRunId: string | null; title: string; context: string; options: Array<{ key: string; label: string; description?: string; recommended?: boolean }>; allowFreeText: boolean; recommendation: string | null; status: E.DecisionStatus; answerKey: string | null; answerText: string | null; answeredByKind: string | null; answeredById: string | null; answeredAt: string | null; expiresAt: string | null; target: Record<string, unknown> | null; correlationKey: string | null; createdAt: string }
+/** One of a `multiselect` input's choices. Keys are unique within that input. */
+export interface DecisionInputChoice { key: string; label: string; description?: string }
+/**
+ * A value a decision asks the human for, alongside (or instead of) choosing an option (VS-92).
+ * `multiselect` carries its `choices`; `secret` carries the `secretName` its value is registered
+ * under — the value of a secret input is never the answer, only the name is (see `answerInputs`).
+ */
+export interface DecisionInput {
+  key: string;
+  label: string;
+  type: E.DecisionInputType;
+  required?: boolean;
+  placeholder?: string;
+  /** `multiselect` only, and required for it. */
+  choices?: DecisionInputChoice[];
+  /** `secret` only, and required for it: the workspace secret name, which becomes the env var name. */
+  secretName?: string;
+}
+/** What a card collected, keyed by input key: a string, or the chosen keys of a multi-select. A secret's string is its name. */
+export type DecisionAnswerInputs = Record<string, string | string[]>;
+export interface Decision { id: string; workspaceId: string; ticketId: string | null; projectId: string | null; kind: E.DecisionKind; owner: E.DecisionOwner; askedByAgentId: string | null; askedInRunId: string | null; title: string; context: string; options: Array<{ key: string; label: string; description?: string; recommended?: boolean }>; inputs: DecisionInput[]; allowFreeText: boolean; recommendation: string | null; status: E.DecisionStatus; answerKey: string | null; answerText: string | null; answerInputs: DecisionAnswerInputs | null; answeredByKind: string | null; answeredById: string | null; answeredAt: string | null; expiresAt: string | null; target: Record<string, unknown> | null; correlationKey: string | null; createdAt: string }
+/** A workspace secret as any surface may see it (VS-92): the name, where it is exposed, and whether a value is held. Never the value. */
+export interface WorkspaceSecret { name: string; envVarName: string; scope: E.SecretScope; scopeId: string | null; hasValue: boolean }
 export interface Wakeup { id: string; workspaceId: string; agentId: string; source: E.WakeSource; reason: string; payload: Record<string, unknown>; idempotencyKey: string | null; status: E.WakeStatus; coalescedIntoId: string | null; skipReason: string | null; runId: string | null; requestedByKind: string | null; requestedById: string | null; notBefore: string | null; createdAt: string; claimedAt: string | null; finishedAt: string | null }
 export interface Run { id: string; workspaceId: string; agentId: string; ticketId: string | null; sessionId: string | null; wakeupIds: string[]; runtimeId: string; model: string | null; status: E.RunStatus; turnEpoch: number; cwd: string; startedAt: string | null; finishedAt: string | null; exitCode: number | null; signal: string | null; pid: number | null; pgid: number | null; errorCode: string | null; errorFamily: E.RunErrorFamily | null; retryOfRunId: string | null; usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number; basis: string } | null; costCents: number | null; result: Record<string, unknown> | null; liveness: E.RunLiveness | null; logPath: string | null; summary: string | null; createdAt: string }
 export interface RunEvent { id: string; runId: string; seq: number; ts: string; type: E.RunEventType; stream: string; level: string; payload: Record<string, unknown> }

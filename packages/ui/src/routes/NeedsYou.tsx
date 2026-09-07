@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import type { DecisionAnswerInputs } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { DecisionCard } from '../components/DecisionCard';
 import { PlanPreview } from '../components/PlanPreview';
@@ -46,7 +47,14 @@ export function NeedsYouRoute(): React.ReactElement {
     [tickets.data],
   );
 
-  const onAnswer = (id: string, a: { key?: string; text?: string; remember?: boolean }): void => {
+  const onAnswer = (id: string, a: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }): void => {
+    // The queue is localStorage. A card that collected a credential must never go into it, so this
+    // answer goes to the daemon or nowhere, and the human is told it was not sent (VS-92).
+    const carriesSecret = (decisions.data?.find((d) => d.id === id)?.inputs ?? []).some((i) => i.type === 'secret');
+    if (offline && carriesSecret) {
+      toast.push({ title: 'Not sent', detail: 'This card holds a secret, so it is never stored on this device. Send it again when you are back online.', status: 'failed' });
+      return;
+    }
     if (offline) {
       enqueue({ kind: 'decision', path: `/decisions/${id}/answer`, body: a, label: a.key ?? a.text ?? 'decision' });
       toast.push({ title: 'Answer queued', detail: 'Re-validated against the ticket when the connection returns.', status: 'working' });
@@ -56,7 +64,11 @@ export function NeedsYouRoute(): React.ReactElement {
       { id, ...a },
       {
         onSuccess: () => toast.push({ title: 'Recorded', detail: a.key ? `Answer: ${a.key}` : undefined, status: 'done', ttl: 4000 }),
-        onError: (e) => toast.push({ title: 'Could not record that answer', detail: e.message, status: 'failed' }),
+        onError: (e) => toast.push({
+          title: carriesSecret ? 'Not sent' : 'Could not record that answer',
+          detail: carriesSecret ? `${e.message} — nothing was stored on this device; send it again.` : e.message,
+          status: 'failed',
+        }),
       },
     );
   };
@@ -106,6 +118,7 @@ export function NeedsYouRoute(): React.ReactElement {
                   <DecisionCard
                     decision={d}
                     ticketIdentifier={t?.identifier ?? d.ticketId}
+                    projectSlug={projects.data?.find((p) => p.id === (d.projectId ?? t?.projectId))?.slug ?? null}
                     askedBy={d.askedByAgentId}
                     busy={answer.isPending}
                     queued={isQueued}

@@ -202,8 +202,10 @@ describe('migrations', () => {
 
       expect(db.all<{ name: string }>('PRAGMA index_list(decisions)').map((i) => i.name))
         .toEqual(expect.arrayContaining(['decisions_open_corr', 'decisions_ws_status']));
+      // Containment, not equality: this is 0010's invariant — the rebuild kept the references it
+      // had — and a later migration adding a column with one of its own does not violate it.
       expect(db.all<{ from: string; table: string }>('PRAGMA foreign_key_list(decisions)').map((f) => `${f.from}->${f.table}`).sort())
-        .toEqual(['ticket_id->tickets', 'workspace_id->workspaces']);
+        .toEqual(expect.arrayContaining(['ticket_id->tickets', 'workspace_id->workspaces']));
       expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
 
       insertDecision(db, { id: 'd4', ticketId: 't1', kind: 'retry_approval', title: 'Parked', correlationKey: 'retry:a1' });
@@ -378,6 +380,57 @@ describe('migrations', () => {
       expect(again.all("SELECT value FROM meta WHERE key = 'migration:0012_model_settings.sql'")).toHaveLength(1);
       expect(again.all<{ name: string }>('PRAGMA table_info(roles)').map((c) => c.name)).not.toContain('runtime_id');
       again.close();
+    });
+  });
+  describe('0013_decision_project_inputs', () => {
+    const cols = (db: Db, table: string): string[] => db.all<{ name: string }>(`PRAGMA table_info(${table})`).map((c) => c.name);
+
+    it('backfills project_id from the ticket and defaults the input columns', () => {
+      const path = join(dir, 'dpi.sqlite');
+      const before = openDbAsOf(path, '0012_upgrade_announcement.sql');
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      before.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at)
+         VALUES ('p1', 'w1', 'api', 'API', 'git@e:a/b.git', 'main', '/tmp/p', 4, 'git', 1, '{}', 'ready', 't0', 't0')`);
+      before.run(
+        `INSERT INTO tickets (id, workspace_id, project_id, number, identifier, kind, title, created_by_kind, created_at, updated_at)
+         VALUES ('t1', 'w1', 'p1', 1, 'VS-1', 'change', 'Add dark mode', 'human', 't0', 't0')`);
+      expect(cols(before, 'decisions')).not.toContain('project_id');
+      const seed = (id: string, ticketId: string | null): void => {
+        before.run(
+          `INSERT INTO decisions (id, workspace_id, ticket_id, kind, owner, title, status, created_at)
+           VALUES (?, 'w1', ?, 'question', 'human', 'Which one?', 'open', 't1')`, [id, ticketId]);
+      };
+      seed('d_ticket', 't1');
+      seed('d_workspace', null);
+      before.close();
+
+      const db = openDb(path);
+      expect(cols(db, 'decisions')).toEqual(expect.arrayContaining(['project_id', 'inputs_json', 'answer_inputs_json']));
+      // The ticket's project is where every decision raised before this migration got its project.
+      expect(db.get('SELECT * FROM decisions WHERE id = ?', ['d_ticket'])).toMatchObject({ projectId: 'p1', inputs: [], answerInputs: null });
+      // A workspace-wide question stays null, which is the honest answer for it.
+      expect(db.get('SELECT * FROM decisions WHERE id = ?', ['d_workspace'])).toMatchObject({ projectId: null, inputs: [] });
+      expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+      db.close();
+    });
+
+    it('round-trips the input columns as JSON', () => {
+      const db = openDb(join(dir, 'dpi2.sqlite'));
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.insert('decisions', {
+        id: 'd1', workspaceId: 'w1', kind: 'question', owner: 'human', title: 'Keys?', status: 'answered', createdAt: 't1',
+        inputsJson: [{ key: 'regions', label: 'Regions', type: 'multiselect', choices: [{ key: 'eu', label: 'EU' }] }],
+        answerInputsJson: { regions: ['eu'], token: 'CF_READONLY_TOKEN' },
+      });
+      const row = db.get<{ inputs: Array<{ key: string }>; answerInputs: Record<string, unknown> }>('SELECT * FROM decisions WHERE id = ?', ['d1']);
+      expect(row?.inputs[0]?.key).toBe('regions');
+      expect(row?.answerInputs).toEqual({ regions: ['eu'], token: 'CF_READONLY_TOKEN' });
+      db.close();
     });
   });
 });

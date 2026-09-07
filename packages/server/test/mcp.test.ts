@@ -177,4 +177,63 @@ describe('agent REST mirror', () => {
     expect(tools.map((t: { name: string }) => t.name)).toContain('ac_worktree_status');
     expect(tools[0].inputSchema.type).toBe('object');
   });
+  // ---------- VS-92 ----------
+
+  it('forwards ac_ask inputs and defaults the project to the asker\'s own', async () => {
+    const { client, h } = await connect();
+    const res = await client.callTool({
+      name: 'ac_ask',
+      arguments: {
+        title: 'I need a read-only token',
+        inputs: [
+          { key: 'token', label: 'Read-only API token', type: 'secret', required: true, secretName: 'CF_READONLY_TOKEN' },
+          { key: 'regions', label: 'Regions', type: 'multiselect', choices: [{ key: 'eu', label: 'EU' }] },
+        ],
+      },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(h.decisionInputs.at(-1)).toMatchObject({
+      // A worker names no project, so its own is the one the card shows.
+      projectId: 'proj1',
+      inputs: [
+        { key: 'token', type: 'secret', secretName: 'CF_READONLY_TOKEN', required: true },
+        { key: 'regions', type: 'multiselect', choices: [{ key: 'eu', label: 'EU' }] },
+      ],
+    });
+    await client.close();
+  });
+
+  it('lets the asker name the project a question is about', async () => {
+    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null, projectId: null });
+    await client.callTool({ name: 'ac_ask', arguments: { title: 'Which region?', projectId: 'proj9' } });
+    expect(h.decisionInputs.at(-1)).toMatchObject({ projectId: 'proj9' });
+    await client.close();
+  });
+
+  it('says on ac_ask that a secret input is stored rather than answered', async () => {
+    const { client } = await connect();
+    const tools = (await client.listTools()).tools;
+    const ask = tools.find((t) => t.name === 'ac_ask')!;
+    expect(ask.description).toContain('never ask for one in prose');
+    expect(ask.description).toContain('answerInputs');
+    await client.close();
+  });
+
+  it('gives only the conductor ac_role_set_secrets, and refuses an unregistered name', async () => {
+    const worker = await connect();
+    expect((await worker.client.listTools()).tools.map((t) => t.name)).not.toContain('ac_role_set_secrets');
+    await worker.client.close();
+
+    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const refused = await client.callTool({ name: 'ac_role_set_secrets', arguments: { id: 'role_1', names: ['NOPE'], reason: 'needs it' } });
+    expect(JSON.parse((refused.content as Array<{ text: string }>)[0]!.text).ok).toBe(false);
+    expect(h.roleSecrets.size).toBe(0);
+
+    // Registered by a human answering a secret input; only then can a role list it.
+    h.runtime.services.secrets.put({ kind: 'human', id: 'victor' }, { name: 'CF_READONLY_TOKEN' }, 'cf-not-a-real-token-0000000000');
+    const ok = await client.callTool({ name: 'ac_role_set_secrets', arguments: { id: 'role_1', names: ['CF_READONLY_TOKEN'], reason: 'cloudflare work' } });
+    expect(JSON.parse((ok.content as Array<{ text: string }>)[0]!.text).ok).toBe(true);
+    expect(h.roleSecrets.get('role_1')).toEqual(['CF_READONLY_TOKEN']);
+    await client.close();
+  });
 });

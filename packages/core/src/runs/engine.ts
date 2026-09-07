@@ -74,13 +74,21 @@ export async function mintRunToken(ctx: WorkspaceContext, claims: { agentId: str
 
 // ---------- helpers ----------
 
-function roleSecretsEnv(ctx: WorkspaceContext, role: Role | null): { env: Record<string, string>; values: string[] } {
+/**
+ * A role's secrets as environment variables, and the values to redact from everything the turn says.
+ *
+ * The daemon's own environment wins (VS-92 keeps that precedence): an operator who exports the
+ * variable on the host still decides. The workspace store only fills a name the host does not carry,
+ * which is what a secret the human typed on a decision card is. A name with no value anywhere is
+ * omitted rather than passed as empty — an empty credential fails later and more confusingly.
+ */
+function roleSecretsEnv(ctx: WorkspaceContext, deps: () => CoreServices, role: Role | null): { env: Record<string, string>; values: string[] } {
   const env: Record<string, string> = {};
   const values: string[] = [];
   for (const name of role?.secrets ?? []) {
     const secret = ctx.db.get<{ envVarName: string }>('SELECT env_var_name FROM secrets WHERE workspace_id = ? AND name = ?', [ctx.workspaceId, name]);
     const varName = secret?.envVarName ?? name;
-    const value = process.env[varName];
+    const value = process.env[varName] ?? deps().secrets.value(name) ?? null;
     if (value) { env[varName] = value; values.push(value); }
   }
   return { env, values };
@@ -203,7 +211,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     };
     writeFileSync(join(runDir, 'mcp.json'), JSON.stringify({ mcpServers }, null, 2), 'utf8');
 
-    const secrets = roleSecretsEnv(ctx, role);
+    const secrets = roleSecretsEnv(ctx, deps, role);
     redact = makeRedactor([token, ...secrets.values]);
     const env: Record<string, string> = {
       [AC_ENV.API_URL]: ctx.loopbackUrl,

@@ -6,7 +6,7 @@ function decision(over: Partial<Decision> & { kind: DecisionKind }): Decision {
   return {
     id: 'dec_1', workspaceId: 'ws', ticketId: 'tkt_1', owner: 'human', askedByAgentId: 'ag_1', askedInRunId: 'run_1',
     title: 'Approve the plan for the tokens refactor', context: 'Six requirements, two of them new.',
-    options: [], recommendation: null, status: 'open', answerKey: null, answerText: null,
+    options: [], inputs: [], recommendation: null, status: 'open', answerKey: null, answerText: null, answerInputs: null,
     answeredByKind: null, answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null,
     createdAt: '2026-09-04T11:56:00.000Z', ...over,
   } as Decision;
@@ -128,7 +128,52 @@ describe('decisionToCard', () => {
     const card = decisionToCard({ id: 'd', kind: 'question', status: 'open' } as Decision, {});
     expect(card.title).toBe('Decision');
     expect(card.options).toEqual([]);
-    expect(card.subtitle).toBeNull();
+    // Was null before VS-92. A card is now always labelled with its project, and a decision that
+    // belongs to none is the workspace's: an absent label and an unresolved one must not look alike.
+    expect(card.subtitle).toBe('Workspace');
     expect(card.uiStatus).toBe('needs-you');
+  });
+  // VS-92: the project label, and a card whose values this surface cannot collect.
+  describe('the project and cards that ask for values', () => {
+    it('says Workspace when no project is known, rather than leaving the label out', () => {
+      const card = decisionToCard(decision({ kind: 'question', ticketId: null }), { now });
+      expect(card.subtitle).toBe('Workspace');
+    });
+
+    it('names the project when one is given, next to the ticket', () => {
+      expect(decisionToCard(decision({ kind: 'question' }), { ticketIdentifier: 'ACME-42', projectName: 'web', now }).subtitle).toBe('ACME-42 · web');
+      // Still labelled when the ticket is all that is known.
+      expect(decisionToCard(decision({ kind: 'question' }), { ticketIdentifier: 'ACME-42', now }).subtitle).toBe('ACME-42 · Workspace');
+    });
+
+    it('sends a card that asks for values to the web app instead of offering buttons', () => {
+      const card = decisionToCard(decision({
+        kind: 'question',
+        inputs: [{ key: 'token', label: 'Read-only token', type: 'secret', secretName: 'CF_READONLY_TOKEN' }],
+        options: [{ key: 'skip', label: 'Skip' }],
+      }), { projectName: 'web', now });
+      expect(card.answerElsewhere).toBe(true);
+      expect(card.options).toEqual([]);
+      expect(card.allowFreeText).toBe(false);
+      expect(card.body.at(-1)).toMatchObject({ value: 'Answer this in the web app: it asks for 1 value.' });
+      // The question itself is still readable here — only answering moves.
+      expect(card.title).toBe('Approve the plan for the tokens refactor');
+    });
+
+    it('leaves a card without inputs exactly as it is', () => {
+      const card = decisionToCard(decision({ kind: 'question', options: [{ key: 'skip', label: 'Skip' }] }), { projectName: 'web', now });
+      expect(card.answerElsewhere).toBe(false);
+      expect(card.options.map((o) => o.key)).toEqual(['skip']);
+      expect(card.allowFreeText).toBe(true);
+    });
+
+    it('offers an answered card with inputs as a record rather than sending it elsewhere', () => {
+      const card = decisionToCard(decision({
+        kind: 'question', status: 'answered', answeredAt: '2026-09-04T11:58:00.000Z',
+        inputs: [{ key: 'token', label: 'Token', type: 'secret', secretName: 'CF_READONLY_TOKEN' }],
+        answerInputs: { token: 'CF_READONLY_TOKEN' },
+      }), { projectName: 'web', now });
+      expect(card.answerElsewhere).toBe(false);
+    });
   });
 });

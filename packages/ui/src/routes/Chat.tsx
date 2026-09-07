@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Decision, Project, ThreadMessage } from '@agent-conductor/shared';
+import type { Decision, DecisionAnswerInputs, Project, ThreadMessage } from '@agent-conductor/shared';
 import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Composer } from '../components/Composer';
@@ -459,11 +459,17 @@ export function ChatRoute(): React.ReactElement {
     if (saved !== null) scrollEl.scrollTop = saved;
   }, [messages.data, scrollEl, ws]);
 
-  const answerDecision = (id: string, a: { key?: string; text?: string }): void =>
+  const answerDecision = (id: string, a: { key?: string; text?: string; inputs?: DecisionAnswerInputs }): void =>
     answer.mutate(
       { id, ...a },
+      // Never queued, whatever it carries: the chat's decision answers go to the daemon or nowhere,
+      // and a card holding a secret says so rather than leaving the value on the device (VS-92).
       { onError: (e) => toast.push({ title: 'Could not record that answer', detail: e.message, status: 'failed' }) },
     );
+
+  /** The project a card belongs to, named or — for a workspace-wide question — left for the card to label. */
+  const projectSlugOf = (d: { projectId: string | null; ticketId: string | null }): string | null =>
+    projects.data?.find((p) => p.id === (d.projectId ?? tickets.data?.find((t) => t.id === d.ticketId)?.projectId))?.slug ?? null;
 
   const send = (text: string): void => {
     if (!threadId) return;
@@ -594,6 +600,7 @@ export function ChatRoute(): React.ReactElement {
                           decision={d}
                           asker="conductor"
                           ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
+                          projectSlug={projectSlugOf(d)}
                           busy={answer.isPending}
                           plan={<PlanPreview decision={d} />}
                           onAnswer={(a) => answerDecision(d.id, a)}
@@ -688,6 +695,7 @@ export function ChatRoute(): React.ReactElement {
                 decision={d}
                 {...(askedByConductor(d) ? { asker: 'conductor' as const } : {})}
                 ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
+                projectSlug={projectSlugOf(d)}
                 busy={answer.isPending}
                 plan={<PlanPreview decision={d} />}
                 onHide={() => hide(d)}

@@ -53,9 +53,9 @@ function queueEntry(t: Ticket, position: number | null): Record<string, unknown>
 
 export function decision(over: Partial<Decision> = {}): Decision {
   return {
-    id: 'dec_1', workspaceId: 'ws1', ticketId: 'tk_1', kind: 'question', owner: 'human', askedByAgentId: null, askedInRunId: null,
+    id: 'dec_1', workspaceId: 'ws1', ticketId: 'tk_1', projectId: 'pr_1', kind: 'question', owner: 'human', askedByAgentId: null, askedInRunId: null,
     title: 'CSS variables or Tailwind?', context: 'Dark mode needs a token strategy.', options: [{ key: 'vars', label: 'CSS variables', recommended: true }, { key: 'tw', label: 'Tailwind' }],
-    allowFreeText: true, recommendation: 'CSS variables', status: 'open', answerKey: null, answerText: null, answeredByKind: null,
+    inputs: [], allowFreeText: true, recommendation: 'CSS variables', status: 'open', answerKey: null, answerText: null, answerInputs: null, answeredByKind: null,
     answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null, createdAt: '2026-09-01T00:00:00.000Z',
     ...over,
   };
@@ -83,6 +83,10 @@ export interface Harness {
   tokens: Map<string, { sessionId: string; operatorId: string; kind: 'web' | 'cli' | 'presenter' }>;
   /** Live method tables behind the service proxies: mutate to stub a method mid-test. */
   impls: Record<string, Record<string, unknown>>;
+  /** Every `decisions.create` input verbatim, so a test can assert what `ac_ask` forwarded (VS-92). */
+  decisionInputs: Array<Record<string, unknown>>;
+  /** Registered secret names, by role, as `ac_role_set_secrets` set them. Never a value. */
+  roleSecrets: Map<string, string[]>;
   /** Drains the real jobs service before closing the db: a pending log flush must not fire against it. */
   close(): Promise<void>;
 }
@@ -124,6 +128,11 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   /** `<ticketId>\0<key>` → the revisions written so far, oldest first. */
   const documents = new Map<string, string[]>();
   const decisions = new Map<string, Decision>([['dec_1', decision()]]);
+  /** Registered secret names, never real values: this fake exists so a test can prove a name was recorded and a value was not. */
+  const secretValues = new Map<string, string>();
+  /** Every `decisions.create` input verbatim, so a tool test can assert what ac_ask forwarded. */
+  const decisionInputs: Array<Record<string, unknown>> = [];
+  const roleSecrets = new Map<string, string[]>();
 
   const getTicket = (id: string): Ticket => {
     const found = [...tickets.values()].find((t) => t.id === id || t.identifier === id);
@@ -195,8 +204,12 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     decisions: impl('decisions', {
       get: (id: string) => { const d = decisions.get(id); if (!d) throw new OcError('not_found', `decision ${id} not found`); return d; },
       list: () => [...decisions.values()],
-      create: (_actor: Actor, input: { title: string; kind: Decision['kind']; owner?: Decision['owner'] }) => {
-        const d = decision({ id: `dec_${decisions.size + 1}`, title: input.title, kind: input.kind, owner: input.owner ?? 'human' });
+      create: (_actor: Actor, input: { title: string; kind: Decision['kind']; owner?: Decision['owner']; projectId?: string | null; inputs?: Decision['inputs'] }) => {
+        decisionInputs.push(input);
+        const d = decision({
+          id: `dec_${decisions.size + 1}`, title: input.title, kind: input.kind, owner: input.owner ?? 'human',
+          projectId: input.projectId ?? null, inputs: input.inputs ?? [],
+        });
         decisions.set(d.id, d);
         bus.emit('decision.created', 'decision', d.id, d);
         return d;
@@ -214,7 +227,15 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     dispatcher: impl('dispatcher', { start: () => undefined, stop: async () => undefined, running: () => 0 }),
     supervisor: impl('supervisor', { start: () => undefined, stop: () => undefined, running: () => true }),
     projects: impl('projects', { list: () => [], get: (id: string) => ({ id, slug: id, defaultBranch: 'main' }) }),
-    roles: impl('roles', { list: () => [] }),
+    roles: impl('roles', {
+      list: () => [],
+      setSecrets: async (_actor: Actor, id: string, names: string[]) => {
+        const missing = names.filter((n) => !secretValues.has(n));
+        if (missing.length) throw new OcError('not_found', `no secret registered under ${missing.map((n) => `"${n}"`).join(', ')}`);
+        roleSecrets.set(id, names);
+        return { id, secrets: names };
+      },
+    }),
     knowledge: impl('knowledge', { lint: () => [] }),
     specs: impl('specs', {}),
     openspec: impl('openspec', { statusFor: async () => null }),
@@ -241,13 +262,24 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       noteVerified: (runtimeId: string) => ({ workspaceId: 'ws1', runtimeId, present: true, expiresAt: null, lastVerifiedAt: '2026-09-07T10:00:00.000Z', refreshFailedAt: null, needsLogin: false, detail: null, updatedAt: '2026-09-07T10:00:00.000Z' }),
     }),
     threads: impl('threads', { list: () => [], primaryThread: () => null }),
+    // A double, not the real store: no route or tool returns a secret value, so a route test never
+    // needs one on disk — it needs to know a name was registered and that nothing leaked it.
+    secrets: impl('secrets', {
+      put: (_actor: Actor, i: { name: string; envVarName?: string }) => {
+        secretValues.set(i.name, 'held');
+        return { name: i.name, envVarName: i.envVarName ?? i.name, scope: 'workspace', scopeId: null, hasValue: true };
+      },
+      list: () => [...secretValues.keys()].map((name) => ({ name, envVarName: name, scope: 'workspace' as const, scopeId: null, hasValue: true })),
+      has: (name: string) => secretValues.has(name),
+      value: (name: string) => secretValues.get(name) ?? null,
+    }),
   } as unknown as CoreServices;
 
   const ctx = {
     workspaceId,
     config: WorkspaceConfigSchema.parse({ version: 1, id: workspaceId, name: 'Test workspace', ticketPrefix: 'ACME' }),
     daemon: DaemonConfigSchema.parse({}),
-    paths: { root: '/tmp/ws', state: '/tmp/ws/.agent-conductor', db: ':memory:', runs: '', conductor: '', roles: '', workers: '', archive: '', projects: '', knowledge: '', runtimesHome: '', wtConfig: '' },
+    paths: { root: '/tmp/ws', state: '/tmp/ws/.agent-conductor', db: ':memory:', runs: '', conductor: '', roles: '', workers: '', archive: '', projects: '', knowledge: '', runtimesHome: '', wtConfig: '', secretsFile: '', secretsKey: '' },
     db, events: bus, registries: createRegistries(),
     log: (domain: Parameters<typeof getLogger>[0]) => getLogger(domain),
     loopbackUrl: 'http://127.0.0.1:0', skillsDir: '/tmp/skills', templatesDir: '/tmp/templates',
@@ -297,7 +329,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     updates, upgrades,
   };
 
-  return { runtime, deps, db, bus, calls, tickets, mergeOutcomes, comments, documents, tokens, impls, close: async () => { await runtime.services.jobs.stop(); db.close(); } };
+  return { runtime, deps, db, bus, calls, tickets, mergeOutcomes, comments, documents, tokens, impls, decisionInputs, roleSecrets, close: async () => { await runtime.services.jobs.stop(); db.close(); } };
 }
 
 export const authed = (extra: Record<string, string> = {}): Record<string, string> => ({ authorization: 'Bearer sess-token', ...extra });

@@ -190,4 +190,36 @@ describe('roles', () => {
     expect(clean.decisionId).toBeNull();
     expect(roles.get(role.id).status).toBe('retired');
   });
+  // VS-92: a secret an agent collected on a card, attached to the role whose workers need it.
+  describe('setSecrets', () => {
+    const FAKE = 'cf-not-a-real-token-0000000000';
+
+    it('replaces the list when every name is registered', async () => {
+      const { role } = await roles.hire(CONDUCTOR, spec(), { autoActivate: true });
+      h.services.secrets!.put(HUMAN, { name: 'CF_READONLY_TOKEN' }, FAKE);
+      h.services.secrets!.put(HUMAN, { name: 'API_KEY' }, FAKE);
+
+      expect((await roles.setSecrets(CONDUCTOR, role.id, ['CF_READONLY_TOKEN', 'API_KEY'], 'cloudflare work')).secrets)
+        .toEqual(['CF_READONLY_TOKEN', 'API_KEY']);
+      // Replaces rather than appends.
+      expect((await roles.setSecrets(CONDUCTOR, role.id, ['API_KEY'], 'no longer needs cloudflare')).secrets).toEqual(['API_KEY']);
+    });
+
+    it('refuses the whole list when one name is not registered, and changes nothing', async () => {
+      const { role } = await roles.hire(CONDUCTOR, spec(), { autoActivate: true });
+      h.services.secrets!.put(HUMAN, { name: 'API_KEY' }, FAKE);
+      await roles.setSecrets(CONDUCTOR, role.id, ['API_KEY'], 'needs the key');
+
+      await expect(roles.setSecrets(CONDUCTOR, role.id, ['API_KEY', 'NEVER_REGISTERED'], 'and one more'))
+        .rejects.toThrow(/no secret registered under "NEVER_REGISTERED"/);
+      expect(roles.get(role.id).secrets).toEqual(['API_KEY']);
+    });
+
+    it('records a revision the way any other spec change does', async () => {
+      const { role } = await roles.hire(CONDUCTOR, spec(), { autoActivate: true });
+      h.services.secrets!.put(HUMAN, { name: 'API_KEY' }, FAKE);
+      await roles.setSecrets(CONDUCTOR, role.id, ['API_KEY'], 'needs the key');
+      expect(roles.revisions(role.id).at(-1)).toMatchObject({ reason: 'needs the key', changedKeys: ['secrets'] });
+    });
+  });
 });

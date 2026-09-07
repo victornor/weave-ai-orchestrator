@@ -14,11 +14,12 @@ const state = vi.hoisted(() => ({
   tickets: [] as Array<Record<string, unknown>>,
   projects: [] as Array<Record<string, unknown>>,
   config: {} as Record<string, unknown>,
+  connection: 'connected' as string,
 }));
 
 vi.mock('../api/context', () => ({
   useWs: () => 'ws1',
-  useConnection: () => ({ state: 'connected', capturedAt: null, lastSeq: 0, attempts: 0 }),
+  useConnection: () => ({ state: state.connection, capturedAt: null, lastSeq: 0, attempts: 0 }),
 }));
 
 vi.mock('../api/hooks', () => ({
@@ -35,7 +36,8 @@ vi.mock('../api/hooks', () => ({
 }));
 
 vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
-vi.mock('../lib/queue', () => ({ enqueue: vi.fn(), useQueue: () => [] }));
+const enqueueMock = vi.hoisted(() => vi.fn());
+vi.mock('../lib/queue', () => ({ enqueue: enqueueMock, useQueue: () => [] }));
 vi.mock('../components/Toast', () => ({
   useToast: () => ({ push: (t: Record<string, unknown>) => { state.toasts.push(t); return 't1'; }, dismiss: vi.fn() }),
 }));
@@ -63,6 +65,8 @@ beforeEach(() => {
   state.tickets = [];
   state.projects = [];
   state.config = {};
+  state.connection = 'connected';
+  enqueueMock.mockClear();
   localStorage.clear();
   clearHiddenCache();
 });
@@ -221,5 +225,82 @@ describe('NeedsYou — YOLO mode', () => {
 
     expect(screen.queryByLabelText('Auto-approved by YOLO mode')).toBeNull();
     expect(screen.getByRole('button', { name: /approve merge/i })).toBeInTheDocument();
+  });
+  // ---------- VS-92 ----------
+
+  it('names the project a decision belongs to, and calls a workspace decision the workspace', () => {
+    state.projects = [{ id: 'pr_1', slug: 'api' }, { id: 'pr_2', slug: 'web' }];
+    state.decisions = [asked({ id: 'd1', projectId: 'pr_2' })];
+    const { unmount } = render(<NeedsYouRoute />);
+    expect(screen.getByText(/web/)).toBeInTheDocument();
+    unmount();
+
+    state.decisions = [asked({ id: 'd1', projectId: null, ticketId: null })];
+    render(<NeedsYouRoute />);
+    expect(screen.getByText(/Workspace/)).toBeInTheDocument();
+  });
+
+  it('falls back to the project of the ticket the decision concerns', () => {
+    state.projects = [{ id: 'pr_1', slug: 'api' }];
+    state.tickets = [{ id: 'tk_9', identifier: 'ACME-9', projectId: 'pr_1' }];
+    state.decisions = [asked({ id: 'd1', projectId: null, ticketId: 'tk_9' })];
+    render(<NeedsYouRoute />);
+    expect(screen.getByText(/ACME-9 · api/)).toBeInTheDocument();
+  });
+
+  it('sends the collected values with the answer', () => {
+    state.decisions = [asked({
+      options: [],
+      inputs: [
+        { key: 'base_url', label: 'Base URL', type: 'text', required: true },
+        { key: 'notes', label: 'Anything else', type: 'multiline' },
+        { key: 'regions', label: 'Regions', type: 'multiselect', choices: [{ key: 'eu', label: 'EU' }, { key: 'us', label: 'US' }] },
+      ],
+    })];
+    render(<NeedsYouRoute />);
+
+    // Nothing to send until the required input is filled.
+    const send = screen.getByRole('button', { name: /send answer/i });
+    expect(send).toBeDisabled();
+    expect(screen.getByText('Base URL is needed before this can be sent.')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/Base URL/), { target: { value: 'https://example.test' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'US' }));
+    fireEvent.click(send);
+
+    // The empty optional input is absent rather than present and empty.
+    expect(state.answer).toHaveBeenCalledWith(
+      { id: 'd1', inputs: { base_url: 'https://example.test', regions: ['us'] } },
+      expect.anything(),
+    );
+  });
+
+  it('masks a secret input and never sends the card to the offline queue', () => {
+    state.connection = 'offline';
+    state.decisions = [asked({
+      options: [],
+      inputs: [{ key: 'token', label: 'Read-only token', type: 'secret', required: true, secretName: 'CF_READONLY_TOKEN' }],
+    })];
+    render(<NeedsYouRoute />);
+
+    const field = screen.getByLabelText(/Read-only token/);
+    expect(field).toHaveAttribute('type', 'password');
+    fireEvent.change(field, { target: { value: 'cf-not-a-real-token-0000000000' } });
+    fireEvent.click(screen.getByRole('button', { name: /send answer/i }));
+
+    // Never in localStorage, and the human is told it did not go.
+    expect(enqueueMock).not.toHaveBeenCalled();
+    expect(state.answer).not.toHaveBeenCalled();
+    expect(state.toasts.at(-1)).toMatchObject({ title: 'Not sent', status: 'failed' });
+    expect(JSON.stringify(localStorage)).not.toContain('cf-not-a-real-token');
+  });
+
+  it('still queues an ordinary answer while offline', () => {
+    state.connection = 'offline';
+    state.decisions = [asked()];
+    render(<NeedsYouRoute />);
+    fireEvent.click(screen.getByRole('radio', { name: /Leave it/ }));
+    fireEvent.click(screen.getByRole('button', { name: /send answer/i }));
+    expect(enqueueMock).toHaveBeenCalledTimes(1);
   });
 });

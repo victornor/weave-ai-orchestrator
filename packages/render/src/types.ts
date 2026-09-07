@@ -132,6 +132,12 @@ export interface CardModel {
   age: string;
   /** Set once answered, so an answered card still reads correctly in history. */
   answer: { key: string | null; text: string | null; at: string | null } | null;
+  /**
+   * The decision collects values this surface cannot take (VS-92) — a secret cannot be typed into
+   * a chat message, and a channel has no controls for a multi-select. A surface that sees this
+   * shows the question and points at the web app rather than offering an answer it cannot complete.
+   */
+  answerElsewhere: boolean;
 }
 
 // ---------------------------------------------------------------- tickets / workers

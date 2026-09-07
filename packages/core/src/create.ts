@@ -17,6 +17,7 @@ import { createProjectsService } from './projects/index.js';
 import { createJobsService } from './jobs/index.js';
 import { createChangelogService } from './changelog/index.js';
 import { createModelsService } from './models/index.js';
+import { createSecretsService } from './secrets/index.js';
 
 /** Assemble all services for one workspace. Services receive a lazy accessor to the full set to avoid construction-order cycles. */
 export function createCore(ctx: WorkspaceContext): CoreServices {
@@ -29,6 +30,7 @@ export function createCore(ctx: WorkspaceContext): CoreServices {
     roles: createRolesService(ctx, deps), workers: createWorkersService(ctx, deps), projects: createProjectsService(ctx, deps),
     models: createModelsService(ctx, deps),
     jobs: createJobsService(ctx, deps), changelog: createChangelogService(ctx, deps),
+    secrets: createSecretsService(ctx),
   };
   return services;
 }

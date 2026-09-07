@@ -209,6 +209,70 @@ describe('run engine', () => {
     expect(rows[0]!.payload.text).toContain('[redacted]');
   });
 
+  // VS-92: a role's secrets in its workers' environment, from the store as well as the host.
+  describe("a role's secrets", () => {
+    /** Not a credential: a fixture, long enough for makeRedactor's 8-character floor. */
+    const FAKE = 'cf-not-a-real-token-0000000000';
+
+    const workerWithSecrets = (names: string[]): string => {
+      h.db.update('roles', h.roleId, { secretsJson: names });
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake' });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      return workerId;
+    };
+
+    it('takes the value from the workspace store when the daemon has no such variable', async () => {
+      h.services.secrets!.put({ kind: 'human', id: 'victor' }, { name: 'CF_READONLY_TOKEN' }, FAKE);
+      workerWithSecrets(['CF_READONLY_TOKEN']);
+      await runOnce();
+      expect(runtime.inputs[0]!.env.CF_READONLY_TOKEN).toBe(FAKE);
+    });
+
+    it('exposes it under the environment variable name the secret was registered with', async () => {
+      h.services.secrets!.put({ kind: 'human', id: 'victor' }, { name: 'cloudflare-read', envVarName: 'CF_TOKEN' }, FAKE);
+      workerWithSecrets(['cloudflare-read']);
+      await runOnce();
+      expect(runtime.inputs[0]!.env.CF_TOKEN).toBe(FAKE);
+      expect(runtime.inputs[0]!.env['cloudflare-read']).toBeUndefined();
+    });
+
+    it("lets the daemon's own environment win over the store", async () => {
+      h.services.secrets!.put({ kind: 'human', id: 'victor' }, { name: 'CF_READONLY_TOKEN' }, FAKE);
+      process.env.CF_READONLY_TOKEN = 'from-the-host-0000000000';
+      try {
+        workerWithSecrets(['CF_READONLY_TOKEN']);
+        await runOnce();
+        expect(runtime.inputs[0]!.env.CF_READONLY_TOKEN).toBe('from-the-host-0000000000');
+      } finally {
+        delete process.env.CF_READONLY_TOKEN;
+      }
+    });
+
+    it('omits a listed secret no one holds rather than passing it empty', async () => {
+      workerWithSecrets(['NEVER_REGISTERED']);
+      await runOnce();
+      expect(runtime.inputs[0]!.env.NEVER_REGISTERED).toBeUndefined();
+    });
+
+    it('redacts the value from what the turn records', async () => {
+      h.services.secrets!.put({ kind: 'human', id: 'victor' }, { name: 'CF_READONLY_TOKEN' }, FAKE);
+      class LeakyRuntime extends FakeRuntime {
+        override async runTurn(input: TurnInput, sink: TurnSink): Promise<TurnResult> {
+          sink.onEvent({ ts: nowIso(), type: 'assistant.text', payload: { text: `curl -H "X-Auth: ${input.env.CF_READONLY_TOKEN}"` } });
+          return super.runTurn(input, sink);
+        }
+      }
+      h.ctx.registries.runtimes.set('fake', new LeakyRuntime());
+      workerWithSecrets(['CF_READONLY_TOKEN']);
+      const run = await runOnce();
+      const rows = h.db.all<{ payload: { text?: string } }>("SELECT payload_json FROM run_events WHERE run_id = ? AND type = 'assistant.text'", [run.id]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.payload.text).not.toContain(FAKE);
+      expect(rows[0]!.payload.text).toContain('[redacted]');
+    });
+  });
+
   it('describes the worker ticket and worktree state in the turn prompt', async () => {
     const ticketId = seedTicket(h, { status: 'in_progress' });
     const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null, branch: 'ac/tst-1-add-a-readme-badge' });

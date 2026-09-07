@@ -69,8 +69,10 @@ the time it was captured. A new snapshot SHALL replace the previous one for that
 runtime; the system does not keep snapshot history.
 
 The system SHALL refresh the snapshots on a recurring daemon poll without any user action, for every
-runtime that at least one agent in the workspace is configured to use. A refresh SHALL NOT block a
-run, and a refresh that fails SHALL leave the previous snapshot in place and record the reason.
+runtime the workspace is spending on: the runtimes named by its two model settings, together with
+the runtime of any agent that has not yet been retired, so that a worker still finishing a turn on a
+runtime a setting has since moved away from is still accounted for. A refresh SHALL NOT block a run,
+and a refresh that fails SHALL leave the previous snapshot in place and record the reason.
 
 #### Scenario: The poll refreshes a snapshot
 
@@ -80,7 +82,8 @@ run, and a refresh that fails SHALL leave the previous snapshot in place and rec
 
 #### Scenario: A runtime nothing uses is not polled
 
-- **WHEN** the refresh runs and no agent in the workspace is configured on a given runtime
+- **WHEN** the refresh runs and a runtime is named by neither of the workspace's model settings and
+  by no agent that is still live
 - **THEN** that runtime is not described and no snapshot is written for it
 
 #### Scenario: A refresh fails

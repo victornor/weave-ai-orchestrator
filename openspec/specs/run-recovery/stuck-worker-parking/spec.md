@@ -80,11 +80,13 @@ handled once for the runtime instead.
 The decision SHALL name the family of the failure and the runtime's own message. When the runtime
 reported when the limit resets, the decision SHALL say so.
 
-The decision SHALL offer retrying now, retrying on each of the other runtimes available to that
-worker, and cancelling the ticket, and SHALL recommend one of them. When a reset time is known it
-SHALL additionally offer retrying automatically at that reset time; otherwise it SHALL offer
-retrying later. The system SHALL NOT start any attempt the human has not chosen: until the decision
-is answered the worker stays parked and nothing further is spent on it.
+The decision SHALL offer retrying now and cancelling the ticket, and SHALL recommend one of them.
+When a reset time is known it SHALL additionally offer retrying automatically at that reset time;
+otherwise it SHALL offer retrying later. It SHALL NOT offer running the worker on another runtime,
+because the runtime is a setting of the workspace and not of a worker; where the failure was a usage
+limit the decision SHALL say which setting holds the runtime, so that the human can change it and
+then retry. The system SHALL NOT start any attempt the human has not chosen: until the decision is
+answered the worker stays parked and nothing further is spent on it.
 
 The worker SHALL be paused with a reason that names the failure, and the ticket SHALL be moved to
 `blocked` unless it has already reached a state in which no further work is expected.
@@ -99,7 +101,7 @@ how many automatic attempts there are, how long they wait, or which failures are
 
 - **WHEN** a worker's last automatic retry fails
 - **THEN** a decision owned by the human is raised on that worker's ticket, offering retry, retry
-  later, each alternative runtime, and cancel
+  later, and cancel, and no option naming another runtime
 - **AND** the decision appears in the human's list of open decisions
 - **AND** the worker is paused and the ticket is `blocked`
 
@@ -108,6 +110,7 @@ how many automatic attempts there are, how long they wait, or which failures are
 - **WHEN** a worker's turn fails because its runtime reported a usage limit
 - **THEN** the worker is parked on that first failure with no automatic attempt having been made
 - **AND** the decision names the quota family and the runtime's message
+- **AND** the decision says that the runtime is the workspace's workers setting
 
 #### Scenario: A known reset time is offered, not booked
 

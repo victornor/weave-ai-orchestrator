@@ -29,8 +29,8 @@ export function knowledgeRoutes(): Hono<AppEnv> {
     return c.json(c.get('ws').services.knowledge.replace(c.get('actor'), scopeParam.parse(c.req.param('scope')), text, 'human', project(c)));
   });
   app.post('/:scope/note', async (c) => {
-    const i = await body(c, z.object({ section: z.string().min(1), text: z.string().min(1) }));
-    return c.json(c.get('ws').services.knowledge.note(c.get('actor'), scopeParam.parse(c.req.param('scope')), i.section, i.text, project(c)));
+    const i = await body(c, z.object({ section: z.string().min(1), text: z.string().min(1), doc: z.string().min(2).optional() }));
+    return c.json(c.get('ws').services.knowledge.note(c.get('actor'), scopeParam.parse(c.req.param('scope')), i.section, i.text, project(c), i.doc));
   });
   app.get('/:scope/revisions', (c) => c.json(c.get('ws').services.knowledge.revisions(scopeParam.parse(c.req.param('scope')), project(c))));
   app.post('/:scope/revert', async (c) => {

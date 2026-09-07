@@ -304,9 +304,9 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx, i) => svc(ctx).knowledge.get(i.scope, knowledgeScope(ctx, i.scope, i.projectId)),
   },
   {
-    name: 'ac_knowledge_note', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), section: z.string().min(1), text: z.string().min(1), projectId: z.string().optional() }),
-    description: 'Append one concise dated entry to a knowledge section. Max 60 words; near-duplicates and over-budget writes are rejected and schedule a curation run instead.',
-    handler: (ctx, i) => svc(ctx).knowledge.note(ctx.actor, i.scope, i.section, i.text, knowledgeScope(ctx, i.scope, i.projectId)),
+    name: 'ac_knowledge_note', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), section: z.string().min(1), text: z.string().min(1), projectId: z.string().optional(), doc: z.string().min(2).optional() }),
+    description: 'Append one concise dated entry to a knowledge section. Max 60 words; near-duplicates and over-budget writes are rejected and schedule a curation run instead. Pass `doc` to append into that linked document\'s section instead of the hub — the document must already exist (ac_knowledge_doc_put creates one).',
+    handler: (ctx, i) => svc(ctx).knowledge.note(ctx.actor, i.scope, i.section, i.text, knowledgeScope(ctx, i.scope, i.projectId), i.doc),
   },
   {
     name: 'ac_knowledge_docs', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES).optional(), projectId: z.string().optional() }),

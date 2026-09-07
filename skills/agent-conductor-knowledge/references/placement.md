@@ -5,8 +5,9 @@
 | "The retry helper double-counts attempts on conflict" | the ticket (or a fix) | task state and a defect, not knowledge |
 | "Run `pnpm dev --filter api` to start just the API" | `PROJECT.md` → Stack & commands | how to work on this project, and the repo README does not say it |
 | "The README says `npm run dev`; that is stale, it is pnpm now" | the **repo**, via a PR | any contributor needs it; fix it at the source, then it is not knowledge |
-| "`src/generated/**` is regenerated; edits are lost" | `PROJECT.md` → Landmines | it bites, and nothing in the repo warns you |
-| "Integration tests need a CREATEDB-capable role" | `PROJECT.md` → Landmines | hard-won, not derivable, will bite the next worker |
+| "`src/generated/**` is regenerated; edits are lost" | `PROJECT.md` → Landmines | it bites, and nothing in the repo warns you, and it fits no subject of its own — a genuine one-off |
+| "Integration tests need a CREATEDB-capable role" — the **first** fact about integration testing this project has recorded | a **new document**, `ac_knowledge_doc_put("integration-testing", body)`, linked from `PROJECT.md` → Documents | it is a subject (integration testing), not a one-off; create its document now rather than waiting for a second landmine to justify one |
+| "jsdom has no `Element.scrollTo`" and a `web-app-testing` document already exists | that document, via `ac_knowledge_note("project", "Landmines", text, doc: "web-app-testing")` | one more dated fact on a subject that already has its own page; the hub keeps only the pointer to it |
 | "This quarter we are moving the dashboard off the legacy API" | `PROJECT.md` → Current focus | conductor and human maintain it; workers read it |
 | "Commit messages are conventional commits" | `SHARED.md` → Conventions | true across projects, names none of them |
 | "The human wants PR links, never PR numbers" | `WORKSPACE.md` → People & preferences | about the human, and workers must not see it |

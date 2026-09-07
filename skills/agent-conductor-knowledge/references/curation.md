@@ -16,7 +16,7 @@ Curation makes a file smaller and truer. It never makes it newer.
 6. **Remove what is contradicted.** If the codebase disagrees with an entry, the entry goes. Note the contradiction in your ticket comment.
 7. **Archive the stale.** Expired `<!--exp:-->` markers, entries about code that no longer exists, focus items from finished quarters.
 8. **Tighten.** Cut hedging, background and prose. Every entry should read as one fact.
-9. **Rebalance.** Keep each section inside its share of the budget. Learnings is the section that grows and the first that should shrink; Overview and Stack & commands are stable and should survive intact.
+9. **Rebalance.** Keep each section inside its share of the budget. Learnings is the section that grows and the first that should shrink; Overview and Stack & commands are stable and should survive intact. When Landmines or Conventions has become a wall of one-off facts on the same few subjects, this is where a **move**, not an addition, belongs: extend an existing document (`ac_knowledge_docs` first — update one on the subject if it exists) or create a new one (`ac_knowledge_doc_put`) with the entries verbatim, and leave a one-line pointer in the hub section in their place. This is exactly the shape of VS-109's initial hub restructuring; a hub section that has grown this way again is a normal curation move, not a reason to file a new `change` ticket.
 10. **Submit.** `ac_knowledge_replace(scope, body)` with the complete new file — the same headings, in the same order, none dropped even if empty.
 11. **Account for it.** Comment on the ticket: every removed entry and its reason, one line each. Then `ac_ticket_transition(id, "done")`.
 

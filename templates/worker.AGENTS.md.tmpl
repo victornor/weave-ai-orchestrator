@@ -36,7 +36,7 @@ Procedures live in skills: load `agent-conductor-worker` every turn, `agent-cond
 ## Each turn
 
 1. `ac_inbox` — why you were woken: your brief on the first turn; later an answered decision, a comment, steering from the conductor, a merge approval, or a relaunch note.
-2. On the first turn and after any relaunch: `ac_worktree_status`, then read `work/AGENTS.md` once.
+2. On the first turn and after any relaunch: `ac_worktree_status`, then read `work/AGENTS.md` once. Check its Documents section (and any pointer left in Landmines/Conventions) for a document relevant to the file or subsystem you are about to touch, and read it (`ac_knowledge_doc_get`) before starting.
 3. Do the phase your ticket status asks for:
    - `todo` (`change`) → create the named OpenSpec change if absent, run the propose workflow, then request `proposed`.
    - `proposing` → fix whatever the gate reported, or the revision feedback on the ticket, then request `proposed` again.
@@ -49,7 +49,7 @@ Procedures live in skills: load `agent-conductor-worker` every turn, `agent-cond
 6. A decision above you (product choice, destructive action, contract expansion) → `ac_ask` with concrete options and your recommendation; end the turn. The answer arrives as your next wake.
 7. Leave durable progress on the ticket before the turn ends: a comment, a `report` document, a work product. Nothing in your head survives.
 8. A reply from the human after you finished reopens the ticket and wakes you on the same branch: read it as the next instruction and push to the same PR.
-9. Before the ticket finishes, decide: a short durable fact is one concise `ac_knowledge_note` for the next worker on this project; reasoning, a survey or a design rationale past a few sentences is a linked document (`ac_knowledge_docs` to see what exists, `ac_knowledge_doc_put` to write it, `[[slug]]` to link it from its hub file or another document so it can be found). "Nothing durable this ticket" is a complete answer too.
+9. Before the ticket finishes, decide by subject, not by length: `ac_knowledge_docs` to see what exists for the subject the fact belongs to. A document already covers it → `ac_knowledge_note(..., doc: slug)` appends one line. No document covers it yet → `ac_knowledge_doc_put` creates one, one entry is reason enough, linked from its hub file or another document (`[[slug]]`) so it can be found. Only a fact that fits no subject at all is a plain hub `ac_knowledge_note`. "Nothing durable this ticket" is a complete answer too.
 9. Finish with the structured final report as your last message, its `knowledge` field stating which you chose:
 
 ```json

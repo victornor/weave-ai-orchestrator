@@ -235,7 +235,7 @@ export interface Supervisor { tick(): Promise<void>; start(): void; stop(): void
 // ---------- knowledge / specs ----------
 export interface KnowledgeService {
   get(scope: S.KnowledgeScope, projectId?: string | null): { path: string; body: string; tokenEstimate: number; budgetTokens: number; lastCuratedAt: string | null; curationPending: boolean; revision: number };
-  note(actor: Actor, scope: S.KnowledgeScope, section: string, text: string, projectId?: string | null): { remainingTokens: number; revision: number };
+  note(actor: Actor, scope: S.KnowledgeScope, section: string, text: string, projectId?: string | null, doc?: string): { remainingTokens: number; revision: number };
   replace(actor: Actor, scope: S.KnowledgeScope, body: string, reason: S.KnowledgeRevisionReason, projectId?: string | null, removed?: string[]): { revision: number };
   revisions(scope: S.KnowledgeScope, projectId?: string | null): Array<{ revision: number; authorKind: string; reason: string; createdAt: string; ticketId: string | null; ticketIdentifier: string | null }>;
   revert(actor: Actor, scope: S.KnowledgeScope, revision: number, projectId?: string | null): { revision: number };

@@ -96,10 +96,11 @@ export function register(program: Command): void {
     .argument('<section>')
     .argument('<text...>')
     .option('-p, --project <id>')
+    .option('--doc <slug>', 'append into this linked document instead of the hub')
     .description('append a note to a section')
     .action(async (scope: string, section: string, text: string[], opts: Record<string, string>, command: Command) => run(async () => {
       const { client } = await session(command);
-      const body = { section, text: text.join(' ') };
+      const body = { section, text: text.join(' '), ...(opts['doc'] ? { doc: opts['doc'] } : {}) };
       const result = await client.write({
         tool: 'ac_knowledge_note', input: { scope, projectId: opts['project'], ...body },
         http: { method: 'POST', path: client.w(`/knowledge/${encodeURIComponent(scope)}/note`), body, query: { project: opts['project'] } },

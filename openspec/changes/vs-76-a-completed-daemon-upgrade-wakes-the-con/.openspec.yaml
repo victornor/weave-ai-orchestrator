@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: A completed daemon upgrade wakes the conductor with what changed and confirms
+  to the human that the system is fully back up

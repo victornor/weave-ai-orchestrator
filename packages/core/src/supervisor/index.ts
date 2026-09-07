@@ -521,6 +521,10 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     stop(): void {
       if (timer) { clearInterval(timer); timer = null; }
     },
+
+    running(): boolean {
+      return timer !== null;
+    },
   };
   return supervisor;
 }

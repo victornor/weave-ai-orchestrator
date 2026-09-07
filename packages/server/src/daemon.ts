@@ -78,6 +78,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const updates = createUpdateChecker({ daemon: daemonCfg, version: VERSION });
   const upgrades = createUpgradeService({
     db: daemonDb, daemon: daemonCfg, configDir, workspaces, updates, version: VERSION, releaseRoot: runningReleaseRoot(),
+    runtimes: () => [...registries.runtimes.keys()],
   });
   const deps: AppDeps = {
     auth, daemon: daemonCfg, workspaces, registries, listener: 'public',
@@ -124,6 +125,11 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     onOperatorConfigured = () => { startPublic().catch((e: unknown) => log.error({ err: e }, 'public listener failed to start after setup')); };
     await writePidFile();
   }
+
+  // Now that the daemon is serving again, tell each workspace about an upgrade that has not been
+  // reported yet (VS-76). Not awaited: the announcement is a report about a daemon that is already up,
+  // and a channel that is slow to take it must not hold the boot.
+  void upgrades.announce().catch((e: unknown) => log.error({ err: e }, 'upgrade announcement failed'));
 
   let stopping: Promise<void> | null = null;
   const stop = (reason = 'shutdown'): Promise<void> => (stopping ??= shutdown(reason));

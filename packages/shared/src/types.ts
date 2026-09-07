@@ -32,8 +32,47 @@ export interface KnowledgeFile { id: string; workspaceId: string; projectId: str
 export interface ChannelThread { id: string; channelId: string; agentId: string; ticketId: string | null; externalThreadId: string | null; externalUserId: string | null; humanLabel: string | null; createdAt: string; lastMessageAt: string | null }
 export interface ThreadMessage { id: string; threadId: string; direction: 'inbound' | 'outbound'; authorKind: string; authorId: string | null; runId: string | null; projectId: string | null; replyToMessageId: string | null; replyToExcerpt: string | null; body: string; parts: unknown[]; externalMessageId: string | null; deliveryStatus: string; createdAt: string }
 export interface Briefing { needsYou: Array<{ decisionId: string; ticketId: string | null; title: string; kind: string; recommendation: string | null; createdAt: string }>; landed: Array<{ ticketId: string; identifier: string; title: string; completedAt: string; prUrl?: string }>; underway: Array<{ workerId: string; workerName: string; ticketId: string; identifier: string; title: string; status: string; lastStatus: string | null }>; queued: Array<{ ticketId: string; identifier: string; title: string; reason: string }>; warnings: string[]; generatedAt: string }
-/** A deferred daemon upgrade (PLAN §20). Daemon-level: it lives in `daemon.sqlite`, not in a workspace. */
-export interface Upgrade { id: string; state: E.UpgradeState; source: string; ref: string; runTest: number; targetSha: string | null; fromRelease: string | null; toRelease: string | null; toSha: string | null; requestedBy: string; requestedAt: string; startedAt: string | null; finishedAt: string | null; reason: E.UpgradeFailureReason | null; message: string | null; log: string[]; backups: string[]; cameBackVersion: string | null }
+/**
+ * A deferred daemon upgrade (PLAN §20). Daemon-level: it lives in `daemon.sqlite`, not in a workspace.
+ * `drainedRuns` is what was still executing when the upgrade began holding dispatch, counted then
+ * because nothing can count it afterwards; `announcedAt` is the once-only marker of VS-76's
+ * announcement, set by the daemon that reports the finished upgrade to the workspace.
+ */
+export interface Upgrade { id: string; state: E.UpgradeState; source: string; ref: string; runTest: number; targetSha: string | null; fromRelease: string | null; toRelease: string | null; toSha: string | null; requestedBy: string; requestedAt: string; startedAt: string | null; finishedAt: string | null; reason: E.UpgradeFailureReason | null; message: string | null; log: string[]; backups: string[]; cameBackVersion: string | null; drainedRuns: number | null; announcedAt: string | null }
+
+/** One health check the upgrade announcement makes before it claims the daemon is back up (VS-76). */
+export interface UpgradeHealthCheck { name: 'database' | 'supervisor' | 'runtimes'; ok: boolean; detail: string }
+
+/** A release as an announcement names it: where it is, what it was built from, what it calls itself. */
+export interface UpgradeRelease { path: string | null; sha: string | null; version: string | null }
+
+/**
+ * What a finished upgrade tells one workspace (VS-76, `daemon-upgrade/upgrade-announcement`). It is the
+ * payload of the conductor's `system` wake; the chat line the human gets is rendered from the same
+ * record, so the two can never disagree.
+ */
+export interface UpgradeAnnouncement {
+  kind: 'daemon.upgraded';
+  upgradeId: string;
+  /** `rolled_back` is a failure whose target is not the release now executing. */
+  outcome: 'completed' | 'failed' | 'rolled_back';
+  from: UpgradeRelease;
+  to: UpgradeRelease;
+  /** The release the daemon making the announcement is executing. */
+  running: UpgradeRelease;
+  startedAt: string | null;
+  finishedAt: string | null;
+  /** When the daemon making the announcement was serving again. */
+  backUpAt: string;
+  /** `drained`: runs waited out before the switch. `resumed`: wakes queued in this workspace now. */
+  runs: { drained: number; resumed: number };
+  /** Work that landed between the previous release being built and the new one being built. */
+  tickets: Array<{ identifier: string; title: string; at: string }>;
+  /** Migration files applied when this process opened the daemon and workspace databases. */
+  migrations: string[];
+  health: { ok: boolean; checks: UpgradeHealthCheck[] };
+  failure: { reason: E.UpgradeFailureReason | null; message: string | null } | null;
+}
 /** One sub-step of a job: fixed for the job's kind, timed independently (VS-37, workspace-setup/setup-jobs). */
 export interface JobStep { id: string; label: string; state: E.JobStepState; startedAt: string | null; endedAt: string | null }
 /** One captured output line. `seq` is monotonic within the job, so a stream can be resumed after it. */

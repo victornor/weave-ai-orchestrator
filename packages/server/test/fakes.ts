@@ -206,7 +206,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     briefing: impl('briefing', { snapshot: (): Briefing => ({ needsYou: [], landed: [], underway: [], queued: [], warnings: [], generatedAt: '2026-09-01T00:00:00.000Z' }) }),
     workers: impl('workers', { list: () => [], conductor: () => ({ id: 'ag_conductor', kind: 'conductor' }) }),
     dispatcher: impl('dispatcher', { start: () => undefined, stop: async () => undefined, running: () => 0 }),
-    supervisor: impl('supervisor', { start: () => undefined, stop: () => undefined }),
+    supervisor: impl('supervisor', { start: () => undefined, stop: () => undefined, running: () => true }),
     projects: impl('projects', { list: () => [], get: (id: string) => ({ id, slug: id, defaultBranch: 'main' }) }),
     roles: impl('roles', { list: () => [] }),
     knowledge: impl('knowledge', { lint: () => [] }),

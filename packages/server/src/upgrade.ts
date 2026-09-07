@@ -17,8 +17,8 @@ import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { newId, nowIso, type Db } from '@agent-conductor/db';
 import {
-  OcError, isCancellableUpgrade, isTerminalUpgrade,
-  type DaemonConfig, type Upgrade, type UpgradeFailureReason, type UpgradeState,
+  CHANGELOG_SOURCES, OcError, isCancellableUpgrade, isTerminalUpgrade,
+  type DaemonConfig, type Upgrade, type UpgradeFailureReason, type UpgradeHealthCheck, type UpgradeState,
 } from '@agent-conductor/shared';
 import { getLogger, recordActivity } from '@agent-conductor/core';
 import {
@@ -27,6 +27,10 @@ import {
 } from '@agent-conductor/release';
 import type { WorkspaceRuntime } from './types.js';
 import type { UpdateChecker } from './release-info.js';
+import {
+  announcementReason, announcementText, buildAnnouncement,
+  type AnnouncementFacts, type LandedTicket,
+} from './upgrade-announce.js';
 
 const log = getLogger('daemon', { component: 'upgrade' });
 
@@ -53,6 +57,12 @@ export interface UpgradeService {
   cancel(): Upgrade;
   /** Startup: settle whatever a previous daemon process left behind. */
   reconcile(): void;
+  /**
+   * Report every terminal upgrade that has not been reported yet (VS-76): one line on each workspace's
+   * primary chat thread and one `system` wake for its conductor. Called by the daemon once it is
+   * serving again, and by the pipeline when an upgrade fails before anything restarts.
+   */
+  announce(): Promise<void>;
   /** Tests only: await the background pipeline started by `request`. */
   settled(): Promise<void>;
 }
@@ -66,6 +76,8 @@ export interface UpgradeDeps {
   version: string;
   /** The release this process is running from. */
   releaseRoot: string;
+  /** The runtime adapters registered on this daemon; one of the announcement's health checks. */
+  runtimes?: () => string[];
   // ---- seams, all defaulted; tests replace them ----
   build?: (o: { from: string; ref: string; test: boolean; onOutput: (line: string) => void }) => { path: string; sha: string } | Promise<{ path: string; sha: string }>;
   backup?: () => string[];
@@ -175,8 +187,10 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
   async function advance(id: string): Promise<void> {
     const row = read(id);
     if (!row) return;
+    // Counted before the hold takes hold: once the runs have drained nothing can say how many there were.
+    const drainedRuns = waitingFor().reduce((n, w) => n + w.running, 0);
     void holdDispatch();
-    set(id, { state: 'waiting', startedAt: nowIso() });
+    set(id, { state: 'waiting', startedAt: nowIso(), drainedRuns });
 
     const outcome = await waitForIdle(id);
     if (outcome === 'cancelled') return;
@@ -232,6 +246,68 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
     }
   }
 
+  // ---------- the announcement (VS-76) ----------
+
+  /** The three checks behind "back up": the workspace answers, the supervisor ticks, runtimes are registered. */
+  function healthChecks(w: WorkspaceRuntime): UpgradeHealthCheck[] {
+    const checks: UpgradeHealthCheck[] = [];
+    try { w.ctx.db.get('SELECT 1 AS one'); checks.push({ name: 'database', ok: true, detail: 'answers' }); }
+    catch (e) { checks.push({ name: 'database', ok: false, detail: (e as Error).message }); }
+    let ticking = false;
+    try { ticking = w.services.supervisor.running(); } catch { ticking = false; }
+    checks.push({ name: 'supervisor', ok: ticking, detail: ticking ? 'ticking' : 'not ticking' });
+    const runtimes = deps.runtimes?.() ?? [];
+    checks.push({ name: 'runtimes', ok: runtimes.length > 0, detail: runtimes.length ? runtimes.join(', ') : 'none registered' });
+    return checks;
+  }
+
+  /**
+   * The work the new release contains, read from the same rows the changelog projects as `landed` —
+   * `mergeDone` writes one when the work actually reached the clone, so this is the delivery record and
+   * not a second opinion about it.
+   */
+  function landedTickets(w: WorkspaceRuntime, window: { since: string | null; until: string }): LandedTicket[] {
+    if (!window.since) return [];
+    return w.ctx.db.all<LandedTicket>(
+      `SELECT t.identifier AS identifier, t.title AS title, a.created_at AS at
+         FROM activity a JOIN tickets t ON t.id = a.ticket_id
+        WHERE a.workspace_id = ? AND a.action = ? AND a.created_at > ? AND a.created_at <= ?
+        ORDER BY a.created_at`,
+      [w.ctx.workspaceId, CHANGELOG_SOURCES.landed.action, window.since, window.until],
+    );
+  }
+
+  function facts(w: WorkspaceRuntime): AnnouncementFacts {
+    const migrations = [...new Set([...db.appliedMigrations, ...w.ctx.db.appliedMigrations])];
+    return {
+      running: { path: deps.releaseRoot, sha: releaseSha(deps.releaseRoot), version: deps.version },
+      shaOf: (release) => (release ? releaseSha(release) : null),
+      landed: (window) => landedTickets(w, window),
+      queuedWakes: () => w.ctx.db.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM wakeups WHERE workspace_id = ? AND status = 'queued'", [w.ctx.workspaceId])?.n ?? 0,
+      migrations,
+      checks: healthChecks(w),
+      now: nowIso(),
+    };
+  }
+
+  /**
+   * Tell one workspace. The line goes out over the channel path first, because it reaches the human
+   * whatever state the conductor is in; the wake carries the detail the line leaves out.
+   */
+  async function announceTo(w: WorkspaceRuntime, row: Upgrade): Promise<void> {
+    const announcement = buildAnnouncement(row, facts(w));
+    await w.services.threads.notifyHuman({ kind: 'system', id: null }, { text: announcementText(announcement) });
+    const conductor = await w.services.workers.ensureConductor();
+    w.services.wake.enqueue(conductor.id, {
+      source: 'system',
+      reason: announcementReason(announcement),
+      payload: { ...announcement },
+      idempotencyKey: `daemon.upgraded:${row.id}`,
+      requestedBy: { kind: 'system', id: null },
+    });
+  }
+
   /**
    * An upgrade is recorded daemon-level, in `daemon.sqlite`, which has no workspace — but the changelog
    * (PLAN §13.6) is per workspace, so the completed upgrade is pushed outward: one `daemon.upgraded`
@@ -261,7 +337,7 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
     }
   }
 
-  return {
+  const service: UpgradeService = {
     status(): UpgradeStatus {
       const upgrade = latest();
       return { upgrade, waitingFor: upgrade && isCancellableUpgrade(upgrade.state) ? waitingFor() : [] };
@@ -287,7 +363,8 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
       pipeline = pipeline.then(() => advance(id)).catch((e: unknown) => {
         log.error({ err: e, upgradeId: id }, 'upgrade pipeline crashed');
         if (!cancelledMidway(id)) { fail(id, 'build_failed', String(e)); resumeDispatch(); }
-      });
+      // A failure before the restart is announced here: no daemon is going to boot and report it.
+      }).then(() => service.announce()).catch((e: unknown) => log.warn({ err: e, upgradeId: id }, 'upgrade announcement failed'));
       return read(id)!;
     },
 
@@ -327,10 +404,28 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
       fail(row.id, 'abandoned', `the daemon restarted while the upgrade was ${row.state}`);
     },
 
+    async announce(): Promise<void> {
+      const pending = db.all<Upgrade>(
+        "SELECT * FROM upgrades WHERE announced_at IS NULL AND state IN ('completed', 'failed') ORDER BY requested_at, id");
+      for (const row of pending) {
+        // The claim is the guard: whoever sets `announced_at` announces, and a second caller — the next
+        // boot, a concurrent pipeline — sees no rows to claim.
+        const claimed = db.run('UPDATE upgrades SET announced_at = ? WHERE id = ? AND announced_at IS NULL', [nowIso(), row.id]);
+        if (claimed.changes !== 1) continue;
+        for (const w of uniqueWorkspaces(deps.workspaces)) {
+          try { await announceTo(w, row); }
+          catch (e) { log.warn({ err: e, upgradeId: row.id, workspaceId: w.id }, 'could not announce the upgrade to a workspace'); }
+        }
+        log.info({ upgradeId: row.id, state: row.state }, 'upgrade announced');
+      }
+    },
+
     settled(): Promise<void> {
       return pipeline;
     },
   };
+
+  return service;
 }
 
 // ---------- the pieces the daemon does itself ----------

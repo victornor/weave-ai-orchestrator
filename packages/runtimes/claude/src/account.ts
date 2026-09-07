@@ -9,7 +9,7 @@
  * `extra_usage`, `behaviors`) is deliberately ignored: it is not a published contract.
  */
 import type { AccountDescription, AccountProbeInput } from '@agent-conductor/runtime-sdk';
-import { spawnLines } from '@agent-conductor/runtime-sdk';
+import { launchCommand, spawnLines } from '@agent-conductor/runtime-sdk';
 import { ACCOUNT_LIMIT_KINDS, type AccountLimitKind, type AccountLimitWindow } from '@agent-conductor/shared';
 
 type Json = Record<string, unknown>;
@@ -30,8 +30,8 @@ export const GET_USAGE_REQUEST = `${JSON.stringify({ type: 'control_request', re
 export const PROBE_ARGS = ['-p', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose'] as const;
 
 /** An account we could not describe. The reason is the note, never an exception. */
-export function unknownAccount(note: string): AccountDescription {
-  return { billingType: 'unknown', planLabel: null, limitsAvailable: false, limits: [], note };
+export function unknownAccount(note: string, diagnostics?: Record<string, string>): AccountDescription {
+  return { billingType: 'unknown', planLabel: null, limitsAvailable: false, limits: [], note, ...(diagnostics ? { diagnostics } : {}) };
 }
 
 /** One entry of `rate_limits.limits[]` → a window, or null when the runtime did not quantify it. */
@@ -88,15 +88,21 @@ export interface ProbeOverrides { cmd?: string; args?: readonly string[] }
  * Always resolves: a missing binary, a non-zero exit and a timeout are all `unknown` with a note.
  */
 export async function probeAccount(input: AccountProbeInput, over: ProbeOverrides = {}): Promise<AccountDescription> {
-  const env: Record<string, string> = { ...input.env };
-  if (input.configHome) env['CLAUDE_CONFIG_DIR'] = input.configHome;
+  const overlay: Record<string, string> = { ...input.env };
+  if (input.configHome) overlay['CLAUDE_CONFIG_DIR'] = input.configHome;
+
+  // The daemon has no interactive shell's PATH, so the binary is resolved the way a turn resolves
+  // it and the child inherits the daemon's environment — a bare env finds no CLI at all.
+  const cwd = input.configHome ?? process.cwd();
+  const launch = launchCommand(over.cmd ?? 'claude', overlay);
+  const diagnostics = { cmd: launch.cmd, cwd, resolvedFrom: launch.source, path: launch.searched };
 
   let answer: string | null = null;
   const run = spawnLines({
-    cmd: over.cmd ?? 'claude',
+    cmd: launch.cmd,
     args: [...(over.args ?? PROBE_ARGS)],
-    cwd: input.configHome ?? process.cwd(),
-    env,
+    cwd,
+    env: launch.env,
     stdin: GET_USAGE_REQUEST,
     timeoutMs: input.timeoutMs,
     onLine: (stream, line) => {
@@ -107,7 +113,7 @@ export async function probeAccount(input: AccountProbeInput, over: ProbeOverride
 
   const outcome = await run.done;
   if (answer !== null) return parseUsageControlResponse(answer);
-  if (outcome.timedOut) return unknownAccount(`claude: the get_usage probe timed out after ${input.timeoutMs} ms`);
+  if (outcome.timedOut) return unknownAccount(`claude: the get_usage probe timed out after ${input.timeoutMs} ms`, diagnostics);
   const tail = outcome.stderr.trim().split('\n').pop()?.slice(0, 200) ?? '';
-  return unknownAccount(`claude: the get_usage probe returned no control response (exit ${outcome.exitCode ?? 'signal'}${tail ? `: ${tail}` : ''})`);
+  return unknownAccount(`claude: the get_usage probe returned no control response (exit ${outcome.exitCode ?? 'signal'}${tail ? `: ${tail}` : ''})`, diagnostics);
 }

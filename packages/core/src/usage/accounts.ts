@@ -85,7 +85,10 @@ export function createAccountsService(ctx: WorkspaceContext): AccountsService {
           ctx.db.insert('runtime_accounts', row);
           const stored = service.get(runtimeId);
           if (stored) out.push(stored);
-          log.debug({ runtimeId, billingType: d.billingType, limits: d.limits.length }, 'runtime account snapshot refreshed');
+          // A probe that could not describe the account says why, and how it tried to launch the
+          // CLI: the command it resolved, the cwd and the PATH it searched (VS-73).
+          if (d.billingType === 'unknown') log.warn({ runtimeId, note: d.note, ...d.diagnostics }, 'the runtime account probe failed');
+          else log.debug({ runtimeId, billingType: d.billingType, limits: d.limits.length }, 'runtime account snapshot refreshed');
         } catch (e) {
           // The previous snapshot stays; a failed probe must not blank out what we last knew.
           log.warn({ runtimeId, err: String(e) }, 'could not describe the runtime account');

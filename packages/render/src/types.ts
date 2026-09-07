@@ -240,6 +240,11 @@ export interface AccountLimitsView {
   windows: AccountLimitWindowView[];
   /** Why there are no windows, when there are none. */
   note: string | null;
+  /**
+   * The probe could not describe this account at all, as opposed to describing it and finding no
+   * windows. The note is then a failure to show, not a property of the plan.
+   */
+  probeFailed: boolean;
   /** How long ago the snapshot was captured: `2m ago`. */
   age: string;
 }

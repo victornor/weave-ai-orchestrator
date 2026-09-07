@@ -100,6 +100,19 @@ export function showCost(mix: UsageBillingMix | null | undefined): boolean {
   return n(mix.subscription) === 0;
 }
 
+/**
+ * Why a window that contains subscription usage still shows a dollar figure: something in it was
+ * metered, or was recorded before the account was classified and is therefore not known to be
+ * covered. Null when the window is not mixed and the caller has nothing to explain.
+ */
+export const MIXED_BILLING_NOTE = 'This window mixes subscription usage with metered or unclassified usage, so cost is still shown.';
+
+export function mixedBillingNote(mix: UsageBillingMix | null | undefined): string | null {
+  if (!mix) return null;
+  const other = n(mix.metered) + n(mix.unknown);
+  return n(mix.subscription) > 0 && other > 0 ? MIXED_BILLING_NOTE : null;
+}
+
 /** `resets in 34m` · `resets in 4d` · null when the runtime reported no reset time. */
 function resetIn(resetsAt: string | null, now: Date): string | null {
   if (!resetsAt) return null;
@@ -129,6 +142,7 @@ export function accountLimits(accounts: RuntimeAccount[] | null | undefined, now
     billingType: a.billingType,
     plan: a.planLabel ?? (a.billingType === 'subscription_included' ? 'subscription' : a.billingType === 'metered_api' ? 'API key' : 'unknown'),
     limitsAvailable: a.limitsAvailable && a.limits.length > 0,
+    probeFailed: a.billingType === 'unknown',
     windows: a.limitsAvailable
       ? a.limits.map((w) => ({
         key: `${w.kind}:${w.scopeLabel ?? ''}`,

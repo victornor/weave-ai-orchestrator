@@ -1,6 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { adapter } from '../src/adapter.js';
 import { GET_USAGE_REQUEST, parseUsageControlResponse, probeAccount } from '../src/account.js';
 
@@ -111,6 +112,42 @@ describe('probeAccount', () => {
     const acc = await probeAccount({ env: {}, timeoutMs: 150 }, { cmd: 'sh', args: ['-c', 'sleep 30'] });
     expect(acc.billingType).toBe('unknown');
     expect(acc.note).toMatch(/timed out after 150 ms/);
+  });
+
+  it('says how it tried to launch the CLI when it could not describe the account', async () => {
+    const acc = await probeAccount(input, { cmd: 'sh', args: ['-c', 'exit 1'] });
+    expect(acc.diagnostics).toMatchObject({ cmd: expect.stringMatching(/sh$/) as unknown as string, cwd: process.cwd() });
+    expect(acc.diagnostics?.['path']).toContain('/bin');
+  });
+});
+
+/**
+ * The daemon runs under a systemd user unit and its PATH is not the interactive shell's; before
+ * VS-73 the probe spawned with a bare environment and never found the CLI at all.
+ */
+describe('the probe finds the CLI without the parent shell', () => {
+  const homes: string[] = [];
+  afterEach(() => { vi.unstubAllEnvs(); for (const h of homes.splice(0)) rmSync(h, { recursive: true, force: true }); });
+
+  /** A `claude` that answers the get_usage control request, installed where mise puts its shims. */
+  function fakeCli(line: string): string {
+    const home = mkdtempSync(join(tmpdir(), 'ac-probe-home-'));
+    homes.push(home);
+    const dir = join(home, '.local', 'share', 'mise', 'shims');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'claude');
+    writeFileSync(path, `#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' ${JSON.stringify(line)}\n`);
+    chmodSync(path, 0o755);
+    return home;
+  }
+
+  it('describes the account with an empty PATH, resolving the binary the way a turn does', async () => {
+    const home = fakeCli(fixture('get-usage-subscription.json'));
+    vi.stubEnv('PATH', '');
+    vi.stubEnv('HOME', home);
+    const acc = await probeAccount({ env: {}, timeoutMs: 5_000 });
+    expect(acc).toMatchObject({ billingType: 'subscription_included', planLabel: 'max', limitsAvailable: true });
+    expect(acc.limits).toHaveLength(3);
   });
 });
 

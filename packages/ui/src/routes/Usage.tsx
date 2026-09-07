@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { UsageGrain, UsageWindow } from '@agent-conductor/shared';
-import { accountLimits, showCost } from '@agent-conductor/render';
+import { accountLimits, mixedBillingNote, showCost } from '@agent-conductor/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { WindowGrainPicker } from '../components/WindowGrainPicker';
 import { RankedBars, ShareBar, StackedBars, StatTile, LineSeries, seriesColor } from '../components/Chart';
@@ -90,7 +90,7 @@ export function UsageRoute(): React.ReactElement {
               />
             </div>
 
-            <PlanLimits accounts={plans} />
+            <PlanLimits accounts={plans} mixedNote={mixedBillingNote(series.data?.billingMix)} />
 
             <section className="ac-card p-4">
               <div className="mb-3.5 text-meta font-medium text-text-soft">Tokens per {grain} by project</div>

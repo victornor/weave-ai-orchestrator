@@ -4,7 +4,7 @@ import type {
   AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
   RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@agent-conductor/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, runTmpDir, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, launchCommand, runTmpDir, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
 import { probeAccount } from './account.js';
 import { buildArgs, RESTRICTED_TOOLS } from './args.js';
@@ -105,11 +105,13 @@ export const adapter: RuntimeAdapter = {
       for (const ev of parser.handle(line)) sink.onEvent({ ...ev, seq: seq++ });
     };
 
+    // The same resolution the account probe uses, so neither can find a different `claude`.
+    const launch = launchCommand(built.cmd, built.env);
     const run = spawnLines({
-      cmd: built.cmd,
+      cmd: launch.cmd,
       args: built.args,
       cwd: input.cwd,
-      env: { ...(process.env as Record<string, string>), ...built.env },
+      env: launch.env,
       stdin: built.stdin,
       timeoutMs: input.limits.timeoutMs,
       onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),

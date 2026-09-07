@@ -1,7 +1,7 @@
 /** `conductor usage` — tokens are the headline, cost is labelled reported or estimated (PLAN §16.3). */
 import type { Command } from 'commander';
 import { USAGE_GRAINS, USAGE_WINDOWS } from '@agent-conductor/shared';
-import { accountLimits, showCost, usageRows, usageTotals, type UsageSeries } from '@agent-conductor/render';
+import { accountLimits, mixedBillingNote, showCost, usageRows, usageTotals, type UsageSeries } from '@agent-conductor/render';
 import { emit, fields, heading, style, table, write } from '../output.js';
 import type { RuntimeAccount } from '@agent-conductor/shared';
 import { run, session } from './util.js';
@@ -63,9 +63,11 @@ export function register(program: Command): void {
           if (plan.limitsAvailable) {
             fields(plan.windows.map((w) => [w.label, `${w.percent}%${w.resetsIn ? style.dim(`  ${w.resetsIn}`) : ''}`] as [string, string]));
           } else {
-            write(style.dim(`  limits unavailable${plan.note ? ` — ${plan.note}` : ''}`));
+            write(style.dim(`  ${plan.probeFailed ? 'account probe failed' : 'limits unavailable'}${plan.note ? ` — ${plan.note}` : ''}`));
           }
         }
+        const mixed = mixedBillingNote(series?.billingMix);
+        if (mixed) { write(''); write(style.dim(`  ${mixed}`)); }
         if (opts['series'] === true) {
           write('');
           table(usageRows(series), [

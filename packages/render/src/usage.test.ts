@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RuntimeAccount } from '@agent-conductor/shared';
-import { accountLimits, budgetMeter, costStatusFor, showCost, usageRows, usageTotals } from './usage.js';
+import { accountLimits, budgetMeter, costStatusFor, MIXED_BILLING_NOTE, mixedBillingNote, showCost, usageRows, usageTotals } from './usage.js';
 
 const series = {
   range: { start: 's', end: 'e', window: '24h', grain: 'hour', prevStart: 'ps', prevEnd: 'pe' },
@@ -106,6 +106,7 @@ describe('accountLimits', () => {
       billingType: 'subscription_included',
       plan: 'max',
       limitsAvailable: true,
+      probeFailed: false,
       windows: [
         { key: 'session:', label: 'Session', percent: 42, resetsIn: 'resets in 35m' },
         { key: 'weekly_all:', label: 'Weekly', percent: 23, resetsIn: 'resets in 4d' },
@@ -155,5 +156,27 @@ describe('accountLimits', () => {
   it('is empty when nothing has been probed', () => {
     expect(accountLimits([], now)).toEqual([]);
     expect(accountLimits(null, now)).toEqual([]);
+  });
+
+  it('separates a probe that failed from an account that simply has no windows', () => {
+    const failed: RuntimeAccount = {
+      ...subscription, billingType: 'unknown', planLabel: null, limitsAvailable: false, limits: [],
+      note: 'claude: the get_usage probe returned no control response (exit -1: spawn error)',
+    };
+    expect(accountLimits([failed], now)[0]).toMatchObject({ probeFailed: true, note: failed.note });
+    expect(accountLimits([{ ...subscription, limitsAvailable: false, limits: [], note: 'no windows' }], now)[0]?.probeFailed).toBe(false);
+  });
+});
+
+describe('mixedBillingNote', () => {
+  it('explains the cost figure only when the window really mixes billing types', () => {
+    expect(mixedBillingNote({ subscription: 10, metered: 1, unknown: 0 })).toBe(MIXED_BILLING_NOTE);
+    expect(mixedBillingNote({ subscription: 10, metered: 0, unknown: 1 })).toBe(MIXED_BILLING_NOTE);
+  });
+
+  it('says nothing when there is nothing to explain', () => {
+    expect(mixedBillingNote({ subscription: 10, metered: 0, unknown: 0 })).toBeNull();
+    expect(mixedBillingNote({ subscription: 0, metered: 10, unknown: 4 })).toBeNull();
+    expect(mixedBillingNote(undefined)).toBeNull();
   });
 });

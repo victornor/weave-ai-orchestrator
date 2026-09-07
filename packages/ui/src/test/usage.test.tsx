@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { accountLimits } from '@agent-conductor/render';
+import { accountLimits, MIXED_BILLING_NOTE } from '@agent-conductor/render';
 import type { RuntimeAccount, UsageBillingMix } from '@agent-conductor/shared';
 import { PlanLimits } from '../components/PlanLimits';
 
@@ -22,6 +22,11 @@ const noLimits: RuntimeAccount = {
   note: 'codex: the CLI keeps plan limits in its session rollout file',
 };
 
+const probeFailed: RuntimeAccount = {
+  ...subscription, billingType: 'unknown', planLabel: null, limitsAvailable: false, limits: [],
+  note: 'claude: the get_usage probe returned no control response (exit -1: spawn error)',
+};
+
 describe('PlanLimits', () => {
   it('shows the plan, every window with its utilisation and reset, and the snapshot age', () => {
     render(<PlanLimits accounts={accountLimits([subscription], NOW)} />);
@@ -39,6 +44,19 @@ describe('PlanLimits', () => {
     expect(screen.getByText(/session rollout file/)).toBeTruthy();
     expect(container.querySelectorAll('.rounded-pill')).toHaveLength(0);
     expect(screen.queryByText('0%')).toBeNull();
+  });
+
+  it('says the probe failed, with its reason and the capture time, rather than blaming the plan', () => {
+    render(<PlanLimits accounts={accountLimits([probeFailed], NOW)} />);
+    expect(screen.getByText(/Account probe failed/)).toBeTruthy();
+    expect(screen.getByText(/spawn error/)).toBeTruthy();
+    expect(screen.getByText('2m ago')).toBeTruthy();
+    expect(screen.queryByText(/Limits unavailable/)).toBeNull();
+  });
+
+  it('explains a cost figure that survives because the window mixes billing types', () => {
+    render(<PlanLimits accounts={accountLimits([subscription], NOW)} mixedNote={MIXED_BILLING_NOTE} />);
+    expect(screen.getByText(MIXED_BILLING_NOTE)).toBeTruthy();
   });
 
   it('renders one block per account', () => {
@@ -83,16 +101,24 @@ describe('the usage route decides cost from the window it is showing', () => {
     expect(screen.getByText('Session')).toBeTruthy();
   });
 
-  it('keeps the dollar figure when any of the window was metered', async () => {
+  it('keeps the dollar figure when any of the window was metered, and says why', async () => {
     mockHooks({ subscription: 1000, metered: 5, unknown: 0 }, [subscription]);
     await renderUsage();
     expect(screen.getByText(/^cost · /)).toBeTruthy();
+    expect(screen.getByText(MIXED_BILLING_NOTE)).toBeTruthy();
   });
 
   it('keeps the dollar figure when the window has unattributed tokens', async () => {
     mockHooks({ subscription: 1000, metered: 0, unknown: 5 }, [subscription]);
     await renderUsage();
     expect(screen.getByText(/^cost · /)).toBeTruthy();
+    expect(screen.getByText(MIXED_BILLING_NOTE)).toBeTruthy();
+  });
+
+  it('does not explain a mix when there is none', async () => {
+    mockHooks({ subscription: 1000, metered: 0, unknown: 0 }, [subscription]);
+    await renderUsage();
+    expect(screen.queryByText(MIXED_BILLING_NOTE)).toBeNull();
   });
 
   it('is unchanged when nothing has been probed and no mix is reported', async () => {

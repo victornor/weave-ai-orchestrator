@@ -45,6 +45,8 @@ export interface AccountDescription {
   limitsAvailable: boolean;
   limits: AccountLimitWindow[];
   note: string | null;
+  /** How the probe was launched, for the daemon's log when it failed. Never stored, never shown. */
+  diagnostics?: Record<string, string>;
 }
 export interface InstructionBundle { instructions: string; skills: Array<{ name: string; dir: string }> }
 
@@ -69,6 +71,7 @@ export interface RuntimeAdapter {
   /** Instruction discovery file name at the home root (AGENTS.md, CLAUDE.md, GEMINI.md). */
   instructionFiles(): string[];
 }
+export * from './launch.js';
 export * from './process.js';
 export * from './testkit.js';
 export * from './fsutil.js';

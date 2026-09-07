@@ -28,7 +28,7 @@ function Window({ label, percent, resetsIn }: Omit<AccountLimitsView['windows'][
   );
 }
 
-export function PlanLimits({ accounts, className }: { accounts: AccountLimitsView[]; className?: string }): React.ReactElement | null {
+export function PlanLimits({ accounts, mixedNote, className }: { accounts: AccountLimitsView[]; mixedNote?: string | null; className?: string }): React.ReactElement | null {
   if (accounts.length === 0) return null;
   return (
     <section className={cx('ac-card p-4', className)}>
@@ -46,12 +46,18 @@ export function PlanLimits({ accounts, className }: { accounts: AccountLimitsVie
                 {a.windows.map(({ key, ...w }: AccountLimitsView['windows'][number]) => <Window key={key} {...w} />)}
               </div>
             ) : (
-              // Never draw a bar at zero for something the runtime did not report.
-              <p className="text-micro text-text-3">Limits unavailable{a.note ? <span className="text-text-4"> — {a.note}</span> : null}</p>
+              // Never draw a bar at zero for something the runtime did not report. A probe that
+              // could not describe the account at all says so, rather than reading as a plan
+              // that happens to have no windows.
+              <p className="text-micro text-text-3">
+                {a.probeFailed ? 'Account probe failed' : 'Limits unavailable'}
+                {a.note ? <span className="text-text-4"> — {a.note}</span> : null}
+              </p>
             )}
           </div>
         ))}
       </div>
+      {mixedNote ? <p className="mt-3.5 border-t border-line-1 pt-2.5 text-nano text-text-4">{mixedNote}</p> : null}
     </section>
   );
 }

@@ -761,6 +761,15 @@ export function useUsageAccounts(): UseQueryResult<T.UsageAccount[]> {
   });
 }
 
+/** Each runtime's credential state: valid with an expiry, or an expired login and what to run. */
+export function useUsageCredentials(): UseQueryResult<T.UsageCredential[]> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.usageCredentials(ws),
+    queryFn: () => api.ws<unknown>(ws, '/usage/credentials').then((r) => listOf<T.UsageCredential>(r, 'credentials')),
+  });
+}
+
 /* --------------------------------------------------------------- threads */
 
 export function useThreads(): UseQueryResult<T.ThreadSummary[]> {

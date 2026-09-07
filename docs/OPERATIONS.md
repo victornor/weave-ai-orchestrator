@@ -1,12 +1,12 @@
 # Operations
 
 Running an AgentConductor daemon on a server: install, TLS, service management, backups, upgrades,
-troubleshooting. For what the product *is*, start at [`../README.md`](../README.md).
+runtime credentials, troubleshooting. For what the product *is*, start at [`../README.md`](../README.md).
 
 The daemon host is the machine where code actually runs. It holds:
 
 - the workspace directories (repos, worktrees, worker homes, knowledge bases, the SQLite DB),
-- the coding CLIs and their credentials,
+- the coding CLIs and their credentials — one per runtime, shared with your own CLI (§7),
 - git/SSH keys and `gh` auth,
 - channel bot tokens and any secret referenced from `workspace.yaml`,
 - `worktrunk` and `openspec`.
@@ -361,7 +361,93 @@ upgrade:
 
 ---
 
-## 7. Troubleshooting
+## 7. Runtime credentials
+
+### One credential per runtime per host
+
+Every agent authenticates with **the same credential file the machine owner's own CLI uses**. There
+is no second copy anywhere.
+
+| Runtime | The one credential | What the workspace has |
+|---|---|---|
+| `claude` | `~/.claude/.credentials.json` | `<workspace>/.agent-conductor/runtimes/claude/.credentials.json` → symlink |
+| `codex` | `~/.codex/auth.json` | `…/runtimes/codex/auth.json` → symlink |
+| `gemini` | `~/.gemini/oauth_creds.json`, `~/.gemini/google_accounts.json` | symlinks |
+| `opencode` | `~/.local/share/opencode/auth.json` | `…/runtimes/opencode/opencode/auth.json` → symlink |
+
+Only the credential file is shared. The rest of each runtime's config home — settings, session
+history, project state — stays per workspace, which is why `CLAUDE_CONFIG_DIR` still points at the
+workspace's own runtime directory.
+
+**Why.** Claude's OAuth rotates the refresh token on every refresh. Two live copies of one rotating
+credential race: whichever side refreshes first invalidates the other. Until VS-75 the daemon kept a
+copy and re-took it whenever the host's file had a newer mtime, which could overwrite a *working*
+credential with a *dead* one. On 2026-09-07 that stopped every agent in the workspace at once.
+
+**Repair.** If a CLI writes its credential by renaming a temp file over the path, it replaces the
+symlink rather than following it, and the credential forks again. Before and after every turn, and
+after every account probe, the daemon reconciles: it compares the expiry the two credentials assert
+about *themselves* and keeps the one that expires later, then restores the link. Modification time
+is never the criterion — a copy resets it, and it says nothing about which token is live. The host's
+credential is replaced only when the workspace's is provably newer (both expiries readable, the
+workspace's later), so a credential whose expiry cannot be read is never clobbered.
+
+**Upgrading.** The first workspace load after the upgrade finds a regular file where the symlink
+belongs and reconciles once. A workspace that had its own separate login keeps whichever credential
+is live. Nobody is signed out and no login is required.
+
+**Consequence.** `conductor runtime login <id>` no longer gives a workspace an independent login: it
+logs in the one host credential for that runtime. Multi-account and per-role credentials are not
+supported.
+
+### When a login expires
+
+The first turn that fails to authenticate **gates that runtime**:
+
+1. The runtime's credential is marked as needing a login.
+2. The dispatcher starts no further turn for any agent on that runtime, in that workspace. Their
+   queued wake-ups are left queued, so no work is lost and nothing has to be re-asked.
+3. Every agent on the runtime is paused with the reason `runtime_login_expired`.
+4. **Exactly one** decision is raised for the human — not one per worker — correlated on
+   `runtime-login:<runtimeId>`, so later failures join it.
+5. The human is told over the channel path directly. That is deliberate: the conductor is usually on
+   the same runtime and cannot take a turn, and an outage must not be able to hide behind an agent
+   the outage itself has stopped.
+
+Nothing is retried. An authentication failure does not enter the retry ladder at all, and does not
+park workers individually.
+
+**To recover, log the CLI in on the daemon's host:**
+
+```bash
+claude /login          # or: codex login · opencode auth login · gemini
+```
+
+That is the whole procedure. Within a minute the supervisor's probe succeeds, the gate clears, every
+paused agent takes the turn it was holding, and the decision withdraws itself. You do not answer the
+card and you do not resume any worker — resume is refused while the gate is up, because the
+dispatcher would not start that turn anyway.
+
+A probe counts as success only when it can actually describe the account. A missing binary and a
+timed-out probe both report "unknown" and deliberately do **not** clear the gate, which would only
+start every agent into the same failure again.
+
+### Seeing the state
+
+```bash
+conductor doctor                       # a `credential <runtime>` check per runtime
+curl .../api/w/<ws>/usage/credentials  # present, expiresAt, lastVerifiedAt, refreshFailedAt, needsLogin
+```
+
+The Usage view shows the same panel, above the usage charts so it is visible even when a gated
+runtime has produced no usage at all.
+
+**No surface ever carries the token.** `RuntimeCredential` has no field that could hold one, and the
+runtime's own error message is redacted where it enters the system rather than at each exit.
+
+---
+
+## 8. Troubleshooting
 
 ### Locked out — `auth_locked` (HTTP 429)
 

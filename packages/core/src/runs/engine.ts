@@ -1,4 +1,5 @@
-import { seedRuntimeCredentials } from '../workspace/loader.js';
+import { credentialReaderFor, reconcileRuntimeCredential } from '../workspace/loader.js';
+import { gateRuntimeForLogin, ungateRuntime } from './authgate.js';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nowIso } from '@agent-conductor/db';
@@ -233,7 +234,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       permission: { mode: permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto', allowedTools: permission.allowed, deniedTools: permission.denied },
       model: agent.model ?? role?.model ?? ctx.config.defaults.model ?? null,
       effort: agent.effort ?? role?.effort ?? null,
-      configHome: (seedRuntimeCredentials(agent.runtimeId, join(ctx.paths.runtimesHome, agent.runtimeId)), join(ctx.paths.runtimesHome, agent.runtimeId)),
+      configHome: (reconcileRuntimeCredential(agent.runtimeId, join(ctx.paths.runtimesHome, agent.runtimeId), { readCredential: credentialReaderFor(ctx.registries, agent.runtimeId) }), join(ctx.paths.runtimesHome, agent.runtimeId)),
     };
 
     // 5. spawn + stream
@@ -336,7 +337,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
       });
     }
 
-    const agentStatus = status === 'succeeded' ? 'active' : (errorFamily && (RETRYABLE.includes(errorFamily) || (errorFamily === 'auth' && countRetries(ctx, runId) < 1))) || status === 'cancelled' ? 'active' : 'error';
+    const agentStatus = status === 'succeeded' ? 'active' : (errorFamily && RETRYABLE.includes(errorFamily)) || status === 'cancelled' ? 'active' : 'error';
     ctx.db.update('agents', f.agent.id, {
       status: agentStatus,
       turnEpoch: f.run.turnEpoch,
@@ -372,15 +373,18 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   ctx.events.emit('run.finished', 'run', runId, { agentId: f.agent.id, ticketId: f.agent.ticketId, status, liveness, costCents, summary });
   runState(ctx).active.delete(runId);
 
-  // Auth failures: the per-workspace credential copy may be stale (OAuth rotation); re-seed from the host and retry once.
+  // An authentication failure is not this turn's problem but the runtime's: one credential is shared
+  // per host, so retrying can only fail again and parking would raise a card per worker for one
+  // outage. It leaves the ladder entirely and gates the runtime once instead (VS-75). Nothing here
+  // rewrites the credential — there is no second copy to restore, and the owner may have renewed it
+  // since this turn failed.
   if (errorFamily === 'auth') {
-    try { seedRuntimeCredentials(f.agent.runtimeId, join(ctx.paths.runtimesHome, f.agent.runtimeId), { force: true }); } catch { /* best effort */ }
-  }
-  // Retry the transient family with backoff (30 s / 2 min / 10 min, max 3); auth gets a single retry
-  // after re-seeding. A usage limit is not in RETRYABLE and falls through to parking below.
-  if (errorFamily && (RETRYABLE.includes(errorFamily) || errorFamily === 'auth')) {
+    gateRuntimeForLogin(ctx, deps, { runtimeId: f.agent.runtimeId, agentId: f.agent.id, runId }, f.failure?.message ?? r?.error?.message ?? null);
+  } else if (errorFamily && RETRYABLE.includes(errorFamily)) {
+    // Retry the transient family with backoff (30 s / 2 min / 10 min, max 3).
+    // A usage limit is not in RETRYABLE and falls through to parking below.
     const attempt = countRetries(ctx, runId);
-    const maxAttempts = errorFamily === 'auth' ? 1 : RETRY_BACKOFF_MS.length;
+    const maxAttempts = RETRY_BACKOFF_MS.length;
     if (attempt < maxAttempts) {
       const delay = RETRY_BACKOFF_MS[attempt]!;
       const notBefore = new Date(Date.now() + delay).toISOString();
@@ -398,6 +402,11 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
     }
   } else if (status === 'failed' && f.agent.kind === 'worker' && errorFamily !== 'model_refusal') {
     parkForHuman(ctx, deps, f, errorFamily, errorCode, f.failure?.message ?? r?.error?.message ?? null);
+  }
+  // A turn that ran proves this runtime's credential works, so a gate left over from an earlier
+  // outage is stale: clear it here rather than waiting for the supervisor's next probe.
+  if (status === 'succeeded') {
+    try { if (deps().accounts.gatedRuntimes().includes(f.agent.runtimeId)) ungateRuntime(ctx, deps, f.agent.runtimeId); } catch { /* the supervisor will clear it */ }
   }
   // A successful turn closes any retry card still waiting on the human.
   if (status === 'succeeded') {

@@ -1,3 +1,5 @@
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeRuntime, type AccountDescription } from '@agent-conductor/runtime-sdk';
 import { newId, nowIso } from '@agent-conductor/db';
@@ -114,5 +116,106 @@ describe('accounts service', () => {
 
     await accounts.refresh();
     expect(gemini.calls).toBe(0);
+  });
+});
+
+/**
+ * The credential state behind the login gate (VS-75). Never launches a CLI: `present` and
+ * `expiresAt` come from the credential file, through the runtime's `readCredential` hook.
+ */
+describe('credential state', () => {
+  let h: TestHarness;
+  let accounts: AccountsService;
+
+  /** A runtime that reads its credential file the way the claude adapter does. */
+  class CredentialRuntime extends AccountRuntime {
+    readCredential({ configHome }: { configHome: string }): { present: boolean; expiresAt: string | null } {
+      try {
+        const raw = readFileSync(join(configHome, '.credentials.json'), 'utf8');
+        const at = (JSON.parse(raw) as { expiresAt?: number }).expiresAt;
+        return { present: true, expiresAt: typeof at === 'number' ? new Date(at).toISOString() : null };
+      } catch { return { present: false, expiresAt: null }; }
+    }
+  }
+
+  const writeCredentialFile = (expiresAt: string | null): void => {
+    const home = join(h.ctx.paths.runtimesHome, 'claude');
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, '.credentials.json'), JSON.stringify(expiresAt ? { expiresAt: Date.parse(expiresAt) } : {}));
+  };
+
+  beforeEach(() => {
+    h = makeHarness();
+    accounts = createAccountsService(h.ctx);
+    h.ctx.registries.runtimes.set('claude', new CredentialRuntime(subscription));
+  });
+  afterEach(() => h.cleanup());
+
+  it('reports a credential that has never failed as valid and ungated', () => {
+    writeCredentialFile('2026-09-08T10:00:00.000Z');
+    const cred = accounts.credential('claude');
+    expect(cred).toMatchObject({ present: true, expiresAt: '2026-09-08T10:00:00.000Z', needsLogin: false, refreshFailedAt: null });
+    expect(accounts.gatedRuntimes()).toEqual([]);
+  });
+
+  it('reports a present credential whose expiry it cannot read, rather than an absent one', () => {
+    writeCredentialFile(null);
+    expect(accounts.credential('claude')).toMatchObject({ present: true, expiresAt: null });
+  });
+
+  it('round-trips a failure and a verification', () => {
+    writeCredentialFile('2026-09-08T10:00:00.000Z');
+
+    const failed = accounts.noteAuthFailure('claude', 'OAuth session expired');
+    expect(failed.needsLogin).toBe(true);
+    expect(failed.refreshFailedAt).not.toBeNull();
+    expect(failed.detail).toBe('OAuth session expired');
+    expect(accounts.gatedRuntimes()).toEqual(['claude']);
+
+    const ok = accounts.noteVerified('claude');
+    expect(ok.needsLogin).toBe(false);
+    expect(ok.refreshFailedAt).toBeNull();
+    expect(ok.lastVerifiedAt).not.toBeNull();
+    expect(accounts.gatedRuntimes()).toEqual([]);
+  });
+
+  it('re-reads the expiry from the file rather than caching it', () => {
+    writeCredentialFile('2026-09-08T10:00:00.000Z');
+    accounts.noteAuthFailure('claude', null);
+    expect(accounts.credential('claude').expiresAt).toBe('2026-09-08T10:00:00.000Z');
+
+    // The owner logs in again: the file moves and the state must move with it, uncached.
+    writeCredentialFile('2026-09-20T10:00:00.000Z');
+    expect(accounts.credential('claude').expiresAt).toBe('2026-09-20T10:00:00.000Z');
+  });
+
+  it('strips anything token-shaped from the detail it stores', () => {
+    writeCredentialFile('2026-09-08T10:00:00.000Z');
+    const failed = accounts.noteAuthFailure('claude', 'could not refresh sk-ant-oat01-AAAAAAAAAAAAAAAAAAAA');
+    expect(failed.detail).not.toContain('sk-ant-oat01-AAAAAAAAAAAAAAAAAAAA');
+    expect(JSON.stringify(accounts.credentials())).not.toContain('AAAAAAAAAAAAAAAAAAAA');
+  });
+
+  it('records the last verified time when a probe describes the account', async () => {
+    writeCredentialFile('2026-09-08T10:00:00.000Z');
+    await accounts.refresh(['claude']);
+    expect(accounts.credential('claude').lastVerifiedAt).not.toBeNull();
+  });
+
+  it('does not lower the gate as a side effect of a probe', async () => {
+    writeCredentialFile('2026-09-08T10:00:00.000Z');
+    accounts.noteAuthFailure('claude', 'expired');
+    await accounts.refresh(['claude']);
+    // Lowering the gate also has to release the agents it paused, which is `ungateRuntime`'s job.
+    expect(accounts.gatedRuntimes()).toEqual(['claude']);
+  });
+
+  it('never returns a token in the credential state', () => {
+    const home = join(h.ctx.paths.runtimesHome, 'claude');
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, '.credentials.json'), JSON.stringify({ expiresAt: Date.parse('2026-09-08T10:00:00Z'), accessToken: 'sk-ant-oat01-SECRET' }));
+    const state = JSON.stringify(accounts.credentials().concat(accounts.credential('claude')));
+    expect(state).not.toContain('sk-ant-oat01-SECRET');
+    expect(state).not.toContain('accessToken');
   });
 });

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, chmodSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, chmodSync, lstatSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import YAML from 'yaml';
@@ -7,7 +7,7 @@ import {
   DaemonConfigSchema, DEFAULT_KNOWLEDGE_BUDGETS, WorkspaceConfigSchema, WorkspaceRegistrySchema, OcError,
   type DaemonConfig, type KnowledgeBudgets, type WorkspaceConfig, type WorkspaceRegistry,
 } from '@agent-conductor/shared';
-import type { WorkspaceContext } from '../context.js';
+import type { Registries, WorkspaceContext } from '../context.js';
 import { workspacePaths } from '../context.js';
 import { EventBus } from '../events.js';
 import { PROJECT_SECTIONS } from '../knowledge/files.js';
@@ -206,7 +206,11 @@ class Loader implements WorkspaceLoader {
 
     // Per-workspace runtime config homes (CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_CONFIG_HOME …).
     const runtimeIds = new Set<string>([...opts.registries.runtimes.keys(), config.defaults.runtime, config.conductor.runtime, ...config.projects.map((p) => p.runtime ?? config.defaults.runtime)]);
-    for (const id of runtimeIds) if (id) { mkdirSync(join(paths.runtimesHome, id), { recursive: true }); seedRuntimeCredentials(id, join(paths.runtimesHome, id)); }
+    for (const id of runtimeIds) {
+      if (!id) continue;
+      mkdirSync(join(paths.runtimesHome, id), { recursive: true });
+      linkRuntimeCredentials(id, join(paths.runtimesHome, id), { readCredential: credentialReaderFor(opts.registries, id) });
+    }
 
     writeWtConfig(paths.wtConfig, config.projects);
     registerBuiltinWorktreeProviders(opts.registries);
@@ -264,10 +268,17 @@ class Loader implements WorkspaceLoader {
 export const loader: WorkspaceLoader = new Loader();
 
 /**
- * Inherit the host user's CLI credentials into a per-workspace runtime config home when it has none yet.
- * Copies only credential files (never settings), mode 0600. `conductor runtime login` can replace them later.
+ * The one credential per runtime per host (VS-75).
+ *
+ * The workspace's runtime config home holds a *symlink* to the credential file the machine owner's
+ * own CLI reads and writes, never a copy of it. Claude's OAuth rotates the refresh token on every
+ * refresh, so two live copies race and whichever refreshes first invalidates the other; the outage
+ * of 2026-09-07 was exactly that. Only the credential file is shared — settings, session history
+ * and project state stay per workspace, so `CLAUDE_CONFIG_DIR` still points here.
  */
-export function seedRuntimeCredentials(runtimeId: string, home: string, opts: { force?: boolean } = {}): void {
+
+/** Host path -> workspace path, per runtime. The host path is always the canonical one. */
+function credentialPaths(runtimeId: string, home: string): Array<[string, string]> {
   const h = process.env.HOME ?? '';
   const candidates: Record<string, Array<[string, string]>> = {
     claude: [[join(h, '.claude', '.credentials.json'), join(home, '.credentials.json')]],
@@ -275,14 +286,81 @@ export function seedRuntimeCredentials(runtimeId: string, home: string, opts: { 
     gemini: [[join(h, '.gemini', 'oauth_creds.json'), join(home, 'oauth_creds.json')], [join(h, '.gemini', 'google_accounts.json'), join(home, 'google_accounts.json')]],
     opencode: [[join(h, '.local', 'share', 'opencode', 'auth.json'), join(home, 'opencode', 'auth.json')]],
   };
-  for (const [src, dst] of candidates[runtimeId] ?? []) {
-    try {
-      if (!existsSync(src)) continue;
-      // Copy when the workspace has no credentials yet, or when the host's file is newer (OAuth tokens rotate; the host CLI refreshes them).
-      if (!opts.force && existsSync(dst) && statSync(dst).mtimeMs >= statSync(src).mtimeMs) continue;
-      mkdirSync(dirname(dst), { recursive: true });
-      copyFileSync(src, dst);
-      chmodSync(dst, 0o600);
-    } catch { /* best effort */ }
+  return candidates[runtimeId] ?? [];
+}
+
+/**
+ * Reads a credential's own facts from a config home. Supplied by the caller, which has the runtime
+ * registries; `core` may not import a runtime package. The config home of a credential file is its
+ * containing directory, which is what the runtimes implementing the hook expect.
+ */
+export type CredentialReader = (configHome: string) => { present: boolean; expiresAt: string | null };
+
+/** The reader a runtime offers, or undefined when it cannot describe its credential. */
+export function credentialReaderFor(registries: Registries, runtimeId: string): CredentialReader | undefined {
+  const adapter = registries.runtimes.get(runtimeId);
+  if (!adapter?.readCredential) return undefined;
+  return (configHome: string) => adapter.readCredential!({ configHome });
+}
+
+/** Is `path` already a symlink resolving to `target`? */
+function linksTo(path: string, target: string): boolean {
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return false;
+    return resolve(dirname(path), readlinkSync(path)) === resolve(target);
+  } catch { return false; }
+}
+
+/** Point `dst` at `src`, replacing whatever is there. `src` is left at 0600. */
+function linkTo(src: string, dst: string): void {
+  mkdirSync(dirname(dst), { recursive: true });
+  rmSync(dst, { force: true });
+  symlinkSync(src, dst);
+  try { chmodSync(src, 0o600); } catch { /* the owner's own file; mode is theirs */ }
+}
+
+/**
+ * One credential pair, reconciled to a single file.
+ *
+ * A CLI that writes its credential by renaming a temp file over the path replaces the *symlink*
+ * rather than following it, so the credential can fork again on any turn. This puts it back, and
+ * decides which of the two survives by the expiry the credentials themselves carry — never by
+ * modification time, which a copy resets and which says nothing about which token is live.
+ *
+ * The host file is only ever replaced when the workspace's is *provably* newer: both expiries
+ * readable and the workspace's later. An unreadable expiry is never a reason to overwrite a
+ * credential we cannot reason about (a `claude setup-token` credential legitimately carries none).
+ */
+function reconcileOne(src: string, dst: string, read?: CredentialReader): void {
+  if (linksTo(dst, src)) return;
+
+  const dstIsFile = (() => { try { return lstatSync(dst).isFile(); } catch { return false; } })();
+
+  if (!existsSync(src)) {
+    // No host credential. A workspace that had its own login keeps it, promoted to the host path,
+    // so upgrading a workspace that was logged in separately does not sign anyone out.
+    if (dstIsFile) { mkdirSync(dirname(src), { recursive: true }); copyFileSync(dst, src); linkTo(src, dst); }
+    return;
+  }
+  if (!dstIsFile) { linkTo(src, dst); return; }
+
+  const expiry = (path: string): string | null => (read ? read(dirname(path)).expiresAt : null);
+  const theirs = expiry(dst);
+  const ours = expiry(src);
+  if (theirs !== null && ours !== null && theirs > ours) copyFileSync(dst, src);
+  linkTo(src, dst);
+}
+
+/**
+ * Share the host user's credential for `runtimeId` into a per-workspace runtime config home, and
+ * repair the sharing if a CLI has replaced the link. Idempotent and best-effort per file: one
+ * unreadable path must not stop the others.
+ */
+export function linkRuntimeCredentials(runtimeId: string, home: string, opts: { readCredential?: CredentialReader } = {}): void {
+  for (const [src, dst] of credentialPaths(runtimeId, home)) {
+    try { reconcileOne(src, dst, opts.readCredential); } catch { /* best effort */ }
   }
 }
+
+/** Alias kept for the reconcile call sites, which read as a repair rather than a first link. */
+export const reconcileRuntimeCredential = linkRuntimeCredentials;

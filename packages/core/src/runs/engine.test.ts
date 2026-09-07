@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
@@ -8,6 +8,8 @@ import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createDecisionsService } from '../decisions/service.js';
 import { createTicketsService } from '../tickets/service.js';
 import { createWakeService } from '../wake/index.js';
+import { createAccountsService } from '../usage/accounts.js';
+import { LOGIN_PAUSE_CODE, loginCorrelationKey } from './authgate.js';
 import { createRunsService } from './index.js';
 import { createDispatcher, type CoreDispatcher } from './dispatcher.js';
 import { countRetries, executeRun } from './engine.js';
@@ -309,8 +311,8 @@ describe('run engine', () => {
     }
 
     /** A worker mid-ticket, woken once, whose turn fails the way `result` says. */
-    async function failOnce(result: Record<string, unknown> | ((input: TurnInput) => Record<string, unknown>)): Promise<{ ticketId: string; workerId: string }> {
-      const ticketId = seedTicket(h, { status: 'in_progress' });
+    async function failOnce(result: Record<string, unknown> | ((input: TurnInput) => Record<string, unknown>), n = 1): Promise<{ ticketId: string; workerId: string }> {
+      const ticketId = seedTicket(h, { status: 'in_progress', number: n, identifier: `TST-${n}` });
       const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
       runtime.queue.push(result as never);
       h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1: Add a README badge' });
@@ -320,6 +322,92 @@ describe('run engine', () => {
     }
 
     const openFor = (ticketId: string): Decision[] => h.services.decisions!.list({ status: ['open'], ticketId });
+
+    // VS-75: an authentication failure is a fact about the runtime's one shared credential, not
+    // about this worker. It leaves the ladder entirely — no retry, no per-worker card, no blocked
+    // ticket — and gates the runtime once instead. The outage of 2026-09-07 produced three retry
+    // cards for one expired login; these pin that it cannot happen again.
+    describe('an authentication failure gates the runtime instead', () => {
+      let notified: string[];
+
+      beforeEach(() => {
+        notified = [];
+        h.services.accounts = createAccountsService(h.ctx);
+        h.services.threads = { notifyHuman: async (_a: unknown, m: { text: string }) => { notified.push(m.text); } } as never;
+      });
+
+      const failAuth = (n = 1) => failOnce({ error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } }, n);
+
+      it('schedules no retry at all', async () => {
+        const { workerId } = await failAuth();
+        const wakes = h.db.all<Wakeup>("SELECT * FROM wakeups WHERE agent_id = ? AND source = 'retry'", [workerId]);
+        expect(wakes).toHaveLength(0);
+        const run = h.db.get<{ scheduledRetryAt: string | null }>('SELECT scheduled_retry_at FROM runs ORDER BY created_at DESC LIMIT 1')!;
+        expect(run.scheduledRetryAt).toBeNull();
+      });
+
+      it('raises no per-worker retry card and does not block the ticket', async () => {
+        const { ticketId } = await failAuth();
+        expect(openFor(ticketId).filter((d) => d.kind === 'retry_approval')).toHaveLength(0);
+        expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('in_progress');
+      });
+
+      it('gates the runtime, pauses the worker with the login reason and tells the human', async () => {
+        const { workerId } = await failAuth();
+        expect(h.services.accounts!.gatedRuntimes()).toEqual(['fake']);
+        const agent = h.db.get<{ status: string; pauseDetail: { code?: string } | null }>('SELECT * FROM agents WHERE id = ?', [workerId])!;
+        expect(agent.status).toBe('paused');
+        expect(agent.pauseDetail?.code).toBe(LOGIN_PAUSE_CODE);
+        expect(notified).toHaveLength(1);
+      });
+
+      it('raises one card however many workers fail', async () => {
+        await failAuth(1);
+        await failAuth(2);
+        const open = h.services.decisions!.list({ status: ['open'] }).filter((d) => d.correlationKey === loginCorrelationKey('fake'));
+        expect(open).toHaveLength(1);
+        expect(notified).toHaveLength(1);
+      });
+
+      // There is only one credential; there is nothing to restore over it, and the owner may have
+      // renewed it since this turn failed. The old code force-copied here and could overwrite a
+      // working credential with a dead one — that was the outage.
+      it('does not write the credential file', async () => {
+        const home = join(h.ctx.paths.runtimesHome, 'fake');
+        mkdirSync(home, { recursive: true });
+        const path = join(home, '.credentials.json');
+        writeFileSync(path, '{"renewed":true}');
+        const before = statSync(path).mtimeMs;
+
+        await failAuth();
+
+        expect(readFileSync(path, 'utf8')).toBe('{"renewed":true}');
+        expect(statSync(path).mtimeMs).toBe(before);
+      });
+
+      // A turn already in flight when another agent gates the runtime proves the credential works,
+      // so it clears the gate rather than leaving the workspace stopped behind a stale one. The
+      // dispatcher will not *start* a turn on a gated runtime, so this is the only way the two meet.
+      it('clears a gate raised while a turn was already in flight', async () => {
+        const { workerId } = await failAuth();
+        expect(h.services.accounts!.gatedRuntimes()).toEqual(['fake']);
+
+        h.db.update('agents', workerId, { status: 'active', pauseReason: null, pauseDetailJson: null, updatedAt: nowIso() });
+        const runId = newId();
+        h.db.insert('runs', {
+          id: runId, workspaceId: h.workspaceId, agentId: workerId, ticketId: null, wakeupIdsJson: [],
+          runtimeId: 'fake', model: null, status: 'queued', turnEpoch: 1,
+          cwd: h.db.get<{ homePath: string }>('SELECT home_path FROM agents WHERE id = ?', [workerId])!.homePath,
+          createdAt: nowIso(),
+        });
+        runtime.queue.push({ structured: { state: 'working', summary: 'back', tickets: [] } } as never);
+        await executeRun(h.ctx, h.deps, runId);
+        await tick();
+
+        expect(h.db.get<Run>('SELECT * FROM runs WHERE id = ?', [runId])!.status).toBe('succeeded');
+        expect(h.services.accounts!.gatedRuntimes()).toEqual([]);
+      });
+    });
 
     it('raises a retry_approval card the human can answer, pauses the worker and blocks the ticket', async () => {
       const { ticketId, workerId } = await failOnce({ error: { code: 'boom', family: 'unknown', message: 'the CLI died' } });

@@ -1,5 +1,5 @@
 import type { Agent } from '@agent-conductor/shared';
-import { agentUiStatus } from '@agent-conductor/shared';
+import { agentUiStatus, waitingOnRuntimeLogin } from '@agent-conductor/shared';
 import { workerPauseReason } from '@agent-conductor/render';
 import { StatusGlyph, StatusBadge } from './StatusGlyph';
 import { Button } from './Button';
@@ -81,7 +81,9 @@ export function WorkerCard({
           <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3" title={pausedFor}>
             {pausedFor}
           </span>
-          {onResume ? (
+          {/* A worker waiting on its runtime's login resumes by itself; offering Resume here would
+              start a turn that can only fail again (VS-75). */}
+          {onResume && !waitingOnRuntimeLogin(agent) ? (
             <Button size="sm" onClick={onResume} disabled={resuming}>
               Resume
             </Button>

@@ -71,6 +71,16 @@ Commit early and clearly. Never end a turn holding work you would mind losing. N
 
 Delivery and the exact merge sequence: `references/delivery.md`.
 
+## Never run a coding CLI against live credentials
+
+**Do not launch `claude`, `codex`, `gemini`, `opencode` or any other coding CLI from inside a ticket** — not to try something out, not for a read-only probe, not to confirm a fact "against the real thing".
+
+The daemon holds one credential per runtime per host, shared with the owner's own CLI. OAuth rotates the refresh token on **every** refresh, so a single invocation from your worktree can rotate the token out from under every agent in the workspace, including the conductor, and force the owner to log in again. That has happened: 2026-09-07, every agent down at once.
+
+The same goes for the workspace's runtime directories under `.agent-conductor/runtimes/` — read them through the `ac_*` tools, never by pointing a CLI at them.
+
+**Instead:** verify launcher, probe and adapter changes against a fake CLI binary and a scratch config directory, the way `packages/runtimes/*/test` and `packages/core/src/workspace/credentials.test.ts` do. If a fact genuinely needs the real CLI, say so in the PR as unverified and let the owner run it.
+
 ## Knowledge
 
 At most one `ac_knowledge_note("project", section, text)` per ticket, usually on the merge turn, answering "what would I have wanted to know before starting this?". ≤ 60 words, standalone, absolute dates, no secrets, nothing derivable from git. A rejected write is not retried — say so in the report. Facts every contributor needs regardless of AgentConductor go into the repo, through your PR. Full rules: `agent-conductor-knowledge`.
@@ -102,6 +112,7 @@ Your last message is one fenced ```json block:
 | Running `openspec archive` | The daemon owns archiving, after verification | Stop at `ac_ticket_merge_done` |
 | Fixing something unrelated you noticed | Silent scope expansion nobody approved | Note it in a comment; the conductor decides |
 | Looking for more work when the inbox is empty | You do not generate your own work | Report `idle` and end |
+| Running the real coding CLI to check something | One refresh rotates the token and signs every agent out, the conductor included | A fake CLI and a scratch config dir; say so in the PR if it truly needs the real one |
 | Pasting a credential into a comment or commit | Permanent leak in the record | `ac_ask` for it; never write it down |
 | Continuing after a worktree mismatch | You may be writing into the wrong checkout | Stop, report `blocked` |
 

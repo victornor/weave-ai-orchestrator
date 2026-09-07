@@ -37,6 +37,25 @@ describe('exportWorkspace', () => {
     writeFileSync(join(h.ctx.paths.runs, 'events.jsonl'), '{}\n');
   }
 
+  // VS-75: the runtime credential is a symlink to the owner's own file. An export walks
+  // workspace.yaml, roles/ and knowledge/ only, so it must never reach it — dereferencing it would
+  // copy a live token into an export that gets shared.
+  it('carries no runtime credential, dereferenced or otherwise', () => {
+    seedFiles();
+    const runtimeHome = join(h.ctx.paths.runtimesHome, 'claude');
+    mkdirSync(runtimeHome, { recursive: true });
+    writeFileSync(join(runtimeHome, '.credentials.json'), '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-SECRET"}}');
+
+    const result = exportWorkspace(h.ctx);
+
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (
+      e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]
+    ));
+    const files = walk(result.path);
+    expect(files.some((f) => f.includes('.credentials.json'))).toBe(false);
+    for (const f of files) expect(readFileSync(f, 'utf8')).not.toContain('sk-ant-oat01-SECRET');
+  });
+
   it('writes workspace.yaml, roles, knowledge and tickets and leaves secrets as ${ENV} references', () => {
     seedFiles();
     seedTicket(h);

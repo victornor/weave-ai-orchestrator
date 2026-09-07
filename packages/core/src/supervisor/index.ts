@@ -5,6 +5,7 @@ import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, type Agen
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
+import { ungateRuntime } from '../runs/authgate.js';
 import { archivedDirFor } from '../openspec/index.js';
 import { CURATION_BUDGET_FRACTION, budgetOf, isDocPath } from '../knowledge/files.js';
 import { sh } from '../util/exec.js';
@@ -25,6 +26,12 @@ const RECONCILE_EVERY_MS = 60 * 60_000;
  * rolling 5-hour session limit), which is well inside the precision of a percentage.
  */
 const ACCOUNTS_EVERY_MS = 5 * 60_000;
+/**
+ * How often a runtime whose login has expired is re-probed (VS-75). Much faster than the ordinary
+ * account poll: while a runtime is gated the whole workspace is stopped on it, so the wait between
+ * the owner logging in again and the work resuming is exactly this.
+ */
+const LOGIN_RECHECK_EVERY_MS = 60_000;
 const RETENTION_EVERY_MS = DAY_MS;
 
 const SYSTEM: Actor = { kind: 'system', id: null };
@@ -68,6 +75,27 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   const setMeta = (key: string, value: string): void => { ctx.db.run('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value]); };
 
   /** True at most once per `everyMs`, and the last run is persisted so a restart does not re-run immediately. */
+  /**
+   * Re-probe every gated runtime and release the workspace when its credential works again (VS-75).
+   *
+   * Success is a `describeAccount` that reports a billing type other than `unknown`. That is
+   * deliberately conservative: `unknown` also covers a missing binary and a probe that timed out,
+   * and treating either as recovery would un-gate straight into a second outage.
+   *
+   * The cheap pre-check first: if the credential file's expiry has not moved since the refresh
+   * failed, nobody has logged in yet and there is nothing to probe.
+   */
+  async function loginRecheck(): Promise<void> {
+    const gated = deps().accounts.gatedRuntimes();
+    for (const runtimeId of gated) {
+      const before = deps().accounts.credential(runtimeId);
+      if (!before.present) continue;                       // nothing to probe: the credential is gone entirely
+      if (before.expiresAt !== null && before.refreshFailedAt !== null && before.expiresAt <= before.refreshFailedAt) continue;
+      const [described] = await deps().accounts.refresh([runtimeId]);
+      if (described && described.billingType !== 'unknown') ungateRuntime(ctx, deps, runtimeId);
+    }
+  }
+
   const due = (key: string, everyMs: number): boolean => {
     const last = Number(meta(key) ?? 0);
     if (Number.isFinite(last) && last > 0 && Date.now() - last < everyMs) return false;
@@ -505,6 +533,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         try { conductorDigest(); } catch (e) { log.error({ err: String(e) }, 'digest failed'); }
         if (due('supervisor:curation_at', CURATION_EVERY_MS)) await curationPass().catch((e) => log.error({ err: String(e) }, 'curation pass failed'));
         if (due('supervisor:accounts_at', ACCOUNTS_EVERY_MS)) { try { await deps().accounts.refresh(); } catch (e) { log.error({ err: String(e) }, 'runtime account refresh failed'); } }
+        if (due('supervisor:login_recheck_at', LOGIN_RECHECK_EVERY_MS)) await loginRecheck().catch((e) => log.error({ err: String(e) }, 'runtime login recheck failed'));
         if (due('supervisor:reconcile_at', RECONCILE_EVERY_MS)) await reconcilePass().catch((e) => log.error({ err: String(e) }, 'reconcile pass failed'));
         if (due('supervisor:retention_at', RETENTION_EVERY_MS)) { try { retentionPass(); } catch (e) { log.error({ err: String(e) }, 'retention pass failed'); } }
       } finally {

@@ -24,6 +24,7 @@ import type {
   UsageGrain,
   UsageWindow,
   RuntimeAccount,
+  RuntimeCredential,
   UsageBillingMix,
   AuthSessionKind,
   PresentationConfig,
@@ -302,6 +303,9 @@ export interface UsageSeries {
 
 /** One runtime account snapshot as `GET /usage/accounts` serves it. */
 export interface UsageAccount extends RuntimeAccount { displayName: string }
+
+/** One runtime's credential state as `GET /usage/credentials` serves it. Carries no token (VS-75). */
+export interface UsageCredential extends RuntimeCredential { displayName: string }
 
 export interface UsageTopRow {
   key: string;

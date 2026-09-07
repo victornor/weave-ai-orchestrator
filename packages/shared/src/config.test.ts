@@ -71,7 +71,7 @@ describe('YOLO mode: the setting', () => {
 describe('daemon config: upgrade', () => {
   it('defaults the deferred upgrade timings when daemon.yaml says nothing', () => {
     const cfg = DaemonConfigSchema.parse({});
-    expect(cfg.upgrade.waitForIdleSec).toBe(3600);
+    expect(cfg.upgrade.waitForIdleSec).toBe(30);
     expect(cfg.upgrade.updateCheckIntervalSec).toBe(900);
   });
 
@@ -79,7 +79,7 @@ describe('daemon config: upgrade', () => {
     const cfg = DaemonConfigSchema.parse({});
     expect(cfg.upgrade.ref).toBe('main');
     expect(cfg.upgrade.keep).toBe(3);
-    expect(cfg.upgrade.drainTimeoutSec).toBe(900);
+    expect(cfg.upgrade.drainTimeoutSec).toBe(30);
     expect(cfg.upgrade.source).toBeUndefined();
   });
 

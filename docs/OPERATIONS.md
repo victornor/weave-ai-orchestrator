@@ -300,7 +300,7 @@ and survives the restart, which is how the outcome is still readable afterwards.
 
 | Stage | What happens | If it fails |
 |---|---|---|
-| `queued`/`waiting` | Dispatch is held in every loaded workspace the moment the record exists. Running turns are **never** cancelled; the upgrade waits for them, up to `upgrade.waitForIdleSec` (default 3600). | `wait_timeout`: dispatch resumes, nothing was built or switched. |
+| `queued`/`waiting` | Dispatch is held in every loaded workspace the moment the record exists, and one line is posted on the primary chat thread saying so. Running turns are **never cancelled by the wait**; the upgrade waits for them, up to `upgrade.waitForIdleSec` (default 30). Once that bound expires it proceeds to `building` anyway — whatever is still running is ended and resumed by the restart later, exactly like any run a daemon restart interrupts. | Never fails from this stage; it always proceeds. |
 | `building` | Clone, install, build (and `--test`) in a fresh release directory. Output is kept as a 200-line tail on the record. | `build_failed`: dispatch resumes, `current` untouched, the old daemon keeps serving. |
 | `switching` | Back up `daemon.sqlite` and every workspace db, then swing `current` and prune. | `backup_failed` before the symlink moves; `switch_failed` after the backups. Dispatch resumes either way. |
 | `restarting` | A **detached runner** — the new release's CLI — restarts the daemon and polls `/api/health` until it reports the target release. | `restart_failed`: the runner swung `current` back to `previous` and restarted. `restart_unverified`: nobody confirmed the restart (see below). |
@@ -328,7 +328,9 @@ reaches neither — `/api/daemon/*` is not on the run-token path list.
 `pnpm install --frozen-lockfile && pnpm build` there (nothing running is touched yet) → online
 backup of `daemon.sqlite` and every workspace db into `~/.config/agent-conductor/backups/<stamp>/`
 → switch `current` (and `previous`) → `POST /api/daemon/drain`, which stops dispatching new turns
-and waits up to `upgrade.drainTimeoutSec` (default 900, since an agent turn can take many minutes) for running ones → `systemctl --user
+and waits up to `upgrade.drainTimeoutSec` (default 30s — an agent turn can take many minutes, so this
+bound only ever catches the fast case; anything still running restarts anyway and is interrupted and
+resumed like any run a restart interrupts) for running ones → `systemctl --user
 restart agent-conductor.service` (or stop/start when no unit is installed) → wait for
 `/api/health`. Releases beyond `upgrade.keep` (default 3) are pruned, never `current` or `previous`.
 
@@ -338,10 +340,15 @@ upgrade:
   source: git@github.com:victornor/agent-conductor.git   # or a local checkout path
   ref: main
   keep: 3
-  drainTimeoutSec: 900      # `daemon upgrade`: how long its drain waits before restarting anyway
-  waitForIdleSec: 3600      # `update apply`: how long it waits for running turns before giving up
+  drainTimeoutSec: 30      # `daemon upgrade`: how long its drain waits before restarting anyway
+  waitForIdleSec: 30       # `update apply`: how long it waits for running turns before proceeding anyway
   updateCheckIntervalSec: 900   # how long "is the source ahead" is cached
 ```
+
+Both bounds default short because expiry no longer means giving up: once dispatch is held, waiting
+longer only holds every workspace's dispatch — including the conductor's own — for longer with no
+benefit, since a turn that is not done in 30s is not meaningfully closer to done at 900s either. Both
+remain overridable per invocation (`--drain-timeout`) or in `daemon.yaml`.
 
 - Schema migrations run automatically when a database is opened. There is no down-migration; the
   backup taken by `upgrade` is the rollback for data, `conductor daemon rollback` for code.
@@ -354,9 +361,10 @@ upgrade:
   exactly where they were. Nothing is ever reset.
 - `upgrade` and `rollback` refuse to run inside a worker (`AC_RUN_TOKEN` set). Agents developing
   AgentConductor propose the change in a ticket; a human runs the upgrade.
-- The difference in in-flight work between the two paths: `upgrade`'s drain **interrupts** whatever is
-  still running at `drainTimeoutSec`; `update apply` never interrupts anything — it waits, and fails
-  rather than cut a turn short.
+- The two paths now handle in-flight work the same way: both `upgrade`'s drain and `update apply`'s
+  wait for idle **interrupt** whatever is still running once their bound expires, rather than either
+  killing it outright or waiting on it forever — the run is ended and resumed exactly like any run a
+  daemon restart interrupts, and neither path ever fails purely because something was still running.
 - After an upgrade, `conductor daemon status` and `conductor doctor` are the two things to look at.
 
 ---

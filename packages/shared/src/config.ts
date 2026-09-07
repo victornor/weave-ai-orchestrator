@@ -216,14 +216,21 @@ export const DaemonConfigSchema = z.object({
     ref: z.string().default('main'),
     /** Releases older than the newest `keep` (never `current`/`previous`) are deleted after a switch. */
     keep: z.number().int().min(1).default(3),
-    /** Seconds to wait for running turns before restarting anyway. An agent turn can take many minutes. */
-    drainTimeoutSec: z.number().int().min(0).default(900),
     /**
-     * A deferred upgrade holds dispatch and waits for every running turn to finish. Bounded, because one
-     * wedged run would otherwise hold every workspace's dispatch silently and forever; on expiry the
-     * upgrade fails and dispatch resumes.
+     * Seconds to wait for running turns before restarting anyway. An agent turn can take many minutes,
+     * so this bound only ever catches the fast case — nothing running, or a turn seconds from finishing
+     * — before restarting regardless; whatever is still executing is interrupted by the restart and
+     * resumes on its own, the same as any run a daemon restart interrupts.
      */
-    waitForIdleSec: z.number().int().min(0).default(3600),
+    drainTimeoutSec: z.number().int().min(0).default(30),
+    /**
+     * A deferred upgrade holds dispatch and waits for every running turn to finish, bounded by this so
+     * one wedged run cannot hold every workspace's dispatch — including the conductor's own — silently
+     * and forever. On expiry the upgrade proceeds to build anyway rather than failing: whatever is still
+     * executing is ended and resumed by the restart that follows, exactly like any run a daemon restart
+     * interrupts (VS-115).
+     */
+    waitForIdleSec: z.number().int().min(0).default(30),
     /** How long the "is the source ahead" answer is cached before the source is resolved again. */
     updateCheckIntervalSec: z.number().int().min(0).default(900),
   }).default({}),

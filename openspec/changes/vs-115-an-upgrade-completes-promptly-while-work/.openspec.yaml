@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: An upgrade completes promptly while work is running, and the chat says the
+  daemon is upgrading instead of going silent

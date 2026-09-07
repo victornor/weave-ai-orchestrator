@@ -212,7 +212,7 @@ describe('holding dispatch and waiting for idle', () => {
     expect(svc.status().waitingFor).toEqual([]);
   });
 
-  it('fails with a timeout, resumes dispatch and builds nothing when the wait expires', async () => {
+  it('proceeds to build once the wait expires, recording how many runs were still executing', async () => {
     const a = fx.addWorkspace('ws1');
     a.active = 1;
     let built = 0;
@@ -224,11 +224,12 @@ describe('holding dispatch and waiting for idle', () => {
     });
     svc.request({ requestedBy: 'op1' });
     await svc.settled();
-    expect(row(svc)).toMatchObject({ state: 'failed', reason: 'wait_timeout' });
-    expect(row(svc).message).toContain('nothing was built or switched');
-    expect(built).toBe(0);
-    expect(switched).toBe(0);
-    expect(a.starts).toBe(1);
+    // Proceeds exactly as the idle outcome does: no failure, dispatch is not resumed by this process —
+    // the run still executing is ended and resumed by the restart, not by this upgrade (VS-115).
+    expect(row(svc)).toMatchObject({ state: 'restarting', reason: null, interruptedRuns: 1 });
+    expect(built).toBe(1);
+    expect(switched).toBe(1);
+    expect(a.starts).toBe(0);
   });
 
   it('leaves a workspace that was already paused paused when dispatch resumes', async () => {

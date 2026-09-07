@@ -191,13 +191,20 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
     const drainedRuns = waitingFor().reduce((n, w) => n + w.running, 0);
     void holdDispatch();
     set(id, { state: 'waiting', startedAt: nowIso(), drainedRuns });
+    // Told as soon as dispatch is held, not after the wait resolves — the chat explains the silence
+    // instead of leaving it unexplained (VS-115). Best-effort: a notification failure never blocks the
+    // upgrade itself.
+    void announceStarting(row).catch((e: unknown) => log.warn({ err: e, upgradeId: id }, 'could not tell a workspace the upgrade is starting'));
 
     const outcome = await waitForIdle(id);
     if (outcome === 'cancelled') return;
     if (outcome === 'timeout') {
-      fail(id, 'wait_timeout', `still ${waitingFor().reduce((n, w) => n + w.running, 0)} run(s) executing after ${deps.daemon.upgrade.waitForIdleSec}s; nothing was built or switched`);
-      resumeDispatch();
-      return;
+      // No longer a failure (VS-115): whatever is still executing is ended and resumed by the restart
+      // that follows, exactly like any run a daemon restart interrupts — the same guarantee the local
+      // CLI drain already relies on. The upgrade proceeds to building below, same as the idle outcome.
+      const interruptedRuns = waitingFor().reduce((n, w) => n + w.running, 0);
+      appendLog(id, `still ${interruptedRuns} run(s) executing after ${deps.daemon.upgrade.waitForIdleSec}s; proceeding anyway — they will be interrupted by the restart and resume on their own`);
+      set(id, { interruptedRuns });
     }
     if (cancelledMidway(id)) return;
 
@@ -243,6 +250,23 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
       if (wasCurrent) { try { switchTo(wasCurrent); } catch { /* leave it to the human */ } }
       fail(id, 'restart_failed', `the restart runner could not be started: ${(e as Error).message}`);
       resumeDispatch();
+    }
+  }
+
+  // ---------- the starting notice (VS-115) ----------
+
+  /**
+   * Tell every workspace the upgrade has begun holding dispatch, before the wait for idle or anything
+   * else, so a message sent to the conductor during the hold is explained rather than silently queued.
+   * Best-effort per workspace: one that cannot be reached does not stop the upgrade or the others from
+   * being told, the same resilience `announceTo` already has.
+   */
+  async function announceStarting(row: Upgrade): Promise<void> {
+    const target = row.targetSha ? ` (${row.targetSha.slice(0, 7)})` : '';
+    const text = `Upgrading to ${row.ref}${target} — I'll be back to answer once it's serving again.`;
+    for (const w of uniqueWorkspaces(deps.workspaces)) {
+      try { await w.services.threads.notifyHuman({ kind: 'system', id: null }, { text }); }
+      catch (e) { log.warn({ err: e, upgradeId: row.id, workspaceId: w.id }, 'could not tell a workspace the upgrade is starting'); }
     }
   }
 

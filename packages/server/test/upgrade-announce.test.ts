@@ -248,8 +248,10 @@ describe('announcing a failure', () => {
     await svc.settled();
 
     expect(fx.db.get<Upgrade>('SELECT * FROM upgrades')!.state).toBe('failed');
-    expect(ws.sent).toHaveLength(1);
-    expect(ws.sent[0]!.text).toMatch(/^The daemon upgrade failed \(build_failed\)\. Running v1\.1\.0 \(bbbbbbb\), back up at \d\d:\d\d\.$/);
+    // [0] is the "upgrading" notice posted as soon as dispatch was held (VS-115); [1] is the failure.
+    expect(ws.sent).toHaveLength(2);
+    expect(ws.sent[0]!.text).toMatch(/^Upgrading to /);
+    expect(ws.sent[1]!.text).toMatch(/^The daemon upgrade failed \(build_failed\)\. Running v1\.1\.0 \(bbbbbbb\), back up at \d\d:\d\d\.$/);
     expect(ws.woken[0]!.payload).toMatchObject({ outcome: 'failed', failure: { reason: 'build_failed' } });
   });
 });
@@ -284,6 +286,45 @@ describe('the announcement marker', () => {
   });
 });
 
+// ---------- the human is told an upgrade has started (VS-115) ----------
+
+describe('the starting notice', () => {
+  it('tells the chat the upgrade is starting, before the wait for idle resolves', async () => {
+    const ws = fx.addWorkspace('ws1');
+    let running = 1;
+    (ws.runtime.services as unknown as { dispatcher: { running: () => number } }).dispatcher.running = () => running;
+    const svc = fx.service();
+    svc.request({ requestedBy: 'op1' });
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(ws.sent).toHaveLength(1);
+    expect(ws.sent[0]!.text).toBe("Upgrading to main — I'll be back to answer once it's serving again.");
+
+    running = 0;
+    await svc.settled();
+  });
+
+  it('names the target commit when one was resolved', async () => {
+    const ws = fx.addWorkspace('ws1');
+    const svc = fx.service({ updates: { running: () => ({ version: '1.1.0', path: TO, sha: 'b'.repeat(40) }), check: () => ({ configured: true, running: { version: '1.1.0', path: TO, sha: 'b'.repeat(40) }, source: '/src', ref: 'main', targetSha: 'c'.repeat(40), updateAvailable: true, checkedAt: nowIso(), error: null }) } });
+    svc.request({ requestedBy: 'op1' });
+    await svc.settled();
+
+    expect(ws.sent[0]!.text).toBe("Upgrading to main (ccccccc) — I'll be back to answer once it's serving again.");
+  });
+
+  it('tells every loaded workspace, and one that cannot be reached does not stop the others', async () => {
+    const a = fx.addWorkspace('ws1');
+    const b = fx.addWorkspace('ws2');
+    a.runtime.services.threads.notifyHuman = async () => { throw new Error('unreachable'); };
+    const svc = fx.service();
+    svc.request({ requestedBy: 'op1' });
+    await svc.settled();
+
+    expect(b.sent).toHaveLength(1);
+  });
+});
+
 // ---------- what the pipeline records for it ----------
 
 describe('the drained count', () => {
@@ -310,7 +351,7 @@ describe('the announcement line', () => {
     to: { path: TO, sha: 'b'.repeat(40), version: '1.1.0' },
     running: { path: TO, sha: 'b'.repeat(40), version: '1.1.0' },
     startedAt: null, finishedAt: null, backUpAt: '2026-02-02T10:30:00.000Z',
-    runs: { drained: 0, resumed: 0 }, tickets: [], migrations: [],
+    runs: { drained: 0, interrupted: 0, resumed: 0 }, tickets: [], migrations: [],
     health: { ok: true, checks: [] }, failure: null,
   };
 

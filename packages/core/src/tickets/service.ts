@@ -1,6 +1,6 @@
 import { newId, nowIso, ticketRow, type Db } from '@agent-conductor/db';
 import {
-  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, estimateTokens, yoloEnabled,
+  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, yoloEnabled,
   type CommentKind, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
 } from '@agent-conductor/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
@@ -346,9 +346,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         title: `Approve the plan for ${next.identifier}: ${next.title}`,
         context: `OpenSpec change \`${next.openspecChangeName ?? ''}\` is planning-complete and validates. Review the plan document.`,
         options: [
-          { key: 'approve', label: 'Approve', description: 'The worker implements the plan.', recommended: true },
-          { key: 'revise', label: 'Revise', description: 'Send it back with feedback.' },
-          { key: 'reject', label: 'Reject', description: 'Cancel the ticket.' },
+          { key: NAMED_CARD_OPTION_KEYS.plan_approval.approve, label: 'Approve', description: 'The worker implements the plan.', recommended: true },
+          { key: NAMED_CARD_OPTION_KEYS.plan_approval.revise, label: 'Revise', description: 'Send it back with feedback.' },
+          { key: NAMED_CARD_OPTION_KEYS.plan_approval.reject, label: 'Reject', description: 'Cancel the ticket.' },
         ],
         allowFreeText: true,
         correlationKey: `plan_approval:${t.id}`,
@@ -371,8 +371,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         title: `Approve the merge for ${next.identifier}: ${next.title}`,
         context: wp?.url ? `Work product: ${wp.url}` : 'The worker delivered its work product.',
         options: [
-          { key: 'approve', label: 'Approve merge', recommended: true },
-          { key: 'changes', label: 'Request changes', description: 'Send it back to the worker.' },
+          { key: NAMED_CARD_OPTION_KEYS.merge_approval.approve, label: 'Approve merge', recommended: true },
+          { key: NAMED_CARD_OPTION_KEYS.merge_approval.changes, label: 'Request changes', description: 'Send it back to the worker.' },
         ],
         allowFreeText: true,
         correlationKey: `merge_approval:${t.id}`,
@@ -889,9 +889,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           title: `Approve the plan for ${t.identifier}: ${t.title}`,
           context: `OpenSpec change \`${t.openspecChangeName ?? ''}\` is planning-complete and validates. Review the plan document. (Re-raised: the previous approval was lost.)`,
           options: [
-            { key: 'approve', label: 'Approve', description: 'The worker implements the plan.', recommended: true },
-            { key: 'revise', label: 'Revise', description: 'Send it back with feedback.' },
-            { key: 'reject', label: 'Reject', description: 'Cancel the ticket.' },
+            { key: NAMED_CARD_OPTION_KEYS.plan_approval.approve, label: 'Approve', description: 'The worker implements the plan.', recommended: true },
+            { key: NAMED_CARD_OPTION_KEYS.plan_approval.revise, label: 'Revise', description: 'Send it back with feedback.' },
+            { key: NAMED_CARD_OPTION_KEYS.plan_approval.reject, label: 'Reject', description: 'Cancel the ticket.' },
           ],
           allowFreeText: true,
           correlationKey: `plan_approval:${t.id}`,
@@ -916,8 +916,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           title: `Approve the merge for ${t.identifier}: ${t.title}`,
           context: `${wp?.url ? `Work product: ${wp.url}` : 'The worker delivered its work product.'} (Re-raised: the previous approval was lost.)`,
           options: [
-            { key: 'approve', label: 'Approve merge', recommended: true },
-            { key: 'changes', label: 'Request changes', description: 'Send it back to the worker.' },
+            { key: NAMED_CARD_OPTION_KEYS.merge_approval.approve, label: 'Approve merge', recommended: true },
+            { key: NAMED_CARD_OPTION_KEYS.merge_approval.changes, label: 'Request changes', description: 'Send it back to the worker.' },
           ],
           allowFreeText: true,
           correlationKey: `merge_approval:${t.id}`,

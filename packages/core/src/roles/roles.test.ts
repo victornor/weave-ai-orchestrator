@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import YAML from 'yaml';
 import { FakeRuntime } from '@agent-conductor/runtime-sdk';
-import type { RoleSpec } from '@agent-conductor/shared';
+import { NAMED_CARD_OPTION_KEYS, type RoleSpec } from '@agent-conductor/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createRolesService } from './index.js';
 import type { Actor, RolesService } from '../api.js';
@@ -58,7 +58,7 @@ describe('roles', () => {
     const options = (created[0]!.options as Array<{ key: string }>).map((o) => o.key);
     // Approve or decline and nothing else: a role carries no runtime since VS-77, so there is no
     // "approve, but run on codex" to offer.
-    expect(options).toEqual(['approve', 'reject']);
+    expect(options).toEqual(Object.values(NAMED_CARD_OPTION_KEYS.hire_approval));
     expect(h.db.get<{ n: number }>('SELECT COUNT(*) n FROM role_revisions WHERE role_id = ?', ['api-backend'])!.n).toBe(1);
   });
 
@@ -184,6 +184,10 @@ describe('roles', () => {
     expect(withWorkers.decisionId).toBeTruthy();
     expect(roles.get(role.id).status).toBe('active');
     expect(created.at(-1)).toMatchObject({ kind: 'discard_approval', correlationKey: `retire:${role.id}` });
+    // VS-111: the discard-approval card's Discard button sends the "go ahead" key — must be one of
+    // these, not a hand-written literal that could drift from what the decision actually offers.
+    const discardOptions = (created.at(-1)!.options as Array<{ key: string }>).map((o) => o.key);
+    expect(discardOptions).toEqual(Object.values(NAMED_CARD_OPTION_KEYS.discard_approval));
 
     h.db.run('UPDATE agents SET status = ? WHERE role_id = ?', ['retired', role.id]);
     const clean = await roles.retire(HUMAN, role.id, 'no longer needed');

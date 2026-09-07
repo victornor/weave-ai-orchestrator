@@ -6,6 +6,7 @@ import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
 import { archivedDirFor } from '../openspec/index.js';
+import { CURATION_BUDGET_FRACTION, budgetOf, isDocPath } from '../knowledge/files.js';
 import { sh } from '../util/exec.js';
 
 const TICK_MS = 15_000;
@@ -297,29 +298,60 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
 
   // ---------- scheduled curation (PLAN §13.4) ----------
 
-  interface KnowledgeFileRow { path: string; scope: string; projectId: string | null; lastCuratedAt: string | null; curationPending: number; updatedAt: string }
+  interface KnowledgeFileRow {
+    id: string; path: string; scope: string; projectId: string | null; tokenEstimate: number;
+    budgetTokens: number; lastCuratedAt: string | null; curationPending: number; updatedAt: string;
+  }
 
-  /** Knowledge files whose last curation (or, if never curated, whose creation) is older than 14 days, plus anything already flagged. */
+  /**
+   * Knowledge files whose last curation (or, if never curated, whose creation) is older than 14
+   * days, plus anything genuinely over its share of the configured budget.
+   *
+   * `curation_pending` is a cache of the second of those, written by whichever write last touched
+   * the file. It outlives the condition that set it — a raised budget (VS-18) or a curator that
+   * rewrote a different file in the same scope both leave it set — and the per-path cooldown then
+   * turns one stuck flag into one curation ticket a day, for ever (VS-67). So the verdict is
+   * re-derived here from the current size against the configured budget, and the row is repaired.
+   */
   async function curationPass(): Promise<void> {
     const rows = ctx.db.all<KnowledgeFileRow>(
-      'SELECT path, scope, project_id, last_curated_at, curation_pending, updated_at FROM knowledge_files WHERE workspace_id = ?',
+      'SELECT id, path, scope, project_id, token_estimate, budget_tokens, last_curated_at, curation_pending, updated_at FROM knowledge_files WHERE workspace_id = ?',
       [ctx.workspaceId],
     );
+    const budgets = ctx.config.defaults.knowledgeBudgetTokens;
     const staleBefore = Date.now() - CURATION_STALE_MS;
     for (const f of rows) {
+      // A row whose file is gone — deleted, archived, renamed, never materialised — has nothing to
+      // curate, however old it looks.
+      if (!existsSync(join(ctx.paths.knowledge, f.path))) {
+        log.debug({ path: f.path, scope: f.scope }, 'curation skipped: no file on disk');
+        continue;
+      }
+      const budget = budgetOf(budgets, f.scope as KnowledgeScope, isDocPath(f.path));
+      const overBudget = f.tokenEstimate > budget * CURATION_BUDGET_FRACTION;
+      // Keep the row honest about the budget in force and about what it implies. `updated_at` is
+      // deliberately not touched: it is the staleness reference for a file never yet curated.
+      if (f.budgetTokens !== budget || Boolean(f.curationPending) !== overBudget) {
+        ctx.db.update('knowledge_files', f.id, { budgetTokens: budget, curationPending: overBudget });
+      }
       const reference = Date.parse(f.lastCuratedAt ?? f.updatedAt ?? '');
       const stale = Number.isFinite(reference) && reference < staleBefore;
-      if (!stale && !f.curationPending) continue;
+      if (!stale && !overBudget) continue;
 
       const key = `supervisor:curation_requested:${f.path}`;
       const asked = Date.parse(meta(key) ?? '');
       if (Number.isFinite(asked) && Date.now() - asked < CURATION_REQUEST_COOLDOWN_MS) continue;
       setMeta(key, nowIso());
+      const reason = overBudget ? 'over_budget' : 'stale';
+      const fields = {
+        path: f.path, scope: f.scope, reason, tokenEstimate: f.tokenEstimate, budgetTokens: budget,
+        lastCuratedAt: f.lastCuratedAt, since: f.lastCuratedAt ?? f.updatedAt,
+      };
       try {
         await deps().knowledge.requestCuration(SYSTEM, f.scope as KnowledgeScope, f.projectId);
-        log.info({ path: f.path, scope: f.scope, reason: stale ? 'stale' : 'pending' }, 'curation requested');
+        log.info(fields, 'curation requested');
       } catch (e) {
-        log.warn({ path: f.path, err: String(e) }, 'curation request failed');
+        log.warn({ ...fields, err: String(e) }, 'curation request failed');
       }
     }
   }

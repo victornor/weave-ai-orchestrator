@@ -10,7 +10,7 @@ import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
 import {
-  DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, budgetOf, countWords, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
+  CURATION_BUDGET_FRACTION, DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, budgetOf, countWords, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
   isDocPath, normalize, parseDoc, parseLinks, relPathFor, renderDoc, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated,
 } from './files.js';
 
@@ -102,7 +102,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       });
       const tokens = estimateTokens(body);
       db.update('knowledge_files', row.id, {
-        tokenEstimate: tokens, hash: sha256(body), curationPending: tokens > budgetOfRow(row) * 0.8, updatedAt: nowIso(),
+        tokenEstimate: tokens, hash: sha256(body), curationPending: tokens > budgetOfRow(row) * CURATION_BUDGET_FRACTION, updatedAt: nowIso(),
       });
       row = fileRow(rel)!;
       indexFile(row, body);
@@ -211,8 +211,17 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       });
       const patch: Record<string, unknown> = { tokenEstimate: tokens, hash: sha256(body), budgetTokens: budget, updatedAt: nowIso() };
       if (reason === 'curation') { patch.lastCuratedAt = nowIso(); patch.curationPending = false; }
-      else patch.curationPending = tokens > budget * 0.8;
+      else patch.curationPending = tokens > budget * CURATION_BUDGET_FRACTION;
       db.update('knowledge_files', row.id, patch);
+      // A curation run is asked for a whole scope, not for one file. The curator rewrites the hub
+      // file, so a flag left on a linked document it did not touch would ask for the same run again
+      // tomorrow, and every day after that (VS-67).
+      if (reason === 'curation') {
+        db.run(
+          'UPDATE knowledge_files SET curation_pending = 0 WHERE workspace_id = ? AND scope = ? AND project_id IS ? AND id <> ?',
+          [ws, row.scope, row.projectId, row.id],
+        );
+      }
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, body, 'utf8');
       const fresh = fileRow(row.path)!;
@@ -313,7 +322,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         });
       }
       const revision = write(actor, row, abs, next, 'note');
-      if (tokens > budget * 0.8) fireCuration(scope, projectId);
+      if (tokens > budget * CURATION_BUDGET_FRACTION) fireCuration(scope, projectId);
       return { remainingTokens: budget - tokens, revision };
     },
 

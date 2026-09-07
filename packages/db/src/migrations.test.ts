@@ -118,7 +118,7 @@ describe('migrations', () => {
     expect(cols).toEqual([
       'id', 'state', 'source', 'ref', 'run_test', 'target_sha', 'from_release', 'to_release', 'to_sha',
       'requested_by', 'requested_at', 'started_at', 'finished_at', 'reason', 'message',
-      'log_json', 'backups_json', 'came_back_version',
+      'log_json', 'backups_json', 'came_back_version', 'announced_at', 'drained_runs',
     ]);
     expect(cols).not.toContain('workspace_id');
     expect(db.all<{ table: string }>('PRAGMA foreign_key_list(upgrades)')).toHaveLength(0);

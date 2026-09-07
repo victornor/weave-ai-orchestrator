@@ -182,7 +182,8 @@ export interface RunsService {
   onEvent(handler: (runId: string, ev: S.RunEvent) => void): () => void;
 }
 export interface Dispatcher { tick(): Promise<void>; start(): void; stop(): Promise<void>; running(): number }
-export interface Supervisor { tick(): Promise<void>; start(): void; stop(): void }
+/** `running()` is the daemon's own health check: is the tick timer installed (VS-76)? */
+export interface Supervisor { tick(): Promise<void>; start(): void; stop(): void; running(): boolean }
 
 // ---------- knowledge / specs ----------
 export interface KnowledgeService {

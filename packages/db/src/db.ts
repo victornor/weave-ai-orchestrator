@@ -13,6 +13,8 @@ const MIGRATIONS_DIR = join(here, 'migrations');
 /** Thin typed wrapper over node:sqlite with camelCase row mapping and migrations. One instance per workspace. */
 export class Db {
   readonly sqlite: DatabaseSync;
+  /** Migration files this process applied when it opened the database; empty when it was already current. */
+  readonly appliedMigrations: string[] = [];
   constructor(public readonly path: string) {
     this.sqlite = new DatabaseSync(path);
     this.sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
@@ -25,7 +27,7 @@ export class Db {
       if (applied.has(f)) continue;
       const sql = readFileSync(join(MIGRATIONS_DIR, f), 'utf8');
       this.sqlite.exec('BEGIN');
-      try { this.sqlite.exec(sql); this.sqlite.prepare("INSERT INTO meta(key, value) VALUES (?, ?)").run(`migration:${f}`, f); this.sqlite.exec('COMMIT'); }
+      try { this.sqlite.exec(sql); this.sqlite.prepare("INSERT INTO meta(key, value) VALUES (?, ?)").run(`migration:${f}`, f); this.sqlite.exec('COMMIT'); this.appliedMigrations.push(f); }
       catch (e) { this.sqlite.exec('ROLLBACK'); throw e; }
     }
   }

@@ -284,6 +284,13 @@ export interface AccountsService {
   get(runtimeId: string): S.RuntimeAccount | null;
   /** Re-probe the given runtimes (default: every runtime this workspace uses) and replace their snapshots. */
   refresh(runtimeIds?: string[]): Promise<S.RuntimeAccount[]>;
+  /**
+   * A human's own re-probe (VS-84), rate limited per runtime to one every `MANUAL_SYNC_INTERVAL_MS`.
+   * Returns the current snapshot of every runtime asked about, plus what was probed, what was
+   * refused as too recent, and what failed — a manual sync never hides a failed probe the way the
+   * poll does.
+   */
+  sync(runtimeIds?: string[]): Promise<S.AccountSync>;
 
   // ---- credential state (VS-75). Never returns a token; `RuntimeCredential` has nowhere to put one.
   /** The credential state of every runtime this workspace has recorded one for. */

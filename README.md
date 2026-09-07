@@ -348,7 +348,7 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | Command | Does |
 |---|---|
 | `conductor runs list [-a] [-t] [-s] [--limit]` · `conductor runs show <id> [--raw]` · `conductor runs tail <id>` · `conductor runs cancel <id> [--mode kill]` | the run log |
-| `conductor usage [--scope workspace\|project:<id>\|role:<id>\|worker:<id>\|ticket:<id>\|model:<id>] [--window 24h\|today\|7d\|week\|month\|all] [--grain hour\|day\|week] [--by model\|ticket\|role\|worker\|project] [--series]` | tokens and cost |
+| `conductor usage [--scope workspace\|project:<id>\|role:<id>\|worker:<id>\|ticket:<id>\|model:<id>] [--window 24h\|today\|7d\|week\|month\|all] [--grain hour\|day\|week] [--by model\|ticket\|role\|worker\|project] [--series] [--sync [--runtime <id>]]` | tokens and cost; `--sync` probes the plan limits now |
 | `conductor knowledge lint` | sizes, budgets, curation state for every KB |
 | `conductor knowledge show \| edit \| note \| revisions \| revert \| curate <scope> [-p project]` | scopes: `workspace`, `shared`, `decisions`, `project` |
 | `conductor specs list \| show <capability> \| changes [name] \| search <q> \| explore [project]` | the spec index |

@@ -1,11 +1,11 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeRuntime, type AccountDescription } from '@agent-conductor/runtime-sdk';
 import { newId, nowIso } from '@agent-conductor/db';
 import type { AccountsService } from '../api.js';
 import { makeHarness, type TestHarness } from '../testing/context.js';
-import { createAccountsService } from './accounts.js';
+import { createAccountsService, MANUAL_SYNC_INTERVAL_MS } from './accounts.js';
 
 /** A fake runtime that answers `describeAccount` with whatever the test scripts. */
 class AccountRuntime extends FakeRuntime {
@@ -116,6 +116,127 @@ describe('accounts service', () => {
 
     await accounts.refresh();
     expect(gemini.calls).toBe(0);
+  });
+});
+
+/**
+ * The on-demand sync (VS-84): the same probe the poll runs, asked for by a human, rate limited so
+ * that asking twice cannot become a way to spawn a coding CLI in a loop.
+ */
+describe('on-demand account sync', () => {
+  let h: TestHarness;
+  let accounts: AccountsService;
+  beforeEach(() => { h = makeHarness(); accounts = createAccountsService(h.ctx); });
+  afterEach(() => { vi.useRealTimers(); h.cleanup(); });
+
+  it('probes the named runtime and answers with the fresh snapshot', async () => {
+    const claude = new AccountRuntime(subscription);
+    h.ctx.registries.runtimes.set('claude', claude);
+
+    const out = await accounts.sync(['claude']);
+    expect(claude.calls).toBe(1);
+    expect(out.synced).toEqual(['claude']);
+    expect(out.throttled).toEqual([]);
+    expect(out.failed).toEqual([]);
+    expect(out.accounts.map((a) => a.runtimeId)).toEqual(['claude']);
+    expect(out.accounts[0]).toMatchObject({ planLabel: 'max', limitsAvailable: true });
+  });
+
+  it('syncs every runtime the workspace spends on when none is named', async () => {
+    const claude = new AccountRuntime(subscription);
+    const idle = new AccountRuntime(subscription);
+    h.ctx.registries.runtimes.set('claude', claude);
+    h.ctx.registries.runtimes.set('gemini', idle);
+
+    const out = await accounts.sync();
+    expect(claude.calls).toBe(1);
+    expect(idle.calls).toBe(0);
+    expect(out.synced).toEqual(['claude']);
+  });
+
+  it('refuses a second sync of the same runtime inside the window, with the current snapshot and the wait', async () => {
+    const claude = new AccountRuntime(subscription);
+    h.ctx.registries.runtimes.set('claude', claude);
+    await accounts.sync(['claude']);
+
+    const out = await accounts.sync(['claude']);
+    expect(claude.calls).toBe(1);
+    expect(out.synced).toEqual([]);
+    expect(out.throttled).toHaveLength(1);
+    expect(out.throttled[0]?.runtimeId).toBe('claude');
+    expect(out.throttled[0]?.retryAfterMs).toBeGreaterThan(0);
+    expect(out.throttled[0]?.retryAfterMs).toBeLessThanOrEqual(MANUAL_SYNC_INTERVAL_MS);
+    expect(Date.parse(out.throttled[0]?.nextSyncAt ?? '')).toBeGreaterThan(Date.now());
+    // The block on screen is drawn from this, so a throttled runtime still carries its snapshot.
+    expect(out.accounts.map((a) => a.runtimeId)).toEqual(['claude']);
+  });
+
+  it('probes again once the window has passed', async () => {
+    vi.useFakeTimers();
+    const claude = new AccountRuntime(subscription);
+    h.ctx.registries.runtimes.set('claude', claude);
+    await accounts.sync(['claude']);
+
+    vi.setSystemTime(new Date(Date.now() + MANUAL_SYNC_INTERVAL_MS + 1));
+    const out = await accounts.sync(['claude']);
+    expect(claude.calls).toBe(2);
+    expect(out.synced).toEqual(['claude']);
+  });
+
+  it('holds the window per runtime, so one runtime does not hold up another', async () => {
+    const claude = new AccountRuntime(subscription);
+    const codex = new AccountRuntime(subscription);
+    h.ctx.registries.runtimes.set('claude', claude);
+    h.ctx.registries.runtimes.set('codex', codex);
+    await accounts.sync(['claude']);
+
+    const out = await accounts.sync(['claude', 'codex']);
+    expect(claude.calls).toBe(1);
+    expect(codex.calls).toBe(1);
+    expect(out.synced).toEqual(['codex']);
+    expect(out.throttled.map((t) => t.runtimeId)).toEqual(['claude']);
+  });
+
+  it('leaves the daemon poll alone: it neither consumes the window nor waits on it', async () => {
+    const claude = new AccountRuntime(subscription);
+    h.ctx.registries.runtimes.set('claude', claude);
+
+    // A poll before the sync does not spend the window …
+    await accounts.refresh(['claude']);
+    expect((await accounts.sync(['claude'])).synced).toEqual(['claude']);
+    // … and a sync does not stop the next poll.
+    await accounts.refresh(['claude']);
+    expect(claude.calls).toBe(3);
+  });
+
+  it('reports a probe that threw, and leaves the previous snapshot standing', async () => {
+    h.ctx.registries.runtimes.set('claude', new AccountRuntime(subscription));
+    await accounts.refresh(['claude']);
+    const before = accounts.get('claude');
+
+    h.ctx.registries.runtimes.set('claude', new AccountRuntime(new Error('the CLI is not logged in')));
+    const out = await accounts.sync(['claude']);
+    expect(out.synced).toEqual([]);
+    expect(out.failed).toEqual([{ runtimeId: 'claude', message: 'the CLI is not logged in' }]);
+    expect(out.accounts).toEqual([before]);
+  });
+
+  it('reports a runtime that does not describe its account rather than silently doing nothing', async () => {
+    h.ctx.registries.runtimes.set('claude', new FakeRuntime());
+    const out = await accounts.sync(['claude']);
+    expect(out.synced).toEqual([]);
+    expect(out.failed[0]?.runtimeId).toBe('claude');
+    expect(out.failed[0]?.message).toContain('does not describe its account');
+    expect(out.accounts).toEqual([]);
+  });
+
+  it('keeps the snapshot a failed probe wrote, so the note reaches the surfaces', async () => {
+    const failedProbe: AccountDescription = { billingType: 'unknown', planLabel: null, limitsAvailable: false, limits: [], note: 'claude: the get_usage probe returned no control response' };
+    h.ctx.registries.runtimes.set('claude', new AccountRuntime(failedProbe));
+
+    const out = await accounts.sync(['claude']);
+    expect(out.synced).toEqual(['claude']);
+    expect(out.accounts[0]).toMatchObject({ billingType: 'unknown', note: failedProbe.note });
   });
 });
 

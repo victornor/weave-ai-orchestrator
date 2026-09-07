@@ -1212,7 +1212,7 @@ conductor models [show]|set conductor|workers --runtime <id> --model <id|default
 conductor workspace list|use|register|unregister|pause|resume   multi-workspace registry
 conductor workspace set-default <key=value...>         workspace defaults, e.g. knowledgeBudgetTokens.project=20000
 conductor runs list|show|tail <runId>|cancel
-conductor usage [--scope workspace|project:<id>|ticket:<id>|role:<id>|model:<id>] [--window 24h|today|7d|week|month|all] [--grain hour|day|week]
+conductor usage [--scope workspace|project:<id>|ticket:<id>|role:<id>|model:<id>] [--window 24h|today|7d|week|month|all] [--grain hour|day|week] [--sync [--runtime <id>]]
 conductor knowledge show|edit|note|lint|curate|revert   knowledge bases: sizes, budgets, last curation, curation history
 conductor specs list|show <capability>|changes|search   the spec index (TUI explorer with `conductor specs`)
 conductor worktree list|verify|discard                 provider-managed worktrees and landed-work verdicts

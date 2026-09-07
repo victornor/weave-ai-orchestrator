@@ -786,6 +786,30 @@ export function useUsageAccounts(options?: { refetchIntervalMs?: number }): UseQ
   });
 }
 
+/**
+ * Sync the account snapshots now (VS-84). The answer already carries every runtime it was asked
+ * about, so it is written straight into the `usageAccounts` cache: both the usage page and the chat
+ * header read that key, and neither has to refetch to show the numbers that just came back.
+ *
+ * `runtimeId` omitted syncs every runtime the workspace spends on, and only those runtimes are
+ * replaced in the cache — a sync of one runtime must not drop the others' snapshots from the page.
+ */
+export function useSyncUsageAccounts(): UseMutationResult<T.UsageAccountSync, Error, { runtimeId?: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars) => api.ws<T.UsageAccountSync>(ws, '/usage/accounts/refresh', { method: 'POST', body: vars }),
+    onSuccess: (out) => {
+      qc.setQueryData<T.UsageAccount[]>(qk.usageAccounts(ws), (prev) => {
+        const fresh = new Map(out.accounts.map((a) => [a.runtimeId, a]));
+        const kept = (prev ?? []).map((a) => fresh.get(a.runtimeId) ?? a);
+        const added = out.accounts.filter((a) => !(prev ?? []).some((p) => p.runtimeId === a.runtimeId));
+        return [...kept, ...added];
+      });
+    },
+  });
+}
+
 /** Each runtime's credential state: valid with an expiry, or an expired login and what to run. */
 export function useUsageCredentials(): UseQueryResult<T.UsageCredential[]> {
   const ws = useWs();

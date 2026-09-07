@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Plan limits can be re-synced on demand from the Usage view and the chat
+  header, and the last sync time is always shown

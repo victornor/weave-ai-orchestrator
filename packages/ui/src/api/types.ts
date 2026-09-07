@@ -23,6 +23,8 @@ import type {
   CostStatus,
   UsageGrain,
   UsageWindow,
+  AccountSyncFailure,
+  AccountSyncThrottle,
   RuntimeAccount,
   RuntimeCredential,
   UsageBillingMix,
@@ -307,6 +309,9 @@ export interface UsageSeries {
 
 /** One runtime account snapshot as `GET /usage/accounts` serves it. */
 export interface UsageAccount extends RuntimeAccount { displayName: string }
+
+/** The answer to `POST /usage/accounts/refresh` (VS-84): the snapshots, and what happened to each. */
+export interface UsageAccountSync { accounts: UsageAccount[]; synced: string[]; throttled: AccountSyncThrottle[]; failed: AccountSyncFailure[] }
 
 /** One runtime's credential state as `GET /usage/credentials` serves it. Carries no token (VS-75). */
 export interface UsageCredential extends RuntimeCredential { displayName: string }

@@ -9,6 +9,7 @@ import { RuntimeCredentials } from '../components/RuntimeCredentials';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { useProjects, useUsage, useUsageAccounts, useUsageCredentials, useUsageModels, useUsageTop } from '../api/hooks';
+import { usePlanSync } from '../lib/planSync';
 import { dayLabel, cents, pct, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
 
@@ -32,6 +33,7 @@ export function UsageRoute(): React.ReactElement {
   const models = useUsageModels(params);
   const accounts = useUsageAccounts();
   const credentials = useUsageCredentials();
+  const planSync = usePlanSync();
 
   const total = series.data?.total;
   const headlineTokens = (total?.tokensIn ?? 0) + (total?.tokensOut ?? 0);
@@ -96,7 +98,7 @@ export function UsageRoute(): React.ReactElement {
               />
             </div>
 
-            <PlanLimits accounts={plans} mixedNote={mixedBillingNote(series.data?.billingMix)} />
+            <PlanLimits accounts={plans} mixedNote={mixedBillingNote(series.data?.billingMix)} sync={planSync} />
 
             <section className="ac-card p-4">
               <div className="mb-3.5 text-meta font-medium text-text-soft">Tokens per {grain} by project</div>

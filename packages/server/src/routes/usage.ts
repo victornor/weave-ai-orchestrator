@@ -2,7 +2,10 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { USAGE_GRAINS, USAGE_WINDOWS } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
-import { query } from '../http.js';
+import { body, query } from '../http.js';
+
+/** An on-demand sync of one runtime, or of every runtime the workspace spends on (VS-84). */
+const AccountSyncBody = z.object({ runtimeId: z.string().min(1).optional() });
 
 const UsageQuery = z.object({
   scope: z.string().default('workspace'),
@@ -28,6 +31,21 @@ export function usageRoutes(): Hono<AppEnv> {
       ...a,
       displayName: ws.ctx.registries.runtimes.get(a.runtimeId)?.displayName ?? a.runtimeId,
     })));
+  });
+  /**
+   * Sync the snapshots now (VS-84). One runtime when the body names one, otherwise every runtime
+   * this workspace spends on. Rate limited per runtime in the accounts service: a request inside
+   * that window is answered, not refused — with the current snapshot and when the next sync of that
+   * runtime is allowed — because "too soon" is something the caller has to show, not an error.
+   */
+  app.post('/accounts/refresh', async (c) => {
+    const ws = c.get('ws');
+    const { runtimeId } = await body(c, AccountSyncBody);
+    const out = await ws.services.accounts.sync(runtimeId ? [runtimeId] : undefined);
+    return c.json({
+      ...out,
+      accounts: out.accounts.map((a) => ({ ...a, displayName: ws.ctx.registries.runtimes.get(a.runtimeId)?.displayName ?? a.runtimeId })),
+    });
   });
   /**
    * The credential state per runtime (VS-75): present, when it expires, when it was last verified,

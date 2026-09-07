@@ -144,6 +144,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: `${W}/usage/models`, tag: 'usage', summary: 'Usage per model', auth: 'session' },
   { method: 'GET', path: `${W}/usage/ticket/{id}`, tag: 'usage', summary: 'Usage for a ticket', auth: 'session' },
   { method: 'GET', path: `${W}/usage/accounts`, tag: 'usage', summary: 'Runtime account snapshots: billing mode and plan limits', auth: 'session' },
+  { method: 'POST', path: `${W}/usage/accounts/refresh`, tag: 'usage', summary: 'Sync one runtime account snapshot now, or every one; rate limited per runtime', auth: 'session', mutating: true },
 
   { method: 'GET', path: `${W}/threads`, tag: 'threads', summary: 'Chat threads', auth: 'session' },
   { method: 'POST', path: `${W}/threads`, tag: 'threads', summary: 'Create a web thread', auth: 'session', mutating: true },

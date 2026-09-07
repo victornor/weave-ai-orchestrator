@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { RuntimeAccount } from '@agent-conductor/shared';
 import { accountLimits, runtimeLimitStrip } from '@agent-conductor/render';
-import { PlanLimits } from './PlanLimits';
+import { PlanLimits, type PlanSync } from './PlanLimits';
 import { Sheet } from './Sheet';
 import { cx } from '../lib/cx';
 
@@ -40,10 +40,13 @@ const TONE: Record<'ok' | 'warn' | 'over', string> = {
 export function SessionLimit({
   accounts,
   runtimeId,
+  sync,
   className,
 }: {
   accounts: RuntimeAccount[] | null | undefined;
   runtimeId: string | null | undefined;
+  /** Handed straight to the block in the sheet, so the header offers the same sync the usage page does (VS-84). */
+  sync?: PlanSync;
   className?: string;
 }): React.ReactElement | null {
   const [open, setOpen] = useState(false);
@@ -88,8 +91,9 @@ export function SessionLimit({
         )}
       </button>
       <Sheet open={open} onClose={() => setOpen(false)} title="Conductor plan limits">
-        {account ? <PlanLimits accounts={accountLimits([account], now)} /> : null}
-        <p className="mt-3 text-nano text-text-4">Captured {view.age}. Refreshed by the daemon every 5 minutes.</p>
+        {/* The block carries the age, the sync control and the daemon's own cadence — the same
+            block the usage page renders, so the two surfaces cannot drift apart. */}
+        {account ? <PlanLimits accounts={accountLimits([account], now)} sync={sync} /> : null}
       </Sheet>
     </>
   );

@@ -2,4 +2,4 @@ import type { WorkspaceContext } from '../context.js'; import type { CoreService
 import { createUsageService as build } from './service.js';
 export function createUsageService(ctx: WorkspaceContext, _deps: () => CoreServices): UsageService { return build(ctx); }
 export { recordUsage, type RecordUsageInput } from './service.js';
-export { createAccountsService, ACCOUNT_PROBE_TIMEOUT_MS } from './accounts.js';
+export { createAccountsService, ACCOUNT_PROBE_TIMEOUT_MS, MANUAL_SYNC_INTERVAL_MS } from './accounts.js';

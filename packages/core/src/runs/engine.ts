@@ -14,7 +14,8 @@ import type { CoreServices } from '../api.js';
 import { createSessions, type SessionsService } from '../sessions/index.js';
 import { buildTurnPrompt, type TurnPromptOptions } from '../prompts/index.js';
 import { ensureHomeCurrent } from '../workers/home.js';
-import { recordUsage } from '../usage/index.js';
+import { recordUsage, ACCOUNT_PROBE_TIMEOUT_MS } from '../usage/index.js';
+import { ensureFreshCredential } from './credentialFreshness.js';
 import { git } from '../util/git.js';
 import { emitRunEvent, runState } from './active.js';
 import { modelSettingFor } from '../models/resolve.js';
@@ -236,6 +237,11 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     let systemPromptText = '';
     try { systemPromptText = readFileSync(instructionsPath, 'utf8'); } catch { systemPromptText = ''; }
 
+    const configHome = join(ctx.paths.runtimesHome, setting.runtime);
+    const reconcileCredential = (): void => reconcileRuntimeCredential(setting.runtime, configHome, { readCredential: credentialReaderFor(ctx.registries, setting.runtime) });
+    reconcileCredential();
+    const turnTimeoutMs = (ctx.config.defaults.turnTimeoutSec ?? 2700) * 1000;
+
     const input: TurnInput = {
       runId,
       turnEpoch: run.turnEpoch,
@@ -248,34 +254,43 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       mcpServers,
       env,
       options: { liveInput: ctx.config.defaults.liveInput },
-      limits: { timeoutMs: (ctx.config.defaults.turnTimeoutSec ?? 2700) * 1000 },
+      limits: { timeoutMs: turnTimeoutMs },
       permission: { mode: permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto', allowedTools: permission.allowed, deniedTools: permission.denied },
       model: setting.model ?? null,
       effort: setting.effort ?? null,
-      configHome: (reconcileRuntimeCredential(setting.runtime, join(ctx.paths.runtimesHome, setting.runtime), { readCredential: credentialReaderFor(ctx.registries, setting.runtime) }), join(ctx.paths.runtimesHome, setting.runtime)),
+      configHome,
     };
 
     // 5. spawn + stream
-    result = await phase('turn', async () => runtime.runTurn(
-      input,
-      {
-        onSpawn: (info) => {
-          ctx.db.update('runs', runId, { pid: info.pid, pgid: info.pgid ?? null });
-          const entry = state.active.get(runId);
-          if (entry) entry.pid = info.pid;
-          record('turn.started', { pid: info.pid }, 'system');
+    result = await phase('turn', async () => {
+      // VS-105: a burst of simultaneous spawns must not become a burst of independent credential
+      // refreshes. This is a no-op for a runtime whose adapter cannot report credential facts.
+      const fresh = await ensureFreshCredential({
+        runtimeId: setting.runtime, configHome, adapter: runtime,
+        minValidMs: turnTimeoutMs, probeTimeoutMs: ACCOUNT_PROBE_TIMEOUT_MS, reconcile: reconcileCredential,
+      });
+      if (!fresh.ok) throw Object.assign(new Error(fresh.message), { ocFamily: 'auth' as RunErrorFamily, ocCode: 'credential_refresh_failed' });
+      return runtime.runTurn(
+        input,
+        {
+          onSpawn: (info) => {
+            ctx.db.update('runs', runId, { pid: info.pid, pgid: info.pgid ?? null });
+            const entry = state.active.get(runId);
+            if (entry) entry.pid = info.pid;
+            record('turn.started', { pid: info.pid }, 'system');
+          },
+          onEvent: (ev: RuntimeEvent) => record(ev.type, ev.payload ?? {}),
+          onRaw: () => { /* raw stream is the runtime adapter's own concern; normalized events are recorded above */ },
         },
-        onEvent: (ev: RuntimeEvent) => record(ev.type, ev.payload ?? {}),
-        onRaw: () => { /* raw stream is the runtime adapter's own concern; normalized events are recorded above */ },
-      },
-      (handle: TurnHandle) => {
-        const existing = state.active.get(runId);
-        if (existing) {
-          existing.cancel = (mode) => handle.cancel(mode);
-          existing.send = handle.send ? (text) => handle.send!(text) : undefined;
-        }
-      },
-    ));
+        (handle: TurnHandle) => {
+          const existing = state.active.get(runId);
+          if (existing) {
+            existing.cancel = (mode) => handle.cancel(mode);
+            existing.send = handle.send ? (text) => handle.send!(text) : undefined;
+          }
+        },
+      );
+    });
   } catch (e) {
     const err = e as Error & { ocFamily?: RunErrorFamily; ocCode?: string };
     failure = { code: err.ocCode ?? 'engine_error', family: err.ocFamily ?? 'tooling', message: err.message.slice(0, 500) };

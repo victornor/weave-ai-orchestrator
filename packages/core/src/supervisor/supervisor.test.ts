@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
 import type { Run, Ticket } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createSupervisor } from './index.js';
+import { createKnowledgeService } from '../knowledge/service.js';
 import type { Supervisor } from '../api.js';
 
 function seedTicket(h: TestHarness, over: Record<string, unknown> = {}): string {
@@ -177,15 +178,27 @@ describe('supervisor scheduled passes', () => {
     h.services.accounts = { list: () => [], get: () => null, refresh: refreshAccounts } as never;
     supervisor = createSupervisor(h.ctx, h.deps);
   });
-  afterEach(() => { supervisor.stop(); h.cleanup(); });
+  afterEach(() => { vi.useRealTimers(); supervisor.stop(); h.cleanup(); });
 
-  function seedKnowledgeFile(over: Record<string, unknown> = {}): void {
+  /** A knowledge row and the file behind it: the supervisor skips a row with nothing on disk. */
+  function seedKnowledgeFile(over: Record<string, unknown> = {}, onDisk = true): string {
+    const id = newId();
+    const path = (over.path as string | undefined) ?? 'workspace/WORKSPACE.md';
     h.db.insert('knowledge_files', {
-      id: newId(), workspaceId: h.workspaceId, projectId: null, path: 'knowledge/workspace/WORKSPACE.md', scope: 'workspace',
-      tokenEstimate: 100, budgetTokens: 3000, lastCuratedAt: null, curationPending: 0, hash: 'x',
-      updatedAt: new Date(Date.now() - 30 * 86_400_000).toISOString(), ...over,
+      id, workspaceId: h.workspaceId, projectId: null, scope: 'workspace',
+      tokenEstimate: 100, budgetTokens: 10_000, lastCuratedAt: null, curationPending: 0, hash: 'x',
+      updatedAt: new Date(Date.now() - 30 * 86_400_000).toISOString(), ...over, path,
     });
+    if (onDisk) {
+      const abs = join(h.ctx.paths.knowledge, path);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, '# Knowledge\n', 'utf8');
+    }
+    return id;
   }
+
+  const pendingOf = (id: string): number =>
+    h.db.get<{ curationPending: number }>('SELECT curation_pending FROM knowledge_files WHERE id = ?', [id])!.curationPending;
 
   describe('curation', () => {
     it('requests curation for a file whose last curation is older than 14 days', async () => {
@@ -196,10 +209,10 @@ describe('supervisor scheduled passes', () => {
       expect(requestCuration).toHaveBeenCalledWith({ kind: 'system', id: null }, 'workspace', null);
     });
 
-    it('requests curation for a pending file even when it was curated yesterday', async () => {
+    it('requests curation for an over-budget file even when it was curated yesterday', async () => {
       const requestCuration = vi.fn(async () => ({}));
       h.services.knowledge = { requestCuration } as never;
-      seedKnowledgeFile({ lastCuratedAt: new Date(Date.now() - 86_400_000).toISOString(), curationPending: 1 });
+      seedKnowledgeFile({ lastCuratedAt: new Date(Date.now() - 86_400_000).toISOString(), tokenEstimate: 9_000, curationPending: 1 });
       await supervisor.tick();
       expect(requestCuration).toHaveBeenCalledTimes(1);
     });
@@ -212,15 +225,67 @@ describe('supervisor scheduled passes', () => {
       expect(requestCuration).not.toHaveBeenCalled();
     });
 
+    // VS-67: `projects/agent-conductor/docs/knowledge-documents.md` was flagged at 1,222 tokens
+    // when a document's budget was 1,500; VS-18 raised it to 10,000 and nothing re-derived the
+    // flag, so the pass filed one curation ticket a day for ever.
+    it('clears a flag left by a budget that has since been raised, and asks for nothing', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration } as never;
+      const id = seedKnowledgeFile({
+        path: 'projects/api/docs/run-engine.md', scope: 'project', projectId: h.projectId,
+        tokenEstimate: 1_222, budgetTokens: 1_500, curationPending: 1, updatedAt: new Date().toISOString(),
+      });
+      await supervisor.tick();
+      expect(requestCuration).not.toHaveBeenCalled();
+      const row = h.db.get<{ curationPending: number; budgetTokens: number }>(
+        'SELECT curation_pending, budget_tokens FROM knowledge_files WHERE id = ?', [id])!;
+      expect(row.curationPending).toBe(0);
+      expect(row.budgetTokens).toBe(10_000);
+    });
+
+    it('flags a file that has grown past 80 % of its budget since it was last written', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration } as never;
+      const id = seedKnowledgeFile({ tokenEstimate: 8_001, curationPending: 0, updatedAt: new Date().toISOString() });
+      await supervisor.tick();
+      expect(requestCuration).toHaveBeenCalledTimes(1);
+      expect(pendingOf(id)).toBe(1);
+    });
+
+    it('skips a row whose file is no longer on disk, however stale it looks', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration } as never;
+      seedKnowledgeFile({
+        path: 'projects/api/docs/archived.md', scope: 'project', projectId: h.projectId,
+        lastCuratedAt: new Date(Date.now() - 20 * 86_400_000).toISOString(), curationPending: 1,
+      }, false);
+      await supervisor.tick();
+      expect(requestCuration).not.toHaveBeenCalled();
+    });
+
+    it('asks for nothing the day after a project was curated', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration } as never;
+      const knowledge = createKnowledgeService(h.ctx, h.deps);
+      knowledge.putDoc({ kind: 'system', id: null }, 'project', 'run-engine', '# Run engine\n\nOne turn end to end.\n', h.projectId);
+      knowledge.note({ kind: 'system', id: null }, 'project', 'Learnings', 'The build needs Node 26 or newer.', h.projectId);
+      knowledge.replace({ kind: 'system', id: null }, 'project', '# API\n\n## Learnings\n- 2026-01-01 · Curated.\n', 'curation', h.projectId);
+
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(Date.now() + 86_400_000));
+      await supervisor.tick();
+      expect(requestCuration).not.toHaveBeenCalled();
+    });
+
     it('asks at most once per file per day and persists the request in meta', async () => {
       const requestCuration = vi.fn(async () => ({}));
       h.services.knowledge = { requestCuration } as never;
-      seedKnowledgeFile({ curationPending: 1 });
+      seedKnowledgeFile({ tokenEstimate: 9_000, curationPending: 1 });
       await supervisor.tick();
       h.db.run("DELETE FROM meta WHERE key = 'supervisor:curation_at'");   // force the 10-minute gate open again
       await supervisor.tick();
       expect(requestCuration).toHaveBeenCalledTimes(1);
-      expect(h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:curation_requested:knowledge/workspace/WORKSPACE.md'])).toBeDefined();
+      expect(h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:curation_requested:workspace/WORKSPACE.md'])).toBeDefined();
     });
 
     it('does not run the pass twice inside the 10-minute window', async () => {
@@ -228,7 +293,7 @@ describe('supervisor scheduled passes', () => {
       h.services.knowledge = { requestCuration } as never;
       await supervisor.tick();
       const at = h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:curation_at'])!.value;
-      seedKnowledgeFile({ curationPending: 1 });
+      seedKnowledgeFile({ tokenEstimate: 9_000, curationPending: 1 });
       await supervisor.tick();
       expect(requestCuration).not.toHaveBeenCalled();
       expect(h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:curation_at'])!.value).toBe(at);

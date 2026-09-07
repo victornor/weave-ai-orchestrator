@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Scheduled knowledge curation runs only when a file is genuinely stale or over
+  budget, not every 24 hours

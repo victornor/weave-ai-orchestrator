@@ -11,6 +11,12 @@ export const BUDGETS: Record<KnowledgeScope, number> = {
 };
 /** Budget per linked document (PLAN §13): a topic page, not a wiki. */
 export const DOC_BUDGET = DEFAULT_KNOWLEDGE_BUDGETS.document;
+/**
+ * PLAN §13.4: a knowledge file past this share of its budget is due for curation. The knowledge
+ * service records that verdict on the row as it writes; the supervisor re-derives it from the same
+ * fraction, so both have to read it from here.
+ */
+export const CURATION_BUDGET_FRACTION = 0.8;
 
 /** The budget a hub file or a document gets from a workspace's configured budgets. */
 export function budgetOf(budgets: KnowledgeBudgets, scope: KnowledgeScope, isDoc: boolean): number {

@@ -208,6 +208,15 @@ describe('knowledge', () => {
     expect(knowledge.get('project', h.projectId).body).toContain('The build needs Node 22 or newer.');
   });
 
+  it('clears the pending flag on every file in a scope when that scope is curated', () => {
+    const doc = knowledge.putDoc(WORKER, 'project', 'run-engine', '# Run engine\n\nOne turn end to end.\n', h.projectId);
+    // A document flagged under the budget in force when it was written (VS-18 raised it since).
+    h.db.run("UPDATE knowledge_files SET curation_pending = 1 WHERE path = ?", [doc.path]);
+    knowledge.replace(HUMAN, 'project', '# API\n\n## Learnings\n- 2026-01-01 · Curated.\n', 'curation', h.projectId);
+    const pending = h.db.get<{ curationPending: number }>('SELECT curation_pending FROM knowledge_files WHERE path = ?', [doc.path])!;
+    expect(pending.curationPending).toBe(0);
+  });
+
   it('picks up out-of-band human edits as a revision', () => {
     const { path } = knowledge.get('shared');
     writeFileSync(path, '# Shared knowledge\n\n## Conventions\n- 2026-01-01 · Squash merges only.\n', 'utf8');

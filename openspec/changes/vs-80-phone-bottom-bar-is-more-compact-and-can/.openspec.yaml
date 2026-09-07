@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-07
+goal: The phone tab bar fits into 56px, folds away to a handle the human can bring
+  back, and stands down while the keyboard is open
+skip_specs: true

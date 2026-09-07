@@ -15,6 +15,7 @@ import { useToast } from '../components/Toast';
 import { useHotkeys } from '../lib/hotkeys';
 import { flushQueue, useQueueCount } from '../lib/queue';
 import { readExpanded, toggleExpanded } from '../lib/wsExpansion';
+import { readBarHidden, writeBarHidden } from '../lib/barVisibility';
 import { updateEntry, updateEntryLabel } from '../lib/upgrade';
 import type { QueuedWrite } from '../lib/queue';
 import type { WorkspaceListItem } from '../api/types';
@@ -33,6 +34,8 @@ export function AppShell(): React.ReactElement {
   const [scopeIndex, setScopeIndex] = useState(-1);
   /** Which workspace groups the rail has open, seeded from what this device remembered. */
   const [expanded, setExpanded] = useState<string[]>(() => readExpanded());
+  /** Whether the phone tab bar is folded away to its handle, likewise remembered per device. */
+  const [barHidden, setBarHidden] = useState<boolean>(readBarHidden);
 
   const summary = useWorkspaceSummary();
   const decisions = useDecisions({ status: 'open', owner: 'human' });
@@ -167,7 +170,8 @@ export function AppShell(): React.ReactElement {
   const isActive = (to: string): boolean => path.startsWith(to);
 
   return (
-    <div className="ac-app flex overflow-hidden bg-bg-0">
+    // `data-bar` is what the stylesheet reads to hand the bar's space back to the content above it.
+    <div className="ac-app flex overflow-hidden bg-bg-0" data-bar={barHidden ? 'hidden' : 'shown'}>
       {/* desktop rail — the only place all projects appear at once */}
       <aside className="hidden w-rail flex-none flex-col border-r border-line-1 bg-bg-input p-2.5 md:flex">
         {/* Self-contained block at the top of the rail: it is about the daemon, not any one
@@ -233,6 +237,11 @@ export function AppShell(): React.ReactElement {
           isActive={isActive}
           onMore={() => setMoreOpen(true)}
           moreOpen={moreOpen}
+          hidden={barHidden}
+          onToggleHidden={(h) => {
+            setBarHidden(h);
+            writeBarHidden(h);
+          }}
         />
       </div>
 

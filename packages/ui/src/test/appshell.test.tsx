@@ -51,7 +51,13 @@ vi.mock('../components/CommandPalette', () => ({
     return null;
   },
 }));
-vi.mock('../app/BottomBar', () => ({ BottomBar: () => null }));
+// Stood in for so the shell's half of the hide/show wiring is what this file reads: the bar itself
+// is `bottombar.test.tsx`.
+vi.mock('../app/BottomBar', () => ({
+  BottomBar: ({ hidden, onToggleHidden }: { hidden?: boolean; onToggleHidden: (h: boolean) => void }) => (
+    <button type="button" aria-label="bar stand-in" aria-pressed={hidden ?? false} onClick={() => onToggleHidden(!(hidden ?? false))} />
+  ),
+}));
 vi.mock('../lib/queue', () => ({ flushQueue: vi.fn(), useQueueCount: () => 0 }));
 vi.mock('../lib/hotkeys', () => ({
   useHotkeys: (keys: Array<{ key: string; run: () => void }>) => { hotkeys.current = keys; },
@@ -287,5 +293,38 @@ describe('the Needs-you badge', () => {
     expect(screen.getByLabelText('2 waiting for you')).toBeInTheDocument();
     expect(screen.getByLabelText('4 waiting for you')).toBeInTheDocument();
     expect(screen.queryByLabelText('9 waiting for you')).not.toBeInTheDocument();
+  });
+});
+
+describe('the phone tab bar', () => {
+  const shell = (c: HTMLElement): HTMLElement => c.querySelector('.ac-app') as HTMLElement;
+
+  it('reserves the bar its space until the human folds it away', () => {
+    const { container } = render(<AppShell />);
+    expect(shell(container).dataset.bar).toBe('shown');
+    // One class, one variable: the content above the bar reads whatever `data-bar` leaves it.
+    expect(container.querySelector('main')?.className).toContain('ac-bar-pad');
+
+    fireEvent.click(screen.getByLabelText('bar stand-in'));
+    expect(shell(container).dataset.bar).toBe('hidden');
+    expect(container.querySelector('main')?.className).toContain('ac-bar-pad');
+  });
+
+  it('remembers the choice for this device', () => {
+    const { container, unmount } = render(<AppShell />);
+    fireEvent.click(screen.getByLabelText('bar stand-in'));
+    expect(shell(container).dataset.bar).toBe('hidden');
+    unmount();
+
+    const again = render(<AppShell />);
+    expect(shell(again.container).dataset.bar).toBe('hidden');
+    fireEvent.click(screen.getByLabelText('bar stand-in'));
+    expect(shell(again.container).dataset.bar).toBe('shown');
+  });
+
+  it('opens with the bar showing on a device that never hid it', () => {
+    const { container } = render(<AppShell />);
+    expect(shell(container).dataset.bar).toBe('shown');
+    expect(screen.getByLabelText('bar stand-in')).toHaveAttribute('aria-pressed', 'false');
   });
 });

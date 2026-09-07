@@ -143,7 +143,11 @@
   --track-label: 0.1em;
 
   --thumb-band: 2.75rem; /* 44px — decision-card primary action band */
-  --bar-height: 4.875rem; /* 78px bottom bar */
+  --bar-height: 3.5rem; /* 56px bottom bar */
+  --bar-handle: 1.5rem; /* 24px — the slim strip the bar collapses to when it is hidden */
+  /* What the content above the bar reserves for it. The one number that moves: the bar and the
+     handle keep their own heights, and this says which of them is standing there. */
+  --bar-inset: calc(var(--bar-height) + var(--ac-safe-bottom));
   --rail-width: 13rem; /* 208px desktop rail */
   --banner-height: 1.5rem; /* 24px connection banner */
 
@@ -170,6 +174,19 @@
    dead space above the keys rather than clearance from anything. */
 :root[data-keyboard='open'] {
   --ac-safe-bottom: 0px;
+}
+
+/* The composer is already sitting on the keyboard, so a tab bar above it is chrome nobody can see
+   past. Both the bar and the handle stand down until it closes, and the content reserves nothing
+   for them; JavaScript never has to notice, so there is no frame where the two disagree about where
+   the bar is. Unlayered on purpose: `display` comes from a Tailwind utility, and the utilities layer
+   outranks anything in `@layer components` however specific the selector. */
+:root[data-keyboard='open'] .ac-app {
+  --bar-inset: 0px;
+}
+:root[data-keyboard='open'] .ac-bar,
+:root[data-keyboard='open'] .ac-bar-handle {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -380,7 +397,7 @@
     top: var(--ac-app-top);
     bottom: var(--ac-app-bottom);
   }
-  /* The phone bottom bar keeps its 78px of chrome and grows by the safe-area
+  /* The phone bottom bar keeps its 56px of chrome and grows by the safe-area
      inset, so the tab row never slides under the home indicator; `ac-bar-pad`
      holds the matching gap open in the content above it. It sits on top of the
      keyboard rather than behind it, so it is offset by whatever that covers. */
@@ -389,8 +406,19 @@
     height: calc(var(--bar-height) + var(--ac-safe-bottom));
     padding-bottom: var(--ac-safe-bottom);
   }
+  /* All that is left of the bar once it is hidden: a full-width strip carrying a grab mark, so the
+     way back is the whole bottom edge rather than a target to find. */
+  .ac-bar-handle {
+    bottom: var(--ac-app-bottom);
+    height: calc(var(--bar-handle) + var(--ac-safe-bottom));
+    padding-bottom: var(--ac-safe-bottom);
+  }
   .ac-bar-pad {
-    padding-bottom: calc(var(--bar-height) + var(--ac-safe-bottom));
+    padding-bottom: var(--bar-inset);
+  }
+  /* Hidden: the content takes back everything but the handle. */
+  .ac-app[data-bar='hidden'] {
+    --bar-inset: calc(var(--bar-handle) + var(--ac-safe-bottom));
   }
   .ac-prose {
     font-size: var(--fs-body);

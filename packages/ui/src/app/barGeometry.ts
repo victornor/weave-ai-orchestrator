@@ -6,6 +6,11 @@
  * below the bar's own padding; VS-81 removed the button, so the row starts at
  * that padding and each tab centres its glyph and label in what is left.
  *
+ * With the button gone, so is the reason the bar was 78px tall. The label is
+ * already the smallest type token and the glyph is 16px, so what remained was
+ * the clearance an entry needed from something that is no longer there: VS-80
+ * takes the chrome down to 56px, which still leaves every tab a 48px target.
+ *
  * Every length is in rem, measured from the bar's padding box (the fixed nav's
  * top border excluded), so the render and the test read the same numbers.
  */
@@ -19,13 +24,16 @@ export interface Rect {
 
 export interface BarGeometry {
   height: number;
+  handle: number;
   padX: number;
   tabTop: number;
 }
 
 export const BAR: BarGeometry = {
   /** --bar-height, the bar chrome above the safe-area inset */
-  height: 4.875,
+  height: 3.5,
+  /** --bar-handle, the slim strip the bar collapses to when it is hidden */
+  handle: 1.5,
   /** horizontal padding of the tab row */
   padX: 0.375,
   /** first row of the tab entries — the bar's own top padding */

@@ -23,8 +23,9 @@ describe('landDelivery', () => {
   const head = async (repo: string, ref = 'HEAD'): Promise<string> => (await git(['rev-parse', ref], repo)).stdout.trim();
 
   const project = (over: Partial<Project> = {}): Project =>
-    ({ id: 'p1', clonePath: clone, defaultBranch: 'main', policies: { deliveryMode: 'pr' }, ...over }) as Project;
-  const ticket = (): Ticket => ({ id: 't1', identifier: 'TST-1', title: 'Dark mode' }) as Ticket;
+    ({ id: 'p1', clonePath: clone, defaultBranch: 'main', landingBranch: null, policies: { deliveryMode: 'pr' }, ...over }) as Project;
+  const ticket = (over: Partial<Ticket> = {}): Ticket =>
+    ({ id: 't1', identifier: 'TST-1', title: 'Dark mode', landingBranch: null, ...over }) as Ticket;
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'ac-land-'));
@@ -54,12 +55,17 @@ describe('landDelivery', () => {
     await git(['checkout', 'main'], clone);
   }
 
-  /** Squash the branch onto origin/main the way `gh pr merge --squash` does. */
-  async function squashMergeOnOrigin(): Promise<void> {
-    await git(['checkout', 'main'], origin);
+  /** Squash the branch onto `origin/<targetBranch>` the way `gh pr merge --squash` does. */
+  async function squashMergeOnOrigin(targetBranch = 'main'): Promise<void> {
+    await git(['checkout', targetBranch], origin);
     await git(['fetch', clone, `${BRANCH}:squash-src`], origin);
     await git(['merge', '--squash', 'squash-src'], origin);
     await git(['commit', '-m', 'feat: dark mode (#42)'], origin);
+  }
+
+  /** A second branch on origin, diverging from `main` at the point it is created (VS-119). */
+  async function branchOnOrigin(name: string): Promise<void> {
+    await git(['checkout', '-b', name, 'main'], origin);
   }
 
   it('verifies a squash merge of a multi-commit branch', async () => {
@@ -129,5 +135,47 @@ describe('landDelivery', () => {
 
     await expect(landDelivery(config, project({ policies: { deliveryMode: 'local-branch' } }), ticket(), BRANCH))
       .rejects.toMatchObject({ code: 'merge_unverified' });
+  });
+
+  describe('a project-declared landing branch distinct from the default branch (VS-119)', () => {
+    it('verifies a squash merge onto the declared landing branch', async () => {
+      await branchOnOrigin('edge');
+      await multiCommitBranch();
+      await squashMergeOnOrigin('edge');
+
+      const r = await landDelivery(config, project({ landingBranch: 'edge' }), ticket(), BRANCH);
+      expect(r).toMatchObject({ mode: 'pr', landed: true });
+      expect(r.detail).toContain('origin/edge');
+    });
+
+    it("refuses when the branch reached the default branch but not the declared landing branch", async () => {
+      await branchOnOrigin('edge');
+      await multiCommitBranch();
+      await squashMergeOnOrigin('main');
+
+      await expect(landDelivery(config, project({ landingBranch: 'edge' }), ticket(), BRANCH))
+        .rejects.toMatchObject({ code: 'merge_unverified', message: expect.stringContaining('origin/edge') });
+    });
+  });
+
+  describe("a ticket's own landing branch overrides its project's (VS-119)", () => {
+    it("verifies against the ticket's own declared landing branch", async () => {
+      await branchOnOrigin('edge');
+      await multiCommitBranch();
+      await squashMergeOnOrigin('main');
+
+      const r = await landDelivery(config, project({ landingBranch: 'edge' }), ticket({ landingBranch: 'main' }), BRANCH);
+      expect(r).toMatchObject({ mode: 'pr', landed: true });
+      expect(r.detail).toContain('origin/main');
+    });
+
+    it("refuses when the branch reached the project's landing branch but not the ticket's own", async () => {
+      await branchOnOrigin('edge');
+      await multiCommitBranch();
+      await squashMergeOnOrigin('edge');
+
+      await expect(landDelivery(config, project({ landingBranch: 'edge' }), ticket({ landingBranch: 'main' }), BRANCH))
+        .rejects.toMatchObject({ code: 'merge_unverified', message: expect.stringContaining('origin/main') });
+    });
   });
 });

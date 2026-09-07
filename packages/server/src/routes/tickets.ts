@@ -8,6 +8,8 @@ const CreateSchema = z.object({
   projectId: z.string().nullish(), kind: z.enum(TICKET_KINDS), title: z.string().min(1), description: z.string().default(''),
   priority: z.enum(TICKET_PRIORITIES).default('medium'), parentId: z.string().nullish(), blockedBy: z.array(z.string()).optional(),
   assigneeRoleId: z.string().nullish(), autoMerge: z.boolean().optional(), originKind: z.string().optional(), originFingerprint: z.string().optional(),
+  // Set only at creation (VS-119); never inferred from a PR base, and not on PatchSchema below.
+  landingBranch: z.string().nullish(),
 });
 const PatchSchema = z.object({
   title: z.string().min(1).optional(), description: z.string().optional(), priority: z.enum(TICKET_PRIORITIES).optional(),

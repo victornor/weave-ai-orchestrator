@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { z, type ZodTypeAny } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
-  COMMON_TOOLS, CONDUCTOR_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema,
+  COMMON_TOOLS, CONDUCTOR_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, DECISION_KINDS, DECISION_INPUT_TYPES,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope,
@@ -405,8 +405,9 @@ export const TOOLS: ToolDef[] = [
       projectId: z.string().nullish(), kind: z.enum(TICKET_KINDS), title: z.string().min(1), description: z.string().default(''),
       priority: z.enum(TICKET_PRIORITIES).default('medium'), parentId: z.string().nullish(), blockedBy: z.array(z.string()).optional(),
       assigneeRoleId: z.string().nullish(), autoMerge: z.boolean().optional(), originKind: z.string().optional(), originFingerprint: z.string().optional(),
+      landingBranch: z.string().nullish(),
     }),
-    description: 'Create a ticket. Set autoMerge only when the human asked for it in the same request. Workers may only create tickets in their own project.',
+    description: "Create a ticket. Set autoMerge only when the human asked for it in the same request. Set landingBranch only when the human asked this ticket's work to land somewhere other than its project's own landing branch (VS-119) — never inferred from a PR base. Workers may only create tickets in their own project.",
     handler: (ctx, i) => svc(ctx).tickets.create(ctx.actor, { ...i, projectId: isConductor(ctx) ? (i.projectId ?? null) : ctx.claims.projectId }),
   },
   {
@@ -522,6 +523,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'ac_project_add', scope: 'conductor', input: z.object({
       id: z.string().min(1), url: z.string().min(1), name: z.string().optional(), defaultBranch: z.string().default('main'),
+      landingBranch: z.string().optional(),
       runtime: z.string().optional(), maxWorkers: z.number().int().min(1).max(32).default(4), setupCommand: z.string().optional(),
     }),
     description: 'Add a project: clone, init OpenSpec, seed the project KB and open the scout ticket. Requires a human decision first.',
@@ -605,18 +607,23 @@ async function worktreeStatus(ctx: ToolCtx): Promise<Record<string, unknown>> {
     try { const { stdout } = await exec('git', args, { cwd, timeout: 15_000 }); return stdout.trim(); }
     catch { return ''; }
   };
-  const defaultBranch = agent.projectId ? (safe(() => svc(ctx).projects.get(agent.projectId!).defaultBranch) ?? 'main') : 'main';
+  const project = agent.projectId ? safe(() => svc(ctx).projects.get(agent.projectId!)) : null;
+  const ticket = agent.ticketId ? safe(() => svc(ctx).tickets.get(agent.ticketId!)) : null;
+  const defaultBranch = project?.defaultBranch ?? 'main';
+  // Ahead/behind compares against the ticket's effective landing branch (VS-119, `landingBranchOf`),
+  // since that — not the project's raw default branch — is what the worktree was created from.
+  const landingBranch = project ? landingBranchOf(project, ticket) : defaultBranch;
   const [porcelain, branch, head, counts] = await Promise.all([
     git('status', '--porcelain'),
     git('rev-parse', '--abbrev-ref', 'HEAD'),
     git('rev-parse', 'HEAD'),
-    git('rev-list', '--left-right', '--count', `${defaultBranch}...HEAD`),
+    git('rev-list', '--left-right', '--count', `${landingBranch}...HEAD`),
   ]);
   const [behind = '0', ahead = '0'] = counts.split(/\s+/);
   return {
     hasWorktree: true, path: cwd, branch: branch || agent.branch, head: head || null,
     dirty: porcelain.length > 0, changedFiles: porcelain ? porcelain.split('\n').length : 0,
-    ahead: Number(ahead) || 0, behind: Number(behind) || 0, defaultBranch,
+    ahead: Number(ahead) || 0, behind: Number(behind) || 0, defaultBranch, landingBranch,
   };
 }
 

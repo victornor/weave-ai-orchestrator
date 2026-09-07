@@ -105,6 +105,16 @@ describe('conductor project add', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it('sends --landing-branch as landingBranch on the request body (VS-119)', async () => {
+    routes['POST /api/w/ws1/projects'] = () => ({ status: 202, body: { project: project(), jobId: 'j1' } });
+    routes['GET /api/w/ws1/projects/api'] = () => ({ body: project({ status: 'ready' }) });
+    frames = [finished()];
+
+    await cli('project', 'add', 'git@github.com:acme/fernwood.git', '--id', 'api', '--branch', 'main', '--landing-branch', 'edge');
+    const posted = calls.find((c) => c.method === 'POST' && c.path === '/api/w/ws1/projects');
+    expect(posted?.body).toMatchObject({ defaultBranch: 'main', landingBranch: 'edge' });
+  });
+
   it('names the failing sub-step, shows its last lines and exits non-zero', async () => {
     routes['POST /api/w/ws1/projects'] = () => ({ status: 202, body: { project: project(), jobId: 'j1' } });
     routes['GET /api/w/ws1/projects/api'] = () => ({ body: project({ status: 'error' }) });

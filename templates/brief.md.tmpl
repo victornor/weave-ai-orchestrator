@@ -29,7 +29,7 @@ Kind `{{ticket.kind}}` · priority `{{ticket.priority}}`
 ## Setup
 
 {{#unless brief.noWorktree}}
-Your worktree is `work/`, on branch `{{worktree.branch}}`, created from `origin/{{project.defaultBranch}}`. Absolute path: `{{worktree.path}}`.
+Your worktree is `work/`, on branch `{{worktree.branch}}`, created from `origin/{{project.landingBranch}}`. Absolute path: `{{worktree.path}}`.
 
 **Before anything else, call `ac_worktree_status`.** It returns the authoritative path, branch, dirty flag and ahead/behind counts — never guess them. If the path or the branch differs from what this brief says, **stop**: `ac_report({state: "blocked"})` and transition the ticket to `blocked` with `{owner: "conductor", action: "worker launched in the wrong worktree"}`. Do not work in a checkout you cannot confirm.
 
@@ -38,13 +38,13 @@ Then read `work/AGENTS.md` (the project's own instructions for contributors) onc
 Its Documents section, and any pointer left in Landmines or Conventions, name the linked documents this project already has. Before touching a file or subsystem, check whether one covers it and read it (`ac_knowledge_doc_get`) — that is the normal way to pick up a subsystem's gotchas, not a discovery you make the hard way.
 {{/unless}}
 {{#if brief.noWorktree}}
-**This is a curation ticket and has no worktree of its own.** Your working directory is your home. `work/` is a read-only checkout of the project's default branch, for fact-checking only: never write to it, never commit, never push. Do not call `ac_worktree_status`. Load `agent-conductor-knowledge` and follow the curation procedure.
+**This is a curation ticket and has no worktree of its own.** Your working directory is your home. `work/` is a read-only checkout of the project's landing branch, for fact-checking only: never write to it, never commit, never push. Do not call `ac_worktree_status`. Load `agent-conductor-knowledge` and follow the curation procedure.
 {{/if}}
 
 ## Rules
 
 - Stay inside this ticket and this project. Cross-project needs become `blocked` with `{owner: "conductor", action: "…"}`.
-- Never push to `{{project.defaultBranch}}`. Never merge unless the ticket is in `merging`.
+- Never push to `{{project.landingBranch}}`. Never merge unless the ticket is in `merging`.
 - Delivery mode is `{{project.deliveryMode}}`; merges use `{{project.mergeMethod}}`.
 {{#if project.yolo}}
 - **YOLO mode is on for this project.** The daemon grants this ticket's plan approval and merge approval itself, as soon as the plan validates and as soon as the PR's checks are green. Do not ask the human to approve either one and do not wait on them for it — the approval arrives as your next wake. Everything else still goes to the human: `ac_ask`, hires, discards, retries. Nothing else changes: the merge queue, the tests and the landing verification are exactly as they are, and `merging` is still the only status you may merge in.
@@ -65,8 +65,8 @@ For reference, this is what "done" means per kind and delivery mode:
 
 | Kind | Delivery | Done means |
 |---|---|---|
-| `change` | `pr` | Planning artifacts complete and validating → `proposed`. After approval, all tasks in `tasks.md` implemented and ticked, committed on `{{worktree.branch}}`, pushed, PR open and recorded with `ac_ticket_work_product` → `in_review`. After the human approves, the ticket becomes `merging`: sync with `{{project.defaultBranch}}`, resolve conflicts yourself, re-run tests and lint, `gh pr merge --{{project.mergeMethod}}`, then `ac_ticket_merge_done`. |
-| `change` | `local-branch` | Same up to `in_review`, but nothing is pushed: record a `branch` work product instead of a PR. In `merging`, rebase onto `{{project.defaultBranch}}`, re-run checks, then `ac_ticket_merge_done` — the daemon fast-forwards the primary clone. |
+| `change` | `pr` | Planning artifacts complete and validating → `proposed`. After approval, all tasks in `tasks.md` implemented and ticked, committed on `{{worktree.branch}}`, pushed, PR open and recorded with `ac_ticket_work_product` → `in_review`. After the human approves, the ticket becomes `merging`: sync with `{{project.landingBranch}}`, resolve conflicts yourself, re-run tests and lint, `gh pr merge --{{project.mergeMethod}}`, then `ac_ticket_merge_done`. |
+| `change` | `local-branch` | Same up to `in_review`, but nothing is pushed: record a `branch` work product instead of a PR. In `merging`, rebase onto `{{project.landingBranch}}`, re-run checks, then `ac_ticket_merge_done` — the daemon fast-forwards the primary clone. |
 | `task` | `pr` | Implemented and committed on `{{worktree.branch}}`, tests and lint green, PR open and recorded → `in_review`; merge as above once the ticket is `merging`. |
 | `task` | `local-branch` | Implemented, committed, checks green, `branch` work product → `in_review`; merge on approval. |
 | `scout` | any | The `report` document is complete and stands alone: Question / What I did / What I found (with evidence: commands, output, `file:line`) / Recommendation / Open questions. Write it with `ac_ticket_document_put(id, "report", body)` → `done`. Never push, never open a PR. A recommendation to build something is a recommendation, not a ticket. |

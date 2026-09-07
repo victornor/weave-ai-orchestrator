@@ -6,7 +6,7 @@ import { body } from '../http.js';
 
 const AddSchema = z.object({
   url: z.string().min(1), id: z.string().optional(), name: z.string().optional(),
-  defaultBranch: z.string().optional(), maxWorkers: z.number().int().min(1).max(32).optional(), setupCommand: z.string().optional(),
+  defaultBranch: z.string().optional(), landingBranch: z.string().optional(), maxWorkers: z.number().int().min(1).max(32).optional(), setupCommand: z.string().optional(),
 // Strict: a project carries no runtime or model since VS-77, and a body that still sends one is a
 // caller that would otherwise believe it had chosen something.
 }).strict();

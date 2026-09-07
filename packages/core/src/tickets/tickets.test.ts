@@ -60,6 +60,11 @@ describe('tickets', () => {
     expect(make({ interactiveSession: true }).interactiveSession).toBe(true);
   });
 
+  it('stores landingBranch from the input, defaulting null (VS-119)', () => {
+    expect(make().landingBranch).toBeNull();
+    expect(make({ landingBranch: 'main' }).landingBranch).toBe('main');
+  });
+
   it('records the run that created the ticket, and nothing when there is no run', () => {
     expect(tickets.create(AGENT, { kind: 'change', title: 'From a turn', projectId: h.projectId, assigneeRoleId: h.roleId }).createdRunId).toBe('run-1');
     expect(make().createdRunId).toBeNull();

@@ -31,6 +31,7 @@ export function register(program: Command): void {
     .option('--blocked-by <ids>', 'comma-separated blocking ticket ids')
     .option('--assign <roleId>', 'assign to a role immediately')
     .option('--auto-merge', 'merge without a merge decision when checks pass')
+    .option('--landing-branch <branch>', "override this ticket's landing branch, set only at creation (VS-119)")
     .action(async (title: string[], opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const { client } = await session(command);
       const input: Record<string, unknown> = {
@@ -44,6 +45,7 @@ export function register(program: Command): void {
       if (opts['blockedBy']) input['blockedBy'] = list(String(opts['blockedBy']));
       if (opts['assign']) input['assigneeRoleId'] = String(opts['assign']);
       if (opts['autoMerge'] === true) input['autoMerge'] = true;
+      if (opts['landingBranch']) input['landingBranch'] = String(opts['landingBranch']);
 
       const created = await client.write<Ticket>({
         tool: 'ac_ticket_create', input,
@@ -138,6 +140,7 @@ export function register(program: Command): void {
           ['role', String(t.assigneeRoleId ?? '')],
           ['worker', String(t.workerId ?? '')],
           ['created', formatRelative(t.createdAt)],
+          ['landing branch', t.landingBranch ? String(t.landingBranch) : undefined],
           ['openspec', t.openspecChangeName ? String(t.openspecChangeName) : undefined],
           ['unblock', t.unblock ? `${t.unblock.owner}: ${t.unblock.action}` : undefined],
         ]);

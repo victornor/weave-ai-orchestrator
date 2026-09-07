@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Merge verification understands a project whose work lands on an
+  integration branch rather than the default branch

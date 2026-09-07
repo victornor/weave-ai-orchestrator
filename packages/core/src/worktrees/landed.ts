@@ -5,10 +5,11 @@ export interface LandedInput {
   repoPath: string;
   worktreePath: string;
   branch: string;
-  defaultBranch: string;
+  /** The ticket's effective landing branch — its own declaration, else its project's, else the project's default branch (VS-119, `landingBranchOf`). */
+  landingBranch: string;
   /** The ticket has a merged pull-request work product. */
   mergedPr?: boolean;
-  /** deliveryMode = local-branch: the local default branch is the authority. */
+  /** deliveryMode = local-branch: the local landing branch is the authority. */
   localBranch?: boolean;
 }
 export interface LandedVerdict { landed: boolean; reason: string; evidence: Record<string, unknown> }
@@ -16,11 +17,11 @@ export interface LandedVerdict { landed: boolean; reason: string; evidence: Reco
 /**
  * PLAN §11.5 landed-work test. A worktree is removed only when the work has provably landed:
  * every commit on the ticket branch is reachable from a remote-tracking branch, OR the PR is merged and the
- * default branch contains the branch's content (ancestor or patch-id match, i.e. squash merge). Uncommitted
+ * landing branch contains the branch's content (ancestor or patch-id match, i.e. squash merge). Uncommitted
  * changes never count as landed. When we cannot tell, the verdict is "not landed" and nothing is discarded.
  */
 export async function landedWorkTest(input: LandedInput): Promise<LandedVerdict> {
-  const { repoPath, worktreePath, branch, defaultBranch } = input;
+  const { repoPath, worktreePath, branch, landingBranch } = input;
   const evidence: Record<string, unknown> = { branch, checkedAt: new Date().toISOString() };
 
   if (!existsSync(worktreePath)) return { landed: true, reason: 'worktree already absent', evidence: { ...evidence, worktree: 'absent' } };
@@ -46,7 +47,7 @@ export async function landedWorkTest(input: LandedInput): Promise<LandedVerdict>
   }
 
   if (input.mergedPr || input.localBranch) {
-    const baseRef = input.localBranch ? defaultBranch : ((await resolveBaseRef(repoPath, defaultBranch)) ?? defaultBranch);
+    const baseRef = input.localBranch ? landingBranch : ((await resolveBaseRef(repoPath, landingBranch)) ?? landingBranch);
     evidence.baseRef = baseRef;
     const ancestor = await git(['merge-base', '--is-ancestor', branch, baseRef], repoPath, 30_000);
     if (ancestor.ok) return { landed: true, reason: `branch is an ancestor of ${baseRef}`, evidence };

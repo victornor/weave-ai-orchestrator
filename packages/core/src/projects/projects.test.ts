@@ -81,6 +81,23 @@ describe('projects', () => {
     expect(projects.get('web').id).toBe(project.id);
   });
 
+  it('declares a landing branch distinct from the default branch, and persists it through an update (VS-119)', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, cfg(src, { landingBranch: 'edge' }));
+    expect(project.landingBranch).toBe('edge');
+    expect(saved[0]!.projects[0]!.landingBranch).toBe('edge');
+
+    const updated = await projects.update(HUMAN, project.id, { maxWorkers: 8 });
+    expect(updated.landingBranch).toBe('edge');
+    expect(updated.maxWorkers).toBe(8);
+  });
+
+  it('leaves landingBranch unset when a project declares none', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, cfg(src));
+    expect(project.landingBranch).toBeNull();
+  });
+
   it('refuses a duplicate slug and reports a clone failure on the row', async () => {
     const src = await sourceRepo();
     await projects.add(HUMAN, cfg(src));
@@ -119,6 +136,23 @@ describe('projects', () => {
 
     const again = await projects.fetch(project.id);
     expect(again.fastForwarded).toBe(false);
+  });
+
+  it('keeps the primary clone on the declared landing branch, not the default branch (VS-119)', async () => {
+    const src = await sourceRepo();
+    await git(['checkout', '-b', 'edge'], src);
+    writeFileSync(join(src, 'edge-only.txt'), 'edge work', 'utf8');
+    await git(['add', '.'], src);
+    await git(['commit', '-m', 'edge: work'], src);
+    await git(['checkout', 'main'], src);
+
+    const project = await projects.add(HUMAN, cfg(src));
+    h.db.update('projects', project.id, { landingBranch: 'edge' });
+
+    const result = await projects.fetch(project.id);
+    expect(result.fastForwarded).toBe(true);
+    expect((await git(['rev-parse', '--abbrev-ref', 'HEAD'], project.clonePath)).stdout.trim()).toBe('edge');
+    expect(existsSync(join(project.clonePath, 'edge-only.txt'))).toBe(true);
   });
 
   it('reconcile creates rows for declared projects and leaves orphans alone', async () => {

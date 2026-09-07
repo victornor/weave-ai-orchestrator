@@ -49,6 +49,8 @@ export const ProjectConfigSchema = z.object({
   url: z.string().min(1),
   name: z.string().optional(),
   defaultBranch: z.string().default('main'),
+  /** Where this project's tickets' work actually lands, when it differs from `defaultBranch` (VS-119). */
+  landingBranch: z.string().optional(),
   maxWorkers: z.number().int().min(1).max(32).default(4),
   setupCommand: z.string().optional(),
   warmPaths: z.array(z.string()).default([]),

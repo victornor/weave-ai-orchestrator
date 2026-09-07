@@ -1,9 +1,9 @@
 /** View models produced by this package. The web widget layer and the TUI widget layer render these and nothing else. */
-import type { BillingType, DecisionKind, DecisionStatus, TicketKind, TicketPriority, TicketStatus, UiStatus, AgentStatus, CostStatus } from '@agent-conductor/shared';
+import type { AuthorKind, BillingType, DecisionKind, DecisionStatus, TicketKind, TicketPriority, TicketStatus, UiStatus, AgentStatus, CostStatus } from '@agent-conductor/shared';
 
 // ---------------------------------------------------------------- transcript
 
-export type TranscriptBlockKind = 'text' | 'thinking' | 'tool' | 'file' | 'status' | 'phase' | 'error';
+export type TranscriptBlockKind = 'text' | 'thinking' | 'tool' | 'file' | 'status' | 'phase' | 'error' | 'human_input';
 
 export interface TranscriptBlockBase {
   /** Stable across re-renders: derived from the first run event folded into the block. */
@@ -75,7 +75,15 @@ export interface ErrorBlock extends TranscriptBlockBase {
   retryable: boolean;
 }
 
-export type TranscriptBlock = TextBlock | ToolBlock | FileBlock | StatusBlock | PhaseBlock | ErrorBlock;
+/** A human's message to a running agent (VS-99), attributed and marked with which delivery occurred. */
+export interface HumanInputBlock extends TranscriptBlockBase {
+  kind: 'human_input';
+  text: string;
+  authorKind: AuthorKind;
+  delivery: 'mid_turn' | 'queued';
+}
+
+export type TranscriptBlock = TextBlock | ToolBlock | FileBlock | StatusBlock | PhaseBlock | ErrorBlock | HumanInputBlock;
 
 export interface TranscriptOptions {
   /** Default true. Set false only where the consumer redacts itself. */

@@ -5,7 +5,8 @@ export type TranscriptBlock =
   | { id: string; type: 'tool'; tool: string; target: string; durationMs: number | null; adds: number | null; dels: number | null; diff: string | null; error?: boolean; pending?: boolean; denied?: boolean }
   | { id: string; type: 'phase'; phase: string; durationMs: number | null; tokens: number | null }
   | { id: string; type: 'status'; text: string; status: 'needs-you' | 'blocked' | 'failed' | 'done' | 'working' }
-  | { id: string; type: 'command'; command: string; exitCode: number | null; output: string | null };
+  | { id: string; type: 'command'; command: string; exitCode: number | null; output: string | null }
+  | { id: string; type: 'human'; text: string; delivery: 'mid_turn' | 'queued' };
 
 function str(v: unknown, fallback = ''): string {
   return typeof v === 'string' ? v : fallback;
@@ -154,6 +155,10 @@ export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBl
       }
       case 'supervisor.action': {
         out.push({ id: e.id, type: 'status', text: str(p['action'], 'supervisor acted'), status: 'working' });
+        break;
+      }
+      case 'human.input': {
+        out.push({ id: e.id, type: 'human', text: str(p['text']), delivery: p['delivery'] === 'mid_turn' ? 'mid_turn' : 'queued' });
         break;
       }
       default:

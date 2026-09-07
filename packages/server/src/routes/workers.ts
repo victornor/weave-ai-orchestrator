@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { describeLiveInput } from '@agent-conductor/core';
 import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
 
@@ -14,7 +15,8 @@ export function workerRoutes(): Hono<AppEnv> {
   });
 
   app.get('/:id', (c) => {
-    const s = c.get('ws').services;
+    const ws = c.get('ws');
+    const s = ws.services;
     const worker = s.workers.get(c.req.param('id'));
     const runs = safe(() => s.runs.list({ agentId: worker.id, limit: 1 }));
     return c.json({
@@ -22,14 +24,18 @@ export function workerRoutes(): Hono<AppEnv> {
       ticket: worker.ticketId ? safe(() => s.tickets.get(worker.ticketId!)) : null,
       lastRun: runs?.items[0] ?? null,
       usage: safe(() => s.usage.series({ scope: `worker:${worker.id}`, window: '7d' })),
+      // Whether the human's next message right now would reach a running turn (VS-99), so a
+      // composer can say so before anyone types rather than guessing from the runtime's name.
+      input: safe(() => describeLiveInput(ws.ctx, worker)) ?? { midTurn: false },
     });
   });
 
   app.get('/:id/brief', (c) => c.text(c.get('ws').services.workers.brief(c.req.param('id'))));
 
   app.post('/:id/message', async (c) => {
-    const { body: text } = await body(c, z.object({ body: z.string().min(1) }));
-    return c.json(await c.get('ws').services.workers.message(c.get('actor'), c.req.param('id'), text), 202);
+    const { body: text, live } = await body(c, z.object({ body: z.string().min(1), live: z.boolean().optional() }));
+    const outcome = await c.get('ws').services.workers.message(c.get('actor'), c.req.param('id'), text, { live });
+    return c.json({ delivery: outcome.delivery, runId: outcome.runId, wakeId: outcome.wake?.id ?? null }, 202);
   });
 
   app.post('/:id/relaunch', async (c) => {

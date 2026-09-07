@@ -1,6 +1,8 @@
 /**
  * `conductor attach <agent>` — the universal terminal view of one agent (PLAN §14b.1): live transcript,
- * status bar, and an input line that posts a ticket comment (worker) or a thread message (conductor).
+ * status bar, and an input line that sends live to a worker (VS-99: the ticket comment is recorded
+ * either way, and the notice line says whether it reached the running turn or was queued for the
+ * next one) or a thread message (conductor).
  *
  * Keys (command mode): p pause/resume · o open ticket · r relaunch · c cancel run · q quit ·
  * i or Enter to type, Esc back to command mode.
@@ -17,6 +19,11 @@ import { useKeys, useStream, useTerminalSize } from '../hooks.js';
 import { setTerminalTitle } from '../terminal.js';
 
 interface WorkerDetail { agent?: Agent; ticket?: Record<string, unknown>; lastRun?: Run; usage?: Record<string, unknown> }
+
+/** The notice line for `POST /workers/:id/message`'s outcome (VS-99) — never invents "delivered". */
+export function deliveryNotice(outcome: { delivery?: 'mid_turn' | 'queued' } | null | undefined): string {
+  return outcome?.delivery === 'mid_turn' ? 'delivered to the running turn' : 'queued for the next turn';
+}
 
 export function Attach({ client, agentId }: { client: TuiClient; agentId: string }): React.ReactElement {
   const { exit } = useApp();
@@ -123,8 +130,15 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
       await act('sent', () => client.wpost(`/threads/${encodeURIComponent(threadId)}/messages`, { body: text }));
       return;
     }
-    await act('comment posted — the worker is woken', () => client.wpost(`/tickets/${encodeURIComponent(ticketId)}/comments`, { body: text }));
-  }, [act, client, detail, isConductor]);
+    const workerId = encodeURIComponent(String(detail?.agent?.id ?? agentId));
+    try {
+      const outcome = await client.wpost<{ delivery?: 'mid_turn' | 'queued' }>(`/workers/${workerId}/message`, { body: text, live: true });
+      setNotice(deliveryNotice(outcome));
+      setNonce((n) => n + 1);
+    } catch (cause) {
+      setNotice((cause as Error).message);
+    }
+  }, [client, detail, isConductor, agentId]);
 
   useKeys((key, meta) => {
     if (mode === 'insert') {
@@ -172,7 +186,7 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
           value={input}
           onChange={setInput}
           onSubmit={(text) => { void submit(text); }}
-          placeholder={isConductor ? 'message the conductor' : 'comment on the ticket (wakes the worker)'}
+          placeholder={isConductor ? 'message the conductor' : 'steer the worker — reaches its running turn or queues for the next'}
           history={history}
           focus
         />

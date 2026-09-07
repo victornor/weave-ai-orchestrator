@@ -1,13 +1,22 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 
-export interface SpawnOpts { cmd: string; args: string[]; cwd: string; env: Record<string, string>; stdin?: string | null; timeoutMs: number; onLine(stream: 'stdout' | 'stderr', line: string): void; onSpawn?(pid: number): void }
+export interface SpawnOpts {
+  cmd: string; args: string[]; cwd: string; env: Record<string, string>; stdin?: string | null; timeoutMs: number;
+  onLine(stream: 'stdout' | 'stderr', line: string): void; onSpawn?(pid: number): void;
+  /**
+   * `'close'` (default): write `stdin` if given, then end the stream — today's behavior. `'open'`:
+   * write `stdin` if given but leave the stream writable for the process's lifetime, for a CLI whose
+   * protocol requires a readable stdin to keep running. Ended on process close and on `cancel`.
+   */
+  stdinMode?: 'close' | 'open';
+}
 export interface SpawnOutcome { exitCode: number | null; signal: string | null; timedOut: boolean; stdout: string; stderr: string }
 
 /** Spawn a CLI in its own process group, stream lines, kill the whole group on timeout/cancel. */
-export function spawnLines(opts: SpawnOpts): { done: Promise<SpawnOutcome>; cancel(mode: 'interrupt' | 'kill'): Promise<void>; child: ChildProcess } {
+export function spawnLines(opts: SpawnOpts): { done: Promise<SpawnOutcome>; cancel(mode: 'interrupt' | 'kill'): Promise<void>; write(line: string): boolean; endStdin(): void; child: ChildProcess } {
   const child = spawn(opts.cmd, opts.args, { cwd: opts.cwd, env: opts.env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
   if (child.pid && opts.onSpawn) opts.onSpawn(child.pid);
-  let timedOut = false; let stdout = ''; let stderr = '';
+  let timedOut = false; let stdout = ''; let stderr = ''; let stdinEnded = false;
   const buf: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
   const feed = (s: 'stdout' | 'stderr', chunk: Buffer) => {
     const text = chunk.toString('utf8'); if (s === 'stdout') stdout += text; else stderr += text;
@@ -16,21 +25,33 @@ export function spawnLines(opts: SpawnOpts): { done: Promise<SpawnOutcome>; canc
   };
   child.stdout!.on('data', (c: Buffer) => feed('stdout', c));
   child.stderr!.on('data', (c: Buffer) => feed('stderr', c));
-  // A CLI that exits before reading stdin makes this write EPIPE; the outcome is already carried by
-  // the exit code, so swallow it rather than letting it surface as an unhandled stream error.
-  child.stdin!.on('error', () => { /* the child closed stdin first */ });
-  if (opts.stdin != null) { child.stdin!.end(opts.stdin); } else { child.stdin!.end(); }
+  // A CLI that exits before reading stdin makes a write EPIPE; the outcome is already carried by the
+  // exit code, so swallow it rather than letting it surface as an unhandled stream error.
+  child.stdin!.on('error', () => { stdinEnded = true; });
+  const endStdin = () => { if (stdinEnded) return; stdinEnded = true; try { child.stdin!.end(); } catch { /* already gone */ } };
+  // A `false` return from `stream.write` means backpressure, not failure — the data is still
+  // queued and will be delivered. Report success on the write itself; only `stdinEnded` or a
+  // synchronous throw means the child cannot be reached.
+  const write = (line: string): boolean => {
+    if (stdinEnded || !child.stdin!.writable) return false;
+    try { child.stdin!.write(line); return true; } catch { stdinEnded = true; return false; }
+  };
+  if (opts.stdinMode === 'open') { if (opts.stdin != null) write(opts.stdin); } else if (opts.stdin != null) { stdinEnded = true; child.stdin!.end(opts.stdin); } else { stdinEnded = true; child.stdin!.end(); }
   const killGroup = (sig: NodeJS.Signals) => { try { if (child.pid) process.kill(-child.pid, sig); } catch { try { child.kill(sig); } catch { /* gone */ } } };
   const timer = setTimeout(() => { timedOut = true; killGroup('SIGINT'); setTimeout(() => killGroup('SIGKILL'), 15000).unref(); }, opts.timeoutMs);
   const done = new Promise<SpawnOutcome>((resolve) => {
     child.on('close', (code, signal) => {
       clearTimeout(timer);
+      endStdin();
       for (const s of ['stdout', 'stderr'] as const) if (buf[s].trim()) opts.onLine(s, buf[s]);
       resolve({ exitCode: code, signal, timedOut, stdout, stderr });
     });
     child.on('error', () => { clearTimeout(timer); resolve({ exitCode: -1, signal: null, timedOut, stdout, stderr: stderr + '\nspawn error' }); });
   });
-  return { done, child, cancel: async (mode) => { killGroup(mode === 'kill' ? 'SIGKILL' : 'SIGINT'); if (mode === 'interrupt') setTimeout(() => killGroup('SIGKILL'), 30000).unref(); } };
+  return {
+    done, child, write, endStdin,
+    cancel: async (mode) => { endStdin(); killGroup(mode === 'kill' ? 'SIGKILL' : 'SIGINT'); if (mode === 'interrupt') setTimeout(() => killGroup('SIGKILL'), 30000).unref(); },
+  };
 }
 
 export function classifyError(exitCode: number | null, stderr: string): { code: string; family: RunErrorFamily; message: string } | undefined {

@@ -129,6 +129,12 @@ export const WorkspaceDefaultsSchema = z.object({
   workerArchiveDays: z.number().int().default(30),
   runLogRetentionDays: z.number().int().default(30),
   permissionMode: z.enum(PERMISSION_MODES).default('auto'),
+  /**
+   * Whether a turn is spawned with its input channel open for the runtime's lifetime, when the
+   * runtime supports it (VS-99) — what lets a human's message reach a running turn mid-turn rather
+   * than only queuing for the next one. `false` returns every adapter to its pre-VS-99 spawn.
+   */
+  liveInput: z.boolean().default(true),
 });
 
 export const WorkspaceConfigSchema = z.object({

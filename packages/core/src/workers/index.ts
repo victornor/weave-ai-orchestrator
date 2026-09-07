@@ -2,12 +2,13 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 
 import { join } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
 import {
-  OcError, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type Wakeup,
+  OcError, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket,
 } from '@agent-conductor/shared';
 import type { WorktreeProvider } from '@agent-conductor/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
-import type { Actor, CoreServices, WorkersService } from '../api.js';
+import type { Actor, CoreServices, WorkerMessageOutcome, WorkersService } from '../api.js';
 import { recordActivity } from '../events.js';
+import { recordHumanInputEvent, runState } from '../runs/active.js';
 import { renderHome } from './home.js';
 import { renderBrief } from '../prompts/index.js';
 import { createSessions } from '../sessions/index.js';
@@ -225,13 +226,37 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       return spawn(actor, ticket.id, { noWorktree: true, spawnReason: 'knowledge curation' });
     },
 
-    async message(actor: Actor, workerId: string, body: string): Promise<Wakeup> {
+    async message(actor: Actor, workerId: string, body: string, opts: { live?: boolean } = {}): Promise<WorkerMessageOutcome> {
       const agent = get(workerId);
       if (!agent.ticketId) throw new OcError('validation', `${agent.name} has no ticket to talk on`);
+      // Attribution first (VS-99): the human's words are on the ticket before any delivery is
+      // attempted, so a failed or throwing send still leaves a durable record.
       deps().tickets.comment(actor, agent.ticketId, body, 'relay', actor.kind === 'human' ? 'trusted' : 'agent');
-      const wake = deps().wake.enqueue(workerId, { source: 'conductor_request', reason: body.slice(0, 160), payload: { ticketId: agent.ticketId, message: body }, requestedBy: actor });
-      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.message', 'agent', workerId, { length: body.length }, agent.ticketId);
-      return wake;
+
+      let delivery: 'mid_turn' | 'queued' = 'queued';
+      let runId: string | null = null;
+      if (opts.live) {
+        for (const active of runState(ctx).active.values()) {
+          if (active.agentId !== workerId || !active.send) continue;
+          runId = active.runId;
+          try { if ((await active.send(body)) === 'delivered') delivery = 'mid_turn'; }
+          catch { /* the runtime could not take it; falls through to queued */ }
+          break;
+        }
+      }
+      // Between turns (or no live attempt), attach the transcript entry to the most recent run —
+      // there is nothing else to attach it to until the next turn starts.
+      if (!runId) {
+        runId = ctx.db.get<{ id: string }>('SELECT id FROM runs WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1', [workerId])?.id ?? null;
+      }
+      if (runId) recordHumanInputEvent(ctx, runId, { text: body, authorKind: actor.kind, authorId: actor.id, delivery });
+
+      // A message the running turn already has must not also be queued — that would deliver it twice.
+      const wake = delivery === 'mid_turn'
+        ? null
+        : deps().wake.enqueue(workerId, { source: 'conductor_request', reason: body.slice(0, 160), payload: { ticketId: agent.ticketId, message: body }, requestedBy: actor });
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.message', 'agent', workerId, { length: body.length, delivery }, agent.ticketId);
+      return { delivery, runId, wake };
     },
 
     async relaunch(actor: Actor, workerId: string, note: string): Promise<Agent> {

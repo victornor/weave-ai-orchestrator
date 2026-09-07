@@ -26,6 +26,18 @@ describe('project policies: mergeConcurrency', () => {
   });
 });
 
+describe('liveInput default (VS-99)', () => {
+  it('defaults to true, so a workspace.yaml written before this change still parses live', () => {
+    expect(WorkspaceDefaultsSchema.parse({}).liveInput).toBe(true);
+    expect(WorkspaceDefaultsSchema.parse({ liveInput: false }).liveInput).toBe(false);
+  });
+
+  it('an existing full workspace config with no liveInput key still parses, defaulting to true', () => {
+    const cfg = WorkspaceConfigSchema.parse({ version: 1, id: 'acme', name: 'Acme', ticketPrefix: 'ACME' });
+    expect(cfg.defaults.liveInput).toBe(true);
+  });
+});
+
 describe('YOLO mode: the setting', () => {
   it('is off unless the workspace turns it on', () => {
     expect(WorkspaceDefaultsSchema.parse({}).yolo).toBe(false);

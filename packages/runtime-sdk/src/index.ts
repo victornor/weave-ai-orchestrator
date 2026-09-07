@@ -5,7 +5,9 @@ export type JsonSchema = Record<string, unknown>;
 export type SessionRef = Record<string, unknown>;
 
 export interface RuntimeCapabilities {
-  resumableSessions: boolean; forkSessions: boolean; streamingInput: boolean;
+  resumableSessions: boolean; forkSessions: boolean;
+  /** True only when this adapter's `TurnHandle` carries `send` — a client reading this can call it. */
+  streamingInput: boolean;
   systemPromptInjection: 'system_prompt' | 'append' | 'file_only' | 'none';
   structuredOutput: boolean; mcp: boolean; usageReporting: 'per_turn' | 'session_cumulative' | 'none'; costReporting: boolean; permissionModes: string[];
   /**
@@ -47,7 +49,14 @@ export interface TurnResult {
   cost?: { usd: number; status: 'reported' | 'estimated' }; model?: string; provider?: string;
   error?: { code: string; family: RunErrorFamily; message: string; retryAfterMs?: number };
 }
-export interface TurnHandle { pid: number | null; cancel(mode: 'interrupt' | 'kill'): Promise<void> }
+/** What became of an attempt to deliver text to a turn already executing. */
+export type InputDelivery = 'delivered' | 'closed' | 'unsupported';
+export interface TurnHandle {
+  pid: number | null;
+  cancel(mode: 'interrupt' | 'kill'): Promise<void>;
+  /** Deliver text to this turn while it runs. Omitted by an adapter whose turn cannot take live input. */
+  send?(text: string): Promise<InputDelivery>;
+}
 export interface AgentHome { path: string; kind: 'conductor' | 'worker' }
 
 /** Input to `describeAccount`: the workspace's per-runtime credential home, the env the CLI would run under, and how long the probe may take. */

@@ -68,6 +68,7 @@ function workerDetail(v: unknown): T.WorkerDetail {
     lastRun: (r['lastRun'] as Run | null | undefined) ?? null,
     usage: usage ? totals(usage['total'] ?? usage) : null,
     worktree: (r['worktree'] as T.WorkerDetail['worktree'] | undefined) ?? (agent.worktreePath ? { status: 'unknown', dirty: false, ahead: 0, behind: 0, path: agent.worktreePath } : null),
+    input: (r['input'] as T.WorkerDetail['input'] | undefined) ?? { midTurn: false },
   };
 }
 
@@ -361,6 +362,19 @@ export function useWorkerAction(): UseMutationResult<unknown, Error, { id: strin
     onSuccess: (_d, v) => {
       void qc.invalidateQueries({ queryKey: qk.worker(ws, v.id) });
       void qc.invalidateQueries({ queryKey: qk.workers(ws) });
+    },
+  });
+}
+
+/** Steer a worker (VS-99): posts the ticket comment server-side and attempts mid-turn delivery when `live`. */
+export function useWorkerMessage(): UseMutationResult<T.WorkerMessageOutcome, Error, { id: string; ticketId: string; body: string; live?: boolean }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body, live }) => api.ws<T.WorkerMessageOutcome>(ws, `/workers/${id}/message`, { method: 'POST', body: { body, live } }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: qk.worker(ws, v.id) });
+      void qc.invalidateQueries({ queryKey: qk.ticketComments(ws, v.ticketId) });
     },
   });
 }

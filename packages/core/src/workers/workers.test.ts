@@ -10,6 +10,7 @@ import { createWorkersService, ticketBranch, branchSlug } from './index.js';
 import { createRolesService } from '../roles/index.js';
 import { GitWorktreeProvider } from '../worktrees/git.js';
 import { git } from '../util/git.js';
+import { runState } from '../runs/active.js';
 import type { Actor, WorkersService } from '../api.js';
 
 const SYSTEM: Actor = { kind: 'system', id: null };
@@ -262,9 +263,128 @@ describe('workers', () => {
     const ticket = seedTicket();
     const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
     wake.calls.length = 0;
-    await workers.message({ kind: 'agent', id: 'conductor' }, worker.id, 'use CSS variables');
+    const outcome = await workers.message({ kind: 'agent', id: 'conductor' }, worker.id, 'use CSS variables');
     expect(h.services.tickets!.comment).toHaveBeenCalledWith(expect.anything(), ticket.id, 'use CSS variables', 'relay', 'agent');
     expect(wake.calls[0]!.input).toMatchObject({ source: 'conductor_request' });
+    // The conductor's own relay never asks for `live`, so it keeps today's one queued path.
+    expect(outcome).toMatchObject({ delivery: 'queued' });
+  });
+
+  describe('message: mid-turn vs queued delivery (VS-99)', () => {
+    function seedRun(worker: Agent, status = 'running'): string {
+      const runId = newId();
+      h.db.insert('runs', {
+        id: runId, workspaceId: h.workspaceId, agentId: worker.id, wakeupIdsJson: [], runtimeId: 'fake',
+        status, turnEpoch: 1, cwd: worker.homePath, createdAt: nowIso(),
+      });
+      return runId;
+    }
+
+    it('delivers mid-turn when `live` is asked for and the active run accepts the frame, and never also queues', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      const sent: string[] = [];
+      runState(h.ctx).active.set(runId, {
+        runId, agentId: worker.id, startedAt: Date.now(), pid: 1,
+        cancel: async () => undefined,
+        send: async (text: string) => { sent.push(text); return 'delivered'; },
+      });
+
+      const outcome = await workers.message(HUMAN, worker.id, 'check the failing test', { live: true });
+      expect(outcome).toEqual({ delivery: 'mid_turn', runId, wake: null });
+      expect(sent).toEqual(['check the failing test']);
+      expect(wake.calls).toHaveLength(0); // never both delivered and queued
+
+      const events = h.db.all<{ type: string; payload: Record<string, unknown> }>('SELECT type, payload_json FROM run_events WHERE run_id = ?', [runId]);
+      expect(events).toHaveLength(1);
+      expect(events[0]!.type).toBe('human.input');
+      expect(events[0]!.payload).toMatchObject({ text: 'check the failing test', authorKind: 'human', authorId: 'victor', delivery: 'mid_turn' });
+    });
+
+    it('queues when `live` is not asked for, even though the runtime could take it mid-turn', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      runState(h.ctx).active.set(runId, {
+        runId, agentId: worker.id, startedAt: Date.now(), pid: 1,
+        cancel: async () => undefined, send: async () => 'delivered',
+      });
+
+      const outcome = await workers.message(HUMAN, worker.id, 'later is fine');
+      expect(outcome.delivery).toBe('queued');
+      expect(outcome.wake).not.toBeNull();
+      expect(wake.calls).toHaveLength(1);
+    });
+
+    it('queues when the active run has no `send` — the runtime cannot take mid-turn input', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      runState(h.ctx).active.set(runId, { runId, agentId: worker.id, startedAt: Date.now(), pid: 1, cancel: async () => undefined });
+
+      const outcome = await workers.message(HUMAN, worker.id, 'queue me', { live: true });
+      expect(outcome.delivery).toBe('queued');
+      expect(outcome.wake).not.toBeNull();
+      expect(wake.calls).toHaveLength(1);
+    });
+
+    it("queues when `send` reports the channel is closed — the turn's result already arrived", async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      runState(h.ctx).active.set(runId, {
+        runId, agentId: worker.id, startedAt: Date.now(), pid: 1,
+        cancel: async () => undefined, send: async () => 'closed',
+      });
+
+      const outcome = await workers.message(HUMAN, worker.id, 'too late', { live: true });
+      expect(outcome.delivery).toBe('queued');
+      expect(wake.calls).toHaveLength(1);
+    });
+
+    it('the ticket comment is recorded even when `send` throws', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      runState(h.ctx).active.set(runId, {
+        runId, agentId: worker.id, startedAt: Date.now(), pid: 1,
+        cancel: async () => undefined, send: async () => { throw new Error('pipe is gone'); },
+      });
+
+      const outcome = await workers.message(HUMAN, worker.id, 'are you still there', { live: true });
+      expect(outcome.delivery).toBe('queued');
+      expect(h.services.tickets!.comment).toHaveBeenCalledWith(expect.anything(), ticket.id, 'are you still there', 'relay', 'trusted');
+      expect(wake.calls).toHaveLength(1);
+    });
+
+    it('a mid-turn message leaves an open decision open and touches no permission or tool config', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      runState(h.ctx).active.set(runId, {
+        runId, agentId: worker.id, startedAt: Date.now(), pid: 1,
+        cancel: async () => undefined, send: async () => 'delivered',
+      });
+      const decisionId = newId();
+      h.db.insert('decisions', {
+        id: decisionId, workspaceId: h.workspaceId, ticketId: ticket.id, kind: 'question', owner: 'human',
+        title: 'Which approach?', context: '', status: 'open', createdAt: nowIso(),
+      });
+      const roleBefore = h.db.get<{ permissionJson: string }>('SELECT permission_json FROM roles WHERE id = ?', [h.roleId]);
+
+      await workers.message(HUMAN, worker.id, 'go with option A', { live: true });
+
+      expect(h.db.get<{ status: string }>('SELECT status FROM decisions WHERE id = ?', [decisionId])!.status).toBe('open');
+      const roleAfter = h.db.get<{ permissionJson: string }>('SELECT permission_json FROM roles WHERE id = ?', [h.roleId]);
+      expect(roleAfter).toEqual(roleBefore);
+    });
   });
 
   it('cancel keeps the worktree and marks it dirty', async () => {

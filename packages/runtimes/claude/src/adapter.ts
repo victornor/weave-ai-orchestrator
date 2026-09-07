@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import type {
-  AccountDescription, AccountProbeInput, AgentHome, CredentialFacts, CredentialProbeInput, InstructionBundle,
+  AccountDescription, AccountProbeInput, AgentHome, CredentialFacts, CredentialProbeInput, InputDelivery, InstructionBundle,
   JsonSchema, RuntimeAdapter, RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle,
   TurnInput, TurnResult, TurnSink,
 } from '@agent-conductor/runtime-sdk';
@@ -9,7 +9,7 @@ import { classifyError, detectBinary, installBundleFiles, launchCommand, runTmpD
 import { extractReport } from '@agent-conductor/shared';
 import { probeAccount } from './account.js';
 import { readCredential } from './credential.js';
-import { buildArgs, RESTRICTED_TOOLS } from './args.js';
+import { buildArgs, RESTRICTED_TOOLS, userFrame } from './args.js';
 import { createClaudeParser } from './events.js';
 import { asClaudeSession, type ClaudeSessionRef } from './session.js';
 
@@ -133,14 +133,31 @@ export const adapter: RuntimeAdapter = {
       cwd: input.cwd,
       env: launch.env,
       stdin: built.stdin,
+      stdinMode: built.liveInput ? 'open' : 'close',
       timeoutMs: input.limits.timeoutMs,
       onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
       onLine: (stream, line) => {
         sink.onRaw(stream, line);
-        if (stream === 'stdout') emit(line);
+        if (stream === 'stdout') {
+          emit(line);
+          // The CLI keeps the session alive for as long as stdin is readable (VS-99); ending it the
+          // moment the turn's own result line arrives is what lets the process exit on schedule.
+          if (built.liveInput && parser.state.resultSeen) run.endStdin();
+        }
       },
     });
-    onHandle?.({ pid: run.child.pid ?? null, cancel: (mode) => run.cancel(mode) });
+    onHandle?.({
+      pid: run.child.pid ?? null,
+      cancel: (mode) => run.cancel(mode),
+      ...(built.liveInput
+        ? {
+          send: async (text: string): Promise<InputDelivery> => {
+            if (parser.state.resultSeen) return 'closed';
+            return run.write(userFrame(text)) ? 'delivered' : 'closed';
+          },
+        }
+        : {}),
+    });
 
     const outcome = await run.done;
     try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }

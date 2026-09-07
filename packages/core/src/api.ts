@@ -142,6 +142,8 @@ export interface RolesService {
 }
 /** What actually caps a role's workers: its own limit, its project's, and how much of it is in use. */
 export interface RoleConcurrency { roleMax: number; projectMax: number; effective: number; live: number; projectLive: number; free: number }
+/** What happened to a message sent to a worker (VS-99): which delivery occurred, never both, never neither. */
+export interface WorkerMessageOutcome { delivery: 'mid_turn' | 'queued'; runId: string | null; wake: S.Wakeup | null }
 export interface WorkersService {
   list(filter?: { status?: S.AgentStatus[]; projectId?: string; roleId?: string; includeRetired?: boolean }): S.Agent[];
   get(id: string): S.Agent;
@@ -149,7 +151,13 @@ export interface WorkersService {
   ensureConductor(): Promise<S.Agent>;
   spawnForTicket(actor: Actor, ticketId: string): Promise<S.Agent>;       // brief, home, worktree, session placeholder, first wake
   spawnCurator(actor: Actor, projectId: string): Promise<S.Agent>;
-  message(actor: Actor, workerId: string, body: string): Promise<S.Wakeup>;  // comment + conductor_request wake
+  /**
+   * Steer a worker: records the human's words as a ticket comment first, always. When `live` is
+   * asked for and the worker's runtime can take mid-turn input, attempts delivery to its executing
+   * turn; otherwise (and whenever delivery fails) the message is queued as a `conductor_request`
+   * wake, exactly as before VS-99. Never both, never neither.
+   */
+  message(actor: Actor, workerId: string, body: string, opts?: { live?: boolean }): Promise<WorkerMessageOutcome>;
   relaunch(actor: Actor, workerId: string, note: string): Promise<S.Agent>;
   cancel(actor: Actor, workerId: string, reason: string): Promise<S.Agent>;
   pause(actor: Actor, id: string, reason: string): S.Agent; resume(actor: Actor, id: string): S.Agent;

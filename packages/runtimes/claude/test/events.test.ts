@@ -7,6 +7,10 @@ import { createClaudeParser } from '../src/events.js';
 // Fixtures: recorded live from claude 2.1.258 on 2026-09-03 (`claude -p --output-format
 // stream-json --verbose --safe-mode ...`). Thinking blocks and the machine-specific tool /
 // command lists in `system:init` were redacted; the event shapes are untouched.
+//
+// `turn-replayed-input` is the exception: constructed, not recorded — the credential rule (VS-99)
+// forbids launching the CLI to record a `--replay-user-messages` turn. Its `user` frames follow the
+// wire shape the installed binary's own help text and log strings document (see design.md).
 function fixture(name: string): string[] {
   const path = fileURLToPath(new URL(`../fixtures/${name}.jsonl`, import.meta.url));
   return readFileSync(path, 'utf8').split('\n').filter((l) => l.trim().length > 0);
@@ -97,6 +101,15 @@ describe('claude stream-json parser', () => {
     expect(evs.map((e) => e.type)).toEqual(['error', 'turn.completed']);
     expect(p.state.isError).toBe(true);
     expect(p.state.errorMessage).toBe('boom');
+  });
+
+  it('a replayed user frame (--replay-user-messages echo) produces no spurious event and marks resultSeen', () => {
+    const { types, state } = run('turn-replayed-input');
+    // Neither the initial-prompt echo nor the mid-turn send() echo appears as an event of any kind.
+    expect(types.filter((t) => t === 'runtime.raw' || t === 'tool.result')).toEqual([]);
+    expect(types).toEqual(['session.started', 'assistant.text', 'usage.delta', 'turn.completed']);
+    expect(state.finalText).toBe('pong');
+    expect(state.resultSeen).toBe(true);
   });
 
   it('emits file.changed for edit tools', () => {

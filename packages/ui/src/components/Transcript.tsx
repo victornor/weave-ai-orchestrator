@@ -84,6 +84,15 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
     );
   }
 
+  if (block.type === 'human') {
+    return (
+      <div className="flex items-center gap-2.5 rounded-r4 border border-line-1 bg-bg-2 px-2.5 py-1.5">
+        <span className="ac-mono text-micro text-text-2">→ you: {block.text}</span>
+        <span className="ac-mono text-nano text-text-4">{block.delivery === 'mid_turn' ? 'mid-turn' : 'queued'}</span>
+      </div>
+    );
+  }
+
   if (block.type === 'command') {
     return (
       <div className="overflow-hidden rounded-r4 border border-line-1">

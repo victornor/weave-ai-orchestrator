@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnInput } from '@agent-conductor/runtime-sdk';
-import { buildArgs, MAX_ARGV_PROMPT, RESTRICTED_TOOLS } from '../src/args.js';
+import { buildArgs, MAX_ARGV_PROMPT, RESTRICTED_TOOLS, userFrame } from '../src/args.js';
 
 const NEW_ID = '11111111-2222-4333-8444-555555555555';
 
@@ -16,17 +16,30 @@ function input(over: Partial<TurnInput> = {}): TurnInput {
 }
 const pairs = (a: string[]) => a.join(' ');
 
-describe('claude buildArgs', () => {
-  it('builds the headless stream-json invocation with a fresh session id', () => {
+describe('claude buildArgs — live input (default)', () => {
+  it('builds the stream-json-in / stream-json-out invocation with a fresh session id', () => {
     const b = buildArgs(input(), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
     expect(b.cmd).toBe('claude');
-    expect(pairs(b.args)).toContain('-p --output-format stream-json --verbose --input-format text');
+    expect(pairs(b.args)).toContain('-p --output-format stream-json --verbose --input-format stream-json --replay-user-messages');
     expect(pairs(b.args)).toContain(`--session-id ${NEW_ID}`);
     expect(b.args).not.toContain('--resume');
     expect(b.sessionId).toBe(NEW_ID);
     expect(b.resumed).toBe(false);
-    expect(b.args[6]).toBe('do the thing'); // operand sits before any variadic flag
-    expect(b.stdin).toBeNull();
+    expect(b.liveInput).toBe(true);
+  });
+
+  it('carries the prompt as the first user frame on stdin, never as an argv operand', () => {
+    const b = buildArgs(input({ prompt: 'do the thing' }), { newSessionId: NEW_ID });
+    expect(b.args).not.toContain('do the thing');
+    expect(b.stdin).toBe(userFrame('do the thing'));
+    expect(JSON.parse(b.stdin!.trimEnd())).toEqual({ type: 'user', message: { role: 'user', content: 'do the thing' } });
+  });
+
+  it('puts the whole prompt on stdin regardless of length — there is no argv to overflow', () => {
+    const big = 'x'.repeat(MAX_ARGV_PROMPT + 1);
+    const b = buildArgs(input({ prompt: big }), { newSessionId: NEW_ID });
+    expect(b.args).not.toContain(big);
+    expect(JSON.parse(b.stdin!.trimEnd())).toEqual({ type: 'user', message: { role: 'user', content: big } });
   });
 
   it('resumes a stored session and never re-issues --session-id', () => {
@@ -110,15 +123,26 @@ describe('claude buildArgs', () => {
     expect(pairs(outside.args)).toContain('--add-dir /srv/wt/acme-42');
     expect(outside.env).toEqual({ AC_RUN_ID: 'run-1', CLAUDE_CONFIG_DIR: '/ws/.agent-conductor/runtimes/claude' });
   });
+});
+
+describe('claude buildArgs — liveInput: false (legacy, argv/text-stdin prompt)', () => {
+  it('reverts to --input-format text with no --replay-user-messages', () => {
+    const b = buildArgs(input({ options: { liveInput: false } }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
+    expect(pairs(b.args)).toContain('-p --output-format stream-json --verbose --input-format text');
+    expect(pairs(b.args)).not.toContain('--replay-user-messages');
+    expect(b.liveInput).toBe(false);
+    expect(b.args[6]).toBe('do the thing'); // operand sits before any variadic flag
+    expect(b.stdin).toBeNull();
+  });
 
   it('keeps the prompt ahead of variadic tool flags', () => {
-    const b = buildArgs(input({ permission: { mode: 'auto', deniedTools: ['WebFetch'] } }), { newSessionId: NEW_ID });
+    const b = buildArgs(input({ permission: { mode: 'auto', deniedTools: ['WebFetch'] }, options: { liveInput: false } }), { newSessionId: NEW_ID });
     expect(b.args.indexOf('do the thing')).toBeLessThan(b.args.indexOf('--disallowedTools'));
   });
 
-  it('moves an oversized prompt to stdin', () => {
+  it('moves an oversized prompt to stdin as plain text', () => {
     const big = 'x'.repeat(MAX_ARGV_PROMPT + 1);
-    const b = buildArgs(input({ prompt: big }), { newSessionId: NEW_ID });
+    const b = buildArgs(input({ prompt: big, options: { liveInput: false } }), { newSessionId: NEW_ID });
     expect(b.stdin).toBe(big);
     expect(b.args).not.toContain(big);
   });

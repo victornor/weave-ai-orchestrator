@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent, RunEventType } from '@agent-conductor/shared';
 import { chatTranscript, runEventsToTranscript } from './transcript.js';
-import type { FileBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock } from './types.js';
+import type { FileBlock, HumanInputBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock } from './types.js';
 
 let seq = 0;
 function ev(type: RunEventType, payload: Record<string, unknown>, ts = '2026-09-04T12:00:00.000Z'): RunEvent {
@@ -223,6 +223,26 @@ describe('runEventsToTranscript', () => {
     expect((blocks[0] as StatusBlock).text).toBe('run started · claude · claude-fable-5-1');
     expect((blocks[1] as StatusBlock).text).toBe('turn 3 started');
     expect((blocks[3] as StatusBlock).tone).toBe('error');
+  });
+
+  it('renders a human message as its own attributed block, carrying its delivery (VS-99)', () => {
+    reset();
+    const blocks = runEventsToTranscript([
+      ev('human.input', { text: 'check the failing test', authorKind: 'human', authorId: 'victor', delivery: 'mid_turn' }),
+      ev('human.input', { text: 'later is fine', authorKind: 'human', authorId: 'victor', delivery: 'queued' }),
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(['human_input', 'human_input']);
+    const mid = blocks[0] as HumanInputBlock;
+    expect(mid).toMatchObject({ text: 'check the failing test', authorKind: 'human', delivery: 'mid_turn' });
+    const queued = blocks[1] as HumanInputBlock;
+    expect(queued.delivery).toBe('queued');
+  });
+
+  it('redacts a secret in a human message like anything else on the wire', () => {
+    reset();
+    const blocks = runEventsToTranscript([ev('human.input', { text: 'use sk-live-abcdef1234567890abcdef', authorKind: 'human', authorId: 'victor', delivery: 'queued' })]);
+    const block = blocks[0] as HumanInputBlock;
+    expect(block.text).not.toContain('sk-live-abcdef1234567890abcdef');
   });
 });
 

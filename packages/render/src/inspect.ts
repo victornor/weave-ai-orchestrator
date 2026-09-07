@@ -7,7 +7,7 @@
  * agent inspecting a run sees the same transcript the run page and `conductor attach` show.
  */
 import { oneLine } from './format.js';
-import type { ErrorBlock, FileBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock, TranscriptBlock, TranscriptBlockKind } from './types.js';
+import type { ErrorBlock, FileBlock, HumanInputBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock, TranscriptBlock, TranscriptBlockKind } from './types.js';
 
 /** One transcript block, rendered. `seq` locates it in the run, so a caller can resume from it. */
 export interface InspectionLine {
@@ -67,6 +67,11 @@ function lineFor(block: TranscriptBlock, textChars: number, detailChars: number)
     case 'error': {
       const e = block as ErrorBlock;
       return e.code ? `[${e.code}] ${e.message}` : e.message;
+    }
+
+    case 'human_input': {
+      const h = block as HumanInputBlock;
+      return `${h.authorKind}: ${clamp(h.text, textChars)} (${h.delivery === 'mid_turn' ? 'mid-turn' : 'queued'})`;
     }
   }
 }

@@ -73,7 +73,7 @@ The digest is evidence, not a to-do list. Act on what changed:
 
 **The unblock ladder**, in order — do not skip to the last rung:
 1. Can you answer it? The blocker names an action and you own that decision → `ac_decision_answer` or `ac_worker_message` with the answer.
-2. Can you steer it? The worker is going the wrong way or missed context → `ac_worker_message` with the correction. It is a comment on the ticket plus a wake; the worker acts or reports.
+2. Can you steer it? The worker is going the wrong way or missed context → `ac_worker_message` with the correction. It is a comment on the ticket, attributed as yours, and by default tries to reach the worker's running turn before falling back to a wake at its next one — the call returns `mid_turn` or `queued`, so you know which happened rather than assuming; `queued` means the worker acts on it starting next turn, not now.
 3. Does it need another project? Create the courier ticket there, link it as a blocker, tell the worker. Workers never coordinate with each other.
 4. Is it genuinely the human's? Escalate — one decision, in full.
 

@@ -72,6 +72,11 @@ attempts are spent, because the failure is not retryable, or because the runtime
 limit, which is never retried automatically — the system SHALL stop and SHALL raise a decision owned
 by the human, attached to the worker's ticket, naming the worker and what it failed on.
 
+A failure to authenticate SHALL be the one exception: it is not a fact about this worker but about
+the credential the whole runtime shares, so the system SHALL NOT park the worker for the human and
+SHALL NOT raise this per-worker decision for it. Such a failure SHALL stop the runtime and be
+handled once for the runtime instead.
+
 The decision SHALL name the family of the failure and the runtime's own message. When the runtime
 reported when the limit resets, the decision SHALL say so.
 
@@ -120,3 +125,9 @@ how many automatic attempts there are, how long they wait, or which failures are
 - **WHEN** a worker that already has an open parking decision fails again
 - **THEN** the earlier decision is superseded and the human is left with exactly one open card for
   that worker
+
+#### Scenario: An authentication failure does not park the worker
+
+- **WHEN** a worker's turn fails because the runtime could not authenticate
+- **THEN** no per-worker decision is raised for it and the worker's ticket is not blocked for it
+- **AND** the runtime is stopped and one decision is raised for the runtime instead

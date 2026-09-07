@@ -59,7 +59,7 @@ export function CommandPalette({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center p-4 pt-[12vh]" role="presentation">
+    <div className="ac-viewport fixed z-[70] flex items-start justify-center p-4 pt-[calc(var(--ac-app-h)*0.12)]" role="presentation">
       <div className="absolute inset-0 bg-(--overlay)" onClick={onClose} aria-hidden />
       <div
         role="dialog"

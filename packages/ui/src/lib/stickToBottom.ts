@@ -168,6 +168,33 @@ export function useStickToBottom(
     scrollToBottom(opening);
   });
 
+  // Geometry, not content. The keyboard opening takes half the list's height away, a decision card
+  // pinning below it takes more, a web font or an image landing changes what the same messages are
+  // worth — and none of those are a change to `signal`, so the effect above never runs and a list
+  // that was showing its newest message quietly stops. Re-pinning is a correction rather than
+  // something to watch arrive, so it is instant even mid-follow, and it waits for the opening jump:
+  // before that the list has no position for this to be restoring.
+  useEffect(() => {
+    if (!el || !follow) return;
+    const pin = (): void => {
+      if (!opened.current || !following.current) return;
+      scrollToBottom(true);
+    };
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(pin);
+    ro?.observe(el);
+    // The scrolled content, whose height is what actually changes when the list itself has not.
+    const content = el.firstElementChild;
+    if (content) ro?.observe(content);
+    // The visual viewport, which the keyboard shrinks without resizing a single element.
+    window.visualViewport?.addEventListener('resize', pin);
+    window.addEventListener('resize', pin);
+    return () => {
+      ro?.disconnect();
+      window.visualViewport?.removeEventListener('resize', pin);
+      window.removeEventListener('resize', pin);
+    };
+  }, [el, follow, scrollToBottom]);
+
   const toBottom = useCallback(() => {
     following.current = true;
     setAtBottom(true);

@@ -147,6 +147,15 @@
   --rail-width: 13rem; /* 208px desktop rail */
   --banner-height: 1.5rem; /* 24px connection banner */
 
+  /* The region the browser is showing, published by `lib/viewport.ts` when the on-screen keyboard
+     has shrunk the visual viewport without shrinking the layout one. These defaults are what every
+     browser that has no keyboard open reads, so nothing in the layout is written in `vh` or `dvh`
+     directly: sizing against `--ac-app-h` is the same thing, and it also shrinks for the keyboard. */
+  --ac-app-h: 100dvh;
+  --ac-app-top: 0px;
+  --ac-app-bottom: 0px;
+  --ac-safe-bottom: env(safe-area-inset-bottom, 0px);
+
   /* QR codes must stay black-on-white in both themes to scan. */
   --qr-bg: #ffffff;
   --qr-fg: #000000;
@@ -155,6 +164,12 @@
   --dur-panel: 120ms;
   --dur-max: 150ms;
   --ease: cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* The home indicator sits under the keyboard while it is open, so the gap the bar holds for it is
+   dead space above the keys rather than clearance from anything. */
+:root[data-keyboard='open'] {
+  --ac-safe-bottom: 0px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -345,17 +360,37 @@
     white-space: nowrap;
   }
   .ac-safe-bottom {
-    padding-bottom: env(safe-area-inset-bottom, 0);
+    padding-bottom: var(--ac-safe-bottom);
+  }
+  /* The app fills the region the browser is showing, not the page: `--ac-app-h` is `100dvh` until a
+     keyboard makes the two differ. Fixed rather than in flow so that region is all there is —
+     nothing can scroll the shell itself out from under the keyboard. */
+  .ac-app {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: var(--ac-app-top);
+    height: var(--ac-app-h);
+  }
+  /* For a `position: fixed` element that would otherwise anchor to the layout viewport — the tab bar,
+     an overlay — and so end up behind the keyboard. Replaces `inset-0`. */
+  .ac-viewport {
+    left: 0;
+    right: 0;
+    top: var(--ac-app-top);
+    bottom: var(--ac-app-bottom);
   }
   /* The phone bottom bar keeps its 78px of chrome and grows by the safe-area
      inset, so the tab row never slides under the home indicator; `ac-bar-pad`
-     holds the matching gap open in the content above it. */
+     holds the matching gap open in the content above it. It sits on top of the
+     keyboard rather than behind it, so it is offset by whatever that covers. */
   .ac-bar {
-    height: calc(var(--bar-height) + env(safe-area-inset-bottom, 0px));
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    bottom: var(--ac-app-bottom);
+    height: calc(var(--bar-height) + var(--ac-safe-bottom));
+    padding-bottom: var(--ac-safe-bottom);
   }
   .ac-bar-pad {
-    padding-bottom: calc(var(--bar-height) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(var(--bar-height) + var(--ac-safe-bottom));
   }
   .ac-prose {
     font-size: var(--fs-body);

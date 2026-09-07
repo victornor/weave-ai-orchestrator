@@ -37,7 +37,7 @@ export function RunTranscript({
         role="log"
         aria-label={label}
         aria-live={live ? 'polite' : 'off'}
-        className={cx('ac-scroll max-h-[50svh] md:max-h-[60svh]', className)}
+        className={cx('ac-scroll max-h-[calc(var(--ac-app-h)*0.5)] md:max-h-[calc(var(--ac-app-h)*0.6)]', className)}
       >
         <Transcript events={events} className="gap-2" />
         <div ref={stick.bottomRef} />

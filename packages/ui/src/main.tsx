@@ -5,7 +5,12 @@ import { RouterProvider } from '@tanstack/react-router';
 import { router } from './router';
 import { ToastProvider } from './components/Toast';
 import { ApiError, NetworkError } from './api/client';
+import { watchViewport } from './lib/viewport';
 import './index.css';
+
+// Chrome and the app layout below it: the region the browser is showing, published as custom
+// properties before the first render so nothing is ever laid out against a stale height.
+watchViewport();
 
 const queryClient = new QueryClient({
   defaultOptions: {

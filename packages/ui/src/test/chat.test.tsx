@@ -6,6 +6,8 @@ import { enqueue } from '../lib/queue';
 import { clearChatScroll, readChatScroll, writeChatScroll } from '../lib/chatScroll';
 import { clearHiddenCache } from '../lib/hiddenDecisions';
 import { writeShowSilentTurns } from '../lib/chatPrefs';
+import { resizeObserved } from './resizeObserver';
+import { installVisualViewport, removeVisualViewport } from './visualViewport';
 
 const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>() }));
 const state = vi.hoisted(() => ({
@@ -1019,6 +1021,99 @@ describe('ChatRoute follow the bottom', () => {
     state.messages = [message({ id: 'm1', body: 'Filed it.' })];
     rerender(<ChatRoute />);
     expect(scrolls()).toBe(before + 1);
+  });
+});
+
+describe('ChatRoute on a phone with the keyboard open', () => {
+  const HEIGHT = 1000;
+  const OPEN = 300;
+  /** What is left of the list once the keyboard has taken the bottom half of the screen. */
+  const SHRUNK = 120;
+
+  // jsdom performs no layout, so the two things a keyboard does — the list getting shorter without
+  // its content changing, and the visual viewport shrinking without any element changing at all —
+  // both have to be staged. Neither of them is a change to what the follow watches, which is the
+  // whole point: only a geometry listener can notice them.
+  function scrollable(el: HTMLElement): { to: (top: number) => void; shrink: () => void } {
+    let top = 0;
+    let client = OPEN;
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => HEIGHT });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => client });
+    Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = v; } });
+    return {
+      to: (v: number) => { top = v; fireEvent.scroll(el); },
+      shrink: () => { client = SHRUNK; act(() => resizeObserved()); },
+    };
+  }
+
+  const list = (c: HTMLElement): HTMLElement => c.querySelector('.ac-scroll') as HTMLElement;
+  const scrolls = (): number =>
+    (window.HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+  const button = (): HTMLElement | null => screen.queryByRole('button', { name: /^Scroll to bottom/ });
+
+  let viewport: ReturnType<typeof installVisualViewport>;
+  beforeEach(() => { viewport = installVisualViewport(800); });
+  afterEach(removeVisualViewport);
+
+  it('follows the newest message when the keyboard takes half the list away', () => {
+    const { container } = render(<ChatRoute />);
+    const { to, shrink } = scrollable(list(container));
+    to(HEIGHT - OPEN);
+
+    const before = scrolls();
+    shrink();
+
+    expect(scrolls()).toBe(before + 1);
+  });
+
+  it('does not offer the scroll-to-bottom button merely because the list got shorter', () => {
+    const { container } = render(<ChatRoute />);
+    const { to, shrink } = scrollable(list(container));
+    to(HEIGHT - OPEN);
+    shrink();
+    // The shrink leaves the offset 180px from the bottom without the human having moved anything.
+    fireEvent.scroll(list(container));
+
+    expect(button()).not.toBeInTheDocument();
+  });
+
+  it('leaves a scrolled-up list exactly where it is when the keyboard opens', () => {
+    const { container } = render(<ChatRoute />);
+    const { to, shrink } = scrollable(list(container));
+    to(HEIGHT - OPEN);
+    to(40);
+
+    const before = scrolls();
+    shrink();
+
+    expect(scrolls()).toBe(before);
+    expect(button()).toBeInTheDocument();
+  });
+
+  it('re-pins on a visual-viewport resize, which changes no element at all', () => {
+    const { container } = render(<ChatRoute />);
+    const { to } = scrollable(list(container));
+    to(HEIGHT - OPEN);
+
+    const before = scrolls();
+    act(() => viewport.keyboard(500));
+
+    expect(scrolls()).toBe(before + 1);
+  });
+
+  it('keeps following the stream while the keyboard is open', () => {
+    const { container } = render(<ChatRoute />);
+    const { to, shrink } = scrollable(list(container));
+    to(HEIGHT - OPEN);
+    shrink();
+    emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
+
+    const before = scrolls();
+    act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
+
+    expect(screen.getByText('Reading the briefing.')).toBeInTheDocument();
+    expect(scrolls()).toBeGreaterThan(before);
+    expect(button()).not.toBeInTheDocument();
   });
 });
 

@@ -484,7 +484,7 @@ export function ChatRoute(): React.ReactElement {
           follow-the-bottom button keeps the list it belongs to. Capped and scrolled internally: a pile
           of open decisions must never push the composer off screen. */}
       {shown.length || hiddenOpen.length ? (
-        <section aria-label="Open decisions" className="ac-scroll max-h-[45svh] flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-7">
+        <section aria-label="Open decisions" className="ac-scroll max-h-[calc(var(--ac-app-h)*0.45)] flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-7">
           <div className="mx-auto flex max-w-3xl flex-col gap-3">
             {/* What was hidden is still counted here, so the pinned area never quietly under-reports
                 what is waiting: one press brings every one of them back. */}

@@ -103,7 +103,7 @@ export function Sheet({
   if (!open || typeof document === 'undefined') return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="presentation">
+    <div className="ac-viewport fixed z-50 flex items-end justify-center sm:items-center" role="presentation">
       <div className="absolute inset-0 bg-(--overlay)" onClick={onClose} aria-hidden />
       <div
         ref={ref}
@@ -153,7 +153,7 @@ export function Sheet({
             </button>
           </div>
         ) : null}
-        <div className="ac-scroll max-h-[70vh] p-4">{children}</div>
+        <div className="ac-scroll max-h-[calc(var(--ac-app-h)*0.7)] p-4">{children}</div>
         {footer ? <div className="flex gap-2 border-t border-line-1 p-4 ac-safe-bottom">{footer}</div> : null}
       </div>
     </div>,
@@ -170,7 +170,7 @@ export function Drawer({ open, onClose, title, children }: { open: boolean; onCl
   useDismiss(open, onClose);
   if (!open || typeof document === 'undefined') return null;
   return createPortal(
-    <div className="fixed inset-0 z-40 flex justify-end">
+    <div className="ac-viewport fixed z-40 flex justify-end">
       <div className="absolute inset-0 bg-(--overlay)" onClick={onClose} aria-hidden />
       <div
         role="dialog"

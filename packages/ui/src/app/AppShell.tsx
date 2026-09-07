@@ -170,7 +170,7 @@ export function AppShell(): React.ReactElement {
   const isActive = (to: string): boolean => path.startsWith(to);
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-bg-0">
+    <div className="ac-app flex overflow-hidden bg-bg-0">
       {/* desktop rail — the only place all projects appear at once */}
       <aside className="hidden w-rail flex-none flex-col border-r border-line-1 bg-bg-input p-2.5 md:flex">
         <button

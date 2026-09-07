@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Mobile chat keeps the composer above the keyboard while live content arrives,
+  and opens and follows at the bottom reliably

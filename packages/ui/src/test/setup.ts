@@ -1,8 +1,14 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
+import { clearResizeObservers, installResizeObserver } from './resizeObserver';
 
 afterEach(cleanup);
+
+// jsdom performs no layout, so it ships no ResizeObserver. Anything that watches an element's size
+// gets this one; a test that needs it to fire calls `resizeObserved()`.
+installResizeObserver();
+afterEach(clearResizeObservers);
 
 // jsdom has no matchMedia, ResizeObserver, EventSource or (on an opaque origin) localStorage.
 if (!window.localStorage) {

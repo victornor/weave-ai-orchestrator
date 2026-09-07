@@ -40,7 +40,7 @@ export function BottomBar({
     <nav
       aria-label="Sections"
       style={{ paddingTop: `${BAR.tabTop}rem` }}
-      className="ac-bar fixed inset-x-0 bottom-0 z-30 flex border-t border-line-1 bg-bg-input px-1.5 md:hidden"
+      className="ac-bar fixed inset-x-0 z-30 flex border-t border-line-1 bg-bg-input px-1.5 md:hidden"
     >
       {items.map((item) => {
         const more = item.key === MORE_TAB_KEY;

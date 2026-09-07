@@ -8,8 +8,8 @@ export type ComposerState = 'idle' | 'queued';
 
 /**
  * The input stops growing here and scrolls internally, so the mic and send controls never move off
- * screen. Kept in step with `max-h-[min(12rem,35dvh)]` on the textarea, which clamps it further on a
- * short viewport; 12rem is this number.
+ * screen. Kept in step with the `max-h` on the textarea, which clamps it further on a short viewport —
+ * including one the keyboard has shortened; 12rem is this number.
  */
 const MAX_INPUT_PX = 192;
 
@@ -196,7 +196,7 @@ export function Composer({
                 send();
               }
             }}
-            className="max-h-[min(12rem,35dvh)] flex-1 resize-none overflow-y-auto bg-transparent py-1.5 text-body text-text-1 outline-none placeholder:text-text-4 focus-visible:[box-shadow:none]"
+            className="max-h-[min(12rem,calc(var(--ac-app-h)*0.35))] flex-1 resize-none overflow-y-auto bg-transparent py-1.5 text-body text-text-1 outline-none placeholder:text-text-4 focus-visible:[box-shadow:none]"
           />
           <button
             type="button"

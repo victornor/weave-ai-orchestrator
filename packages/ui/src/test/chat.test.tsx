@@ -450,7 +450,7 @@ describe('ChatRoute dispatch labels', () => {
   it('meters the conductor\u2019s context in the header, from its last finished turn', () => {
     state.conductor = {
       agent: { id: 'ag_conductor', runtimeId: 'claude', model: 'claude-opus-5' },
-      lastRun: { id: 'r1', status: 'succeeded', model: 'claude-opus-5-20260115', finishedAt: '2026-09-07T10:00:00.000Z', usage: { inputTokens: 12_000, cachedInputTokens: 70_000, outputTokens: 900 } },
+      lastRun: { id: 'r1', status: 'succeeded', model: 'claude-opus-5-20260115', finishedAt: '2026-09-07T10:00:00.000Z', usage: { inputTokens: 320_119, cachedInputTokens: 667_671, outputTokens: 1_022, contextTokens: 82_000 } },
     } as unknown as typeof state.conductor;
     render(<ChatRoute />);
     expect(screen.getByText('41%')).toBeInTheDocument();
@@ -462,7 +462,7 @@ describe('ChatRoute dispatch labels', () => {
     state.models = [{ id: 'sonnet' }];
     state.conductor = {
       agent: { id: 'ag_conductor', runtimeId: 'claude', model: 'claude-opus-5' },
-      lastRun: { id: 'r1', status: 'succeeded', model: 'claude-opus-5', finishedAt: '2026-09-07T10:00:00.000Z', usage: { inputTokens: 12_000, cachedInputTokens: 70_000, outputTokens: 900 } },
+      lastRun: { id: 'r1', status: 'succeeded', model: 'claude-opus-5', finishedAt: '2026-09-07T10:00:00.000Z', usage: { inputTokens: 320_119, cachedInputTokens: 667_671, outputTokens: 1_022, contextTokens: 82_000 } },
     } as unknown as typeof state.conductor;
     render(<ChatRoute />);
     expect(screen.getByText('Context window unknown')).toBeInTheDocument();

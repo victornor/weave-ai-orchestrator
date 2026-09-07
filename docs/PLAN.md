@@ -549,7 +549,9 @@ export interface TurnResult {
   session: SessionRef | null;               // updated handle to persist
   finalText: string | null;
   structured?: unknown;                     // parsed against outputSchema when supported
-  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number; basis: "per_turn" | "session_cumulative" };
+  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number;
+            contextTokens?: number;                // last request alone; the others are turn totals
+            basis: "per_turn" | "session_cumulative" };
   cost?: { usd: number; status: "reported" | "estimated" };
   model?: string; provider?: string;
   error?: { code: string; family: RunErrorFamily; message: string; retryAfterMs?: number };

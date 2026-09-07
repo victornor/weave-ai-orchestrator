@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Decision, Project, RunEvent, RunTrace, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
+import type { Agent, Decision, Project, RunEvent, RunTrace, RuntimeAccount, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
 import { agent, decision, project, ticket } from './factories';
 import { enqueue } from '../lib/queue';
 import { clearChatScroll, readChatScroll, writeChatScroll } from '../lib/chatScroll';
@@ -11,7 +11,10 @@ import { installVisualViewport, removeVisualViewport } from './visualViewport';
 
 const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>() }));
 const state = vi.hoisted(() => ({
-  conductor: { agent: { id: 'ag_conductor' }, lastRun: null as { id: string; status: string } | null },
+  conductor: { agent: { id: 'ag_conductor', runtimeId: 'claude' }, lastRun: null as { id: string; status: string } | null },
+  accounts: [] as RuntimeAccount[],
+  runtimes: [{ id: 'claude', capabilities: { contextCompactionAt: 0.92 } }] as Array<{ id: string; capabilities: Record<string, unknown> }>,
+  models: [{ id: 'claude-opus-5', contextWindowTokens: 200_000 }] as Array<{ id: string; contextWindowTokens?: number }>,
   messages: [] as ThreadMessage[],
   /** False while the history query is disabled or still fetching: `data` is undefined, not empty. */
   messagesLoaded: true,
@@ -55,7 +58,11 @@ vi.mock('../api/context', async () => {
 });
 
 vi.mock('../api/hooks', () => ({
+  ACCOUNTS_REFRESH_MS: 300_000,
   useConductor: () => ({ data: state.conductor }),
+  useUsageAccounts: () => ({ data: state.accounts }),
+  useRuntimes: () => ({ data: state.runtimes }),
+  useRuntimeModels: () => ({ data: state.models }),
   useRunEvents: (id: string) => { if (id) state.eventRequests.push(id); return { data: id ? state.persisted : [] }; },
   useRunTraces: (p: Record<string, unknown>) => { state.traceQuery = p; return { data: state.traces }; },
   useThreads: () => ({ data: [{ id: 'th_1' }], isSuccess: true }),
@@ -133,7 +140,10 @@ function runTrace(over: Partial<RunTrace> & Pick<RunTrace, 'runId'>): RunTrace {
 beforeEach(() => {
   bus.handlers.clear();
   FakeEventSource.open = [];
-  state.conductor = { agent: { id: 'ag_conductor' }, lastRun: null };
+  state.conductor = { agent: { id: 'ag_conductor', runtimeId: 'claude' }, lastRun: null };
+  state.accounts = [];
+  state.runtimes = [{ id: 'claude', capabilities: { contextCompactionAt: 0.92 } }];
+  state.models = [{ id: 'claude-opus-5', contextWindowTokens: 200_000 }];
   state.messages = [];
   state.messagesLoaded = true;
   state.hasOlder = false;
@@ -433,6 +443,51 @@ describe('ChatRoute dispatch labels', () => {
     state.workers = [state.workers[0]!];
     rerender(<ChatRoute />);
     expect(screen.queryByRole('button', { name: /Backend Engineer #2/ })).not.toBeInTheDocument();
+  });
+
+  it('meters the conductor\u2019s context in the header, from its last finished turn', () => {
+    state.conductor = {
+      agent: { id: 'ag_conductor', runtimeId: 'claude', model: 'claude-opus-5' },
+      lastRun: { id: 'r1', status: 'succeeded', model: 'claude-opus-5-20260115', finishedAt: '2026-09-07T10:00:00.000Z', usage: { inputTokens: 12_000, cachedInputTokens: 70_000, outputTokens: 900 } },
+    } as unknown as typeof state.conductor;
+    render(<ChatRoute />);
+    expect(screen.getByText('41%')).toBeInTheDocument();
+    expect(screen.getByText('· 45% to compaction')).toBeInTheDocument();
+    expect(screen.getByTestId('context-meter').getAttribute('title')).toContain('82k of 200k tokens');
+  });
+
+  it('says the window is unknown rather than guessing when the model is not in the runtime\u2019s list', () => {
+    state.models = [{ id: 'sonnet' }];
+    state.conductor = {
+      agent: { id: 'ag_conductor', runtimeId: 'claude', model: 'claude-opus-5' },
+      lastRun: { id: 'r1', status: 'succeeded', model: 'claude-opus-5', finishedAt: '2026-09-07T10:00:00.000Z', usage: { inputTokens: 12_000, cachedInputTokens: 70_000, outputTokens: 900 } },
+    } as unknown as typeof state.conductor;
+    render(<ChatRoute />);
+    expect(screen.getByText('Context window unknown')).toBeInTheDocument();
+  });
+
+  it('shows no context meter until the conductor has finished a turn', () => {
+    render(<ChatRoute />);
+    expect(screen.queryByTestId('context-meter')).not.toBeInTheDocument();
+  });
+
+  it('carries the conductor runtime\u2019s plan meter in the header, and only that runtime\u2019s', () => {
+    state.accounts = [
+      {
+        workspaceId: 'ws1', runtimeId: 'codex', billingType: 'subscription_included', planLabel: 'pro',
+        limitsAvailable: true, limits: [{ kind: 'session', label: 'Session', utilization: 90, resetsAt: null, scopeLabel: null }],
+        note: null, capturedAt: new Date().toISOString(),
+      },
+      {
+        workspaceId: 'ws1', runtimeId: 'claude', billingType: 'subscription_included', planLabel: 'max',
+        limitsAvailable: true, limits: [{ kind: 'session', label: 'Session', utilization: 33, resetsAt: null, scopeLabel: null }],
+        note: null, capturedAt: new Date().toISOString(),
+      },
+    ];
+    render(<ChatRoute />);
+    expect(screen.getByTestId('session-limit').getAttribute('title')).toContain('claude \u00b7 max');
+    expect(screen.getByText('33%')).toBeInTheDocument();
+    expect(screen.queryByText('90%')).not.toBeInTheDocument();
   });
 });
 

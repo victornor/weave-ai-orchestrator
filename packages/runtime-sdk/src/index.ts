@@ -8,9 +8,17 @@ export interface RuntimeCapabilities {
   resumableSessions: boolean; forkSessions: boolean; streamingInput: boolean;
   systemPromptInjection: 'system_prompt' | 'append' | 'file_only' | 'none';
   structuredOutput: boolean; mcp: boolean; usageReporting: 'per_turn' | 'session_cumulative' | 'none'; costReporting: boolean; permissionModes: string[];
+  /**
+   * The fraction of a model's context window at which this CLI compacts the conversation on its
+   * own, as a number in 0..1. Omitted by a runtime that does not compact, and by one whose
+   * threshold we cannot state — a client then reports context against the window alone rather
+   * than inventing a point to count towards.
+   */
+  contextCompactionAt?: number;
 }
 export interface RuntimeDetection { status: 'available' | 'missing_binary' | 'broken' | 'unsupported'; version?: string; path?: string; notes?: string }
-export interface RuntimeModel { id: string; label: string; provider: string; source: 'detected' | 'static'; tier?: string; notes?: string }
+/** `contextWindowTokens` is the model's own window; a variant with a larger window is its own entry. */
+export interface RuntimeModel { id: string; label: string; provider: string; source: 'detected' | 'static'; tier?: string; notes?: string; contextWindowTokens?: number }
 export interface McpServerConfig { type: 'http' | 'stdio'; url?: string; command?: string; args?: string[]; headers?: Record<string, string>; env?: Record<string, string> }
 
 export interface TurnInput {

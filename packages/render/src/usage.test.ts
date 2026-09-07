@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RuntimeAccount } from '@agent-conductor/shared';
-import { accountLimits, budgetMeter, costStatusFor, MIXED_BILLING_NOTE, mixedBillingNote, showCost, usageRows, usageTotals } from './usage.js';
+import { accountLimits, budgetMeter, contextStrip, contextTokens, costStatusFor, MIXED_BILLING_NOTE, mixedBillingNote, resolveModel, runtimeLimitStrip, showCost, usageRows, usageTotals } from './usage.js';
 
 const series = {
   range: { start: 's', end: 'e', window: '24h', grain: 'hour', prevStart: 'ps', prevEnd: 'pe' },
@@ -178,5 +178,152 @@ describe('mixedBillingNote', () => {
     expect(mixedBillingNote({ subscription: 10, metered: 0, unknown: 0 })).toBeNull();
     expect(mixedBillingNote({ subscription: 0, metered: 10, unknown: 4 })).toBeNull();
     expect(mixedBillingNote(undefined)).toBeNull();
+  });
+});
+
+describe('runtimeLimitStrip', () => {
+  const now = new Date('2026-09-05T17:35:00.000Z');
+  const subscription: RuntimeAccount = {
+    workspaceId: 'ws', runtimeId: 'claude', billingType: 'subscription_included', planLabel: 'max',
+    limitsAvailable: true,
+    limits: [
+      { kind: 'weekly_all', label: 'Weekly', utilization: 23, resetsAt: '2026-09-10T01:59:59.000Z', scopeLabel: null },
+      { kind: 'session', label: 'Session', utilization: 33, resetsAt: '2026-09-05T19:45:00.000Z', scopeLabel: null },
+    ],
+    note: null, capturedAt: '2026-09-05T17:33:00.000Z',
+  };
+
+  it('meters the session window with a bare countdown, whatever order the runtime lists windows in', () => {
+    expect(runtimeLimitStrip([subscription], 'claude', now)).toEqual({
+      runtimeId: 'claude',
+      plan: 'max',
+      meter: { label: 'Session', percent: 33, resetsIn: '2h 10m', tone: 'ok' },
+      reason: null,
+      note: null,
+      age: '2m ago',
+      capturedAt: '2026-09-05T17:33:00.000Z',
+    });
+  });
+
+  it('warns past 80 % and calls it over past 95 %', () => {
+    const at = (utilization: number): string | undefined =>
+      runtimeLimitStrip([{ ...subscription, limits: [{ kind: 'session', label: 'Session', utilization, resetsAt: null, scopeLabel: null }] }], 'claude', now)?.meter?.tone;
+    expect(at(79)).toBe('ok');
+    expect(at(80)).toBe('warn');
+    expect(at(96)).toBe('over');
+  });
+
+  it('falls back to the only window a runtime reports, scope label and all', () => {
+    const weeklyOnly: RuntimeAccount = { ...subscription, limits: [subscription.limits[0]!, { kind: 'weekly_scoped', label: 'Weekly', utilization: 12, resetsAt: null, scopeLabel: 'Fable' }] };
+    expect(runtimeLimitStrip([weeklyOnly], 'claude', now)?.meter).toEqual({ label: 'Weekly', percent: 23, resetsIn: '4d 8h', tone: 'ok' });
+  });
+
+  it('shows nothing at all for a metered account, which has no plan window', () => {
+    expect(runtimeLimitStrip([{ ...subscription, billingType: 'metered_api', planLabel: null, limitsAvailable: false, limits: [] }], 'claude', now)).toBeNull();
+  });
+
+  it('shows nothing until that runtime has been probed', () => {
+    expect(runtimeLimitStrip([subscription], 'codex', now)).toBeNull();
+    expect(runtimeLimitStrip([], 'claude', now)).toBeNull();
+    expect(runtimeLimitStrip(null, null, now)).toBeNull();
+  });
+
+  it('gives one quiet reason, and no zero, when a subscription reports no windows', () => {
+    const bare: RuntimeAccount = { ...subscription, limitsAvailable: false, limits: [], note: 'codex: the CLI keeps plan limits in its session rollout file' };
+    expect(runtimeLimitStrip([bare], 'claude', now)).toMatchObject({ meter: null, reason: 'Limits unavailable', note: bare.note });
+  });
+
+  it('separates a probe that failed from a plan that simply has no windows', () => {
+    const failed: RuntimeAccount = { ...subscription, billingType: 'unknown', planLabel: null, limitsAvailable: false, limits: [], note: 'exit -1: spawn error' };
+    expect(runtimeLimitStrip([failed], 'claude', now)).toMatchObject({ meter: null, reason: 'Account probe failed', plan: 'unknown' });
+  });
+
+  it('counts down to the reset and past it', () => {
+    const resetsIn = (at: string): string | null | undefined => runtimeLimitStrip([subscription], 'claude', new Date(at))?.meter?.resetsIn;
+    expect(resetsIn('2026-09-05T18:58:00.000Z')).toBe('47m');
+    expect(resetsIn('2026-09-05T19:44:30.000Z')).toBe('now');
+    expect(resetsIn('2026-09-05T20:00:00.000Z')).toBe('now');
+  });
+});
+
+describe('resolveModel', () => {
+  const models = [{ id: 'opus', contextWindowTokens: 200_000 }, { id: 'claude-opus-5', contextWindowTokens: 200_000 }, { id: 'claude-opus-5-1m', contextWindowTokens: 1_000_000 }];
+
+  it('takes the exact entry before any prefix of it', () => {
+    expect(resolveModel(models, 'claude-opus-5')?.contextWindowTokens).toBe(200_000);
+    expect(resolveModel(models, 'claude-opus-5-1m')?.contextWindowTokens).toBe(1_000_000);
+  });
+
+  it('falls back to the longest entry a reported build id starts with', () => {
+    expect(resolveModel(models, 'claude-opus-5-20260115')?.id).toBe('claude-opus-5');
+  });
+
+  it('resolves an alias the list also carries', () => {
+    expect(resolveModel(models, 'opus')?.id).toBe('opus');
+  });
+
+  it('guesses nothing when nothing matches', () => {
+    expect(resolveModel(models, 'gpt-5')).toBeNull();
+    expect(resolveModel(models, null)).toBeNull();
+    expect(resolveModel(null, 'opus')).toBeNull();
+  });
+});
+
+describe('contextStrip', () => {
+  const usage = { inputTokens: 12_000, cachedInputTokens: 70_000, outputTokens: 900 };
+
+  it('reads the context as the turn\u2019s input plus its cache reads', () => {
+    expect(contextTokens(usage)).toBe(82_000);
+    expect(contextTokens(null)).toBe(0);
+  });
+
+  it('measures the window and the distance to compaction', () => {
+    expect(contextStrip({ usage, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true })).toEqual({
+      tokens: 82_000,
+      tokensLabel: '82k',
+      windowLabel: '200k',
+      meter: { percent: 41, toCompaction: 45, tone: 'ok' },
+      reason: null,
+    });
+  });
+
+  it('measures against a larger window without a special case', () => {
+    expect(contextStrip({ usage, contextWindowTokens: 1_000_000, compactionAt: 0.92, hasRun: true })?.meter)
+      .toEqual({ percent: 8, toCompaction: 9, tone: 'ok' });
+  });
+
+  it('takes its tone from the distance to compaction, not from the raw window', () => {
+    const at = (tokens: number): string | undefined =>
+      contextStrip({ usage: { inputTokens: tokens, cachedInputTokens: 0 }, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true })?.meter?.tone;
+    // 147.2k of 184k is 80 % of the way to compaction but only 74 % of the window.
+    expect(at(147_200)).toBe('warn');
+    expect(at(146_000)).toBe('ok');
+    expect(at(175_000)).toBe('over');
+  });
+
+  it('falls back to the window when the runtime does not compact', () => {
+    const v = contextStrip({ usage, contextWindowTokens: 200_000, hasRun: true });
+    expect(v?.meter).toEqual({ percent: 41, toCompaction: null, tone: 'ok' });
+  });
+
+  it('clamps a context that has outgrown the numbers we were given', () => {
+    expect(contextStrip({ usage: { inputTokens: 500_000, cachedInputTokens: 0 }, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true })?.meter)
+      .toEqual({ percent: 100, toCompaction: 100, tone: 'over' });
+  });
+
+  it('says nothing at all before the conductor has finished a turn', () => {
+    expect(contextStrip({ usage: null, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: false })).toBeNull();
+  });
+
+  it('gives one quiet reason, and no percentage, when the window is unknown', () => {
+    expect(contextStrip({ usage, contextWindowTokens: null, compactionAt: 0.92, hasRun: true }))
+      .toEqual({ tokens: 82_000, tokensLabel: '82k', windowLabel: '\u2014', meter: null, reason: 'Context window unknown' });
+    expect(contextStrip({ usage, contextWindowTokens: 0, hasRun: true })?.reason).toBe('Context window unknown');
+  });
+
+  it('gives one quiet reason, and no percentage, when the turn reported no tokens', () => {
+    expect(contextStrip({ usage: null, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true }))
+      .toMatchObject({ tokens: 0, meter: null, reason: 'Context size unreported' });
+    expect(contextStrip({ usage: { inputTokens: 0, cachedInputTokens: 0 }, contextWindowTokens: 200_000, hasRun: true })?.reason).toBe('Context size unreported');
   });
 });

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { newId } from '@agent-conductor/db';
 import { estimateTokens } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createKnowledgeService } from './service.js';
@@ -62,6 +63,36 @@ describe('knowledge', () => {
 
     knowledge.note(WORKER, 'project', 'Deploy notes', 'Staging deploys run from the release branch only.', h.projectId);
     expect(knowledge.get('project', h.projectId).body).toContain('## Deploy notes');
+  });
+
+  it('records the ticket a note or a document came from, resolved from the writing run (VS-102)', () => {
+    const now = new Date().toISOString();
+    const ticketId = newId();
+    h.db.insert('tickets', {
+      id: ticketId, workspaceId: h.workspaceId, projectId: h.projectId, number: 7, identifier: 'API-7', kind: 'task',
+      title: 'Do a thing', status: 'in_progress', priority: 'medium', createdByKind: 'human', createdAt: now, updatedAt: now,
+    });
+    const agentId = h.addWorker(ticketId);
+    h.db.insert('runs', {
+      id: 'run-1', workspaceId: h.workspaceId, agentId, ticketId, runtimeId: 'claude', turnEpoch: 1, cwd: '/tmp', createdAt: now,
+    });
+
+    knowledge.note(WORKER, 'project', 'Learnings', 'A note written while holding a ticket.', h.projectId);
+    const noteRevision = knowledge.revisions('project', h.projectId)[0]!;
+    expect(noteRevision).toMatchObject({ ticketId, ticketIdentifier: 'API-7' });
+
+    const written = knowledge.putDoc(WORKER, 'project', 'a-doc', '# A doc\n\nSome reasoning.\n', h.projectId);
+    const docRevision = h.db.get<{ ticketId: string | null }>(
+      'SELECT ticket_id FROM knowledge_revisions WHERE file_id = (SELECT id FROM knowledge_files WHERE path = ?) AND revision = ?',
+      [written.path, written.revision],
+    );
+    expect(docRevision).toMatchObject({ ticketId });
+  });
+
+  it('records no ticket for a write with no run behind it — a human edit or a daemon seed', () => {
+    knowledge.replace(HUMAN, 'project', '# api\n\n## Overview\n\n- 2026-09-07 · A human edit.\n', 'human', h.projectId);
+    const revision = knowledge.revisions('project', h.projectId)[0]!;
+    expect(revision).toMatchObject({ ticketId: null, ticketIdentifier: null });
   });
 
   it('appends under an existing section whose name arrives HTML-escaped', () => {
@@ -150,6 +181,46 @@ describe('knowledge', () => {
     await tick();
     expect(knowledge.get('project', h.projectId).curationPending).toBe(true);
     expect(workers.spawnCurator).toHaveBeenCalled();
+  });
+
+  it('derives the health view\'s four measures from a project with one of each, and reports empty arrays for a clean one (VS-102)', () => {
+    // a hub past 80% of its share
+    const body = `# API\n\n## Learnings\n${Array.from({ length: 10 }, (_, i) => `- 2026-01-01 · durable fact number ${i} about the project internals`).join('\n')}\n`;
+    knowledge.replace(HUMAN, 'project', body, 'human', h.projectId);
+    const tokens = knowledge.get('project', h.projectId).tokenEstimate;
+    budgets().project = Math.ceil(tokens / 0.85);
+
+    // an orphan document with an unresolved [[link]]
+    knowledge.putDoc(WORKER, 'project', 'payments-webhooks', '# Payments webhooks\n\nSee [[nowhere]].\n', h.projectId);
+
+    // a document nobody has touched in a long time
+    knowledge.putDoc(WORKER, 'project', 'old-design', '# Old design\n\nA rationale from a while ago.\n', h.projectId);
+    const longAgo = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString();
+    h.db.run('UPDATE knowledge_files SET updated_at = ? WHERE path = ?', [longAgo, 'projects/api/docs/old-design.md']);
+
+    const dirty = knowledge.health(h.projectId);
+    expect(dirty.hubs.find((hub) => hub.path === 'projects/api/PROJECT.md')).toMatchObject({ nearBudget: true });
+    expect(dirty.orphans.map((d) => d.slug)).toContain('payments-webhooks');
+    expect(dirty.orphans.map((d) => d.slug)).toContain('old-design');
+    expect(dirty.stale.map((d) => d.slug)).toEqual(['old-design']);
+    expect(dirty.unresolvedLinks).toEqual([{ fromPath: 'projects/api/docs/payments-webhooks.md', fromTitle: 'Payments webhooks', toSlug: 'nowhere' }]);
+
+    // a second, untouched project reports the measures empty rather than omitting them
+    const h2 = makeHarness();
+    const knowledge2 = createKnowledgeService(h2.ctx, h2.deps);
+    const clean = knowledge2.health(h2.projectId);
+    expect(clean.orphans).toEqual([]);
+    expect(clean.stale).toEqual([]);
+    expect(clean.unresolvedLinks).toEqual([]);
+    expect(clean.hubs.find((hub) => hub.path === 'projects/api/PROJECT.md')).toMatchObject({ nearBudget: false });
+    h2.cleanup();
+  });
+
+  it('the workspace-wide health view (no project) reports every project\'s hubs and documents', () => {
+    knowledge.putDoc(WORKER, 'project', 'an-orphan', '# An orphan\n\nNothing links here.\n', h.projectId);
+    const all = knowledge.health();
+    expect(all.hubs.map((hub) => hub.path)).toEqual(expect.arrayContaining(['workspace/WORKSPACE.md', 'workspace/SHARED.md', 'workspace/decisions.md', 'projects/api/PROJECT.md']));
+    expect(all.orphans.map((d) => d.slug)).toContain('an-orphan');
   });
 
   it('rejects a document over the configured document budget', () => {

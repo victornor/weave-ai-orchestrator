@@ -356,6 +356,14 @@ export interface KnowledgeGraph {
   edges: Array<{ from: string; to: string }>;
 }
 
+/** The knowledge network's health (VS-102): derived on read, no `project` means the whole workspace. */
+export interface KnowledgeHealth {
+  hubs: Array<{ path: string; scope: string; projectId: string | null; projectSlug: string | null; tokenEstimate: number; budgetTokens: number; pct: number; nearBudget: boolean; curationPending: boolean; lastCuratedAt: string | null }>;
+  orphans: KnowledgeDocSummary[];
+  stale: KnowledgeDocSummary[];
+  unresolvedLinks: Array<{ fromPath: string; fromTitle: string; toSlug: string }>;
+}
+
 export interface KnowledgeDoc {
   path: string;
   scope: string;
@@ -372,6 +380,9 @@ export interface KnowledgeRevision {
   createdAt: string;
   reason: string;
   tokenEstimate: number;
+  /** Which ticket produced this revision (VS-102); null for a human edit or a daemon seed, or a revision recorded before provenance existed. */
+  ticketId: string | null;
+  ticketIdentifier: string | null;
 }
 
 export interface SearchHit {

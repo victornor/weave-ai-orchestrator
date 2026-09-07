@@ -6,7 +6,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Decision, Project, Run, Ticket } from '@agent-conductor/shared';
-import type { ChangelogEntry, ChangelogHeatmap, KnowledgeDoc, KnowledgeDocSummary, MergeQueue, ProjectPullRequests } from '../api/types';
+import type { ChangelogEntry, ChangelogHeatmap, KnowledgeDoc, KnowledgeDocSummary, KnowledgeHealth, MergeQueue, ProjectPullRequests } from '../api/types';
 import { agent, decision, project as projectOf, run, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -23,6 +23,7 @@ const state = vi.hoisted(() => ({
   heatmap: null as ChangelogHeatmap | null,
   hub: null as KnowledgeDoc | null,
   docs: [] as KnowledgeDocSummary[],
+  health: null as KnowledgeHealth | null,
   pullRequests: null as ProjectPullRequests | null,
   go: vi.fn() as ReturnType<typeof vi.fn>,
 }));
@@ -58,6 +59,7 @@ vi.mock('../api/hooks', () => ({
   useChangelogHeatmap: () => ({ data: state.heatmap, isLoading: false }),
   useKnowledgeDoc: () => ({ data: state.hub, isLoading: false }),
   useKnowledgeDocs: () => ({ data: state.docs, isLoading: false }),
+  useKnowledgeHealth: () => ({ data: state.health, isLoading: false }),
   usePullRequests: () => ({ data: state.pullRequests, isLoading: false }),
   usePullRequest: () => ({ data: null, isLoading: false }),
 }));
@@ -108,6 +110,7 @@ beforeEach(() => {
   state.heatmap = null;
   state.hub = null;
   state.docs = [];
+  state.health = null;
   state.pullRequests = null;
   state.go = vi.fn();
 });
@@ -305,6 +308,26 @@ describe('knowledge', () => {
   it('says so for a project with no documents', () => {
     render(<ProjectOverviewRoute />);
     expect(within(section('Knowledge')).getByText('No linked documents in this project.')).toBeTruthy();
+  });
+
+  it('reports a clean network as having none of an issue, rather than omitting the measure', () => {
+    state.health = { hubs: [], orphans: [], stale: [], unresolvedLinks: [] };
+    render(<ProjectOverviewRoute />);
+    expect(within(section('Knowledge')).getByText('No orphan documents, no stale documents, no unresolved links.')).toBeTruthy();
+  });
+
+  it('shows the counts for an orphan, a stale document and an unresolved link', () => {
+    state.health = {
+      hubs: [],
+      orphans: [{ path: 'p1', scope: 'project', projectId: 'p1', projectSlug: 'api', slug: 'orphan', title: 'Orphan', summary: '', tokenEstimate: 1, budgetTokens: 1, links: 0, backlinks: 0, updatedAt: daysAgo(1) }],
+      stale: [{ path: 'p2', scope: 'project', projectId: 'p1', projectSlug: 'api', slug: 'stale', title: 'Stale', summary: '', tokenEstimate: 1, budgetTokens: 1, links: 0, backlinks: 1, updatedAt: daysAgo(120) }],
+      unresolvedLinks: [{ fromPath: 'p3', fromTitle: 'From', toSlug: 'nowhere' }],
+    };
+    render(<ProjectOverviewRoute />);
+    const card = section('Knowledge');
+    expect(within(card).getByText(/1 document with no backlink/)).toBeTruthy();
+    expect(within(card).getByText(/1 document not updated in 90 days/)).toBeTruthy();
+    expect(within(card).getByText(/1 unresolved link/)).toBeTruthy();
   });
 });
 

@@ -300,6 +300,67 @@ describe('supervisor scheduled passes', () => {
     });
   });
 
+  describe('knowledge health (VS-102)', () => {
+    const emptyHealth = { hubs: [{ path: 'workspace/WORKSPACE.md', scope: 'workspace', projectId: null, projectSlug: null, tokenEstimate: 100, budgetTokens: 10_000, pct: 1, nearBudget: false, curationPending: false, lastCuratedAt: null }], orphans: [] as Array<{ path: string }>, stale: [] as Array<{ path: string }>, unresolvedLinks: [] as Array<{ fromPath: string; toSlug: string }> };
+    /** Forces both the knowledge-health gate and the curation gate open again, so a test can drive two sweeps. */
+    const reopenGates = (): void => { h.db.run("DELETE FROM meta WHERE key IN ('supervisor:knowledge_health_at', 'supervisor:curation_at')"); };
+
+    it('records a project\'s first sweep without waking the conductor, even if it already has an orphan', async () => {
+      h.services.knowledge = { requestCuration: vi.fn(async () => ({})), health: () => ({ ...emptyHealth, orphans: [{ path: 'projects/api/docs/old.md' }] }) } as never;
+      await supervisor.tick();
+      expect(wake.calls.some((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'knowledge_health')).toBe(false);
+      expect(h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:knowledge_health:workspace'])).toBeDefined();
+    });
+
+    it('wakes the conductor when a new orphan appears between two sweeps', async () => {
+      const health = vi.fn(() => ({ ...emptyHealth }));
+      h.services.knowledge = { requestCuration: vi.fn(async () => ({})), health } as never;
+      await supervisor.tick(); // first sweep: seeds, clean
+      reopenGates();
+      health.mockReturnValue({ ...emptyHealth, orphans: [{ path: 'projects/api/docs/new-orphan.md' }] });
+      await supervisor.tick();
+      const woken = wake.calls.find((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'knowledge_health');
+      expect(woken).toBeDefined();
+      expect((woken!.input as { payload: { orphans: string[] } }).payload.orphans).toContain('projects/api/docs/new-orphan.md');
+    });
+
+    it('wakes the conductor when a hub crosses its budget between sweeps, with no write ever rejected', async () => {
+      const health = vi.fn(() => ({ ...emptyHealth }));
+      h.services.knowledge = { requestCuration: vi.fn(async () => ({})), health } as never;
+      await supervisor.tick();
+      reopenGates();
+      health.mockReturnValue({ ...emptyHealth, hubs: [{ ...emptyHealth.hubs[0]!, pct: 85, nearBudget: true }] });
+      await supervisor.tick();
+      const woken = wake.calls.find((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'knowledge_health');
+      expect(woken).toBeDefined();
+      expect((woken!.input as { payload: { nearBudgetHubs: string[] } }).payload.nearBudgetHubs).toContain('workspace/WORKSPACE.md');
+    });
+
+    it('stays silent when nothing changed since the last sweep', async () => {
+      const health = vi.fn(() => ({ ...emptyHealth, orphans: [{ path: 'projects/api/docs/steady.md' }] }));
+      h.services.knowledge = { requestCuration: vi.fn(async () => ({})), health } as never;
+      await supervisor.tick();
+      reopenGates();
+      await supervisor.tick();
+      expect(wake.calls.some((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'knowledge_health')).toBe(false);
+    });
+
+    it('stays silent once a fixed orphan drops out of the signature', async () => {
+      const health = vi.fn(() => ({ ...emptyHealth, orphans: [{ path: 'projects/api/docs/temp.md' }] }));
+      h.services.knowledge = { requestCuration: vi.fn(async () => ({})), health } as never;
+      await supervisor.tick();
+      reopenGates();
+      health.mockReturnValue({ ...emptyHealth }); // the orphan got a backlink
+      await supervisor.tick();
+      expect(wake.calls.some((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'knowledge_health')).toBe(false);
+      reopenGates();
+      health.mockReturnValue({ ...emptyHealth, orphans: [{ path: 'projects/api/docs/temp.md' }] }); // it comes back
+      await supervisor.tick();
+      // Reappearing is "new" relative to the now-clean signature, so it wakes again — it is not remembered forever.
+      expect(wake.calls.some((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'knowledge_health')).toBe(true);
+    });
+  });
+
   describe('reconciliation', () => {
     function seedPrTicket(over: Record<string, unknown> = {}): string {
       const ticketId = seedTicket(h, { status: 'in_review', kind: 'change', ...over });

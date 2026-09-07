@@ -10,7 +10,7 @@ import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
 import {
-  CURATION_BUDGET_FRACTION, DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, budgetOf, countWords, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
+  CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, budgetOf, countWords, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
   isDocPath, normalize, parseDoc, parseLinks, relPathFor, renderDoc, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated,
 } from './files.js';
 
@@ -202,12 +202,16 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
   ): number {
     const budget = budgetOfRow(row);
     const body = isDocPath(row.path) ? next : withBudgetStated(next, budget);
+    // Provenance (VS-102): which ticket this write came from, resolved from the run rather than the
+    // actor — a ticket is a property of this particular run (`runs.ticket_id`), not of who is calling.
+    // A human or system write has no run and records no ticket.
+    const ticketId = actor.runId ? db.get<{ ticketId: string | null }>('SELECT ticket_id FROM runs WHERE id = ?', [actor.runId])?.ticketId ?? null : null;
     return tx(db, () => {
       const revision = currentRevision(row.id) + 1;
       const tokens = estimateTokens(body);
       db.insert('knowledge_revisions', {
         id: newId(), fileId: row.id, revision, body, authorKind: actor.kind, authorId: actor.id, runId: actor.runId ?? null,
-        reason, removedEntriesJson: removed, createdAt: nowIso(),
+        ticketId, reason, removedEntriesJson: removed, createdAt: nowIso(),
       });
       const patch: Record<string, unknown> = { tokenEstimate: tokens, hash: sha256(body), budgetTokens: budget, updatedAt: nowIso() };
       if (reason === 'curation') { patch.lastCuratedAt = nowIso(); patch.curationPending = false; }
@@ -341,8 +345,10 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
 
     revisions(scope, projectId) {
       const { row } = ensure(scope, projectId);
-      return db.all<{ revision: number; authorKind: string; reason: string; createdAt: string }>(
-        'SELECT revision, author_kind, reason, created_at FROM knowledge_revisions WHERE file_id = ? ORDER BY revision DESC',
+      return db.all<{ revision: number; authorKind: string; reason: string; createdAt: string; ticketId: string | null; ticketIdentifier: string | null }>(
+        `SELECT r.revision, r.author_kind, r.reason, r.created_at, r.ticket_id, t.identifier AS ticket_identifier
+           FROM knowledge_revisions r LEFT JOIN tickets t ON t.id = r.ticket_id
+          WHERE r.file_id = ? ORDER BY r.revision DESC`,
         [row.id],
       );
     },
@@ -564,6 +570,50 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         .filter((e) => paths.has(e.fromPath) && paths.has(e.toPath!))
         .map((e) => ({ from: e.fromPath, to: e.toPath! }));
       return { nodes, edges };
+    },
+
+    health(projectId) {
+      // A hub scope this call cares about has to exist to be reported on — a project nobody has
+      // read or written to yet still gets a health view, not an omission.
+      if (projectId) { ensure('project', projectId); ensure('shared'); }
+      else {
+        ensure('workspace'); ensure('shared'); ensure('decisions');
+        for (const p of db.all<{ id: string }>('SELECT id FROM projects WHERE workspace_id = ?', [ws])) ensure('project', p.id);
+      }
+
+      // Same visibility rule every knowledge read uses: no project is the workspace's own view
+      // (every hub, every project); a project is that project's hub plus `shared`.
+      const rows = db.all<Record<string, unknown>>('SELECT * FROM knowledge_files WHERE workspace_id = ? ORDER BY path', [ws]).map((raw) => knowledgeRow(raw) as unknown as FileRow);
+      const pid = projectId ? projectOf(projectId).id : null;
+      const visible = rows.filter((f) => !pid || f.projectId === pid || f.scope === 'shared');
+      const visiblePaths = new Set(visible.map((f) => f.path));
+
+      const hubs = visible
+        .filter((f) => !isDocPath(f.path))
+        .map((f) => {
+          const budget = budgetOfRow(f);
+          const pct = budget ? Math.round((f.tokenEstimate / budget) * 100) : 0;
+          return {
+            path: f.path, scope: f.scope, projectId: f.projectId, projectSlug: projectSlugOf(f.projectId),
+            tokenEstimate: f.tokenEstimate, budgetTokens: budget, pct, nearBudget: f.tokenEstimate > budget * CURATION_BUDGET_FRACTION,
+            curationPending: f.curationPending, lastCuratedAt: f.lastCuratedAt,
+          };
+        });
+
+      const docs = service.listDocs(projectId !== undefined && projectId !== null ? { projectId } : {});
+      const staleBefore = Date.now() - DOCUMENT_STALE_MS;
+      const orphans = docs.filter((d) => d.backlinks === 0);
+      const stale = docs.filter((d) => Date.parse(d.updatedAt) < staleBefore);
+
+      const unresolvedLinks = db
+        .all<{ fromPath: string; toSlug: string }>('SELECT from_path, to_slug FROM knowledge_links WHERE workspace_id = ? AND to_path IS NULL', [ws])
+        .filter((l) => visiblePaths.has(l.fromPath))
+        .map((l) => ({
+          fromPath: l.fromPath, toSlug: l.toSlug,
+          fromTitle: db.get<{ title: string }>("SELECT title FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [l.fromPath])?.title ?? l.fromPath,
+        }));
+
+      return { hubs, orphans, stale, unresolvedLinks };
     },
 
     appendDecision(decision: Decision) {

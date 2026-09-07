@@ -17,6 +17,14 @@ export const DOC_BUDGET = DEFAULT_KNOWLEDGE_BUDGETS.document;
  * fraction, so both have to read it from here.
  */
 export const CURATION_BUDGET_FRACTION = 0.8;
+/**
+ * VS-102: a linked document nobody has written to in this long is flagged stale on the knowledge
+ * health view. Deliberately not §13.4's 14-day hub staleness — a hub file changes constantly, so 14
+ * days of silence is unusual; a document holding a design rationale going quiet for a season is
+ * normal, and only worth a flag well past that. This is a health signal, not a curation trigger:
+ * nothing is rewritten, archived or rejected because of it.
+ */
+export const DOCUMENT_STALE_MS = 90 * 24 * 60 * 60 * 1000;
 
 /** The budget a hub file or a document gets from a workspace's configured budgets. */
 export function budgetOf(budgets: KnowledgeBudgets, scope: KnowledgeScope, isDoc: boolean): number {

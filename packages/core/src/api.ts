@@ -201,7 +201,7 @@ export interface KnowledgeService {
   get(scope: S.KnowledgeScope, projectId?: string | null): { path: string; body: string; tokenEstimate: number; budgetTokens: number; lastCuratedAt: string | null; curationPending: boolean; revision: number };
   note(actor: Actor, scope: S.KnowledgeScope, section: string, text: string, projectId?: string | null): { remainingTokens: number; revision: number };
   replace(actor: Actor, scope: S.KnowledgeScope, body: string, reason: S.KnowledgeRevisionReason, projectId?: string | null, removed?: string[]): { revision: number };
-  revisions(scope: S.KnowledgeScope, projectId?: string | null): Array<{ revision: number; authorKind: string; reason: string; createdAt: string }>;
+  revisions(scope: S.KnowledgeScope, projectId?: string | null): Array<{ revision: number; authorKind: string; reason: string; createdAt: string; ticketId: string | null; ticketIdentifier: string | null }>;
   revert(actor: Actor, scope: S.KnowledgeScope, revision: number, projectId?: string | null): { revision: number };
   lint(): Array<{ path: string; scope: string; projectId: string | null; tokenEstimate: number; budgetTokens: number; pct: number; lastCuratedAt: string | null; curationPending: boolean }>;
   requestCuration(actor: Actor, scope: S.KnowledgeScope, projectId?: string | null): Promise<{ ticketId?: string; wakeId?: string }>;
@@ -215,6 +215,14 @@ export interface KnowledgeService {
   putDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, body: string, projectId?: string | null, reason?: S.KnowledgeRevisionReason): KnowledgeDocWriteResult;
   deleteDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, projectId?: string | null): void;
   graph(projectId?: string | null): KnowledgeGraph;
+  /** The knowledge network's health (VS-102): derived on read, no new table. `projectId` omitted means the whole workspace. */
+  health(projectId?: string | null): KnowledgeHealth;
+}
+export interface KnowledgeHealth {
+  hubs: Array<{ path: string; scope: S.KnowledgeScope; projectId: string | null; projectSlug: string | null; tokenEstimate: number; budgetTokens: number; pct: number; nearBudget: boolean; curationPending: boolean; lastCuratedAt: string | null }>;
+  orphans: KnowledgeDocSummary[];
+  stale: KnowledgeDocSummary[];
+  unresolvedLinks: Array<{ fromPath: string; fromTitle: string; toSlug: string }>;
 }
 export interface KnowledgeDocSummary {
   path: string; scope: S.KnowledgeScope; projectId: string | null; projectSlug: string | null; slug: string; title: string; summary: string;

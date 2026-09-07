@@ -566,7 +566,7 @@ describe('the idle gate against a real dispatcher', () => {
 
   it('lets a turn that is already running finish instead of cancelling it', async () => {
     runtime.delayMs = 150;
-    runtime.queue.push({ structured: { state: 'done', summary: 'finished', tickets: [] } });
+    runtime.queue.push({ structured: { state: 'done', summary: 'finished', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
     h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'do a thing' });
 
     await dispatcher.tick();
@@ -583,7 +583,7 @@ describe('the idle gate against a real dispatcher', () => {
 
   it('starts no run for a wake raised while the upgrade is pending, and leaves the wake queued', async () => {
     runtime.delayMs = 200;
-    runtime.queue.push({ structured: { state: 'done', summary: 'first', tickets: [] } });
+    runtime.queue.push({ structured: { state: 'done', summary: 'first', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
     h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'first' });
     await dispatcher.tick();
 
@@ -597,8 +597,8 @@ describe('the idle gate against a real dispatcher', () => {
 
   it('dispatches the held wake once a cancellation resumes the dispatcher', async () => {
     runtime.delayMs = 100;
-    runtime.queue.push({ structured: { state: 'done', summary: 'first', tickets: [] } });
-    runtime.queue.push({ structured: { state: 'done', summary: 'second', tickets: [] } });
+    runtime.queue.push({ structured: { state: 'done', summary: 'first', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+    runtime.queue.push({ structured: { state: 'done', summary: 'second', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
     h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'first' });
     await dispatcher.tick();
 

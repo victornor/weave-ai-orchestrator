@@ -1878,6 +1878,9 @@ describe('ChatRoute resizable decisions area', () => {
   const handle = (): HTMLElement => screen.getByRole('separator', { name: 'Resize the decisions area' });
   const stored = (): string | null => localStorage.getItem('conductor.decisions.height');
 
+  /** The cap a chosen height renders as: never a fixed size, so shorter content is never padded out. */
+  const capOf = (px: number): string => `min(${px}px, calc(var(--ac-app-h) * 0.75))`;
+
   const rect = (el: Element, top: number, height: number): void => {
     Object.defineProperty(el, 'getBoundingClientRect', {
       configurable: true,
@@ -1930,11 +1933,12 @@ describe('ChatRoute resizable decisions area', () => {
 
     // An absolute mapping: the pointer's distance from the area's bottom edge is its height.
     fireEvent.pointerMove(window, { pointerId: 1, clientY: 400 });
-    expect(area().style.height).toBe('400px');
-    expect(area().style.maxHeight).toBe('calc(var(--ac-app-h) * 0.75)');
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe(capOf(400));
 
     fireEvent.pointerMove(window, { pointerId: 1, clientY: 550 });
-    expect(area().style.height).toBe('250px');
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe(capOf(250));
 
     fireEvent.pointerUp(window, { pointerId: 1 });
     expect(stored()).toBe('250');
@@ -1947,7 +1951,8 @@ describe('ChatRoute resizable decisions area', () => {
     fireEvent.pointerMove(window, { pointerId: 1, clientY: -2000 });
     fireEvent.pointerUp(window, { pointerId: 1 });
 
-    expect(area().style.height).toBe(`${MAX}px`);
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe(capOf(MAX));
     expect(stored()).toBe(String(MAX));
   });
 
@@ -1957,7 +1962,8 @@ describe('ChatRoute resizable decisions area', () => {
     fireEvent.pointerMove(window, { pointerId: 1, clientY: 2000 });
     fireEvent.pointerUp(window, { pointerId: 1 });
 
-    expect(area().style.height).toBe(`${MIN}px`);
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe(capOf(MIN));
     expect(stored()).toBe(String(MIN));
   });
 
@@ -1979,30 +1985,32 @@ describe('ChatRoute resizable decisions area', () => {
     fireEvent.pointerMove(window, { pointerId: 7, pointerType: 'touch', clientY: 500 });
     fireEvent.pointerUp(window, { pointerId: 7, pointerType: 'touch' });
 
-    expect(area().style.height).toBe('300px');
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe(capOf(300));
   });
 
   it('resizes in steps from the arrow keys', () => {
     open();
     fireEvent.keyDown(handle(), { key: 'ArrowUp' });
-    expect(area().style.height).toBe('224px');
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe(capOf(224));
     fireEvent.keyDown(handle(), { key: 'ArrowDown' });
     fireEvent.keyDown(handle(), { key: 'ArrowDown' });
-    expect(area().style.height).toBe('176px');
+    expect(area().style.maxHeight).toBe(capOf(176));
     expect(stored()).toBe('176');
   });
 
   it('goes straight to either clamp and no further', () => {
     open();
     fireEvent.keyDown(handle(), { key: 'End' });
-    expect(area().style.height).toBe(`${MAX}px`);
+    expect(area().style.maxHeight).toBe(capOf(MAX));
     fireEvent.keyDown(handle(), { key: 'ArrowUp' });
-    expect(area().style.height).toBe(`${MAX}px`);
+    expect(area().style.maxHeight).toBe(capOf(MAX));
 
     fireEvent.keyDown(handle(), { key: 'Home' });
-    expect(area().style.height).toBe(`${MIN}px`);
+    expect(area().style.maxHeight).toBe(capOf(MIN));
     fireEvent.keyDown(handle(), { key: 'ArrowDown' });
-    expect(area().style.height).toBe(`${MIN}px`);
+    expect(area().style.maxHeight).toBe(capOf(MIN));
   });
 
   it('leaves a key it does not handle alone', () => {
@@ -2039,11 +2047,12 @@ describe('ChatRoute resizable decisions area', () => {
     state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
     state.decisions = [asked()];
     const { rerender } = render(<ChatRoute />);
-    expect(area().style.height).toBe('350px');
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe(capOf(350));
 
     state.ws = 'ws2';
     rerender(<ChatRoute />);
-    expect(area().style.height).toBe('350px');
+    expect(area().style.maxHeight).toBe(capOf(350));
   });
 
   it('pins nothing when nothing is open, and returns at the chosen height when a card arrives', () => {
@@ -2055,7 +2064,52 @@ describe('ChatRoute resizable decisions area', () => {
 
     state.decisions = [asked()];
     rerender(<ChatRoute />);
-    expect(area().style.height).toBe('350px');
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe(capOf(350));
+  });
+
+  it('caps rather than fixes the height once every card is hidden', () => {
+    open();
+    fireEvent.pointerDown(handle(), { pointerId: 1, clientY: 600 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: 300 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(stored()).toBe('500');
+
+    fireEvent.click(screen.getByRole('button', { name: /Hide from chat/ }));
+
+    expect(screen.getByRole('button', { name: /1 hidden from chat/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/File this as a ticket\?/)).not.toBeInTheDocument();
+    // The chosen height is still the cap the region is bounded by — it is just no longer forced,
+    // which is the only thing jsdom's styleless layout lets a test observe directly.
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe(capOf(500));
+  });
+
+  it('caps rather than fixes the height when the open content is shorter than it', () => {
+    // What a reload has after a height was chosen for a screenful of cards: the number in
+    // localStorage, applied to a chat that now opens with a single short card.
+    writeDecisionHeight(500);
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+
+    expect(area()).toContainElement(screen.getByLabelText('Conductor asks: File this as a ticket?'));
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe(capOf(500));
+  });
+
+  it('restores the chosen height’s worth of content when hidden cards are shown again', () => {
+    open();
+    fireEvent.pointerDown(handle(), { pointerId: 1, clientY: 600 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: 300 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+
+    fireEvent.click(screen.getByRole('button', { name: /Hide from chat/ }));
+    fireEvent.click(screen.getByRole('button', { name: /1 hidden from chat/ }));
+
+    expect(screen.getByLabelText('Conductor asks: File this as a ticket?')).toBeInTheDocument();
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe(capOf(500));
   });
 
   it('leaves the message list following its newest message across a resize', () => {

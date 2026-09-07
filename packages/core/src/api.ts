@@ -31,7 +31,8 @@ export interface TicketsService {
   /** Relaunch the ticket's worker (or spawn one) after a failure or a pause; blocked tickets go back to work. */
   retry(actor: Actor, id: string, note?: string): Promise<S.Ticket>;
   comments(id: string, after?: string): S.TicketComment[];
-  putDocument(actor: Actor, id: string, key: string, body: string): { documentId: string; revision: number };
+  /** `opts.system` is for the daemon's own internal write of the `plan` digest only — never set it from a tool or route handling external input; every other write to `key: 'plan'` is refused. */
+  putDocument(actor: Actor, id: string, key: string, body: string, opts?: { system?: boolean }): { documentId: string; revision: number };
   getDocument(id: string, key: string, revision?: number): { documentId: string; revision: number; body: string; createdAt: string } | null;
   documentRevisions(id: string, key: string): Array<{ revision: number; authorKind: string; createdAt: string }>;
   /** Every document on a ticket with its current revision — the catalogue an agent reads before asking for one by key. */
@@ -44,6 +45,8 @@ export interface TicketsService {
   mergeQueue: MergeQueueService;
   /** Liveness scan helper: tickets in active statuses without an action path. */
   livenessViolations(): S.Ticket[];
+  /** A `proposed` change ticket or a non-`auto_merge` `in_review` ticket with no open approval gets a fresh one, raised as the daemon. Returns what it repaired. */
+  repairApprovals(): Promise<Array<{ id: string; identifier: string; kind: 'plan_approval' | 'merge_approval' }>>;
   /** Move `in_review` tickets with auto_merge on to `merging` once their delivery is ready (local-branch: immediately; pr: CI green or no CI). Returns how many advanced. */
   autoMergeSweep(): Promise<number>;
   nextIdentifier(): string;

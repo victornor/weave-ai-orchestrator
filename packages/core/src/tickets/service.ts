@@ -246,7 +246,16 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
 
   // ---------- documents ----------
 
-  function putDocument(actor: Actor, id: string, key: string, body: string): { documentId: string; revision: number } {
+  /**
+   * `opts.system` is set only by `transition()`'s own write of the generated plan digest — the one
+   * legitimate writer of the `plan` key. Every external entry point (the agent tool, the HTTP route)
+   * rejects `key: 'plan'` before it reaches here, so this is not an authorization check on `actor`;
+   * `actorFor()` never produces a `system` actor for a real request in the first place.
+   */
+  function putDocument(actor: Actor, id: string, key: string, body: string, opts?: { system?: boolean }): { documentId: string; revision: number } {
+    if (key === 'plan' && !opts?.system) {
+      throw new OcError('forbidden', "the `plan` document key is reserved for the daemon-generated plan digest; use `report` (or another key) for your own notes", { key });
+    }
     const t = get(id);
     return tx(db, () => {
       let doc = db.get<{ id: string; currentRevision: number }>('SELECT id, current_revision FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, key]);
@@ -319,7 +328,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
 
     const next = tx(db, () => {
       const updated = touch(t.id, patch);
-      if (planBody !== null) putDocument(actor, t.id, 'plan', planBody);
+      if (planBody !== null) putDocument(actor, t.id, 'plan', planBody, { system: true });
       if (input.note) systemComment(t.id, input.note, actor);
       recordActivity(db, ws, actor, 'ticket.transition', 'ticket', t.id, { from: t.status, to, note: input.note ?? null }, t.id);
       ctx.events.emit('ticket.status', 'ticket', t.id, updated);
@@ -845,6 +854,77 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         const queuedWake = db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND status IN ('queued','claimed')", [worker.id])?.n ?? 0;
         return liveRun === 0 && queuedWake === 0;
       });
+    },
+
+    /**
+     * A `proposed` change ticket, or an `in_review` ticket without `auto_merge`, is always supposed
+     * to have an open decision — that decision is its action path, which is exactly why
+     * `livenessViolations` leaves both statuses alone. Whatever closed the decision without moving
+     * the ticket on (VS-104: an overloaded document key; conceivably something else in the future)
+     * raises a fresh one here, so the ticket is never left silently stranded.
+     */
+    async repairApprovals() {
+      const SYSTEM: Actor = { kind: 'system', id: null };
+      const repaired: Array<{ id: string; identifier: string; kind: 'plan_approval' | 'merge_approval' }> = [];
+
+      const proposed = db
+        .all<Record<string, unknown>>("SELECT * FROM tickets WHERE workspace_id = ? AND status = 'proposed' AND kind = 'change'", [ws])
+        .map(row);
+      for (const t of proposed) {
+        if (openApproval(t.id, 'plan_approval')) continue;
+        const owner = approvalOwner(t);
+        if (owner === 'none') {
+          await transition(SYSTEM, t.id, { to: 'approved', note: 'plan auto-approved by policy (repaired: no approval was open)' });
+          repaired.push({ id: t.id, identifier: t.identifier, kind: 'plan_approval' });
+          continue;
+        }
+        const doc = db.get<{ id: string; currentRevision: number }>('SELECT id, current_revision FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, 'plan']);
+        const planApproval = deps().decisions.create(SYSTEM, {
+          ticketId: t.id, kind: 'plan_approval', owner,
+          title: `Approve the plan for ${t.identifier}: ${t.title}`,
+          context: `OpenSpec change \`${t.openspecChangeName ?? ''}\` is planning-complete and validates. Review the plan document. (Re-raised: the previous approval was lost.)`,
+          options: [
+            { key: 'approve', label: 'Approve', description: 'The worker implements the plan.', recommended: true },
+            { key: 'revise', label: 'Revise', description: 'Send it back with feedback.' },
+            { key: 'reject', label: 'Reject', description: 'Cancel the ticket.' },
+          ],
+          allowFreeText: true,
+          correlationKey: `plan_approval:${t.id}`,
+          target: doc ? { documentId: doc.id, revision: doc.currentRevision } : undefined,
+          askedByAgentId: t.workerId,
+          askedInRunId: null,
+        });
+        // Same as the original creation at the `proposed` transition: YOLO answers it immediately.
+        if (yolo(t)) await autoApprove(t, planApproval.id);
+        repaired.push({ id: t.id, identifier: t.identifier, kind: 'plan_approval' });
+      }
+
+      const inReview = db
+        .all<Record<string, unknown>>("SELECT * FROM tickets WHERE workspace_id = ? AND status = 'in_review'", [ws])
+        .map(row)
+        .filter((t) => !t.autoMerge);
+      for (const t of inReview) {
+        if (openApproval(t.id, 'merge_approval')) continue;
+        const wp = db.get<{ url: string | null }>("SELECT url FROM ticket_work_products WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1", [t.id]);
+        deps().decisions.create(SYSTEM, {
+          ticketId: t.id, kind: 'merge_approval', owner: 'human',
+          title: `Approve the merge for ${t.identifier}: ${t.title}`,
+          context: `${wp?.url ? `Work product: ${wp.url}` : 'The worker delivered its work product.'} (Re-raised: the previous approval was lost.)`,
+          options: [
+            { key: 'approve', label: 'Approve merge', recommended: true },
+            { key: 'changes', label: 'Request changes', description: 'Send it back to the worker.' },
+          ],
+          allowFreeText: true,
+          correlationKey: `merge_approval:${t.id}`,
+          askedByAgentId: t.workerId,
+          askedInRunId: null,
+        });
+        // Not auto-answered here even under YOLO: `autoMergeSweep` already answers a pending
+        // merge_approval on a YOLO ticket every tick, so it picks this one up on its own next pass.
+        repaired.push({ id: t.id, identifier: t.identifier, kind: 'merge_approval' });
+      }
+
+      return repaired;
     },
 
     nextIdentifier() {

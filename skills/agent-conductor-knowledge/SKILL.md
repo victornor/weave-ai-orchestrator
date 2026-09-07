@@ -11,7 +11,7 @@ The knowledge bases are the memory between sessions. Nothing else carries contex
 
 Ask in this order and stop at the first yes:
 
-1. **Is it task state, a finding, or a decision about this one ticket?** → the ticket: a comment, a `plan` or `report` document, a work product. Never a knowledge base.
+1. **Is it task state, a finding, or a decision about this one ticket?** → the ticket: a comment, a `report` document, a work product. Never a knowledge base.
 2. **Would a future contributor to this repo need it, with or without AgentConductor?** → the **repo**: its `AGENTS.md`, its docs, its specs. It goes through your PR like any other change. Do not copy repo content into a knowledge base; point at it.
 3. **Is it about working on this project from the outside — the stack, the commands, a convention the repo does not state, a landmine, a hard-won lesson?** → `knowledge/projects/<id>/PROJECT.md`, via `ac_knowledge_note("project", section, text)`. **More than a few lines on one topic** (a subsystem, an integration, a runbook, an environment) → a **linked document**: `ac_knowledge_doc_put(slug, body)`, linked from `PROJECT.md`'s Documents section and from related documents with `[[slug]]`. See `references/documents.md`.
 4. **Is it project-agnostic and true everywhere in this workspace — a house convention, a term, a matter of tone?** → `SHARED.md`. **Conductor only**, and it must never name a project, a repo, a client or a role.

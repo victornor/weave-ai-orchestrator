@@ -186,6 +186,16 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     return { rel, abs: join(ctx.paths.knowledge, rel), projectRowId: null };
   }
 
+  /** A document `note()` can append to: it must already exist — a bare append cannot invent a `# Title`. */
+  function ensureDoc(scope: KnowledgeScope, slug: string, projectId?: string | null): { row: FileRow; abs: string; body: string } {
+    const { rel, abs } = locateDoc(scope, slug, projectId);
+    const row = fileRow(rel);
+    if (!row || !existsSync(abs)) {
+      throw new OcError('not_found', `document ${slug} does not exist in the ${scope} scope; create it first with ac_knowledge_doc_put`);
+    }
+    return { row, abs, body: readBody(abs) };
+  }
+
   function titleOf(body: string): string | null {
     const m = /^#\s+(.+)$/m.exec(body);
     return m ? m[1]!.trim() : null;
@@ -298,14 +308,14 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       };
     },
 
-    note(actor, scope, section, text, projectId) {
+    note(actor, scope, section, text, projectId, doc) {
       const trimmed = text.trim();
       if (!trimmed) throw new OcError('validation', 'an entry needs text');
       const words = countWords(trimmed);
       if (words > 60) {
         throw new OcError('entry_too_long', `entries are at most 60 words; this one has ${words}`, { words, limit: 60 });
       }
-      const { row, abs, body } = ensure(scope, projectId);
+      const { row, abs, body } = doc ? ensureDoc(scope, doc, projectId) : ensure(scope, projectId);
       const norm = normalize(trimmed);
       for (const e of entriesOf(body)) {
         if (similarity(norm, e.normalized) >= DUPLICATE_THRESHOLD) {

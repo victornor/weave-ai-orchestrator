@@ -34,3 +34,29 @@ describe('GET /knowledge/health', () => {
     expect(res.status).not.toBe(400);
   });
 });
+
+describe('POST /knowledge/:scope/note', () => {
+  it('passes an optional doc slug through to the service', async () => {
+    const { fetch } = app();
+    harness!.impls.knowledge!['note'] = (_actor: unknown, scope: string, section: string, text: string, projectId: string | null, doc?: string) =>
+      ({ remainingTokens: 100, revision: 2, received: { scope, section, text, projectId, doc } });
+    const res = await fetch('/api/w/ws1/knowledge/project/note?project=proj1', {
+      method: 'POST', body: JSON.stringify({ section: 'Landmines', text: 'A fact.', doc: 'run-engine' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.received).toMatchObject({ scope: 'project', section: 'Landmines', text: 'A fact.', projectId: 'proj1', doc: 'run-engine' });
+  });
+
+  it('leaves doc undefined when the caller does not send one', async () => {
+    const { fetch } = app();
+    harness!.impls.knowledge!['note'] = (_actor: unknown, _scope: string, _section: string, _text: string, _projectId: string | null, doc?: string) =>
+      ({ remainingTokens: 100, revision: 2, received: { doc } });
+    const res = await fetch('/api/w/ws1/knowledge/project/note?project=proj1', {
+      method: 'POST', body: JSON.stringify({ section: 'Learnings', text: 'A fact.' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.received.doc).toBeUndefined();
+  });
+});

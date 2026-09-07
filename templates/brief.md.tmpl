@@ -34,6 +34,8 @@ Your worktree is `work/`, on branch `{{worktree.branch}}`, created from `origin/
 **Before anything else, call `ac_worktree_status`.** It returns the authoritative path, branch, dirty flag and ahead/behind counts — never guess them. If the path or the branch differs from what this brief says, **stop**: `ac_report({state: "blocked"})` and transition the ticket to `blocked` with `{owner: "conductor", action: "worker launched in the wrong worktree"}`. Do not work in a checkout you cannot confirm.
 
 Then read `work/AGENTS.md` (the project's own instructions for contributors) once. The project knowledge base and the shared conventions are already in this file — do not fetch them again.
+
+Its Documents section, and any pointer left in Landmines or Conventions, name the linked documents this project already has. Before touching a file or subsystem, check whether one covers it and read it (`ac_knowledge_doc_get`) — that is the normal way to pick up a subsystem's gotchas, not a discovery you make the hard way.
 {{/unless}}
 {{#if brief.noWorktree}}
 **This is a curation ticket and has no worktree of its own.** Your working directory is your home. `work/` is a read-only checkout of the project's default branch, for fact-checking only: never write to it, never commit, never push. Do not call `ac_worktree_status`. Load `agent-conductor-knowledge` and follow the curation procedure.

@@ -125,6 +125,47 @@ describe('knowledge', () => {
     expect(knowledge.note(WORKER, 'project', 'Landmines', 'The websocket gateway drops idle connections after 30 seconds.', h.projectId).revision).toBeGreaterThan(1);
   });
 
+  it('appends a note into an existing linked document instead of the hub', () => {
+    knowledge.putDoc(WORKER, 'project', 'run-engine', '# Run engine\n\nOne turn end to end.\n', h.projectId);
+    const r = knowledge.note(WORKER, 'project', 'Landmines', 'A second wake for a busy agent is coalesced into the queued one.', h.projectId, 'run-engine');
+    expect(r.revision).toBe(2);
+    const doc = knowledge.getDoc('project', 'run-engine', h.projectId);
+    expect(doc.body).toMatch(/## Landmines\n- \d{4}-\d{2}-\d{2} · A second wake for a busy agent is coalesced into the queued one\./);
+    expect(knowledge.get('project', h.projectId).body).not.toContain('A second wake for a busy agent');
+  });
+
+  it('rejects a doc-targeted note when the document does not exist', () => {
+    expect(() => knowledge.note(WORKER, 'project', 'Landmines', 'Nowhere to put this yet.', h.projectId, 'no-such-doc'))
+      .toThrowError(expect.objectContaining({ code: 'not_found' }));
+  });
+
+  it('checks a doc-targeted note for near-duplicates against the document, not the hub', () => {
+    knowledge.putDoc(WORKER, 'project', 'run-engine', '# Run engine\n\nOne turn end to end.\n', h.projectId);
+    knowledge.note(WORKER, 'project', 'Landmines', 'Never grep the process list for vitest to detect a finished run.', h.projectId, 'run-engine');
+    // The exact same fact in the hub is not a duplicate of the one in the document.
+    expect(knowledge.note(WORKER, 'project', 'Landmines', 'Never grep the process list for vitest to detect a finished run.', h.projectId).revision).toBeGreaterThan(1);
+    // But it is a duplicate of the one already in the document.
+    expect(() => knowledge.note(WORKER, 'project', 'Landmines', 'Never grep the process list for vitest to detect a finished run', h.projectId, 'run-engine'))
+      .toThrowError(expect.objectContaining({ code: 'duplicate_entry' }));
+  });
+
+  it('rejects an over-budget doc-targeted note and schedules curation without touching the hub', async () => {
+    const filler = Array.from({ length: 40 }, (_, i) => `- 2026-01-01 · a run-engine fact number ${i} about phases and wakes`).join('\n');
+    knowledge.putDoc(WORKER, 'project', 'run-engine', `# Run engine\n\n## Landmines\n${filler}\n`, h.projectId);
+    budgets().document = 500;
+    expect(() => knowledge.note(WORKER, 'project', 'Landmines', 'One more run-engine fact worth remembering here.', h.projectId, 'run-engine'))
+      .toThrowError(expect.objectContaining({ code: 'budget_exceeded' }));
+    await tick();
+    expect(knowledge.get('project', h.projectId).curationPending).toBe(false);
+    expect(workers.spawnCurator).toHaveBeenCalledWith(expect.objectContaining({ kind: 'system' }), h.projectId);
+  });
+
+  it('appends a doc-targeted note exactly as before when no doc is given', () => {
+    const r = knowledge.note(WORKER, 'project', 'Learnings', 'Unaffected by the doc parameter existing.', h.projectId);
+    expect(knowledge.get('project', h.projectId).body).toContain('Unaffected by the doc parameter existing.');
+    expect(r.revision).toBe(2);
+  });
+
   it('rejects over-budget writes, flags curation and spawns a curation worker', async () => {
     const filler = Array.from({ length: 400 }, (_, i) => `- 2026-01-01 · durable fact number ${i} about the project internals`).join('\n');
     knowledge.replace(HUMAN, 'project', `# API\n\n## Learnings\n${filler}\n`, 'human', h.projectId);

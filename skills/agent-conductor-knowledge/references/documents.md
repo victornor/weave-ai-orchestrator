@@ -1,13 +1,17 @@
 # Linked documents
 
 The hub files (`PROJECT.md`, `SHARED.md`, `WORKSPACE.md`) are budgeted summaries. Anything that
-needs more than a few lines lives in a **document**: one topic page that links to other pages
-with `[[slug]]`. Together they form the project's knowledge graph. Think Obsidian, with a budget.
+belongs to a **subject** — a subsystem, an integration, a testing quirk, a runbook — lives in a
+**document** for that subject: one topic page that links to other pages with `[[slug]]`. Together
+they form the project's knowledge graph. Think Obsidian, with a budget. Decide by subject, not by
+how much you have to say: a document earns its existence on the first fact about its subject, not
+once enough facts have piled up to look like one — that pile-up, in the hub, is exactly the wall
+this system exists to avoid.
 
 | | Hub file | Document |
 |---|---|---|
 | Path | `knowledge/projects/<id>/PROJECT.md` | `knowledge/projects/<id>/docs/<slug>.md` |
-| Write with | `ac_knowledge_note(scope, section, text)` | `ac_knowledge_doc_put(slug, body)` |
+| Write with | `ac_knowledge_note(scope, section, text)` | `ac_knowledge_doc_put(slug, body)` to create or replace whole; `ac_knowledge_note(scope, section, text, doc: slug)` to append one entry to an existing one |
 | Size | the workspace's configured budget for that file (10000 tokens by default) | the configured document budget (10000 tokens by default) |
 | Shape | fixed sections, ≤ 60-word entries | `# Title`, a one-line summary paragraph, then whatever the topic needs |
 | Found through | always loaded at boot | `ac_knowledge_docs` (catalogue), links, `ac_knowledge_search` |
@@ -19,16 +23,25 @@ by the conductor only. Workspace documents are the conductor's private notes.
 
 Write one when a future worker would otherwise re-discover the same thing: how a subsystem fits
 together, how an integration authenticates and fails, a deployment or release runbook, the data
-model of one bounded context, an environment and its quirks. One topic per document.
+model of one bounded context, an environment and its quirks. One topic per document — including
+a subject whose first known fact is one dated landmine. Do not hold it back in the hub until a
+second one arrives; that wait is how the hub grows into a wall.
 
 Do **not** write one for: task state (the ticket), anything the repo already documents (link to
 the file instead), code walkthroughs that go stale with every PR, or secrets of any kind.
 
 ## Before writing
 
-1. `ac_knowledge_docs` — read the catalogue. If a document on the topic exists, **update it**
-   (`ac_knowledge_doc_get`, edit, `ac_knowledge_doc_put` with the same slug) instead of adding a
-   near-duplicate.
+1. `ac_knowledge_docs` — read the catalogue.
+   - A document on the subject already exists and you have one dated line to add — a landmine, a
+     convention, a fact of the same shape a hub entry would be — **append to it**:
+     `ac_knowledge_note(scope, section, text, doc: slug)`.
+   - No document covers the subject yet, even though the fact itself is one line — **create one**:
+     `ac_knowledge_doc_put(slug, body)`. A single dated entry under a `# Title` and a one-line
+     summary is a complete, valid document; do not default to the hub just because nothing exists
+     yet.
+   - Reach for `ac_knowledge_doc_get` + edit + `ac_knowledge_doc_put` on an existing document only
+     when the change is more than one entry (restructuring, rewriting the summary, fixing links).
 2. `ac_knowledge_search("<topic>")` — the hub entries and other documents that touch it.
 
 ## Writing

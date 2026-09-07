@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Mobile dictation no longer duplicates every word — interim speech results
+  replace the growing phrase instead of being appended
+skip_specs: true

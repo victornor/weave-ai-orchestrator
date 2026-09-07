@@ -27,8 +27,18 @@ class FakeRecognition {
   }
 }
 
+/**
+ * One `result` event. The argument is the recognizer's whole results list for the session, because
+ * that is what the real one hands back every time: it accumulates, and an interim result is
+ * replaced in place at its own index until it turns final. `resultIndex` points at the first
+ * result carried by this event, as Chrome sets it.
+ */
 function said(...parts: [string, boolean][]): { resultIndex: number; results: ResultLike[] } {
-  return { resultIndex: 0, results: parts.map(([transcript, isFinal]) => ({ isFinal, length: 1, 0: { transcript } })) };
+  const firstInterim = parts.findIndex(([, isFinal]) => !isFinal);
+  return {
+    resultIndex: firstInterim === -1 ? Math.max(parts.length - 1, 0) : firstInterim,
+    results: parts.map(([transcript, isFinal]) => ({ isFinal, length: 1, 0: { transcript } })),
+  };
 }
 
 const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
@@ -101,8 +111,76 @@ describe('dictation — speech mode', () => {
     act(() => rec.onresult!(said(['add dark mode to the board', true])));
     expect(box.value).toBe('add dark mode to the board');
 
-    act(() => rec.onresult!(said(['and ship it', true])));
+    // Desktop's shape: the settled result stays put and the next phrase arrives beside it.
+    act(() => rec.onresult!(said(['add dark mode to the board', true], [' and ship it', false])));
     expect(box.value).toBe('add dark mode to the board and ship it');
+
+    act(() => rec.onresult!(said(['add dark mode to the board', true], [' and ship it', true])));
+    expect(box.value).toBe('add dark mode to the board and ship it');
+  });
+
+  // VS-70: Android Chrome restates the whole utterance so far in every result it sends, and marks
+  // the restatements final. Appending them gave the owner "we we we also we also need …".
+  it('writes each word once when the recognizer restates the whole phrase every result', () => {
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+    const box = screen.getByLabelText('Message…') as HTMLTextAreaElement;
+
+    dictate();
+    const rec = FakeRecognition.last!;
+    const heard = [
+      'we',
+      'we also',
+      'we also need',
+      'we also need to',
+      'we also need to document',
+      'we also need to document the different services',
+    ];
+    for (let i = 0; i < heard.length; i++) {
+      const upTo = heard.slice(0, i + 1).map((t) => [t, true] as [string, boolean]);
+      act(() => rec.onresult!(said(...upTo)));
+      expect(box.value).toBe(heard[i]);
+    }
+
+    // The live interim tail sits after the restatement and is itself replaced, not appended.
+    const settled = heard.map((t) => [t, true] as [string, boolean]);
+    act(() => rec.onresult!(said(...settled, ['fans like', false])));
+    expect(box.value).toBe('we also need to document the different services fans like');
+    act(() => rec.onresult!(said(...settled, ['fans like provides', true])));
+    expect(box.value).toBe('we also need to document the different services fans like provides');
+  });
+
+  // VS-70: mobile ends a recognition session after every phrase, and the next one starts a fresh
+  // results list — the text heard so far has to move forward with it, exactly once.
+  it('carries the committed text across a restart mid-sentence', () => {
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+    const box = screen.getByLabelText('Message…') as HTMLTextAreaElement;
+
+    dictate();
+    const rec = FakeRecognition.last!;
+    act(() => rec.onresult!(said(['we also need to document', true])));
+    expect(box.value).toBe('we also need to document');
+
+    act(() => rec.onend!());
+    expect(rec.start).toHaveBeenCalledTimes(2);
+
+    act(() => rec.onresult!(said(['the different', false])));
+    expect(box.value).toBe('we also need to document the different');
+
+    act(() => rec.onresult!(said(['the different services', true])));
+    expect(box.value).toBe('we also need to document the different services');
+  });
+
+  it('keeps text typed before the mic opened, and does not repeat it', () => {
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+    const box = screen.getByLabelText('Message…') as HTMLTextAreaElement;
+
+    fireEvent.change(box, { target: { value: 'typed first' } });
+    dictate();
+    const rec = FakeRecognition.last!;
+    act(() => rec.onresult!(said(['and', true])));
+    act(() => rec.onresult!(said(['and', true], ['and then some', true])));
+
+    expect(box.value).toBe('typed first and then some');
   });
 
   it('never opens a microphone of its own, and shows no meter it cannot fill', () => {

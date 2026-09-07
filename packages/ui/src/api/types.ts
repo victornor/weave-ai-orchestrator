@@ -2,6 +2,7 @@
  * Response shapes for docs/API.md. Entities come from @agent-conductor/shared;
  * these are the envelopes the HTTP layer wraps them in.
  */
+import type { DiffFileStatus, DiffHunk } from '@agent-conductor/render';
 import type {
   Agent,
   Briefing,
@@ -452,7 +453,7 @@ export interface SpecChangeDetail extends SpecChangeSummary {
 }
 
 /** `GET /projects/:id/pull-requests` (VS-97). Flat, exactly as the daemon joins it. */
-export type PullRequestUnavailable = 'no_forge' | 'not_authenticated' | 'no_clone' | 'unsupported' | 'unreachable';
+export type PullRequestUnavailable = 'no_forge' | 'not_authenticated' | 'no_clone' | 'unsupported' | 'unreachable' | 'no_local_branch';
 export type PullRequestChecks = 'pending' | 'success' | 'failure' | 'none';
 
 export interface PullRequestTicket { id: string; identifier: string; title: string; status: TicketStatus; hasPlan: boolean }
@@ -509,6 +510,30 @@ export interface PullRequestDetailResult {
   stale: boolean;
   /** Null with `available: true` means the forge has no such pull request. */
   pullRequest: ProjectPullRequestDetail | null;
+}
+
+/** `GET /projects/:id/pull-requests/:number/diff` (VS-107). Never carries a hunk — the cheap manifest a file tree renders from. */
+export interface DiffFileSummary {
+  path: string; previousPath: string | null; status: DiffFileStatus;
+  additions: number; deletions: number; binary: boolean; tooLarge: boolean;
+}
+export interface PullRequestDiffFilesResult {
+  projectId: string; number: number; available: boolean; reason: PullRequestUnavailable | null; message: string | null; stale: boolean;
+  files: DiffFileSummary[];
+}
+
+/** `GET /projects/:id/pull-requests/:number/diff/file` (VS-107). */
+export interface DiffFileContent extends DiffFileSummary { hunks: DiffHunk[] }
+export interface PullRequestDiffFileResult {
+  projectId: string; number: number; available: boolean; reason: PullRequestUnavailable | null; message: string | null;
+  /** `available: true` with `file: null` means the diff has no such path. */
+  file: DiffFileContent | null;
+}
+
+/** `GET /projects/:id/pull-requests/:number/diff/file/context` (VS-107): a collapsed region's expand control. */
+export interface PullRequestDiffContextResult {
+  projectId: string; number: number; available: boolean; reason: PullRequestUnavailable | null;
+  lines: string[];
 }
 
 /** `GET /projects/:id/history` (VS-96). A branch the history covers — the default branch, a worker's, or an unfinished ticket's. */

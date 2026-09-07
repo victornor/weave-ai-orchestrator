@@ -710,3 +710,107 @@ describe("a project's commit history (VS-96)", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("a pull request's diff (VS-107)", () => {
+  const repos: string[] = [];
+  afterEach(() => { while (repos.length) rmSync(repos.pop()!, { recursive: true, force: true }); });
+
+  function repo(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'ac-diff-'));
+    repos.push(dir);
+    execFileSync('git', ['init', '-b', 'main'], { cwd: dir });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir });
+    return dir;
+  }
+  function commit(dir: string, file: string, content: string, message: string): void {
+    writeFileSync(join(dir, file), content, 'utf8');
+    execFileSync('git', ['add', '.'], { cwd: dir });
+    execFileSync('git', ['commit', '-m', message], { cwd: dir });
+  }
+  function insertProject(h: Harness, clonePath: string): void {
+    h.db.run(
+      "INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at) VALUES ('proj1','ws1','api','API','https://github.com/acme/api.git','main',?,4,'git',1,'{}','ready','t0','t0')",
+      [clonePath],
+    );
+  }
+  const PR = {
+    number: 12, title: 'Add dark mode', url: 'https://github.com/acme/api/pull/12', author: 'victornor',
+    state: 'open' as const, isDraft: false, headRefName: 'ac/acme-42-add-dark-mode', baseRefName: 'main',
+    createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T01:00:00.000Z', mergedAt: null, closedAt: null,
+    additions: 1, deletions: 1, changedFiles: 1, checks: 'success' as const, reviewDecision: null, mergeCommit: null,
+  };
+  const DIFF = 'diff --git a/a.ts b/a.ts\nindex 1..2 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new';
+
+  it('serves the manifest and one file from a fixture forge', async () => {
+    const { h, fetch } = app();
+    insertProject(h, repo());
+    h.runtime.ctx.registries.forges.set('github', {
+      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const }), mergePr: async () => ({}),
+      listPullRequests: async () => [PR], pullRequest: async () => null,
+      pullRequestDiff: async () => DIFF,
+    });
+
+    const manifest = await fetch('/api/w/ws1/projects/proj1/pull-requests/12/diff', { headers: authed() });
+    expect(manifest.status).toBe(200);
+    await expect(manifest.json()).resolves.toMatchObject({ available: true, files: [{ path: 'a.ts', status: 'modified' }] });
+
+    const file = await fetch('/api/w/ws1/projects/proj1/pull-requests/12/diff/file?path=a.ts', { headers: authed() });
+    expect(file.status).toBe(200);
+    const body = await file.json();
+    expect(body.file.hunks).toHaveLength(1);
+  });
+
+  it('falls back to the clone when there is no forge, for a pull request from a local branch', async () => {
+    const { h, fetch } = app();
+    const dir = repo();
+    commit(dir, 'a.ts', 'one\n', 'first');
+    execFileSync('git', ['checkout', '-b', 'ac/acme-42-add-dark-mode'], { cwd: dir });
+    commit(dir, 'a.ts', 'two\n', 'change');
+    execFileSync('git', ['checkout', 'main'], { cwd: dir });
+    insertProject(h, dir);
+    h.runtime.ctx.registries.forges.set('github', {
+      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const }), mergePr: async () => ({}),
+      listPullRequests: async () => [PR], pullRequest: async () => null,
+    });
+
+    const res = await fetch('/api/w/ws1/projects/proj1/pull-requests/12/diff', { headers: authed() });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ available: true, files: [{ path: 'a.ts' }] });
+  });
+
+  it('answers 200 with no_local_branch when neither the forge nor the clone can answer', async () => {
+    const { h, fetch } = app();
+    insertProject(h, repo());
+    h.runtime.ctx.registries.forges.set('github', {
+      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const }), mergePr: async () => ({}),
+      listPullRequests: async () => [PR], pullRequest: async () => null,
+    });
+
+    const res = await fetch('/api/w/ws1/projects/proj1/pull-requests/12/diff', { headers: authed() });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ available: false, reason: 'no_local_branch' });
+  });
+
+  it('reads a collapsed region from the base revision', async () => {
+    const { h, fetch } = app();
+    const dir = repo();
+    commit(dir, 'a.ts', ['one', 'two', 'three', ''].join('\n'), 'first');
+    insertProject(h, dir);
+    h.runtime.ctx.registries.forges.set('github', {
+      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const }), mergePr: async () => ({}),
+      listPullRequests: async () => [PR], pullRequest: async () => null, pullRequestDiff: async () => DIFF,
+    });
+
+    const res = await fetch('/api/w/ws1/projects/proj1/pull-requests/12/diff/file/context?path=a.ts&start=1&end=2', { headers: authed() });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ available: true, lines: ['one', 'two'] });
+  });
+
+  it('rejects a diff/file request with no path', async () => {
+    const { h, fetch } = app();
+    insertProject(h, repo());
+    const res = await fetch('/api/w/ws1/projects/proj1/pull-requests/12/diff/file', { headers: authed() });
+    expect(res.status).toBe(400);
+  });
+});

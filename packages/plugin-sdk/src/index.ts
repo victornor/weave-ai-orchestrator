@@ -46,6 +46,12 @@ export interface ForgeAdapter {
   listPullRequests?(cwd: string, opts?: { limit?: number }): Promise<ForgePullRequest[]>;
   /** Optional (VS-97): one pull request with its description, its changed files and its checks. */
   pullRequest?(cwd: string, number: number): Promise<ForgePullRequestDetail | null>;
+  /**
+   * Optional (VS-107): one pull request's unified diff, in the same text format `git diff` produces
+   * — the daemon's own clone-diff fallback and this are parsed by the same code. `null` when the
+   * forge has no such pull request.
+   */
+  pullRequestDiff?(cwd: string, number: number): Promise<string | null>;
 }
 export interface Logger { debug(msg: string, data?: Record<string, unknown>): void; info(msg: string, data?: Record<string, unknown>): void; warn(msg: string, data?: Record<string, unknown>): void; error(msg: string, data?: Record<string, unknown>): void }
 export interface PluginHost {

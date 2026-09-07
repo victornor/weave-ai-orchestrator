@@ -18,17 +18,11 @@ import { SkeletonRows } from '../../components/Skeleton';
 import { Markdown } from '../../components/Markdown';
 import { ago } from '../../lib/format';
 import { cx } from '../../lib/cx';
+import { UNAVAILABLE } from '../../lib/pullRequestUnavailable';
+import { PullRequestDiff } from './PullRequestDiff';
 import type * as T from '../../api/types';
 import type { ProjectSectionProps } from './sections';
 
-/** What each reason means for this project, in the section's own words. None of them is an error. */
-const UNAVAILABLE: Record<T.PullRequestUnavailable, string> = {
-  no_forge: 'Pull requests are not available for this project: this daemon has no forge.',
-  not_authenticated: 'Pull requests are not available for this project: the forge tool is not signed in on the daemon host.',
-  no_clone: 'Pull requests are not available for this project: its repository has not been cloned yet.',
-  unsupported: 'Pull requests are not available for this project: its forge cannot list them.',
-  unreachable: 'The forge could not be reached.',
-};
 
 const CHECK_STATUS = { success: 'done', failure: 'failed', pending: 'working', none: 'idle' } as const;
 
@@ -224,19 +218,7 @@ function PullRequestDetail({
           <span className="ac-mono text-nano text-done">+{totals.additions}</span>
           <span className="ac-mono text-nano text-failed">−{totals.deletions}</span>
         </div>
-        {pr.files.length ? (
-          <ul className="flex flex-col gap-0.5">
-            {pr.files.map((f) => (
-              <li key={f.path} className="flex items-center gap-2 px-1">
-                <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-2" title={f.path}>{f.path}</span>
-                <span className="ac-mono flex-none text-nano text-done">+{f.additions}</span>
-                <span className="ac-mono flex-none text-nano text-failed">−{f.deletions}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-meta text-text-3">The forge reported no changed files.</p>
-        )}
+        <PullRequestDiff projectId={project.id} number={number} />
       </div>
 
       <div>

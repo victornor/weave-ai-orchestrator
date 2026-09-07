@@ -43,9 +43,34 @@ export function projectRoutes(): Hono<AppEnv> {
    */
   app.get('/:id/pull-requests', async (c) => c.json(await c.get('ws').services.pullRequests.list(c.req.param('id'))));
   app.get('/:id/pull-requests/:number', async (c) => {
-    const number = Number(c.req.param('number'));
-    if (!Number.isInteger(number) || number <= 0) throw new OcError('validation', 'pull request number must be a positive integer', { number: c.req.param('number') });
+    const number = prNumber(c.req.param('number'));
     return c.json(await c.get('ws').services.pullRequests.get(c.req.param('id'), number));
+  });
+  /**
+   * The pull request's diff, per file (VS-107): a manifest with no hunks, and one file's hunks sliced
+   * from the same parse — so opening a pull request, and opening one file of it, are each their own
+   * cheap request. Both share the pull-requests cache's TTL and event-driven invalidation.
+   */
+  app.get('/:id/pull-requests/:number/diff', async (c) => {
+    const number = prNumber(c.req.param('number'));
+    return c.json(await c.get('ws').services.pullRequests.diffFiles(c.req.param('id'), number));
+  });
+  app.get('/:id/pull-requests/:number/diff/file', async (c) => {
+    const number = prNumber(c.req.param('number'));
+    const path = c.req.query('path');
+    if (!path) throw new OcError('validation', 'path is required', {});
+    return c.json(await c.get('ws').services.pullRequests.diffFile(c.req.param('id'), number, path));
+  });
+  /** Expands a collapsed unchanged region from the base revision's own content (design.md). */
+  app.get('/:id/pull-requests/:number/diff/file/context', async (c) => {
+    const number = prNumber(c.req.param('number'));
+    const path = c.req.query('path');
+    if (!path) throw new OcError('validation', 'path is required', {});
+    const start = Number(c.req.query('start'));
+    const end = Number(c.req.query('end'));
+    if (!Number.isInteger(start) || start <= 0) throw new OcError('validation', 'start must be a positive integer', { start: c.req.query('start') });
+    if (!Number.isInteger(end) || end <= 0) throw new OcError('validation', 'end must be a positive integer', { end: c.req.query('end') });
+    return c.json(await c.get('ws').services.pullRequests.diffContext(c.req.param('id'), number, path, start, end));
   });
   /**
    * The project's commit graph (VS-96): the default branch plus every live worker/ticket branch,
@@ -60,6 +85,12 @@ export function projectRoutes(): Hono<AppEnv> {
   });
   app.get('/:id/commits/:sha', async (c) => c.json(await c.get('ws').services.projects.commit(c.req.param('id'), c.req.param('sha'))));
   return app;
+}
+
+function prNumber(raw: string): number {
+  const number = Number(raw);
+  if (!Number.isInteger(number) || number <= 0) throw new OcError('validation', 'pull request number must be a positive integer', { number: raw });
+  return number;
 }
 
 function slugFromUrl(url: string): string {

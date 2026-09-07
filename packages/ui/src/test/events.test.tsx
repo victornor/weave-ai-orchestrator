@@ -85,6 +85,14 @@ describe("a project's pull requests (VS-97)", () => {
   it('is left alone by a ticket event that cannot change a pull request', () => {
     expect(invalidated(event('ticket.updated', { entityId: 'tk_1', entityType: 'ticket' }))).not.toContain(JSON.stringify(qk.pullRequestsRoot('ws1')));
   });
+
+  // VS-107: the diff keys have no listener of their own — they key under the same root, so the
+  // three events above already reach them the way `qk.mergeQueue` reaches under `mergeQueueRoot`.
+  it('keys the diff manifest and one file under the same root, so one invalidation reaches both', () => {
+    const root = JSON.stringify(qk.pullRequestsRoot('ws1')).slice(0, -1);
+    expect(JSON.stringify(qk.pullRequestDiffFiles('ws1', 'p1', 12)).startsWith(root)).toBe(true);
+    expect(JSON.stringify(qk.pullRequestDiffFile('ws1', 'p1', 12, 'a.ts')).startsWith(root)).toBe(true);
+  });
 });
 
 describe("a project's commit graph (VS-96)", () => {

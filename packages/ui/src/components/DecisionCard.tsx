@@ -1,19 +1,19 @@
 import { useState } from 'react';
 import type { Decision, DecisionAnswerInputs, DecisionInput, UiStatus } from '@agent-conductor/shared';
+import { A } from '../app/link';
 import { Button } from './Button';
 import { Composer } from './Composer';
 import { StatusGlyph } from './StatusGlyph';
 import { clock } from '../lib/format';
 import { cx } from '../lib/cx';
-import { A } from '../app/link';
 
 export interface DecisionCardProps {
   decision: Decision;
   ticketIdentifier?: string | null;
   projectSlug?: string | null;
-  askedBy?: string | null;
-  /** The workspace slug — needed only to link a `merge_approval` card to its ticket's conversation (VS-106). */
+  /** The workspace slug — needed to link a merge-approval card to its ticket's conversation (VS-106) and to its pull request's diff (VS-107). */
   ws?: string | null;
+  askedBy?: string | null;
   /** Who raised a question: the conductor asking the human reads differently from a worker asking. */
   asker?: 'conductor' | 'worker';
   busy?: boolean;
@@ -168,7 +168,7 @@ function answerLine(decision: Decision): string | null {
  * primary action sits bottom-left inside a 44 px thumb band. A decision that has
  * been answered renders the same card as an inert record of what was decided.
  */
-export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy, asker, ws, busy, queued, plan, autoApproving, onHide, onAnswer, className }: DecisionCardProps): React.ReactElement {
+export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, askedBy, asker, busy, queued, plan, autoApproving, onHide, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [freeText, setFreeText] = useState(false);
@@ -222,6 +222,13 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
           <a className="ac-mono text-micro" href={target.prUrl} target="_blank" rel="noreferrer">
             PR {target.prNumber ? `#${target.prNumber}` : ''} ↗
           </a>
+        ) : null}
+        {/* The explorer, in place, rather than the forge (VS-107) — absent when there is no pull
+            request to show, or nowhere to route it to. */}
+        {decision.kind === 'merge_approval' && target.prNumber != null && ws && projectSlug ? (
+          <A to="/w/$ws/p/$project" params={{ ws, project: projectSlug }} search={{ pr: target.prNumber }} className="ac-mono text-micro text-accent-link">
+            Show PR
+          </A>
         ) : null}
         {meta ? <span className="ac-mono text-micro text-text-3">{meta}</span> : null}
       </div>

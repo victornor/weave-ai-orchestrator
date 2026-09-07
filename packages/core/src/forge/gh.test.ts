@@ -168,3 +168,24 @@ describe('pullRequest', () => {
     await expect(new GhForge().pullRequest(home, 1)).rejects.toThrow(/invalid JSON/);
   });
 });
+
+describe('pullRequestDiff', () => {
+  it('returns the unified diff exactly as gh printed it', async () => {
+    const diff = 'diff --git a/a.ts b/a.ts\nindex 1..2 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new';
+    fakeGh(`${diff}\n`);
+    const text = await new GhForge().pullRequestDiff(home, 77);
+    expect(text).toBe(diff);
+    expect(args()).toContain('diff');
+    expect(args()).toContain('77');
+  });
+
+  it('answers null for a number the repository does not have', async () => {
+    fakeGh('', 1, 'no pull requests found for branch');
+    await expect(new GhForge().pullRequestDiff(home, 999)).resolves.toBeNull();
+  });
+
+  it('throws on any other gh failure', async () => {
+    fakeGh('', 1, 'HTTP 500');
+    await expect(new GhForge().pullRequestDiff(home, 1)).rejects.toThrow(/gh pr diff failed/);
+  });
+});

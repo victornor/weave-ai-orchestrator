@@ -28,6 +28,7 @@ vi.mock('../api/hooks', () => ({
   useTicketDocumentRevisions: () => ({ data: [] }),
   useTicketWorkProducts: () => ({ data: [], isLoading: false }),
   useTicketUsage: () => ({ data: undefined, isLoading: false }),
+  useTicketKnowledgeUsage: () => ({ data: undefined, isLoading: false }),
   usePatchTicket: () => ({ mutate: vi.fn() }),
   usePostComment: () => ({ mutate: vi.fn() }),
   useRetryTicket: () => ({ mutate: vi.fn(), isPending: false }),

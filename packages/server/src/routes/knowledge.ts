@@ -1,15 +1,32 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { KNOWLEDGE_SCOPES } from '@agent-conductor/shared';
+import { KNOWLEDGE_SCOPES, USAGE_WINDOWS } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
-import { body } from '../http.js';
+import { body, query } from '../http.js';
 
 const scopeParam = z.enum(KNOWLEDGE_SCOPES);
 const project = (c: { req: { query(k: string): string | undefined } }): string | null => c.req.query('project') ?? null;
 
+/** `project`/`window` for the knowledge-context rollups (VS-110) — same window vocabulary as `/usage`. */
+const KnowledgeUsageQuery = z.object({ project: z.string().optional(), window: z.enum(USAGE_WINDOWS).default('all') });
+
 export function knowledgeRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.get('/', (c) => c.json(c.get('ws').services.knowledge.lint()));
+  // Knowledge-context accounting (VS-110): what runs actually consumed, not what a file estimates —
+  // registered before `/:scope` so these literal two-segment paths are never read as a scope.
+  app.get('/usage/summary', (c) => {
+    const q = query(c, KnowledgeUsageQuery);
+    return c.json(c.get('ws').services.knowledgeUsage.summary({ projectId: q.project, window: q.window }));
+  });
+  app.get('/usage/top', (c) => {
+    const q = query(c, KnowledgeUsageQuery);
+    return c.json(c.get('ws').services.knowledgeUsage.topDocuments({ projectId: q.project, window: q.window }));
+  });
+  app.get('/usage/never-read', (c) => {
+    const q = query(c, KnowledgeUsageQuery);
+    return c.json(c.get('ws').services.knowledgeUsage.neverRead({ projectId: q.project, window: q.window }));
+  });
   // Linked documents and the graph come before `/:scope` so "docs" and "graph" are not parsed as scopes.
   app.get('/docs', (c) => {
     const scope = c.req.query('scope');

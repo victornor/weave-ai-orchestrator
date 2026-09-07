@@ -206,7 +206,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     // 3. build the turn prompt
     const policy = sessionPolicyFor(agent, role);
     const turnSession = sessions.forTurn({ id: agent.id, kind: agent.kind, runtimeId: setting.runtime }, policy);
-    promptOptions = { ...promptOptions, isFirstTurn: promptOptions.isFirstTurn ?? turnSession.isFirstTurn, sessionStale: turnSession.stale, turnEpoch: run.turnEpoch };
+    promptOptions = { ...promptOptions, isFirstTurn: promptOptions.isFirstTurn ?? turnSession.isFirstTurn, sessionStale: turnSession.stale, turnEpoch: run.turnEpoch, runId };
     const prompt = await phase('build_prompt', async () => {
       const text = await buildTurnPrompt(ctx, deps, agent, wakes, promptOptions);
       writeFileSync(join(runDir, 'prompt.md'), text, 'utf8');

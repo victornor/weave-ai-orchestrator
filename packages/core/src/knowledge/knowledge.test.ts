@@ -386,6 +386,31 @@ describe('knowledge', () => {
     expect(d.text).not.toContain('Migrations run with pnpm db:migrate.');
     expect(d.tokens).toBe(estimateTokens(d.text));
     expect(d.truncated).toBe(false);
+    expect(d.parts.map((p) => p.scope)).toEqual(['workspace', 'shared', 'project']);
+    const projectPart = d.parts.find((p) => p.scope === 'project')!;
+    expect(projectPart.projectId).toBe(h.projectId);
+    // The chunk is only Overview + Current focus, not Learnings — measured on that slice, not the
+    // full project file's own `tokenEstimate` (VS-110).
+    expect(projectPart.tokens).toBeLessThan(knowledge.get('project', h.projectId).tokenEstimate);
+  });
+
+  it('gives the conductor one bootstrap-part entry per project, sized to that project\'s own chunk', () => {
+    const otherId = newId();
+    const now = new Date().toISOString();
+    h.db.insert('projects', {
+      id: otherId, workspaceId: h.workspaceId, slug: 'web', name: 'Web', gitUrl: 'git@example.com:acme/web.git', defaultBranch: 'main',
+      clonePath: '/tmp/web', maxWorkers: 4, worktreeProvider: 'git', openspecEnabled: 1, policiesJson: {}, status: 'ready',
+      createdAt: now, updatedAt: now,
+    });
+    knowledge.note(HUMAN, 'project', 'Overview', 'Short overview.', h.projectId);
+    knowledge.note(HUMAN, 'project', 'Overview', 'A much longer overview describing the web app in far more detail than the API project has.', otherId);
+    const d = knowledge.bootstrapDigest(h.conductorId);
+    const projectParts = d.parts.filter((p) => p.scope === 'project');
+    expect(projectParts).toHaveLength(2);
+    expect(new Set(projectParts.map((p) => p.projectId))).toEqual(new Set([h.projectId, otherId]));
+    const apiPart = projectParts.find((p) => p.projectId === h.projectId)!;
+    const webPart = projectParts.find((p) => p.projectId === otherId)!;
+    expect(webPart.tokens).toBeGreaterThan(apiPart.tokens);
   });
 
   it('gives a worker SHARED.md plus its own project knowledge, truncating Learnings when over budget', () => {

@@ -685,6 +685,12 @@ export function useTicketUsage(id: string): UseQueryResult<{ total: T.UsageTotal
   return useQuery({ queryKey: qk.ticketUsage(ws, id), queryFn: () => api.ws(ws, `/tickets/${id}/usage`), enabled: Boolean(id) });
 }
 
+/** A ticket's knowledge context (VS-110): hub tokens plus distinct documents, summed over its own runs and its subtree. */
+export function useTicketKnowledgeUsage(id: string): UseQueryResult<T.KnowledgeContextUsage> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.ticketKnowledgeUsage(ws, id), queryFn: () => api.ws<T.KnowledgeContextUsage>(ws, `/tickets/${id}/knowledge-usage`), enabled: Boolean(id) });
+}
+
 /* ------------------------------------------------------------- decisions */
 
 export function useDecisions(
@@ -912,6 +918,38 @@ export function useUsageModels(params: UsageParams): UseQueryResult<T.UsageModel
   return useQuery({
     queryKey: qk.usageModels(ws, params),
     queryFn: () => api.ws<unknown>(ws, `/usage/models${qs(params)}`).then((r) => listOf<Record<string, unknown>>(r, 'models').map((m) => ({ ...topRow(m), model: String(m['model'] ?? m['key'] ?? ''), series: Array.isArray(m['series']) ? (m['series'] as Record<string, unknown>[]).map((p) => ({ ...totals(p), bucket: String(p['bucket'] ?? '') })) : undefined }))),
+  });
+}
+
+export interface KnowledgeUsageParams extends Record<string, string | undefined> {
+  project?: string;
+  window?: UsageWindow;
+}
+
+/** Average knowledge tokens per run for a project and window (VS-110) — separate from `/usage`'s cost figure. */
+export function useKnowledgeUsageSummary(params: KnowledgeUsageParams): UseQueryResult<T.KnowledgeUsageSummary> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.knowledgeUsageSummary(ws, params),
+    queryFn: () => api.ws<T.KnowledgeUsageSummary>(ws, `/knowledge/usage/summary${qs(params)}`),
+  });
+}
+
+/** The documents read most often in a project and window, most-read first. */
+export function useKnowledgeUsageTop(params: KnowledgeUsageParams): UseQueryResult<T.KnowledgeDocumentUsage[]> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.knowledgeUsageTop(ws, params),
+    queryFn: () => api.ws<T.KnowledgeDocumentUsage[]>(ws, `/knowledge/usage/top${qs(params)}`),
+  });
+}
+
+/** Documents in the project's catalogue that no run read in the window — the point of measuring this at all. */
+export function useKnowledgeUsageNeverRead(params: KnowledgeUsageParams): UseQueryResult<T.KnowledgeDocumentRef[]> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.knowledgeUsageNeverRead(ws, params),
+    queryFn: () => api.ws<T.KnowledgeDocumentRef[]>(ws, `/knowledge/usage/never-read${qs(params)}`),
   });
 }
 

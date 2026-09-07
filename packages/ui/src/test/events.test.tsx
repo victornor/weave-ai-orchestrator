@@ -111,3 +111,17 @@ describe("a project's commit graph (VS-96)", () => {
     expect(invalidated(event('ticket.updated', { entityId: 'tk_1', entityType: 'ticket' }))).not.toContain(JSON.stringify(qk.historyRoot('ws1')));
   });
 });
+
+describe('knowledge context events (VS-110)', () => {
+  it('makes the knowledge-usage root and the naming ticket\'s own key stale', () => {
+    const keys = invalidated(event('knowledge_usage.recorded', { entityId: 'run_1', entityType: 'run', payload: { runId: 'run_1', ticketId: 'tk_1' } }));
+    expect(keys).toContain(JSON.stringify(qk.knowledgeUsageRoot('ws1')));
+    expect(keys).toContain(JSON.stringify(qk.ticketKnowledgeUsage('ws1', 'tk_1')));
+  });
+
+  it('skips the ticket key when the run recorded against carries no ticket', () => {
+    const keys = invalidated(event('knowledge_usage.recorded', { entityId: 'run_1', entityType: 'run', payload: { runId: 'run_1', ticketId: null } }));
+    expect(keys).toContain(JSON.stringify(qk.knowledgeUsageRoot('ws1')));
+    expect(keys).not.toContain(JSON.stringify(qk.ticketKnowledgeUsage('ws1', 'tk_1')));
+  });
+});

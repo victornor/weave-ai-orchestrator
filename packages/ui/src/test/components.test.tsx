@@ -21,6 +21,9 @@ const planDoc = vi.hoisted(() => ({ current: null as Record<string, unknown> | n
 vi.mock('../api/hooks', () => ({
   useTicketDocument: () => planDoc.current ?? { data: undefined, isLoading: false, isError: true },
 }));
+vi.mock('../app/link', () => ({
+  A: ({ children, to }: { children?: React.ReactNode; to?: string }) => <a href={to}>{children}</a>,
+}));
 
 describe('StatusGlyph', () => {
   it('renders one accessible glyph per status token', () => {
@@ -189,6 +192,24 @@ describe('DecisionCard', () => {
     expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Revise/ })).toBeInTheDocument();
     expect(screen.getByText('ThemeProvider + OS fallback')).toBeInTheDocument();
+  });
+
+  it('links a merge-approval card to a conversation with the worker that asked it (VS-106)', () => {
+    render(<DecisionCard decision={decision({ kind: 'merge_approval', ticketId: 'tk_9' })} ws="ws1" onAnswer={() => undefined} />);
+    expect(screen.getByRole('link', { name: 'Ask the worker' })).toBeInTheDocument();
+  });
+
+  it('offers no such link without a workspace or a ticket to point at', () => {
+    const { unmount } = render(<DecisionCard decision={decision({ kind: 'merge_approval', ticketId: 'tk_9' })} onAnswer={() => undefined} />);
+    expect(screen.queryByRole('link', { name: 'Ask the worker' })).not.toBeInTheDocument();
+    unmount();
+    render(<DecisionCard decision={decision({ kind: 'merge_approval', ticketId: null })} ws="ws1" onAnswer={() => undefined} />);
+    expect(screen.queryByRole('link', { name: 'Ask the worker' })).not.toBeInTheDocument();
+  });
+
+  it('offers no such link on a decision kind other than merge_approval', () => {
+    render(<DecisionCard decision={decision({ kind: 'plan_approval', ticketId: 'tk_9' })} ws="ws1" onAnswer={() => undefined} />);
+    expect(screen.queryByRole('link', { name: 'Ask the worker' })).not.toBeInTheDocument();
   });
 
   it('renders the plan slot on a plan approval only', () => {

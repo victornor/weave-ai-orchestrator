@@ -27,6 +27,9 @@ export function workerRoutes(): Hono<AppEnv> {
       // Whether the human's next message right now would reach a running turn (VS-99), so a
       // composer can say so before anyone types rather than guessing from the runtime's name.
       input: safe(() => describeLiveInput(ws.ctx, worker)) ?? { midTurn: false },
+      // Whether the worker's *next* turn would resume its existing session rather than start a
+      // fresh one — orthogonal to `input.midTurn`, which is about a turn executing right now.
+      sessionResumable: safe(() => s.workers.sessionResumable(worker.id)) ?? false,
     });
   });
 

@@ -307,6 +307,23 @@ describe('tickets', () => {
     });
   });
 
+  describe('lastWorker (VS-106)', () => {
+    it('names the ticket\'s worker even after retirement nulls its current one', () => {
+      const t = make();
+      const workerId = h.addWorker(t.id);
+      expect(tickets.lastWorker(t.id)?.id).toBe(workerId);
+
+      h.db.update('agents', workerId, { status: 'retired', retiredAt: nowIso() });
+      h.db.update('tickets', t.id, { workerId: null });
+      expect(tickets.lastWorker(t.id)?.id).toBe(workerId);
+    });
+
+    it('is null for a ticket that never had a worker', () => {
+      const t = make();
+      expect(tickets.lastWorker(t.id)).toBeNull();
+    });
+  });
+
   describe('mergeDone', () => {
     it('archives the openspec change and completes the ticket', async () => {
       const t = make();

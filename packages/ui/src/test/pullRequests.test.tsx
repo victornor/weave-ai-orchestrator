@@ -94,7 +94,10 @@ describe('the list', () => {
       open: [pr({ number: 12, ticket: { id: 'tk_1', identifier: 'ACME-42', title: 'Add dark mode', status: 'in_review', hasPlan: false }, changeName: 'acme-42-dark-mode' })],
     });
     show();
-    expect(linkTo('ACME-42').getAttribute('data-params')).toContain('ACME-42');
+    const ticketLink = linkTo('ACME-42');
+    expect(ticketLink.getAttribute('data-params')).toContain('ACME-42');
+    // Opens straight on the conversation with the worker that produced it, not on the overview (VS-106).
+    expect(JSON.parse(ticketLink.getAttribute('data-search') ?? '{}')).toEqual({ tab: 'activity' });
     const change = linkTo('acme-42-dark-mode');
     expect(change.getAttribute('data-to')).toBe('/w/$ws/knowledge');
     expect(JSON.parse(change.getAttribute('data-search') ?? '{}')).toEqual({ project: 'p1', tab: 'specs' });

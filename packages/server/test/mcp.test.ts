@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { OcError } from '@agent-conductor/shared';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createApp } from '../src/app.js';
@@ -266,6 +267,20 @@ describe('agent REST mirror', () => {
     const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
     expect(payload.data.delivery).toBe('queued');
     expect(calledWith[0]![3]).toEqual({ live: false });
+    await client.close();
+  });
+
+  // ---------- VS-106 ----------
+
+  it('ac_worker_message surfaces wrong_status rather than ok:true for a retired worker', async () => {
+    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    h.impls.workers!['message'] = async () => {
+      throw new OcError('wrong_status', 'Backend Engineer #1 has retired; reply on the ticket to reopen it instead');
+    };
+    const res = await client.callTool({ name: 'ac_worker_message', arguments: { workerId: 'ag_1', message: 'still there?' } });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.ok).toBe(false);
+    expect(payload.error.code).toBe('wrong_status');
     await client.close();
   });
 });

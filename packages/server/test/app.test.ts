@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
-import { OcError } from '@agent-conductor/shared';
+import { OcError, type Agent } from '@agent-conductor/shared';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import { authed, makeHarness, ticket, type Harness } from './fakes.js';
@@ -267,6 +267,26 @@ describe('routes', () => {
     const { fetch } = app();
     const res = await fetch('/api/w/ws1/tickets/tk_1', { headers: authed() });
     await expect(res.json()).resolves.toMatchObject({ mergeQueue: { position: null } });
+  });
+
+  it("names a ticket's last worker even after it has retired (VS-106)", async () => {
+    const { h, fetch } = app();
+    h.tickets.set('tk_1', ticket({ workerId: null }));
+    h.impls.tickets!['lastWorker'] = () => ({ id: 'ag_1', status: 'retired', name: 'Backend Engineer #1' } as unknown as Agent);
+    h.impls.workers!['get'] = (id: string) => (id === 'ag_1' ? ({ id: 'ag_1', status: 'retired', name: 'Backend Engineer #1' } as unknown as Agent) : null);
+
+    const res = await fetch('/api/w/ws1/tickets/tk_1', { headers: authed() });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ worker: { id: 'ag_1', status: 'retired' } });
+  });
+
+  it('names no worker for a ticket that never had one', async () => {
+    const { h, fetch } = app();
+    h.tickets.set('tk_1', ticket({ workerId: null }));
+    h.impls.tickets!['lastWorker'] = () => null;
+
+    const res = await fetch('/api/w/ws1/tickets/tk_1', { headers: authed() });
+    await expect(res.json()).resolves.toMatchObject({ worker: null });
   });
 
   it('serves the briefing snapshot', async () => {

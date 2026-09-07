@@ -259,6 +259,8 @@ export interface WorkerDetail {
   lastStatusLine?: string | null;
   /** Whether a message sent right now would reach a running turn (VS-99), and why not when it wouldn't. */
   input: { midTurn: boolean; reason?: string };
+  /** Whether this worker's *next* turn would resume its existing session rather than start fresh (VS-106). */
+  sessionResumable: boolean;
 }
 
 /** `POST /workers/:id/message` result (VS-99): which delivery actually happened. */

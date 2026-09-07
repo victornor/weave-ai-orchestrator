@@ -18,7 +18,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@tanstack/react-router', () => ({ useParams: () => state.params }));
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
-vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
+vi.mock('../app/link', () => ({ useGo: () => vi.fn(), useSearchParams: () => ({}) }));
 
 vi.mock('../api/hooks', () => ({
   useTicket: () => ({ data: { ticket: ticket({ id: 'tk_1' }), project: null, worker: agent(), blockers: [], mergeQueue: { position: null }, openspecState: null }, isLoading: false, isError: false }),
@@ -33,6 +33,8 @@ vi.mock('../api/hooks', () => ({
   useRetryTicket: () => ({ mutate: vi.fn(), isPending: false }),
   useDecisions: () => ({ data: [] }),
   useAnswerDecision: () => ({ mutate: vi.fn(), isPending: false }),
+  useWorker: () => ({ data: undefined, isLoading: false, isError: false }),
+  useWorkerMessage: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRun: () => ({ data: state.runDetail, isLoading: false, isError: false }),
   useRunEvents: (id: string) => ({ data: id ? state.persisted : [], isLoading: false }),
 }));

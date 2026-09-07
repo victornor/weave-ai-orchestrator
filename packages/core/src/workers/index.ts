@@ -229,6 +229,12 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     async message(actor: Actor, workerId: string, body: string, opts: { live?: boolean } = {}): Promise<WorkerMessageOutcome> {
       const agent = get(workerId);
       if (!agent.ticketId) throw new OcError('validation', `${agent.name} has no ticket to talk on`);
+      // A retired worker will never take another turn: recording a comment and queuing a wake for
+      // it would misstate what happened as delivered-or-queued when nobody will ever read it.
+      // Reopening the ticket with a plain comment is the real way back in (VS-106).
+      if (agent.status === 'retired') {
+        throw new OcError('wrong_status', `${agent.name} has retired; reply on the ticket to reopen it instead`);
+      }
       // Attribution first (VS-99): the human's words are on the ticket before any delivery is
       // attempted, so a failed or throwing send still leaves a durable record.
       deps().tickets.comment(actor, agent.ticketId, body, 'relay', actor.kind === 'human' ? 'trusted' : 'agent');
@@ -400,6 +406,10 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       ctx.events.emit('worker.retired', 'agent', workerId, { ticketId: agent.ticketId, name: agent.name });
       log.info({ workerId }, 'worker retired');
       return { retired: true };
+    },
+
+    sessionResumable(id: string): boolean {
+      return sessions.active(id) !== null;
     },
 
     brief(workerId: string): string {

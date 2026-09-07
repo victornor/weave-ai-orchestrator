@@ -649,6 +649,7 @@ export function ChatRoute(): React.ReactElement {
                           asker="conductor"
                           ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
                           projectSlug={projectSlugOf(d)}
+                          ws={ws}
                           busy={answer.isPending}
                           plan={<PlanPreview decision={d} />}
                           onAnswer={(a) => answerDecision(d.id, a)}
@@ -748,6 +749,7 @@ export function ChatRoute(): React.ReactElement {
                 {...(askedByConductor(d) ? { asker: 'conductor' as const } : {})}
                 ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
                 projectSlug={projectSlugOf(d)}
+                ws={ws}
                 busy={answer.isPending}
                 plan={<PlanPreview decision={d} />}
                 onHide={() => hide(d)}

@@ -677,6 +677,11 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       return db.all<TicketComment>(sql, params);
     },
 
+    lastWorker(id) {
+      const t = get(id);
+      return latestWorkerFor(t.id);
+    },
+
     putDocument,
 
     getDocument(id, key, revision) {

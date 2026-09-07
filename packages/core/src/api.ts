@@ -31,6 +31,9 @@ export interface TicketsService {
   /** Relaunch the ticket's worker (or spawn one) after a failure or a pause; blocked tickets go back to work. */
   retry(actor: Actor, id: string, note?: string): Promise<S.Ticket>;
   comments(id: string, after?: string): S.TicketComment[];
+  /** The most recent worker to have held this ticket, even after it retired — `ticket.workerId` is
+   * nulled on retirement, so this is the only way to name who built a ticket that has since landed. */
+  lastWorker(id: string): S.Agent | null;
   /** `opts.system` is for the daemon's own internal write of the `plan` digest only — never set it from a tool or route handling external input; every other write to `key: 'plan'` is refused. */
   putDocument(actor: Actor, id: string, key: string, body: string, opts?: { system?: boolean }): { documentId: string; revision: number };
   getDocument(id: string, key: string, revision?: number): { documentId: string; revision: number; body: string; createdAt: string } | null;
@@ -186,6 +189,8 @@ export interface WorkersService {
   cancel(actor: Actor, workerId: string, reason: string): Promise<S.Agent>;
   pause(actor: Actor, id: string, reason: string): S.Agent; resume(actor: Actor, id: string): S.Agent;
   retireIfLanded(actor: Actor, workerId: string): Promise<{ retired: boolean; reason?: string }>;
+  /** Whether this agent's next turn would resume its existing session rather than start a fresh one. */
+  sessionResumable(id: string): boolean;
   brief(workerId: string): string;
   resetSession(actor: Actor, id: string, reason: string): Promise<void>;
 }

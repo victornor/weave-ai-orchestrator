@@ -169,6 +169,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
         }),
       },
       comments: () => comments,
+      lastWorker: () => null,
       putDocument: (_actor: Actor, id: string, key: string, body: string) => {
         const docKey = `${getTicket(id).id}\0${key}`;
         const revisions = documents.get(docKey) ?? [];

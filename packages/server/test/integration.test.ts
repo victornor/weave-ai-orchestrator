@@ -68,6 +68,73 @@ describe('real core services over HTTP', () => {
     expect((await res.json()).status).toBe('answered');
   });
 
+  // ---------- VS-106 ----------
+
+  it('a reviewer conversation: queued delivery, approving the merge, then a retired worker is refused', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const services = deps.workspaces.get(harness.workspaceId)!.services;
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+
+    const ticket = services.tickets.create({ kind: 'human', id: null }, { projectId: harness.projectId, kind: 'task', title: 'Add dark mode' });
+    const workerId = harness.addWorker(ticket.id);
+    harness.db.update('tickets', ticket.id, { status: 'in_review' });
+    const decision = services.decisions.create({ kind: 'agent', id: workerId }, {
+      kind: 'merge_approval', title: 'Merge dark mode?', ticketId: ticket.id, askedByAgentId: workerId, options: [{ key: 'approve', label: 'Approve' }, { key: 'changes', label: 'Request changes' }],
+    });
+
+    // No turn is executing (no active run seeded), so a live send queues rather than reaching a turn.
+    const sent = await app.fetch(new Request(`${base}/workers/${workerId}/message`, {
+      method: 'POST', headers: H, body: JSON.stringify({ body: 'why a token layer first?', live: true }),
+    }));
+    expect(sent.status).toBe(202);
+    expect((await sent.json()).delivery).toBe('queued');
+    expect(services.tickets.comments(ticket.id).at(-1)).toMatchObject({ body: 'why a token layer first?', kind: 'relay' });
+
+    // Approving from the conversation answers the same decision the card would, landing the ticket.
+    const approved = await app.fetch(new Request(`${base}/decisions/${decision.id}/answer`, {
+      method: 'POST', headers: H, body: JSON.stringify({ key: 'approve' }),
+    }));
+    expect(approved.status).toBe(200);
+    expect(services.tickets.get(ticket.id).status).toBe('merging');
+
+    // Once the worker has retired, the ticket still names it (VS-106's lastWorker fallback) and a
+    // new message is refused rather than queued into nothing.
+    harness.db.update('agents', workerId, { status: 'retired' });
+    harness.db.run('UPDATE tickets SET worker_id = NULL WHERE id = ?', [ticket.id]);
+
+    const detail = await (await app.fetch(new Request(`${base}/tickets/${ticket.id}`, { headers: H }))).json();
+    expect(detail.worker).toMatchObject({ id: workerId, status: 'retired' });
+
+    const refused = await app.fetch(new Request(`${base}/workers/${workerId}/message`, {
+      method: 'POST', headers: H, body: JSON.stringify({ body: 'are you still there?', live: true }),
+    }));
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error.code).toBe('wrong_status');
+  });
+
+  it('asking for revisions from the conversation answers the decision and wakes the worker with the words', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const services = deps.workspaces.get(harness.workspaceId)!.services;
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+
+    const ticket = services.tickets.create({ kind: 'human', id: null }, { projectId: harness.projectId, kind: 'task', title: 'Add dark mode' });
+    const workerId = harness.addWorker(ticket.id);
+    harness.db.update('tickets', ticket.id, { status: 'in_review' });
+    const decision = services.decisions.create({ kind: 'agent', id: workerId }, {
+      kind: 'merge_approval', title: 'Merge dark mode?', ticketId: ticket.id, askedByAgentId: workerId, options: [{ key: 'approve', label: 'Approve' }, { key: 'changes', label: 'Request changes' }],
+    });
+
+    const revised = await app.fetch(new Request(`${base}/decisions/${decision.id}/answer`, {
+      method: 'POST', headers: H, body: JSON.stringify({ key: 'changes', text: 'please add a test' }),
+    }));
+    expect(revised.status).toBe(200);
+    expect(services.tickets.get(ticket.id).status).toBe('in_progress');
+    expect(services.tickets.comments(ticket.id).some((c) => c.body.includes('please add a test'))).toBe(true);
+    expect(services.wake.listForAgent(workerId).length).toBeGreaterThan(0);
+  });
+
   it('serves an agent tool call backed by real services', async () => {
     const { deps, harness } = boot();
     const app = createApp(deps);

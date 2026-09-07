@@ -31,3 +31,11 @@ describe('decision events', () => {
     expect(invalidated(event('ticket.created', { entityId: 'tk_1' }))).not.toContain(JSON.stringify(qk.workspaces()));
   });
 });
+
+describe('run events', () => {
+  it('makes the conductor detail stale, so the chat header reads the turn that just ended', () => {
+    const keys = invalidated(event('run.finished', { entityId: 'run_1', entityType: 'run' }));
+    expect(keys).toContain(JSON.stringify(qk.conductor('ws1')));
+    expect(keys).toContain(JSON.stringify(qk.runs('ws1')));
+  });
+});

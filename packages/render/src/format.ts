@@ -134,3 +134,25 @@ export function initials(name: string | null | undefined): string {
   if (words.length === 1) return words[0]!.slice(0, 2).toUpperCase();
   return `${words[0]![0]!}${words[1]![0]!}`.toUpperCase();
 }
+
+/**
+ * Time left until a moment, at the granularity a header can carry: `2h 10m` · `47m` · `3d 4h` ·
+ * `now`. Finer than `formatRelative` on purpose — a countdown that only moves once an hour reads
+ * as frozen. Null when there is no target, so the caller can leave the phrase out entirely.
+ */
+export function formatCountdown(target: string | number | Date | null | undefined, now: Date = new Date()): string | null {
+  if (target === null || target === undefined) return null;
+  const t = target instanceof Date ? target.getTime() : typeof target === 'number' ? target : Date.parse(target);
+  if (!Number.isFinite(t)) return null;
+  const min = Math.floor((t - now.getTime()) / 60_000);
+  if (min <= 0) return 'now';
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) {
+    const rem = min % 60;
+    return rem ? `${hr}h ${rem}m` : `${hr}h`;
+  }
+  const day = Math.floor(hr / 24);
+  const rem = hr % 24;
+  return rem ? `${day}d ${rem}h` : `${day}d`;
+}

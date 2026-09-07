@@ -752,12 +752,24 @@ export function useUsageModels(params: UsageParams): UseQueryResult<T.UsageModel
   });
 }
 
-/** The current runtime account snapshots: billing mode and plan limits, refreshed daemon-side. */
-export function useUsageAccounts(): UseQueryResult<T.UsageAccount[]> {
+/**
+ * The daemon's own refresh interval for the account snapshots (`ACCOUNTS_EVERY_MS` in the
+ * supervisor). A view that wants the numbers to stay live polls at the same cadence: refetching
+ * faster only re-reads a row nothing has rewritten.
+ */
+export const ACCOUNTS_REFRESH_MS = 5 * 60_000;
+
+/**
+ * The current runtime account snapshots: billing mode and plan limits, refreshed daemon-side.
+ * `refetchIntervalMs` is opt-in per caller — a screen that shows the numbers live asks for the
+ * poll, and one that reads them once on load does not pay for it.
+ */
+export function useUsageAccounts(options?: { refetchIntervalMs?: number }): UseQueryResult<T.UsageAccount[]> {
   const ws = useWs();
   return useQuery({
     queryKey: qk.usageAccounts(ws),
     queryFn: () => api.ws<unknown>(ws, '/usage/accounts').then((r) => listOf<T.UsageAccount>(r, 'accounts')),
+    refetchInterval: options?.refetchIntervalMs ?? false,
   });
 }
 

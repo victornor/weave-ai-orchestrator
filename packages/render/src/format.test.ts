@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatAge, formatCents, formatCost, formatDelta, formatDiffStat, formatDuration, formatRelative, formatReportedShare, formatTokens, initials, joinMeta, oneLine } from './format.js';
+import { formatAge, formatCents, formatCost, formatCountdown, formatDelta, formatDiffStat, formatDuration, formatRelative, formatReportedShare, formatTokens, initials, joinMeta, oneLine } from './format.js';
 
 describe('formatTokens', () => {
   it('formats the design contract sample', () => {
@@ -91,5 +91,21 @@ describe('misc formatters', () => {
     expect(initials('Backend Engineer')).toBe('BE');
     expect(initials('conductor')).toBe('CO');
     expect(initials(null)).toBe('··');
+  });
+});
+
+describe('formatCountdown', () => {
+  const now = new Date('2026-09-05T17:35:00.000Z');
+  it('keeps minutes visible inside the hour and the day', () => {
+    expect(formatCountdown('2026-09-05T18:22:00.000Z', now)).toBe('47m');
+    expect(formatCountdown('2026-09-05T19:45:00.000Z', now)).toBe('2h 10m');
+    expect(formatCountdown('2026-09-05T19:35:00.000Z', now)).toBe('2h');
+    expect(formatCountdown('2026-09-10T01:59:59.000Z', now)).toBe('4d 8h');
+  });
+  it('says now once the moment has passed, and nothing when there is no moment', () => {
+    expect(formatCountdown('2026-09-05T17:35:00.000Z', now)).toBe('now');
+    expect(formatCountdown('2026-09-05T10:00:00.000Z', now)).toBe('now');
+    expect(formatCountdown(null, now)).toBeNull();
+    expect(formatCountdown('not a date', now)).toBeNull();
   });
 });

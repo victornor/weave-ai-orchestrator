@@ -14,7 +14,10 @@ import { StatusGlyph } from '../components/StatusGlyph';
 import { Transcript } from '../components/Transcript';
 import { TurnTrace } from '../components/TurnTrace';
 import { ScrollToBottomButton } from '../components/ScrollToBottom';
+import { SessionLimit } from '../components/SessionLimit';
+import { ContextMeter } from '../components/ContextMeter';
 import {
+  ACCOUNTS_REFRESH_MS,
   useAnswerDecision,
   useConductor,
   useCreateThread,
@@ -24,11 +27,15 @@ import {
   useRunTraces,
   useThreadMessages,
   useThreads,
+  useRuntimeModels,
+  useRuntimes,
   useTickets,
+  useUsageAccounts,
   useWorkers,
 } from '../api/hooks';
 import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
+import { contextStrip, resolveModel, runtimeLimitStrip } from '@agent-conductor/render';
 import { chatEntries, chatRows } from '../lib/dispatch';
 import { useShowSilentTurns } from '../lib/chatPrefs';
 import { readExpandedTraces, toggleExpandedTrace } from '../lib/traceExpansion';
@@ -102,6 +109,28 @@ export function ChatRoute(): React.ReactElement {
   const replyToId = draft.replyToId ?? null;
   const conductor = useConductor();
   const conductorId = conductor.data?.agent.id ?? null;
+  // The conductor's own runtime, not the workers': the agent row is kept in step with the
+  // `conductor` block of the workspace config by `ensureConductor`, and Settings reads the same
+  // field, so there is one source for which runtime the conductor is on.
+  const conductorRuntime = conductor.data?.agent.runtimeId ?? null;
+  // Polled rather than streamed: nothing emits a workspace event when a snapshot is replaced, so
+  // the strip re-reads on the daemon's own probe cadence and ticks its countdown locally between.
+  const accounts = useUsageAccounts({ refetchIntervalMs: ACCOUNTS_REFRESH_MS });
+  // How full the conductor's context is. The window is the model's own, from the runtime's model
+  // list; the compaction point is the runtime's own capability — neither is decided in the UI. The
+  // size itself is the last finished turn's input plus cache reads, refreshed because `run.finished`
+  // invalidates the conductor detail.
+  const runtimes = useRuntimes();
+  const conductorModels = useRuntimeModels(conductorRuntime);
+  const lastRun = conductor.data?.lastRun ?? null;
+  /** Only for the divider between the two meters: whether the plan meter renders anything at all. */
+  const hasPlanMeter = runtimeLimitStrip(accounts.data, conductorRuntime) !== null;
+  const context = useMemo(() => contextStrip({
+    usage: lastRun?.usage,
+    contextWindowTokens: resolveModel(conductorModels.data, lastRun?.model ?? conductor.data?.agent.model)?.contextWindowTokens,
+    compactionAt: (runtimes.data ?? []).find((r) => r.id === conductorRuntime)?.capabilities['contextCompactionAt'] as number | undefined,
+    hasRun: Boolean(lastRun?.finishedAt),
+  }), [lastRun, conductorModels.data, runtimes.data, conductorRuntime, conductor.data?.agent.model]);
   /**
    * The conductor run on screen, and whether it is still going.
    *
@@ -354,7 +383,16 @@ export function ChatRoute(): React.ReactElement {
     <Page>
       <PageHeader
         title="Conductor"
-        meta={`${running} workers running · ${(decisions.data ?? []).filter((d) => d.status === 'open').length} need you`}
+        // Hidden on a phone: the plan strip is the live number worth the width there, and the
+        // header must stay one line.
+        meta={<span className="hidden md:inline">{`${running} workers running · ${(decisions.data ?? []).filter((d) => d.status === 'open').length} need you`}</span>}
+        actions={
+          <div className="flex min-w-0 items-center gap-2.5">
+            <ContextMeter view={context} />
+            {context && hasPlanMeter ? <span className="h-3 w-px bg-line-2" aria-hidden /> : null}
+            <SessionLimit accounts={accounts.data} runtimeId={conductorRuntime} />
+          </div>
+        }
       />
 
       {onboarding ? (

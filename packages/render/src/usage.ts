@@ -3,8 +3,8 @@
  * plan-limit block a subscription account replaces that cost with (PLAN §16.3).
  */
 import type { CostStatus, RuntimeAccount, UsageBillingMix } from '@agent-conductor/shared';
-import { formatCents, formatCost, formatDelta, formatRelative, formatReportedShare, formatTokens } from './format.js';
-import type { AccountLimitsView, UsageTotalsView } from './types.js';
+import { formatCents, formatCost, formatCountdown, formatDelta, formatRelative, formatReportedShare, formatTokens } from './format.js';
+import type { AccountLimitsView, ContextStripView, RuntimeLimitStripView, UsageTotalsView } from './types.js';
 
 export interface UsagePoint {
   bucket?: string;
@@ -154,4 +154,115 @@ export function accountLimits(accounts: RuntimeAccount[] | null | undefined, now
     note: a.note,
     age: formatRelative(a.capturedAt, now),
   }));
+}
+
+/** Amber past 80 %, red past 95 % — the thresholds the plan-limit bars and the budget meter share. */
+function limitTone(percent: number): 'ok' | 'warn' | 'over' {
+  return percent >= 95 ? 'over' : percent >= 80 ? 'warn' : 'ok';
+}
+
+/**
+ * The plan meter for one runtime, sized for a page header: the session window with a live
+ * countdown to its reset, or the one reason there is nothing to meter.
+ *
+ * Null when there is nothing a header should say at all — no snapshot for that runtime, or an
+ * account billed per token, which has no plan window to be a fraction of. A subscription whose
+ * limits the runtime could not report, and an account the probe could not describe, both come back
+ * with `reason` and no `meter`: a quiet line beats a bar drawn at zero.
+ */
+export function runtimeLimitStrip(
+  accounts: RuntimeAccount[] | null | undefined,
+  runtimeId: string | null | undefined,
+  now: Date = new Date(),
+): RuntimeLimitStripView | null {
+  if (!runtimeId) return null;
+  const account = (accounts ?? []).find((a) => a.runtimeId === runtimeId);
+  if (!account || account.billingType === 'metered_api') return null;
+
+  const base = {
+    runtimeId: account.runtimeId,
+    plan: account.planLabel ?? (account.billingType === 'subscription_included' ? 'subscription' : 'unknown'),
+    note: account.note,
+    age: formatRelative(account.capturedAt, now),
+    capturedAt: account.capturedAt,
+  };
+
+  // The session window is the one the header is about; a runtime that reports only a weekly window
+  // shows that rather than nothing, since it is still the limit the human is spending against.
+  const window = account.limitsAvailable ? account.limits.find((w) => w.kind === 'session') ?? account.limits[0] : undefined;
+  if (!window) {
+    return {
+      ...base,
+      meter: null,
+      reason: account.billingType === 'unknown' ? 'Account probe failed' : 'Limits unavailable',
+    };
+  }
+  const percent = Math.max(0, Math.min(100, Math.round(window.utilization)));
+  return {
+    ...base,
+    meter: {
+      label: windowLabel(window.label, window.scopeLabel),
+      percent,
+      resetsIn: formatCountdown(window.resetsAt, now),
+      tone: limitTone(percent),
+    },
+    reason: null,
+  };
+}
+
+/**
+ * Which entry of a runtime's model list a reported model id is. Exact first, then the longest entry
+ * the id starts with: a CLI reports a dated build (`claude-opus-5-20260115`) where the list carries
+ * the family (`claude-opus-5`), and an alias (`opus`) where the list carries the alias too. Null
+ * rather than a guess when nothing matches — the caller then says the window is unknown.
+ */
+export function resolveModel<T extends { id: string }>(models: T[] | null | undefined, modelId: string | null | undefined): T | null {
+  if (!modelId) return null;
+  const list = models ?? [];
+  const exact = list.find((m) => m.id === modelId);
+  if (exact) return exact;
+  const prefixed = list.filter((m) => m.id.length > 0 && modelId.startsWith(m.id)).sort((a, b) => b.id.length - a.id.length);
+  return prefixed[0] ?? null;
+}
+
+/** The live context size of a resumed session: what the last turn sent, plus what it read from cache. */
+export function contextTokens(usage: { inputTokens?: number | null; cachedInputTokens?: number | null } | null | undefined): number {
+  return n(usage?.inputTokens) + n(usage?.cachedInputTokens);
+}
+
+/**
+ * How full the conductor's context is: the last turn's context size as a fraction of the model's
+ * window, and how far that is towards the point the runtime compacts at.
+ *
+ * The turn's own `inputTokens + cachedInputTokens` is the context size because the session is
+ * resumed — everything the conversation holds is re-sent or read back from cache on every turn.
+ *
+ * Null when there is no finished turn to measure, which is not a failure and needs no line. A turn
+ * that reported nothing usable, and a model whose window we cannot state, both come back with a
+ * `reason` and no meter rather than a percentage of a number we invented.
+ */
+export function contextStrip(input: {
+  usage: { inputTokens?: number | null; cachedInputTokens?: number | null } | null | undefined;
+  /** The model's own context window, from the runtime's model list. */
+  contextWindowTokens: number | null | undefined;
+  /** The runtime's compaction point as a fraction of the window, from its capabilities. */
+  compactionAt?: number | null;
+  /** False before the conductor has ever finished a turn. */
+  hasRun: boolean;
+}): ContextStripView | null {
+  if (!input.hasRun) return null;
+  const tokens = contextTokens(input.usage);
+  const window = input.contextWindowTokens;
+  const bare = { tokens, tokensLabel: formatTokens(tokens), windowLabel: window ? formatTokens(window) : '—', meter: null };
+  if (tokens <= 0) return { ...bare, reason: 'Context size unreported' };
+  if (!window || !Number.isFinite(window) || window <= 0) return { ...bare, reason: 'Context window unknown' };
+
+  const percent = Math.max(0, Math.min(100, Math.round((tokens / window) * 100)));
+  const compactionTokens = input.compactionAt && input.compactionAt > 0 ? window * input.compactionAt : null;
+  const toCompaction = compactionTokens ? Math.max(0, Math.min(100, Math.round((tokens / compactionTokens) * 100))) : null;
+  return {
+    ...bare,
+    meter: { percent, toCompaction, tone: limitTone(toCompaction ?? percent) },
+    reason: null,
+  };
 }

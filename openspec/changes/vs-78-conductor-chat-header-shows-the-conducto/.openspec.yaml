@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Conductor chat header shows the conductor runtime's live session limit and
+  time to reset when it runs on a subscription

@@ -249,6 +249,55 @@ export interface AccountLimitsView {
   age: string;
 }
 
+/**
+ * The one-line plan meter a chat header carries for a single runtime: the session window and its
+ * countdown to reset, or the single quiet reason there is no meter to draw. Null from
+ * `runtimeLimitStrip` — the caller renders nothing at all — when the runtime is metered or has no
+ * snapshot yet, because neither has a plan window a header could be about.
+ */
+export interface RuntimeLimitStripView {
+  runtimeId: string;
+  /** The plan label the runtime reported, or a stand-in for the billing mode. */
+  plan: string;
+  /**
+   * The window to show in the header: the session window when the runtime reports one, otherwise
+   * the first window it does report. Null when there is no window to draw, and `reason` says why.
+   * `resetsIn` is the bare countdown (`2h 10m`), not the `resets in …` phrase the usage view uses.
+   */
+  meter: { label: string; percent: number; resetsIn: string | null; tone: 'ok' | 'warn' | 'over' } | null;
+  /** The single quiet line shown in place of a meter: `Account probe failed` · `Limits unavailable`. */
+  reason: string | null;
+  /** The runtime's own explanation of `reason`, when it gave one. */
+  note: string | null;
+  /** How long ago the snapshot was captured: `2m ago`. */
+  age: string;
+  /** The raw capture time, for the title a hover reads. */
+  capturedAt: string;
+}
+
+/**
+ * How full the conductor's context is, for the same header strip the plan meter sits in. Null from
+ * `contextStrip` when the agent has not run yet and there is simply nothing to measure; `reason`
+ * with no `meter` when it has run but the runtime did not report enough to compute a fraction.
+ */
+export interface ContextStripView {
+  /** Tokens in the window right now: the last turn's input plus what it read back from cache. */
+  tokens: number;
+  /** `82k` — the count a hover shows. */
+  tokensLabel: string;
+  /** `200k` — the window it is a fraction of. */
+  windowLabel: string;
+  meter: {
+    /** Percentage of the model's context window, 0..100. */
+    percent: number;
+    /** Percentage of the way to the runtime's compaction point; null when the runtime has none. */
+    toCompaction: number | null;
+    tone: 'ok' | 'warn' | 'over';
+  } | null;
+  /** The single quiet line shown in place of a meter. */
+  reason: string | null;
+}
+
 export interface UsageTotalsView {
   tokens: string;
   tokensIn: string;

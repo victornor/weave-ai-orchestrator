@@ -106,6 +106,23 @@ describe('SessionLimit', () => {
     const sheet = screen.getByRole('dialog');
     expect(sheet.textContent).toContain('Weekly · Fable');
     expect(sheet.textContent).toContain('resets in 4d');
-    expect(sheet.textContent).toContain('Captured 2m ago');
+    expect(sheet.textContent).toContain('synced 2m ago');
+  });
+
+  // The detail is the usage page's own block (VS-84), so the sync it offers is the same one.
+  it('offers the same sync in the detail, for the conductor\'s runtime', () => {
+    const sync = { pendingRuntimeId: null, messages: {}, onSync: vi.fn() };
+    render(<SessionLimit accounts={[subscription]} runtimeId="claude" sync={sync} />);
+    fireEvent.click(screen.getByTestId('session-limit'));
+
+    expect(screen.getByRole('dialog').textContent).toContain('every 5 minutes');
+    fireEvent.click(screen.getByTestId('sync-claude'));
+    expect(sync.onSync).toHaveBeenCalledWith('claude');
+  });
+
+  it('offers no sync in the detail when the header was given none', () => {
+    render(<SessionLimit accounts={[subscription]} runtimeId="claude" />);
+    fireEvent.click(screen.getByTestId('session-limit'));
+    expect(screen.queryByTestId('sync-claude')).toBeNull();
   });
 });

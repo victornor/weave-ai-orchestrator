@@ -18,6 +18,13 @@ import { redactSecrets } from '../util/redact.js';
 /** A probe may not hold up a tick; the claude CLI answers in well under a second. */
 export const ACCOUNT_PROBE_TIMEOUT_MS = 20_000;
 
+/**
+ * How long an on-demand sync of one runtime blocks the next one (VS-84). A human clicking twice
+ * must not become a way to spawn a coding CLI in a loop. Per workspace and runtime, and counted
+ * only against manual syncs: the supervisor poll neither consumes this window nor waits on it.
+ */
+export const MANUAL_SYNC_INTERVAL_MS = 30_000;
+
 interface CredentialRow {
   workspaceId: string; runtimeId: string; present: number; expiresAt: string | null;
   lastVerifiedAt: string | null; refreshFailedAt: string | null; needsLogin: number;
@@ -68,6 +75,50 @@ export function createAccountsService(ctx: WorkspaceContext): AccountsService {
     return [...ids].filter(Boolean).sort();
   };
 
+  /** When each runtime was last probed *on demand*. Per service instance, which is per workspace. */
+  const lastManualSync = new Map<string, number>();
+
+  /**
+   * Describe one runtime's account and replace its snapshot. Shared by the supervisor poll and the
+   * on-demand sync, which differ only in what they do with a probe that threw: the poll leaves the
+   * previous snapshot standing and says nothing, the sync says so.
+   */
+  const probe = async (runtimeId: string): Promise<{ account: S.RuntimeAccount | null; error: string | null }> => {
+    const adapter = ctx.registries.runtimes.get(runtimeId);
+    if (!adapter?.describeAccount) return { account: null, error: `the ${runtimeId} runtime does not describe its account` };
+    const configHome = join(ctx.paths.runtimesHome, runtimeId);
+    try {
+      reconcileRuntimeCredential(runtimeId, configHome, { readCredential: credentialReaderFor(ctx.registries, runtimeId) });
+      const d = await adapter.describeAccount({ configHome, env: {}, timeoutMs: ACCOUNT_PROBE_TIMEOUT_MS });
+      const row = {
+        workspaceId: ctx.workspaceId,
+        runtimeId,
+        billingType: d.billingType,
+        planLabel: d.planLabel,
+        limitsAvailable: d.limitsAvailable ? 1 : 0,
+        limitsJson: d.limits,
+        note: d.note,
+        capturedAt: nowIso(),
+      };
+      ctx.db.run('DELETE FROM runtime_accounts WHERE workspace_id = ? AND runtime_id = ?', [ctx.workspaceId, runtimeId]);
+      ctx.db.insert('runtime_accounts', row);
+      // A probe that described the account proves the credential works. Only the "last seen
+      // working" mark is written here: lowering the gate also has to release the agents it
+      // paused, which is `ungateRuntime`'s job, not a side effect of a poll (VS-75).
+      if (d.billingType !== 'unknown') writeCredential(ctx, runtimeId, { lastVerifiedAt: nowIso() });
+      // A probe that could not describe the account says why, and how it tried to launch the
+      // CLI: the command it resolved, the cwd and the PATH it searched (VS-73). The snapshot it
+      // wrote carries the note, so the surfaces say so too rather than showing stale numbers.
+      if (d.billingType === 'unknown') log.warn({ runtimeId, note: d.note, ...d.diagnostics }, 'the runtime account probe failed');
+      else log.debug({ runtimeId, billingType: d.billingType, limits: d.limits.length }, 'runtime account snapshot refreshed');
+      return { account: service.get(runtimeId), error: null };
+    } catch (e) {
+      // The previous snapshot stays; a failed probe must not blank out what we last knew.
+      log.warn({ runtimeId, err: String(e) }, 'could not describe the runtime account');
+      return { account: null, error: String(e instanceof Error ? e.message : e) };
+    }
+  };
+
   const service: AccountsService = {
     list(): S.RuntimeAccount[] {
       return ctx.db
@@ -84,40 +135,44 @@ export function createAccountsService(ctx: WorkspaceContext): AccountsService {
       const ids = runtimeIds ?? runtimesInUse();
       const out: S.RuntimeAccount[] = [];
       for (const runtimeId of ids) {
-        const adapter = ctx.registries.runtimes.get(runtimeId);
-        if (!adapter?.describeAccount) continue;
-        const configHome = join(ctx.paths.runtimesHome, runtimeId);
-        try {
-          reconcileRuntimeCredential(runtimeId, configHome, { readCredential: credentialReaderFor(ctx.registries, runtimeId) });
-          const d = await adapter.describeAccount({ configHome, env: {}, timeoutMs: ACCOUNT_PROBE_TIMEOUT_MS });
-          const row = {
-            workspaceId: ctx.workspaceId,
-            runtimeId,
-            billingType: d.billingType,
-            planLabel: d.planLabel,
-            limitsAvailable: d.limitsAvailable ? 1 : 0,
-            limitsJson: d.limits,
-            note: d.note,
-            capturedAt: nowIso(),
-          };
-          ctx.db.run('DELETE FROM runtime_accounts WHERE workspace_id = ? AND runtime_id = ?', [ctx.workspaceId, runtimeId]);
-          ctx.db.insert('runtime_accounts', row);
-          const stored = service.get(runtimeId);
-          if (stored) out.push(stored);
-          // A probe that described the account proves the credential works. Only the "last seen
-          // working" mark is written here: lowering the gate also has to release the agents it
-          // paused, which is `ungateRuntime`'s job, not a side effect of a poll (VS-75).
-          if (d.billingType !== 'unknown') writeCredential(ctx, runtimeId, { lastVerifiedAt: nowIso() });
-          // A probe that could not describe the account says why, and how it tried to launch the
-          // CLI: the command it resolved, the cwd and the PATH it searched (VS-73).
-          if (d.billingType === 'unknown') log.warn({ runtimeId, note: d.note, ...d.diagnostics }, 'the runtime account probe failed');
-          else log.debug({ runtimeId, billingType: d.billingType, limits: d.limits.length }, 'runtime account snapshot refreshed');
-        } catch (e) {
-          // The previous snapshot stays; a failed probe must not blank out what we last knew.
-          log.warn({ runtimeId, err: String(e) }, 'could not describe the runtime account');
-        }
+        // The poll swallows a failure by design: the previous snapshot stays, and a stale number
+        // with a visible capture time beats no number. `sync` is the caller that reports it.
+        const { account } = await probe(runtimeId);
+        if (account) out.push(account);
       }
       return out;
+    },
+
+    /**
+     * A human asked for the numbers now (VS-84). Probes every requested runtime that is outside its
+     * rate limit window, and answers with the current snapshot of all of them — freshly probed or
+     * not — so the caller can render the same block either way, plus what it refused and what it
+     * could not describe.
+     */
+    async sync(runtimeIds?: string[]): Promise<S.AccountSync> {
+      const ids = runtimeIds ?? runtimesInUse();
+      const synced: string[] = [];
+      const throttled: S.AccountSyncThrottle[] = [];
+      const failed: S.AccountSyncFailure[] = [];
+      const now = Date.now();
+      for (const runtimeId of ids) {
+        const last = lastManualSync.get(runtimeId) ?? 0;
+        const retryAfterMs = last + MANUAL_SYNC_INTERVAL_MS - now;
+        if (retryAfterMs > 0) {
+          throttled.push({ runtimeId, nextSyncAt: new Date(last + MANUAL_SYNC_INTERVAL_MS).toISOString(), retryAfterMs });
+          continue;
+        }
+        // The clock starts at the request, not at the answer: a probe that hangs for its whole
+        // timeout must not leave the runtime open to another one the moment it gives up.
+        lastManualSync.set(runtimeId, now);
+        const { account, error } = await probe(runtimeId);
+        if (error) failed.push({ runtimeId, message: error });
+        else if (account) synced.push(runtimeId);
+      }
+      // Every runtime that was asked about, in the order it was asked about, whatever happened to
+      // it: the block on screen is drawn from this list and must not lose a row to a failed probe.
+      const accounts = ids.map((id) => service.get(id)).filter((a): a is S.RuntimeAccount => a !== null);
+      return { accounts, synced, throttled, failed };
     },
 
     // ---------- credential state (VS-75) ----------

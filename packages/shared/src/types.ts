@@ -35,6 +35,16 @@ export interface UsageEvent { id: string; workspaceId: string; projectId: string
 export interface AccountLimitWindow { kind: E.AccountLimitKind; label: string; utilization: number; resetsAt: string | null; scopeLabel: string | null }
 /** The current account snapshot for one runtime in one workspace (PLAN §16.2). */
 export interface RuntimeAccount { workspaceId: string; runtimeId: string; billingType: E.BillingType; planLabel: string | null; limitsAvailable: boolean; limits: AccountLimitWindow[]; note: string | null; capturedAt: string }
+/** A runtime an on-demand sync would not probe again yet, with the moment the next one is allowed (VS-84). */
+export interface AccountSyncThrottle { runtimeId: string; nextSyncAt: string; retryAfterMs: number }
+/** A runtime an on-demand sync probed and could not describe. Its previous snapshot still stands. */
+export interface AccountSyncFailure { runtimeId: string; message: string }
+/**
+ * The answer to an on-demand account sync (VS-84): the current snapshot of every runtime that was
+ * asked about — freshly probed or not — plus which of them were probed, which were refused as too
+ * recent, and which failed. Unlike the supervisor poll, a manual sync never hides a failed probe.
+ */
+export interface AccountSync { accounts: RuntimeAccount[]; synced: string[]; throttled: AccountSyncThrottle[]; failed: AccountSyncFailure[] }
 /**
  * The state of the one credential this host shares for a runtime (VS-75). `needsLogin` is the gate:
  * while it is true no turn is started for any agent on that runtime. Deliberately has no field that

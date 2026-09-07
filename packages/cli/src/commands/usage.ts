@@ -3,7 +3,7 @@ import type { Command } from 'commander';
 import { USAGE_GRAINS, USAGE_WINDOWS } from '@agent-conductor/shared';
 import { accountLimits, mixedBillingNote, showCost, usageRows, usageTotals, type UsageSeries } from '@agent-conductor/render';
 import { emit, fields, heading, style, table, write } from '../output.js';
-import type { RuntimeAccount } from '@agent-conductor/shared';
+import type { AccountSync, RuntimeAccount } from '@agent-conductor/shared';
 import { run, session } from './util.js';
 
 export function register(program: Command): void {
@@ -17,6 +17,8 @@ export function register(program: Command): void {
     .option('--end <iso>', 'custom window end')
     .option('--by <dimension>', 'break down by model|ticket|role|worker|project')
     .option('--series', 'print every bucket, not only the totals')
+    .option('--sync', 'probe the plan limits now instead of reading the last snapshot')
+    .option('--runtime <id>', 'with --sync, probe only this runtime')
     .action(async (opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const { client } = await session(command);
       const query = {
@@ -41,6 +43,11 @@ export function register(program: Command): void {
         return;
       }
 
+      // Probe before reading, when asked. The snapshots are then re-read the same way as always,
+      // so a sync of one runtime cannot quietly narrow the block to that runtime alone.
+      const sync = opts['sync'] === true
+        ? await client.wpost<AccountSync>('/usage/accounts/refresh', typeof opts['runtime'] === 'string' ? { runtimeId: opts['runtime'] } : {})
+        : null;
       const series = await client.wget<UsageSeries>('/usage', query);
       const accounts = await client.wget<RuntimeAccount[]>('/usage/accounts').catch(() => [] as RuntimeAccount[]);
       const totals = usageTotals(series);
@@ -48,7 +55,7 @@ export function register(program: Command): void {
       // subscription the plan windows take their place (PLAN §16.3).
       const withCost = showCost(series?.billingMix);
       const plans = accountLimits(accounts, new Date());
-      emit({ ...series, accounts }, () => {
+      emit({ ...series, accounts, ...(sync ? { sync } : {}) }, () => {
         heading(`${query.scope} · ${query.window}${series?.range?.grain ? ` · ${series.range.grain}` : ''}`);
         fields([
           ['tokens', `${totals.tokens}  ${style.dim(`in ${totals.tokensIn} · out ${totals.tokensOut} · cached ${totals.tokensCached}`)}`],
@@ -59,13 +66,22 @@ export function register(program: Command): void {
 
         for (const plan of plans) {
           write('');
-          heading(`${plan.runtimeId} · ${plan.plan} ${style.dim(plan.age)}`);
+          heading(`${plan.runtimeId} · ${plan.plan} ${style.dim(`synced ${plan.age}`)}`);
           if (plan.limitsAvailable) {
             fields(plan.windows.map((w) => [w.label, `${w.percent}%${w.resetsIn ? style.dim(`  ${w.resetsIn}`) : ''}`] as [string, string]));
           } else {
             write(style.dim(`  ${plan.probeFailed ? 'account probe failed' : 'limits unavailable'}${plan.note ? ` — ${plan.note}` : ''}`));
           }
         }
+        // What the sync itself did. A runtime refused as too recent is not an error — it is a wait,
+        // and saying so is the whole point of the daemon answering rather than refusing.
+        if (sync) {
+          write('');
+          if (sync.synced.length) write(style.dim(`  synced ${sync.synced.join(', ')}`));
+          for (const t of sync.throttled) write(style.dim(`  ${t.runtimeId}: synced too recently — next sync in ${Math.max(1, Math.ceil(t.retryAfterMs / 1000))}s`));
+          for (const f of sync.failed) write(style.dim(`  ${f.runtimeId}: sync failed — ${f.message}`));
+        }
+
         const mixed = mixedBillingNote(series?.billingMix);
         if (mixed) { write(''); write(style.dim(`  ${mixed}`)); }
         if (opts['series'] === true) {

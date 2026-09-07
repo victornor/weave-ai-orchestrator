@@ -61,6 +61,7 @@ vi.mock('../api/hooks', () => ({
   ACCOUNTS_REFRESH_MS: 300_000,
   useConductor: () => ({ data: state.conductor }),
   useUsageAccounts: () => ({ data: state.accounts }),
+  useSyncUsageAccounts: () => ({ mutate: vi.fn(), isPending: false }),
   useRuntimes: () => ({ data: state.runtimes }),
   useRuntimeModels: () => ({ data: state.models }),
   useRunEvents: (id: string) => { if (id) state.eventRequests.push(id); return { data: id ? state.persisted : [] }; },

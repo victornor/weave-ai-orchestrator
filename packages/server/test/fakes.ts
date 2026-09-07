@@ -8,7 +8,7 @@ import type { Actor, CoreServices, WorkspaceContext } from '@agent-conductor/cor
 import type { AuthService } from '@agent-conductor/core';
 import {
   DaemonConfigSchema, OcError, WorkspaceConfigSchema,
-  type Briefing, type Decision, type RuntimeAccount, type RuntimeCredential, type Ticket, type TicketComment, type Wakeup,
+  type AccountSyncFailure, type AccountSyncThrottle, type Briefing, type Decision, type RuntimeAccount, type RuntimeCredential, type Ticket, type TicketComment, type Wakeup,
 } from '@agent-conductor/shared';
 import type { AppDeps, WorkspaceRuntime } from '../src/types.js';
 import { createUpdateChecker } from '../src/release-info.js';
@@ -102,11 +102,15 @@ export interface HarnessOptions {
   accounts?: RuntimeAccount[];
   /** Runtime credential state served by `GET /usage/credentials` (VS-75). */
   credentials?: RuntimeCredential[];
+  /** Runtimes an on-demand sync reports as failed (VS-84). */
+  syncFailed?: AccountSyncFailure[];
 }
 
 export function makeHarness(options: HarnessOptions = {}): Harness {
   const workspaceId = options.workspaceId ?? 'ws1';
   const calls: Call[] = [];
+  /** Which runtimes this harness has already synced on demand, so a second sync is throttled. */
+  const syncedRuntimes = new Set<string>();
   const db = new Db(':memory:');
   db.migrate();
   db.run('INSERT INTO workspaces (id, slug, name, ticket_prefix, status, root_path, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
@@ -217,6 +221,18 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     usage: impl('usage', {}),
     accounts: impl('accounts', {
       list: () => options.accounts ?? [], get: () => null, refresh: async () => [],
+      // A stand-in for the real rate limit (VS-84), which lives in the core service and is tested
+      // there: the first sync of a runtime probes, every later one in this process is throttled.
+      sync: async (runtimeIds?: string[]) => {
+        const ids = runtimeIds ?? (options.accounts ?? []).map((a) => a.runtimeId);
+        const synced: string[] = [];
+        const throttled: AccountSyncThrottle[] = [];
+        for (const runtimeId of ids) {
+          if (syncedRuntimes.has(runtimeId)) throttled.push({ runtimeId, nextSyncAt: '2026-09-07T10:00:30.000Z', retryAfterMs: 30_000 });
+          else { syncedRuntimes.add(runtimeId); synced.push(runtimeId); }
+        }
+        return { accounts: (options.accounts ?? []).filter((a) => ids.includes(a.runtimeId)), synced, throttled, failed: options.syncFailed ?? [] };
+      },
       credentials: () => options.credentials ?? [],
       credential: (runtimeId: string) => (options.credentials ?? []).find((c) => c.runtimeId === runtimeId)
         ?? { workspaceId: 'ws1', runtimeId, present: false, expiresAt: null, lastVerifiedAt: null, refreshFailedAt: null, needsLogin: false, detail: null, updatedAt: '2026-09-07T09:00:00.000Z' },

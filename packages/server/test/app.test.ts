@@ -380,6 +380,59 @@ describe('usage accounts', () => {
     const { fetch } = app({ accounts: [snapshot] });
     expect((await fetch('/api/w/ws1/usage/accounts')).status).toBe(401);
   });
+
+  /** The on-demand sync (VS-84). The window itself is the accounts service's; this is the surface. */
+  describe('syncing on demand', () => {
+    const sync = (fetch: (p: string, i?: RequestInit) => Promise<Response>, body?: Record<string, unknown>) =>
+      fetch('/api/w/ws1/usage/accounts/refresh', {
+        method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify(body ?? {}),
+      });
+
+    it('syncs the named runtime and answers with its snapshot and what happened', async () => {
+      const { h, fetch } = app({ accounts: [snapshot] });
+      const res = await sync(fetch, { runtimeId: 'claude' });
+      expect(res.status).toBe(200);
+
+      const out = await res.json() as Record<string, unknown>;
+      expect(out['synced']).toEqual(['claude']);
+      expect(out['throttled']).toEqual([]);
+      expect(out['failed']).toEqual([]);
+      expect(out['accounts']).toHaveLength(1);
+      expect((out['accounts'] as Array<Record<string, unknown>>)[0]).toMatchObject({ runtimeId: 'claude', displayName: 'claude', capturedAt: '2026-09-05T17:00:00.000Z' });
+      expect(h.calls.filter((c) => c.method === 'sync').map((c) => c.args)).toEqual([[['claude']]]);
+    });
+
+    it('syncs every runtime the workspace spends on when the body names none', async () => {
+      const { h, fetch } = app({ accounts: [snapshot] });
+      await sync(fetch);
+      expect(h.calls.filter((c) => c.method === 'sync').map((c) => c.args)).toEqual([[undefined]]);
+    });
+
+    // The point of the rate limit's shape: too soon is a fact the caller has to render, not a
+    // failure. The snapshot still comes back so the block on screen keeps its numbers.
+    it('answers a sync inside the rate limit window with the snapshot and the wait, not an error', async () => {
+      const { fetch } = app({ accounts: [snapshot] });
+      await sync(fetch, { runtimeId: 'claude' });
+
+      const res = await sync(fetch, { runtimeId: 'claude' });
+      expect(res.status).toBe(200);
+      const out = await res.json() as Record<string, unknown>;
+      expect(out['synced']).toEqual([]);
+      expect(out['throttled']).toEqual([{ runtimeId: 'claude', nextSyncAt: '2026-09-07T10:00:30.000Z', retryAfterMs: 30_000 }]);
+      expect(out['accounts']).toHaveLength(1);
+    });
+
+    it('reports a probe that failed rather than letting the old numbers read as fresh', async () => {
+      const { fetch } = app({ accounts: [snapshot], syncFailed: [{ runtimeId: 'claude', message: 'the CLI is not logged in' }] });
+      const out = await (await sync(fetch, { runtimeId: 'claude' })).json() as Record<string, unknown>;
+      expect(out['failed']).toEqual([{ runtimeId: 'claude', message: 'the CLI is not logged in' }]);
+    });
+
+    it('is session-gated', async () => {
+      const { fetch } = app({ accounts: [snapshot] });
+      expect((await fetch('/api/w/ws1/usage/accounts/refresh', { method: 'POST' })).status).toBe(401);
+    });
+  });
 });
 
 /**

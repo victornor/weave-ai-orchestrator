@@ -7,13 +7,17 @@ import { configureOutput } from './output.js';
 let server: Server | null = null;
 let url = '';
 let routes: Record<string, unknown> = {};
+/** Every path the stub was asked for, so a test can assert that a sync was — or was not — made. */
+let seen: string[] = [];
 
 beforeEach(async () => {
   routes = {};
+  seen = [];
   server = createServer((req, res) => {
     req.resume();
     req.on('end', () => {
       const path = (req.url ?? '').split('?')[0]!;
+      seen.push(path);
       const body = routes[path];
       res.writeHead(body === undefined ? 404 : 200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(body ?? { error: { code: 'not_found', message: `no stub for ${path}`, retryable: false } }));
@@ -100,6 +104,54 @@ describe('conductor usage', () => {
     const out = await cli('usage');
     expect(out).toMatch(/^\s*cost /m);
     expect(out).not.toContain('limits unavailable');
+  });
+
+  /* ------------------------------------------- the on-demand sync (VS-84) */
+
+  it('does not sync unless asked', async () => {
+    seedSeries({ subscription: 1000, metered: 0, unknown: 0 });
+    routes['/api/w/ws1/usage/accounts'] = [subscription];
+    const out = await cli('usage');
+    expect(seen).not.toContain('/api/w/ws1/usage/accounts/refresh');
+    expect(out).not.toContain('synced claude');
+  });
+
+  it('probes before printing and says what it synced', async () => {
+    seedSeries({ subscription: 1000, metered: 0, unknown: 0 });
+    routes['/api/w/ws1/usage/accounts'] = [subscription];
+    routes['/api/w/ws1/usage/accounts/refresh'] = { accounts: [subscription], synced: ['claude'], throttled: [], failed: [] };
+
+    const out = await cli('usage', '--sync');
+    expect(seen).toContain('/api/w/ws1/usage/accounts/refresh');
+    expect(out).toContain('synced claude');
+    // The block itself is unchanged: the same snapshot, printed the same way.
+    expect(out).toContain('claude · max');
+    expect(out).toContain('42%');
+  });
+
+  it('says how long to wait when the daemon refused the sync as too recent', async () => {
+    seedSeries({ subscription: 1000, metered: 0, unknown: 0 });
+    routes['/api/w/ws1/usage/accounts'] = [subscription];
+    routes['/api/w/ws1/usage/accounts/refresh'] = {
+      accounts: [subscription], synced: [], failed: [],
+      throttled: [{ runtimeId: 'claude', nextSyncAt: '2026-09-07T10:00:30.000Z', retryAfterMs: 11_200 }],
+    };
+
+    const out = await cli('usage', '--sync');
+    expect(out).toContain('claude: synced too recently — next sync in 12s');
+    // Still not an error, and the numbers are still printed.
+    expect(process.exitCode).toBeUndefined();
+    expect(out).toContain('42%');
+  });
+
+  it('says which runtime the probe failed for', async () => {
+    seedSeries({ subscription: 1000, metered: 0, unknown: 0 });
+    routes['/api/w/ws1/usage/accounts'] = [subscription];
+    routes['/api/w/ws1/usage/accounts/refresh'] = {
+      accounts: [subscription], synced: [], throttled: [], failed: [{ runtimeId: 'claude', message: 'the CLI is not logged in' }],
+    };
+
+    expect(await cli('usage', '--sync')).toContain('claude: sync failed — the CLI is not logged in');
   });
 
   it('drops the COST column from --series on a subscription window', async () => {

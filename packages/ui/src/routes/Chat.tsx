@@ -15,6 +15,7 @@ import { Transcript } from '../components/Transcript';
 import { TurnTrace } from '../components/TurnTrace';
 import { ScrollToBottomButton } from '../components/ScrollToBottom';
 import { SessionLimit } from '../components/SessionLimit';
+import { usePlanSync } from '../lib/planSync';
 import { ContextMeter } from '../components/ContextMeter';
 import {
   ACCOUNTS_REFRESH_MS,
@@ -116,6 +117,8 @@ export function ChatRoute(): React.ReactElement {
   // Polled rather than streamed: nothing emits a workspace event when a snapshot is replaced, so
   // the strip re-reads on the daemon's own probe cadence and ticks its countdown locally between.
   const accounts = useUsageAccounts({ refetchIntervalMs: ACCOUNTS_REFRESH_MS });
+  // … and a human who does not want to wait for that cadence can sync from the sheet (VS-84).
+  const planSync = usePlanSync();
   // How full the conductor's context is. The window is the model's own, from the runtime's model
   // list; the compaction point is the runtime's own capability — neither is decided in the UI. The
   // size itself is the last finished turn's input plus cache reads, refreshed because `run.finished`
@@ -127,10 +130,10 @@ export function ChatRoute(): React.ReactElement {
   const hasPlanMeter = runtimeLimitStrip(accounts.data, conductorRuntime) !== null;
   const context = useMemo(() => contextStrip({
     usage: lastRun?.usage,
-    contextWindowTokens: resolveModel(conductorModels.data, lastRun?.model ?? conductor.data?.agent.model)?.contextWindowTokens,
+    contextWindowTokens: resolveModel(conductorModels.data, lastRun?.model)?.contextWindowTokens,
     compactionAt: (runtimes.data ?? []).find((r) => r.id === conductorRuntime)?.capabilities['contextCompactionAt'] as number | undefined,
     hasRun: Boolean(lastRun?.finishedAt),
-  }), [lastRun, conductorModels.data, runtimes.data, conductorRuntime, conductor.data?.agent.model]);
+  }), [lastRun, conductorModels.data, runtimes.data, conductorRuntime]);
   /**
    * The conductor run on screen, and whether it is still going.
    *
@@ -390,7 +393,7 @@ export function ChatRoute(): React.ReactElement {
           <div className="flex min-w-0 items-center gap-2.5">
             <ContextMeter view={context} />
             {context && hasPlanMeter ? <span className="h-3 w-px bg-line-2" aria-hidden /> : null}
-            <SessionLimit accounts={accounts.data} runtimeId={conductorRuntime} />
+            <SessionLimit accounts={accounts.data} runtimeId={conductorRuntime} sync={planSync} />
           </div>
         }
       />

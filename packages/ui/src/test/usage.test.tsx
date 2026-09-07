@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { accountLimits, MIXED_BILLING_NOTE } from '@agent-conductor/render';
 import type { RuntimeAccount, RuntimeCredential, UsageBillingMix } from '@agent-conductor/shared';
-import { PlanLimits } from '../components/PlanLimits';
+import { PlanLimits, type PlanSync } from '../components/PlanLimits';
 import { RuntimeCredentials } from '../components/RuntimeCredentials';
 
 const NOW = new Date('2026-09-05T17:35:00.000Z');
@@ -36,7 +36,7 @@ describe('PlanLimits', () => {
     expect(screen.getByText('42%')).toBeTruthy();
     expect(screen.getByText('resets in 35m')).toBeTruthy();
     expect(screen.getByText('Weekly · Fable')).toBeTruthy();
-    expect(screen.getByText('2m ago')).toBeTruthy();
+    expect(screen.getByText('synced 2m ago')).toBeTruthy();
   });
 
   it('says limits are unavailable with the reason, and draws no bar', () => {
@@ -51,7 +51,7 @@ describe('PlanLimits', () => {
     render(<PlanLimits accounts={accountLimits([probeFailed], NOW)} />);
     expect(screen.getByText(/Account probe failed/)).toBeTruthy();
     expect(screen.getByText(/spawn error/)).toBeTruthy();
-    expect(screen.getByText('2m ago')).toBeTruthy();
+    expect(screen.getByText('synced 2m ago')).toBeTruthy();
     expect(screen.queryByText(/Limits unavailable/)).toBeNull();
   });
 
@@ -70,6 +70,48 @@ describe('PlanLimits', () => {
     const { container } = render(<PlanLimits accounts={accountLimits([], NOW)} />);
     expect(container.innerHTML).toBe('');
   });
+
+  /* ------------------------------------------- the on-demand sync (VS-84) */
+
+  const planSync = (over: Partial<PlanSync> = {}): PlanSync => ({ pendingRuntimeId: null, messages: {}, onSync: vi.fn(), ...over });
+
+  it('offers no sync at all when the caller hands down none', () => {
+    const { container } = render(<PlanLimits accounts={accountLimits([subscription], NOW)} />);
+    expect(container.querySelector('[data-testid="sync-claude"]')).toBeNull();
+    expect(screen.queryByText(/every 5 minutes/)).toBeNull();
+  });
+
+  it('syncs the runtime whose control was used, and says what the daemon does on its own', () => {
+    const sync = planSync();
+    render(<PlanLimits accounts={accountLimits([subscription, noLimits], NOW)} sync={sync} />);
+    expect(screen.getByText(/every 5 minutes/)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('sync-codex'));
+    expect(sync.onSync).toHaveBeenCalledWith('codex');
+  });
+
+  it('spins and refuses a second request while that runtime is in flight, leaving the others alone', () => {
+    const sync = planSync({ pendingRuntimeId: 'claude' });
+    render(<PlanLimits accounts={accountLimits([subscription, noLimits], NOW)} sync={sync} />);
+
+    const claude = screen.getByTestId('sync-claude') as HTMLButtonElement;
+    expect(claude.disabled).toBe(true);
+    expect(claude.getAttribute('aria-busy')).toBe('true');
+    expect(claude.textContent).toContain('Syncing');
+    expect(claude.querySelector('.animate-spin')).toBeTruthy();
+    expect((screen.getByTestId('sync-codex') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('says next to the runtime when its sync failed or was refused as too recent', () => {
+    render(
+      <PlanLimits
+        accounts={accountLimits([subscription, noLimits], NOW)}
+        sync={planSync({ messages: { claude: 'Sync failed — the CLI is not logged in', codex: 'Synced too recently — try again in 12s.' } })}
+      />,
+    );
+    expect(screen.getByTestId('sync-note-claude').textContent).toContain('the CLI is not logged in');
+    expect(screen.getByTestId('sync-note-codex').textContent).toContain('try again in 12s');
+  });
 });
 
 /* ------------------------------------------------------ the Usage route */
@@ -83,6 +125,7 @@ function mockHooks(billingMix: UsageBillingMix | undefined, accounts: RuntimeAcc
     useUsageTop: () => ({ data: [] }),
     useUsageModels: () => ({ data: [] }),
     useUsageAccounts: () => ({ data: accounts.map((a) => ({ ...a, displayName: a.runtimeId })) }),
+    useSyncUsageAccounts: () => ({ mutate: vi.fn(), isPending: false }),
     useUsageCredentials: () => ({ data: credentials.map((c) => ({ ...c, displayName: c.runtimeId })) }),
   }));
 }

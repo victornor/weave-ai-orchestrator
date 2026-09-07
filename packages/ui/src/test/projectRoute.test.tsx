@@ -1,7 +1,7 @@
 /**
- * The project overview page (VS-95): the address it resolves, the header, every section that has
- * data, and the History section still reserved for VS-96. The Pull requests section has its own
- * suite (`pullRequests.test.tsx`); here it only has to be present, named and rendering.
+ * The project overview page (VS-95): the address it resolves, the header, and every section that
+ * has data. The History and Pull requests sections have their own suites (`historySection.test.tsx`,
+ * `pullRequests.test.tsx`); here they only have to be present, named and rendering.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,6 +25,7 @@ const state = vi.hoisted(() => ({
   docs: [] as KnowledgeDocSummary[],
   health: null as KnowledgeHealth | null,
   pullRequests: null as ProjectPullRequests | null,
+  history: null as { refs: unknown[]; commits: unknown[] } | null,
   go: vi.fn() as ReturnType<typeof vi.fn>,
 }));
 
@@ -62,6 +63,11 @@ vi.mock('../api/hooks', () => ({
   useKnowledgeHealth: () => ({ data: state.health, isLoading: false }),
   usePullRequests: () => ({ data: state.pullRequests, isLoading: false }),
   usePullRequest: () => ({ data: null, isLoading: false }),
+  useProjectHistory: () => ({
+    refs: state.history?.refs ?? [], commits: state.history?.commits ?? [],
+    isLoading: false, isError: false, refetch: vi.fn(), hasMore: false, isLoadingMore: false, loadMore: vi.fn(),
+  }),
+  useCommit: () => ({ data: null, isLoading: false, isError: false, refetch: vi.fn() }),
 }));
 
 const { ProjectOverviewRoute } = await import('../routes/project/ProjectOverview');
@@ -338,12 +344,11 @@ describe('the sections', () => {
     ]);
   });
 
-  it('names the History section and says what will be there, with nothing invented', () => {
+  // Its content is VS-96's; all this file asserts is that giving it content changed nothing else.
+  it('renders the History section without disturbing the page', () => {
     render(<ProjectOverviewRoute />);
     const card = section('History');
-    expect(within(card).getByText(/commit graph/)).toBeTruthy();
-    expect(within(card).queryByRole('list')).toBeNull();
-    expect(within(card).queryByRole('status')).toBeNull();
+    expect(within(card).getByText(/No commits yet/)).toBeTruthy();
     expect(within(card).queryByRole('alert')).toBeNull();
   });
 

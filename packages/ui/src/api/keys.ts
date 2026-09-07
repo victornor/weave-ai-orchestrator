@@ -79,6 +79,11 @@ export const qk = {
   pullRequests: (ws: string, project: string) => ['w', ws, 'pull-requests', project] as const,
   pullRequest: (ws: string, project: string, number: number) => ['w', ws, 'pull-requests', project, 'one', number] as const,
 
+  /** Deliberately not under `projects` — same trap VS-95 hit with the merge queue: nested there, no ticket or worker event would reach it. */
+  historyRoot: (ws: string) => ['w', ws, 'history'] as const,
+  history: (ws: string, project: string) => ['w', ws, 'history', project] as const,
+  commit: (ws: string, project: string, sha: string) => ['w', ws, 'history', project, 'commits', sha] as const,
+
   presentation: (ws: string) => ['w', ws, 'presentation'] as const,
   presentationSurfaces: (ws: string) => ['w', ws, 'presentation', 'surfaces'] as const,
 } as const;

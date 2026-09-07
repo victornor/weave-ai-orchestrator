@@ -6,6 +6,7 @@ export { createCore } from './create.js';
 export { createJobsService, JOB_LOG_LINES, JOB_LOG_FLUSH_MS } from './jobs/index.js';
 export { createChangelogService } from './changelog/index.js';
 export { createPullRequestsService, PR_CACHE_TTL_MS, PR_LIST_LIMIT, PR_WINDOW_DAYS } from './pull-requests/index.js';
+export { createHistoryReader, HISTORY_GIT_SUBCOMMANDS } from './projects/history.js';
 export { createAuthService, openDaemonDb, DAEMON_DB_FILE } from './auth/index.js';
 export { signRunToken, verifyRunToken, runTokenSecret, peekWorkspaceId, isRunToken, RUN_TOKEN_PREFIX, RUN_TOKEN_TTL_SECONDS, type RunTokenClaims } from './runs/runtoken.js';
 export { describeLiveInput, type LiveInputStatus } from './runs/active.js';

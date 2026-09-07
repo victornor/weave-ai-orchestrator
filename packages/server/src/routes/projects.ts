@@ -47,6 +47,18 @@ export function projectRoutes(): Hono<AppEnv> {
     if (!Number.isInteger(number) || number <= 0) throw new OcError('validation', 'pull request number must be a positive integer', { number: c.req.param('number') });
     return c.json(await c.get('ws').services.pullRequests.get(c.req.param('id'), number));
   });
+  /**
+   * The project's commit graph (VS-96): the default branch plus every live worker/ticket branch,
+   * paged. `:commits` sits above the `:id/commits/:sha` route only in that both are registered here
+   * together; neither collides with `/:id` because both carry a literal segment after the project id.
+   */
+  app.get('/:id/history', async (c) => {
+    const limitRaw = c.req.query('limit');
+    const limit = limitRaw !== undefined ? Number(limitRaw) : undefined;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) throw new OcError('validation', 'limit must be a positive integer', { limit: limitRaw });
+    return c.json(await c.get('ws').services.projects.history(c.req.param('id'), { cursor: c.req.query('cursor') ?? null, limit }));
+  });
+  app.get('/:id/commits/:sha', async (c) => c.json(await c.get('ws').services.projects.commit(c.req.param('id'), c.req.param('sha'))));
   return app;
 }
 

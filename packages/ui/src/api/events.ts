@@ -169,6 +169,8 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
     case 'project.updated':
     case 'project.removed':
       inv(qk.projects(ws));
+      // The default branch or the repository itself can change (VS-96).
+      inv(qk.historyRoot(ws));
       break;
     case 'role.hired':
     case 'role.activated':
@@ -189,6 +191,9 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       inv(qk.workers(ws));
       inv(qk.worker(ws, id));
       inv(qk.briefing(ws));
+      // A worker's worktree branch is what the History section's ref coverage reads (VS-96); only
+      // spawning and retiring change which branches exist, not a mid-life status change.
+      if (evt.type === 'worker.spawned' || evt.type === 'worker.retired') inv(qk.historyRoot(ws));
       break;
     case 'ticket.created':
     case 'ticket.updated':
@@ -207,6 +212,9 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       // A merge or a status change is what the daemon drops its forge cache on, so this is when the
       // overview's Pull requests section has something new to read (VS-97).
       if (evt.type === 'ticket.status' || evt.type === 'ticket.merged') inv(qk.pullRequestsRoot(ws));
+      // A ticket landing or changing status can change which branches the History section covers
+      // (a finished ticket's branch drops out of ref coverage) — VS-96.
+      if (evt.type === 'ticket.status' || evt.type === 'ticket.merged') inv(qk.historyRoot(ws));
       break;
     case 'ticket.comment':
       inv(qk.ticketComments(ws, id));
@@ -222,6 +230,8 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       inv(qk.changelogRoot(ws));
       // It is also the pull request the overview's section is waiting for (VS-97).
       inv(qk.pullRequestsRoot(ws));
+      // A recorded `branch` work product can add a ref the History section covers (VS-96).
+      inv(qk.historyRoot(ws));
       break;
     case 'decision.created':
     case 'decision.answered':

@@ -123,6 +123,27 @@ export interface ProjectsService {
   remove(actor: Actor, id: string): Promise<void>;
   fetch(id: string): Promise<{ head: string; fastForwarded: boolean }>;   // git fetch + ff primary clone
   reconcile(): Promise<void>;                                              // declared vs db
+  /** The project's commit graph (VS-96): default branch plus every live worker/ticket branch, paged. */
+  history(id: string, query?: HistoryQuery): Promise<HistoryPage>;
+  /** One commit's full detail — message, parents and changed files against its first parent. */
+  commit(id: string, sha: string): Promise<CommitDetail>;
+}
+
+/** A branch the history covers: the default branch, a worker's branch, or a ticket's. */
+export interface ProjectRef {
+  name: string; sha: string; isDefault: boolean;
+  ticketId: string | null; ticketIdentifier: string | null;
+  agentId: string | null; agentName: string | null;
+}
+export interface HistoryCommit {
+  sha: string; parents: string[]; author: string; authoredAt: string; subject: string; refs: string[];
+}
+export interface HistoryQuery { cursor?: string | null; limit?: number }
+export interface HistoryPage { refs: ProjectRef[]; commits: HistoryCommit[]; cursor: string | null }
+export interface CommitFile { path: string; previousPath: string | null; status: 'added' | 'modified' | 'deleted' | 'renamed'; additions: number; deletions: number }
+export interface CommitDetail {
+  sha: string; parents: string[]; author: string; email: string; authoredAt: string; committedAt: string;
+  message: string; files: CommitFile[]; truncatedFiles: number; forgeUrl: string | null;
 }
 export interface RolesService {
   list(projectId?: string): S.Role[]; get(id: string): S.Role;

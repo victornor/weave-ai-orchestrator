@@ -3,12 +3,13 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
 import { OcError, PROJECT_ADD_STEPS, ProjectConfigSchema, type Project, type ProjectAddStepId, type ProjectConfig } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
-import type { Actor, CoreServices, ProjectsService } from '../api.js';
+import type { Actor, CommitDetail, CoreServices, HistoryPage, HistoryQuery, ProjectsService } from '../api.js';
 import { recordActivity } from '../events.js';
 import { binaryExists, type OnLine } from '../util/exec.js';
 import { git } from '../util/git.js';
 import { projectKnowledgeSkeleton } from '../workspace/loader.js';
 import { modelSettingFor } from '../models/resolve.js';
+import { createHistoryReader } from './history.js';
 
 function looksLocal(url: string): boolean {
   if (/^[a-z+]+:\/\//i.test(url)) return false;
@@ -18,6 +19,7 @@ function looksLocal(url: string): boolean {
 
 export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreServices): ProjectsService {
   const log = ctx.log('daemon');
+  const historyReader = createHistoryReader(ctx.db);
 
   const get = (id: string): Project => {
     const p = ctx.db.get<Project>('SELECT * FROM projects WHERE workspace_id = ? AND (id = ? OR slug = ?)', [ctx.workspaceId, id, id]);
@@ -313,6 +315,14 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       if (!merged.ok) log.warn({ project: project.slug, stderr: merged.stderr.trim().slice(0, 200) }, 'primary clone could not be fast-forwarded');
       if (fastForwarded) { try { await deps().specs.index(project.id); } catch (e) { log.debug({ err: String(e) }, 'spec reindex after fetch failed'); } }
       return { head, fastForwarded };
+    },
+
+    async history(id: string, query?: HistoryQuery): Promise<HistoryPage> {
+      return historyReader.history(get(id), query);
+    },
+
+    async commit(id: string, sha: string): Promise<CommitDetail> {
+      return historyReader.commit(get(id), sha);
     },
 
     async reconcile(): Promise<void> {

@@ -469,6 +469,61 @@ export function usePullRequest(projectId: string | null | undefined, number: num
   });
 }
 
+const HISTORY_PAGE_SIZE = 30;
+
+export interface ProjectHistory {
+  refs: T.ProjectRef[] | undefined;
+  commits: T.HistoryCommit[] | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  refetch: () => void;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  loadMore: () => void;
+}
+
+/**
+ * The project's commit graph (VS-96), a page at a time. `GET /projects/:id/history` answers
+ * newest-first already and hands back the cursor for the page after it, exactly like the changelog
+ * (`useChangelog`) — no page needs reversing, and `refs` is only ever read from the first page: the
+ * ref list a cursor was resolved against does not change while paging through it.
+ */
+export function useProjectHistory(projectId: string | null | undefined): ProjectHistory {
+  const ws = useWs();
+  const q = useInfiniteQuery({
+    queryKey: qk.history(ws, projectId ?? ''),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      api.ws<T.HistoryPage>(ws, `/projects/${encodeURIComponent(projectId ?? '')}/history${qs({ limit: HISTORY_PAGE_SIZE, cursor: pageParam })}`),
+    getNextPageParam: (page) => page.cursor ?? undefined,
+    enabled: Boolean(projectId),
+  });
+
+  const commits = useMemo(() => (q.data ? q.data.pages.flatMap((p) => p.commits) : undefined), [q.data]);
+  const refs = q.data?.pages[0]?.refs;
+  const { hasNextPage, isFetchingNextPage, fetchNextPage, refetch } = q;
+
+  return {
+    refs, commits,
+    isLoading: q.isLoading,
+    isError: q.isError,
+    refetch: () => void refetch(),
+    hasMore: hasNextPage,
+    isLoadingMore: isFetchingNextPage,
+    loadMore: () => { if (hasNextPage && !isFetchingNextPage) void fetchNextPage(); },
+  };
+}
+
+/** One commit's full message and changed files. */
+export function useCommit(projectId: string | null | undefined, sha: string | null): UseQueryResult<T.CommitDetail> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.commit(ws, projectId ?? '', sha ?? ''),
+    queryFn: () => api.ws<T.CommitDetail>(ws, `/projects/${encodeURIComponent(projectId ?? '')}/commits/${encodeURIComponent(sha ?? '')}`),
+    enabled: Boolean(projectId) && Boolean(sha),
+  });
+}
+
 export function useCreateTicket(): UseMutationResult<Ticket, Error, Record<string, unknown>> {
   const ws = useWs();
   const qc = useQueryClient();

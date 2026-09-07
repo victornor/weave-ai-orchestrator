@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { NAMED_CARD_OPTION_KEYS } from '@agent-conductor/shared';
 import type { Decision, DecisionAnswerInputs, DecisionInput, UiStatus } from '@agent-conductor/shared';
 import { A } from '../app/link';
 import { Button } from './Button';
@@ -396,7 +397,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             placeholder="What should change?"
             submitLabel="Send revision"
             onSubmit={(t) => {
-              onAnswer({ key: 'revise', text: t });
+              onAnswer({ key: NAMED_CARD_OPTION_KEYS.plan_approval.revise, text: t });
               setRevising(false);
             }}
           />
@@ -419,23 +420,22 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             </p>
           ) : inert ? null : decision.kind === 'plan_approval' ? (
             <>
-              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer('approve')} kbd="⏎">
+              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.plan_approval.approve)} kbd="⏎">
                 Approve
               </Button>
               <Button variant="secondary" size="thumb" className="flex-1" disabled={busy} onClick={() => setRevising((v) => !v)}>
                 Revise…
               </Button>
-              <Button variant="ghost" size="thumb" className="w-12 border border-line-2" aria-label="Reject" disabled={busy} onClick={() => answer('reject')}>
+              <Button variant="ghost" size="thumb" className="w-12 border border-line-2" aria-label="Reject" disabled={busy} onClick={() => answer(NAMED_CARD_OPTION_KEYS.plan_approval.reject)}>
                 ✕
               </Button>
             </>
           ) : decision.kind === 'merge_approval' ? (
             <>
-              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer('approve')}>
+              {/* No Hold: hiding the card (VS-72) already covers "not now" without answering, and a
+                  merge approval has only `approve`/`changes` to answer with (VS-111). */}
+              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.merge_approval.approve)}>
                 Approve merge
-              </Button>
-              <Button variant="secondary" size="thumb" className="w-24" disabled={busy} onClick={() => answer('hold')}>
-                Hold
               </Button>
               {ws && decision.ticketId ? (
                 <A
@@ -450,10 +450,10 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             </>
           ) : decision.kind === 'hire_approval' ? (
             <>
-              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer('approve')}>
+              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.hire_approval.approve)}>
                 Hire
               </Button>
-              <Button variant="secondary" size="thumb" className="w-24" disabled={busy} onClick={() => answer('reject')}>
+              <Button variant="secondary" size="thumb" className="w-24" disabled={busy} onClick={() => answer(NAMED_CARD_OPTION_KEYS.hire_approval.reject)}>
                 Reject
               </Button>
             </>
@@ -463,7 +463,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
               size="thumb"
               full
               disabled={busy || confirm.trim() !== (target.confirm ?? ticketIdentifier ?? '')}
-              onClick={() => answer('discard')}
+              onClick={() => answer(NAMED_CARD_OPTION_KEYS.discard_approval.approve)}
             >
               Discard
             </Button>

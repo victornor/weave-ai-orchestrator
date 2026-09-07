@@ -1,6 +1,6 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { UI_STATUSES } from '@agent-conductor/shared';
+import { UI_STATUSES, NAMED_CARD_OPTION_KEYS } from '@agent-conductor/shared';
 import type { Decision } from '@agent-conductor/shared';
 import { StatusGlyph, StatusBadge } from '../components/StatusGlyph';
 import { TicketCard } from '../components/TicketCard';
@@ -338,6 +338,63 @@ describe('DecisionCard', () => {
     expect(discard).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Type the ticket identifier to confirm'), { target: { value: 'ACME-42' } });
     expect(discard).toBeEnabled();
+  });
+
+  // ---------- VS-111: no card can offer an option its decision does not have ----------
+  //
+  // Each named-variant card's buttons are hand-written literals, independent of `decision.options`
+  // at render time (see DecisionCard's design notes). This is the general rule the ticket asked
+  // for: every hard-coded action, for every kind, must send a key that kind's shared canonical
+  // option-key map lists — the same map `packages/core` uses when it actually creates the decision.
+  // This is exactly what would have caught the Hold and Discard bugs before they shipped.
+  describe('a hard-coded card action always sends a key its decision kind actually offers', () => {
+    const validKeys = (kind: keyof typeof NAMED_CARD_OPTION_KEYS): string[] => Object.values(NAMED_CARD_OPTION_KEYS[kind]);
+
+    it('plan_approval: Approve and Reject', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={decision({ kind: 'plan_approval' })} onAnswer={onAnswer} />);
+      fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+      expect(onAnswer).toHaveBeenCalledTimes(2);
+      for (const call of onAnswer.mock.calls) expect(validKeys('plan_approval')).toContain(call[0]?.key);
+    });
+
+    it('plan_approval: Revise', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={decision({ kind: 'plan_approval' })} ticketIdentifier="ACME-42" onAnswer={onAnswer} />);
+      fireEvent.click(screen.getByRole('button', { name: /Revise/ }));
+      fireEvent.change(screen.getByLabelText('What should change?'), { target: { value: 'use a different token layer' } });
+      fireEvent.keyDown(screen.getByLabelText('What should change?'), { key: 'Enter' });
+      expect(onAnswer).toHaveBeenCalledTimes(1);
+      expect(validKeys('plan_approval')).toContain(onAnswer.mock.calls[0]?.[0]?.key);
+    });
+
+    it('merge_approval: Approve merge, and offers no Hold', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={decision({ kind: 'merge_approval' })} onAnswer={onAnswer} />);
+      expect(screen.queryByRole('button', { name: 'Hold' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Approve merge' }));
+      expect(onAnswer).toHaveBeenCalledTimes(1);
+      expect(validKeys('merge_approval')).toContain(onAnswer.mock.calls[0]?.[0]?.key);
+    });
+
+    it('hire_approval: Hire and Reject', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={decision({ kind: 'hire_approval' })} onAnswer={onAnswer} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Hire' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+      expect(onAnswer).toHaveBeenCalledTimes(2);
+      for (const call of onAnswer.mock.calls) expect(validKeys('hire_approval')).toContain(call[0]?.key);
+    });
+
+    it('discard_approval: Discard', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={decision({ kind: 'discard_approval' })} ticketIdentifier="ACME-42" onAnswer={onAnswer} />);
+      fireEvent.change(screen.getByLabelText('Type the ticket identifier to confirm'), { target: { value: 'ACME-42' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+      expect(onAnswer).toHaveBeenCalledTimes(1);
+      expect(validKeys('discard_approval')).toContain(onAnswer.mock.calls[0]?.[0]?.key);
+    });
   });
 
   // ---------- VS-92: the project label ----------

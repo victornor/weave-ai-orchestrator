@@ -45,6 +45,22 @@ export type DecisionOwner = (typeof DECISION_OWNERS)[number];
 export const DECISION_STATUSES = ['open', 'answered', 'expired', 'withdrawn', 'superseded'] as const;
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];
 
+/**
+ * The option keys a "named variant" decision card (packages/ui's DecisionCard: `plan_approval`,
+ * `merge_approval`, `hire_approval`, `discard_approval`) is allowed to send with its hard-coded
+ * buttons, keyed by name so a call site can cite `NAMED_CARD_OPTION_KEYS.merge_approval.approve`
+ * rather than a free-floating string literal. The daemon's decision creation for these kinds MUST
+ * offer exactly these keys, so a card's button can never send a key its decision does not accept
+ * (VS-111).
+ */
+export const NAMED_CARD_OPTION_KEYS = {
+  plan_approval: { approve: 'approve', revise: 'revise', reject: 'reject' },
+  merge_approval: { approve: 'approve', changes: 'changes' },
+  hire_approval: { approve: 'approve', reject: 'reject' },
+  discard_approval: { approve: 'approve', reject: 'reject' },
+} as const satisfies Record<'plan_approval' | 'merge_approval' | 'hire_approval' | 'discard_approval', Record<string, string>>;
+export type NamedCardKind = keyof typeof NAMED_CARD_OPTION_KEYS;
+
 /** What a decision can ask for beyond an option (VS-92). `secret` never records its value — only the name it was stored under. */
 export const DECISION_INPUT_TYPES = ['text', 'multiline', 'multiselect', 'secret'] as const;
 export type DecisionInputType = (typeof DECISION_INPUT_TYPES)[number];

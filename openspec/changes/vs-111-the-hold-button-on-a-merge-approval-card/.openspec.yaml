@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Fix the Hold button on a merge-approval card sending an answer its
+  decision does not accept, and stop any card from offering an option its
+  decision lacks

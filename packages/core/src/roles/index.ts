@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, RoleSpecSchema, type Role, type RoleSpec, type Project } from '@agent-conductor/shared';
+import { OcError, RoleSpecSchema, NAMED_CARD_OPTION_KEYS, type Role, type RoleSpec, type Project } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, RoleConcurrency, RolesService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -122,8 +122,8 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
             kind: 'hire_approval', owner: 'human', title: `Hire ${spec.name} for ${project.slug}?`,
             context: `${spec.charterSummary}\n\nScope: ${spec.scope}\n\nUp to ${spec.maxWorkers} concurrent workers, on the workspace's workers model setting.`,
             options: [
-              { key: 'approve', label: 'Approve and activate', recommended: true },
-              { key: 'reject', label: 'Reject' },
+              { key: NAMED_CARD_OPTION_KEYS.hire_approval.approve, label: 'Approve and activate', recommended: true },
+              { key: NAMED_CARD_OPTION_KEYS.hire_approval.reject, label: 'Reject' },
             ],
             recommendation: 'approve',
             correlationKey: `hire:${spec.id}`,
@@ -262,7 +262,10 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
           const decision = deps().decisions.create(actor, {
             kind: 'discard_approval', owner: 'human', title: `Retire ${role.name} with ${live} live worker(s)?`,
             context: `Retiring this role stops new workers. ${live} worker(s) are still live; their tickets need a decision first.\n\nReason: ${reason}`,
-            options: [{ key: 'approve', label: 'Retire the role and cancel its workers' }, { key: 'reject', label: 'Keep the role', recommended: true }],
+            options: [
+              { key: NAMED_CARD_OPTION_KEYS.discard_approval.approve, label: 'Retire the role and cancel its workers' },
+              { key: NAMED_CARD_OPTION_KEYS.discard_approval.reject, label: 'Keep the role', recommended: true },
+            ],
             correlationKey: `retire:${id}`, target: { roleId: id },
           });
           decisionId = decision.id;

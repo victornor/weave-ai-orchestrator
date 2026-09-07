@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, TICKET_KINDS, TICKET_STATUSES, canTransition, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
+import { OcError, TICKET_KINDS, TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, canTransition, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, fakeSpecs, type TestHarness } from '../testing/context.js';
 import { createTicketsService } from './service.js';
 import type { Actor, TicketsService } from '../api.js';
@@ -170,6 +170,10 @@ describe('tickets', () => {
       expect(openspec.validateForProposed).toHaveBeenCalledWith(t.id);
       expect(tickets.getDocument(t.id, 'plan')?.body).toContain('## Proposal');
       expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'plan_approval', owner: 'human' }));
+      // VS-111: the plan-approval card's buttons are hard-coded to these keys — the decision the
+      // daemon actually raises must offer no other keys, or pressing one of them would fail.
+      const planCall = decisions.create.mock.calls.find((c) => c[1]?.kind === 'plan_approval');
+      expect(planCall?.[1]?.options.map((o: { key: string }) => o.key)).toEqual(Object.values(NAMED_CARD_OPTION_KEYS.plan_approval));
     });
 
     it('rejects the transition when openspec validation fails', async () => {
@@ -229,6 +233,10 @@ describe('tickets', () => {
       h.db.update('tickets', t.id, { status: 'in_progress' });
       await tickets.transition(AGENT, t.id, { to: 'in_review' });
       expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'merge_approval' }));
+      // VS-111: the merge-approval card no longer offers Hold, so the decision it answers must never
+      // offer a third key that a card could be tempted to send.
+      const mergeCall = decisions.create.mock.calls.find((c) => c[1]?.kind === 'merge_approval');
+      expect(mergeCall?.[1]?.options.map((o: { key: string }) => o.key)).toEqual(Object.values(NAMED_CARD_OPTION_KEYS.merge_approval));
 
       decisions.create.mockClear();
       const auto = make({ kind: 'task', autoMerge: true, title: 'auto' });
@@ -479,6 +487,9 @@ describe('tickets', () => {
       expect(repaired).toEqual([{ id: stranded.id, identifier: stranded.identifier, kind: 'plan_approval' }]);
       expect(decisions.create).toHaveBeenCalledTimes(1);
       expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ticketId: stranded.id, kind: 'plan_approval' }));
+      // VS-111: repairApprovals re-raises with its own (duplicated) options array — must not drift
+      // from the one the normal `proposed` transition creates.
+      expect(decisions.create.mock.calls[0]?.[1]?.options.map((o: { key: string }) => o.key)).toEqual(Object.values(NAMED_CARD_OPTION_KEYS.plan_approval));
     });
 
     it('raises a fresh merge_approval for an in_review, non-auto_merge ticket with none open, and skips auto_merge tickets', async () => {
@@ -493,6 +504,8 @@ describe('tickets', () => {
       expect(repaired).toEqual([{ id: stranded.id, identifier: stranded.identifier, kind: 'merge_approval' }]);
       expect(decisions.create).toHaveBeenCalledTimes(1);
       expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ticketId: stranded.id, kind: 'merge_approval' }));
+      // VS-111: same duplicated-array risk as the plan_approval repair path above.
+      expect(decisions.create.mock.calls[0]?.[1]?.options.map((o: { key: string }) => o.key)).toEqual(Object.values(NAMED_CARD_OPTION_KEYS.merge_approval));
     });
 
     it('reports nothing when every waiting ticket already has an open approval', async () => {

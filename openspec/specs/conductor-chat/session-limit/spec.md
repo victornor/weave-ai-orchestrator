@@ -153,9 +153,17 @@ runtime states a point at which it compacts the conversation — how far that si
 point, as a percentage of it. The absolute token count SHALL be available without taking header
 space.
 
-The context size SHALL be the conductor's most recent finished turn's input tokens plus its
-cache-read tokens, which is what a resumed session re-sends or reads back each turn. The number
-SHALL be updated when a conductor turn finishes, without a reload.
+The context size SHALL be the size of the **last API request** the conductor's most recent finished
+turn made: the tokens that request sent, plus the tokens it read back from cache. It SHALL NOT be
+the turn's total across its requests. A turn answers a prompt with as many requests as its tool use
+needs, and each of them re-sends or cache-reads the whole conversation, so the total is roughly the
+context size multiplied by the number of requests and is not a measurement of anything the window
+holds. The number SHALL be updated when a conductor turn finishes, without a reload.
+
+The size SHALL come from a figure the runtime itself reported for one request. The system SHALL
+record it separately from the turn's cumulative token counts rather than replacing them: the
+cumulative counts remain what cost, the usage records and the plan-limit strip are computed from,
+and SHALL keep counting every request the turn made.
 
 The context window SHALL come from the runtime's own model list, per model, so that a model variant
 with a larger window is measured against its own. The compaction point SHALL come from the runtime's
@@ -163,10 +171,17 @@ own capabilities. Neither SHALL be stated by the client that draws the meter.
 
 #### Scenario: A conductor turn on a 200k model
 
-- **WHEN** the conductor's last finished turn reported 12k input tokens and 70k cache-read tokens on
-  a model whose window is 200k, and the runtime compacts at 92 % of the window
+- **WHEN** the conductor's last finished turn ended with a request that sent 12k tokens and read 70k
+  tokens from cache, on a model whose window is 200k, and the runtime compacts at 92 % of the window
 - **THEN** the header shows the context at `41%` of the window and `45%` of the way to compaction
 - **AND** hovering it shows `82k` of `200k` tokens
+
+#### Scenario: A turn with many tool round-trips
+
+- **WHEN** the conductor's last finished turn made twenty requests, each around 80k tokens of
+  context, on a model whose window is 200k
+- **THEN** the header measures one request, so the meter shows roughly 40 % and cannot exceed 100 %
+- **AND** the turn's usage record and its cost still account for every request's tokens, unchanged
 
 #### Scenario: A model with a larger window
 
@@ -190,10 +205,12 @@ The header SHALL NOT show a context percentage it had to invent a number for.
 Where the conductor has not finished a turn, the header SHALL show nothing about context: there is
 nothing to measure, and that is not a failure to report.
 
-Where the conductor has run but the turn reported no usable token counts, or where the model it ran
-on is not one the runtime's model list states a context window for, the header SHALL show a single
-quiet line saying which of those happened, and no percentage and no bar. The two SHALL be
-distinguishable.
+Where the conductor has run but no per-request context size was reported for that turn — because the
+turn reported no usable token counts at all, or because its runtime reports only totals across the
+requests it made — or where the model it ran on is not one the runtime's model list states a context
+window for, the header SHALL show a single quiet line saying which of those happened, and no
+percentage and no bar. A missing size and an unknown window SHALL be distinguishable. A runtime that
+cannot report per request SHALL NOT have its cumulative totals shown as a context size instead.
 
 #### Scenario: No finished turn yet
 
@@ -208,6 +225,13 @@ distinguishable.
 
 #### Scenario: A turn that reported no tokens
 
-- **WHEN** the conductor's last finished turn reported no input or cache-read tokens
+- **WHEN** the conductor's last finished turn reported no per-request context size
 - **THEN** the header says the context size was not reported, distinctly from the window being
   unknown, and shows no percentage and no bar
+
+#### Scenario: A runtime that reports only cumulative usage
+
+- **WHEN** the conductor is on a runtime whose turns report only the totals across every request
+  they made, and its last turn recorded such a total
+- **THEN** the header says the context size was not reported, and shows no percentage and no bar,
+  rather than measuring the total against the window

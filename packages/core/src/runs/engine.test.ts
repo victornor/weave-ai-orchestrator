@@ -959,6 +959,31 @@ describe('run engine', () => {
       expect(h.db.get<{ pauseReason: string | null; pauseDetail: unknown }>('SELECT pause_reason, pause_detail_json FROM agents WHERE id = ?', [workerId]))
         .toMatchObject({ pauseReason: null, pauseDetail: null });
     });
+
+    // VS-118: parking used to lose the ticket's real status because resuming picked `in_progress` vs
+    // `todo` from `ticket.executionRunId`, which this very `finalize()` already nulls a few lines
+    // above the `parkForHuman` call below — so it was always `todo`, and a `change` ticket that was
+    // `approved` had to walk the whole propose path again, re-raising an approval the human already
+    // gave for an unchanged plan.
+    it('parks an approved change ticket and restores exactly that status on retry, with no new plan_approval', async () => {
+      h.services.workers = { relaunch: vi.fn(async () => undefined) } as never;
+      const ticketId = seedTicket(h, { kind: 'change', status: 'approved' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      runtime.queue.push({ error: { code: 'boom', family: 'unknown', message: 'the CLI died' } } as never);
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1: Add a README badge' });
+      await runOnce();
+      await tick();
+
+      expect(h.db.get<{ status: string; blockedFromStatus: string | null }>('SELECT status, blocked_from_status as blockedFromStatus FROM tickets WHERE id = ?', [ticketId]))
+        .toMatchObject({ status: 'blocked', blockedFromStatus: 'approved' });
+
+      const card = openFor(ticketId)[0]!;
+      expect(card.kind).toBe('retry_approval');
+      await h.services.decisions!.answer({ kind: 'human', id: 'victor' }, card.id, { key: 'retry' });
+
+      expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('approved');
+      expect(openFor(ticketId).filter((d) => d.kind === 'plan_approval')).toHaveLength(0);
+    });
   });
 });
 

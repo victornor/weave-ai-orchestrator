@@ -40,7 +40,7 @@ export function ticket(over: Partial<Ticket> = {}): Ticket {
     title: 'Add dark mode', description: '', status: 'in_progress', priority: 'medium', autoMerge: false,
     assigneeRoleId: null, workerId: null, assigneeHuman: false, interactiveSession: false, parentId: null, createdByKind: 'human', createdById: null,
     originKind: null, originFingerprint: null, checkoutRunId: null, executionRunId: null, openspecChangeName: null,
-    openspecState: null, delivery: null, unblock: null, monitorNextCheckAt: null, blockedTransitionAt: null,
+    openspecState: null, delivery: null, unblock: null, blockedFromStatus: null, monitorNextCheckAt: null, blockedTransitionAt: null,
     mergeQueuedAt: null, mergeStartedAt: null,
     startedAt: null, completedAt: null, cancelledAt: null, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
     ...over,

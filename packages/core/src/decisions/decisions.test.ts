@@ -7,6 +7,7 @@ import type { Actor, DecisionsService, TicketsService } from '../api.js';
 
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
 const AGENT: Actor = { kind: 'agent', id: 'worker-1', runId: 'run-1' };
+const SYSTEM: Actor = { kind: 'system', id: null };
 
 describe('decisions', () => {
   let h: TestHarness;
@@ -105,6 +106,28 @@ describe('decisions', () => {
       await decisions.answer(HUMAN, d.id, { key: 'reject', text: 'not now' });
       expect(tickets.get(t.id).status).toBe('cancelled');
     });
+  });
+
+  // VS-118: answering "retry now" on a parking decision used to send the ticket to `todo` whenever
+  // `t.executionRunId` happened to be null — which it always is by the time this runs, since
+  // `finalize()` clears it before the park that raised this decision. It must restore the status the
+  // ticket actually held before it was parked.
+  it('retry now restores the ticket to the status it held before it was blocked', async () => {
+    const relaunch = vi.fn(async () => undefined);
+    h.services.workers = { relaunch } as never;
+    const t = ticket();
+    h.db.update('tickets', t.id, { status: 'in_progress' });
+    await tickets.transition(SYSTEM, t.id, { to: 'blocked', unblock: { owner: 'human', action: 'retry or cancel' } });
+    expect(tickets.get(t.id).blockedFromStatus).toBe('in_progress');
+    const d = decisions.create(SYSTEM, {
+      kind: 'retry_approval', owner: 'human', ticketId: t.id, title: 'Worker failed',
+      target: { agentId: 'ag_1', ticketId: t.id },
+    });
+
+    await decisions.answer(HUMAN, d.id, { key: 'retry' });
+
+    expect(relaunch).toHaveBeenCalledWith(HUMAN, 'ag_1', 'the human asked for a retry');
+    expect(tickets.get(t.id).status).toBe('in_progress');
   });
 
   it('merge approval approve moves the ticket to merging and wakes the worker', async () => {

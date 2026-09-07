@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 
 import { join } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
 import {
-  OcError, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket,
+  OcError, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type TicketStatus,
 } from '@agent-conductor/shared';
 import type { WorktreeProvider } from '@agent-conductor/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
@@ -372,7 +372,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;
       if (ticket?.status === 'blocked') {
         void deps().tickets.transition(actor, ticket.id, {
-          to: ticket.executionRunId ? 'in_progress' : 'todo',
+          to: (ticket.blockedFromStatus ?? 'todo') as TicketStatus,
           note: `${agent.name} was resumed`,
         }).catch((e: unknown) => log.warn({ workerId: id, ticketId: ticket.id, err: String(e) }, 'resuming the worker could not unblock its ticket'));
       }

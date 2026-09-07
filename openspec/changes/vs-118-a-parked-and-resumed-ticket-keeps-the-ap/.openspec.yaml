@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: A parked and resumed ticket keeps the approval it already had instead of
+  falling back to todo and asking the human again

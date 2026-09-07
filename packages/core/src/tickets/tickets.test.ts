@@ -120,6 +120,18 @@ describe('tickets', () => {
       }
     });
 
+    // VS-118: the ticket forgot what it was doing before it was blocked, so resuming or unblocking
+    // it always fell back to `todo` — this is what remembers.
+    it('records the status a ticket held before it was blocked, and clears it on the way out', async () => {
+      const t = make();
+      h.db.update('tickets', t.id, { status: 'approved' });
+      const blocked = await tickets.transition(SYSTEM, t.id, { to: 'blocked', unblock: { owner: 'human', action: 'decide' } });
+      expect(blocked.blockedFromStatus).toBe('approved');
+
+      const restored = await tickets.transition(SYSTEM, t.id, { to: 'approved' });
+      expect(restored.blockedFromStatus).toBeNull();
+    });
+
     it('rejects blocked without a routable action path', async () => {
       const t = make();
       await expect(tickets.transition(AGENT, t.id, { to: 'blocked', note: 'stuck' })).rejects.toMatchObject({ code: 'missing_action_path' });
@@ -311,12 +323,60 @@ describe('tickets', () => {
       expect(wake.calls.some((c) => c.agentId === depWorker && c.input.source === 'blockers_resolved')).toBe(true);
     });
 
+    // VS-118: a dependent blocked while `approved` (or further along) used to lose that status to the
+    // same `assigneeRoleId ? todo : backlog` guess `setBlockers` and this propagation used for a
+    // ticket that never had a recorded prior status. Once one is recorded, it wins.
+    it('returns a blocked dependent to the status it held, not always todo, when its blockers land', async () => {
+      const blocker = make({ title: 'blocker' });
+      const dep = make({ title: 'dependent' });
+      h.db.update('tickets', dep.id, { status: 'approved' });
+      tickets.setBlockers(HUMAN, dep.id, [blocker.id]);
+      expect(tickets.get(dep.id)).toMatchObject({ status: 'blocked', blockedFromStatus: 'approved' });
+
+      tickets.addWorkProduct(AGENT, blocker.id, { type: 'branch', title: 'ac/x' });
+      h.db.update('tickets', blocker.id, { status: 'merging', autoMerge: 1 });
+      await tickets.transition(SYSTEM, blocker.id, { to: 'done' });
+
+      expect(tickets.get(dep.id)).toMatchObject({ status: 'approved', blockedFromStatus: null });
+    });
+
+    it('setBlockers itself restores the status a ticket held before it was blocked', () => {
+      const blocker = make({ title: 'blocker' });
+      const dep = make({ title: 'dependent' });
+      h.db.update('tickets', dep.id, { status: 'in_progress' });
+      tickets.setBlockers(HUMAN, dep.id, [blocker.id]);
+      expect(tickets.get(dep.id)).toMatchObject({ status: 'blocked', blockedFromStatus: 'in_progress' });
+
+      tickets.setBlockers(HUMAN, dep.id, []);
+
+      expect(tickets.get(dep.id)).toMatchObject({ status: 'in_progress', blockedFromStatus: null });
+    });
+
     it('wakes the parent when every child is terminal', async () => {
       const parent = make({ title: 'parent' });
       const parentWorker = h.addWorker(parent.id);
       const child = make({ title: 'child', parentId: parent.id });
       tickets.cancel(HUMAN, child.id, 'not needed');
       expect(wake.calls.some((c) => c.agentId === parentWorker && c.input.source === 'children_completed')).toBe(true);
+    });
+  });
+
+  // VS-118: `retry()` picked `in_progress` vs `todo` from `t.executionRunId`, which is always null
+  // for a blocked ticket by the time a human retries it — the run that got it parked already cleared
+  // its own lock. It must restore what the ticket actually was.
+  describe('retry (VS-118)', () => {
+    it('restores the ticket to the status it held before it was blocked, not always todo', async () => {
+      const t = make();
+      const workerId = h.addWorker(t.id);
+      const relaunch = vi.fn(async () => undefined);
+      h.services.workers = { get: vi.fn(() => ({ id: workerId, status: 'active' })), relaunch } as never;
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      await tickets.transition(SYSTEM, t.id, { to: 'blocked', unblock: { owner: 'human', action: 'retry or cancel' } });
+
+      const after = await tickets.retry(HUMAN, t.id, 'try again');
+
+      expect(relaunch).toHaveBeenCalledWith(HUMAN, workerId, 'try again');
+      expect(after.status).toBe('in_progress');
     });
   });
 

@@ -210,8 +210,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       const open = blockersOf(dep.id).filter((b) => b.status !== 'done');
       if (open.length) continue;
       if (dep.status === 'blocked') {
-        const back: TicketStatus = dep.assigneeRoleId || dep.workerId ? 'todo' : 'backlog';
-        db.update('tickets', dep.id, { status: back, unblockJson: null, blockedTransitionAt: null, updatedAt: nowIso() });
+        const back: TicketStatus = dep.blockedFromStatus ?? (dep.assigneeRoleId || dep.workerId ? 'todo' : 'backlog');
+        db.update('tickets', dep.id, { status: back, unblockJson: null, blockedTransitionAt: null, blockedFromStatus: null, updatedAt: nowIso() });
         recordActivity(db, ws, actor, 'ticket.unblocked', 'ticket', dep.id, { from: 'blocked', to: back }, dep.id);
         ctx.events.emit('ticket.status', 'ticket', dep.id, get(dep.id));
       }
@@ -317,10 +317,15 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     }
     if (to === 'blocked') {
       patch.blockedTransitionAt = now;
+      // The status this ticket is about to lose, recorded so resuming or unblocking it later can
+      // restore exactly this rather than guessing from a signal that will already be gone by then
+      // (VS-118).
+      patch.blockedFromStatus = t.status;
       if (input.unblock) patch.unblockJson = input.unblock;
     } else {
       patch.unblockJson = null;
       patch.blockedTransitionAt = null;
+      patch.blockedFromStatus = null;
     }
     if (!t.startedAt && (to === 'proposing' || to === 'in_progress')) patch.startedAt = now;
     if (to === 'done') patch.completedAt = now;
@@ -560,10 +565,12 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         if (open.length && !TERMINAL.has(t.status) && t.status !== 'blocked') {
           patch.status = 'blocked';
           patch.blockedTransitionAt = nowIso();
+          patch.blockedFromStatus = t.status;
         } else if (!open.length && t.status === 'blocked') {
-          patch.status = t.assigneeRoleId || t.workerId ? 'todo' : 'backlog';
+          patch.status = t.blockedFromStatus ?? (t.assigneeRoleId || t.workerId ? 'todo' : 'backlog');
           patch.unblockJson = null;
           patch.blockedTransitionAt = null;
+          patch.blockedFromStatus = null;
         }
         const next = touch(t.id, patch);
         recordActivity(db, ws, actor, 'ticket.blockers', 'ticket', t.id, { blockedBy, status: next.status }, t.id);
@@ -661,7 +668,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         throw new OcError('validation', `${t.identifier} has no role; assign one first`);
       }
       if (t.status === 'blocked') {
-        const back = t.executionRunId ? 'in_progress' : 'todo';
+        const back = t.blockedFromStatus ?? 'todo';
         try { await service.transition(actor, t.id, { to: back as TicketStatus, note: note ?? 'retrying' }); } catch { /* keep blocked if the machine says so */ }
       }
       recordActivity(db, ws, actor, 'ticket.retry', 'ticket', t.id, { note: note ?? null }, t.id);

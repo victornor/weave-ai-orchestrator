@@ -12,6 +12,7 @@ import { useToast } from '../components/Toast';
 import { useGo } from '../app/link';
 import { useListNav } from '../lib/hotkeys';
 import { isAutoApproving } from '../lib/yolo';
+import { isHiddenFromChat, useHiddenDecisions } from '../lib/hiddenDecisions';
 
 export function NeedsYouRoute(): React.ReactElement {
   const ws = useWs();
@@ -26,6 +27,10 @@ export function NeedsYouRoute(): React.ReactElement {
   const summary = useWorkspaceSummary();
   const answer = useAnswerDecision();
   const queue = useQueue();
+  // Hiding a card from the conductor chat never takes it off this page — this is where a decision
+  // put off until later is still waiting — but the page says which ones were hidden and offers each
+  // of them back, so the chat's pinned area is never a mystery from here (VS-72).
+  const { hidden, show } = useHiddenDecisions(ws);
   const offline = conn.state === 'offline' || conn.state === 'unreachable';
 
   const items = decisions.data ?? [];
@@ -87,8 +92,17 @@ export function NeedsYouRoute(): React.ReactElement {
             {items.map((d, i) => {
               const t = ticketOf(d.ticketId);
               const isQueued = queue.some((q) => q.path.includes(d.id));
+              const isHidden = isHiddenFromChat(d, hidden);
               return (
                 <div key={d.id} onFocus={() => nav.setIndex(i)} className={i === nav.index ? 'ring-1 ring-accent-edge rounded-r8' : undefined}>
+                  {isHidden ? (
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <span className="ac-mono text-micro text-text-4">Hidden from chat</span>
+                      <button type="button" onClick={() => show(d.id)} className="text-micro font-medium text-accent-link hover:text-accent-hover">
+                        Show in chat again
+                      </button>
+                    </div>
+                  ) : null}
                   <DecisionCard
                     decision={d}
                     ticketIdentifier={t?.identifier ?? d.ticketId}

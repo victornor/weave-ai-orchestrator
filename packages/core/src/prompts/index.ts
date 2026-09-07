@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { yoloEnabled } from '@agent-conductor/shared';
+import { landingBranchOf, yoloEnabled } from '@agent-conductor/shared';
 import type * as S from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
@@ -99,7 +99,7 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
       exclusions: (r as unknown as { exclusions?: string[] })?.exclusions ?? [], notes: (r as unknown as { notes?: string })?.notes ?? '',
     },
     project: {
-      id: p?.slug ?? '', name: p?.name ?? '', defaultBranch: p?.defaultBranch ?? 'main', deliveryMode,
+      id: p?.slug ?? '', name: p?.name ?? '', defaultBranch: p?.defaultBranch ?? 'main', landingBranch: p ? landingBranchOf(p, t) : 'main', deliveryMode,
       mergeMethod: String(policies.mergeMethod ?? 'squash'), rules: r?.rules ?? [], openspec: p?.openspecEnabled ?? false,
       yolo: yoloEnabled(policies, ctx.config.defaults.yolo),
     },
@@ -203,10 +203,10 @@ export function flattenWakes(wakes: S.Wakeup[]): BundledWake[] {
  * What the merge queue means for this ticket's turn (PLAN §11.4): the admitted ticket is told it holds
  * the project's merge slot and that its base moved while it waited; a waiting one is told to sit still.
  */
-export function mergeQueueLine(ctx: WorkspaceContext, t: S.Ticket, defaultBranch: string): string | null {
+export function mergeQueueLine(ctx: WorkspaceContext, t: S.Ticket, landingBranch: string): string | null {
   if (t.status !== 'merging') return null;
   if (t.mergeStartedAt) {
-    return `- **You hold the merge slot for this project.** Only one ticket merges at a time, and it is now yours. Your base moved while you waited: sync \`work/\` with \`${defaultBranch}\`, resolve the conflicts yourself, re-run the project's tests and lint, then merge and call \`ac_ticket_merge_done\`. The next ticket starts when you are done, so do not hold the slot longer than the merge needs.`;
+    return `- **You hold the merge slot for this project.** Only one ticket merges at a time, and it is now yours. Your base moved while you waited: sync \`work/\` with \`${landingBranch}\`, resolve the conflicts yourself, re-run the project's tests and lint, then merge and call \`ac_ticket_merge_done\`. The next ticket starts when you are done, so do not hold the slot longer than the merge needs.`;
   }
   if (!t.projectId) return null;
   const ahead = ctx.db.get<{ n: number }>(
@@ -257,17 +257,18 @@ export async function buildTurnPrompt(
     const p = project(ctx, agent.projectId);
     if (t) {
       let wtLine = '';
+      const landing = p ? landingBranchOf(p, t) : 'main';
       if (agent.worktreePath) {
-        const st = await worktreeState(agent.worktreePath, p?.defaultBranch ?? 'main');
+        const st = await worktreeState(agent.worktreePath, landing);
         wtLine = st.exists
-          ? ` — worktree \`work/\` on \`${st.branch ?? agent.branch}\` (${st.dirty ? `${st.changedFiles} uncommitted change(s)` : 'clean'}, ${st.ahead} ahead / ${st.behind} behind ${p?.defaultBranch ?? 'main'})`
+          ? ` — worktree \`work/\` on \`${st.branch ?? agent.branch}\` (${st.dirty ? `${st.changedFiles} uncommitted change(s)` : 'clean'}, ${st.ahead} ahead / ${st.behind} behind ${landing})`
           : ` — worktree missing at ${agent.worktreePath}: stop and report blocked`;
       }
       const lastStatus = ctx.db.get<{ body: string }>("SELECT body FROM ticket_comments WHERE ticket_id = ? AND kind = 'status' ORDER BY created_at DESC LIMIT 1", [t.id]);
       parts.push('\n## Your ticket');
       parts.push(`- ${t.identifier} [${t.status}] ${t.title}${wtLine}${lastStatus ? `; last status: ${lastStatus.body.slice(0, 160)}` : ''}`);
       if (t.openspecChangeName) parts.push(`- OpenSpec change: \`${t.openspecChangeName}\``);
-      const queue = mergeQueueLine(ctx, t, p?.defaultBranch ?? 'main');
+      const queue = mergeQueueLine(ctx, t, landing);
       if (queue) parts.push(queue);
     }
   }

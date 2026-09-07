@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MERGE_CONCURRENCY, DaemonConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, mergeConcurrencyOf, yoloEnabled } from './config.js';
+import { DEFAULT_MERGE_CONCURRENCY, DaemonConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, mergeConcurrencyOf, yoloEnabled } from './config.js';
+
+describe('project config: landingBranch (VS-119)', () => {
+  it('parses without a landing branch declared', () => {
+    const cfg = ProjectConfigSchema.parse({ id: 'api', url: 'git@example.com:acme/api.git' });
+    expect(cfg.landingBranch).toBeUndefined();
+  });
+
+  it('parses a declared landing branch', () => {
+    const cfg = ProjectConfigSchema.parse({ id: 'fernwood', url: 'git@example.com:acme/fernwood.git', landingBranch: 'edge' });
+    expect(cfg.landingBranch).toBe('edge');
+  });
+});
 
 describe('project policies: mergeConcurrency', () => {
   it('leaves the value unset when the policies block does not mention it', () => {

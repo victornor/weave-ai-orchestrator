@@ -38,7 +38,7 @@ export function ticket(over: Partial<Ticket> = {}): Ticket {
   return {
     id: 'tk_1', workspaceId: 'ws1', projectId: 'proj1', number: 42, identifier: 'ACME-42', kind: 'change',
     title: 'Add dark mode', description: '', status: 'in_progress', priority: 'medium', autoMerge: false,
-    assigneeRoleId: null, workerId: null, assigneeHuman: false, interactiveSession: false, parentId: null, createdByKind: 'human', createdById: null,
+    assigneeRoleId: null, workerId: null, assigneeHuman: false, interactiveSession: false, landingBranch: null, parentId: null, createdByKind: 'human', createdById: null,
     originKind: null, originFingerprint: null, checkoutRunId: null, executionRunId: null, openspecChangeName: null,
     openspecState: null, delivery: null, unblock: null, blockedFromStatus: null, monitorNextCheckAt: null, blockedTransitionAt: null,
     mergeQueuedAt: null, mergeStartedAt: null,
@@ -147,7 +147,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   /** A row a test inserted with `h.db.run("INSERT INTO projects ...")`, else the same stub `projects.get` always returned. */
   const getProject = (id: string): Project =>
     db.get<Project>('SELECT * FROM projects WHERE id = ? OR slug = ?', [id, id])
-    ?? ({ id, slug: id, name: id, gitUrl: '', defaultBranch: 'main', clonePath: tmpdir(), maxWorkers: 4, setupCommand: null, worktreeProvider: 'git', openspecEnabled: true, openspecVersion: null, policies: {}, status: 'ready', lastFetchedAt: null, errorText: null } as Project);
+    ?? ({ id, slug: id, name: id, gitUrl: '', defaultBranch: 'main', landingBranch: null, clonePath: tmpdir(), maxWorkers: 4, setupCommand: null, worktreeProvider: 'git', openspecEnabled: true, openspecVersion: null, policies: {}, status: 'ready', lastFetchedAt: null, errorText: null } as Project);
   // Real, like the changelog: read-only over this fake's real db and a real git clone a test points `clonePath` at.
   const historyReader = createHistoryReader(db);
 

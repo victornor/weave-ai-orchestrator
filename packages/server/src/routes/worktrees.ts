@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync } from 'node:fs';
-import { OcError } from '@agent-conductor/shared';
+import { OcError, landingBranchOf } from '@agent-conductor/shared';
 import { landedWorkTest } from '@agent-conductor/core';
 import type { AppEnv } from '../types.js';
 import { body, notFound } from '../http.js';
@@ -26,11 +26,12 @@ export function worktreeRoutes(): Hono<AppEnv> {
     const ws = c.get('ws');
     const row = findWorktree(ws.ctx.db, c.req.param('id'));
     const git = await gitState(row.path);
-    const project = ws.ctx.db.get<{ clonePath: string; defaultBranch: string }>('SELECT clone_path, default_branch FROM projects WHERE id = ?', [row.projectId]);
+    const project = ws.ctx.db.get<{ clonePath: string; defaultBranch: string; landingBranch: string | null }>('SELECT clone_path, default_branch, landing_branch FROM projects WHERE id = ?', [row.projectId]);
+    const ticket = row.ticketId ? ws.ctx.db.get<{ landingBranch: string | null }>('SELECT landing_branch FROM tickets WHERE id = ?', [row.ticketId]) : null;
     const workProducts = row.ticketId ? ws.services.tickets.workProducts(row.ticketId) : [];
     const pr = workProducts.find((w) => w.type === 'pull_request') as { state?: string; url?: string } | undefined;
     const verdict = existsSync(row.path) && project
-      ? await landedWorkTest({ worktreePath: row.path, branch: row.branch, repoPath: project.clonePath, defaultBranch: project.defaultBranch, prMerged: pr?.state === 'merged', deliveryMode: 'pr' } as never).catch((e: unknown) => ({ landed: false, reason: String(e) }))
+      ? await landedWorkTest({ worktreePath: row.path, branch: row.branch, repoPath: project.clonePath, landingBranch: landingBranchOf(project, ticket), prMerged: pr?.state === 'merged', deliveryMode: 'pr' } as never).catch((e: unknown) => ({ landed: false, reason: String(e) }))
       : { landed: false, reason: 'worktree path missing' };
     const landed = (verdict as { landed?: boolean }).landed === true;
     ws.ctx.db.update('worktrees', row.id, { lastVerifiedAt: new Date().toISOString(), status: row.status === 'removed' ? 'removed' : landed ? 'landed' : git.dirty ? 'dirty' : 'active', landedEvidenceJson: verdict });

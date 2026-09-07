@@ -150,6 +150,24 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('ac_ticket_merge_done');
   });
 
+  it("re-syncs with the project's declared landing branch, not the default branch (VS-119)", async () => {
+    h.db.update('projects', h.projectId, { landingBranch: 'edge' });
+    h.db.update('tickets', ticketId, { status: 'merging', mergeQueuedAt: nowIso(), mergeStartedAt: nowIso() });
+    const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: worker.id, source: 'merge_approved', reason: 'front of the queue', payload: {}, status: 'claimed' } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).toContain('sync `work/` with `edge`');
+  });
+
+  it("re-syncs with the ticket's own landing branch, overriding the project's (VS-119)", async () => {
+    h.db.update('projects', h.projectId, { landingBranch: 'edge' });
+    h.db.update('tickets', ticketId, { status: 'merging', mergeQueuedAt: nowIso(), mergeStartedAt: nowIso(), landingBranch: 'main' });
+    const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: worker.id, source: 'merge_approved', reason: 'front of the queue', payload: {}, status: 'claimed' } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).toContain('sync `work/` with `main`');
+  });
+
   it('tells a waiting worker its position and that there is nothing to merge yet', async () => {
     const ahead = newId();
     const now = nowIso();

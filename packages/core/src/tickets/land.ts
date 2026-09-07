@@ -1,4 +1,4 @@
-import { OcError, type Project, type Ticket, type WorkspaceConfig } from '@agent-conductor/shared';
+import { OcError, landingBranchOf, type Project, type Ticket, type WorkspaceConfig } from '@agent-conductor/shared';
 import { git } from '../util/git.js';
 
 export interface LandResult { mode: 'pr' | 'local-branch'; landed: boolean; head: string | null; detail: string }
@@ -13,7 +13,7 @@ async function patchId(clone: string, diffArgs: string[]): Promise<string | null
 }
 
 /**
- * Is the branch's content on the default branch? Four checks, cheapest first; the returned string
+ * Is the branch's content on its landing branch? Four checks, cheapest first; the returned string
  * names the one that passed, and null means the work has not landed.
  *
  * The order matters. Ancestry is the ordinary merge. Tree equality is the squash that was the last
@@ -46,30 +46,33 @@ async function verifyContained(clone: string, branchHead: string, upstream: stri
 
 /**
  * Land a ticket's delivery into the primary clone before archiving (PLAN §11.3/§12.2 step 7):
- * - `local-branch`: fast-forward the primary clone's default branch to the ticket branch (refuse when not fast-forwardable).
- * - `pr`: fetch and verify the default branch already carries the ticket branch's content (the worker merged the PR on the forge).
+ * - `local-branch`: fast-forward the ticket's landing branch to the ticket branch (refuse when not fast-forwardable).
+ * - `pr`: fetch and verify the ticket's landing branch already carries the ticket branch's content (the worker merged the PR on the forge).
+ *
+ * The landing branch is the ticket's own declaration if it has one, else the project's, else the
+ * project's default branch (VS-119, `landingBranchOf`) — never inferred from where the PR was opened.
  *
  * The caller serialises this per project (PLAN §11.4): it mutates the one clone every ticket shares.
  */
 export async function landDelivery(config: WorkspaceConfig, project: Project, ticket: Ticket, branch: string): Promise<LandResult> {
   const mode = ((project.policies as { deliveryMode?: string } | null)?.deliveryMode ?? config.defaults.deliveryMode) as 'pr' | 'local-branch';
   const clone = project.clonePath;
-  const def = project.defaultBranch;
+  const landing = landingBranchOf(project, ticket);
   if (mode === 'local-branch') {
-    const onDefault = await git(['checkout', def], clone);
-    if (!onDefault.ok) throw new OcError('merge_unverified', `primary clone cannot check out ${def}: ${onDefault.stderr.trim().slice(0, 200)}`);
+    const onLanding = await git(['checkout', landing], clone);
+    if (!onLanding.ok) throw new OcError('merge_unverified', `primary clone cannot check out ${landing}: ${onLanding.stderr.trim().slice(0, 200)}`);
     const ff = await git(['merge', '--ff-only', branch], clone, 120_000);
-    if (!ff.ok) throw new OcError('merge_unverified', `branch ${branch} is not fast-forwardable onto ${def}; rebase it onto ${def} and retry`, { stderr: ff.stderr.trim().slice(0, 300) });
+    if (!ff.ok) throw new OcError('merge_unverified', `branch ${branch} is not fast-forwardable onto ${landing}; rebase it onto ${landing} and retry`, { stderr: ff.stderr.trim().slice(0, 300) });
     const head = (await git(['rev-parse', 'HEAD'], clone)).stdout.trim();
-    return { mode, landed: true, head, detail: `fast-forwarded ${def} to ${branch}` };
+    return { mode, landed: true, head, detail: `fast-forwarded ${landing} to ${branch}` };
   }
   // pr mode: the worker merged on the forge; verify by fetching and checking what the branch left behind.
   await git(['fetch', 'origin'], clone, 300_000);
-  await git(['merge', '--ff-only', `origin/${def}`], clone, 120_000);
+  await git(['merge', '--ff-only', `origin/${landing}`], clone, 120_000);
   const branchHead = (await git(['rev-parse', branch], clone)).stdout.trim();
   if (branchHead) {
-    const detail = await verifyContained(clone, branchHead, `origin/${def}`);
+    const detail = await verifyContained(clone, branchHead, `origin/${landing}`);
     if (detail) return { mode, landed: true, head: branchHead, detail };
   }
-  throw new OcError('merge_unverified', `origin/${def} does not contain ${branch} yet; merge the PR first (or wait for the forge), then report again`);
+  throw new OcError('merge_unverified', `origin/${landing} does not contain ${branch} yet; merge the PR first (or wait for the forge), then report again`);
 }

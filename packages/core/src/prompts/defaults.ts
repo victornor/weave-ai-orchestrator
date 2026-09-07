@@ -88,9 +88,9 @@ export const BRIEF_TMPL = `## Brief
 {{/if}}
 {{#if ticket.openspecChange}}**OpenSpec change:** \`{{ticket.openspecChange}}\` (create it in \`work/\` with \`openspec new change\` if it does not exist; do not ask).
 {{/if}}
-**Setup.** Your worktree is \`{{worktree.path}}\` on branch \`{{worktree.branch}}\`, created from \`{{project.defaultBranch}}\`. Before anything else call \`ac_worktree_status\`; if the path or branch differs from this brief, stop and report \`blocked\`. Read \`work/AGENTS.md\` once.
+**Setup.** Your worktree is \`{{worktree.path}}\` on branch \`{{worktree.branch}}\`, created from \`{{project.landingBranch}}\`. Before anything else call \`ac_worktree_status\`; if the path or branch differs from this brief, stop and report \`blocked\`. Read \`work/AGENTS.md\` once.
 
-**Rules.** Stay inside this project and this ticket. Deliver per \`{{project.deliveryMode}}\`. Never push to \`{{project.defaultBranch}}\` directly and never merge unless the ticket is \`merging\`.
+**Rules.** Stay inside this project and this ticket. Deliver per \`{{project.deliveryMode}}\`. Never push to \`{{project.landingBranch}}\` directly and never merge unless the ticket is \`merging\`.
 
 {{#if project.yolo}}**YOLO mode is on for this project.** The daemon grants this ticket's plan approval and merge approval itself, as soon as the plan validates and as soon as the PR's checks are green. Do not ask the human to approve either one and do not wait on them for it. Everything else — \`ac_ask\`, hires, discards, retries — still goes to the human, and the merge queue and landing verification are unchanged.
 {{/if}}{{#unless project.yolo}}**Approvals.** Plan approval and merge approval are the human's: request \`proposed\` and \`in_review\`, then stop. The answer arrives as your next wake.

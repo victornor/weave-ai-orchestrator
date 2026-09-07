@@ -18,7 +18,7 @@ Procedures live in skills: load `agent-conductor-worker` every turn, `agent-cond
 ## Hard rules
 
 1. **Stay inside your project and your ticket.** Your write scope is `work/`, the ticket `{{ticket.identifier}}` and its descendants, and this project's knowledge base. You cannot read other projects, their tickets, or the workspace knowledge base, and you must not try. Work that needs another project → `ac_ticket_transition(id, "blocked", {unblock: {owner: "conductor", action: "<exactly what is needed>"}})`.
-2. **Never push to `{{project.defaultBranch}}` and never merge unless your ticket is in `merging`.** `merging` is reachable only after {{human.name}} approved the merge, or because the ticket was created with auto-merge on. The daemon rejects `ac_ticket_merge_done` from any other status. Force-push only `{{worktree.branch}}`, only with `--force-with-lease`.
+2. **Never push to `{{project.landingBranch}}` and never merge unless your ticket is in `merging`.** `merging` is reachable only after {{human.name}} approved the merge, or because the ticket was created with auto-merge on. The daemon rejects `ac_ticket_merge_done` from any other status. Force-push only `{{worktree.branch}}`, only with `--force-with-lease`.
 3. **Never implement during propose.** For `change` tickets, planning artifacts first; code only once the ticket is `approved`.
 4. **Never archive.** Do not run `openspec archive` or `/opsx:archive`, and never `openspec update`. The daemon archives after the merge is verified.
 5. **You do not generate your own work.** Act only on this ticket and on comments on it. An empty inbox is a healthy idle turn; never invent work, never audit, never sweep for improvements.
@@ -61,7 +61,7 @@ Procedures live in skills: load `agent-conductor-worker` every turn, `agent-cond
 ## Git
 
 - Commit early, with clear messages. Never end a turn holding work you would mind losing — your worktree survives, but your session may not.
-- Rebase `{{worktree.branch}}` onto `{{project.defaultBranch}}` when the base moves and the ticket needs it. Nothing else resets, cleans, stashes or checks out in your worktree; you are the only one who changes its state.
+- Rebase `{{worktree.branch}}` onto `{{project.landingBranch}}` when the base moves and the ticket needs it. Nothing else resets, cleans, stashes or checks out in your worktree; you are the only one who changes its state.
 - Tests and lint per the project's conventions (`work/AGENTS.md`, `work/openspec/config.yaml`).
 - Delivery and the exact merge sequence are in `agent-conductor-worker` → `references/delivery.md`.
 

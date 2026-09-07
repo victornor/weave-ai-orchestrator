@@ -16,6 +16,7 @@ export function register(program: Command): void {
     .description('clone a repo, init OpenSpec, seed the project KB')
     .option('--id <id>', 'project id (slug)')
     .option('--branch <branch>', 'default branch')
+    .option('--landing-branch <branch>', "the branch tickets' work lands on, when it differs from --branch (VS-119)")
     .option('--max-workers <n>', 'concurrent workers across all roles')
     .option('--setup <command>', 'setup command run once per new worktree')
     .option('--no-follow', 'return as soon as the job has started instead of watching it')
@@ -24,6 +25,7 @@ export function register(program: Command): void {
       const body: Record<string, unknown> = { url };
       if (opts['id']) body['id'] = opts['id'];
       if (opts['branch']) body['defaultBranch'] = opts['branch'];
+      if (opts['landingBranch']) body['landingBranch'] = opts['landingBranch'];
       if (opts['maxWorkers']) body['maxWorkers'] = Number(opts['maxWorkers']);
       if (opts['setup']) body['setupCommand'] = opts['setup'];
       const started = await client.write<Started>({
@@ -56,6 +58,7 @@ export function register(program: Command): void {
           { header: 'ID', get: (r) => String(r['id'] ?? '') },
           { header: 'NAME', get: (r) => String(r['name'] ?? '') },
           { header: 'BRANCH', get: (r) => String(r['defaultBranch'] ?? '') },
+          { header: 'LANDING', get: (r) => String(r['landingBranch'] ?? '') },
           { header: 'MAX', get: (r) => String(r['maxWorkers'] ?? ''), align: 'right' },
           { header: 'STATUS', get: (r) => String(r['status'] ?? '') },
           { header: 'FETCHED', get: (r) => String(r['lastFetchedAt'] ?? '') },
@@ -76,6 +79,7 @@ export function register(program: Command): void {
           ['name', String(p['name'] ?? '')],
           ['git', String(p['gitUrl'] ?? '')],
           ['branch', String(p['defaultBranch'] ?? '')],
+          ['landing branch', p['landingBranch'] ? String(p['landingBranch']) : undefined],
           ['clone', String(p['clonePath'] ?? '')],
           ['max workers', String(p['maxWorkers'] ?? '')],
           ['setup', String(p['setupCommand'] ?? '')],

@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 
 import { join } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
 import {
-  OcError, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type TicketStatus,
+  OcError, landingBranchOf, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type TicketStatus,
 } from '@agent-conductor/shared';
 import type { WorktreeProvider } from '@agent-conductor/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
@@ -91,7 +91,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         const provider = providerFor(project);
         const targetPath = join(home, 'work');
         const info = await provider.create({
-          repoPath: project.clonePath, branch, base: project.defaultBranch, targetPath,
+          repoPath: project.clonePath, branch, base: landingBranchOf(project, ticket), targetPath,
           setupCommand: project.setupCommand ?? undefined, warmPaths: (project as unknown as { warmPaths?: string[] }).warmPaths ?? [],
           configPath: ctx.paths.wtConfig,
         });
@@ -391,6 +391,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const agent = get(workerId);
       if (agent.status === 'retired') return { retired: true };
       const project = agent.projectId ? projectOf(agent.projectId) : null;
+      const ticket = agent.ticketId ? ticketOf(agent.ticketId) : null;
       const wt = ctx.db.get<{ id: string; path: string; branch: string; status: string }>("SELECT id, path, branch, status FROM worktrees WHERE agent_id = ? AND status != 'removed' ORDER BY created_at DESC LIMIT 1", [workerId]);
 
       if (project && wt) {
@@ -399,7 +400,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
           : undefined;
         const policies = (project.policies ?? {}) as { deliveryMode?: string };
         const verdict = await landedWorkTest({
-          repoPath: project.clonePath, worktreePath: wt.path, branch: wt.branch, defaultBranch: project.defaultBranch,
+          repoPath: project.clonePath, worktreePath: wt.path, branch: wt.branch, landingBranch: landingBranchOf(project, ticket),
           mergedPr: !!merged, localBranch: (policies.deliveryMode ?? ctx.config.defaults.deliveryMode) === 'local-branch',
         });
         if (!verdict.landed) {

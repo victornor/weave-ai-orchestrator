@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, PROJECT_ADD_STEPS, ProjectConfigSchema, type Project, type ProjectAddStepId, type ProjectConfig } from '@agent-conductor/shared';
+import { OcError, PROJECT_ADD_STEPS, ProjectConfigSchema, landingBranchOf, type Project, type ProjectAddStepId, type ProjectConfig } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CommitDetail, CoreServices, HistoryPage, HistoryQuery, ProjectsService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -124,6 +124,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       id: project.slug, url: project.gitUrl, name: project.name, defaultBranch: project.defaultBranch,
       maxWorkers: project.maxWorkers,
       ...(project.setupCommand ? { setupCommand: project.setupCommand } : {}),
+      ...(project.landingBranch ? { landingBranch: project.landingBranch } : {}),
       worktrees: project.worktreeProvider, openspec: { enabled: project.openspecEnabled }, policies: project.policies,
     });
   }
@@ -140,6 +141,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
     const now = nowIso();
     ctx.db.insert('projects', {
       id, workspaceId: ctx.workspaceId, slug: cfg.id, name: cfg.name ?? cfg.id, gitUrl: cfg.url, defaultBranch: cfg.defaultBranch,
+      landingBranch: cfg.landingBranch ?? null,
       clonePath: join(ctx.paths.projects, cfg.id), maxWorkers: cfg.maxWorkers, setupCommand: cfg.setupCommand ?? null, warmPathsJson: cfg.warmPaths,
       worktreeProvider: cfg.worktrees ?? ctx.config.defaults.worktrees, openspecEnabled: cfg.openspec.enabled, policiesJson: cfg.policies,
       status: 'cloning', createdAt: now, updatedAt: now,
@@ -280,7 +282,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       const existing = ctx.config.projects.find((p) => p.id === project.slug);
       const merged = ProjectConfigSchema.parse({ ...(existing ?? { id: project.slug, url: project.gitUrl }), ...patch, id: project.slug });
       ctx.db.update('projects', project.id, {
-        name: merged.name ?? project.name, defaultBranch: merged.defaultBranch, maxWorkers: merged.maxWorkers,
+        name: merged.name ?? project.name, defaultBranch: merged.defaultBranch, landingBranch: merged.landingBranch ?? null, maxWorkers: merged.maxWorkers,
         setupCommand: merged.setupCommand ?? null, warmPathsJson: merged.warmPaths, worktreeProvider: merged.worktrees ?? project.worktreeProvider,
         openspecEnabled: merged.openspec.enabled,
         policiesJson: merged.policies, updatedAt: nowIso(),
@@ -304,10 +306,15 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
 
     async fetch(id: string): Promise<{ head: string; fastForwarded: boolean }> {
       const project = get(id);
+      // Kept on the project's own landing branch (VS-119, project-level regardless of any one
+      // ticket's override — see design.md), not just fast-forwarded: `git clone` may have left the
+      // clone on the repository's actual default branch, which differs from the landing branch.
+      const landing = landingBranchOf(project);
       const fetched = await git(['fetch', 'origin'], project.clonePath, 300_000);
       if (!fetched.ok) throw new OcError('internal', `git fetch failed: ${fetched.stderr.trim().slice(0, 300)}`, { project: project.slug });
       const before = await git(['rev-parse', 'HEAD'], project.clonePath, 15_000);
-      const merged = await git(['merge', '--ff-only', `origin/${project.defaultBranch}`], project.clonePath, 120_000);
+      await git(['checkout', landing], project.clonePath, 30_000);
+      const merged = await git(['merge', '--ff-only', `origin/${landing}`], project.clonePath, 120_000);
       const after = await git(['rev-parse', 'HEAD'], project.clonePath, 15_000);
       const head = after.ok ? after.stdout.trim() : before.stdout.trim();
       const fastForwarded = merged.ok && before.stdout.trim() !== head;

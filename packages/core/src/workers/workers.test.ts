@@ -96,6 +96,43 @@ describe('workers', () => {
     expect(h.db.get<{ n: number }>('SELECT COUNT(*) n FROM agent_sessions WHERE agent_id = ?', [worker.id])!.n).toBe(1);
   });
 
+  describe('startInteractiveSession (VS-101)', () => {
+    it('marks an existing ticket interactive and spawns its worker, exactly as spawnForTicket would', async () => {
+      const ticket = seedTicket();
+      const agent = await workers.startInteractiveSession(HUMAN, { ticketId: ticket.id });
+      expect(agent.ticketId).toBe(ticket.id);
+      expect(agent.worktreePath).toBeTruthy();
+      const updated = h.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [ticket.id])!;
+      expect(updated.interactiveSession).toBeTruthy();
+    });
+
+    it('creates a fresh ticket marked interactive when no ticketId is given', async () => {
+      // The harness's ticket fake ignores its input by default (it exists to satisfy spawnCurator's
+      // fixed ticket); this test needs the input actually respected, so it swaps in a real insert.
+      (h.services.tickets!.create as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        (_actor: Actor, input: { kind: string; title: string; description?: string; assigneeRoleId?: string; interactiveSession?: boolean }) =>
+          seedTicket({
+            number: 9, identifier: 'TST-9', kind: input.kind, title: input.title, description: input.description ?? '',
+            assigneeRoleId: input.assigneeRoleId, interactiveSession: input.interactiveSession ?? false,
+          }),
+      );
+      const agent = await workers.startInteractiveSession(HUMAN, {
+        projectId: h.projectId, roleId: h.roleId, kind: 'task', title: 'Debug the flaky test',
+      });
+      const ticket = h.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId!])!;
+      expect(ticket.title).toBe('Debug the flaky test');
+      expect(ticket.interactiveSession).toBeTruthy();
+      expect(agent.worktreePath).toBeTruthy();
+    });
+
+    it('returns the existing worker rather than spawning a second one', async () => {
+      const ticket = seedTicket();
+      const first = await workers.startInteractiveSession(HUMAN, { ticketId: ticket.id });
+      const second = await workers.startInteractiveSession(HUMAN, { ticketId: ticket.id });
+      expect(second.id).toBe(first.id);
+    });
+  });
+
   it('returns the existing worker instead of spawning twice for a ticket', async () => {
     const ticket = seedTicket();
     const a = await workers.spawnForTicket(SYSTEM, ticket.id);
@@ -271,6 +308,25 @@ describe('workers', () => {
     expect(h.services.tickets!.comment).toHaveBeenCalledWith(expect.anything(), ticket.id, 'use CSS variables', 'relay', 'agent');
     expect(wake.calls[0]!.input).toMatchObject({ source: 'conductor_request' });
     expect(outcome).toMatchObject({ delivery: 'queued' });
+  });
+
+  describe('the conductor cannot message an interactive session (VS-101)', () => {
+    it('refuses an agent actor', async () => {
+      const session = await workers.startInteractiveSession(HUMAN, { ticketId: seedTicket().id });
+      await expect(workers.message(CONDUCTOR, session.id, 'what are you doing')).rejects.toThrow(/interactive session/);
+    });
+
+    it('leaves a human actor unaffected', async () => {
+      const session = await workers.startInteractiveSession(HUMAN, { ticketId: seedTicket().id });
+      const outcome = await workers.message(HUMAN, session.id, 'go ahead');
+      expect(outcome).toMatchObject({ delivery: 'queued' });
+    });
+
+    it('does not refuse the conductor on an ordinary (non-session) ticket', async () => {
+      const worker = await workers.spawnForTicket(SYSTEM, seedTicket().id);
+      const outcome = await workers.message(CONDUCTOR, worker.id, 'status?');
+      expect(outcome).toMatchObject({ delivery: 'queued' });
+    });
   });
 
   describe('message: mid-turn vs queued delivery (VS-99)', () => {
@@ -462,6 +518,17 @@ describe('workers', () => {
     expect(after.status).toBe('done');
     expect(existsSync(worker.worktreePath!)).toBe(true);
     expect(h.db.get<{ status: string }>('SELECT status FROM worktrees WHERE agent_id = ?', [worker.id])!.status).toBe('dirty');
+  });
+
+  it('ending an interactive session is exactly cancel: ticket commented, worktree kept, no new mechanism (VS-101)', async () => {
+    const session = await workers.startInteractiveSession(HUMAN, { ticketId: seedTicket().id });
+    const after = await workers.cancel(HUMAN, session.id, 'done for now');
+    expect(after.status).toBe('done');
+    expect(existsSync(session.worktreePath!)).toBe(true);
+    expect(h.db.get<{ status: string }>('SELECT status FROM worktrees WHERE agent_id = ?', [session.id])!.status).toBe('dirty');
+    expect(h.services.tickets!.comment).toHaveBeenCalledWith(
+      expect.anything(), session.ticketId, expect.stringContaining('kept until the work lands or is discarded'), 'status', 'trusted',
+    );
   });
 
   it('spawns a curator with no worktree', async () => {

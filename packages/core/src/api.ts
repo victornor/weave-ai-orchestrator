@@ -9,7 +9,7 @@ export interface Actor { kind: 'human' | 'agent' | 'system'; id: string | null; 
 export interface Page<T> { items: T[]; total: number }
 
 // ---------- tickets ----------
-export interface TicketCreateInput { projectId?: string | null; kind: S.TicketKind; title: string; description?: string; priority?: S.TicketPriority; parentId?: string | null; blockedBy?: string[]; assigneeRoleId?: string | null; autoMerge?: boolean; originKind?: string; originFingerprint?: string }
+export interface TicketCreateInput { projectId?: string | null; kind: S.TicketKind; title: string; description?: string; priority?: S.TicketPriority; parentId?: string | null; blockedBy?: string[]; assigneeRoleId?: string | null; autoMerge?: boolean; originKind?: string; originFingerprint?: string; /** VS-101: marks the ticket as an interactive session from the moment it is created. */ interactiveSession?: boolean }
 /** `sort: 'finished'` orders by when a ticket reached done or cancelled, so a page of terminal tickets is the most recently finished ones rather than the most recently created. */
 export interface TicketFilter { projectId?: string; status?: S.TicketStatus[]; kind?: S.TicketKind[]; roleId?: string; workerId?: string; search?: string; limit?: number; offset?: number; includeTerminal?: boolean; sort?: 'number' | 'finished' }
 export interface TransitionInput { to: S.TicketStatus; note?: string; unblock?: { owner: 'conductor' | 'human'; action: string }; blockedBy?: string[] }
@@ -178,6 +178,12 @@ export interface WorkersService {
   ensureConductor(): Promise<S.Agent>;
   spawnForTicket(actor: Actor, ticketId: string): Promise<S.Agent>;       // brief, home, worktree, session placeholder, first wake
   spawnCurator(actor: Actor, projectId: string): Promise<S.Agent>;
+  /**
+   * Start an interactive session (VS-101): always against a ticket, either one that already exists
+   * or one created in the same action. Marks the ticket `interactiveSession` and calls the ordinary
+   * `spawn` unchanged — the session's agent is that ticket's worker, nothing more.
+   */
+  startInteractiveSession(actor: Actor, input: { ticketId: string } | { projectId: string; roleId: string; kind: S.TicketKind; title: string; description?: string }): Promise<S.Agent>;
   /**
    * Steer a worker: records the human's words as a ticket comment first, always. When `live` is
    * asked for and the worker's runtime can take mid-turn input, attempts delivery to its executing

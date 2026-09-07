@@ -296,6 +296,57 @@ describe('run engine', () => {
     expect(h.db.get<{ executionRunId: string | null }>('SELECT execution_run_id FROM tickets WHERE id = ?', [ticketId])!.executionRunId).toBeNull();
   });
 
+  describe('interactive session first-turn hold (VS-101)', () => {
+    it('restricts the first turn to the read-and-report allowlist', async () => {
+      const ticketId = seedTicket(h, { interactiveSession: true });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      runtime.queue.push({ structured: { state: 'working', summary: 'stated understanding', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+
+      expect(runtime.inputs[0]!.permission.allowedTools).toEqual([
+        'ac_inbox', 'ac_ticket_get', 'ac_ticket_comments', 'ac_ticket_comment', 'ac_ticket_document_get', 'ac_worktree_status', 'Read', 'Grep', 'Glob',
+      ]);
+    });
+
+    it('lifts the restriction from the second turn on', async () => {
+      const ticketId = seedTicket(h, { interactiveSession: true });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      runtime.queue.push({ structured: { state: 'working', summary: 'stated understanding', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+
+      h.services.wake!.enqueue(workerId, { source: 'conductor_request', reason: 'go ahead' });
+      runtime.queue.push({ structured: { state: 'done', summary: 'did the work', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+
+      expect(runtime.inputs).toHaveLength(2);
+      expect(runtime.inputs[1]!.permission.allowedTools).toBeUndefined();
+    });
+
+    it('does not restrict an ordinary (non-session) ticket\'s first turn', async () => {
+      const ticketId = seedTicket(h);
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      runtime.queue.push({ structured: { state: 'working', summary: 'started', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+
+      expect(runtime.inputs[0]!.permission.allowedTools).toBeUndefined();
+    });
+
+    it('never widens beyond a role that already denies one of the allowlisted tools', async () => {
+      h.db.update('roles', h.roleId, { permissionJson: { mode: 'auto', denied: ['ac_ticket_comment'] } });
+      const ticketId = seedTicket(h, { interactiveSession: true });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      runtime.queue.push({ structured: { state: 'working', summary: 'stated understanding', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+
+      expect(runtime.inputs[0]!.permission.allowedTools).not.toContain('ac_ticket_comment');
+      expect(runtime.inputs[0]!.permission.deniedTools).toEqual(['ac_ticket_comment']);
+    });
+  });
+
   it('carries the runtime’s live-input handle onto the active run, and clears it at finalize (VS-99)', async () => {
     runtime.streamingInput = true;
     runtime.delayMs = 30;

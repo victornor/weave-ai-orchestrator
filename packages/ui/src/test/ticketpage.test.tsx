@@ -1,11 +1,13 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Decision, TicketComment } from '@agent-conductor/shared';
+import type { Agent, Decision, Ticket, TicketComment } from '@agent-conductor/shared';
 import { agent, decision, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
   comments: [] as TicketComment[],
+  ticketOverrides: {} as Partial<Ticket>,
   worker: null as Agent | null,
+  startSession: vi.fn(),
   decisions: [] as Decision[],
   workerDetail: undefined as { input: { midTurn: boolean; reason?: string } } | undefined,
   search: {} as Record<string, string | undefined>,
@@ -24,7 +26,7 @@ vi.mock('../app/link', () => ({ useGo: () => vi.fn(), useSearchParams: () => sta
 vi.mock('../api/hooks', () => ({
   useTicket: () => ({
     data: {
-      ticket: ticket({ description: 'A description\nwrapped onto two lines.', status: state.ticketStatus as never }),
+      ticket: ticket({ description: 'A description\nwrapped onto two lines.', status: state.ticketStatus as never, ...state.ticketOverrides }),
       project: null, worker: state.worker, role: null, blockers: [], children: [], documents: [],
       workProducts: [], openspecState: null, mergeQueue: { position: null, concurrency: 1 },
     },
@@ -33,6 +35,7 @@ vi.mock('../api/hooks', () => ({
   }),
   usePatchTicket: () => ({ mutate: vi.fn(), isPending: false }),
   useRetryTicket: () => ({ mutate: vi.fn(), isPending: false }),
+  useStartSession: () => ({ mutate: state.startSession, isPending: false }),
   usePostComment: () => ({ mutate: vi.fn(), isPending: false }),
   useTicketComments: () => list(state.comments),
   useTicketDocument: () => empty,
@@ -57,7 +60,9 @@ function comment(over: Partial<TicketComment> & Pick<TicketComment, 'id' | 'body
 
 beforeEach(() => {
   state.comments = [];
+  state.ticketOverrides = {};
   state.worker = null;
+  state.startSession = vi.fn();
   state.decisions = [];
   state.workerDetail = undefined;
   state.search = {};
@@ -81,6 +86,28 @@ describe('TicketRoute comments', () => {
   it('still reflows a hard-wrapped description', () => {
     const { container } = render(<TicketRoute />);
     expect(container.querySelector('.ac-prose p')!.innerHTML).toBe('A description wrapped onto two lines.');
+  });
+});
+
+describe('TicketRoute — interactive sessions (VS-101)', () => {
+  it('offers to start a session on a ticket with no worker yet, and starts it on click', () => {
+    render(<TicketRoute />);
+    const startButton = screen.getByRole('button', { name: 'Start interactive session' });
+    fireEvent.click(startButton);
+    expect(state.startSession).toHaveBeenCalledWith({ ticketId: 'tk_1' }, expect.anything());
+  });
+
+  it('does not offer to start a session once the ticket already has a worker', () => {
+    state.worker = agent();
+    render(<TicketRoute />);
+    expect(screen.queryByRole('button', { name: 'Start interactive session' })).not.toBeInTheDocument();
+  });
+
+  it('does not offer to start a session that is already one, and marks it interactive instead', () => {
+    state.ticketOverrides = { interactiveSession: true };
+    render(<TicketRoute />);
+    expect(screen.queryByRole('button', { name: 'Start interactive session' })).not.toBeInTheDocument();
+    expect(screen.getByText('interactive')).toBeInTheDocument();
   });
 });
 

@@ -240,6 +240,32 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   }
 
   /**
+   * Cancel an interactive session's worker (VS-101) that has had no turn run and none executing for
+   * the configured quiet period — the same `workers.cancel` a human ending it would call, so the
+   * ticket is left commented and the worktree kept, never discarded. `agents.lastRunAt` is stamped at
+   * every turn's finalize (both a human's message and the agent's own activity lead to one), so no
+   * separate activity timestamp is needed.
+   */
+  async function retireIdleSessions(): Promise<void> {
+    const timeoutMs = (ctx.config.defaults.interactiveSessionIdleTimeoutMinutes ?? 240) * 60_000;
+    const cutoff = new Date(Date.now() - timeoutMs).toISOString();
+    const idle = ctx.db.all<Agent>(
+      `SELECT a.* FROM agents a JOIN tickets t ON t.id = a.ticket_id
+        WHERE a.workspace_id = ? AND a.kind = 'worker' AND a.status IN ('provisioning','active','running','paused','error') AND t.interactive_session = 1
+          AND (a.last_run_at IS NULL OR a.last_run_at < ?)`,
+      [ctx.workspaceId, cutoff],
+    );
+    for (const agent of idle) {
+      const running = ctx.db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [agent.id]);
+      if (running) continue;
+      try {
+        await deps().workers.cancel(SYSTEM, agent.id, 'idle interactive session');
+        log.info({ agentId: agent.id, ticketId: agent.ticketId }, 'interactive session cancelled: idle');
+      } catch (e) { log.warn({ agentId: agent.id, err: String(e) }, 'idle session cancel failed'); }
+    }
+  }
+
+  /**
    * Advance every project's merge queue (PLAN §11.4). Transitions pump their own project, so this is
    * the recovery path: a queue whose head vanished with the daemon, or one left half-admitted by a
    * restart, starts moving again on the next tick without anyone acting.
@@ -620,6 +646,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         { const sweep = deps().tickets.autoMergeSweep; if (typeof sweep === 'function') await sweep.call(deps().tickets).catch((e: unknown) => log.error({ err: String(e) }, 'auto-merge sweep failed')); }
         await pumpMergeQueues().catch((e) => log.error({ err: String(e) }, 'merge queue pump failed'));
         await retireFinished().catch((e) => log.error({ err: String(e) }, 'retire pass failed'));
+        await retireIdleSessions().catch((e) => log.error({ err: String(e) }, 'idle session retire pass failed'));
         if (Date.now() - lastLiveness > LIVENESS_EVERY_MS) {
           lastLiveness = Date.now();
           try { livenessScan(); } catch (e) { log.error({ err: String(e) }, 'liveness scan failed'); }

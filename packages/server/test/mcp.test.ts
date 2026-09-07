@@ -270,6 +270,20 @@ describe('agent REST mirror', () => {
     await client.close();
   });
 
+  // ---------- VS-101 ----------
+
+  it('ac_worker_message surfaces the refusal when the ticket is an interactive session', async () => {
+    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    h.impls.workers!['message'] = async () => {
+      throw new OcError('forbidden', "Session #1's ticket is an interactive session; the conductor cannot message it directly");
+    };
+    const res = await client.callTool({ name: 'ac_worker_message', arguments: { workerId: 'ag_1', message: 'what are you doing' } });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.ok).toBe(false);
+    expect(payload.error.code).toBe('forbidden');
+    await client.close();
+  });
+
   // ---------- VS-106 ----------
 
   it('ac_worker_message surfaces wrong_status rather than ok:true for a retired worker', async () => {

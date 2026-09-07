@@ -31,6 +31,7 @@ vi.mock('../api/hooks', () => ({
   usePatchTicket: () => ({ mutate: vi.fn() }),
   usePostComment: () => ({ mutate: vi.fn() }),
   useRetryTicket: () => ({ mutate: vi.fn(), isPending: false }),
+  useStartSession: () => ({ mutate: vi.fn(), isPending: false }),
   useDecisions: () => ({ data: [] }),
   useAnswerDecision: () => ({ mutate: vi.fn(), isPending: false }),
   useWorker: () => ({ data: undefined, isLoading: false, isError: false }),

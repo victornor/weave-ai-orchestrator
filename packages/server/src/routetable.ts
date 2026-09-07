@@ -77,8 +77,9 @@ export const ROUTES: RouteRow[] = [
   { method: 'POST', path: `${W}/roles/{id}/resume`, tag: 'roles', summary: 'Resume a role', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/roles/{id}/retire`, tag: 'roles', summary: 'Retire a role', auth: 'session', mutating: true },
 
-  { method: 'GET', path: `${W}/workers`, tag: 'workers', summary: 'List workers', auth: 'session' },
+  { method: 'GET', path: `${W}/workers`, tag: 'workers', summary: 'List workers (interactiveSession marked per VS-101)', auth: 'session' },
   { method: 'GET', path: `${W}/workers/{id}`, tag: 'workers', summary: 'Worker with ticket, last run and usage', auth: 'session' },
+  { method: 'POST', path: `${W}/workers/start-session`, tag: 'workers', summary: 'Start an interactive session against an existing or a newly created ticket (VS-101)', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/workers/{id}/brief`, tag: 'workers', summary: 'The worker brief as text', auth: 'session' },
   { method: 'POST', path: `${W}/workers/{id}/message`, tag: 'workers', summary: 'Steer a worker (comment + wake)', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/workers/{id}/relaunch`, tag: 'workers', summary: 'Relaunch with a fresh session', auth: 'session', mutating: true },

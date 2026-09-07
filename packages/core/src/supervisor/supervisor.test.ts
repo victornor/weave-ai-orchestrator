@@ -6,6 +6,7 @@ import type { Run, Ticket } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createSupervisor } from './index.js';
 import { createKnowledgeService } from '../knowledge/service.js';
+import { runState } from '../runs/active.js';
 import type { Supervisor } from '../api.js';
 
 function seedTicket(h: TestHarness, over: Record<string, unknown> = {}): string {
@@ -640,5 +641,73 @@ describe('supervisor runtime login recheck', () => {
   it('does not fail the tick when the probe throws', async () => {
     refresh.mockRejectedValue(new Error('the CLI is not logged in'));
     await expect(supervisor.tick()).resolves.toBeUndefined();
+  });
+});
+
+describe('supervisor idle interactive sessions (VS-101)', () => {
+  let h: TestHarness;
+  let supervisor: Supervisor;
+  let cancel: ReturnType<typeof vi.fn>;
+
+  function seedSessionWorker(over: Record<string, unknown> = {}): { ticketId: string; agentId: string } {
+    const ticketId = newId();
+    const now = nowIso();
+    h.db.insert('tickets', {
+      id: ticketId, workspaceId: h.workspaceId, projectId: h.projectId, number: 1, identifier: 'TST-1',
+      kind: 'task', title: 'Debug it', status: 'in_progress', priority: 'medium', assigneeRoleId: h.roleId,
+      interactiveSession: true, createdByKind: 'human', createdAt: now, updatedAt: now,
+    });
+    const agentId = h.addWorker(ticketId, { lastRunAt: now, ...over });
+    return { ticketId, agentId };
+  }
+
+  beforeEach(() => {
+    h = makeHarness();
+    h.services.wake = fakeWake() as never;
+    cancel = vi.fn(async () => ({}));
+    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }), cancel } as never;
+    h.services.tickets = { livenessViolations: () => [] } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
+    supervisor = createSupervisor(h.ctx, h.deps);
+  });
+  afterEach(() => { supervisor.stop(); h.cleanup(); });
+
+  it('cancels a session idle past the timeout', async () => {
+    h.ctx.config.defaults.interactiveSessionIdleTimeoutMinutes = 60;
+    const { agentId } = seedSessionWorker({ lastRunAt: new Date(Date.now() - 61 * 60_000).toISOString() });
+    await supervisor.tick();
+    expect(cancel).toHaveBeenCalledWith({ kind: 'system', id: null }, agentId, 'idle interactive session');
+  });
+
+  it('leaves a session alone that is not idle yet', async () => {
+    h.ctx.config.defaults.interactiveSessionIdleTimeoutMinutes = 60;
+    seedSessionWorker({ lastRunAt: new Date(Date.now() - 5 * 60_000).toISOString() });
+    await supervisor.tick();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it('leaves a session alone whose run is still executing, whatever lastRunAt says', async () => {
+    h.ctx.config.defaults.interactiveSessionIdleTimeoutMinutes = 60;
+    const { agentId } = seedSessionWorker({ lastRunAt: new Date(Date.now() - 61 * 60_000).toISOString() });
+    const runId = newId();
+    h.db.insert('runs', {
+      id: runId, workspaceId: h.workspaceId, agentId, wakeupIdsJson: [], runtimeId: 'claude',
+      status: 'running', turnEpoch: 1, cwd: h.ctx.paths.workers, startedAt: nowIso(), createdAt: nowIso(),
+    });
+    // Present in this process's own active-run map, so boot recovery (which runs first on the same
+    // tick) treats it as a genuinely in-flight run rather than one orphaned by a previous daemon.
+    runState(h.ctx).active.set(runId, { runId, agentId, startedAt: Date.now(), pid: null, cancel: async () => undefined });
+    await supervisor.tick();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it('does not touch an ordinary (non-session) idle worker', async () => {
+    h.ctx.config.defaults.interactiveSessionIdleTimeoutMinutes = 60;
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    h.addWorker(ticketId, { lastRunAt: new Date(Date.now() - 61 * 60_000).toISOString() });
+    await supervisor.tick();
+    expect(cancel).not.toHaveBeenCalled();
   });
 });

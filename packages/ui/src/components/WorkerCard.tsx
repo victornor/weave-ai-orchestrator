@@ -1,7 +1,7 @@
 import type { Agent } from '@agent-conductor/shared';
 import { agentUiStatus, waitingOnRuntimeLogin } from '@agent-conductor/shared';
 import { workerPauseReason } from '@agent-conductor/render';
-import { StatusGlyph, StatusBadge } from './StatusGlyph';
+import { StatusGlyph, StatusBadge, Badge } from './StatusGlyph';
 import { Button } from './Button';
 import { cents, initials, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
@@ -15,6 +15,8 @@ export interface WorkerCardProps {
   usage?: { tokens: number; costCents: number | null; estimated?: boolean } | null;
   needsYou?: boolean;
   stalled?: boolean;
+  /** The ticket this worker is on is an interactive session (VS-101): a human is conversing with it directly. */
+  interactive?: boolean;
   onOpen?: () => void;
   /** Offered on a paused worker; resuming continues the same ticket, worktree and session. */
   onResume?: () => void;
@@ -31,6 +33,7 @@ export function WorkerCard({
   usage,
   needsYou,
   stalled,
+  interactive,
   onOpen,
   onResume,
   resuming,
@@ -53,6 +56,7 @@ export function WorkerCard({
             {[projectSlug, ticketIdentifier].filter(Boolean).join(' · ') || '—'}
           </span>
         </span>
+        {interactive ? <Badge tone="accent">interactive</Badge> : null}
         <StatusBadge status={ui} />
       </div>
       {lastLine ? <div className="ac-mono ac-truncate mb-2.5 rounded-r4 bg-bg-2 px-2.5 py-2 text-micro text-text-2">{lastLine}</div> : null}
@@ -94,7 +98,7 @@ export function WorkerCard({
   );
 }
 
-export function WorkerRow({ agent, projectSlug, ticketIdentifier, lastLine, needsYou, stalled, onOpen }: WorkerCardProps): React.ReactElement {
+export function WorkerRow({ agent, projectSlug, ticketIdentifier, lastLine, needsYou, stalled, interactive, onOpen }: WorkerCardProps): React.ReactElement {
   const ui = agentUiStatus(agent.status, { needsYou, stalled });
   const pausedFor = workerPauseReason(agent);
   return (
@@ -108,6 +112,7 @@ export function WorkerRow({ agent, projectSlug, ticketIdentifier, lastLine, need
         <span className="block truncate text-ui text-text-1">{agent.name}</span>
         <span className="ac-mono block truncate text-micro text-text-3">{pausedFor ?? lastLine ?? [projectSlug, ticketIdentifier].filter(Boolean).join(' · ')}</span>
       </span>
+      {interactive ? <Badge tone="accent">interactive</Badge> : null}
     </button>
   );
 }

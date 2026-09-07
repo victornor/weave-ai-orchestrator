@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FakeRuntime } from '@agent-conductor/runtime-sdk';
 import { OcError, type Agent } from '@agent-conductor/shared';
 import { createApp } from '../src/app.js';
@@ -22,6 +22,69 @@ function worker(over: Partial<Agent> = {}): Agent {
     ...over,
   };
 }
+
+describe('GET /workers — interactiveSession (VS-101)', () => {
+  it('marks a worker whose ticket is an interactive session, and no others', async () => {
+    const { h, fetch } = app();
+    h.db.run(
+      "INSERT INTO tickets (id, workspace_id, number, identifier, kind, title, status, interactive_session, created_by_kind, created_at, updated_at) VALUES ('tk_session','ws1',1,'ACME-1','task','Debug it','in_progress',1,'human','t0','t0')",
+    );
+    h.db.run(
+      "INSERT INTO tickets (id, workspace_id, number, identifier, kind, title, status, interactive_session, created_by_kind, created_at, updated_at) VALUES ('tk_normal','ws1',2,'ACME-2','task','Fix the bug','in_progress',0,'human','t0','t0')",
+    );
+    h.impls.workers!['list'] = () => [
+      worker({ id: 'ag_session', ticketId: 'tk_session' }),
+      worker({ id: 'ag_normal', ticketId: 'tk_normal' }),
+      worker({ id: 'ag_bare', ticketId: null }),
+    ];
+
+    const res = await fetch('/api/w/ws1/workers', { headers: authed() });
+    expect(res.status).toBe(200);
+    const list: Array<{ id: string; interactiveSession: boolean }> = await res.json();
+    expect(list.find((w) => w.id === 'ag_session')?.interactiveSession).toBe(true);
+    expect(list.find((w) => w.id === 'ag_normal')?.interactiveSession).toBe(false);
+    expect(list.find((w) => w.id === 'ag_bare')?.interactiveSession).toBe(false);
+  });
+});
+
+describe('POST /workers/start-session (VS-101)', () => {
+  it('starts a session against an existing ticket', async () => {
+    const { h, fetch } = app();
+    const startInteractiveSession = vi.fn(async () => worker({ id: 'ag_session', ticketId: 'tk_1' }));
+    h.impls.workers!['startInteractiveSession'] = startInteractiveSession;
+
+    const res = await fetch('/api/w/ws1/workers/start-session', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ ticketId: 'tk_1' }),
+    });
+    expect(res.status).toBe(201);
+    const agent = await res.json();
+    expect(agent.id).toBe('ag_session');
+    expect(startInteractiveSession).toHaveBeenCalledWith(expect.anything(), { ticketId: 'tk_1' });
+  });
+
+  it('starts a session by creating a ticket in the same action', async () => {
+    const { h, fetch } = app();
+    const startInteractiveSession = vi.fn(async () => worker({ id: 'ag_session', ticketId: 'tk_new' }));
+    h.impls.workers!['startInteractiveSession'] = startInteractiveSession;
+
+    const res = await fetch('/api/w/ws1/workers/start-session', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ projectId: 'proj1', roleId: 'role1', kind: 'task', title: 'Debug the flaky test' }),
+    });
+    expect(res.status).toBe(201);
+    expect(startInteractiveSession).toHaveBeenCalledWith(
+      expect.anything(), { projectId: 'proj1', roleId: 'role1', kind: 'task', title: 'Debug the flaky test' },
+    );
+  });
+
+  it('refuses a body matching neither shape', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/workers/start-session', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ title: 'no project or ticket' }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
 
 describe('GET /workers/:id — input.midTurn (VS-99)', () => {
   it('names the reason for a runtime that cannot take mid-turn input at all', async () => {

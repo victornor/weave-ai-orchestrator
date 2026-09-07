@@ -21,6 +21,14 @@ import { emitRunEvent, runState } from './active.js';
 import { modelSettingFor } from '../models/resolve.js';
 import { runTokenSecret, signRunToken } from './runtoken.js';
 
+/**
+ * An interactive session's agent's first turn (VS-101): read the ticket and its context, post one
+ * comment, nothing else. Enforced by the runtime's own `--allowedTools`, not by prompt wording —
+ * `ac_ticket_comment` is included because the requirement is not silence, it is stating what the
+ * agent understands and is ready to do.
+ */
+export const FIRST_TURN_ALLOWLIST = ['ac_inbox', 'ac_ticket_get', 'ac_ticket_comments', 'ac_ticket_comment', 'ac_ticket_document_get', 'ac_worktree_status', 'Read', 'Grep', 'Glob'];
+
 const PAYLOAD_LIMIT = 8 * 1024;
 const RETRY_BACKOFF_MS = [30_000, 120_000, 600_000];
 /**
@@ -233,6 +241,15 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     if (!runtime) throw Object.assign(new Error(`runtime ${setting.runtime} is not registered`), { ocFamily: 'tooling' as RunErrorFamily, ocCode: 'runtime_unreachable' });
 
     const permission = (role?.permission ?? {}) as { mode?: PermissionMode; allowed?: string[]; denied?: string[] };
+    // An interactive session's very first turn (VS-101) is held to reading its ticket and posting
+    // one comment — a ceiling under the role's own permission, never a widening of it: a role that
+    // already denies one of these tools still denies it.
+    const isFirstInteractiveTurn = Boolean(ticket?.interactiveSession) && agent.turnCount === 0;
+    const deniedSet = new Set(permission.denied ?? []);
+    const allowedTools = isFirstInteractiveTurn
+      ? (permission.allowed?.length ? permission.allowed.filter((t) => FIRST_TURN_ALLOWLIST.includes(t)) : FIRST_TURN_ALLOWLIST)
+          .filter((t) => !deniedSet.has(t))
+      : permission.allowed;
     const instructionsPath = join(agent.homePath, 'AGENTS.md');
     let systemPromptText = '';
     try { systemPromptText = readFileSync(instructionsPath, 'utf8'); } catch { systemPromptText = ''; }
@@ -255,7 +272,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       env,
       options: { liveInput: ctx.config.defaults.liveInput },
       limits: { timeoutMs: turnTimeoutMs },
-      permission: { mode: permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto', allowedTools: permission.allowed, deniedTools: permission.denied },
+      permission: { mode: permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto', allowedTools, deniedTools: permission.denied },
       model: setting.model ?? null,
       effort: setting.effort ?? null,
       configHome,

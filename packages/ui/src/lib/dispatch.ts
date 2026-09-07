@@ -8,8 +8,8 @@
  * decision is attributed to the run that raised it. Either is matched against the run behind an
  * outbound message in the thread.
  */
-import type { Agent, AgentStatus, Decision, Ticket, ThreadMessage, UiStatus } from '@agent-conductor/shared';
-import { agentUiStatus, ticketUiStatus } from '@agent-conductor/shared';
+import type { Agent, AgentStatus, Decision, RunTrace, Ticket, ThreadMessage, UiStatus } from '@agent-conductor/shared';
+import { agentUiStatus, isActiveRun, ticketUiStatus } from '@agent-conductor/shared';
 
 /** A worker in one of these has stopped; the ticket is then the honest record of how the work ended. */
 const FINISHED: readonly AgentStatus[] = ['done', 'retired'];
@@ -122,4 +122,67 @@ export function chatEntries(messages: ThreadMessage[], tickets: Ticket[], worker
     unattributed: workers.filter((w) => !FINISHED.includes(w.status) && !(w.ticketId && anchored.has(w.ticketId))),
     unanchoredDecisions,
   };
+}
+
+/**
+ * What the chat renders, in order: the conversation, and the turns that left no message in it.
+ *
+ * A finished conductor turn is worth a row whether or not it spoke — the wake that only filed a
+ * ticket did something, and a history that shows nothing for it reads as if nothing happened. Its
+ * work goes with its reply where there is one and stands alone where there is not, so the same
+ * trace is never rendered twice.
+ */
+export type ChatRow =
+  | { kind: 'message'; key: string; entry: ChatEntry; trace: RunTrace | null }
+  | { kind: 'trace'; key: string; trace: RunTrace };
+
+/** When a turn happened, for ordering it against the messages. Its end, or its start if it has none. */
+function traceAt(trace: RunTrace): string {
+  return trace.finishedAt ?? trace.startedAt ?? trace.createdAt;
+}
+
+/** Nothing a transcript would render: bookkeeping events alone are not a trace worth offering. */
+export function traceIsEmpty(trace: RunTrace): boolean {
+  return trace.toolCalls + trace.files + trace.errors + trace.texts === 0;
+}
+
+/**
+ * Messages and trace-only rows, ordered by time.
+ *
+ * A trace goes to the *last* message of its run, the same anchor the dispatches and decisions use,
+ * so a turn that sent two messages accounts for itself once. A run still in flight never becomes a
+ * row: the live view is already showing it, and a second copy of the same turn is exactly what this
+ * is meant to avoid. `showSilent` hides the standalone rows without touching the anchored traces.
+ */
+export function chatRows(
+  entries: ChatEntry[],
+  traces: readonly RunTrace[],
+  { showSilent = true }: { showSilent?: boolean } = {},
+): ChatRow[] {
+  const byRun = new Map<string, RunTrace>();
+  for (const t of traces) byRun.set(t.runId, t);
+
+  /** Run id → the last message it produced, so an earlier message of the same turn carries nothing. */
+  const anchor = new Map<string, string>();
+  for (const { message } of entries) {
+    if (message.direction === 'outbound' && message.runId) anchor.set(message.runId, message.id);
+  }
+
+  const rows: ChatRow[] = entries.map((entry) => {
+    const runId = entry.message.runId;
+    const own = runId && anchor.get(runId) === entry.message.id ? byRun.get(runId) ?? null : null;
+    return { kind: 'message', key: entry.message.id, entry, trace: own && !traceIsEmpty(own) ? own : null };
+  });
+
+  if (showSilent) {
+    for (const trace of traces) {
+      if (anchor.has(trace.runId) || isActiveRun(trace.status) || traceIsEmpty(trace)) continue;
+      rows.push({ kind: 'trace', key: `trace:${trace.runId}`, trace });
+    }
+  }
+
+  // Stable: messages already arrive in order, and two things recorded in the same millisecond keep
+  // whichever order their ids give them rather than swapping between renders.
+  const at = (r: ChatRow): string => (r.kind === 'message' ? r.entry.message.createdAt : traceAt(r.trace));
+  return rows.sort((a, b) => (at(a) === at(b) ? a.key.localeCompare(b.key) : at(a).localeCompare(at(b))));
 }

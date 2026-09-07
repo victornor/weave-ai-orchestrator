@@ -12,6 +12,14 @@ export interface Decision { id: string; workspaceId: string; ticketId: string | 
 export interface Wakeup { id: string; workspaceId: string; agentId: string; source: E.WakeSource; reason: string; payload: Record<string, unknown>; idempotencyKey: string | null; status: E.WakeStatus; coalescedIntoId: string | null; skipReason: string | null; runId: string | null; requestedByKind: string | null; requestedById: string | null; notBefore: string | null; createdAt: string; claimedAt: string | null; finishedAt: string | null }
 export interface Run { id: string; workspaceId: string; agentId: string; ticketId: string | null; sessionId: string | null; wakeupIds: string[]; runtimeId: string; model: string | null; status: E.RunStatus; turnEpoch: number; cwd: string; startedAt: string | null; finishedAt: string | null; exitCode: number | null; signal: string | null; pid: number | null; pgid: number | null; errorCode: string | null; errorFamily: E.RunErrorFamily | null; retryOfRunId: string | null; usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number; basis: string } | null; costCents: number | null; result: Record<string, unknown> | null; liveness: E.RunLiveness | null; logPath: string | null; summary: string | null; createdAt: string }
 export interface RunEvent { id: string; runId: string; seq: number; ts: string; type: E.RunEventType; stream: string; level: string; payload: Record<string, unknown> }
+/**
+ * What a run did, counted off its stored events (VS-74). Cheap enough to ask for a page of history
+ * at once, and enough to say what a turn was without loading its transcript. `files` counts distinct
+ * paths, so a file edited four times is one; `texts` counts the assistant text and thinking blocks,
+ * so `toolCalls + files + errors + texts` being zero is how a surface knows there is no transcript
+ * worth offering, whatever bookkeeping events the run also recorded.
+ */
+export interface RunTrace { runId: string; status: E.RunStatus; agentId: string; createdAt: string; startedAt: string | null; finishedAt: string | null; durationMs: number | null; toolCalls: number; files: number; errors: number; texts: number; events: number; summary: string | null }
 export interface UsageEvent { id: string; workspaceId: string; projectId: string | null; roleId: string | null; agentId: string; ticketId: string | null; runId: string; runtimeId: string; provider: string | null; model: string | null; billingType: E.BillingType; inputTokens: number; cachedInputTokens: number; outputTokens: number; costCents: number | null; costStatus: E.CostStatus; durationMs: number; occurredAt: string }
 /** One plan limit window as a runtime reports it. `utilization` is a percentage 0..100; a window the runtime does not quantify is omitted, never reported as zero. */
 export interface AccountLimitWindow { kind: E.AccountLimitKind; label: string; utilization: number; resetsAt: string | null; scopeLabel: string | null }

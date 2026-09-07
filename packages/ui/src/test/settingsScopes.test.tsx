@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { qk } from '../api/keys';
+import { readShowSilentTurns, writeShowSilentTurns } from '../lib/chatPrefs';
 import {
   SETTINGS_AREAS,
   SETTINGS_SECTIONS,
@@ -163,6 +164,18 @@ describe('settings held in this browser', () => {
     for (const label of ['Decisions', 'Landed work', 'Everything else']) {
       expect(screen.getByRole('switch', { name: label })).toBeInTheDocument();
     }
+  });
+
+  it('offers the chat’s trace-only rows as a device preference, on by default (VS-74)', () => {
+    openDevice();
+    const rows = screen.getByRole('switch', { name: 'Turns with no reply' });
+    expect(rows).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(rows);
+
+    expect(screen.getByRole('switch', { name: 'Turns with no reply' })).toHaveAttribute('aria-checked', 'false');
+    expect(readShowSilentTurns()).toBe(false);
+    writeShowSilentTurns(true);
   });
 
   it('no longer offers the theme as a workspace setting, and keeps the workspace list there', () => {

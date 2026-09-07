@@ -39,6 +39,7 @@ import type { TotpSetup } from '../api/types';
 import { useWs } from '../api/context';
 import { useGo, useSearchParams } from '../app/link';
 import { useTheme } from '../lib/theme';
+import { readShowSilentTurns, writeShowSilentTurns } from '../lib/chatPrefs';
 import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
 import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, shortSha, updateEntry, updateEntryLabel } from '../lib/upgrade';
 import { cx } from '../lib/cx';
@@ -758,6 +759,9 @@ function DeviceSection(): React.ReactElement {
   });
   const [enabled, setEnabled] = useState(() => subscriptionId(ws) !== null);
   const [busy, setBusy] = useState(false);
+  // The chat reads this through `useShowSilentTurns`; the writer publishes, so a chat already
+  // mounted behind this page follows without a reload.
+  const [silentTurns, setSilentTurns] = useState(readShowSilentTurns);
 
   const save = (key: string, on: boolean): void => {
     const next = { ...state, [key]: on };
@@ -810,6 +814,31 @@ function DeviceSection(): React.ReactElement {
           ))}
         </div>
         <p className="mt-1.5 text-micro text-text-3">Dark is the designed theme; light is authored from the same tokens.</p>
+      </section>
+
+      <section>
+        <div className="ac-label mb-2">Chat</div>
+        <div className="ac-card">
+          <label className="flex items-center gap-3 px-3.5 py-3">
+            <span className="min-w-0 flex-1">
+              <span className="block text-meta text-text-1">Turns with no reply</span>
+              <span className="block text-micro text-text-3">A row for work the conductor did without saying anything — a wake that only filed a ticket.</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={silentTurns}
+              aria-label="Turns with no reply"
+              onClick={() => { setSilentTurns(!silentTurns); writeShowSilentTurns(!silentTurns); }}
+              className={cx(
+                'flex h-5 w-9 flex-none items-center rounded-pill border px-0.5 transition-colors duration-(--dur-fast) ease-ac',
+                silentTurns ? 'justify-end border-accent bg-accent' : 'justify-start border-line-2 bg-bg-3',
+              )}
+            >
+              <span className={cx('size-3.5 rounded-pill', silentTurns ? 'bg-accent-on' : 'bg-text-nav')} />
+            </button>
+          </label>
+        </div>
       </section>
 
       <section className="flex flex-col gap-4">

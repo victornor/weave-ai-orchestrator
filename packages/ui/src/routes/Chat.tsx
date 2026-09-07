@@ -12,6 +12,7 @@ import { EmptyState, ErrorState } from '../components/States';
 import { Markdown } from '../components/Markdown';
 import { StatusGlyph } from '../components/StatusGlyph';
 import { Transcript } from '../components/Transcript';
+import { TurnTrace } from '../components/TurnTrace';
 import { ScrollToBottomButton } from '../components/ScrollToBottom';
 import {
   useAnswerDecision,
@@ -20,6 +21,7 @@ import {
   useDecisions,
   usePostThreadMessage,
   useProjects,
+  useRunTraces,
   useThreadMessages,
   useThreads,
   useTickets,
@@ -27,7 +29,9 @@ import {
 } from '../api/hooks';
 import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
-import { chatEntries } from '../lib/dispatch';
+import { chatEntries, chatRows } from '../lib/dispatch';
+import { useShowSilentTurns } from '../lib/chatPrefs';
+import { readExpandedTraces, toggleExpandedTrace } from '../lib/traceExpansion';
 import { draftKey, useDraft } from '../lib/drafts';
 import { isHiddenFromChat, useHiddenDecisions } from '../lib/hiddenDecisions';
 import { isAtBottom, useStickToBottom } from '../lib/stickToBottom';
@@ -39,6 +43,9 @@ import { clock } from '../lib/format';
 import { cx } from '../lib/cx';
 
 const IDENTIFIER = /\b([A-Z][A-Z0-9]+-\d+)\b/g;
+
+/** How long a finished turn is held on screen when no row ever arrives to replace it. */
+const SETTLE_MS = 4000;
 
 /** Ticket identifiers in message text become chips that expand inline. */
 function MessageBody({
@@ -95,17 +102,25 @@ export function ChatRoute(): React.ReactElement {
   const replyToId = draft.replyToId ?? null;
   const conductor = useConductor();
   const conductorId = conductor.data?.agent.id ?? null;
-  /** The conductor run being streamed, or null when it is idle. */
-  const [runId, setRunId] = useState<string | null>(null);
+  /**
+   * The conductor run on screen, and whether it is still going.
+   *
+   * A finished run is kept here rather than dropped, until the row that takes its place has been
+   * rendered: `run.finished`, the thread's refetch and the traces' refetch are three separate
+   * arrivals, and clearing on the first of them empties the bottom of the list for as long as the
+   * other two take. See `conductor-chat/live-turn-stream`.
+   */
+  const [live, setLive] = useState<{ id: string; running: boolean } | null>(null);
+  const runId = live?.id ?? null;
   /** Bridges the gap between posting and the daemon starting the run, so "working" shows at once. */
   const [sending, setSending] = useState(false);
   const offline = conn.state === 'offline' || conn.state === 'unreachable';
 
-  const runEvents = useRunEventStream(runId);
+  const runEvents = useRunEventStream(runId, { live: live?.running ?? false });
   // The reply renders as the thread message ac_human_send created; showing the call too would
   // put the same words on screen twice.
   const liveEvents = useMemo(() => runEvents.filter((e) => !isHumanReplyToolEvent(e)), [runEvents]);
-  const working = sending || runId !== null;
+  const working = sending || (live?.running ?? false);
 
   useEffect(() => {
     if (threadId) return;
@@ -117,7 +132,7 @@ export function ChatRoute(): React.ReactElement {
   // Resume mid-turn: a chat that loads while the conductor is working streams the run in flight.
   useEffect(() => {
     const last = conductor.data?.lastRun;
-    if (last && isActiveRun(last.status)) setRunId((cur) => cur ?? last.id);
+    if (last && isActiveRun(last.status)) setLive((cur) => cur ?? { id: last.id, running: true });
   }, [conductor.data?.lastRun]);
 
   // The conductor's turns are the ones we stream; `run.started` carries the agent it belongs to.
@@ -127,9 +142,11 @@ export function ChatRoute(): React.ReactElement {
         if (e.type !== 'run.started' && e.type !== 'run.finished') return;
         const p = e.payload as { agentId?: string } | null;
         if (!conductorId || p?.agentId !== conductorId) return;
-        if (e.type === 'run.started') setRunId(e.entityId);
+        if (e.type === 'run.started') setLive({ id: e.entityId, running: true });
         else {
-          setRunId((cur) => (cur === null || cur === e.entityId ? null : cur));
+          // Only the run being shown settles here; a `run.finished` for some other turn leaves the
+          // one on screen alone, exactly as it did when this was a bare id.
+          setLive((cur) => (cur && cur.id === e.entityId ? { id: cur.id, running: false } : cur));
           setSending(false);
         }
       },
@@ -173,6 +190,42 @@ export function ChatRoute(): React.ReactElement {
     () => chatEntries(messages.data ?? [], tickets.data ?? [], workers.data ?? [], decisions.data ?? []),
     [messages.data, tickets.data, workers.data, decisions.data],
   );
+
+  // What each turn in the loaded history did, counted (VS-74). The runs behind the messages on
+  // screen, plus every conductor turn since the oldest of them — which is the only way a turn that
+  // sent no message is heard about. Counts only: no transcript is fetched until one is opened.
+  const messageRuns = useMemo(
+    () => [...new Set((messages.data ?? []).filter((m) => m.direction === 'outbound' && m.runId).map((m) => m.runId!))],
+    [messages.data],
+  );
+  const oldestLoaded = messages.data?.[0]?.createdAt ?? null;
+  const traces = useRunTraces({ ids: messageRuns, agent: conductorId, since: oldestLoaded });
+
+  const showSilent = useShowSilentTurns();
+  const rows = useMemo(
+    () => chatRows(entries, traces.data ?? [], { showSilent }),
+    [entries, traces.data, showSilent],
+  );
+  /** Every run the list already accounts for, which is what tells the live block it may let go. */
+  const rowRuns = useMemo(
+    () => new Set(rows.map((r) => (r.kind === 'trace' ? r.trace.runId : r.entry.message.runId)).filter((id): id is string => Boolean(id))),
+    [rows],
+  );
+
+  // Let go of a finished turn once the list holds it — or, failing that, after a moment. The floor
+  // matters: a turn that said nothing while those rows are hidden would otherwise never be replaced
+  // by anything, and the live block would sit under the conversation for the rest of the session.
+  useEffect(() => {
+    if (!live || live.running) return;
+    if (rowRuns.has(live.id)) { setLive(null); return; }
+    const t = setTimeout(() => setLive(null), SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [live, rowRuns]);
+
+  /** Which turns' traces are open, remembered for the session so scrolling back does not re-collapse them. */
+  const [expanded, setExpanded] = useState<string[]>(() => readExpandedTraces(ws));
+  useEffect(() => setExpanded(readExpandedTraces(ws)), [ws]);
+  const toggleTrace = useCallback((runId: string) => setExpanded(toggleExpandedTrace(ws, runId)), [ws]);
   // Every open decision is pinned above the composer instead of sitting where it was asked, so one
   // raised twenty messages ago is still the thing on screen. Oldest first: the longest wait reads
   // first, and the order does not shuffle as answers come in.
@@ -338,7 +391,7 @@ export function ChatRoute(): React.ReactElement {
               </>
             ) : messages.isError ? (
               <ErrorState code="CONDUCTOR_UNREACHABLE" message="Could not load the thread; the history below is the last known state." onRetry={() => void messages.refetch()} />
-            ) : (messages.data?.length ?? 0) === 0 ? (
+            ) : rows.length === 0 ? (
               <EmptyState
                 title="Tell me what you need."
                 detail={
@@ -350,46 +403,58 @@ export function ChatRoute(): React.ReactElement {
                 }
               />
             ) : (
-              entries.map((entry) => (
-                <div key={entry.message.id} className="flex flex-col gap-2">
-                  <ChatMessage
-                    message={entry.message}
-                    onTicket={openTicket}
-                    ticketStatus={ticketStatus}
-                    projectName={projectName}
-                    onReply={entry.message.direction === 'outbound' ? () => patch({ replyToId: entry.message.id }) : undefined}
-                  />
-                  {entry.dispatches.map((d) => (
-                    <DispatchLabel
-                      key={d.ticket.id}
-                      identifier={d.ticket.identifier}
-                      name={d.worker?.name ?? d.ticket.title}
-                      status={d.status}
-                      onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
+              rows.map((row) =>
+                row.kind === 'trace' ? (
+                  /* A turn that said nothing. Secondary to the conversation, and collapsed until asked. */
+                  <div key={row.key} className="opacity-80">
+                    <TurnTrace trace={row.trace} standalone open={expanded.includes(row.trace.runId)} onToggle={() => toggleTrace(row.trace.runId)} />
+                  </div>
+                ) : (
+                  <div key={row.key} className="flex flex-col gap-2">
+                    <ChatMessage
+                      message={row.entry.message}
+                      onTicket={openTicket}
+                      ticketStatus={ticketStatus}
+                      projectName={projectName}
+                      onReply={row.entry.message.direction === 'outbound' ? () => patch({ replyToId: row.entry.message.id }) : undefined}
                     />
-                  ))}
-                  {/* Answered here, open below: an open card is pinned above the composer, and the
-                      record of what was decided takes its place here once it has been answered. */}
-                  {entry.decisions
-                    .filter((d) => d.status !== 'open')
-                    .map((d) => (
-                      <DecisionCard
-                        key={d.id}
-                        decision={d}
-                        asker="conductor"
-                        ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
-                        busy={answer.isPending}
-                        plan={<PlanPreview decision={d} />}
-                        onAnswer={(a) => answerDecision(d.id, a)}
+                    {/* Under the reply, above the work it filed: what the turn did, then what it left. */}
+                    {row.trace ? (
+                      <TurnTrace trace={row.trace} open={expanded.includes(row.trace.runId)} onToggle={() => toggleTrace(row.trace!.runId)} />
+                    ) : null}
+                    {row.entry.dispatches.map((d) => (
+                      <DispatchLabel
+                        key={d.ticket.id}
+                        identifier={d.ticket.identifier}
+                        name={d.worker?.name ?? d.ticket.title}
+                        status={d.status}
+                        onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
                       />
                     ))}
-                </div>
-              ))
+                    {/* Answered here, open below: an open card is pinned above the composer, and the
+                        record of what was decided takes its place here once it has been answered. */}
+                    {row.entry.decisions
+                      .filter((d) => d.status !== 'open')
+                      .map((d) => (
+                        <DecisionCard
+                          key={d.id}
+                          decision={d}
+                          asker="conductor"
+                          ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
+                          busy={answer.isPending}
+                          plan={<PlanPreview decision={d} />}
+                          onAnswer={(a) => answerDecision(d.id, a)}
+                        />
+                      ))}
+                  </div>
+                ),
+              )
             )}
 
-            {/* The turn in flight. Transient: it goes when the run finishes and the thread's
-                messages stand alone, so the reply is never on screen twice. */}
-            {working ? (
+            {/* The turn in flight, and the moment after it: the block stays until the row that
+                replaces it is on screen, so the end of a turn is a fold rather than a blink. The
+                streamed reply text is still never left behind — the thread message is the record. */}
+            {working || live ? (
               <section aria-label="Conductor is working" className="flex flex-col gap-2">
                 <div className="flex items-center gap-2.5">
                   <StatusGlyph status="working" size="xs" />

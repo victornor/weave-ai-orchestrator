@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, TicketComment, Ticket, Decision, Agent, Role, Run, Project, UsageGrain, UsageWindow, Workspace } from '@agent-conductor/shared';
+import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, Agent, Role, Run, Project, UsageGrain, UsageWindow, Workspace } from '@agent-conductor/shared';
 import { dayKey } from '@agent-conductor/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -579,6 +579,27 @@ export function useRunEvents(id: string, after = 0): UseQueryResult<RunEvent[]> 
     queryKey: [...qk.runEvents(ws, id), after],
     queryFn: () => api.ws<RunEvent[] | { events: RunEvent[] }>(ws, `/runs/${id}/events${qs({ after, limit: 500 })}`).then((r) => listOf(r, 'events')),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * What a set of turns did, without their transcripts (VS-74).
+ *
+ * `ids` are the runs the caller already knows it needs — the ones behind the messages on screen —
+ * and `agent`/`since` adds that agent's other turns in the same window, which is the only way a
+ * turn that produced no message is heard about at all. The ids are sorted into the key so that the
+ * same set in a different order is the same query rather than a second fetch.
+ */
+export function useRunTraces({ ids, agent, since }: { ids: readonly string[]; agent?: string | null; since?: string | null }): UseQueryResult<RunTrace[]> {
+  const ws = useWs();
+  const params = useMemo(
+    () => ({ ids: [...new Set(ids)].sort().join(','), agent: agent ?? undefined, since: since ?? undefined }),
+    [ids, agent, since],
+  );
+  return useQuery({
+    queryKey: qk.runTraces(ws, params),
+    queryFn: () => api.ws<RunTrace[] | { traces: RunTrace[] }>(ws, `/runs/traces${qs(params)}`).then((r) => listOf(r, 'traces')),
+    enabled: Boolean(params.ids || params.agent),
   });
 }
 

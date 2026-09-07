@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Find and fix why mobile dictation still duplicates cumulatively after VS-70

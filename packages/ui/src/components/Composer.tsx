@@ -68,6 +68,7 @@ export function Composer({
   className,
 }: ComposerProps): React.ReactElement {
   const [internal, setInternal] = useState('');
+  const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
   const text = value ?? internal;
   const set = useCallback((v: string) => (onChange ? onChange(v) : setInternal(v)), [onChange]);
   const ta = useRef<HTMLTextAreaElement>(null);
@@ -264,6 +265,19 @@ export function Composer({
           Dictation is unavailable: this browser has no Web Speech API and the daemon has no transcription provider.{' '}
           <span className="text-accent-link">Set a provider in Settings → Conductor</span>, or type instead.
         </p>
+      ) : null}
+      {dictation.diagnostics.enabled && dictation.diagnostics.count > 0 ? (
+        <button
+          type="button"
+          onClick={() => {
+            dictation.diagnostics.copy();
+            setDiagnosticsCopied(true);
+            setTimeout(() => setDiagnosticsCopied(false), 2000);
+          }}
+          className="self-start text-micro text-accent-link hover:underline"
+        >
+          {diagnosticsCopied ? 'Copied' : `Copy dictation diagnostics (${dictation.diagnostics.count} event${dictation.diagnostics.count === 1 ? '' : 's'})`}
+        </button>
       ) : null}
     </div>
   );

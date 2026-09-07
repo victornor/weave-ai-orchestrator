@@ -1,4 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  appendCapture,
+  formatDictationCapture,
+  readDictationDiagnosticsEnabled,
+  useDictationDiagnosticsEnabled,
+  type DictationCaptureEntry,
+} from './dictationDiagnostics.js';
 
 /* Minimal typings — the Web Speech API is not in lib.dom for all TS versions. */
 interface SpeechRecognitionAlternativeLike { transcript: string }
@@ -66,6 +73,18 @@ export interface Dictation {
   start: () => void;
   stop: () => void;
   toggle: () => void;
+  /**
+   * Ground truth for a duplication bug no worker can reproduce (VS-121): while
+   * `conductor.dictationDiagnostics` is on, every raw recognizer event and restart boundary from the
+   * most recent session is captured here for a human to copy out. Off by default, and recording
+   * nothing at all while off — not merely hidden.
+   */
+  diagnostics: {
+    enabled: boolean;
+    /** Entries captured so far this session; empty whenever diagnostics is off. */
+    count: number;
+    copy: () => void;
+  };
 }
 
 /**
@@ -132,6 +151,19 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
   const committed = useRef('');
   /** Transcript of the session running now, rebuilt from its whole results list on every event. */
   const sessionText = useRef('');
+  // Diagnostics: decided once per `start()`, from whatever the toggle says at that moment, so a
+  // session already running is never backfilled by a later flip and a session begun with it off
+  // never records. `capture` only ever reads state already being computed elsewhere in this hook —
+  // it does not change what any of it decides.
+  const diagnosticsWanted = useDictationDiagnosticsEnabled();
+  const diagnosticsOn = useRef(false);
+  const capture = useRef<DictationCaptureEntry[]>([]);
+  const [captureCount, setCaptureCount] = useState(0);
+  const record = useCallback((entry: DictationCaptureEntry) => {
+    if (!diagnosticsOn.current) return;
+    appendCapture(capture.current, entry);
+    setCaptureCount(capture.current.length);
+  }, []);
 
   const rec = useRef<SpeechRecognitionLike | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
@@ -208,6 +240,13 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     heardAudio.current = false;
     committed.current = '';
     sessionText.current = '';
+    // Read fresh, not the value this hook was rendered with: Settings and the composer are never
+    // mounted together, and this is the moment a decision to record has to be made for the whole
+    // session about to start.
+    diagnosticsOn.current = readDictationDiagnosticsEnabled();
+    capture.current = [];
+    setCaptureCount(0);
+    record({ kind: 'start' });
     timer.current = setInterval(() => setElapsed((s) => s + 1), 1000);
 
     if (Ctor) {
@@ -222,15 +261,19 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         // which is what duplicated every word on Android (VS-70).
         let text = '';
         let final = true;
+        const entries: Array<{ isFinal: boolean; transcript: string }> = [];
         for (let i = 0; i < e.results.length; i++) {
           const res = e.results[i];
           if (!res) continue;
           text = mergeTranscript(text, res[0].transcript);
           if (!res.isFinal) final = false;
+          entries.push({ isFinal: res.isFinal, transcript: res[0].transcript });
         }
         sessionText.current = text;
         gotResult.current = true;
-        cb.current(mergeTranscript(committed.current, text), final);
+        const handed = mergeTranscript(committed.current, text);
+        record({ kind: 'result', resultIndex: e.resultIndex, entries, sessionTextAfter: text, handedToComposer: handed, final });
+        cb.current(handed, final);
       };
       // The recognizer is the only thing that can tell us it heard anything — we never touch its
       // stream. Without this, silence and "heard you, transcribed nothing" look identical.
@@ -248,6 +291,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         // the human stops, unless nothing ever came back — then say so instead of spinning.
         if (wantListening.current && rec.current === r) {
           if (!gotResult.current && elapsedRef.current >= 8) {
+            record({ kind: 'end', restarted: false, committedAfter: committed.current });
             setError(heardAudio.current ? NO_TRANSCRIPT : ERRORS['no-speech']!);
             wantListening.current = false;
             setListening(false);
@@ -258,9 +302,14 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
           // the committed prefix — otherwise the restart either loses it or repeats it.
           committed.current = mergeTranscript(committed.current, sessionText.current);
           sessionText.current = '';
+          record({ kind: 'end', restarted: true, committedAfter: committed.current });
           try { r.start(); return; } catch { /* fall through */ }
         }
-        if (rec.current === r) { setListening(false); stopMeters(); }
+        if (rec.current === r) {
+          record({ kind: 'end', restarted: false, committedAfter: committed.current });
+          setListening(false);
+          stopMeters();
+        }
       };
       rec.current = r;
       try {
@@ -320,5 +369,20 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
 
   useEffect(() => () => stop(), [stop]);
 
-  return { mode, listening, elapsed, analyser: analyserNode, metered, error, start, stop, toggle };
+  const copyDiagnostics = useCallback(() => {
+    void navigator.clipboard?.writeText(formatDictationCapture(capture.current));
+  }, []);
+
+  return {
+    mode,
+    listening,
+    elapsed,
+    analyser: analyserNode,
+    metered,
+    error,
+    start,
+    stop,
+    toggle,
+    diagnostics: { enabled: diagnosticsWanted, count: captureCount, copy: copyDiagnostics },
+  };
 }

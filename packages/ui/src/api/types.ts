@@ -257,7 +257,12 @@ export interface WorkerDetail {
   usage: UsageTotals | null;
   worktree: { status: string; dirty: boolean; ahead: number; behind: number; path: string | null } | null;
   lastStatusLine?: string | null;
+  /** Whether a message sent right now would reach a running turn (VS-99), and why not when it wouldn't. */
+  input: { midTurn: boolean; reason?: string };
 }
+
+/** `POST /workers/:id/message` result (VS-99): which delivery actually happened. */
+export interface WorkerMessageOutcome { delivery: 'mid_turn' | 'queued'; runId: string | null; wakeId: string | null }
 
 export interface RoleDetail {
   role: Role;

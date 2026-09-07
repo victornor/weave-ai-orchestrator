@@ -15,6 +15,7 @@ import { createDispatcher, type CoreDispatcher } from './dispatcher.js';
 import { countRetries, executeRun } from './engine.js';
 import { makeRedactor } from './engine.js';
 import { runTokenSecret, verifyRunToken } from './runtoken.js';
+import { runState } from './active.js';
 
 const tick = () => new Promise((r) => setImmediate(r));
 
@@ -283,6 +284,27 @@ describe('run engine', () => {
     expect(prompt).toContain('TST-1 [in_progress] Add a README badge');
     expect(run.ticketId).toBe(ticketId);
     expect(h.db.get<{ executionRunId: string | null }>('SELECT execution_run_id FROM tickets WHERE id = ?', [ticketId])!.executionRunId).toBeNull();
+  });
+
+  it('carries the runtime’s live-input handle onto the active run, and clears it at finalize (VS-99)', async () => {
+    runtime.streamingInput = true;
+    runtime.delayMs = 30;
+    const runId = newId();
+    h.db.insert('runs', {
+      id: runId, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: [], runtimeId: 'fake',
+      status: 'queued', turnEpoch: 1, cwd: h.ctx.paths.conductor, createdAt: nowIso(),
+    });
+    const done = executeRun(h.ctx, h.deps, runId);
+    // The engine runs several async phases (home, worktree, prompt) before the runtime hands back
+    // its handle; poll rather than assume one microtask turn is enough to reach it.
+    let midFlight = runState(h.ctx).active.get(runId);
+    for (let i = 0; i < 50 && !midFlight?.send; i += 1) { await tick(); midFlight = runState(h.ctx).active.get(runId); }
+    expect(midFlight?.send).toBeTypeOf('function');
+    await expect(midFlight!.send!('hello')).resolves.toBe('delivered');
+    expect(runtime.sentInputs).toEqual(['hello']);
+
+    await done;
+    expect(runState(h.ctx).active.get(runId)).toBeUndefined();
   });
 
   it('can execute a run directly for a bare agent', async () => {

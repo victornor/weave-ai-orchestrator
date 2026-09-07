@@ -568,7 +568,7 @@ Closed enum (`shared/src/run-events.ts`): `session.started, session.resumed, tur
 
 | Concern | claude 2.1.258 | codex 0.149.1 | opencode 1.18.27 | gemini 0.58.0 |
 |---|---|---|---|---|
-| Headless turn | `claude -p --output-format stream-json --verbose` | `codex exec --json -C <cwd> -` (prompt on stdin) | `opencode run --format json --dir <cwd>` | `gemini -p <prompt> -o stream-json` |
+| Headless turn | `claude -p --output-format stream-json --verbose --input-format stream-json --replay-user-messages`, prompt as the turn's first `user` frame on stdin (VS-99, ADR 0012; `--input-format text` with an argv/stdin prompt when `defaults.liveInput: false`) | `codex exec --json -C <cwd> -` (prompt on stdin) | `opencode run --format json --dir <cwd>` | `gemini -p <prompt> -o stream-json` |
 | New session with known id | `--session-id <uuid>` | (id returned in events) | (id returned in events) | `--session-id <uuid>` |
 | Resume | `--resume <id>` | `codex exec resume <id> -` | `opencode run -s <id>` | `--resume <id>` |
 | Fork | `--resume <id> --fork-session` | `codex exec fork <id>` | `--fork` with `-s` | not supported |
@@ -579,7 +579,7 @@ Closed enum (`shared/src/run-events.ts`): `session.started, session.resumed, tur
 | Budget | `--max-budget-usd` | n/a | n/a | n/a |
 | Model / effort | `--model`, `--effort` | `-m`, `-c model_reasoning_effort=` | `-m provider/model`, `--variant` | `-m` |
 | Isolation of config | `--setting-sources user` + `--bare` optional; `CLAUDE_CONFIG_DIR` env for a per-workspace config dir | `CODEX_HOME` env per workspace | `XDG_CONFIG_HOME`/`OPENCODE_CONFIG` per workspace | `GEMINI_CLI_HOME`-style env per workspace (verify) |
-| Warm process (later) | `--input-format stream-json` | `codex app-server` (JSON-RPC, schema via `generate-json-schema`) | `opencode serve` + `run --attach` | n/a |
+| Mid-turn input | shipped (VS-99, ADR 0012): the stdin channel above stays open for the turn's lifetime; a human's message is delivered as another `user` frame while a turn is running, and queued for the next turn otherwise | not supported — `codex app-server` (JSON-RPC) would be an unrelated warm-process build | not supported — `opencode serve` + `run --attach` would be an unrelated warm-process build | not supported |
 
 Decisions:
 - **Claude is the reference adapter** and the only one required for M1. It supports every capability.
@@ -1027,7 +1027,7 @@ Execution never changes: every agent turn is a daemon-spawned headless process w
 
 ### 14b.1 The attach TUI (`conductor attach`)
 
-`conductor attach <agentId>` (package `tui`, Ink) is the universal terminal view of one agent (the conductor or a worker): a live transcript rendered from `run_events` (assistant text, tool calls with collapsed results, file changes, status lines), a status bar (worker name and role, ticket, runtime, model, turn count, worktree state, spend so far), and an input line. Text typed there is a direct-thread message to that agent (`human_message` wake) and, when the agent is mid-turn, it is queued and delivered as the next wake (the TUI says so). Keybindings: pause/resume, open ticket, jump to worktree in `$SHELL`, cancel run, relaunch. `conductor chat` is the same component pointed at the conductor with chat-first layout (§21.3); on a worker, the input line posts ticket comments (§11.7). `conductor top` is a one-screen fleet view (workers grouped by project and role × status × ticket × spend) with the same keys.
+`conductor attach <agentId>` (package `tui`, Ink) is the universal terminal view of one agent (the conductor or a worker): a live transcript rendered from `run_events` (assistant text, tool calls with collapsed results, file changes, status lines, and the human's own messages attributed as `human.input` blocks), a status bar (worker name and role, ticket, runtime, model, turn count, worktree state, spend so far), and an input line. On a worker, text typed there is recorded as a ticket comment and, when the runtime genuinely supports mid-turn input and a turn is executing, is delivered to that turn immediately; otherwise it is queued for the agent's next turn (VS-99, ADR 0012) — the notice line names whichever happened, never assumes delivery. On the conductor it is a direct-thread message (`human_message` wake), unchanged. Attaching is a pure subscription to the existing event stream: nothing about a run depends on someone watching it, and detaching changes nothing. Keybindings: pause/resume, open ticket, jump to worktree in `$SHELL`, cancel run, relaunch. `conductor chat` is the same component pointed at the conductor with chat-first layout (§21.3). `conductor top` is a one-screen fleet view (workers grouped by project and role × status × ticket × spend) with the same keys.
 
 This means every surface is just "open a terminal running `conductor attach <id>`" in the right place.
 

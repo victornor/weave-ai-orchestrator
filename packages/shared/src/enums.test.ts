@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   CANCELLABLE_UPGRADE_STATES, CHANGELOG_KINDS, CHANGELOG_MEASURE_KIND, CHANGELOG_SOURCES,
-  TERMINAL_UPGRADE_STATES, UPGRADE_FAILURE_REASONS, UPGRADE_STATES,
-  isCancellableUpgrade, isTerminalUpgrade, type UpgradeState,
+  RUN_EVENT_TYPES, TERMINAL_UPGRADE_STATES, UPGRADE_FAILURE_REASONS, UPGRADE_STATES,
+  isCancellableUpgrade, isTerminalUpgrade, type RunEventType, type UpgradeState,
 } from './enums.js';
+
+describe('run event types (VS-99)', () => {
+  it('carries human.input, distinct from the agent-asks-for-input direction', () => {
+    expect(RUN_EVENT_TYPES).toContain('human.input');
+    expect(RUN_EVENT_TYPES).toContain('user_input.requested');
+    const t: RunEventType = 'human.input';
+    expect(RUN_EVENT_TYPES).toContain(t);
+  });
+});
 
 describe('upgrade states', () => {
   it('is the forward-only lifecycle the daemon walks', () => {

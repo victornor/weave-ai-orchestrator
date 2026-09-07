@@ -8,6 +8,7 @@ export { createChangelogService } from './changelog/index.js';
 export { createPullRequestsService, PR_CACHE_TTL_MS, PR_LIST_LIMIT, PR_WINDOW_DAYS } from './pull-requests/index.js';
 export { createAuthService, openDaemonDb, DAEMON_DB_FILE } from './auth/index.js';
 export { signRunToken, verifyRunToken, runTokenSecret, peekWorkspaceId, isRunToken, RUN_TOKEN_PREFIX, RUN_TOKEN_TTL_SECONDS, type RunTokenClaims } from './runs/runtoken.js';
+export { describeLiveInput, type LiveInputStatus } from './runs/active.js';
 export * from './workspace/index.js';
 export { registerBuiltinWorktreeProviders, GitWorktreeProvider, WorktrunkProvider, landedWorkTest, renderWtConfig, writeWtConfig, type LandedInput, type LandedVerdict } from './worktrees/index.js';
 export { registerBuiltinForges, GhForge } from './forge/index.js';

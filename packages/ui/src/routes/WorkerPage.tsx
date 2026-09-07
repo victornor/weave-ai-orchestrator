@@ -12,7 +12,7 @@ import { StatusBadge } from '../components/StatusGlyph';
 import { SkeletonRows } from '../components/Skeleton';
 import { ErrorState, EmptyState } from '../components/States';
 import { Markdown } from '../components/Markdown';
-import { usePostComment, useRunEvents, useWorker, useWorkerAction, useWorkerBrief } from '../api/hooks';
+import { useRunEvents, useWorker, useWorkerAction, useWorkerBrief, useWorkerMessage } from '../api/hooks';
 import { useWorkspaceEvents, useWs } from '../api/context';
 import { useGo } from '../app/link';
 import { cents, tokens } from '../lib/format';
@@ -31,7 +31,8 @@ export function WorkerRoute(): React.ReactElement {
   const detail = useWorker(workerId);
   const brief = useWorkerBrief(workerId);
   const action = useWorkerAction();
-  const comment = usePostComment();
+  const message = useWorkerMessage();
+  const [lastOutcome, setLastOutcome] = useState<string | null>(null);
   // The steer box and the ticket page's reply box post to the same conversation, so they share one
   // draft: a note started on either is there on the other.
   const steerTicketId = detail.data?.ticket?.id ?? null;
@@ -43,6 +44,7 @@ export function WorkerRoute(): React.ReactElement {
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => setLive([]), [runId]);
+  useEffect(() => setLastOutcome(null), [workerId]);
 
   // Live transcript: `run.event` frames append to what the API already gave us.
   useWorkspaceEvents(
@@ -82,9 +84,12 @@ export function WorkerRoute(): React.ReactElement {
     );
   }
 
-  const { agent, ticket, project, usage, worktree } = detail.data;
+  const { agent, ticket, project, usage, worktree, input } = detail.data;
   const pausedFor = workerPauseReason(agent);
   const events = [...(persisted.data ?? []), ...live];
+  // Before typing: whether a message would reach the running turn right now, and why not when it
+  // wouldn't (VS-99). After sending: which of the two actually happened, until the next send.
+  const steerLabel = lastOutcome ?? (input.midTurn ? 'Reaches the running turn immediately.' : `Queued for the next turn${input.reason ? ` — ${input.reason}` : ''}.`);
 
   return (
     <Page>
@@ -151,9 +156,13 @@ export function WorkerRoute(): React.ReactElement {
             <Composer
               placeholder="Steer this worker — posts a ticket comment and wakes it…"
               submitLabel="Send"
+              queuedReason={steerLabel}
               value={draft.text}
               onChange={(text) => patch({ text })}
-              onSubmit={(body) => comment.mutate({ id: ticket.id, body })}
+              onSubmit={async (body) => {
+                const outcome = await message.mutateAsync({ id: workerId, ticketId: ticket.id, body, live: true });
+                setLastOutcome(outcome.delivery === 'mid_turn' ? 'Delivered to the running turn.' : 'Queued for the next turn.');
+              }}
             />
           </div>
         </div>

@@ -13,10 +13,10 @@
  * Payload shapes are read defensively: the runtime adapters normalise events, but a missing field
  * must degrade to a shorter line, never to a crash.
  */
-import { isHumanReplyToolEvent, type RunEvent } from '@agent-conductor/shared';
+import { isHumanReplyToolEvent, type AuthorKind, type RunEvent } from '@agent-conductor/shared';
 import { formatDuration, formatTokens, formatDiffStat, oneLine } from './format.js';
 import { redact } from './redact.js';
-import type { ErrorBlock, FileBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock, TranscriptBlock, TranscriptOptions } from './types.js';
+import type { ErrorBlock, FileBlock, HumanInputBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock, TranscriptBlock, TranscriptOptions } from './types.js';
 
 type Payload = Record<string, unknown>;
 
@@ -331,6 +331,14 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
       case 'permission.requested': {
         const tool = str(p, 'tool', 'name');
         push(status(ev, `asked for permission${tool ? `: ${tool}` : ''}`, 'warn'));
+        break;
+      }
+
+      case 'human.input': {
+        const text = scrub(str(p, 'text')) ?? '';
+        const authorKind = (str(p, 'authorKind') ?? 'human') as AuthorKind;
+        const delivery: HumanInputBlock['delivery'] = str(p, 'delivery') === 'mid_turn' ? 'mid_turn' : 'queued';
+        push({ ...base(ev), kind: 'human_input', text, authorKind, delivery } satisfies HumanInputBlock);
         break;
       }
 

@@ -6,7 +6,7 @@ import { asClaudeSession, isUuid } from './session.js';
 /** Tools left available in `restricted` posture (no command/code execution, no network fetch). */
 export const RESTRICTED_TOOLS = ['Read', 'Glob', 'Grep', 'TodoWrite', 'Task'] as const;
 
-/** Prompts longer than this go on stdin instead of argv (ARG_MAX headroom). */
+/** Prompts longer than this go on stdin instead of argv (ARG_MAX headroom) — only when live input is off. */
 export const MAX_ARGV_PROMPT = 96_000;
 
 export interface ClaudeBuildOpts {
@@ -20,17 +20,32 @@ export interface ClaudeBuiltCommand extends BuiltCommand {
   /** The session id this turn will run under (new or resumed) — persist it as the session ref. */
   sessionId: string;
   resumed: boolean;
+  /**
+   * `true` unless `input.options.liveInput === false`. A live turn runs on
+   * `--input-format stream-json`, has no prompt operand, and `stdin` is the turn's first `user`
+   * frame — meant to be written with the channel left open, not ended, so more frames can follow.
+   */
+  liveInput: boolean;
 }
 
 function str(v: unknown): string | null { return typeof v === 'string' && v.length > 0 ? v : null; }
+
+/** The turn's prompt as its first stdin frame, on the wire shape the CLI itself documents (VS-99). */
+export function userFrame(text: string): string {
+  return `${JSON.stringify({ type: 'user', message: { role: 'user', content: text } })}\n`;
+}
 
 /** Pure: TurnInput -> the exact `claude` invocation. No I/O; `files` is written by the adapter. */
 export function buildArgs(input: TurnInput, opts: ClaudeBuildOpts): ClaudeBuiltCommand {
   const tmp = opts.tmpDir ?? runTmpDir(input.runId);
   const files: Array<{ path: string; content: string }> = [];
-  // The prompt goes immediately after the fixed head: several later flags are variadic
-  // (--allowedTools, --disallowedTools, --mcp-config, --tools) and would swallow a trailing operand.
-  const head: string[] = ['-p', '--output-format', 'stream-json', '--verbose', '--input-format', 'text'];
+  const liveInput = input.options?.['liveInput'] !== false;
+  // The prompt (non-live only) goes immediately after the fixed head: several later flags are
+  // variadic (--allowedTools, --disallowedTools, --mcp-config, --tools) and would swallow a
+  // trailing operand.
+  const head: string[] = liveInput
+    ? ['-p', '--output-format', 'stream-json', '--verbose', '--input-format', 'stream-json', '--replay-user-messages']
+    : ['-p', '--output-format', 'stream-json', '--verbose', '--input-format', 'text'];
   const args: string[] = [];
 
   // A stored ref always means "resume that conversation" (a relaunch resumes too, §7.4).
@@ -109,9 +124,15 @@ export function buildArgs(input: TurnInput, opts: ClaudeBuildOpts): ClaudeBuiltC
   const env: Record<string, string> = { ...input.env };
   if (input.configHome) env['CLAUDE_CONFIG_DIR'] = input.configHome;
 
-  let stdin: string | null = null;
-  if (input.prompt.length > MAX_ARGV_PROMPT) stdin = input.prompt;
-  else head.push(input.prompt);
+  let stdin: string | null;
+  if (liveInput) {
+    stdin = userFrame(input.prompt);
+  } else if (input.prompt.length > MAX_ARGV_PROMPT) {
+    stdin = input.prompt;
+  } else {
+    stdin = null;
+    head.push(input.prompt);
+  }
 
-  return { cmd: 'claude', args: [...head, ...args], stdin, env, files, sessionId, resumed: Boolean(resume) };
+  return { cmd: 'claude', args: [...head, ...args], stdin, env, files, sessionId, resumed: Boolean(resume), liveInput };
 }

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: A human can attach to a running agent session, watch it live and type into
+  it, and can start an interactive session of their own with a role

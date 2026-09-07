@@ -247,7 +247,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       outputSchema: RUN_REPORT_JSON_SCHEMA as unknown as Record<string, unknown>,
       mcpServers,
       env,
-      options: {},
+      options: { liveInput: ctx.config.defaults.liveInput },
       limits: { timeoutMs: (ctx.config.defaults.turnTimeoutSec ?? 2700) * 1000 },
       permission: { mode: permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto', allowedTools: permission.allowed, deniedTools: permission.denied },
       model: setting.model ?? null,
@@ -270,7 +270,10 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       },
       (handle: TurnHandle) => {
         const existing = state.active.get(runId);
-        if (existing) existing.cancel = (mode) => handle.cancel(mode);
+        if (existing) {
+          existing.cancel = (mode) => handle.cancel(mode);
+          existing.send = handle.send ? (text) => handle.send!(text) : undefined;
+        }
       },
     ));
   } catch (e) {

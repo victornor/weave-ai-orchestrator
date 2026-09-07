@@ -8,7 +8,7 @@ import { runState } from './active.js';
 export { createDispatcher, type CoreDispatcher } from './dispatcher.js';
 export { executeRun, mintRunToken, makeRedactor } from './engine.js';
 export { signRunToken, verifyRunToken, runTokenSecret, peekWorkspaceId, isRunToken, RUN_TOKEN_PREFIX, RUN_TOKEN_TTL_SECONDS, type RunTokenClaims } from './runtoken.js';
-export { runState, emitRunEvent, type ActiveRun } from './active.js';
+export { runState, emitRunEvent, recordHumanInputEvent, describeLiveInput, type ActiveRun, type LiveInputStatus } from './active.js';
 
 /** The aggregate row behind one run's trace, named as the mapper hands it back. */
 interface Counts { events: number; toolCalls: number; errors: number; texts: number; files: number }

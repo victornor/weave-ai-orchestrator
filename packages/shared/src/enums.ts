@@ -84,10 +84,15 @@ export type RunPhase = (typeof RUN_PHASES)[number];
  */
 export const RECORDED_RUN_PHASES: readonly RunPhase[] = ['prepare_home', 'prepare_worktree', 'build_prompt', 'turn', 'collect_result'];
 
+/**
+ * `human.input` (VS-99): a human sent text to a running agent. Payload
+ * `{ text, authorKind, authorId, delivery: 'mid_turn' | 'queued', acknowledgedAt? }` — never
+ * `user_input.requested`, which is the agent asking for input, the opposite direction.
+ */
 export const RUN_EVENT_TYPES = [
   'session.started', 'session.resumed', 'turn.started', 'assistant.text', 'assistant.thinking', 'tool.call', 'tool.result', 'tool.denied',
   'permission.requested', 'user_input.requested', 'plan.proposed', 'file.changed', 'command.executed', 'usage.delta', 'error', 'turn.completed',
-  'runtime.raw', 'run.started', 'run.finalized', 'run.phase.timing', 'supervisor.action',
+  'runtime.raw', 'run.started', 'run.finalized', 'run.phase.timing', 'supervisor.action', 'human.input',
 ] as const;
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
 

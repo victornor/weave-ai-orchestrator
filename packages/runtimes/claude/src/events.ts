@@ -20,6 +20,8 @@ export interface ClaudeParseState {
   isError: boolean;
   errorMessage: string | null;
   numTurns: number | null;
+  /** True once this turn's `result` line has been seen — the point past which stdin should close. */
+  resultSeen: boolean;
 }
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -39,6 +41,7 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
   const state: ClaudeParseState = {
     sessionId: null, model: null, finalText: null, assistantText: '', structured: undefined,
     usage: null, contextTokens: null, costUsd: null, isError: false, errorMessage: null, numTurns: null,
+    resultSeen: false,
   };
   /** tool_use id -> tool name, so tool_result lines can be classified. */
   const toolNames = new Map<string, string>();
@@ -129,6 +132,10 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
   function user(msg: Json, ts: string): RuntimeEvent[] {
     const out: RuntimeEvent[] = [];
     const m = obj(msg['message']);
+    // A `user` frame with string content is never a tool result (those always carry an array of
+    // blocks) — under `--replay-user-messages` it can only be the CLI echoing a frame we wrote to
+    // stdin back to us. That is an acknowledgement, not a fresh input, so it produces no event.
+    if (m && typeof m['content'] === 'string') return [];
     const content = m && Array.isArray(m['content']) ? m['content'] : [];
     for (const blockRaw of content) {
       const b = obj(blockRaw);
@@ -150,6 +157,7 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
   }
 
   function result(msg: Json, ts: string): RuntimeEvent[] {
+    state.resultSeen = true;
     const out: RuntimeEvent[] = [];
     const u = obj(msg['usage']);
     if (u) {

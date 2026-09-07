@@ -173,6 +173,21 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
       return updated;
     },
 
+    /**
+     * The role's secrets, by name (VS-92). Structured rather than prose, which is why this is not
+     * `updateCharter`: the names have to be checked against the store, and the whole list is refused
+     * if one is missing. A role listing a secret nobody registered produces a worker whose
+     * environment silently lacks the variable, which fails much later and reads as a bug elsewhere.
+     */
+    async setSecrets(actor: Actor, id: string, names: string[], reason: string): Promise<Role> {
+      const wanted = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+      const missing = wanted.filter((n) => !deps().secrets.has(n));
+      if (missing.length) {
+        throw new OcError('not_found', `no secret registered under ${missing.map((n) => `"${n}"`).join(', ')}`, { missing, known: deps().secrets.list().map((s) => s.name) });
+      }
+      return service.update(actor, id, { secrets: wanted }, reason);
+    },
+
     async updateCharter(actor: Actor, id: string, charter: string, reason: string, opts: { applyToRunning?: boolean } = {}): Promise<Role> {
       const role = get(id);
       const dir = roleDir(ctx, id);

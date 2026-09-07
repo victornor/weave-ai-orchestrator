@@ -45,6 +45,14 @@ export type DecisionOwner = (typeof DECISION_OWNERS)[number];
 export const DECISION_STATUSES = ['open', 'answered', 'expired', 'withdrawn', 'superseded'] as const;
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];
 
+/** What a decision can ask for beyond an option (VS-92). `secret` never records its value — only the name it was stored under. */
+export const DECISION_INPUT_TYPES = ['text', 'multiline', 'multiselect', 'secret'] as const;
+export type DecisionInputType = (typeof DECISION_INPUT_TYPES)[number];
+
+/** How widely a registered secret applies. The `secrets` table has carried this since 0001_init. */
+export const SECRET_SCOPES = ['workspace', 'project', 'role'] as const;
+export type SecretScope = (typeof SECRET_SCOPES)[number];
+
 export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved'] as const;
 export type WakeSource = (typeof WAKE_SOURCES)[number];
 

@@ -13,6 +13,7 @@ import { getLogger } from '../logger.js';
 import type { CoreServices } from '../api.js';
 import { createChangelogService } from '../changelog/index.js';
 import { createModelsService } from '../models/index.js';
+import { createSecretsService } from '../secrets/index.js';
 
 export interface TestHarness {
   ctx: WorkspaceContext;
@@ -102,6 +103,9 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
   // Real too: it reads and writes this harness's own config and db, and every suite that runs a turn
   // reaches it through the resolution path (VS-77).
   services.models = createModelsService(ctx, () => deps());
+  // Real as well (VS-92): the harness root is a real temp directory, so the encrypted store writes
+  // and reads exactly as it does in a workspace, and the run engine reaches it for a role's secrets.
+  services.secrets = createSecretsService(ctx);
   const deps = (): CoreServices =>
     new Proxy({} as CoreServices, {
       get: (_t, prop: string | symbol) => {

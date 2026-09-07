@@ -1,6 +1,7 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { UI_STATUSES } from '@agent-conductor/shared';
+import type { Decision } from '@agent-conductor/shared';
 import { StatusGlyph, StatusBadge } from '../components/StatusGlyph';
 import { TicketCard } from '../components/TicketCard';
 import { WorkerCard } from '../components/WorkerCard';
@@ -300,6 +301,139 @@ describe('DecisionCard', () => {
     expect(discard).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Type the ticket identifier to confirm'), { target: { value: 'ACME-42' } });
     expect(discard).toBeEnabled();
+  });
+
+  // ---------- VS-92: the project label ----------
+
+  it('names its project, and says Workspace when it belongs to none', () => {
+    const { unmount } = render(<DecisionCard decision={decision()} ticketIdentifier="ACME-42" projectSlug="web" onAnswer={() => undefined} />);
+    expect(screen.getByText('ACME-42 · web')).toBeInTheDocument();
+    unmount();
+    // An unlabelled card and a card whose project could not be resolved must not look alike.
+    render(<DecisionCard decision={decision()} onAnswer={() => undefined} />);
+    expect(screen.getByText('Workspace')).toBeInTheDocument();
+  });
+
+  it('shows the PR link and the project label together on a merge approval', () => {
+    render(
+      <DecisionCard
+        decision={decision({ kind: 'merge_approval', target: { prUrl: 'https://github.test/a/b/pull/7', prNumber: 7 } })}
+        ticketIdentifier="ACME-42"
+        projectSlug="api"
+        onAnswer={() => undefined}
+      />,
+    );
+    expect(screen.getByRole('link', { name: /PR #7/ })).toBeInTheDocument();
+    expect(screen.getByText('ACME-42 · api')).toBeInTheDocument();
+  });
+
+  // ---------- VS-92: answer inputs ----------
+
+  const withInputs = (over: Partial<Decision> = {}): Decision =>
+    decision({
+      kind: 'question',
+      options: [],
+      target: null,
+      inputs: [
+        { key: 'base_url', label: 'Base URL', type: 'text', required: true },
+        { key: 'notes', label: 'Anything else', type: 'multiline' },
+        { key: 'regions', label: 'Regions', type: 'multiselect', choices: [{ key: 'eu', label: 'EU' }, { key: 'us', label: 'US' }, { key: 'ap', label: 'APAC' }] },
+      ],
+      ...over,
+    });
+
+  it('renders one control per input, in the order the asker gave them', () => {
+    render(<DecisionCard decision={withInputs()} onAnswer={() => undefined} />);
+    expect(screen.getByLabelText(/Base URL/).tagName).toBe('INPUT');
+    expect(screen.getByLabelText(/Anything else/).tagName).toBe('TEXTAREA');
+    expect(screen.getAllByRole('checkbox').map((c) => c.textContent)).toEqual(['EU', 'US', 'APAC']);
+  });
+
+  it('blocks the send until every required input is filled, and says which one is missing', () => {
+    render(<DecisionCard decision={withInputs()} onAnswer={() => undefined} />);
+    const send = screen.getByRole('button', { name: /send answer/i });
+    expect(send).toBeDisabled();
+    expect(screen.getByText('Base URL is needed before this can be sent.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Base URL/), { target: { value: 'https://example.test' } });
+    expect(send).toBeEnabled();
+    expect(screen.queryByText('Base URL is needed before this can be sent.')).not.toBeInTheDocument();
+  });
+
+  it('selects and deselects multi-select choices and sends the chosen keys', () => {
+    const onAnswer = vi.fn();
+    render(<DecisionCard decision={withInputs()} onAnswer={onAnswer} />);
+    fireEvent.change(screen.getByLabelText(/Base URL/), { target: { value: 'https://example.test' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'EU' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'US' }));
+    expect(screen.getByRole('checkbox', { name: 'US' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'US' }));
+    expect(screen.getByRole('checkbox', { name: 'US' })).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: /send answer/i }));
+    // The empty optional note is absent, not present and empty.
+    expect(onAnswer).toHaveBeenCalledWith({ inputs: { base_url: 'https://example.test', regions: ['eu'] } });
+  });
+
+  it('sends the values alongside a chosen option', () => {
+    const onAnswer = vi.fn();
+    render(
+      <DecisionCard
+        decision={withInputs({ options: [{ key: 'now', label: 'Now' }, { key: 'later', label: 'Later' }] })}
+        onAnswer={onAnswer}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/Base URL/), { target: { value: 'https://example.test' } });
+    fireEvent.click(screen.getByRole('radio', { name: /Now/ }));
+    fireEvent.click(screen.getByRole('button', { name: /send answer/i }));
+    expect(onAnswer).toHaveBeenCalledWith({ key: 'now', inputs: { base_url: 'https://example.test' } });
+  });
+
+  it('masks a secret input and never renders the value back', () => {
+    const onAnswer = vi.fn();
+    render(
+      <DecisionCard
+        decision={decision({ kind: 'question', options: [], target: null, inputs: [{ key: 'token', label: 'Read-only token', type: 'secret', required: true, secretName: 'CF_READONLY_TOKEN' }] })}
+        onAnswer={onAnswer}
+      />,
+    );
+    const field = screen.getByLabelText(/Read-only token/) as HTMLInputElement;
+    expect(field.type).toBe('password');
+    // The card says where the value is going, by name.
+    expect(screen.getByText('CF_READONLY_TOKEN')).toBeInTheDocument();
+    fireEvent.change(field, { target: { value: 'cf-not-a-real-token-0000000000' } });
+    fireEvent.click(screen.getByRole('button', { name: /send answer/i }));
+    expect(onAnswer).toHaveBeenCalledWith({ inputs: { token: 'cf-not-a-real-token-0000000000' } });
+  });
+
+  it('shows an answered card\'s values as a record, a secret as the name it was stored under', () => {
+    render(
+      <DecisionCard
+        decision={withInputs({
+          status: 'answered', answerKey: null, answeredAt: '2026-09-07T12:00:00.000Z',
+          inputs: [
+            { key: 'regions', label: 'Regions', type: 'multiselect', choices: [{ key: 'eu', label: 'EU' }, { key: 'us', label: 'US' }] },
+            { key: 'token', label: 'Read-only token', type: 'secret', secretName: 'CF_READONLY_TOKEN' },
+          ],
+          answerInputs: { regions: ['eu', 'us'], token: 'CF_READONLY_TOKEN' },
+        })}
+        onAnswer={() => undefined}
+      />,
+    );
+    // Choice labels, not keys, and no controls to answer with again.
+    expect(screen.getByText('EU, US')).toBeInTheDocument();
+    expect(screen.getByText('stored as CF_READONLY_TOKEN')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /send answer/i })).not.toBeInTheDocument();
+  });
+
+  it('leaves a card with no inputs exactly as it was', () => {
+    const onAnswer = vi.fn();
+    render(<DecisionCard decision={question()} onAnswer={onAnswer} />);
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: /localStorage/ }));
+    fireEvent.click(screen.getByRole('button', { name: /send answer/i }));
+    // No `inputs` key at all, so nothing downstream has to distinguish empty from absent.
+    expect(onAnswer).toHaveBeenCalledWith({ key: 'local' });
   });
 });
 

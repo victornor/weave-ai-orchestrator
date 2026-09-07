@@ -188,4 +188,171 @@ describe('decisions', () => {
     expect(decisions.get(d.id).correlationKey).toBe('approval:workspace');
     expect(newId()).toBeTruthy();
   });
+  // ---------- VS-92: the project a card names ----------
+
+  describe('the project a decision belongs to', () => {
+    it('takes the ticket\'s project, and the ticket wins over a project the asker named', () => {
+      const t = ticket();
+      expect(decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'Which?' }).projectId).toBe(h.projectId);
+      // Not overridable: a card naming a project other than its ticket's would be a lie.
+      const other = newId();
+      h.db.insert('projects', {
+        id: other, workspaceId: h.ctx.workspaceId, slug: 'web', name: 'Web', gitUrl: 'git@e:a/w.git', defaultBranch: 'main',
+        clonePath: '/tmp/web', maxWorkers: 2, worktreeProvider: 'git', openspecEnabled: 1, policiesJson: {}, status: 'ready',
+        createdAt: '2026-09-07T00:00:00.000Z', updatedAt: '2026-09-07T00:00:00.000Z',
+      });
+      expect(decisions.create(AGENT, { ticketId: t.id, projectId: other, kind: 'question', title: 'Which?', correlationKey: 'q2' }).projectId).toBe(h.projectId);
+    });
+
+    it('takes the project the asker named when there is no ticket', () => {
+      const d = decisions.create(AGENT, { projectId: h.projectId, kind: 'question', title: 'Which region?' });
+      expect(d.projectId).toBe(h.projectId);
+      expect(d.ticketId).toBeNull();
+    });
+
+    it('is null for a workspace-wide question, which surfaces render as the workspace', () => {
+      expect(decisions.create(AGENT, { kind: 'question', title: 'Which region?' }).projectId).toBeNull();
+    });
+
+    it('refuses a project that is not one of this workspace\'s', () => {
+      expect(() => decisions.create(AGENT, { projectId: 'pr_nope', kind: 'question', title: 'Which?' })).toThrow(/project pr_nope not found/);
+    });
+  });
+
+  // ---------- VS-92: inputs ----------
+
+  const INPUTS = [
+    { key: 'base_url', label: 'Base URL', type: 'text' as const, required: true },
+    { key: 'notes', label: 'Anything else', type: 'multiline' as const },
+    { key: 'regions', label: 'Regions', type: 'multiselect' as const, choices: [{ key: 'eu', label: 'EU' }, { key: 'us', label: 'US' }, { key: 'ap', label: 'APAC' }] },
+  ];
+
+  describe('asking for values', () => {
+    it('refuses a decision whose inputs could not be answered', () => {
+      const bad = (inputs: unknown[], match: RegExp): void =>
+        expect(() => decisions.create(AGENT, { kind: 'question', title: 'x', inputs: inputs as never, correlationKey: newId() })).toThrow(match);
+      bad([{ key: '', label: 'No key', type: 'text' }], /needs a key/);
+      bad([{ key: 'a', label: '', type: 'text' }], /needs a label/);
+      bad([{ key: 'a', label: 'A', type: 'text' }, { key: 'a', label: 'Again', type: 'text' }], /share the key "a"/);
+      bad([{ key: 'r', label: 'Regions', type: 'multiselect' }], /needs at least one choice/);
+      bad([{ key: 'r', label: 'Regions', type: 'multiselect', choices: [] }], /needs at least one choice/);
+      bad([{ key: 'r', label: 'R', type: 'multiselect', choices: [{ key: 'eu', label: 'EU' }, { key: 'eu', label: 'EU again' }] }], /repeats the choice "eu"/);
+      bad([{ key: 't', label: 'Token', type: 'secret' }], /needs a secretName/);
+      bad([{ key: 't', label: 'Token', type: 'secret', secretName: 'lower case' }], /needs a secretName/);
+      expect(decisions.list()).toHaveLength(0);
+    });
+
+    it('records each type, keyed by input, and wakes the asker with the same map', async () => {
+      const d = decisions.create(AGENT, { kind: 'question', title: 'How should I reach it?', inputs: INPUTS, askedByAgentId: h.conductorId });
+      const answered = await decisions.answer(HUMAN, d.id, { inputs: { base_url: 'https://example.test', regions: ['us', 'eu'] } });
+      expect(answered.answerInputs).toEqual({ base_url: 'https://example.test', regions: ['eu', 'us'] });
+      // Recorded in the order the choices were offered, so the same set always records the same way.
+      expect(answered.answerInputs!.regions).toEqual(['eu', 'us']);
+      // An optional input left empty is absent, not present and empty.
+      expect(Object.keys(answered.answerInputs!)).not.toContain('notes');
+      const woken = wake.calls.at(-1)!;
+      expect(woken.input.payload).toMatchObject({ decisionId: d.id, answerInputs: { base_url: 'https://example.test', regions: ['eu', 'us'] } });
+    });
+
+    it('answers with a choice and values together', async () => {
+      const d = decisions.create(AGENT, {
+        kind: 'question', title: 'Which and where?', options: [{ key: 'now', label: 'Now' }, { key: 'later', label: 'Later' }], inputs: INPUTS,
+      });
+      const answered = await decisions.answer(HUMAN, d.id, { key: 'now', inputs: { base_url: 'https://example.test' } });
+      expect(answered.answerKey).toBe('now');
+      expect(answered.answerInputs).toEqual({ base_url: 'https://example.test' });
+    });
+
+    it('refuses an answer that misses a required input, names an input that does not exist, or picks a choice that was not offered', async () => {
+      const d = decisions.create(AGENT, { kind: 'question', title: 'How?', inputs: INPUTS });
+      await expect(decisions.answer(HUMAN, d.id, { inputs: { notes: 'hi' } })).rejects.toThrow(/"base_url".*is required/);
+      await expect(decisions.answer(HUMAN, d.id, { inputs: { base_url: 'x', nope: 'y' } })).rejects.toThrow(/has no input "nope"/);
+      await expect(decisions.answer(HUMAN, d.id, { inputs: { base_url: 'x', regions: ['mars'] } })).rejects.toThrow(/"mars" is not a choice/);
+      // Nothing was recorded by any of them, and the card is still there to answer.
+      expect(decisions.get(d.id).status).toBe('open');
+      expect(decisions.get(d.id).answerInputs).toBeNull();
+    });
+
+    it('refuses values for a decision that asks for none', async () => {
+      const d = decisions.create(AGENT, { kind: 'question', title: 'Yes or no?', options: [{ key: 'yes', label: 'Yes' }] });
+      await expect(decisions.answer(HUMAN, d.id, { key: 'yes', inputs: { anything: 'x' } })).rejects.toThrow(/asks for no inputs/);
+      expect(decisions.get(d.id).status).toBe('open');
+    });
+
+    it('leaves a decision with no inputs exactly as it was', async () => {
+      const d = decisions.create(AGENT, { kind: 'question', title: 'Yes or no?', options: [{ key: 'yes', label: 'Yes' }] });
+      expect(d.inputs).toEqual([]);
+      const answered = await decisions.answer(HUMAN, d.id, { key: 'yes' });
+      expect(answered.answerKey).toBe('yes');
+      expect(answered.answerInputs).toBeNull();
+      // And it still refuses an empty answer the way it always has.
+      const other = decisions.create(AGENT, { kind: 'question', title: 'Yes?', correlationKey: 'q-other' });
+      await expect(decisions.answer(HUMAN, other.id, {})).rejects.toThrow(/needs a key or free text/);
+    });
+
+    it('answers an inputs-only card without a key or free text', async () => {
+      const d = decisions.create(AGENT, { kind: 'question', title: 'Base URL?', allowFreeText: false, inputs: [INPUTS[0]!] });
+      const answered = await decisions.answer(HUMAN, d.id, { inputs: { base_url: 'https://example.test' } });
+      expect(answered.status).toBe('answered');
+      expect(answered.answerInputs).toEqual({ base_url: 'https://example.test' });
+    });
+  });
+
+  // ---------- VS-92: a secret input's value ----------
+
+  describe('a secret input', () => {
+    /** Not a credential: a fixture, long enough that the run redactor would treat it as one. */
+    const FAKE = 'cf-not-a-real-token-0000000000';
+    const secretInputs = [{ key: 'token', label: 'Read-only API token', type: 'secret' as const, required: true, secretName: 'CF_READONLY_TOKEN' }];
+
+    it('registers the value and records only the name it was stored under', async () => {
+      const d = decisions.create(AGENT, { kind: 'question', title: 'I need a read-only token', inputs: secretInputs, askedByAgentId: h.conductorId });
+      const answered = await decisions.answer(HUMAN, d.id, { inputs: { token: FAKE } });
+
+      expect(answered.answerInputs).toEqual({ token: 'CF_READONLY_TOKEN' });
+      expect(h.services.secrets!.value('CF_READONLY_TOKEN')).toBe(FAKE);
+      expect(h.services.secrets!.list()).toEqual([{ name: 'CF_READONLY_TOKEN', envVarName: 'CF_READONLY_TOKEN', scope: 'workspace', scopeId: null, hasValue: true }]);
+      // What the asker is woken with is the name too — nothing downstream can leak what it never sees.
+      expect(JSON.stringify(wake.calls.at(-1))).not.toContain(FAKE);
+      expect(wake.calls.at(-1)!.input.payload).toMatchObject({ answerInputs: { token: 'CF_READONLY_TOKEN' } });
+    });
+
+    it('leaves the value in no row of the database', async () => {
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'Token?', inputs: secretInputs, askedByAgentId: h.conductorId });
+      await decisions.answer(HUMAN, d.id, { inputs: { token: FAKE }, remember: true });
+      for (const { name } of h.db.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")) {
+        expect(JSON.stringify(h.db.all(`SELECT * FROM "${name}"`)), `${name} carries the secret value`).not.toContain(FAKE);
+      }
+    });
+
+    it('refuses the answer and leaves the decision open when the store will not take the value', async () => {
+      const d = decisions.create(AGENT, { kind: 'question', title: 'Token?', inputs: secretInputs });
+      const real = h.services.secrets!;
+      h.services.secrets = { ...real, put: () => { throw new Error('disk full'); } } as never;
+      await expect(decisions.answer(HUMAN, d.id, { inputs: { token: FAKE } })).rejects.toThrow(/disk full/);
+      h.services.secrets = real;
+      // Nothing recorded: a decision claiming a credential was collected that nobody holds is the
+      // one outcome this ordering exists to prevent.
+      expect(decisions.get(d.id).status).toBe('open');
+      expect(decisions.get(d.id).answerInputs).toBeNull();
+      expect(real.has('CF_READONLY_TOKEN')).toBe(false);
+    });
+
+    it('still refuses a missing required secret before touching the store', async () => {
+      const d = decisions.create(AGENT, { kind: 'question', title: 'Token?', inputs: secretInputs });
+      await expect(decisions.answer(HUMAN, d.id, { inputs: { token: '  ' } })).rejects.toThrow(/is required/);
+      expect(h.services.secrets!.has('CF_READONLY_TOKEN')).toBe(false);
+    });
+
+    it('skips an optional secret the human left empty', async () => {
+      const d = decisions.create(AGENT, {
+        kind: 'question', title: 'Token?',
+        inputs: [{ key: 'token', label: 'Token', type: 'secret', secretName: 'OPTIONAL_TOKEN' }, { key: 'base_url', label: 'Base URL', type: 'text', required: true }],
+      });
+      const answered = await decisions.answer(HUMAN, d.id, { inputs: { base_url: 'https://example.test' } });
+      expect(answered.answerInputs).toEqual({ base_url: 'https://example.test' });
+      expect(h.services.secrets!.has('OPTIONAL_TOKEN')).toBe(false);
+    });
+  });
 });

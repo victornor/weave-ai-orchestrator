@@ -10,7 +10,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   COMMON_TOOLS, CONDUCTOR_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES,
-  COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, DECISION_KINDS,
+  COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, DECISION_KINDS, DECISION_INPUT_TYPES,
   type ToolResult, type Ticket, type Wakeup,
 } from '@agent-conductor/shared';
 import type { Actor, CoreServices } from '@agent-conductor/core';
@@ -116,12 +116,30 @@ const TransitionSchema = z.object({
   unblock: z.object({ owner: z.enum(['conductor', 'human']), action: z.string().min(1) }).optional(),
   blockedBy: z.array(z.string()).optional(),
 });
+/**
+ * A value the card collects alongside the options (VS-92). `multiselect` needs its `choices`;
+ * `secret` needs a `secretName` and never records the value the human types — see the tool
+ * description, which says so where an agent will actually read it.
+ */
+const AskInputSchema = z.object({
+  key: z.string().min(1).describe('unique within this decision; how the value comes back to you'),
+  label: z.string().min(1).describe('what the human reads above the field'),
+  type: z.enum(DECISION_INPUT_TYPES),
+  required: z.boolean().optional().describe('the human cannot send the card until this is filled'),
+  placeholder: z.string().optional(),
+  choices: z.array(z.object({ key: z.string().min(1), label: z.string().min(1), description: z.string().optional() })).optional()
+    .describe('multiselect only, and required for it'),
+  secretName: z.string().optional()
+    .describe('secret only, and required for it: UPPER_SNAKE_CASE. The value is stored under this name and you receive only the name.'),
+});
 const AskSchema = z.object({
   ticketId: z.string().optional(),
+  projectId: z.string().optional().describe('which project this question is about, when it concerns no ticket. A ticket\'s own project always wins.'),
   title: z.string().min(1),
   context: z.string().optional(),
   kind: z.enum(DECISION_KINDS).default('question'),
   options: z.array(z.object({ key: z.string(), label: z.string(), description: z.string().optional(), recommended: z.boolean().optional() })).default([]),
+  inputs: z.array(AskInputSchema).optional().describe('values to collect on the card as well as, or instead of, an option'),
   recommendation: z.string().nullish(),
   allowFreeText: z.boolean().default(true),
   correlationKey: z.string().optional(),
@@ -241,11 +259,17 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'ac_ask', scope: 'all', input: AskSchema,
-    description: 'Ask for a decision. Owned by the human by default; kind=gate_finding is routed to the conductor. Give real options and a recommendation with a one-line why. End your turn after asking — the answer arrives as your next wake.',
+    description:
+      'Ask for a decision. Owned by the human by default; kind=gate_finding is routed to the conductor. Give real options and a recommendation with a one-line why. '
+      + 'Use `inputs` when the answer is a value rather than a choice: text, multiline, multiselect (with `choices`), or secret. '
+      + 'A `secret` input is how you ask for a credential — never ask for one in prose. Its value is registered under the input\'s `secretName` and you receive only that name in `answerInputs`; '
+      + 'the value never appears in the answer, the chat, a ticket, a log or a transcript. Attach it to a role with ac_role_set_secrets to give that role\'s workers the environment variable. '
+      + 'End your turn after asking — the answer arrives as your next wake, with `answerInputs` keyed by your input keys.',
     handler: (ctx, i) => svc(ctx).decisions.create(ctx.actor, {
       ticketId: i.ticketId ? writeTicket(ctx, i.ticketId).id : (ctx.claims.ticketId ?? null),
+      projectId: i.projectId ?? ctx.claims.projectId ?? null,
       kind: i.kind, owner: i.kind === 'gate_finding' ? 'conductor' : 'human', title: i.title, context: i.context,
-      options: i.options, allowFreeText: i.allowFreeText, recommendation: i.recommendation ?? null,
+      options: i.options, inputs: i.inputs, allowFreeText: i.allowFreeText, recommendation: i.recommendation ?? null,
       correlationKey: i.correlationKey, expiresInHours: i.expiresInHours,
       askedByAgentId: ctx.claims.agentId, askedInRunId: ctx.claims.runId,
     }),
@@ -393,6 +417,11 @@ export const TOOLS: ToolDef[] = [
     name: 'ac_role_update_charter', scope: 'conductor', input: z.object({ id: z.string().min(1), charter: z.string().min(1), reason: z.string().min(1), applyToRunning: z.boolean().optional() }),
     description: 'Replace a role charter, creating a new role revision. applyToRunning re-briefs live workers on their next turn.',
     handler: (ctx, i) => svc(ctx).roles.updateCharter(ctx.actor, i.id, i.charter, i.reason, { applyToRunning: i.applyToRunning }),
+  },
+  {
+    name: 'ac_role_set_secrets', scope: 'conductor', input: z.object({ id: z.string().min(1), names: z.array(z.string().min(1)), reason: z.string().min(1) }),
+    description: 'Replace a role\'s secret names, so workers of that role get them as environment variables. Every name must already be registered — a secret is registered when the human fills a `secret` input on a card you raised with ac_ask. Refused in full if any name is unknown. Takes effect for the next worker spawned, not for one already running.',
+    handler: (ctx, i) => svc(ctx).roles.setSecrets(ctx.actor, i.id, i.names, i.reason),
   },
   {
     name: 'ac_role_set_max_workers', scope: 'conductor',

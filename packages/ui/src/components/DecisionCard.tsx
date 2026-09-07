@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Decision, UiStatus } from '@agent-conductor/shared';
+import type { Decision, DecisionAnswerInputs, DecisionInput, UiStatus } from '@agent-conductor/shared';
 import { Button } from './Button';
 import { Composer } from './Composer';
 import { StatusGlyph } from './StatusGlyph';
@@ -27,7 +27,7 @@ export interface DecisionCardProps {
    * conductor chat passes one; a card that is a record rather than a prompt never offers it.
    */
   onHide?: () => void;
-  onAnswer: (answer: { key?: string; text?: string; remember?: boolean }) => void;
+  onAnswer: (answer: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }) => void;
   className?: string;
 }
 
@@ -74,6 +74,84 @@ function statusLabel(status: Decision['status']): string {
   return status === 'withdrawn' ? 'Withdrawn' : status === 'expired' ? 'Expired' : status === 'superseded' ? 'Superseded' : 'Closed';
 }
 
+const isEmpty = (v: string | string[] | undefined): boolean => v === undefined || (typeof v === 'string' ? v.trim() === '' : v.length === 0);
+
+/**
+ * One control per input (VS-92), in the order the asker gave them. A `secret` is a password field:
+ * its value is never rendered back, is submitted straight to the daemon, and is registered under
+ * the asker's `secretName` rather than becoming the answer.
+ */
+function InputControl({ input, value, disabled, onChange }: {
+  input: DecisionInput; value: string | string[] | undefined; disabled?: boolean; onChange: (v: string | string[]) => void;
+}): React.ReactElement {
+  const id = `dc-input-${input.key}`;
+  const field = 'w-full rounded-r6 border border-line-2 bg-bg-input px-3 text-meta text-text-1 outline-none placeholder:text-text-4 focus:border-accent-edge';
+  const chosen = Array.isArray(value) ? value : [];
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={input.type === 'multiselect' ? undefined : id} className="text-micro font-medium text-text-2">
+        {input.label}
+        {input.required ? <span className="ml-1 text-needs-you" aria-hidden>*</span> : null}
+      </label>
+      {input.type === 'multiline' ? (
+        <textarea
+          id={id} rows={3} disabled={disabled} value={typeof value === 'string' ? value : ''}
+          placeholder={input.placeholder} aria-required={input.required}
+          onChange={(e) => onChange(e.target.value)} className={cx(field, 'resize-y py-2')}
+        />
+      ) : input.type === 'multiselect' ? (
+        <div role="group" aria-label={input.label} className="flex flex-wrap gap-1.5">
+          {(input.choices ?? []).map((c) => {
+            const on = chosen.includes(c.key);
+            return (
+              <button
+                key={c.key} type="button" role="checkbox" aria-checked={on} disabled={disabled}
+                title={c.description}
+                onClick={() => onChange(on ? chosen.filter((k) => k !== c.key) : [...chosen, c.key])}
+                className={cx(
+                  'rounded-pill border px-3 py-1.5 text-micro transition-colors duration-(--dur-fast) ease-ac',
+                  on ? 'border-accent bg-accent-tint text-text-strong' : 'border-line-2 text-text-2 hover:bg-bg-2',
+                )}
+              >
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <input
+          id={id} type={input.type === 'secret' ? 'password' : 'text'} disabled={disabled}
+          value={typeof value === 'string' ? value : ''} placeholder={input.placeholder} aria-required={input.required}
+          autoComplete={input.type === 'secret' ? 'off' : undefined}
+          onChange={(e) => onChange(e.target.value)} className={cx(field, 'h-9')}
+        />
+      )}
+      {input.type === 'secret' ? (
+        <p className="text-nano text-text-4">
+          Stored as <span className="ac-mono">{input.secretName}</span> and never shown again — it does not go into the chat or the ticket.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** What an answered card shows in place of its controls: a secret is the name it was stored under. */
+function answeredInputs(decision: Decision): Array<{ label: string; value: string }> {
+  const given = decision.answerInputs ?? {};
+  return (decision.inputs ?? [])
+    .filter((i) => given[i.key] !== undefined)
+    .map((i) => {
+      const v = given[i.key]!;
+      if (i.type === 'multiselect') {
+        const labels = (Array.isArray(v) ? v : [v]).map((k) => i.choices?.find((c) => c.key === k)?.label ?? k);
+        return { label: i.label, value: labels.join(', ') };
+      }
+      // Never the value: what was recorded for a secret is the name it went into.
+      if (i.type === 'secret') return { label: i.label, value: `stored as ${String(v)}` };
+      return { label: i.label, value: String(v) };
+    });
+}
+
 /** What was answered, in the words the human would recognise: the option's label, else its key. */
 function answerLine(decision: Decision): string | null {
   const chosen = decision.answerKey ? (decision.options.find((o) => o.key === decision.answerKey)?.label ?? decision.answerKey) : null;
@@ -92,9 +170,13 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
   const [confirm, setConfirm] = useState('');
   const [freeText, setFreeText] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [values, setValues] = useState<DecisionAnswerInputs>({});
   const target = (decision.target ?? {}) as Target;
+  const inputs = decision.inputs ?? [];
   const destructive = decision.kind === 'discard_approval';
-  const meta = [ticketIdentifier, projectSlug, askedBy].filter(Boolean).join(' · ');
+  // A decision belonging to no project is the workspace's, and says so: an absent label and one that
+  // simply could not be resolved must not look the same when four projects are asking at once (VS-92).
+  const meta = [ticketIdentifier, projectSlug ?? 'Workspace', askedBy].filter(Boolean).join(' · ');
   // A decision that is no longer open cannot be answered again; it is a record, not a prompt.
   const answered = decision.status === 'answered';
   const inert = decision.status !== 'open';
@@ -106,7 +188,19 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
       ? { label: 'Conductor asks', status: 'needs-you' as UiStatus }
       : (HEAD[decision.kind] ?? HEAD['approval']!);
 
-  const answer = (key: string, text?: string): void => onAnswer(text === undefined ? { key } : { key, text });
+  // Every required input filled is what unlocks the send; the card names the first one still missing
+  // rather than leaving a disabled button with no explanation.
+  const missing = inputs.filter((i) => i.required && isEmpty(values[i.key]));
+  const collected = (): DecisionAnswerInputs => {
+    const out: DecisionAnswerInputs = {};
+    // An optional input left empty is absent, never present and empty — the same rule the daemon applies.
+    for (const i of inputs) if (!isEmpty(values[i.key])) out[i.key] = values[i.key]!;
+    return out;
+  };
+  const withInputs = (a: { key?: string; text?: string }): { key?: string; text?: string; inputs?: DecisionAnswerInputs } =>
+    inputs.length ? { ...a, inputs: collected() } : a;
+
+  const answer = (key: string, text?: string): void => onAnswer(withInputs(text === undefined ? { key } : { key, text }));
 
   return (
     <article
@@ -119,13 +213,14 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
           {!inert && decision.kind === 'plan_approval' ? 'Needs you' : head.label}
         </span>
         <div className="flex-1" />
+        {/* Both, not one or the other: the PR link used to take the meta line's place, which hid the
+            project on a merge approval — the card where knowing the repository matters most. */}
         {target.prUrl ? (
           <a className="ac-mono text-micro" href={target.prUrl} target="_blank" rel="noreferrer">
             PR {target.prNumber ? `#${target.prNumber}` : ''} ↗
           </a>
-        ) : meta ? (
-          <span className="ac-mono text-micro text-text-3">{meta}</span>
         ) : null}
+        {meta ? <span className="ac-mono text-micro text-text-3">{meta}</span> : null}
       </div>
 
       <div className="p-3.5">
@@ -227,10 +322,33 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
           </div>
         ) : null}
 
+        {/* the values this card collects, in the order the asker asked for them */}
+        {inputs.length && !inert ? (
+          <div className="mb-3 flex flex-col gap-3 rounded-r6 border border-line-1 bg-bg-2 p-3">
+            {inputs.map((i) => (
+              <InputControl
+                key={i.key}
+                input={i}
+                value={values[i.key]}
+                disabled={busy}
+                onChange={(v) => setValues((prev) => ({ ...prev, [i.key]: v }))}
+              />
+            ))}
+          </div>
+        ) : null}
+
         {/* answered — the record of what was decided */}
         {answered ? (
           <div className="mb-3 rounded-r6 border border-line-1 bg-bg-2 p-3" aria-label="The answer given">
-            <p className="text-meta leading-relaxed text-text-1">{answerLine(decision) ?? 'No answer recorded.'}</p>
+            {answerLine(decision) || !answeredInputs(decision).length ? (
+              <p className="text-meta leading-relaxed text-text-1">{answerLine(decision) ?? 'No answer recorded.'}</p>
+            ) : null}
+            {answeredInputs(decision).map((r) => (
+              <p key={r.label} className="text-meta leading-relaxed text-text-1">
+                <span className="text-text-3">{r.label}: </span>
+                {r.value}
+              </p>
+            ))}
             {decision.answeredAt ? <p className="ac-mono mt-1 text-micro text-text-4">{clock(decision.answeredAt)}</p> : null}
           </div>
         ) : null}
@@ -253,7 +371,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
             placeholder="Answer in your own words…"
             submitLabel="Send answer"
             onSubmit={(t) => {
-              onAnswer({ text: t });
+              onAnswer(withInputs({ text: t }));
               setFreeText(false);
             }}
           />
@@ -274,6 +392,12 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
           />
         ) : null}
 
+        {missing.length && !inert ? (
+          <p className="mb-2 text-micro text-text-3" role="status">
+            {missing[0]!.label} is needed before this can be sent.
+          </p>
+        ) : null}
+
         {queued ? <p className="mb-2 text-micro text-working">Queued — this answer is sent and re-validated when the connection returns.</p> : null}
 
         {/* primary action band, 44px, primary bottom-left. An answered card has none. */}
@@ -285,7 +409,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
             </p>
           ) : inert ? null : decision.kind === 'plan_approval' ? (
             <>
-              <Button variant="primary" size="thumb" className="flex-1" disabled={busy} onClick={() => answer('approve')} kbd="⏎">
+              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer('approve')} kbd="⏎">
                 Approve
               </Button>
               <Button variant="secondary" size="thumb" className="flex-1" disabled={busy} onClick={() => setRevising((v) => !v)}>
@@ -297,7 +421,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
             </>
           ) : decision.kind === 'merge_approval' ? (
             <>
-              <Button variant="primary" size="thumb" className="flex-1" disabled={busy} onClick={() => answer('approve')}>
+              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer('approve')}>
                 Approve merge
               </Button>
               <Button variant="secondary" size="thumb" className="w-24" disabled={busy} onClick={() => answer('hold')}>
@@ -306,7 +430,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
             </>
           ) : decision.kind === 'hire_approval' ? (
             <>
-              <Button variant="primary" size="thumb" className="flex-1" disabled={busy} onClick={() => answer('approve')}>
+              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer('approve')}>
                 Hire
               </Button>
               <Button variant="secondary" size="thumb" className="w-24" disabled={busy} onClick={() => answer('reject')}>
@@ -324,7 +448,12 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
               Discard
             </Button>
           ) : optionList ? (
-            <Button variant="primary" size="thumb" className="flex-1" disabled={busy || selected === null} onClick={() => answer(selected!)}>
+            <Button variant="primary" size="thumb" className="flex-1" disabled={busy || selected === null || missing.length > 0} onClick={() => answer(selected!)}>
+              Send answer
+            </Button>
+          ) : inputs.length ? (
+            // Nothing to choose, only values to give: filling them in is the whole answer.
+            <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => onAnswer({ inputs: collected() })}>
               Send answer
             </Button>
           ) : null}

@@ -75,13 +75,13 @@ export interface MergeQueueService {
 }
 
 // ---------- decisions ----------
-export interface DecisionCreateInput { ticketId?: string | null; kind: S.DecisionKind; owner?: S.DecisionOwner; title: string; context?: string; options?: S.Decision['options']; allowFreeText?: boolean; recommendation?: string | null; expiresInHours?: number; target?: Record<string, unknown>; correlationKey?: string; askedByAgentId?: string | null; askedInRunId?: string | null }
+export interface DecisionCreateInput { ticketId?: string | null; projectId?: string | null; kind: S.DecisionKind; owner?: S.DecisionOwner; title: string; context?: string; options?: S.Decision['options']; inputs?: S.DecisionInput[]; allowFreeText?: boolean; recommendation?: string | null; expiresInHours?: number; target?: Record<string, unknown>; correlationKey?: string; askedByAgentId?: string | null; askedInRunId?: string | null }
 export interface DecisionsService {
   create(actor: Actor, input: DecisionCreateInput): S.Decision;
   get(id: string): S.Decision;
   list(filter?: { status?: S.DecisionStatus[]; owner?: S.DecisionOwner; ticketId?: string; limit?: number }): S.Decision[];
   /** Async: side effects drive ticket transitions and role activation. */
-  answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean }): Promise<S.Decision>;
+  answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean; inputs?: S.DecisionAnswerInputs }): Promise<S.Decision>;
   withdraw(actor: Actor, id: string, reason: string): S.Decision;
   supersedeForTarget(actor: Actor, ticketId: string, correlationKey: string): number;
   expireDue(): Promise<S.Decision[]>;
@@ -129,6 +129,8 @@ export interface RolesService {
   activate(actor: Actor, id: string): Promise<S.Role>;
   update(actor: Actor, id: string, patch: Partial<S.RoleSpec>, reason: string, opts?: { applyToRunning?: boolean }): Promise<S.Role>;
   updateCharter(actor: Actor, id: string, charter: string, reason: string, opts?: { applyToRunning?: boolean }): Promise<S.Role>;
+  /** Replace the role's secret names (VS-92). Refused in full if any name is not registered, so a role can never list a secret its workers would silently not get. */
+  setSecrets(actor: Actor, id: string, names: string[], reason: string): Promise<S.Role>;
   charter(id: string): string;
   revisions(id: string): Array<{ revision: number; author: string; reason: string | null; changedKeys: string[]; createdAt: string }>;
   rollback(actor: Actor, id: string, revision: number): Promise<S.Role>;
@@ -352,9 +354,24 @@ export interface ChangelogService {
   heatmap(q?: ChangelogHeatmapQuery): S.ChangelogHeatmap;
 }
 
+// ---------- secrets ----------
+/**
+ * Registering a value the human supplied, and reading one back for the daemon alone (VS-92). The
+ * value is never in the database and never on any client, channel or agent surface: `list` says
+ * only whether one is held, and `value` has exactly one caller, `roleSecretsEnv`.
+ */
+export interface SecretsService {
+  put(actor: Actor, input: { name: string; envVarName?: string; scope?: S.SecretScope; scopeId?: string | null }, value: string): S.WorkspaceSecret;
+  list(): S.WorkspaceSecret[];
+  /** Is this name registered at all — what `roles.setSecrets` checks before accepting a list. */
+  has(name: string): boolean;
+  /** Daemon-only. Do not expose through a route, a tool or an event. */
+  value(name: string): string | null;
+}
+
 export interface CoreServices {
   tickets: TicketsService; decisions: DecisionsService; projects: ProjectsService; roles: RolesService; workers: WorkersService;
   wake: WakeService; runs: RunsService; dispatcher: Dispatcher; supervisor: Supervisor; knowledge: KnowledgeService; specs: SpecsService;
   openspec: OpenSpecService; usage: UsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
-  changelog: ChangelogService; models: ModelsService;
+  changelog: ChangelogService; models: ModelsService; secrets: SecretsService;
 }

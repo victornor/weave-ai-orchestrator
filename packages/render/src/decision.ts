@@ -6,6 +6,9 @@
 import type { Decision } from '@agent-conductor/shared';
 import { decisionUiStatus } from '@agent-conductor/shared';
 import { formatAge, formatDiffStat, joinMeta, oneLine } from './format.js';
+
+/** What a decision belonging to no project is called, on every surface. */
+export const WORKSPACE_LABEL = 'Workspace';
 import { redact } from './redact.js';
 import type { CardBodyLine, CardModel, CardOption, CardVariant } from './types.js';
 
@@ -67,7 +70,13 @@ export function decisionToCard(decision: Decision, ctx: DecisionCardContext = {}
   const allowFreeText = typeof d.allowFreeText === 'boolean' ? d.allowFreeText : variant === 'question' || variant === 'plan_approval';
 
   const identifier = ctx.ticketIdentifier ?? tstr(target, 'ticketIdentifier', 'identifier') ?? d.ticketId ?? null;
-  const subtitle = joinMeta(identifier, ctx.projectName ?? tstr(target, 'projectName', 'project')) || null;
+  // Always a project chunk (VS-92): a card with no label reads as one whose project is unknown, and
+  // the two mean very different things when four projects are asking at once.
+  const project = ctx.projectName ?? tstr(target, 'projectName', 'project') ?? WORKSPACE_LABEL;
+  const subtitle = joinMeta(identifier, project) || null;
+  // A card asking for values is not answerable here: no channel can take a secret without putting
+  // it in a message, and none has a control for a multi-select.
+  const answerElsewhere = Array.isArray(d.inputs) && d.inputs.length > 0 && d.status === 'open';
 
   const card: CardModel = {
     id: d.id ?? '',
@@ -91,7 +100,16 @@ export function decisionToCard(decision: Decision, ctx: DecisionCardContext = {}
     createdAt: d.createdAt ?? '',
     age: formatAge(d.createdAt, ctx.now ?? new Date()),
     answer: d.status === 'answered' ? { key: d.answerKey ?? null, text: d.answerText ? redact(d.answerText) : null, at: d.answeredAt ?? null } : null,
+    answerElsewhere,
   };
+  if (answerElsewhere) {
+    // No options either: offering buttons that cannot carry the values would answer the decision
+    // with half of what it asked for.
+    card.options = [];
+    card.allowFreeText = false;
+    card.freeTextLabel = null;
+    card.body = [...card.body, { label: null, value: `Answer this in the web app: it asks for ${d.inputs.length} value${d.inputs.length === 1 ? '' : 's'}.`, format: 'text' }];
+  }
   return card;
 }
 

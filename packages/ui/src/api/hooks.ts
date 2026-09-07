@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, Agent, Role, Run, Project, UsageGrain, UsageWindow, Workspace } from '@agent-conductor/shared';
+import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, UsageGrain, UsageWindow, Workspace } from '@agent-conductor/shared';
 import { dayKey } from '@agent-conductor/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -556,7 +556,7 @@ export function useDecisions(
   });
 }
 
-export function useAnswerDecision(): UseMutationResult<unknown, Error, { id: string; key?: string; text?: string; remember?: boolean }> {
+export function useAnswerDecision(): UseMutationResult<unknown, Error, { id: string; key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({

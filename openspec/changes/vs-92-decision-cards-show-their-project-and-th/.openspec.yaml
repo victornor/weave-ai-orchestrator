@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Decision cards show their project, and the conductor can ask with custom
+  answer inputs (multi-select, text, secret) whose values reach the right place

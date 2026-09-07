@@ -20,10 +20,12 @@ export function createRegistries(): Registries { return { runtimes: new Map(), c
 
 export interface WorkspacePaths {
   root: string; state: string; db: string; runs: string; conductor: string; roles: string; workers: string; archive: string; projects: string; knowledge: string; runtimesHome: string; wtConfig: string;
+  /** VS-92: the encrypted secret values and the key that opens them. Both `0600`, both inside `state`, neither exported nor backed up. */
+  secretsFile: string; secretsKey: string;
 }
 export function workspacePaths(root: string): WorkspacePaths {
   const j = (...p: string[]) => [root, ...p].join('/');
-  return { root, state: j('.agent-conductor'), db: j('.agent-conductor', 'db.sqlite'), runs: j('.agent-conductor', 'runs'), conductor: j('conductor'), roles: j('roles'), workers: j('workers'), archive: j('archive', 'workers'), projects: j('projects'), knowledge: j('knowledge'), runtimesHome: j('.agent-conductor', 'runtimes'), wtConfig: j('.agent-conductor', 'wt.toml') };
+  return { root, state: j('.agent-conductor'), db: j('.agent-conductor', 'db.sqlite'), runs: j('.agent-conductor', 'runs'), conductor: j('conductor'), roles: j('roles'), workers: j('workers'), archive: j('archive', 'workers'), projects: j('projects'), knowledge: j('knowledge'), runtimesHome: j('.agent-conductor', 'runtimes'), wtConfig: j('.agent-conductor', 'wt.toml'), secretsFile: j('.agent-conductor', 'secrets.enc'), secretsKey: j('.agent-conductor', 'secrets.key') };
 }
 
 export interface WorkspaceContext {

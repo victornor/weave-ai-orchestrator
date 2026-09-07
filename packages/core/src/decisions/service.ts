@@ -1,5 +1,5 @@
 import { decisionRow, newId, nowIso, type Db } from '@agent-conductor/db';
-import { OcError, type Decision, type DecisionKind, type DecisionOwner, type DecisionStatus } from '@agent-conductor/shared';
+import { OcError, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus } from '@agent-conductor/shared';
 import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -7,6 +7,9 @@ import { tx } from '../tickets/tx.js';
 import { WORKERS_RUNTIME_CORRELATION } from '../models/index.js';
 
 const asDecision = (r: Record<string, unknown>): Decision => decisionRow(r) as unknown as Decision;
+
+/** A secret input's `secretName` becomes an environment variable name, so it has to be able to be one. */
+const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreServices): DecisionsService {
   const db: Db = ctx.db;
@@ -69,9 +72,57 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     return rows.length;
   }
 
+  /**
+   * Which project a decision belongs to, resolved once here rather than derived on every read
+   * (VS-92): the ticket's project wins and is not overridable — a card naming a project other than
+   * its ticket's would be a lie — then the project the asker named, then the asker's own. Null is
+   * the honest answer for a workspace-wide question, and every surface renders it as `Workspace`.
+   */
+  function resolveProject(input: DecisionCreateInput, ticketId: string | null): string | null {
+    if (ticketId) return db.get<{ projectId: string | null }>('SELECT project_id FROM tickets WHERE id = ?', [ticketId])?.projectId ?? null;
+    const named = input.projectId ?? null;
+    if (!named) return null;
+    if (!db.get('SELECT id FROM projects WHERE workspace_id = ? AND id = ?', [ws, named])) throw new OcError('not_found', `project ${named} not found`);
+    return named;
+  }
+
+  /**
+   * Refuse a card that could not be answered, before the row exists. Everything here is a shape the
+   * card has to render or the answer has to validate against; a decision that reaches the human
+   * with a multi-select and no choices is a dead end with no way back for either of them.
+   */
+  function validateInputs(inputs: DecisionInput[]): DecisionInput[] {
+    const seen = new Set<string>();
+    for (const i of inputs) {
+      const key = (i.key ?? '').trim();
+      if (!key) throw new OcError('validation', 'every decision input needs a key');
+      if (seen.has(key)) throw new OcError('validation', `two decision inputs share the key "${key}"`);
+      seen.add(key);
+      if (!(i.label ?? '').trim()) throw new OcError('validation', `input "${key}" needs a label`);
+      if (i.type === 'multiselect') {
+        const choices = i.choices ?? [];
+        if (!choices.length) throw new OcError('validation', `multiselect input "${key}" needs at least one choice`);
+        const keys = new Set<string>();
+        for (const c of choices) {
+          if (!(c.key ?? '').trim()) throw new OcError('validation', `every choice of input "${key}" needs a key`);
+          if (keys.has(c.key)) throw new OcError('validation', `input "${key}" repeats the choice "${c.key}"`);
+          keys.add(c.key);
+        }
+      }
+      // The value never becomes the answer, so the name it is stored under is the only thing that
+      // can carry it onward — and it has to be usable as an environment variable name.
+      if (i.type === 'secret' && !SECRET_NAME.test(i.secretName ?? '')) {
+        throw new OcError('validation', `secret input "${key}" needs a secretName matching ${SECRET_NAME.source}`);
+      }
+    }
+    return inputs;
+  }
+
   function create(actor: Actor, input: DecisionCreateInput): Decision {
     const ticketId = input.ticketId ?? null;
     if (ticketId && !db.get('SELECT id FROM tickets WHERE id = ?', [ticketId])) throw new OcError('not_found', `ticket ${ticketId} not found`);
+    const projectId = resolveProject(input, ticketId);
+    const inputs = validateInputs(input.inputs ?? []);
     const correlationKey = input.correlationKey ?? `${input.kind}:${ticketId ?? 'workspace'}`;
     const owner = input.owner ?? defaultOwner(input.kind, ticketId);
     const id = newId();
@@ -79,9 +130,9 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     return tx(db, () => {
       supersedeOpen(actor, ticketId, correlationKey);
       db.insert('decisions', {
-        id, workspaceId: ws, ticketId, kind: input.kind, owner, askedByAgentId: input.askedByAgentId ?? null,
+        id, workspaceId: ws, ticketId, projectId, kind: input.kind, owner, askedByAgentId: input.askedByAgentId ?? null,
         askedInRunId: input.askedInRunId ?? actor.runId ?? null, title: input.title, context: input.context ?? '',
-        optionsJson: input.options ?? [], allowFreeText: input.allowFreeText ?? true, recommendation: input.recommendation ?? null,
+        optionsJson: input.options ?? [], inputsJson: inputs, allowFreeText: input.allowFreeText ?? true, recommendation: input.recommendation ?? null,
         status: 'open', expiresAt: input.expiresInHours ? new Date(Date.now() + input.expiresInHours * 3600e3).toISOString() : null,
         targetJson: input.target ?? null, correlationKey, createdAt: now,
       });
@@ -213,22 +264,87 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     wake(conductorId(), 'decision_answered', `discard ${approved ? 'approved' : 'declined'}`, { decisionId: d.id, ticketId, answer: key });
   }
 
-  async function answer(actor: Actor, id: string, ans: { key?: string; text?: string; remember?: boolean }): Promise<Decision> {
+  /**
+   * The values a card collected, checked against what the decision actually asked for. Returns the
+   * map to record — empty optional inputs dropped, and every `secret` still holding its raw value,
+   * which `settleSecrets` replaces with the name before anything is written.
+   */
+  function validateAnswerInputs(d: Decision, supplied: DecisionAnswerInputs): DecisionAnswerInputs {
+    const declared = new Map((d.inputs ?? []).map((i) => [i.key, i]));
+    for (const key of Object.keys(supplied)) {
+      if (!declared.has(key)) throw new OcError('validation', `decision ${d.id} has no input "${key}"`, { inputs: [...declared.keys()] });
+    }
+    const out: DecisionAnswerInputs = {};
+    for (const input of declared.values()) {
+      const raw = supplied[input.key];
+      const empty = raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === '') || (Array.isArray(raw) && raw.length === 0);
+      if (empty) {
+        if (input.required) throw new OcError('validation', `input "${input.key}" (${input.label}) is required`);
+        continue; // An optional input left empty is absent, never present and empty.
+      }
+      if (input.type === 'multiselect') {
+        const chosen = Array.isArray(raw) ? raw : [raw];
+        const offered = (input.choices ?? []).map((c) => c.key);
+        for (const c of chosen) {
+          if (!offered.includes(c)) throw new OcError('validation', `"${c}" is not a choice of input "${input.key}"`, { choices: offered });
+        }
+        // Recorded in the order the choices were offered, so two humans picking the same set record the same thing.
+        out[input.key] = offered.filter((c) => chosen.includes(c));
+      } else {
+        if (Array.isArray(raw)) throw new OcError('validation', `input "${input.key}" takes a single value`);
+        out[input.key] = raw;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Register every secret input's value and replace it with the name it was stored under, so what
+   * the answer records is a reference and never a credential.
+   *
+   * This runs *before* the answer is written, inverting this service's usual record-then-side-effect
+   * order. That order exists so a failing side effect never loses an answer; here it would do the
+   * opposite — record a decision claiming a credential was collected that nobody holds. A failed
+   * registration throws, nothing is recorded, and the decision stays open for another try.
+   */
+  function settleSecrets(actor: Actor, d: Decision, values: DecisionAnswerInputs): DecisionAnswerInputs {
+    const out: DecisionAnswerInputs = { ...values };
+    for (const input of d.inputs ?? []) {
+      if (input.type !== 'secret') continue;
+      const value = out[input.key];
+      if (typeof value !== 'string' || value === '') continue; // Absent means optional and skipped; validation already refused a missing required one.
+      deps().secrets.put(actor, { name: input.secretName!, envVarName: input.secretName!, scope: 'workspace' }, value);
+      out[input.key] = input.secretName!;
+    }
+    return out;
+  }
+
+  async function answer(actor: Actor, id: string, ans: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }): Promise<Decision> {
     const d = get(id);
     if (d.status !== 'open') throw new OcError('wrong_status', `decision ${id} is ${d.status}`);
-    if (!ans.key && !ans.text) throw new OcError('validation', 'an answer needs a key or free text');
+    const suppliedInputs = ans.inputs ?? {};
+    const hasInputs = (d.inputs ?? []).length > 0;
+    if (!hasInputs && Object.keys(suppliedInputs).length) throw new OcError('validation', `decision ${id} asks for no inputs`);
+    // A card that only collects values is answered by filling them in: requiring a key or free text
+    // as well would make an inputs-only decision unanswerable.
+    if (!ans.key && !ans.text && !hasInputs) throw new OcError('validation', 'an answer needs a key or free text');
     // No `runtime:` escape hatch (VS-77): a card cannot move one agent onto another runtime, so an
     // answer that is not one of the offered options is a validation error again.
     if (ans.key && d.options.length && !d.options.some((o) => o.key === ans.key)) {
       throw new OcError('validation', `unknown option "${ans.key}"`, { options: d.options.map((o) => o.key) });
     }
-    if (!ans.key && !d.allowFreeText) throw new OcError('validation', 'this decision requires one of its options');
+    if (!ans.key && !d.allowFreeText && !hasInputs) throw new OcError('validation', 'this decision requires one of its options');
+
+    // Validate, then settle the secrets, then record — in that order, and all of it before the row
+    // is touched: nothing about this answer is written until every value has somewhere to live.
+    const checked = hasInputs ? validateAnswerInputs(d, suppliedInputs) : {};
+    const answerInputs = hasInputs ? settleSecrets(actor, d, checked) : null;
 
     const key = ans.key ?? null;
     const text = ans.text ?? null;
     const answered = tx(db, () => {
       db.update('decisions', d.id, {
-        status: 'answered' as DecisionStatus, answerKey: key, answerText: text,
+        status: 'answered' as DecisionStatus, answerKey: key, answerText: text, answerInputsJson: answerInputs,
         answeredByKind: actor.kind, answeredById: actor.id, answeredAt: nowIso(),
       });
       const next = get(d.id);
@@ -257,6 +373,8 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     if (answered.askedByAgentId) {
       wake(answered.askedByAgentId, 'decision_answered', `decision answered: ${answered.title}`, {
         decisionId: answered.id, answer: { key, text }, ticketId: answered.ticketId,
+        // Already settled: a secret's entry here is the name it was stored under, never the value.
+        ...(answerInputs ? { answerInputs } : {}),
       });
     }
     if (ans.remember) {

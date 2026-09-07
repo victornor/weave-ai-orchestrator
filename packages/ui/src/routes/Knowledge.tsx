@@ -24,7 +24,8 @@ import { ago } from '../lib/format';
 import { cx } from '../lib/cx';
 import { DocsPanel, DocPanel, refFromPath, type DocRef } from './KnowledgeDocs';
 import { ChangelogPanel } from './Changelog';
-import { useSearchParams } from '../app/link';
+import { A, useSearchParams } from '../app/link';
+import { useWs } from '../api/context';
 
 // The graph is the only screen that needs a force-layout engine. Loading it on demand keeps
 // `d3-force` and the renderer out of the chunk every other page pays for.
@@ -216,6 +217,7 @@ function KnowledgeDocPanel({ scope, project, onClose, onOpenDoc }: { scope: stri
   };
   const revisions = useKnowledgeRevisions(scope, project);
   const mutate = useKnowledgeMutation();
+  const ws = useWs();
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState('');
 
@@ -279,6 +281,11 @@ function KnowledgeDocPanel({ scope, project, onClose, onOpenDoc }: { scope: stri
               <div key={r.revision} className="flex items-center gap-3">
                 <span className="ac-mono text-micro text-text-3">r{r.revision}</span>
                 <span className="flex-1 text-micro text-text-2">{r.reason}</span>
+                {r.ticketIdentifier ? (
+                  <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: r.ticketIdentifier }} className="ac-mono text-nano text-accent-link">
+                    {r.ticketIdentifier}
+                  </A>
+                ) : null}
                 <span className="ac-mono text-nano text-text-4">{ago(r.createdAt)}</span>
                 <button type="button" className="text-micro text-accent-link" onClick={() => mutate.mutate({ scope, ...(project ? { project } : {}), op: 'revert', revision: r.revision })}>
                   Revert

@@ -22,6 +22,7 @@ export function knowledgeRoutes(): Hono<AppEnv> {
   });
   app.delete('/docs/:scope/:slug', (c) => { c.get('ws').services.knowledge.deleteDoc(c.get('actor'), scopeParam.parse(c.req.param('scope')), c.req.param('slug'), project(c)); return c.json({ ok: true }); });
   app.get('/graph', (c) => c.json(c.get('ws').services.knowledge.graph(project(c))));
+  app.get('/health', (c) => c.json(c.get('ws').services.knowledge.health(project(c))));
   app.get('/:scope', (c) => c.json(c.get('ws').services.knowledge.get(scopeParam.parse(c.req.param('scope')), project(c))));
   app.put('/:scope', async (c) => {
     const { body: text } = await body(c, z.object({ body: z.string() }));

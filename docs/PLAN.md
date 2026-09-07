@@ -675,10 +675,12 @@ Every turn ends with the agent producing JSON matching `RunReportSchema` (via `-
   "summary": "one paragraph for the record",
   "tickets": [{"id": "ACME-42", "status": "in_progress", "note": "…"}],
   "nextAction": {"owner": "self|conductor|human|none", "what": "…"} ,
-  "knowledgeUpdated": false }
+  "knowledge": { "recorded": false, "reason": "…" } }
 ```
 
 `idle` means "nothing actionable" and is the cheap fast path: the engine records liveness `empty` without penalty when the wake was a digest or timer. Missing report ⇒ `liveness=empty` and a warning event; three consecutive empties on non-digest wakes ⇒ conductor `gate_finding`.
+
+`knowledge` is required (VS-102) and is one of `{recorded: true, where: "…"}` or `{recorded: false, reason: "…"}` — the turn's explicit answer to "did this produce durable knowledge, and where, or why not." "Nothing durable" is always a complete, unpenalised answer. A report missing `knowledge`, or giving `recorded: true` with no `where`, or `recorded: false` with no `reason`, fails to parse and is treated exactly like a report missing `state`: `liveness = empty`, on the same terms as no report at all. Nothing checks whether a stated `reason` is a good one — see §13.7 for the check that actually looks at outcomes rather than self-reported claims.
 
 ### 9.5 `conductor` CLI for agents
 
@@ -981,6 +983,34 @@ An entry carries an absolute timestamp, its kind, the actor (`human`, `agent`, `
 **Surfaces.** `GET /changelog` and `GET /changelog/heatmap` (§API.md), the Changelog tab in the web app's Knowledge area, and `conductor changelog [--project <id>] [--from <date>] [--to <date>]`.
 
 **The heatmap** is a calendar grid of the last 371 days shading **tickets landed per day** — the measure of a day's output, since landing is what means work reached the repository. The view states the measure and its definition. Days are bucketed in a named IANA timezone (the reader's in the web app, the machine's in the CLI), in TypeScript rather than in SQL: SQLite can only express a fixed offset, which is wrong across a DST boundary and so wrong for part of any one-year range. The timeline's day, week and month separators bucket through the same function, so a heatmap cell and the separator it scrolls to always mean the same day.
+
+### 13.7 Health, provenance, and the honest limit of a self-reported report (VS-102)
+
+§9.4's required `knowledge` field only checks that the question was asked, never that the answer was
+good — an agent can truthfully or lazily report "nothing durable" on every ticket forever, and
+nothing here is meant to catch that. The actual check on outcomes is the **knowledge health view**,
+`KnowledgeService.health(projectId?)`: derived on every read, with no new table, from data the
+daemon already keeps —
+
+- every hub file's current size against its configured budget (`lint()`'s numbers);
+- every linked document with no backlink (`listDocs()`'s `backlinks`, filtered to zero);
+- every linked document not written to in 90 days (`DOCUMENT_STALE_MS`, a health signal distinct
+  from §13.4's 14-day hub curation staleness — a document going quiet for three months is normal,
+  a hub file is not);
+- every `[[link]]` recorded in `knowledge_links` that does not resolve (`to_path IS NULL`).
+
+It answers `GET /knowledge/health` (workspace-wide, or scoped `?project=`) and appears as a section
+on that project's overview page. A **supervisor pass**, on the same kind of cadence as §13.4's
+curation sweep, compares each project's measures against what they were at the last comparison and
+wakes the conductor when something got worse — a new orphan, a new unresolved link, or a hub file
+newly past its 80% share — folding in what would otherwise only surface when a write to that file
+was rejected. An unchanged or improving project stays silent; the first sweep of a project records
+its starting point without waking anyone.
+
+**Provenance.** `knowledge_revisions` carries `ticket_id` (nullable, resolved from the writing run,
+unset for a human or system write) alongside the `author_kind`/`author_id` it already carried, so a
+future reader can open the ticket that established a claim. This applies from the migration forward;
+no existing revision is backfilled.
 
 ---
 

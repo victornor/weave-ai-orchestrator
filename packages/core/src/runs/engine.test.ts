@@ -55,7 +55,7 @@ describe('run engine', () => {
   }
 
   it('runs a turn end to end: prompt file, events, usage, session, wake completion', async () => {
-    runtime.queue.push({ structured: { state: 'done', summary: 'created the ticket', tickets: [] } });
+    runtime.queue.push({ structured: { state: 'done', summary: 'created the ticket', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
     const wake = h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'add a README badge' });
 
     const run = await runOnce();
@@ -94,7 +94,7 @@ describe('run engine', () => {
     // Anything deriving "which phase is this run in" from `run.phase.timing` walks that list, so a
     // phase added to or dropped from the engine has to move the list with it. `RUN_PHASES` is wider:
     // it declares `spawn` and `finalize`, which nothing records.
-    runtime.queue.push({ structured: { state: 'done', summary: 'done', tickets: [] } });
+    runtime.queue.push({ structured: { state: 'done', summary: 'done', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
     h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'anything' });
     const run = await runOnce();
 
@@ -157,8 +157,18 @@ describe('run engine', () => {
     expect(run.liveness).toBe('empty');
   });
 
+  it('treats a report with an incomplete knowledge decision as no report at all (VS-102)', async () => {
+    // Every other field is valid; `knowledge.recorded: true` with no `where` fails the schema, so
+    // the whole report fails to parse — the same "incomplete report" outcome a missing `state` gets.
+    runtime.queue.push({ structured: { state: 'done', summary: 'finished the ticket', tickets: [], knowledge: { recorded: true } } });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    const run = await runOnce();
+    expect(run.status).toBe('succeeded');
+    expect(run.liveness).toBe('empty');
+  });
+
   it('marks needs_decision liveness from the structured report', async () => {
-    runtime.queue.push({ structured: { state: 'needs_decision', summary: 'asked the human', tickets: [] } });
+    runtime.queue.push({ structured: { state: 'needs_decision', summary: 'asked the human', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
     h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'hmm' });
     expect((await runOnce()).liveness).toBe('needs_decision');
   });
@@ -443,12 +453,12 @@ describe('run engine', () => {
   // runs.retry_of_run_id. Without it `countRetries` reads zero forever and the ladder never ends.
   describe('the retry link', () => {
     it('records the run a retry wake names, and nothing for an ordinary wake', async () => {
-      runtime.queue.push({ structured: { state: 'working', summary: 'first', tickets: [] } });
+      runtime.queue.push({ structured: { state: 'working', summary: 'first', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
       h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
       const first = await runOnce();
       expect(first.retryOfRunId).toBeNull();
 
-      runtime.queue.push({ structured: { state: 'working', summary: 'second', tickets: [] } });
+      runtime.queue.push({ structured: { state: 'working', summary: 'second', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
       h.services.wake!.enqueue(h.conductorId, { source: 'retry', reason: 'retry after overloaded', payload: { retryOfRunId: first.id } });
       expect((await runOnce()).retryOfRunId).toBe(first.id);
     });
@@ -456,11 +466,11 @@ describe('run engine', () => {
     // A retry enqueued while an ordinary wake is already queued is coalesced into it and its payload
     // ends up in that wake's `bundle`; the link has to survive that.
     it('records the link when the retry wake is coalesced into an ordinary one', async () => {
-      runtime.queue.push({ structured: { state: 'working', summary: 'first', tickets: [] } });
+      runtime.queue.push({ structured: { state: 'working', summary: 'first', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
       h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
       const first = await runOnce();
 
-      runtime.queue.push({ structured: { state: 'working', summary: 'second', tickets: [] } });
+      runtime.queue.push({ structured: { state: 'working', summary: 'second', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
       h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'and also this' });
       const coalesced = h.services.wake!.enqueue(h.conductorId, { source: 'retry', reason: 'retry after overloaded', payload: { retryOfRunId: first.id } });
       expect(coalesced.status).toBe('coalesced');
@@ -608,7 +618,7 @@ describe('run engine', () => {
           cwd: h.db.get<{ homePath: string }>('SELECT home_path FROM agents WHERE id = ?', [workerId])!.homePath,
           createdAt: nowIso(),
         });
-        runtime.queue.push({ structured: { state: 'working', summary: 'back', tickets: [] } } as never);
+        runtime.queue.push({ structured: { state: 'working', summary: 'back', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } } as never);
         await executeRun(h.ctx, h.deps, runId);
         await tick();
 
@@ -771,7 +781,7 @@ describe('run engine', () => {
       expect(card.kind).toBe('retry_approval');
 
       h.db.update('agents', workerId, { status: 'active' });
-      runtime.queue.push({ structured: { state: 'working', summary: 'back on it', tickets: [] } });
+      runtime.queue.push({ structured: { state: 'working', summary: 'back on it', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
       h.services.wake!.enqueue(workerId, { source: 'retry', reason: 'retry after boom' });
       await runOnce();
       await tick();

@@ -18,6 +18,10 @@ const DAY_MS = 86_400_000;
 const CURATION_EVERY_MS = 10 * 60_000;
 const CURATION_STALE_MS = 14 * DAY_MS;
 const CURATION_REQUEST_COOLDOWN_MS = DAY_MS;
+/** VS-102: how often the knowledge health view is compared against its last sweep, per workspace/project. */
+const KNOWLEDGE_HEALTH_EVERY_MS = 30 * 60_000;
+/** A scope's total open issues reaching this many is itself worth telling the conductor about. */
+const KNOWLEDGE_HEALTH_ISSUE_THRESHOLD = 5;
 /** PLAN §7.5 reconciliation is hourly; PLAN §16.1 log retention is a daily sweep. */
 const RECONCILE_EVERY_MS = 60 * 60_000;
 /**
@@ -384,6 +388,72 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     }
   }
 
+  // ---------- knowledge health (VS-102) ----------
+
+  /**
+   * A project's (or the workspace's) knowledge health, as a sorted set of issue keys — comparable
+   * across sweeps without caring which specific measure changed.
+   */
+  function healthSignature(h: { orphans: Array<{ path: string }>; stale: Array<{ path: string }>; unresolvedLinks: Array<{ fromPath: string; toSlug: string }>; hubs: Array<{ path: string; nearBudget: boolean }> }): string[] {
+    return [
+      ...h.orphans.map((d) => `orphan:${d.path}`),
+      ...h.stale.map((d) => `stale:${d.path}`),
+      ...h.unresolvedLinks.map((l) => `link:${l.fromPath}->${l.toSlug}`),
+      ...h.hubs.filter((hub) => hub.nearBudget).map((hub) => `budget:${hub.path}`),
+    ].sort();
+  }
+
+  /**
+   * Compares each project's (and the workspace's) knowledge health against what it was at the last
+   * sweep, and tells the conductor when it got worse — a new orphan, a new unresolved link, or a hub
+   * newly past its budget share, or the scope's total issues newly reaching a threshold — before any
+   * of that would otherwise surface only when a write was rejected for being over budget. An
+   * unchanged or improving scope stays silent, and a scope's first sweep only records its starting
+   * point: existing issues at that point are not "new."
+   */
+  async function knowledgeHealthPass(): Promise<void> {
+    const scopes: Array<{ key: string; projectId: string | null }> = [{ key: 'workspace', projectId: null }];
+    for (const p of ctx.db.all<{ id: string }>('SELECT id FROM projects WHERE workspace_id = ?', [ctx.workspaceId])) scopes.push({ key: p.id, projectId: p.id });
+
+    for (const scope of scopes) {
+      let health: Awaited<ReturnType<CoreServices['knowledge']['health']>>;
+      try { health = deps().knowledge.health(scope.projectId); }
+      catch (e) { log.warn({ err: String(e), scope: scope.key }, 'knowledge health sweep failed'); continue; }
+
+      const signature = healthSignature(health);
+      const metaKey = `supervisor:knowledge_health:${scope.key}`;
+      const previousRaw = meta(metaKey);
+      setMeta(metaKey, JSON.stringify(signature));
+      if (previousRaw === null) continue; // first sweep of this scope: record, do not compare
+
+      const previous = new Set(JSON.parse(previousRaw) as string[]);
+      const current = new Set(signature);
+      const isNew = signature.filter((k) => !previous.has(k));
+      const crossedThreshold = previous.size < KNOWLEDGE_HEALTH_ISSUE_THRESHOLD && current.size >= KNOWLEDGE_HEALTH_ISSUE_THRESHOLD;
+      if (!isNew.length && !crossedThreshold) continue;
+
+      const cooldownKey = `supervisor:knowledge_health_notified:${scope.key}`;
+      const notifiedAt = Date.parse(meta(cooldownKey) ?? '');
+      if (Number.isFinite(notifiedAt) && Date.now() - notifiedAt < CURATION_REQUEST_COOLDOWN_MS) continue;
+      setMeta(cooldownKey, nowIso());
+
+      let conductor: Agent;
+      try { conductor = deps().workers.conductor(); } catch { continue; }
+      const cap = <T,>(arr: T[]): T[] => arr.slice(0, 10);
+      deps().wake.enqueue(conductor.id, {
+        source: 'system',
+        reason: `knowledge health worsened for ${scope.key === 'workspace' ? 'the workspace' : scope.key}: ${isNew.length ? `${isNew.length} new issue(s)` : `${current.size} open issues`}`,
+        payload: {
+          kind: 'knowledge_health', projectId: scope.projectId,
+          orphans: cap(health.orphans.map((d) => d.path)), unresolvedLinks: cap(health.unresolvedLinks.map((l) => `${l.fromPath} -> [[${l.toSlug}]]`)),
+          staleDocs: cap(health.stale.map((d) => d.path)), nearBudgetHubs: cap(health.hubs.filter((hub) => hub.nearBudget).map((hub) => hub.path)),
+        },
+        requestedBy: SYSTEM,
+      });
+      log.info({ scope: scope.key, newIssues: isNew.length, totalIssues: current.size }, 'knowledge health worsened; conductor notified');
+    }
+  }
+
   // ---------- reconciliation (PLAN §7.5) ----------
 
   interface ProjectRow { id: string; slug: string; clonePath: string }
@@ -532,6 +602,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }
         try { conductorDigest(); } catch (e) { log.error({ err: String(e) }, 'digest failed'); }
         if (due('supervisor:curation_at', CURATION_EVERY_MS)) await curationPass().catch((e) => log.error({ err: String(e) }, 'curation pass failed'));
+        if (due('supervisor:knowledge_health_at', KNOWLEDGE_HEALTH_EVERY_MS)) await knowledgeHealthPass().catch((e) => log.error({ err: String(e) }, 'knowledge health pass failed'));
         if (due('supervisor:accounts_at', ACCOUNTS_EVERY_MS)) { try { await deps().accounts.refresh(); } catch (e) { log.error({ err: String(e) }, 'runtime account refresh failed'); } }
         if (due('supervisor:login_recheck_at', LOGIN_RECHECK_EVERY_MS)) await loginRecheck().catch((e) => log.error({ err: String(e) }, 'runtime login recheck failed'));
         if (due('supervisor:reconcile_at', RECONCILE_EVERY_MS)) await reconcilePass().catch((e) => log.error({ err: String(e) }, 'reconcile pass failed'));

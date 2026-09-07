@@ -237,7 +237,13 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
         return { id, secrets: names };
       },
     }),
-    knowledge: impl('knowledge', { lint: () => [] }),
+    knowledge: impl('knowledge', {
+      lint: () => [],
+      health: (projectId?: string | null) => ({
+        hubs: [{ path: projectId ? `projects/${projectId}/PROJECT.md` : 'workspace/WORKSPACE.md', scope: projectId ? 'project' : 'workspace', projectId: projectId ?? null, projectSlug: null, tokenEstimate: 0, budgetTokens: 10000, pct: 0, nearBudget: false, curationPending: false, lastCuratedAt: null }],
+        orphans: [], stale: [], unresolvedLinks: [],
+      }),
+    }),
     specs: impl('specs', {}),
     openspec: impl('openspec', { statusFor: async () => null }),
     usage: impl('usage', {}),

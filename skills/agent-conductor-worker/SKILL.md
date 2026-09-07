@@ -90,10 +90,10 @@ At most one `ac_knowledge_note("project", section, text)` per ticket, usually on
 Your last message is one fenced ```json block:
 
 ```json
-{"state":"working","summary":"…","tickets":[{"id":"ACME-42","status":"in_progress","note":"…"}],"nextAction":{"owner":"self","what":"…"},"knowledgeUpdated":false,"uncommittedWork":false}
+{"state":"working","summary":"…","tickets":[{"id":"ACME-42","status":"in_progress","note":"…"}],"nextAction":{"owner":"self","what":"…"},"knowledge":{"recorded":false,"reason":"…"},"uncommittedWork":false}
 ```
 
-`state`: `working | needs_decision | blocked | paused | done | failed | idle`. `nextAction.owner`: `self | conductor | human | none`. One example per state: `references/report-examples.md`.
+`state`: `working | needs_decision | blocked | paused | done | failed | idle`. `nextAction.owner`: `self | conductor | human | none`. `knowledge` is required: `{recorded:true, where}` when the ticket produced durable knowledge, `{recorded:false, reason}` when it did not — "nothing durable" is always a complete answer, and a report that omits the field or gives an incomplete shape is treated as no report at all. One example per state: `references/report-examples.md`.
 
 ## Common mistakes
 

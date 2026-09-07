@@ -679,6 +679,12 @@ export function useKnowledgeGraph(project?: string): UseQueryResult<T.KnowledgeG
   return useQuery({ queryKey: [...qk.knowledge(ws), 'graph', project ?? ''], queryFn: () => api.ws<T.KnowledgeGraph>(ws, `/knowledge/graph${qs({ project })}`) });
 }
 
+/** The knowledge network's health (VS-102): nested under `qk.knowledge`, so a knowledge write already invalidates it. */
+export function useKnowledgeHealth(project?: string): UseQueryResult<T.KnowledgeHealth> {
+  const ws = useWs();
+  return useQuery({ queryKey: [...qk.knowledge(ws), 'health', project ?? ''], queryFn: () => api.ws<T.KnowledgeHealth>(ws, `/knowledge/health${qs({ project })}`) });
+}
+
 export function useKnowledgeDocMutation(): UseMutationResult<unknown, Error, { scope: string; slug: string; project?: string; op: 'put' | 'delete'; body?: string }> {
   const ws = useWs();
   const qc = useQueryClient();

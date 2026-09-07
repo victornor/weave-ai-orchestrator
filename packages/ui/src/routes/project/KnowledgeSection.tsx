@@ -4,7 +4,7 @@
  */
 import { useMemo } from 'react';
 import { A } from '../../app/link';
-import { useKnowledgeDoc, useKnowledgeDocs } from '../../api/hooks';
+import { useKnowledgeDoc, useKnowledgeDocs, useKnowledgeHealth } from '../../api/hooks';
 import { BudgetMeter } from '../../components/BudgetMeter';
 import { SkeletonRows } from '../../components/Skeleton';
 import { ago } from '../../lib/format';
@@ -14,6 +14,7 @@ import type { ProjectSectionProps } from './sections';
 export function KnowledgeSection({ project, ws }: ProjectSectionProps): React.ReactElement {
   const hub = useKnowledgeDoc('project', project.id);
   const docs = useKnowledgeDocs(project.id);
+  const health = useKnowledgeHealth(project.id);
   const sections = useMemo(() => knowledgeSections(hub.data?.body), [hub.data]);
   const linked = (docs.data ?? []).filter((d) => d.scope === 'project');
 
@@ -67,6 +68,8 @@ export function KnowledgeSection({ project, ws }: ProjectSectionProps): React.Re
         )}
       </div>
 
+      <KnowledgeHealthBlock ws={ws} projectId={project.id} health={health.data} loading={health.isLoading} />
+
       <A
         to="/w/$ws/knowledge"
         params={{ ws }}
@@ -76,5 +79,52 @@ export function KnowledgeSection({ project, ws }: ProjectSectionProps): React.Re
         Open this project's knowledge
       </A>
     </div>
+  );
+}
+
+/** The network's health for this project (VS-102): reachability and freshness, never entry count. */
+function KnowledgeHealthBlock({
+  ws,
+  projectId,
+  health,
+  loading,
+}: {
+  ws: string;
+  projectId: string;
+  health: ReturnType<typeof useKnowledgeHealth>['data'];
+  loading: boolean;
+}): React.ReactElement {
+  if (loading) return <SkeletonRows rows={1} />;
+  const orphans = health?.orphans.length ?? 0;
+  const stale = health?.stale.length ?? 0;
+  const unresolved = health?.unresolvedLinks.length ?? 0;
+  const clean = orphans === 0 && stale === 0 && unresolved === 0;
+
+  return (
+    <div>
+      <div className="ac-label mb-1.5">Knowledge health</div>
+      {clean ? (
+        <p className="text-meta text-text-3">No orphan documents, no stale documents, no unresolved links.</p>
+      ) : (
+        <A
+          to="/w/$ws/knowledge"
+          params={{ ws }}
+          search={{ project: projectId, tab: 'knowledge' }}
+          className="flex flex-wrap gap-1.5"
+        >
+          {orphans > 0 ? <HealthBadge count={orphans} label={orphans === 1 ? 'document with no backlink' : 'documents with no backlink'} /> : null}
+          {stale > 0 ? <HealthBadge count={stale} label={stale === 1 ? 'document not updated in 90 days' : 'documents not updated in 90 days'} /> : null}
+          {unresolved > 0 ? <HealthBadge count={unresolved} label={unresolved === 1 ? 'unresolved link' : 'unresolved links'} /> : null}
+        </A>
+      )}
+    </div>
+  );
+}
+
+function HealthBadge({ count, label }: { count: number; label: string }): React.ReactElement {
+  return (
+    <span className="ac-mono rounded-pill border border-line-2 px-2 py-0.5 text-nano text-text-3">
+      {count} {label}
+    </span>
   );
 }

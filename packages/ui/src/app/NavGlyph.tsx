@@ -27,6 +27,15 @@ export function NavGlyph({ glyph, active, className }: { glyph: NavItem['glyph']
       </svg>
     );
   }
+  if (glyph === 'queue') {
+    return (
+      <svg viewBox="0 0 16 16" className={box} aria-hidden>
+        <rect x="0.8" y="2.2" width="14.4" height="2.6" rx="1.1" fill={colour} />
+        <rect x="2.6" y="6.7" width="10.8" height="2.6" rx="1.1" fill={colour} opacity="0.72" />
+        <rect x="4.4" y="11.2" width="7.2" height="2.6" rx="1.1" fill={colour} opacity="0.48" />
+      </svg>
+    );
+  }
   if (glyph === 'more') {
     return (
       <svg viewBox="0 0 16 16" className={box} aria-hidden>

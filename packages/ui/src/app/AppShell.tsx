@@ -4,10 +4,8 @@ import { A, useGo } from './link';
 import { TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
 import { RAIL, TABS, href } from './nav';
 import { WorkspaceNav } from './WorkspaceNav';
-import { StartWorkSheet } from './StartWorkSheet';
 import { MoreSheet } from './MoreSheet';
 import { BottomBar } from './BottomBar';
-import { PlusGlyph } from './PlusGlyph';
 import { CommandPalette } from '../components/CommandPalette';
 import type { Command } from '../components/CommandPalette';
 import { ConnectionBanner, UnreachableScreen } from '../components/ConnectionBanner';
@@ -31,7 +29,6 @@ export function AppShell(): React.ReactElement {
   const toast = useToast();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [startOpen, setStartOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [scopeIndex, setScopeIndex] = useState(-1);
   /** Which workspace groups the rail has open, seeded from what this device remembered. */
@@ -119,7 +116,8 @@ export function AppShell(): React.ReactElement {
         run: () => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: t.identifier } }),
       });
     }
-    cmds.push({ id: 'create', label: 'Create ticket', sub: scope ? `in ${scope}` : 'in the conductor thread', kbd: 'C', run: () => setStartOpen(true) });
+    // Everything is asked for in one place, so this goes where the board's empty state goes.
+    cmds.push({ id: 'create', label: 'Create ticket', sub: scope ? `in ${scope}` : 'in the conductor chat', kbd: 'C', run: () => go('/w/$ws/chat', { params: { ws } }) });
     const first = tickets.data?.[0];
     if (first) {
       for (const s of TICKET_STATUSES) {
@@ -146,7 +144,6 @@ export function AppShell(): React.ReactElement {
   useHotkeys(
     [
       { key: 'k', meta: true, inFields: true, run: () => setPaletteOpen((v) => !v) },
-      { key: 'Space', meta: true, shift: true, inFields: true, run: () => setStartOpen(true) },
       ...RAIL.flatMap((item) => (item.kbd ? [{ key: item.kbd, run: () => go(href(item, ws)) }] : [])),
     ],
     true,
@@ -173,17 +170,7 @@ export function AppShell(): React.ReactElement {
     <div className="ac-app flex overflow-hidden bg-bg-0">
       {/* desktop rail — the only place all projects appear at once */}
       <aside className="hidden w-rail flex-none flex-col border-r border-line-1 bg-bg-input p-2.5 md:flex">
-        <button
-          type="button"
-          onClick={() => setStartOpen(true)}
-          className="mb-3.5 flex h-8 flex-none items-center gap-2 rounded-r6 bg-accent px-2.5 text-accent-on transition-colors duration-(--dur-fast) ease-ac hover:bg-accent-hover"
-        >
-          <PlusGlyph className="size-2.5" />
-          <span className="flex-1 text-left text-meta font-medium">Start Work</span>
-          <span className="ac-mono text-nano opacity-65">⌘⇧␣</span>
-        </button>
-
-        {/* Self-contained block above the workspace list: it is about the daemon, not any one
+        {/* Self-contained block at the top of the rail: it is about the daemon, not any one
             workspace, and it routes to the Updates section by key so a settings reshuffle cannot
             strand it. It replaces the dot the Settings entry used to carry — one fact, one entry. */}
         {update ? (
@@ -244,7 +231,6 @@ export function AppShell(): React.ReactElement {
           update={update}
           otherWorkspacesNeed={otherWorkspacesNeed}
           isActive={isActive}
-          onStartWork={() => setStartOpen(true)}
           onMore={() => setMoreOpen(true)}
           moreOpen={moreOpen}
         />
@@ -257,7 +243,6 @@ export function AppShell(): React.ReactElement {
         scope={scope}
         onScopeCycle={() => setScopeIndex((i) => (i + 1 >= (projects.data?.length ?? 0) ? -1 : i + 1))}
       />
-      <StartWorkSheet open={startOpen} onClose={() => setStartOpen(false)} />
       <MoreSheet
         open={moreOpen}
         onClose={() => setMoreOpen(false)}

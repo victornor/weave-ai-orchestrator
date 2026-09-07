@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Remove the Start Work button and sheet from the desktop rail and the phone
+  bar so every request goes through the conductor chat
+skip_specs: true

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: A pinned decision card in the conductor chat can be hidden without answering
+  it, leaving the decision open and waiting in Needs you

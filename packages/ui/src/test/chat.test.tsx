@@ -4,6 +4,7 @@ import type { Agent, Decision, Project, RunEvent, ThreadMessage, Ticket, Workspa
 import { agent, decision, project, ticket } from './factories';
 import { enqueue } from '../lib/queue';
 import { clearChatScroll, readChatScroll, writeChatScroll } from '../lib/chatScroll';
+import { clearHiddenCache } from '../lib/hiddenDecisions';
 
 const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>() }));
 const state = vi.hoisted(() => ({
@@ -135,6 +136,10 @@ beforeEach(() => {
   state.answer = vi.fn();
   state.toasts = [];
   state.ws = 'ws1';
+  // Hidden decisions are a device preference in localStorage behind a module-level cache; one
+  // test's hidden card must not open the next test with an empty pinned area.
+  localStorage.clear();
+  clearHiddenCache();
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
@@ -800,6 +805,98 @@ describe('ChatRoute decision cards', () => {
     state.decisions = [asked(), asked({ id: 'd2', status: 'answered', answerKey: 'file' })];
     render(<ChatRoute />);
     expect(screen.getByText(/1 need you/)).toBeInTheDocument();
+  });
+});
+
+describe('ChatRoute hiding a pinned decision', () => {
+  const asked = (over: Partial<Decision> = {}): Decision =>
+    decision({
+      id: 'd1', kind: 'question', ticketId: 'tk_1', askedInRunId: 'run_1', title: 'File this as a ticket?',
+      context: 'It is a one-line fix.', recommendation: null, target: null,
+      options: [
+        { key: 'file', label: 'File it', description: 'A ticket, routed to the engineer.' },
+        { key: 'skip', label: 'Leave it', description: 'Nothing is filed.' },
+      ],
+      ...over,
+    });
+
+  /** The card for a decision, whichever header the chat decided it deserves. */
+  const cardFor = (title: string): HTMLElement | null => screen.queryByLabelText(new RegExp(`: ${title.replace('?', '\\?')}$`));
+  const hideIt = (): void => { fireEvent.click(screen.getByRole('button', { name: /Hide from chat/ })); };
+
+  it('takes the card off the pinned area without answering the decision', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+
+    hideIt();
+    expect(cardFor('File this as a ticket?')).not.toBeInTheDocument();
+    expect(state.answer).not.toHaveBeenCalled();
+    // Still open, so the header still counts it and Needs you still has it.
+    expect(screen.getByText(/1 need you/)).toBeInTheDocument();
+  });
+
+  it('says how many are hidden and puts every one of them back with one press', () => {
+    state.decisions = [
+      asked({ id: 'd_a', title: 'First question?', createdAt: '2026-09-01T09:00:00.000Z' }),
+      asked({ id: 'd_b', title: 'Second question?', createdAt: '2026-09-01T09:05:00.000Z' }),
+    ];
+    render(<ChatRoute />);
+
+    for (const title of ['First question?', 'Second question?']) {
+      fireEvent.click(within(cardFor(title)!).getByRole('button', { name: /Hide from chat/ }));
+    }
+    const restore = screen.getByRole('button', { name: /2 hidden from chat/ });
+    expect(cardFor('First question?')).not.toBeInTheDocument();
+
+    fireEvent.click(restore);
+    expect(cardFor('First question?')).toBeInTheDocument();
+    expect(cardFor('Second question?')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /hidden from chat/ })).toBeNull();
+  });
+
+  it('is still hidden after a reload', () => {
+    state.decisions = [asked()];
+    const { unmount } = render(<ChatRoute />);
+    hideIt();
+    unmount();
+
+    // A reload keeps localStorage and loses the module cache, which is what a fresh tab has.
+    clearHiddenCache();
+    render(<ChatRoute />);
+    expect(cardFor('File this as a ticket?')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /1 hidden from chat/ })).toBeInTheDocument();
+  });
+
+  it('pins it again when a comment lands on its ticket', () => {
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+    hideIt();
+
+    // A comment on some other ticket leaves it hidden.
+    emit({ type: 'ticket.comment', entityType: 'ticket', entityId: 'tk_other' });
+    expect(cardFor('File this as a ticket?')).not.toBeInTheDocument();
+
+    emit({ type: 'ticket.comment', entityType: 'ticket', entityId: 'tk_1' });
+    expect(cardFor('File this as a ticket?')).toBeInTheDocument();
+  });
+
+  it('pins it again when the decision itself is edited', () => {
+    state.decisions = [asked()];
+    const { rerender } = render(<ChatRoute />);
+    hideIt();
+
+    state.decisions = [asked({ context: 'Actually it touches three files.' })];
+    rerender(<ChatRoute />);
+    expect(cardFor('File this as a ticket?')).toBeInTheDocument();
+  });
+
+  it('offers no hide control on the inert record of an answered decision', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    state.decisions = [asked({ status: 'answered', answerKey: 'file', answeredAt: '2026-09-01T09:30:00.000Z' })];
+    render(<ChatRoute />);
+    expect(cardFor('File this as a ticket?')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Hide from chat/ })).toBeNull();
   });
 });
 

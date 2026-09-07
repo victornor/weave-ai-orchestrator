@@ -29,6 +29,7 @@ import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import { chatEntries } from '../lib/dispatch';
 import { draftKey, useDraft } from '../lib/drafts';
+import { isHiddenFromChat, useHiddenDecisions } from '../lib/hiddenDecisions';
 import { isAtBottom, useStickToBottom } from '../lib/stickToBottom';
 import { readChatScroll, writeChatScroll } from '../lib/chatScroll';
 import { enqueue, useQueueCount } from '../lib/queue';
@@ -182,6 +183,28 @@ export function ChatRoute(): React.ReactElement {
         .sort((a, b) => (a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt))),
     [decisions.data],
   );
+  // Hidden on this device (VS-72): a decision the human means to take later, taken off the pinned
+  // area without being answered. It is still open and still in Needs you — only the card is gone —
+  // so the pinned area keeps a count of them and can put them all back with one press.
+  const { hidden, hide, showMany } = useHiddenDecisions(ws);
+  const shown = useMemo(() => pinned.filter((d) => !isHiddenFromChat(d, hidden)), [pinned, hidden]);
+  const hiddenOpen = useMemo(() => pinned.filter((d) => isHiddenFromChat(d, hidden)), [pinned, hidden]);
+  // A follow-up comment on the ticket a hidden decision hangs off changes what is being asked, so
+  // the card comes back rather than staying hidden against a conversation that has moved on. The
+  // other re-pin triggers need no listener: an edited decision stops matching the fingerprint it was
+  // hidden against, a superseded one is replaced by a different id, and one about to expire is shown
+  // whatever was stored (see lib/hiddenDecisions.ts).
+  useWorkspaceEvents(
+    useCallback(
+      (e) => {
+        if (e.type !== 'ticket.comment') return;
+        const back = hiddenOpen.filter((d) => d.ticketId === e.entityId).map((d) => d.id);
+        if (back.length) showMany(back);
+      },
+      [hiddenOpen, showMany],
+    ),
+  );
+
   // Who is asking, for a card that no longer sits under the message that would have said so: the
   // agent id settles it mid-turn, before the turn's message exists to anchor to.
   const anchored = useMemo(() => new Set(entries.flatMap((e) => e.decisions.map((d) => d.id))), [entries]);
@@ -195,7 +218,7 @@ export function ChatRoute(): React.ReactElement {
   // instead of moving the viewport. At the other end, reaching the top pulls in the page before the
   // loaded history and holds the viewport on what they were reading while it lands. The pinned area
   // counts as content too: it takes height off the list, so the newest message must be re-reached.
-  const stick = useStickToBottom([messages.data, liveEvents.length, pinned.length], {
+  const stick = useStickToBottom([messages.data, liveEvents.length, shown.length, hiddenOpen.length], {
     // Loaded history, not "not loading": the query is disabled until the thread id is known, and a
     // disabled query is idle rather than fetching, so `isLoading` is already false on the first
     // render — before there is a thread, let alone a message to open on.
@@ -395,10 +418,21 @@ export function ChatRoute(): React.ReactElement {
       {/* Outside the scrolling body, so nothing the human has to answer can be scrolled away, and the
           follow-the-bottom button keeps the list it belongs to. Capped and scrolled internally: a pile
           of open decisions must never push the composer off screen. */}
-      {pinned.length ? (
+      {shown.length || hiddenOpen.length ? (
         <section aria-label="Open decisions" className="ac-scroll max-h-[45svh] flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-7">
           <div className="mx-auto flex max-w-3xl flex-col gap-3">
-            {pinned.map((d) => (
+            {/* What was hidden is still counted here, so the pinned area never quietly under-reports
+                what is waiting: one press brings every one of them back. */}
+            {hiddenOpen.length ? (
+              <button
+                type="button"
+                onClick={() => showMany(hiddenOpen.map((d) => d.id))}
+                className="self-start rounded-r6 border border-dashed border-line-2 px-3 py-1.5 text-micro text-text-3 hover:bg-bg-2 hover:text-text-1"
+              >
+                {hiddenOpen.length} hidden from chat — show {hiddenOpen.length === 1 ? 'it' : 'them'} again
+              </button>
+            ) : null}
+            {shown.map((d) => (
               <DecisionCard
                 key={d.id}
                 decision={d}
@@ -406,6 +440,7 @@ export function ChatRoute(): React.ReactElement {
                 ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
                 busy={answer.isPending}
                 plan={<PlanPreview decision={d} />}
+                onHide={() => hide(d)}
                 onAnswer={(a) => answerDecision(d.id, a)}
               />
             ))}

@@ -22,6 +22,11 @@ export interface DecisionCardProps {
    * offers no approve action. Only ever true for a plan or merge approval (see lib/yolo.ts).
    */
   autoApproving?: boolean;
+  /**
+   * Take this card off the surface it is pinned to without answering it (VS-72). Only the
+   * conductor chat passes one; a card that is a record rather than a prompt never offers it.
+   */
+  onHide?: () => void;
   onAnswer: (answer: { key?: string; text?: string; remember?: boolean }) => void;
   className?: string;
 }
@@ -82,7 +87,7 @@ function answerLine(decision: Decision): string | null {
  * primary action sits bottom-left inside a 44 px thumb band. A decision that has
  * been answered renders the same card as an inert record of what was decided.
  */
-export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy, asker, busy, queued, plan, autoApproving, onAnswer, className }: DecisionCardProps): React.ReactElement {
+export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy, asker, busy, queued, plan, autoApproving, onHide, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [freeText, setFreeText] = useState(false);
@@ -324,6 +329,18 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, askedBy,
             </Button>
           ) : null}
         </div>
+
+        {/* Hide from the surface, not from the decision. A full-width 44 px band of its own rather
+            than an icon in the corner: on a phone this sits under the thumb that just decided not
+            to answer yet, and nothing about it is reachable by a mis-tap on the approve action. */}
+        {onHide && !inert ? (
+          <div className="mt-2 border-t border-line-1 pt-2">
+            <Button variant="ghost" size="thumb" full className="justify-start px-3 text-meta" onClick={onHide}>
+              Hide from chat
+              <span className="text-micro text-text-4">— stays in Needs you</span>
+            </Button>
+          </div>
+        ) : null}
       </div>
     </article>
   );

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Decision } from '@agent-conductor/shared';
 import { decision } from './factories';
+import { clearHiddenCache, decisionFingerprint, readHidden, writeHidden } from '../lib/hiddenDecisions';
 
 const state = vi.hoisted(() => ({
   planDoc: null as { key: string; revision: number; body: string; createdAt: string } | null,
@@ -62,6 +63,8 @@ beforeEach(() => {
   state.tickets = [];
   state.projects = [];
   state.config = {};
+  localStorage.clear();
+  clearHiddenCache();
 });
 
 describe('NeedsYouRoute', () => {
@@ -117,6 +120,52 @@ describe('NeedsYouRoute', () => {
     render(<NeedsYouRoute />);
     expect(screen.queryByText('File this as a ticket?')).not.toBeInTheDocument();
     expect(screen.getByText('Nothing needs you right now.')).toBeInTheDocument();
+  });
+});
+
+describe('NeedsYou — decisions hidden from the chat', () => {
+  /** What the chat writes when the human hides a card: the decision as it read at the time. */
+  const hideInChat = (d: Decision): void => writeHidden('ws1', { [d.id]: { fingerprint: decisionFingerprint(d), at: '2026-09-01T09:00:00.000Z' } });
+
+  it('still lists a hidden decision, and marks it as hidden from the chat', () => {
+    const d = asked();
+    hideInChat(d);
+    state.decisions = [d];
+    render(<NeedsYouRoute />);
+
+    expect(screen.getByText('File this as a ticket?')).toBeInTheDocument();
+    expect(screen.getByText('1 waiting')).toBeInTheDocument();
+    expect(screen.getByText('Hidden from chat')).toBeInTheDocument();
+  });
+
+  it('shows it in the chat again, and leaves the decision itself alone', () => {
+    const d = asked();
+    hideInChat(d);
+    state.decisions = [d];
+    render(<NeedsYouRoute />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show in chat again' }));
+    expect(screen.queryByText('Hidden from chat')).toBeNull();
+    expect(readHidden('ws1')).toEqual({});
+    expect(state.answer).not.toHaveBeenCalled();
+  });
+
+  it('answers a hidden decision exactly as it answers a pinned one', () => {
+    const d = asked();
+    hideInChat(d);
+    state.decisions = [d];
+    render(<NeedsYouRoute />);
+
+    fireEvent.click(screen.getByRole('radio', { name: /Leave it/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    expect(state.answer).toHaveBeenCalledWith({ id: 'd1', key: 'skip' }, expect.anything());
+  });
+
+  it('marks nothing when the decision has been edited since it was hidden', () => {
+    hideInChat(asked());
+    state.decisions = [asked({ context: 'Actually it touches three files.' })];
+    render(<NeedsYouRoute />);
+    expect(screen.queryByText('Hidden from chat')).toBeNull();
   });
 });
 

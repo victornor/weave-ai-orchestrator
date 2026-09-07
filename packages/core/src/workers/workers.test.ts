@@ -15,6 +15,7 @@ import type { Actor, WorkersService } from '../api.js';
 
 const SYSTEM: Actor = { kind: 'system', id: null };
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
+const CONDUCTOR: Actor = { kind: 'agent', id: 'conductor', runId: 'run-1' };
 
 describe('workers', () => {
   let h: TestHarness;
@@ -259,14 +260,16 @@ describe('workers', () => {
     });
   });
 
-  it('messages a worker as a ticket comment plus a conductor_request wake', async () => {
+  it('messages a worker as a ticket comment plus a conductor_request wake when the caller asks for no live delivery', async () => {
     const ticket = seedTicket();
     const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
     wake.calls.length = 0;
+    // This pins the *service's own* default (queued) when a caller omits `live` entirely — not the
+    // conductor's `ac_worker_message` tool, which defaults to `live: true` at the tool layer (VS-103)
+    // and is covered separately in packages/server/test/mcp.test.ts.
     const outcome = await workers.message({ kind: 'agent', id: 'conductor' }, worker.id, 'use CSS variables');
     expect(h.services.tickets!.comment).toHaveBeenCalledWith(expect.anything(), ticket.id, 'use CSS variables', 'relay', 'agent');
     expect(wake.calls[0]!.input).toMatchObject({ source: 'conductor_request' });
-    // The conductor's own relay never asks for `live`, so it keeps today's one queued path.
     expect(outcome).toMatchObject({ delivery: 'queued' });
   });
 
@@ -381,6 +384,35 @@ describe('workers', () => {
 
       await workers.message(HUMAN, worker.id, 'go with option A', { live: true });
 
+      expect(h.db.get<{ status: string }>('SELECT status FROM decisions WHERE id = ?', [decisionId])!.status).toBe('open');
+      const roleAfter = h.db.get<{ permissionJson: string }>('SELECT permission_json FROM roles WHERE id = ?', [h.roleId]);
+      expect(roleAfter).toEqual(roleBefore);
+    });
+
+    it('a mid-turn message from the conductor leaves an open decision open and touches no permission or tool config (VS-103)', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      const sent: string[] = [];
+      runState(h.ctx).active.set(runId, {
+        runId, agentId: worker.id, startedAt: Date.now(), pid: 1,
+        cancel: async () => undefined,
+        send: async (text: string) => { sent.push(text); return 'delivered'; },
+      });
+      const decisionId = newId();
+      h.db.insert('decisions', {
+        id: decisionId, workspaceId: h.workspaceId, ticketId: ticket.id, kind: 'question', owner: 'human',
+        title: 'Which approach?', context: '', status: 'open', createdAt: nowIso(),
+      });
+      const roleBefore = h.db.get<{ permissionJson: string }>('SELECT permission_json FROM roles WHERE id = ?', [h.roleId]);
+
+      const outcome = await workers.message(CONDUCTOR, worker.id, 'scope changed, drop the CSV export', { live: true });
+
+      expect(outcome).toMatchObject({ delivery: 'mid_turn' });
+      expect(sent).toEqual(['scope changed, drop the CSV export']);
+      expect(wake.calls).toHaveLength(0);
+      expect(h.services.tickets!.comment).toHaveBeenCalledWith(expect.anything(), ticket.id, 'scope changed, drop the CSV export', 'relay', 'agent');
       expect(h.db.get<{ status: string }>('SELECT status FROM decisions WHERE id = ?', [decisionId])!.status).toBe('open');
       const roleAfter = h.db.get<{ permissionJson: string }>('SELECT permission_json FROM roles WHERE id = ?', [h.roleId]);
       expect(roleAfter).toEqual(roleBefore);

@@ -236,4 +236,36 @@ describe('agent REST mirror', () => {
     expect(h.roleSecrets.get('role_1')).toEqual(['CF_READONLY_TOKEN']);
     await client.close();
   });
+
+  // ---------- VS-103 ----------
+
+  it('ac_worker_message defaults to live delivery when the conductor omits `live`', async () => {
+    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const calledWith: unknown[][] = [];
+    h.impls.workers!['message'] = async (...args: unknown[]) => {
+      calledWith.push(args);
+      return { delivery: 'mid_turn', runId: 'run_1', wake: null };
+    };
+    const res = await client.callTool({ name: 'ac_worker_message', arguments: { workerId: 'ag_1', message: 'scope changed' } });
+    expect(res.isError).toBeFalsy();
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload).toEqual({ ok: true, data: { delivery: 'mid_turn', runId: 'run_1', wake: null } });
+    expect(calledWith[0]![3]).toEqual({ live: true });
+    await client.close();
+  });
+
+  it('ac_worker_message queues on request even when the caller could have asked for live delivery', async () => {
+    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const calledWith: unknown[][] = [];
+    h.impls.workers!['message'] = async (...args: unknown[]) => {
+      calledWith.push(args);
+      return { delivery: 'queued', runId: null, wake: { id: 'wk_9' } };
+    };
+    const res = await client.callTool({ name: 'ac_worker_message', arguments: { workerId: 'ag_1', message: 'later is fine', live: false } });
+    expect(res.isError).toBeFalsy();
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.data.delivery).toBe('queued');
+    expect(calledWith[0]![3]).toEqual({ live: false });
+    await client.close();
+  });
 });

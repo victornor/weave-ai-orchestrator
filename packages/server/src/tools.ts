@@ -455,9 +455,9 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx, i) => ({ worker: svc(ctx).workers.get(i.id), brief: svc(ctx).workers.brief(i.id) }),
   },
   {
-    name: 'ac_worker_message', scope: 'conductor', input: z.object({ workerId: z.string().min(1), message: z.string().min(1) }),
-    description: 'Steer a worker: posts a comment on its ticket and wakes it (conductor_request). It acknowledges by acting or by ac_report.',
-    handler: (ctx, i) => svc(ctx).workers.message(ctx.actor, i.workerId, i.message),
+    name: 'ac_worker_message', scope: 'conductor', input: z.object({ workerId: z.string().min(1), message: z.string().min(1), live: z.boolean().optional() }),
+    description: 'Steer a worker: posts a comment on its ticket, attributed as yours, then tries to deliver it to the worker\'s running turn (default: try). Returns { delivery: "mid_turn" | "queued", runId, wake } — mid_turn means it landed inside the current turn; queued means it will apply at the worker\'s next wake (conductor_request), never both. Never widens what the worker may do and never answers an open decision for it. Set live:false to queue it outright.',
+    handler: (ctx, i) => svc(ctx).workers.message(ctx.actor, i.workerId, i.message, { live: i.live ?? true }),
   },
   {
     name: 'ac_worker_relaunch', scope: 'conductor', input: z.object({ id: z.string().min(1), note: z.string().min(1) }),

@@ -1,4 +1,4 @@
-/** The Start Work mark: rail button, workspace menu and the phone bottom bar. */
+/** The add mark: New workspace, in the rail and in the phone's More sheet. */
 export function PlusGlyph({ className }: { className?: string }): React.ReactElement {
   return (
     <svg viewBox="0 0 16 16" className={className} aria-hidden>

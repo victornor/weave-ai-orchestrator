@@ -173,7 +173,7 @@ Two invariants hold in every scenario:
 
 ## 13. Starting work from your phone
 
-**You:** open the installed PWA, tap **Start Work** in the bottom bar, tap the microphone, say "In api, make the export endpoint stream results instead of buffering, and merge it when it's done." Tap send after glancing at the transcript.
+**You:** open the installed PWA, tap **Chat** in the bottom bar, tap the microphone, say "In api, make the export endpoint stream results instead of buffering, and merge it when it's done." Tap send after glancing at the transcript.
 
 **Conductor does:** creates the `change` ticket in `api` with **auto-merge on** because you said so, assigns the Backend Engineer role, replies with the ticket link.
 
@@ -187,7 +187,7 @@ Two invariants hold in every scenario:
 
 **From your laptop:** `conductor login https://conductor.example.com --name laptop` (password, then the TOTP code), `conductor context use laptop`. Every command now runs against the server: `conductor chat`, `conductor board`, `conductor attach <worker>`. Start `conductor presenter --surface hyprland --workspace 5` and the workers running on the server appear as terminal windows on your laptop's workspace 5, each streaming its transcript over the network; close the laptop and they keep working, because nothing runs on the laptop.
 
-**From your phone:** open `https://conductor.example.com`, log in once, install the PWA. Start Work, dictate, approve plan cards from notifications. Same state as the laptop and Telegram.
+**From your phone:** open `https://conductor.example.com`, log in once, install the PWA. Open the chat, dictate, approve plan cards from notifications. Same state as the laptop and Telegram.
 
 **Security posture:** plaintext is refused off-loopback; five failed logins lock the account for 15 minutes; devices are listed and revocable in Settings; the agents' MCP endpoint is not reachable from outside the server at all.
 

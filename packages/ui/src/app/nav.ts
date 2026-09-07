@@ -23,7 +23,7 @@ export const RAIL: NavItem[] = [
   { key: 'settings', label: 'Settings', to: '/w/$ws/settings', kbd: ',', glyph: 'more' },
 ];
 
-/** Phone: five tabs. Six targets do not fit at 390px, so Start Work floats. */
+/** Phone: five tabs. Six targets do not fit at 390px, and Chat is where work is asked for. */
 export const TABS: NavItem[] = [
   { key: 'chat', label: 'Chat', to: '/w/$ws/chat', kbd: '1', glyph: 'chat' },
   { key: 'board', label: 'Board', to: '/w/$ws/board', kbd: '3', glyph: 'board' },

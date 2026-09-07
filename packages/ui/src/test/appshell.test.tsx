@@ -34,7 +34,9 @@ vi.mock('../app/link', () => ({
       {children}
     </a>
   ),
-  useGo: () => (to: string) => { went.calls.push(to); },
+  useGo: () => (to: string, opts?: { params?: Record<string, string> }) => {
+    went.calls.push(Object.entries(opts?.params ?? {}).reduce((acc, [k, v]) => acc.replace(`$${k}`, v), to));
+  },
 }));
 vi.mock('../api/context', () => ({
   useWs: () => 'ws1',
@@ -43,7 +45,6 @@ vi.mock('../api/context', () => ({
 }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 // Children with their own data hooks; none of them is what this file is about.
-vi.mock('../app/StartWorkSheet', () => ({ StartWorkSheet: () => null }));
 vi.mock('../components/CommandPalette', () => ({
   CommandPalette: ({ commands }: { commands: Array<{ id: string; label: string; sub?: string }> }) => {
     palette.commands = commands;
@@ -236,6 +237,26 @@ describe('expansion memory', () => {
     expect(screen.queryByText('retired')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Beta sections')).toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem('conductor.ws.expanded') ?? '[]')).toContain('retired');
+  });
+});
+
+describe('asking for work goes through the chat', () => {
+  it('has no Start Work control left in the rail', () => {
+    render(<AppShell />);
+    expect(screen.queryByText(/start work/i)).toBeNull();
+  });
+
+  it('has no shortcut left that would open one', () => {
+    render(<AppShell />);
+    expect(hotkeys.current.find((k) => k.key === 'Space')).toBeUndefined();
+  });
+
+  it('sends the palette’s Create ticket to the conductor chat', () => {
+    render(<AppShell />);
+    const create = palette.commands.find((c) => c.id === 'create');
+    expect(create?.sub).toBe('in the conductor chat');
+    (create as unknown as { run: () => void }).run();
+    expect(went.calls).toContain('/w/ws1/chat');
   });
 });
 

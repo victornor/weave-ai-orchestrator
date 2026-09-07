@@ -75,13 +75,14 @@ export function Composer({
   const [explain, setExplain] = useState(false);
   const startedByKey = useRef(false);
 
+  // `base` is whatever was in the box when the mic opened, and it does not move while it is open:
+  // the hook hands over the whole transcript so far on every event, so each one replaces the last.
+  // Committing interim text into `base` here is what appended the growing phrase to itself (VS-70).
   const dictation = useDictation(
-    (chunk, final) => {
-      const piece = chunk.trim();
+    (transcript) => {
+      const piece = transcript.trim();
       if (!piece) return;
-      const next = `${base.current}${base.current && !base.current.endsWith(' ') ? ' ' : ''}${piece}`;
-      set(next);
-      if (final) base.current = next;
+      set(`${base.current}${base.current && !base.current.endsWith(' ') ? ' ' : ''}${piece}`);
     },
   );
 

@@ -24,6 +24,29 @@ function speechCtor(): SpeechRecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+/** Words, lowercased and stripped of punctuation, so two transcripts compare by content. */
+function words(s: string): string[] {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, ' ').split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Join one transcript segment onto what is already assembled.
+ *
+ * Android Chrome restates the whole utterance so far in every result it sends — "we", "we also",
+ * "we also need" — and marks the restatements final, so a consumer that appends each one ends up
+ * with "we we we also we also need" (VS-70). A segment that repeats everything accumulated so far
+ * therefore *replaces* it; anything else is genuinely new and is appended with a single space.
+ */
+export function mergeTranscript(acc: string, next: string): string {
+  const piece = next.trim();
+  if (!piece) return acc;
+  const before = words(acc);
+  if (!before.length) return piece;
+  const after = words(piece);
+  if (after.length >= before.length && before.every((w, i) => after[i] === w)) return piece;
+  return `${acc.trimEnd()} ${piece}`;
+}
+
 export type DictationMode = 'speech' | 'upload' | 'unavailable';
 
 export interface Dictation {
@@ -78,6 +101,12 @@ const UNAVAILABLE = 'Dictation is not available in this browser, and the daemon 
 /** The recognizer heard sound and still returned no words — not the same thing as silence. */
 const NO_TRANSCRIPT = 'The browser heard audio but its speech service returned no words. Try again, or configure a transcription provider on the daemon (Settings \u2192 Conductor) for dictation that never leaves your machines.';
 
+/**
+ * `onText` receives the **whole** transcript dictated since the mic opened, not the newest fragment:
+ * every call replaces what the previous one said. Assembling it here is what keeps the growing
+ * interim phrase from being appended to itself (VS-70); `final` says the recognizer considers every
+ * segment in it settled.
+ */
 export function useDictation(onText: (text: string, final: boolean) => void, opts: { transcribeUrl?: string; serverConfigured?: boolean } = {}): Dictation {
   const [listening, setListening] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -99,6 +128,10 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
   const wantListening = useRef(false);
   const gotResult = useRef(false);
   const heardAudio = useRef(false);
+  /** Transcript of recognition sessions this run has already finished — mobile ends one per phrase. */
+  const committed = useRef('');
+  /** Transcript of the session running now, rebuilt from its whole results list on every event. */
+  const sessionText = useRef('');
 
   const rec = useRef<SpeechRecognitionLike | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
@@ -173,6 +206,8 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     wantListening.current = true;
     gotResult.current = false;
     heardAudio.current = false;
+    committed.current = '';
+    sessionText.current = '';
     timer.current = setInterval(() => setElapsed((s) => s + 1), 1000);
 
     if (Ctor) {
@@ -181,17 +216,21 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       r.interimResults = true;
       r.lang = navigator.language || 'en-US';
       r.onresult = (e) => {
-        // Results from `resultIndex` on: an interim result is re-sent (replaced) until it turns final.
+        // The whole results list, every time. An interim result is replaced in place at its own
+        // index until it turns final, so rebuilding from index 0 is the only reading that cannot
+        // double-count it — emitting the tail from `resultIndex` forced the consumer to append,
+        // which is what duplicated every word on Android (VS-70).
         let text = '';
         let final = true;
-        for (let i = e.resultIndex; i < e.results.length; i++) {
+        for (let i = 0; i < e.results.length; i++) {
           const res = e.results[i];
           if (!res) continue;
-          text += res[0].transcript;
+          text = mergeTranscript(text, res[0].transcript);
           if (!res.isFinal) final = false;
         }
+        sessionText.current = text;
         gotResult.current = true;
-        cb.current(text, final);
+        cb.current(mergeTranscript(committed.current, text), final);
       };
       // The recognizer is the only thing that can tell us it heard anything — we never touch its
       // stream. Without this, silence and "heard you, transcribed nothing" look identical.
@@ -215,6 +254,10 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
             stopMeters();
             return;
           }
+          // The next session starts a fresh results list, so what this one heard has to move into
+          // the committed prefix — otherwise the restart either loses it or repeats it.
+          committed.current = mergeTranscript(committed.current, sessionText.current);
+          sessionText.current = '';
           try { r.start(); return; } catch { /* fall through */ }
         }
         if (rec.current === r) { setListening(false); stopMeters(); }

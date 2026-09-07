@@ -1,10 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Decision, Project, RunEvent, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
+import type { Agent, Decision, Project, RunEvent, RunTrace, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
 import { agent, decision, project, ticket } from './factories';
 import { enqueue } from '../lib/queue';
 import { clearChatScroll, readChatScroll, writeChatScroll } from '../lib/chatScroll';
 import { clearHiddenCache } from '../lib/hiddenDecisions';
+import { writeShowSilentTurns } from '../lib/chatPrefs';
 
 const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>() }));
 const state = vi.hoisted(() => ({
@@ -16,6 +17,10 @@ const state = vi.hoisted(() => ({
   isLoadingOlder: false,
   loadOlder: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   persisted: [] as RunEvent[],
+  traces: [] as RunTrace[],
+  traceQuery: null as Record<string, unknown> | null,
+  /** Every run whose events were asked for, so "loaded on demand" is testable rather than assumed. */
+  eventRequests: [] as string[],
   tickets: [] as Ticket[],
   workers: [] as Agent[],
   ticketQuery: null as Record<string, unknown> | null,
@@ -49,7 +54,8 @@ vi.mock('../api/context', async () => {
 
 vi.mock('../api/hooks', () => ({
   useConductor: () => ({ data: state.conductor }),
-  useRunEvents: (id: string) => ({ data: id ? state.persisted : [] }),
+  useRunEvents: (id: string) => { if (id) state.eventRequests.push(id); return { data: id ? state.persisted : [] }; },
+  useRunTraces: (p: Record<string, unknown>) => { state.traceQuery = p; return { data: state.traces }; },
   useThreads: () => ({ data: [{ id: 'th_1' }], isSuccess: true }),
   useCreateThread: () => ({ mutate: vi.fn(), isPending: false, data: null }),
   useThreadMessages: () => ({
@@ -112,6 +118,15 @@ const emit = (e: Partial<WorkspaceEvent> & Pick<WorkspaceEvent, 'type' | 'entity
   });
 };
 const stream = (): FakeEventSource => FakeEventSource.open[FakeEventSource.open.length - 1]!;
+const live = (): FakeEventSource[] => FakeEventSource.open.filter((s) => !s.closed);
+
+function runTrace(over: Partial<RunTrace> & Pick<RunTrace, 'runId'>): RunTrace {
+  return {
+    status: 'succeeded', agentId: 'ag_conductor', createdAt: '2026-09-01T09:00:00.000Z',
+    startedAt: '2026-09-01T09:00:00.000Z', finishedAt: '2026-09-01T09:00:12.000Z', durationMs: 12000,
+    toolCalls: 3, files: 1, errors: 0, texts: 2, events: 9, summary: null, ...over,
+  };
+}
 
 beforeEach(() => {
   bus.handlers.clear();
@@ -123,6 +138,9 @@ beforeEach(() => {
   state.isLoadingOlder = false;
   state.loadOlder = vi.fn();
   state.persisted = [];
+  state.traces = [];
+  state.traceQuery = null;
+  state.eventRequests = [];
   state.tickets = [];
   state.workers = [];
   state.ticketQuery = null;
@@ -162,9 +180,11 @@ describe('ChatRoute live turn', () => {
     act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
     expect(screen.getByText('Reading the briefing.')).toBeInTheDocument();
 
+    // The stream is closed as soon as the turn ends; what it produced is held until the row that
+    // replaces it is on screen (VS-74), so the bottom of the list is never empty in between.
     emit({ type: 'run.finished', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
-    expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
-    expect(screen.queryByText('Reading the briefing.')).not.toBeInTheDocument();
+    expect(live()).toHaveLength(0);
+    expect(screen.getByText('Reading the briefing.')).toBeInTheDocument();
   });
 
   it('ignores a run belonging to a worker', () => {
@@ -1327,5 +1347,191 @@ describe('ChatRoute reading position', () => {
     state.messagesLoaded = true;
     rerender(<ChatRoute />);
     expect(list(container).scrollTop).toBe(420);
+  });
+});
+
+/**
+ * VS-74 (`conductor-chat/turn-work-trace`): a finished turn keeps what it did, collapsed under the
+ * reply, and a turn that said nothing still leaves a row.
+ */
+describe('ChatRoute turn work trace', () => {
+  it('keeps a collapsed summary of what a finished turn did under its reply', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed VS-9.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1', toolCalls: 3, files: 2, durationMs: 12000 })];
+
+    render(<ChatRoute />);
+
+    const trace = screen.getByRole('button', { name: 'What I did' });
+    expect(trace).toHaveAttribute('aria-expanded', 'false');
+    expect(trace).toHaveTextContent('3 tool calls');
+    expect(trace).toHaveTextContent('2 files');
+    expect(trace).toHaveTextContent('12s');
+  });
+
+  it('asks for a turn\u2019s events only once its section is expanded', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed VS-9.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1' })];
+    state.persisted = [ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })];
+
+    render(<ChatRoute />);
+    expect(state.eventRequests).not.toContain('run_1');
+    expect(screen.queryByText('Reading the briefing.')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'What I did' }));
+
+    expect(state.eventRequests).toContain('run_1');
+    expect(screen.getByText('Reading the briefing.')).toBeInTheDocument();
+  });
+
+  it('remembers an expanded section for the session', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed VS-9.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1' })];
+
+    const first = render(<ChatRoute />);
+    fireEvent.click(screen.getByRole('button', { name: 'What I did' }));
+    expect(screen.getByRole('button', { name: 'What I did' })).toHaveAttribute('aria-expanded', 'true');
+    first.unmount();
+
+    render(<ChatRoute />);
+    expect(screen.getByRole('button', { name: 'What I did' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('shows nothing extra for a message that cannot be linked to a run', () => {
+    state.messages = [message({ id: 'm1', body: 'From elsewhere.', runId: null })];
+    state.traces = [];
+
+    render(<ChatRoute />);
+
+    expect(screen.queryByRole('button', { name: 'What I did' })).not.toBeInTheDocument();
+    expect(state.eventRequests).toEqual([]);
+  });
+
+  it('renders no section for a turn that recorded nothing', () => {
+    state.messages = [message({ id: 'm1', body: 'Nothing to do.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1', toolCalls: 0, files: 0, errors: 0, texts: 0, events: 2 })];
+
+    render(<ChatRoute />);
+
+    expect(screen.queryByRole('button', { name: 'What I did' })).not.toBeInTheDocument();
+  });
+
+  it('carries the section on the last message of a turn that sent several', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'One moment.', runId: 'run_1', createdAt: '2026-09-01T09:00:00.000Z' }),
+      message({ id: 'm2', body: 'Filed VS-9.', runId: 'run_1', createdAt: '2026-09-01T09:00:05.000Z' }),
+    ];
+    state.traces = [runTrace({ runId: 'run_1' })];
+
+    render(<ChatRoute />);
+
+    expect(screen.getAllByRole('button', { name: 'What I did' })).toHaveLength(1);
+  });
+
+  it('asks for the runs behind the messages and for the conductor’s turns since the oldest of them', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'a', runId: 'run_1', createdAt: '2026-09-01T09:00:00.000Z' }),
+      message({ id: 'm2', body: 'b', runId: 'run_2', createdAt: '2026-09-01T09:05:00.000Z' }),
+    ];
+
+    render(<ChatRoute />);
+
+    expect(state.traceQuery).toEqual({ ids: ['run_1', 'run_2'], agent: 'ag_conductor', since: '2026-09-01T09:00:00.000Z' });
+  });
+});
+
+describe('ChatRoute turns that said nothing', () => {
+  // The preference is a device setting in `localStorage`, which nothing else clears between tests.
+  // Reset before rather than after: the chat is still mounted when an `afterEach` runs, and the
+  // write publishes to it.
+  beforeEach(() => writeShowSilentTurns(true));
+
+  const silent = runTrace({
+    runId: 'run_silent',
+    createdAt: '2026-09-01T09:02:00.000Z',
+    startedAt: '2026-09-01T09:02:00.000Z',
+    finishedAt: '2026-09-01T09:02:30.000Z',
+    summary: 'filed VS-9',
+  });
+
+  it('renders a compact row for a finished turn that produced no message', () => {
+    state.messages = [message({ id: 'm1', body: 'Earlier.', runId: 'run_1', createdAt: '2026-09-01T09:00:00.000Z' })];
+    state.traces = [runTrace({ runId: 'run_1' }), silent];
+
+    render(<ChatRoute />);
+
+    const row = screen.getByRole('button', { name: /^What the conductor did at / });
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    expect(row).toHaveTextContent('3 tool calls');
+    expect(screen.getByText('filed VS-9')).toBeInTheDocument();
+  });
+
+  it('orders the row against the messages by when the turn ran', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'Earlier.', runId: 'run_1', createdAt: '2026-09-01T09:00:00.000Z' }),
+      message({ id: 'm2', body: 'Later.', runId: 'run_2', createdAt: '2026-09-01T09:10:00.000Z' }),
+    ];
+    state.traces = [silent];
+
+    const { container } = render(<ChatRoute />);
+
+    const text = (container.textContent ?? '');
+    expect(text.indexOf('Earlier.')).toBeLessThan(text.indexOf('filed VS-9'));
+    expect(text.indexOf('filed VS-9')).toBeLessThan(text.indexOf('Later.'));
+  });
+
+  it('renders no row for a turn that is still running', () => {
+    state.messages = [message({ id: 'm1', body: 'Earlier.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_2', status: 'running', finishedAt: null, durationMs: null })];
+
+    render(<ChatRoute />);
+
+    expect(screen.queryByRole('button', { name: /^What the conductor did at / })).not.toBeInTheDocument();
+  });
+
+  it('hides the rows when the device preference is off, keeping the sections on replies', () => {
+    state.messages = [message({ id: 'm1', body: 'Earlier.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1' }), silent];
+    writeShowSilentTurns(false);
+
+    render(<ChatRoute />);
+
+    expect(screen.queryByRole('button', { name: /^What the conductor did at / })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'What I did' })).toBeInTheDocument();
+  });
+});
+
+describe('ChatRoute live turn folding into its trace', () => {
+  it('holds the finished turn on screen until the reply that replaces it arrives', () => {
+    const { rerender } = render(<ChatRoute />);
+    emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
+    act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
+
+    emit({ type: 'run.finished', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
+    expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+
+    // The thread and the traces catch up; only then does the live block let go.
+    state.messages = [message({ id: 'm1', body: 'The briefing is clear.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1' })];
+    rerender(<ChatRoute />);
+
+    expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
+    expect(screen.getByText('The briefing is clear.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'What I did' })).toBeInTheDocument();
+  });
+
+  it('lets go of a turn that never produces a row, rather than holding it for the session', () => {
+    vi.useFakeTimers();
+    try {
+      render(<ChatRoute />);
+      emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
+      emit({ type: 'run.finished', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
+      expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(5000); });
+
+      expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

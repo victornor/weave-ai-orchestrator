@@ -53,7 +53,7 @@ The workspace outbox carries `job.started` and `job.finished` only — never a l
 `GET /decisions?status=&owner=` · `GET /decisions/:id` · `POST /decisions/:id/answer` `{ key?, text?, remember? }` · `POST /decisions/:id/withdraw`
 
 ### Runs
-`GET /runs?agent=&ticket=&status=&limit=&offset=` · `GET /runs/:id` · `GET /runs/:id/events?after=&limit=` · `GET /runs/:id/events/stream` (SSE) · `POST /runs/:id/cancel` `{ mode }` · `GET /runs/:id/log` (raw jsonl)
+`GET /runs?agent=&ticket=&status=&limit=&offset=` · `GET /runs/traces?ids=&agent=&since=&limit=` (per-run counts of tool calls, distinct files, errors and assistant text plus timing, oldest first; `ids` and the agent window are a union; unknown ids omitted) · `GET /runs/:id` · `GET /runs/:id/events?after=&limit=` · `GET /runs/:id/events/stream` (SSE) · `POST /runs/:id/cancel` `{ mode }` · `GET /runs/:id/log` (raw jsonl)
 
 ### Knowledge & specs
 `GET /knowledge` (lint) · `GET /knowledge/:scope?project=` · `PUT /knowledge/:scope?project=` `{ body }` (human replace) · `POST /knowledge/:scope/note?project=` `{ section, text }` · `GET /knowledge/:scope/revisions?project=` · `POST /knowledge/:scope/revert?project=` `{ revision }` · `POST /knowledge/:scope/curate?project=` · `GET /search?q=&project=` (knowledge + specs)

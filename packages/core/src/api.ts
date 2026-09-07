@@ -170,6 +170,14 @@ export interface RunsService {
   tail(id: string, limit?: number): S.RunEvent[];
   /** Only the run's `run.phase.timing` events, in order. At most one per `RUN_PHASES` entry, wherever they fall in the run. */
   phaseTimings(id: string): S.RunEvent[];
+  /**
+   * What a set of runs did, counted off `run_events` (VS-74): one aggregate for the whole set, so a
+   * surface can label a page of history without loading a transcript. `ids` names runs outright;
+   * `agentId` with `since` adds every run that agent has taken in a window, which is how a surface
+   * learns about a turn that left no trace of itself anywhere else. Ids that name no run in this
+   * workspace are omitted. Oldest first; `limit` keeps the newest.
+   */
+  traces(filter: { ids?: readonly string[]; agentId?: string; since?: string; limit?: number }): S.RunTrace[];
   cancel(actor: Actor, id: string, mode?: 'interrupt' | 'kill'): Promise<void>;
   onEvent(handler: (runId: string, ev: S.RunEvent) => void): () => void;
 }

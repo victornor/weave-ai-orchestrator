@@ -15,6 +15,16 @@ export function runRoutes(): Hono<AppEnv> {
     return c.json(c.get('ws').services.runs.list({ agentId: q.agent, ticketId: q.ticket, status: q.status as never, limit: q.limit, offset: q.offset }));
   });
 
+  /**
+   * What a set of runs did, counted (VS-74). Before `/:id`, or Hono would read `traces` as a run id.
+   * The ids come as one `?ids=` list because the caller is labelling a page of chat history: one
+   * request whatever the page holds.
+   */
+  app.get('/traces', (c) => {
+    const q = query(c, z.object({ ids: csv.optional(), agent: z.string().optional(), since: z.string().optional(), limit: z.coerce.number().int().min(1).max(500).optional() }));
+    return c.json(c.get('ws').services.runs.traces({ ids: q.ids, agentId: q.agent, since: q.since, limit: q.limit }));
+  });
+
   app.get('/:id', (c) => c.json(c.get('ws').services.runs.get(c.req.param('id'))));
 
   app.get('/:id/events', (c) => {

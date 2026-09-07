@@ -243,7 +243,7 @@ export interface KnowledgeService {
   requestCuration(actor: Actor, scope: S.KnowledgeScope, projectId?: string | null): Promise<{ ticketId?: string; wakeId?: string }>;
   search(query: string, projectId?: string | null, limit?: number): Array<{ kind: string; projectId: string | null; ref: string; title: string; snippet: string }>;
   reindex(): void;
-  bootstrapDigest(agentId: string): { text: string; tokens: number; truncated: boolean };
+  bootstrapDigest(agentId: string): { text: string; tokens: number; truncated: boolean; parts: KnowledgeBootstrapPart[] };
   appendDecision(decision: S.Decision): void;
   /** Linked documents (PLAN §13): topic pages under a scope that link to each other with [[slug]]. */
   listDocs(filter?: { scope?: S.KnowledgeScope; projectId?: string | null }): KnowledgeDocSummary[];
@@ -273,6 +273,37 @@ export interface KnowledgeDocWriteResult { path: string; revision: number; token
 export interface KnowledgeGraph {
   nodes: Array<{ id: string; kind: 'hub' | 'doc'; scope: S.KnowledgeScope; projectId: string | null; projectSlug: string | null; slug: string | null; title: string; tokens: number; updatedAt: string }>;
   edges: Array<{ from: string; to: string }>;
+}
+
+// ---------- knowledge context accounting (VS-110) ----------
+/** One hub chunk rendered into a bootstrap digest, measured at the point it was built — never the file's stored `tokenEstimate`. */
+export interface KnowledgeBootstrapPart { scope: S.KnowledgeScope; projectId: string | null; tokens: number }
+/** A knowledge read returned during a run: an explicit hub read (`slug` null) or a document read by slug. */
+export interface KnowledgeReadEvent {
+  runId: string; agentId: string; ticketId: string | null;
+  scope: S.KnowledgeScope; projectId: string | null; slug: string | null; tokens: number;
+}
+/** A run's or a ticket's knowledge context: hub tokens, document tokens, and which documents were touched. */
+export interface KnowledgeContextUsage {
+  hubTokens: number; documentTokens: number; totalTokens: number;
+  documents: Array<{ scope: S.KnowledgeScope; projectId: string | null; slug: string | null; tokens: number }>;
+}
+export interface KnowledgeUsageQuery { projectId?: string | null; window?: S.UsageWindow }
+export interface KnowledgeDocumentUsage { scope: S.KnowledgeScope; projectId: string | null; slug: string; title: string | null; reads: number; tokens: number }
+export interface KnowledgeDocumentRef { scope: S.KnowledgeScope; projectId: string | null; slug: string; title: string | null; tokenEstimate: number }
+/**
+ * Records what a run's turn actually consumed from the knowledge base — separate from `UsageService`,
+ * which tracks billed model tokens. Measures only; nothing here throttles, caps or refuses a run.
+ */
+export interface KnowledgeUsageService {
+  recordBootstrap(runId: string, agentId: string, ticketId: string | null, parts: KnowledgeBootstrapPart[]): void;
+  recordRead(evt: KnowledgeReadEvent): void;
+  forRun(runId: string): KnowledgeContextUsage;
+  /** Sums the ticket's own runs plus its subtree, matching `UsageService.ticket()`'s subtree semantics. */
+  forTicket(ticketId: string): KnowledgeContextUsage;
+  summary(query: KnowledgeUsageQuery): { averageTokensPerRun: number; runs: number };
+  topDocuments(query: KnowledgeUsageQuery, limit?: number): KnowledgeDocumentUsage[];
+  neverRead(query: KnowledgeUsageQuery): KnowledgeDocumentRef[];
 }
 /** An active change touching a capability, as the capability lists show it. */
 export interface PendingChange { changeName: string; ticketId: string | null; ticketIdentifier: string | null; deltaKind: string }
@@ -494,6 +525,6 @@ export interface SecretsService {
 export interface CoreServices {
   tickets: TicketsService; decisions: DecisionsService; projects: ProjectsService; roles: RolesService; workers: WorkersService;
   wake: WakeService; runs: RunsService; dispatcher: Dispatcher; supervisor: Supervisor; knowledge: KnowledgeService; specs: SpecsService;
-  openspec: OpenSpecService; usage: UsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
+  openspec: OpenSpecService; usage: UsageService; knowledgeUsage: KnowledgeUsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
   changelog: ChangelogService; models: ModelsService; secrets: SecretsService; pullRequests: PullRequestsService;
 }

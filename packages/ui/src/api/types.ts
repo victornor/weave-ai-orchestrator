@@ -13,6 +13,7 @@ import type {
   ChangelogPage,
   Decision,
   KnowledgeFile,
+  KnowledgeScope,
   Project,
   Role,
   Run,
@@ -339,6 +340,23 @@ export interface UsageModelRow extends UsageTopRow {
   model: string;
   series?: UsagePoint[];
 }
+
+/**
+ * Knowledge context (VS-110): the hub tokens and distinct documents a run's or a ticket's turns
+ * actually consumed — separate from `UsageTotals` above, which is billed model tokens.
+ */
+export interface KnowledgeContextUsage {
+  hubTokens: number;
+  documentTokens: number;
+  totalTokens: number;
+  documents: Array<{ scope: KnowledgeScope; projectId: string | null; slug: string | null; tokens: number }>;
+}
+
+export interface KnowledgeUsageSummary { averageTokensPerRun: number; runs: number }
+
+export interface KnowledgeDocumentUsage { scope: KnowledgeScope; projectId: string | null; slug: string; title: string | null; reads: number; tokens: number }
+
+export interface KnowledgeDocumentRef { scope: KnowledgeScope; projectId: string | null; slug: string; title: string | null; tokenEstimate: number }
 
 export interface KnowledgeIndex {
   files: Array<KnowledgeFile & { title?: string | null; projectSlug?: string | null; kind?: 'hub' | 'doc'; curationDueInDays?: number | null }>;

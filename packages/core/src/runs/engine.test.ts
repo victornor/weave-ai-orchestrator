@@ -9,6 +9,7 @@ import { createDecisionsService } from '../decisions/service.js';
 import { createTicketsService } from '../tickets/service.js';
 import { createWakeService } from '../wake/index.js';
 import { createAccountsService } from '../usage/accounts.js';
+import { createKnowledgeUsageService } from '../knowledge/index.js';
 import { LOGIN_PAUSE_CODE, loginCorrelationKey } from './authgate.js';
 import { createRunsService } from './index.js';
 import { createDispatcher, type CoreDispatcher } from './dispatcher.js';
@@ -103,6 +104,27 @@ describe('run engine', () => {
     // The conductor has no worktree, so it skips `prepare_worktree` — the one phase that is conditional.
     expect(timed).toEqual(RECORDED_RUN_PHASES.filter((p) => p !== 'prepare_worktree'));
     expect(RECORDED_RUN_PHASES.every((p) => RUN_PHASES.includes(p))).toBe(true);
+  });
+
+  it("records the first turn's bootstrap digest as this run's knowledge context (VS-110)", async () => {
+    h.services.knowledge = {
+      bootstrapDigest: () => ({
+        text: 'digest text', tokens: 5, truncated: false,
+        parts: [{ scope: 'shared', projectId: null, tokens: 40 }, { scope: 'project', projectId: h.projectId, tokens: 25 }],
+      }),
+    } as never;
+    h.services.knowledgeUsage = createKnowledgeUsageService(h.ctx, h.deps);
+    runtime.queue.push({ structured: { state: 'done', summary: 'done', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'anything' });
+    const run = await runOnce();
+
+    const rows = h.db.all<{ kind: string; scope: string; tokens: number; docProjectId: string | null }>(
+      'SELECT kind, scope, tokens, doc_project_id AS docProjectId FROM knowledge_usage_events WHERE run_id = ? ORDER BY scope', [run.id],
+    );
+    expect(rows).toEqual([
+      { kind: 'hub', scope: 'project', tokens: 25, docProjectId: h.projectId },
+      { kind: 'hub', scope: 'shared', tokens: 40, docProjectId: null },
+    ]);
   });
 
   it('injects the system prompt on the first turn only and resumes the session afterwards', async () => {

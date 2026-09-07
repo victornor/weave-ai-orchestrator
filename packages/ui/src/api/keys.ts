@@ -36,6 +36,12 @@ export const qk = {
   ticketWorkProducts: (ws: string, id: string) => ['w', ws, 'tickets', id, 'work-products'] as const,
   ticketRuns: (ws: string, id: string) => ['w', ws, 'tickets', id, 'runs'] as const,
   ticketUsage: (ws: string, id: string) => ['w', ws, 'tickets', id, 'usage'] as const,
+  /**
+   * Not nested under `usageRoot` or `knowledgeUsageRoot` (VS-110): `qk.ticketUsage` above shows the
+   * same trap held for it too, since `usage.recorded`'s prefix invalidation never reached a
+   * `tickets/:id/...` key — `knowledge_usage.recorded` invalidates this key explicitly instead.
+   */
+  ticketKnowledgeUsage: (ws: string, id: string) => ['w', ws, 'tickets', id, 'knowledge-usage'] as const,
 
   decisions: (ws: string) => ['w', ws, 'decisions'] as const,
   decision: (ws: string, id: string) => ['w', ws, 'decisions', id] as const,
@@ -68,6 +74,11 @@ export const qk = {
   usageModels: (ws: string, params: Record<string, unknown>) => ['w', ws, 'usage', 'models', params] as const,
   usageAccounts: (ws: string) => ['w', ws, 'usage', 'accounts'] as const,
   usageCredentials: (ws: string) => ['w', ws, 'usage', 'credentials'] as const,
+
+  knowledgeUsageRoot: (ws: string) => ['w', ws, 'knowledge-usage'] as const,
+  knowledgeUsageSummary: (ws: string, params: Record<string, unknown>) => ['w', ws, 'knowledge-usage', 'summary', params] as const,
+  knowledgeUsageTop: (ws: string, params: Record<string, unknown>) => ['w', ws, 'knowledge-usage', 'top', params] as const,
+  knowledgeUsageNeverRead: (ws: string, params: Record<string, unknown>) => ['w', ws, 'knowledge-usage', 'never-read', params] as const,
 
   threads: (ws: string) => ['w', ws, 'threads'] as const,
   threadMessages: (ws: string, id: string) => ['w', ws, 'threads', id, 'messages'] as const,

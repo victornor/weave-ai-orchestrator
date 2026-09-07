@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Every ticket reports what its knowledge cost in tokens — the hub it was
+  given plus each document it read

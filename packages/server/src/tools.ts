@@ -11,7 +11,7 @@ import {
   COMMON_TOOLS, CONDUCTOR_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, DECISION_KINDS, DECISION_INPUT_TYPES,
-  type ToolResult, type Ticket, type Wakeup,
+  type ToolResult, type Ticket, type Wakeup, type KnowledgeScope,
 } from '@agent-conductor/shared';
 import type { Actor, CoreServices } from '@agent-conductor/core';
 import type { RunTokenClaims } from './runtoken.js';
@@ -75,6 +75,17 @@ function knowledgeScope(ctx: ToolCtx, scope: string, projectId?: string | null):
     return ctx.claims.projectId;
   }
   return null;
+}
+
+/**
+ * VS-110: record that this run's explicit knowledge read returned `tokens`, isolated from the read
+ * itself — a recording failure must never turn a successful `ac_knowledge_get`/`ac_knowledge_doc_get`
+ * into a tool error.
+ */
+function recordKnowledgeRead(ctx: ToolCtx, scope: KnowledgeScope, projectId: string | null, slug: string | null, tokens: number): void {
+  try {
+    svc(ctx).knowledgeUsage.recordRead({ runId: ctx.claims.runId, agentId: ctx.claims.agentId, ticketId: ctx.claims.ticketId, scope, projectId, slug, tokens });
+  } catch { /* measurement only */ }
 }
 
 function projectScope(ctx: ToolCtx, projectId?: string | null): string {
@@ -301,7 +312,12 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'ac_knowledge_get', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), projectId: z.string().optional() }),
     description: 'Read a knowledge base: shared (SHARED.md), project (your project KB), workspace/decisions (conductor only). Includes size against budget.',
-    handler: (ctx, i) => svc(ctx).knowledge.get(i.scope, knowledgeScope(ctx, i.scope, i.projectId)),
+    handler: (ctx, i) => {
+      const projectId = knowledgeScope(ctx, i.scope, i.projectId);
+      const result = svc(ctx).knowledge.get(i.scope, projectId);
+      recordKnowledgeRead(ctx, i.scope, projectId, null, result.tokenEstimate);
+      return result;
+    },
   },
   {
     name: 'ac_knowledge_note', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), section: z.string().min(1), text: z.string().min(1), projectId: z.string().optional(), doc: z.string().min(2).optional() }),
@@ -319,7 +335,12 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'ac_knowledge_doc_get', scope: 'all', input: z.object({ slug: z.string().min(2), scope: z.enum(KNOWLEDGE_SCOPES).default('project'), projectId: z.string().optional() }),
     description: 'Read one linked knowledge document by slug: body, the documents it links to (resolved or not) and the documents that link to it. Follow linksTo/linkedFrom to go as deep as the question needs.',
-    handler: (ctx, i) => svc(ctx).knowledge.getDoc(i.scope, i.slug, knowledgeScope(ctx, i.scope, i.projectId)),
+    handler: (ctx, i) => {
+      const projectId = knowledgeScope(ctx, i.scope, i.projectId);
+      const result = svc(ctx).knowledge.getDoc(i.scope, i.slug, projectId);
+      recordKnowledgeRead(ctx, i.scope, projectId, i.slug, result.tokenEstimate);
+      return result;
+    },
   },
   {
     name: 'ac_knowledge_doc_put', scope: 'all', input: z.object({ slug: z.string().min(2), body: z.string().min(1), scope: z.enum(KNOWLEDGE_SCOPES).default('project'), projectId: z.string().optional() }),

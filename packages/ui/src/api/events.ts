@@ -276,6 +276,14 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
     case 'usage.recorded':
       inv(qk.usageRoot(ws));
       break;
+    case 'knowledge_usage.recorded': {
+      inv(qk.knowledgeUsageRoot(ws));
+      // Not nested under that root (same trap `qk.ticketUsage` never got fixed for): invalidate the
+      // ticket's own key explicitly so its knowledge tab does not wait out a remount.
+      const ticketId = (evt.payload as { ticketId?: string | null } | null)?.ticketId;
+      if (ticketId) inv(qk.ticketKnowledgeUsage(ws, ticketId));
+      break;
+    }
     case 'presentation.updated':
       inv(qk.presentation(ws));
       break;

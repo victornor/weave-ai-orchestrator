@@ -27,6 +27,7 @@ import {
   useTicketDocumentRevisions,
   useTicketRuns,
   useTicketUsage,
+  useTicketKnowledgeUsage,
   useTicketWorkProducts,
   useAnswerDecision,
   useDecisions,
@@ -46,6 +47,7 @@ const TABS = [
   { key: 'activity', label: 'Activity' },
   { key: 'work', label: 'Work' },
   { key: 'usage', label: 'Usage' },
+  { key: 'knowledge', label: 'Knowledge' },
 ] as const;
 const TAB_KEYS: readonly string[] = TABS.map((t) => t.key);
 const resolveTab = (key: string | undefined): string => (key && TAB_KEYS.includes(key) ? key : 'overview');
@@ -177,6 +179,7 @@ export function TicketRoute(): React.ReactElement {
         {tab === 'activity' ? <ActivityTab ticketId={ticket.id} ticketIdentifier={ticket.identifier} /> : null}
         {tab === 'work' ? <WorkTab ticketId={ticket.id} /> : null}
         {tab === 'usage' ? <UsageTab ticketId={ticket.id} /> : null}
+        {tab === 'knowledge' ? <KnowledgeUsageTab ticketId={ticket.id} /> : null}
       </PageBody>
     </Page>
   );
@@ -630,6 +633,39 @@ function UsageTab({ ticketId }: { ticketId: string }): React.ReactElement {
           ]}
         />
       ) : null}
+    </div>
+  );
+}
+
+function KnowledgeUsageTab({ ticketId }: { ticketId: string }): React.ReactElement {
+  const usage = useTicketKnowledgeUsage(ticketId);
+  if (usage.isLoading) return <SkeletonRows rows={3} />;
+  const data = usage.data;
+  return (
+    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+      <p className="text-meta text-text-2">
+        Knowledge context this ticket's runs consumed — the hub they were bootstrapped with plus every
+        document they read, measured from what was actually sent or returned. Not total context; see
+        the Usage tab for that.
+      </p>
+      <div className="flex gap-px overflow-hidden rounded-r6 border border-line-1 bg-line-1">
+        <StatTile value={tokens(data?.totalTokens ?? 0)} caption="total knowledge tokens" />
+        <StatTile value={tokens(data?.hubTokens ?? 0)} caption="hub (bootstrap)" muted />
+        <StatTile value={tokens(data?.documentTokens ?? 0)} caption="documents read" muted />
+      </div>
+      {data?.documents.length ? (
+        <Table
+          rows={data.documents}
+          rowKey={(d) => `${d.scope}:${d.projectId ?? ''}:${d.slug ?? ''}`}
+          columns={[
+            { key: 'scope', header: 'Scope', mono: true, render: (d) => d.scope },
+            { key: 'slug', header: 'Document', render: (d) => d.slug ?? '(whole file)' },
+            { key: 'tok', header: 'Tokens', align: 'right', mono: true, render: (d) => tokens(d.tokens) },
+          ]}
+        />
+      ) : (
+        <EmptyState title="No documents read" detail="This ticket's runs read only hub knowledge, no linked documents." />
+      )}
     </div>
   );
 }

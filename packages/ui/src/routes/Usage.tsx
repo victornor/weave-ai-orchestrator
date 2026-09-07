@@ -8,7 +8,10 @@ import { PlanLimits } from '../components/PlanLimits';
 import { RuntimeCredentials } from '../components/RuntimeCredentials';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
-import { useProjects, useUsage, useUsageAccounts, useUsageCredentials, useUsageModels, useUsageTop } from '../api/hooks';
+import {
+  useKnowledgeUsageNeverRead, useKnowledgeUsageSummary, useKnowledgeUsageTop,
+  useProjects, useUsage, useUsageAccounts, useUsageCredentials, useUsageModels, useUsageTop,
+} from '../api/hooks';
 import { usePlanSync } from '../lib/planSync';
 import { dayLabel, cents, pct, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
@@ -34,6 +37,13 @@ export function UsageRoute(): React.ReactElement {
   const accounts = useUsageAccounts();
   const credentials = useUsageCredentials();
   const planSync = usePlanSync();
+  // Knowledge context (VS-110) is workspace-wide here, unlike the token/cost charts above: this page
+  // has no project selector, only a per-project breakdown, so the knowledge section is not scoped to
+  // one project either — a ticket's own Knowledge tab is where a single project's figure lives.
+  const knowledgeWindow = window === 'custom' ? 'all' : window;
+  const knowledgeSummary = useKnowledgeUsageSummary({ window: knowledgeWindow });
+  const knowledgeTop = useKnowledgeUsageTop({ window: knowledgeWindow });
+  const knowledgeNeverRead = useKnowledgeUsageNeverRead({ window: knowledgeWindow });
 
   const total = series.data?.total;
   const headlineTokens = (total?.tokensIn ?? 0) + (total?.tokensOut ?? 0);
@@ -71,6 +81,43 @@ export function UsageRoute(): React.ReactElement {
         {/* Above the usage conditional on purpose: a runtime whose login expired has no usage
             precisely because everything on it is stopped, and that is when this matters most. */}
         <RuntimeCredentials credentials={credentials.data ?? []} />
+
+        <section className="ac-card p-4">
+          <div className="mb-1 text-meta font-medium text-text-soft">Knowledge context</div>
+          <p className="ac-mono mb-3.5 text-nano text-text-4">
+            Hub and document tokens a run actually consumed, measured from what was sent or returned —
+            not the total-context figures above, which are billed model tokens.
+          </p>
+          <div className="mb-3.5 flex gap-px overflow-hidden rounded-r6 border border-line-1 bg-line-1">
+            <StatTile value={tokens(Math.round(knowledgeSummary.data?.averageTokensPerRun ?? 0))} caption="avg knowledge tokens / run" />
+            <StatTile value={String(knowledgeNeverRead.data?.length ?? 0)} caption="documents never read" muted />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <div className="mb-2 text-micro text-text-2">Read most often</div>
+              {knowledgeTop.data?.length ? (
+                <RankedBars rows={knowledgeTop.data.slice(0, 8).map((d) => ({ key: `${d.scope}:${d.projectId ?? ''}:${d.slug}`, label: d.title ?? d.slug, sublabel: d.scope, value: d.tokens, right: `${d.reads} reads` }))} />
+              ) : (
+                <EmptyState title="No documents read" detail="Nothing has been read in this window yet." />
+              )}
+            </div>
+            <div>
+              <div className="mb-2 text-micro text-text-2">Never read</div>
+              {knowledgeNeverRead.data?.length ? (
+                <div className="flex flex-col gap-1.5">
+                  {knowledgeNeverRead.data.slice(0, 8).map((d) => (
+                    <div key={`${d.scope}:${d.projectId ?? ''}:${d.slug}`} className="flex items-center justify-between gap-2">
+                      <span className="ac-mono ac-truncate flex-1 text-micro text-text-soft">{d.title ?? d.slug}</span>
+                      <span className="ac-mono text-micro text-text-4">{d.scope}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState title="Every document has been read" detail="Nothing in the catalogue is going unused in this window." />
+              )}
+            </div>
+          </div>
+        </section>
 
         {series.isLoading ? (
           <SkeletonRows rows={6} />

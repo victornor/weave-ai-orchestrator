@@ -5,7 +5,7 @@ import {
   estimateTokens, OcError,
   type Decision, type KnowledgeRevisionReason, type KnowledgeScope,
 } from '@agent-conductor/shared';
-import type { Actor, CoreServices, KnowledgeDocDetail, KnowledgeDocSummary, KnowledgeService } from '../api.js';
+import type { Actor, CoreServices, KnowledgeBootstrapPart, KnowledgeDocDetail, KnowledgeDocSummary, KnowledgeService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
@@ -464,21 +464,44 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       if (!agent) throw new OcError('not_found', `agent ${agentId} not found`);
       const budget = ctx.config.defaults.bootstrapBudgetTokens;
       const parts: string[] = [];
+      // Measured on each chunk as it is built, before the join/truncate below — never the source
+      // file's stored `tokenEstimate`, which for the conductor's per-project chunk would be the
+      // whole project hub's size, not just the Overview/Current-focus slice actually rendered here.
+      const usage: KnowledgeBootstrapPart[] = [];
+      const record = (scope: KnowledgeScope, projectId: string | null, chunk: string): void => {
+        if (!chunk) return;
+        usage.push({ scope, projectId, tokens: estimateTokens(chunk) });
+      };
 
       if (agent.kind === 'conductor') {
-        parts.push(service.get('workspace').body.trimEnd());
-        parts.push(service.get('shared').body.trimEnd());
+        const workspaceChunk = service.get('workspace').body.trimEnd();
+        parts.push(workspaceChunk);
+        record('workspace', null, workspaceChunk);
+        const sharedChunk = service.get('shared').body.trimEnd();
+        parts.push(sharedChunk);
+        record('shared', null, sharedChunk);
         const decisions = service.get('decisions').body.split('\n').filter((l) => /^\s*[-*]\s+/.test(l));
         const tail = decisions.slice(-30);
-        if (tail.length) parts.push(['## Recent decisions', ...tail].join('\n'));
+        if (tail.length) {
+          const decisionsChunk = ['## Recent decisions', ...tail].join('\n');
+          parts.push(decisionsChunk);
+          record('decisions', null, decisionsChunk);
+        }
         for (const p of db.all<ProjectRow>('SELECT id, slug, name FROM projects WHERE workspace_id = ? ORDER BY slug', [ws])) {
           const body = service.get('project', p.id).body;
           const chunk = [`## Project: ${p.name} (${p.slug})`, sectionText(body, 'Overview'), sectionText(body, 'Current focus')].filter(Boolean).join('\n\n');
           parts.push(chunk);
+          record('project', p.id, chunk);
         }
       } else {
-        parts.push(service.get('shared').body.trimEnd());
-        if (agent.projectId) parts.push(service.get('project', agent.projectId).body.trimEnd());
+        const sharedChunk = service.get('shared').body.trimEnd();
+        parts.push(sharedChunk);
+        record('shared', null, sharedChunk);
+        if (agent.projectId) {
+          const projectChunk = service.get('project', agent.projectId).body.trimEnd();
+          parts.push(projectChunk);
+          record('project', agent.projectId, projectChunk);
+        }
       }
 
       let text = parts.filter(Boolean).join('\n\n---\n\n').trimEnd() + '\n';
@@ -492,7 +515,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         const limit = Math.floor(budget * 3.5);
         text = `${text.slice(0, limit)}\n\n(truncated, call ac_knowledge_get)\n`;
       }
-      return { text, tokens: estimateTokens(text), truncated };
+      return { text, tokens: estimateTokens(text), truncated, parts: usage };
     },
 
     listDocs(filter = {}) {

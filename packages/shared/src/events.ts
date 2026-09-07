@@ -7,7 +7,7 @@ export const EVENT_TYPES = [
   'decision.created', 'decision.answered', 'decision.expired', 'decision.superseded',
   'wake.queued', 'wake.skipped', 'run.started', 'run.event', 'run.finished',
   'job.started', 'job.finished',
-  'thread.message', 'knowledge.updated', 'knowledge.curated', 'spec.indexed', 'usage.recorded', 'auth.login', 'auth.logout', 'auth.revoked', 'presentation.updated',
+  'thread.message', 'knowledge.updated', 'knowledge.curated', 'spec.indexed', 'usage.recorded', 'knowledge_usage.recorded', 'auth.login', 'auth.logout', 'auth.revoked', 'presentation.updated',
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 export interface WorkspaceEvent<T = unknown> { seq: number; workspaceId: string; type: EventType; entityType: string; entityId: string; payload: T; createdAt: string }

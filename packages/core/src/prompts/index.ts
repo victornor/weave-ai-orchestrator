@@ -183,6 +183,8 @@ export interface TurnPromptOptions {
   relaunchNote?: string | null;
   interrupted?: boolean;
   turnEpoch?: number;
+  /** The run this prompt is being built for (VS-110): lets the bootstrap digest record its knowledge context against the right run. */
+  runId?: string;
 }
 
 interface BundledWake { source: string; reason: string; payload: Record<string, unknown> }
@@ -304,7 +306,14 @@ export async function buildTurnPrompt(
   if (opts.interrupted) notes.push('- Your previous turn was interrupted; verify what you had already done before redoing it.');
   if (opts.isFirstTurn || opts.sessionStale) {
     let digest = '';
-    try { digest = deps().knowledge.bootstrapDigest(agent.id).text; } catch { digest = ''; }
+    try {
+      const d = deps().knowledge.bootstrapDigest(agent.id);
+      digest = d.text;
+      // Recording the knowledge context this run was bootstrapped with must never affect the
+      // prompt itself (VS-110: it measures, it does not gate) — isolated in its own try so a
+      // recording failure can never wipe out a digest that was already built successfully.
+      try { if (opts.runId) deps().knowledgeUsage.recordBootstrap(opts.runId, agent.id, agent.ticketId ?? null, d.parts ?? []); } catch { /* measurement only */ }
+    } catch { digest = ''; }
     if (digest) notes.push(`- Bootstrap:\n\n${digest}`);
   }
   if (notes.length) { parts.push('\n## Notes'); parts.push(notes.join('\n')); }

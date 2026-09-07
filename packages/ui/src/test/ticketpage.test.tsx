@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   ticketStatus: 'in_progress' as string,
   messageMutateAsync: vi.fn(async () => ({ delivery: 'queued', runId: null, wakeId: null })),
   answerMutate: vi.fn(),
+  knowledgeUsage: undefined as { hubTokens: number; documentTokens: number; totalTokens: number; documents: Array<{ scope: string; projectId: string | null; slug: string | null; tokens: number }> } | undefined,
 }));
 
 const empty = { data: undefined, isLoading: false, isError: false };
@@ -43,6 +44,7 @@ vi.mock('../api/hooks', () => ({
   useTicketWorkProducts: () => list([]),
   useTicketRuns: () => list([]),
   useTicketUsage: () => empty,
+  useTicketKnowledgeUsage: () => ({ data: state.knowledgeUsage, isLoading: false, isError: false }),
   useDecisions: () => list(state.decisions),
   useAnswerDecision: () => ({ mutate: state.answerMutate, isPending: false }),
   useWorker: () => (state.workerDetail ? { data: state.workerDetail, isLoading: false, isError: false } : empty),
@@ -67,6 +69,7 @@ beforeEach(() => {
   state.workerDetail = undefined;
   state.search = {};
   state.ticketStatus = 'in_progress';
+  state.knowledgeUsage = undefined;
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -216,5 +219,27 @@ describe("TicketRoute's Activity tab answers the merge approval (VS-106)", () =>
     expect(state.answerMutate).toHaveBeenCalledTimes(1);
     expect(state.answerMutate).toHaveBeenCalledWith({ id: 'dec_1', key: 'approve' });
     expect(state.answerMutate).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'dec_other' }));
+  });
+});
+
+describe('TicketRoute knowledge tab (VS-110)', () => {
+  it('shows the hub/document/total token split and the documents read, labelled as knowledge context', () => {
+    state.knowledgeUsage = {
+      hubTokens: 40, documentTokens: 10, totalTokens: 50,
+      documents: [{ scope: 'project', projectId: 'proj1', slug: 'payments-webhooks', tokens: 10 }],
+    };
+    render(<TicketRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Knowledge' }));
+
+    expect(screen.getByText(/Knowledge context/)).toBeInTheDocument();
+    expect(screen.getByText('payments-webhooks')).toBeInTheDocument();
+  });
+
+  it('says so when no documents were read', () => {
+    state.knowledgeUsage = { hubTokens: 40, documentTokens: 0, totalTokens: 40, documents: [] };
+    render(<TicketRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Knowledge' }));
+
+    expect(screen.getByText('No documents read')).toBeInTheDocument();
   });
 });

@@ -127,6 +127,9 @@ function mockHooks(billingMix: UsageBillingMix | undefined, accounts: RuntimeAcc
     useUsageAccounts: () => ({ data: accounts.map((a) => ({ ...a, displayName: a.runtimeId })) }),
     useSyncUsageAccounts: () => ({ mutate: vi.fn(), isPending: false }),
     useUsageCredentials: () => ({ data: credentials.map((c) => ({ ...c, displayName: c.runtimeId })) }),
+    useKnowledgeUsageSummary: () => ({ data: { averageTokensPerRun: 0, runs: 0 } }),
+    useKnowledgeUsageTop: () => ({ data: [] }),
+    useKnowledgeUsageNeverRead: () => ({ data: [] }),
   }));
 }
 
@@ -171,6 +174,30 @@ describe('the usage route decides cost from the window it is showing', () => {
     await renderUsage();
     expect(screen.getByText(/^cost · /)).toBeTruthy();
     expect(screen.queryByText('Plan limits')).toBeNull();
+  });
+});
+
+describe('the usage route knowledge context section (VS-110)', () => {
+  afterEach(() => { vi.resetModules(); vi.doUnmock('../api/hooks'); });
+
+  it('shows the average per run, the most-read documents and the never-read list, labelled apart from total context', async () => {
+    vi.doMock('../api/hooks', () => ({
+      useProjects: () => ({ data: [] }),
+      useUsage: () => ({ data: { scope: 'workspace', window: 'week', grain: 'day', start: '', end: '', series: [], total: totals, billingMix: undefined }, isLoading: false, isError: false, refetch: () => undefined }),
+      useUsageTop: () => ({ data: [] }),
+      useUsageModels: () => ({ data: [] }),
+      useUsageAccounts: () => ({ data: [] }),
+      useSyncUsageAccounts: () => ({ mutate: vi.fn(), isPending: false }),
+      useUsageCredentials: () => ({ data: [] }),
+      useKnowledgeUsageSummary: () => ({ data: { averageTokensPerRun: 123, runs: 4 } }),
+      useKnowledgeUsageTop: () => ({ data: [{ scope: 'project', projectId: 'p1', slug: 'payments-webhooks', title: 'Payments webhooks', reads: 3, tokens: 90 }] }),
+      useKnowledgeUsageNeverRead: () => ({ data: [{ scope: 'project', projectId: 'p1', slug: 'stale-doc', title: 'Stale doc', tokenEstimate: 20 }] }),
+    }));
+    await renderUsage();
+    expect(screen.getByText('Knowledge context')).toBeTruthy();
+    expect(screen.getByText(/not the total-context figures above/)).toBeTruthy();
+    expect(screen.getByText('Payments webhooks')).toBeTruthy();
+    expect(screen.getByText('Stale doc')).toBeTruthy();
   });
 });
 

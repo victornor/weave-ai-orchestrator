@@ -112,6 +112,13 @@ export function ticketRoutes(): Hono<AppEnv> {
     return c.json(s.usage.ticket(s.tickets.get(c.req.param('id')).id));
   });
 
+  // Knowledge context (VS-110): the hub tokens and distinct documents this ticket's own runs and its
+  // subtree consumed — separate from `/usage` above, which is billed model tokens.
+  app.get('/:id/knowledge-usage', (c) => {
+    const s = c.get('ws').services;
+    return c.json(s.knowledgeUsage.forTicket(s.tickets.get(c.req.param('id')).id));
+  });
+
   /** Discarding unlanded work always goes through a human `discard_approval` (PLAN §15). */
   app.post('/:id/discard', async (c) => {
     const s = c.get('ws').services;

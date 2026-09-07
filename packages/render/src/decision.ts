@@ -40,15 +40,15 @@ const DEFAULTS: Record<CardVariant, CardOption[]> = {
   ],
   merge_approval: [
     opt('approve', 'Approve merge', 'primary', 'Merge the pull request and archive the change.'),
-    opt('hold', 'Hold', 'default', 'Leave the PR open; nothing is merged.'),
+    opt('changes', 'Request changes', 'default', 'Send it back to the worker.'),
   ],
   hire_approval: [
-    opt('hire', 'Hire', 'primary', 'Create the role and let it pick up tickets.'),
+    opt('approve', 'Hire', 'primary', 'Create the role and let it pick up tickets.'),
     opt('reject', 'Reject', 'default', 'Do not create the role.'),
   ],
   discard_approval: [
-    opt('discard', 'Discard', 'danger', 'Destroys the worktree and any uncommitted work.'),
-    opt('keep', 'Keep', 'default', 'Leave the worktree alone.'),
+    opt('approve', 'Discard', 'danger', 'Destroys the worktree and any uncommitted work.'),
+    opt('reject', 'Keep', 'default', 'Leave the worktree alone.'),
   ],
   approval: [opt('approve', 'Approve', 'primary', null), opt('reject', 'Reject', 'default', null)],
   gate_finding: [opt('acknowledge', 'Acknowledge', 'primary', null), opt('ignore', 'Ignore', 'default', null)],

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { NAMED_CARD_OPTION_KEYS } from '@agent-conductor/shared';
 import type { Decision, DecisionKind } from '@agent-conductor/shared';
 import { decisionToCard } from './decision.js';
 
@@ -35,7 +36,7 @@ describe('decisionToCard', () => {
       target: { prUrl: 'https://github.com/acme/web/pull/12', ciPassed: 7, ciTotal: 7, additions: 18, deletions: 2, files: 3, branch: 'ac/acme-42' },
     }), { now });
     expect(card.variant).toBe('merge_approval');
-    expect(card.options.map((o) => o.label)).toEqual(['Approve merge', 'Hold']);
+    expect(card.options.map((o) => o.label)).toEqual(['Approve merge', 'Request changes']);
     expect(card.allowFreeText).toBe(false);
     expect(card.body).toEqual([
       { label: 'PR', value: 'https://github.com/acme/web/pull/12', format: 'link' },
@@ -53,7 +54,7 @@ describe('decisionToCard', () => {
       options: [{ key: 'switch:codex', label: 'Switch runtime to codex', description: 'Use Codex instead of Claude Code' }],
       target: { roleName: 'Backend Engineer', projectName: 'api', charterSummary: 'Owns the HTTP API and its tests', runtime: 'claude', model: 'claude-fable-5-1', maxWorkers: 2 },
     }), { now });
-    expect(card.options.map((o) => o.key)).toEqual(['hire', 'reject', 'switch:codex']);
+    expect(card.options.map((o) => o.key)).toEqual(['approve', 'reject', 'switch:codex']);
     expect(card.options[0]!.tone).toBe('primary');
     expect(card.options[2]!.tone).toBe('default');
     expect(card.body[0]).toEqual({ label: null, value: 'Backend Engineer · api', format: 'text' });
@@ -96,9 +97,41 @@ describe('decisionToCard', () => {
     }), { ticketIdentifier: 'ACME-42', now });
     expect(card.destructive).toBe(true);
     expect(card.confirm).toEqual({ expect: 'ACME-42', prompt: 'Type ACME-42 to confirm' });
+    expect(card.options.map((o) => o.key)).toEqual(['approve', 'reject']);
     expect(card.options[0]!.tone).toBe('danger');
     expect(card.allowFreeText).toBe(false);
     expect(card.body.at(-1)!.value).toContain('destroys the worktree');
+  });
+
+  // VS-114: the same class of bug VS-111 fixed in packages/ui — a card option key that the
+  // decision it answers does not actually accept. Each named variant here is given exactly the
+  // options the daemon creates it with (packages/core/src/tickets/service.ts,
+  // packages/core/src/roles/index.ts), so this fails the same way a hand-written literal that
+  // drifts from NAMED_CARD_OPTION_KEYS would.
+  it('never offers a named-variant option key the decision does not accept', () => {
+    const real: Record<'plan_approval' | 'merge_approval' | 'hire_approval' | 'discard_approval', Array<{ key: string; label: string }>> = {
+      plan_approval: [
+        { key: 'approve', label: 'Approve' },
+        { key: 'revise', label: 'Revise' },
+        { key: 'reject', label: 'Reject' },
+      ],
+      merge_approval: [
+        { key: 'approve', label: 'Approve merge' },
+        { key: 'changes', label: 'Request changes' },
+      ],
+      hire_approval: [
+        { key: 'approve', label: 'Approve and activate' },
+        { key: 'reject', label: 'Reject' },
+      ],
+      discard_approval: [
+        { key: 'approve', label: 'Retire the role and cancel its workers' },
+        { key: 'reject', label: 'Keep the role' },
+      ],
+    };
+    for (const kind of Object.keys(real) as Array<keyof typeof real>) {
+      const card = decisionToCard(decision({ kind, options: real[kind] }), { now });
+      expect(card.options.map((o) => o.key)).toEqual(Object.values(NAMED_CARD_OPTION_KEYS[kind]));
+    }
   });
 
   it('falls back to a generic approval for unknown kinds and conductor-owned headers', () => {

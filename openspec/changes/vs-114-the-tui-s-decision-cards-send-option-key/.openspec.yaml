@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Align packages/render's decisionToCard DEFAULTS with
+  NAMED_CARD_OPTION_KEYS so the TUI never offers
+  merge_approval/hire_approval/discard_approval option keys the real decision
+  rejects

@@ -1,7 +1,48 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { cx } from '../lib/cx';
+
+/** How far the grab handle has to travel down before letting go dismisses the sheet. */
+export const SWIPE_CLOSE_PX = 64;
+
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/**
+ * Tab and Shift+Tab stay inside an open sheet: it is `aria-modal`, so the rest of the page is not
+ * there to be reached, and a keyboard would otherwise walk straight out into it.
+ */
+function useFocusTrap(open: boolean, ref: React.RefObject<HTMLDivElement | null>): void {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent): void => {
+      const node = ref.current;
+      if (e.key !== 'Tab' || !node) return;
+      const items = [...node.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) {
+        e.preventDefault();
+        return;
+      }
+      const active = document.activeElement;
+      if (!node.contains(active)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+        return;
+      }
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, ref]);
+}
 
 function useDismiss(open: boolean, onClose: () => void): void {
   useEffect(() => {
@@ -30,6 +71,7 @@ export function Sheet({
   children,
   footer,
   labelledBy,
+  swipeToClose,
 }: {
   open: boolean;
   onClose: () => void;
@@ -37,11 +79,26 @@ export function Sheet({
   children: ReactNode;
   footer?: ReactNode;
   labelledBy?: string;
+  /** Phone affordance: a grab handle that dismisses the sheet when dragged down past the threshold. */
+  swipeToClose?: boolean;
 }): React.ReactElement | null {
   useDismiss(open, onClose);
   const ref = useRef<HTMLDivElement>(null);
+  useFocusTrap(open, ref);
+  const grabbedAt = useRef<number | null>(null);
+  const [dragged, setDragged] = useState(0);
   useEffect(() => {
-    if (open) ref.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus();
+    if (!open) return;
+    // The panel itself when nothing asked for the focus: the trap and Escape both act from inside,
+    // and a screen reader lands on the dialog rather than wherever the page was.
+    const node = ref.current;
+    (node?.querySelector<HTMLElement>('[data-autofocus]') ?? node)?.focus();
+  }, [open]);
+  useEffect(() => {
+    if (!open) {
+      grabbedAt.current = null;
+      setDragged(0);
+    }
   }, [open]);
   if (!open || typeof document === 'undefined') return null;
 
@@ -54,11 +111,39 @@ export function Sheet({
         aria-modal="true"
         aria-label={title}
         aria-labelledby={labelledBy}
+        tabIndex={-1}
+        style={dragged ? { transform: `translateY(${dragged}px)` } : undefined}
         className={cx(
-          'relative w-full max-w-lg overflow-hidden rounded-t-r8 border border-line-2 bg-bg-1 shadow-sheet sm:rounded-r8',
+          'relative w-full max-w-lg overflow-hidden rounded-t-r8 border border-line-2 bg-bg-1 shadow-sheet outline-none sm:rounded-r8',
           'motion-safe:animate-[ac-sheet-in_var(--dur-panel)_var(--ease)]',
         )}
       >
+        {swipeToClose ? (
+          <div
+            data-testid="sheet-grab"
+            className="flex touch-none justify-center pt-2 pb-1 sm:hidden"
+            onPointerDown={(e) => {
+              grabbedAt.current = e.clientY;
+              e.currentTarget.setPointerCapture?.(e.pointerId);
+            }}
+            onPointerMove={(e) => {
+              if (grabbedAt.current === null) return;
+              setDragged(Math.max(0, e.clientY - grabbedAt.current));
+            }}
+            onPointerUp={() => {
+              const travelled = dragged;
+              grabbedAt.current = null;
+              setDragged(0);
+              if (travelled >= SWIPE_CLOSE_PX) onClose();
+            }}
+            onPointerCancel={() => {
+              grabbedAt.current = null;
+              setDragged(0);
+            }}
+          >
+            <span className="h-1 w-9 rounded-pill bg-line-3" aria-hidden />
+          </div>
+        ) : null}
         {title ? (
           <div className="flex items-center gap-2 border-b border-line-1 px-4 py-3">
             <h2 className="text-head font-semibold tracking-head text-text-strong">{title}</h2>

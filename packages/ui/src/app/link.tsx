@@ -10,6 +10,7 @@ export interface AProps {
   title?: string;
   'aria-label'?: string;
   'aria-current'?: 'page' | 'true' | undefined;
+  onClick?: () => void;
   children?: ReactNode;
 }
 

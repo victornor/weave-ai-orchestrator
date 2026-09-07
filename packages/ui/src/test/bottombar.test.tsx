@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { BAR, fabRect, intersects, rem, tabRects } from '../app/barGeometry';
 import type { Rect } from '../app/barGeometry';
@@ -48,15 +48,74 @@ function remStyle(value: string): number {
 
 describe('BottomBar', () => {
   function renderBar(): void {
-    render(<BottomBar ws="ws1" items={TABS} needsCount={2} isActive={(to) => to.endsWith('/chat')} onStartWork={vi.fn()} />);
+    render(<BottomBar ws="ws1" items={TABS} needsCount={2} isActive={(to) => to.endsWith('/chat')} onStartWork={vi.fn()} onMore={vi.fn()} />);
   }
 
   it('renders every tab plus the floating Start Work', () => {
     renderBar();
     const nav = screen.getByRole('navigation', { name: 'Sections' });
-    expect(within(nav).getAllByRole('link')).toHaveLength(TABS.length);
+    // Four tabs navigate; More opens the menu, so it is a button rather than a link.
+    expect(within(nav).getAllByRole('link')).toHaveLength(TABS.length - 1);
     for (const item of TABS) expect(within(nav).getByText(item.label)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start work' })).toBeInTheDocument();
+  });
+
+  it('opens the More menu instead of navigating to Settings', () => {
+    const onMore = vi.fn();
+    render(<BottomBar ws="ws1" items={TABS} needsCount={0} isActive={() => false} onStartWork={vi.fn()} onMore={onMore} />);
+    const nav = screen.getByRole('navigation', { name: 'Sections' });
+    const more = within(nav).getByText('More').closest('button') as HTMLButtonElement;
+    expect(more).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(within(nav).queryByRole('link', { name: /More/ })).toBeNull();
+    fireEvent.click(more);
+    expect(onMore).toHaveBeenCalled();
+  });
+
+  it('reports the menu as expanded while it is open', () => {
+    render(<BottomBar ws="ws1" items={TABS} needsCount={0} isActive={() => false} onStartWork={vi.fn()} onMore={vi.fn()} moreOpen />);
+    expect(screen.getByText('More').closest('button')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('marks More active on a page the menu leads to', () => {
+    render(
+      <BottomBar ws="ws1" items={TABS} needsCount={0} isActive={(to) => to === '/w/ws1/usage'} onStartWork={vi.fn()} onMore={vi.fn()} moreOpen={false} />,
+    );
+    expect(screen.getByText('More')).toHaveClass('text-text-1');
+    expect(screen.getByText('Chat')).toHaveClass('text-text-nav');
+  });
+
+  it('leaves More inactive on a page one of the tabs carries', () => {
+    renderBar();
+    expect(screen.getByText('More')).toHaveClass('text-text-nav');
+    expect(screen.getByText('Chat')).toHaveClass('text-text-1');
+  });
+
+  it('badges More with what the other workspaces are waiting on', () => {
+    render(
+      <BottomBar ws="ws1" items={TABS} needsCount={0} otherWorkspacesNeed={3} isActive={() => false} onStartWork={vi.fn()} onMore={vi.fn()} />,
+    );
+    const nav = screen.getByRole('navigation', { name: 'Sections' });
+    const badge = within(nav).getByLabelText('3 waiting for you in other workspaces');
+    expect(within(nav).getByText('More').closest('button')).toContainElement(badge);
+    expect(badge.className).toContain('absolute');
+  });
+
+  it('gives the update the one badge slot when both would show', () => {
+    render(
+      <BottomBar
+        ws="ws1"
+        items={TABS}
+        needsCount={0}
+        otherWorkspacesNeed={3}
+        update={{ state: 'available', title: 'Update available', detail: 'main · bbbbbbbbbb' }}
+        isActive={() => false}
+        onStartWork={vi.fn()}
+        onMore={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText('Daemon update available')).toBeInTheDocument();
+    expect(screen.queryByLabelText('3 waiting for you in other workspaces')).toBeNull();
   });
 
   it('badges More when the daemon has an update, without moving the tabs', () => {
@@ -68,11 +127,12 @@ describe('BottomBar', () => {
         update={{ state: 'available', title: 'Update available', detail: 'main · bbbbbbbbbb' }}
         isActive={() => false}
         onStartWork={vi.fn()}
+        onMore={vi.fn()}
       />,
     );
     const nav = screen.getByRole('navigation', { name: 'Sections' });
     const badge = within(nav).getByLabelText('Daemon update available');
-    expect(within(nav).getByText('More').closest('a')).toContainElement(badge);
+    expect(within(nav).getByText('More').closest('button')).toContainElement(badge);
     // Out of flow, like the Needs-you count: the bar keeps the geometry the rest of this file pins down.
     expect(badge.className).toContain('absolute');
     expect(nav.style.paddingTop).toBe(`${BAR.tabTop}rem`);

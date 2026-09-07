@@ -5,6 +5,7 @@ import { TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
 import { RAIL, TABS, href } from './nav';
 import { WorkspaceNav } from './WorkspaceNav';
 import { StartWorkSheet } from './StartWorkSheet';
+import { MoreSheet } from './MoreSheet';
 import { BottomBar } from './BottomBar';
 import { PlusGlyph } from './PlusGlyph';
 import { CommandPalette } from '../components/CommandPalette';
@@ -31,6 +32,7 @@ export function AppShell(): React.ReactElement {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [scopeIndex, setScopeIndex] = useState(-1);
   /** Which workspace groups the rail has open, seeded from what this device remembered. */
   const [expanded, setExpanded] = useState<string[]>(() => readExpanded());
@@ -54,6 +56,11 @@ export function AppShell(): React.ReactElement {
   // Nothing is shown when the daemon is up to date, when checking is not configured, or when it failed.
   // One fact, one entry: the rail block on desktop, the More badge on a phone (PLAN §20).
   const update = updateEntry(daemonUpdate.data, daemonUpgrade.data?.upgrade ?? null);
+  /**
+   * What the other workspaces are waiting on. The tabs address the active workspace only, so on a
+   * phone this count is reachable through the More menu alone — which is why More carries it.
+   */
+  const otherWorkspacesNeed = (workspaces.data ?? []).reduce((n, w) => (w.id === activeWs ? n : n + w.needsYou), 0);
 
   // Queued writes (offline, or taken while the conductor was mid-turn) are
   // flushed in order as soon as the stream is back.
@@ -131,7 +138,7 @@ export function AppShell(): React.ReactElement {
       cmds.push({ id: `ws-${w.id}`, label: 'Switch workspace', sub: w.name, kbd: '⌘⇧O', run: () => go('/w/$ws/needs', { params: { ws: w.id } }) });
     }
     for (const item of RAIL) {
-      cmds.push({ id: `go-${item.key}`, label: `Go to ${item.label}`, kbd: item.kbd, run: () => go(href(item, ws)) });
+      cmds.push({ id: `go-${item.key}`, label: `Go to ${item.label}`, ...(item.kbd ? { kbd: item.kbd } : {}), run: () => go(href(item, ws)) });
     }
     return cmds;
   }, [tickets.data, workspaces.data, scope, ws, go, transition]);
@@ -140,7 +147,7 @@ export function AppShell(): React.ReactElement {
     [
       { key: 'k', meta: true, inFields: true, run: () => setPaletteOpen((v) => !v) },
       { key: 'Space', meta: true, shift: true, inFields: true, run: () => setStartOpen(true) },
-      ...RAIL.map((item) => ({ key: item.kbd, run: () => go(href(item, ws)) })),
+      ...RAIL.flatMap((item) => (item.kbd ? [{ key: item.kbd, run: () => go(href(item, ws)) }] : [])),
     ],
     true,
   );
@@ -230,7 +237,17 @@ export function AppShell(): React.ReactElement {
           <Outlet />
         </main>
 
-        <BottomBar ws={ws} items={TABS} needsCount={needsCount} update={update} isActive={isActive} onStartWork={() => setStartOpen(true)} />
+        <BottomBar
+          ws={ws}
+          items={TABS}
+          needsCount={needsCount}
+          update={update}
+          otherWorkspacesNeed={otherWorkspacesNeed}
+          isActive={isActive}
+          onStartWork={() => setStartOpen(true)}
+          onMore={() => setMoreOpen(true)}
+          moreOpen={moreOpen}
+        />
       </div>
 
       <CommandPalette
@@ -241,6 +258,17 @@ export function AppShell(): React.ReactElement {
         onScopeCycle={() => setScopeIndex((i) => (i + 1 >= (projects.data?.length ?? 0) ? -1 : i + 1))}
       />
       <StartWorkSheet open={startOpen} onClose={() => setStartOpen(false)} />
+      <MoreSheet
+        open={moreOpen}
+        onClose={() => setMoreOpen(false)}
+        ws={ws}
+        activeWs={activeWs}
+        workspaces={listed}
+        needsCount={needsCount}
+        update={update}
+        isActive={isActive}
+        onNewWorkspace={() => go('/onboarding')}
+      />
     </div>
   );
 }

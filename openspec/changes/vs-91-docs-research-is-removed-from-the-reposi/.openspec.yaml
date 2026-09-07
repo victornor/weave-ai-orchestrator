@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-07
+goal: docs/research/ and docs/design/ are removed from the repository and
+  gitignored, their markdown preserved verbatim as private knowledge documents
+skip_specs: true

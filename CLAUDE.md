@@ -3,13 +3,17 @@
 For coding agents (and humans) changing this repo. User-facing docs are in [`README.md`](README.md)
 and [`docs/`](docs/); this file is about the code.
 
-## Read these three first
+## Read these two first
 
 | Doc | Why |
 |---|---|
 | [`docs/PLAN.md`](docs/PLAN.md) | The naming and behaviour contract. Every `code`-styled identifier in it (table, field, tool name, CLI command, status) is the real one. §23 is the decision log; §22 the milestones. **The plan wins on conflict** with any other doc. |
 | [`docs/API.md`](docs/API.md) | The HTTP + SSE + MCP surface. Adding a route means adding it here too. |
-| [`docs/design/DESIGN-CONTRACT.md`](docs/design/DESIGN-CONTRACT.md) | Tokens, components, screens and states for `packages/ui` and, by extension, `packages/tui`. It is the source of visual truth. |
+
+The visual contract for `packages/ui` and, by extension, `packages/tui` — tokens, components, screens
+and states — is held outside this repository and is not published. `packages/ui/src/index.css` is the
+in-tree expression of its tokens and the lint gate that rejects raw hex and px in components; PLAN §21
+carries the brief behind it. Ask a maintainer for anything neither answers.
 
 Deviations from the plan go in `docs/adr/` with the reason, not into the plan silently.
 

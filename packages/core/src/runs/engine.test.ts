@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
-import { FakeRuntime, type TurnInput, type TurnSink, type TurnResult } from '@agent-conductor/runtime-sdk';
+import { FakeRuntime, type AccountDescription, type CredentialFacts, type TurnInput, type TurnSink, type TurnResult } from '@agent-conductor/runtime-sdk';
 import { RECORDED_RUN_PHASES, RUN_PHASES, type Decision, type Run, type Wakeup } from '@agent-conductor/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createDecisionsService } from '../decisions/service.js';
@@ -624,6 +624,100 @@ describe('run engine', () => {
 
         expect(h.db.get<Run>('SELECT * FROM runs WHERE id = ?', [runId])!.status).toBe('succeeded');
         expect(h.services.accounts!.gatedRuntimes()).toEqual([]);
+      });
+    });
+
+    // VS-105: a burst of simultaneous spawns must not become a burst of independent refreshes. This
+    // pins the engine wiring of `ensureFreshCredential`, not the singleflight itself (see
+    // `credentialFreshness.test.ts` for that).
+    describe('the credential freshness check before a turn spawns', () => {
+      class FakeCredentialRuntime extends FakeRuntime {
+        describeCalls = 0;
+        facts: CredentialFacts;
+        describeShouldFail = false;
+        describeDelayMs = 0;
+        constructor(facts: CredentialFacts) { super(); this.facts = facts; }
+        readCredential(): CredentialFacts { return this.facts; }
+        async describeAccount(): Promise<AccountDescription> {
+          this.describeCalls += 1;
+          if (this.describeDelayMs) await new Promise((r) => setTimeout(r, this.describeDelayMs));
+          if (this.describeShouldFail) {
+            return { billingType: 'unknown', planLabel: null, limitsAvailable: false, limits: [], note: 'claude: OAuth session expired and could not be refreshed' };
+          }
+          this.facts = { present: true, expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() };
+          return { billingType: 'subscription_included', planLabel: 'Max', limitsAvailable: false, limits: [], note: null };
+        }
+      }
+
+      let credRuntime: FakeCredentialRuntime;
+      let notified: string[];
+
+      beforeEach(() => {
+        credRuntime = new FakeCredentialRuntime({ present: true, expiresAt: new Date(Date.now() - 1000).toISOString() });
+        credRuntime.describeDelayMs = 10;
+        h.ctx.registries.runtimes.set('fake', credRuntime);
+        h.services.accounts = createAccountsService(h.ctx);
+        notified = [];
+        h.services.threads = { notifyHuman: async (_a: unknown, m: { text: string }) => { notified.push(m.text); } } as never;
+      });
+
+      const runIdFor = (agentId: string): string => {
+        const runId = newId();
+        h.db.insert('runs', {
+          id: runId, workspaceId: h.workspaceId, agentId, ticketId: null, wakeupIdsJson: [],
+          runtimeId: 'fake', model: null, status: 'queued', turnEpoch: 1,
+          cwd: h.db.get<{ homePath: string }>('SELECT home_path FROM agents WHERE id = ?', [agentId])!.homePath,
+          createdAt: nowIso(),
+        });
+        return runId;
+      };
+
+      it('collapses two overlapping turn spawns into one probe and still runs both turns', async () => {
+        credRuntime.queue.push({ structured: { state: 'done', summary: 'a', tickets: [] } } as never);
+        credRuntime.queue.push({ structured: { state: 'done', summary: 'b', tickets: [] } } as never);
+
+        const ticketA = seedTicket(h, { number: 10, identifier: 'TST-10', status: 'in_progress' });
+        const workerA = h.addWorker(ticketA, { runtimeId: 'fake', worktreePath: null });
+        const ticketB = seedTicket(h, { number: 11, identifier: 'TST-11', status: 'in_progress' });
+        const workerB = h.addWorker(ticketB, { runtimeId: 'fake', worktreePath: null });
+
+        const runA = runIdFor(workerA);
+        const runB = runIdFor(workerB);
+
+        await Promise.all([executeRun(h.ctx, h.deps, runA), executeRun(h.ctx, h.deps, runB)]);
+
+        expect(credRuntime.describeCalls).toBe(1);
+        expect(h.db.get<Run>('SELECT * FROM runs WHERE id = ?', [runA])!.status).toBe('succeeded');
+        expect(h.db.get<Run>('SELECT * FROM runs WHERE id = ?', [runB])!.status).toBe('succeeded');
+      });
+
+      it('gates the runtime exactly like a turn-level auth failure when the shared probe cannot restore a valid credential', async () => {
+        credRuntime.describeShouldFail = true;
+
+        const ticketId = seedTicket(h, { status: 'in_progress' });
+        const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+        h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1: Add a README badge' });
+        const run = await runOnce();
+        await tick();
+
+        expect(run.status).toBe('failed');
+        expect(run.errorFamily).toBe('auth');
+        expect(h.services.accounts!.gatedRuntimes()).toEqual(['fake']);
+        const agent = h.db.get<{ status: string; pauseDetail: { code?: string } | null }>('SELECT * FROM agents WHERE id = ?', [workerId])!;
+        expect(agent.status).toBe('paused');
+        expect(agent.pauseDetail?.code).toBe(LOGIN_PAUSE_CODE);
+        expect(notified).toHaveLength(1);
+        // No retry wake for an auth failure, exactly as a turn-level auth failure (VS-75).
+        expect(h.db.all<Wakeup>("SELECT * FROM wakeups WHERE agent_id = ? AND source = 'retry'", [workerId])).toHaveLength(0);
+      });
+
+      it('does not affect a turn whose credential is already fresh', async () => {
+        credRuntime.facts = { present: true, expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() };
+        credRuntime.queue.push({ structured: { state: 'done', summary: 'fine', tickets: [] } } as never);
+        h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+        const run = await runOnce();
+        expect(run.status).toBe('succeeded');
+        expect(credRuntime.describeCalls).toBe(0);
       });
     });
 

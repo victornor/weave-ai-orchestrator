@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Serialize Claude credential refresh through the daemon so a burst of
+  concurrent agent spawns cannot rotate the owner's OAuth token out from under
+  itself

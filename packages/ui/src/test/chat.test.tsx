@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Decision, Project, RunEvent, RunTrace, RuntimeAccount, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
 import { agent, decision, project, ticket } from './factories';
@@ -6,6 +6,7 @@ import { enqueue } from '../lib/queue';
 import { clearChatScroll, readChatScroll, writeChatScroll } from '../lib/chatScroll';
 import { clearHiddenCache } from '../lib/hiddenDecisions';
 import { writeShowSilentTurns } from '../lib/chatPrefs';
+import { writeDecisionHeight } from '../lib/decisionHeight';
 import { resizeObserved } from './resizeObserver';
 import { installVisualViewport, removeVisualViewport } from './visualViewport';
 
@@ -1684,5 +1685,229 @@ describe('ChatRoute live turn folding into its trace', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('ChatRoute resizable decisions area', () => {
+  const asked = (over: Partial<Decision> = {}): Decision =>
+    decision({
+      id: 'd1', kind: 'question', ticketId: null, askedInRunId: 'run_1', title: 'File this as a ticket?',
+      context: 'It is a one-line fix.', recommendation: null, target: null,
+      options: [{ key: 'file', label: 'File it' }, { key: 'skip', label: 'Leave it' }],
+      ...over,
+    });
+
+  /** The clamps the geometry below works out to, so a test asserts a number rather than an outcome. */
+  const MIN = 144;
+  const MAX = 580; // 800 (the area's bottom) - 100 (the list's top) - 120 (the strip the list keeps)
+
+  const area = (): HTMLElement => screen.getByLabelText('Open decisions');
+  const handle = (): HTMLElement => screen.getByRole('separator', { name: 'Resize the decisions area' });
+  const stored = (): string | null => localStorage.getItem('conductor.decisions.height');
+
+  const rect = (el: Element, top: number, height: number): void => {
+    Object.defineProperty(el, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top, bottom: top + height, height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) }),
+    });
+  };
+
+  /**
+   * The layout jsdom will never perform. A 900px window: the message list starts at 100 under the
+   * header, the pinned area is 200 tall and its bottom edge sits at 800 with the composer below it.
+   * Without this every rect is zeros, the clamps collapse to their floor, and a drag test would pass
+   * while asserting nothing.
+   */
+  const laidOut = (container: HTMLElement, areaHeight = 200): void => {
+    rect(area(), 800 - areaHeight, areaHeight);
+    rect(container.querySelector('.ac-scroll') as HTMLElement, 100, 800 - areaHeight - 100);
+  };
+
+  /** Render with one decision pinned and the geometry faked, the gauge caught up on a second pass. */
+  const open = (): HTMLElement => {
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked()];
+    const { container, rerender } = render(<ChatRoute />);
+    laidOut(container);
+    rerender(<ChatRoute />);
+    return container;
+  };
+
+  it('is as tall as its contents under the app cap until the human resizes it', () => {
+    open();
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe('calc(var(--ac-app-h) * 0.45)');
+    expect(stored()).toBeNull();
+  });
+
+  it('offers the top edge as a handle that says what it resizes', () => {
+    open();
+    expect(area()).toContainElement(handle());
+    expect(handle()).toHaveAttribute('aria-orientation', 'horizontal');
+    expect(handle()).toHaveAttribute('tabindex', '0');
+    // A focusable separator has to report where it is and what it is bounded by.
+    expect(handle()).toHaveAttribute('aria-valuenow', '200');
+    expect(handle()).toHaveAttribute('aria-valuemin', String(MIN));
+    expect(handle()).toHaveAttribute('aria-valuemax', String(MAX));
+  });
+
+  it('grows the area when the top edge is dragged up and shrinks it when dragged down', () => {
+    open();
+    fireEvent.pointerDown(handle(), { pointerId: 1, clientY: 600 });
+
+    // An absolute mapping: the pointer's distance from the area's bottom edge is its height.
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: 400 });
+    expect(area().style.height).toBe('400px');
+    expect(area().style.maxHeight).toBe('calc(var(--ac-app-h) * 0.75)');
+
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: 550 });
+    expect(area().style.height).toBe('250px');
+
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(stored()).toBe('250');
+    expect(handle()).toHaveAttribute('aria-valuenow', '250');
+  });
+
+  it('stops at the large end, leaving the composer and a strip of the conversation on screen', () => {
+    open();
+    fireEvent.pointerDown(handle(), { pointerId: 1, clientY: 600 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: -2000 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+
+    expect(area().style.height).toBe(`${MAX}px`);
+    expect(stored()).toBe(String(MAX));
+  });
+
+  it('stops at the small end, leaving a card heading and its actions on screen', () => {
+    open();
+    fireEvent.pointerDown(handle(), { pointerId: 1, clientY: 600 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: 2000 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+
+    expect(area().style.height).toBe(`${MIN}px`);
+    expect(stored()).toBe(String(MIN));
+  });
+
+  it('writes nothing when the handle is pressed and released without moving', () => {
+    open();
+    fireEvent.pointerDown(handle(), { pointerId: 1, clientY: 600 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+
+    expect(area().style.height).toBe('');
+    expect(stored()).toBeNull();
+  });
+
+  it('is dragged by a finger the same way', () => {
+    open();
+    // `touch-none` is `touch-action: none`: without it the finger scrolls the page, not the edge.
+    expect(handle()).toHaveClass('touch-none');
+
+    fireEvent.pointerDown(handle(), { pointerId: 7, pointerType: 'touch', clientY: 600 });
+    fireEvent.pointerMove(window, { pointerId: 7, pointerType: 'touch', clientY: 500 });
+    fireEvent.pointerUp(window, { pointerId: 7, pointerType: 'touch' });
+
+    expect(area().style.height).toBe('300px');
+  });
+
+  it('resizes in steps from the arrow keys', () => {
+    open();
+    fireEvent.keyDown(handle(), { key: 'ArrowUp' });
+    expect(area().style.height).toBe('224px');
+    fireEvent.keyDown(handle(), { key: 'ArrowDown' });
+    fireEvent.keyDown(handle(), { key: 'ArrowDown' });
+    expect(area().style.height).toBe('176px');
+    expect(stored()).toBe('176');
+  });
+
+  it('goes straight to either clamp and no further', () => {
+    open();
+    fireEvent.keyDown(handle(), { key: 'End' });
+    expect(area().style.height).toBe(`${MAX}px`);
+    fireEvent.keyDown(handle(), { key: 'ArrowUp' });
+    expect(area().style.height).toBe(`${MAX}px`);
+
+    fireEvent.keyDown(handle(), { key: 'Home' });
+    expect(area().style.height).toBe(`${MIN}px`);
+    fireEvent.keyDown(handle(), { key: 'ArrowDown' });
+    expect(area().style.height).toBe(`${MIN}px`);
+  });
+
+  it('leaves a key it does not handle alone', () => {
+    open();
+    const event = createEvent.keyDown(handle(), { key: 'PageUp' });
+    fireEvent(handle(), event);
+
+    expect(area().style.height).toBe('');
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it.each(['Enter', 'Escape'])('gives the chosen height back on %s', (key) => {
+    open();
+    fireEvent.keyDown(handle(), { key: 'End' });
+    fireEvent.keyDown(handle(), { key });
+
+    expect(area().style.height).toBe('');
+    expect(area().style.maxHeight).toBe('calc(var(--ac-app-h) * 0.45)');
+    expect(stored()).toBeNull();
+  });
+
+  it('gives the chosen height back on a double-click of the handle', () => {
+    open();
+    fireEvent.keyDown(handle(), { key: 'End' });
+    fireEvent.doubleClick(handle());
+
+    expect(area().style.height).toBe('');
+    expect(stored()).toBeNull();
+  });
+
+  it('opens at the height this device chose, whatever workspace the chat is for', () => {
+    // What a reload has: the key in localStorage and nothing else.
+    writeDecisionHeight(350);
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked()];
+    const { rerender } = render(<ChatRoute />);
+    expect(area().style.height).toBe('350px');
+
+    state.ws = 'ws2';
+    rerender(<ChatRoute />);
+    expect(area().style.height).toBe('350px');
+  });
+
+  it('pins nothing when nothing is open, and returns at the chosen height when a card arrives', () => {
+    writeDecisionHeight(350);
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    const { rerender } = render(<ChatRoute />);
+    expect(screen.queryByLabelText('Open decisions')).not.toBeInTheDocument();
+    expect(screen.queryByRole('separator', { name: 'Resize the decisions area' })).not.toBeInTheDocument();
+
+    state.decisions = [asked()];
+    rerender(<ChatRoute />);
+    expect(area().style.height).toBe('350px');
+  });
+
+  it('leaves the message list following its newest message across a resize', () => {
+    const container = open();
+    const before = (window.HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    fireEvent.pointerDown(handle(), { pointerId: 1, clientY: 600 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: 400 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    // The relayout the browser would perform: the list is 200px shorter than it was.
+    rect(container.querySelector('.ac-scroll') as HTMLElement, 100, 300);
+    act(() => resizeObserved());
+
+    expect((window.HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(before);
+    expect(screen.queryByRole('button', { name: /^Scroll to bottom/ })).not.toBeInTheDocument();
+  });
+
+  it('answers nothing and hides nothing by being resized', () => {
+    open();
+    fireEvent.pointerDown(handle(), { pointerId: 1, clientY: 600 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: 400 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+
+    expect(state.answer).not.toHaveBeenCalled();
+    expect(state.posted).toEqual([]);
+    expect(area()).toContainElement(screen.getByLabelText('Conductor asks: File this as a ticket?'));
   });
 });

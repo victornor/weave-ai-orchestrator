@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Decision, Project, ThreadMessage } from '@agent-conductor/shared';
 import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
@@ -42,6 +42,8 @@ import { useShowSilentTurns } from '../lib/chatPrefs';
 import { readExpandedTraces, toggleExpandedTrace } from '../lib/traceExpansion';
 import { draftKey, useDraft } from '../lib/drafts';
 import { isHiddenFromChat, useHiddenDecisions } from '../lib/hiddenDecisions';
+import { MIN_PX, STEP_PX, clampHeight, maxHeight, readDecisionHeight, writeDecisionHeight } from '../lib/decisionHeight';
+import type { HeightBounds } from '../lib/decisionHeight';
 import { isAtBottom, useStickToBottom } from '../lib/stickToBottom';
 import { readChatScroll, writeChatScroll } from '../lib/chatScroll';
 import { enqueue, useQueueCount } from '../lib/queue';
@@ -322,6 +324,112 @@ export function ChatRoute(): React.ReactElement {
   const attach = stick.scrollRef;
   const attachScroll = useCallback((el: HTMLDivElement | null) => { setScrollEl(el); attach(el); }, [attach]);
 
+  // How tall the pinned area is, dragged by its top edge and remembered per device (VS-94). `null`
+  // is "never resized", which is a rendering rather than a number: the area stays as tall as its
+  // contents under today's cap, so one short card is not a tall empty box. The list below shrinks
+  // by whatever the area takes — `useStickToBottom` already re-pins on that, so nothing here has to.
+  const [decisionHeight, setDecisionHeight] = useState<number | null>(readDecisionHeight);
+  const decisionsRef = useRef<HTMLElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+  // The geometry a drag is measured against, captured when it starts: the area's bottom edge is held
+  // still by the composer below it, and the list's top by the header above it, so neither moves while
+  // the edge does. Re-reading them mid-drag would measure the box the drag is in the middle of moving.
+  const dragBounds = useRef<HeightBounds | null>(null);
+  /**
+   * What the area is actually as tall as, and how tall it may become. A focusable separator has to
+   * report a value, and before the first resize there is no chosen number to report — so it is
+   * measured. Held as state rather than read during render: a rect is not a render-time thing.
+   */
+  const [gauge, setGauge] = useState<{ height: number; max: number }>({ height: 0, max: MIN_PX });
+
+  /** Live geometry, or null when the area is not on screen and there is nothing to measure against. */
+  const readBounds = useCallback((): HeightBounds | null => {
+    const section = decisionsRef.current;
+    if (!section || !scrollEl) return null;
+    return { sectionBottom: section.getBoundingClientRect().bottom, pageTop: scrollEl.getBoundingClientRect().top };
+  }, [scrollEl]);
+
+  // No dependency array: the area's height changes with its contents, not with anything this could
+  // key on, and the state is only written when the numbers actually differ so it still settles.
+  useLayoutEffect(() => {
+    const section = decisionsRef.current;
+    const bounds = readBounds();
+    if (!section || !bounds) return;
+    const next = { height: Math.round(section.getBoundingClientRect().height), max: maxHeight(bounds) };
+    setGauge((prev) => (prev.height === next.height && prev.max === next.max ? prev : next));
+  });
+
+  /** Giving the chosen height back: the area goes back to behaving as though it was never resized. */
+  const resetHeight = useCallback(() => {
+    setDecisionHeight(null);
+    writeDecisionHeight(null);
+  }, []);
+
+  const startDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const bounds = readBounds();
+    if (!bounds) return;
+    // The area's own bottom edge is what the pointer's distance from it means, so a drag is an
+    // absolute position rather than an accumulated delta: past a clamp there is no travel to undo
+    // before the edge moves again, which is what a delta-based drag reads as a dead zone.
+    dragBounds.current = bounds;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    setDragging(true);
+  }, [readBounds]);
+
+  // The pointer leaves a strip this thin at once, so the drag is followed on the window. Pointer
+  // capture would do it in a browser, but it is best-effort — jsdom has no `setPointerCapture` — and
+  // these listeners are what the behaviour actually rests on. The chosen height is written once, at
+  // the end: a press that never moved has chosen nothing.
+  useEffect(() => {
+    if (!dragging) return;
+    let latest: number | null = null;
+    const move = (e: PointerEvent): void => {
+      const bounds = dragBounds.current;
+      if (!bounds) return;
+      latest = clampHeight(bounds.sectionBottom - e.clientY, bounds);
+      setDecisionHeight(latest);
+    };
+    const end = (): void => {
+      if (latest !== null) writeDecisionHeight(latest);
+      dragBounds.current = null;
+      setDragging(false);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+  }, [dragging]);
+
+  const onHandleKey = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === 'Escape') {
+      e.preventDefault();
+      resetHeight();
+      return;
+    }
+    const bounds = readBounds();
+    if (!bounds) return;
+    // Before the first resize the keyboard steps off what the area is measured at, so the first
+    // press moves it from where it is rather than jumping to a number nobody chose.
+    const from = decisionHeight ?? gauge.height;
+    const to =
+      e.key === 'ArrowUp' ? from + STEP_PX
+      : e.key === 'ArrowDown' ? from - STEP_PX
+      : e.key === 'Home' ? MIN_PX
+      : e.key === 'End' ? maxHeight(bounds)
+      : null;
+    if (to === null) return;
+    // Otherwise the message list scrolls under the arrow keys while the handle is being used.
+    e.preventDefault();
+    const next = clampHeight(to, bounds);
+    setDecisionHeight(next);
+    writeDecisionHeight(next);
+  }, [decisionHeight, gauge.height, readBounds, resetHeight]);
+
   // Recorded as the human scrolls, not on the way out: by the time an unmount cleanup runs React has
   // already detached the ref, and a detached element reports no scroll position to record.
   //
@@ -529,7 +637,39 @@ export function ChatRoute(): React.ReactElement {
           follow-the-bottom button keeps the list it belongs to. Capped and scrolled internally: a pile
           of open decisions must never push the composer off screen. */}
       {shown.length || hiddenOpen.length ? (
-        <section aria-label="Open decisions" className="ac-scroll max-h-[calc(var(--ac-app-h)*0.45)] flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-7">
+        <section
+          ref={decisionsRef}
+          aria-label="Open decisions"
+          className="ac-scroll flex-none border-t border-line-1 bg-bg-0 px-4 pb-3 md:px-7"
+          // Unresized, the area is as tall as its contents up to the app's own share of the height.
+          // Resized, it is exactly what was chosen — and the cap keeps following `--ac-app-h`, so a
+          // height chosen before a keyboard opened is brought back inside the viewport it left.
+          style={
+            decisionHeight === null
+              ? { maxHeight: 'calc(var(--ac-app-h) * 0.45)' }
+              : { height: `${decisionHeight}px`, maxHeight: 'calc(var(--ac-app-h) * 0.75)' }
+          }
+        >
+          {/* The top edge, as a handle. Sticky rather than absolute: the area scrolls within itself,
+              and a grip that scrolled away with the cards would be unreachable exactly when there
+              are enough of them to want it. `touch-action: none` is what stops a finger drag from
+              scrolling the page instead of moving the edge. */}
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize the decisions area"
+            aria-valuenow={decisionHeight ?? gauge.height}
+            aria-valuemin={MIN_PX}
+            aria-valuemax={gauge.max}
+            tabIndex={0}
+            title="Drag to resize · double-click to reset"
+            onPointerDown={startDrag}
+            onDoubleClick={resetHeight}
+            onKeyDown={onHandleKey}
+            className="sticky top-0 z-10 -mx-4 mb-2 flex h-3 cursor-ns-resize touch-none items-center justify-center bg-bg-0 outline-none focus-visible:bg-bg-2 md:-mx-7"
+          >
+            <span className={cx('h-0.5 w-10 rounded-full', dragging ? 'bg-text-3' : 'bg-line-2')} />
+          </div>
           <div className="mx-auto flex max-w-3xl flex-col gap-3">
             {/* What was hidden is still counted here, so the pinned area never quietly under-reports
                 what is waiting: one press brings every one of them back. */}

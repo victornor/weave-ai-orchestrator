@@ -326,9 +326,13 @@ own when an on-screen keyboard takes part of the viewport, and a height chosen b
 opened SHALL be brought back within them for as long as it is open.
 
 Until the human has chosen a height, the region SHALL be exactly as tall as its contents up to the
-share of the viewport the app chooses, which is what it is today. Once they have chosen one, the
-region SHALL be that tall whether its contents need it or not, and SHALL scroll within itself when
-they need more.
+share of the viewport the app chooses, which is what it is today. Once they have chosen one, that
+chosen height SHALL be the region's maximum rather than its fixed size: the region SHALL still be
+exactly as tall as its contents, up to the chosen height, and SHALL scroll within itself only when
+its contents need more than that. Content shorter than the chosen height SHALL NOT be padded out to
+fill it, whether that content is open cards, the count of what is hidden, or both together. The
+handle stays part of the region's own content rather than a fixed overlay, so it SHALL remain
+reachable at whatever height the region actually takes, including its shortest.
 
 The chosen height SHALL be remembered for the device it was chosen on: it SHALL survive reloading
 the chat, leaving the chat and coming back, and switching between workspaces, and it SHALL NOT
@@ -343,7 +347,7 @@ While the region is being resized and once the resize has finished, the message 
 following its own newest message if it was doing so when the resize began.
 
 When no decision is pinned the region is not shown, and the handle is not shown with it; the
-remembered height SHALL apply again the next time a decision is pinned.
+remembered height SHALL apply again, as a maximum, the next time a decision is pinned.
 
 #### Scenario: Dragging the top edge up
 
@@ -373,7 +377,7 @@ remembered height SHALL apply again the next time a decision is pinned.
 #### Scenario: The height outlives the page
 
 - **WHEN** the human resizes the region and then reloads the chat, or switches to another workspace and opens its chat
-- **THEN** the region is the height they chose
+- **THEN** the region is capped at the height they chose
 
 #### Scenario: Giving the height back
 
@@ -393,7 +397,22 @@ remembered height SHALL apply again the next time a decision is pinned.
 #### Scenario: The region empties and fills again
 
 - **WHEN** the last pinned decision is answered and later another decision is raised
-- **THEN** nothing is pinned in between, and the region returns at the height the human chose
+- **THEN** nothing is pinned in between, and the region returns exactly as tall as the new decision's card, capped at the height the human chose
+
+#### Scenario: Every card hidden at a chosen height
+
+- **WHEN** every open decision is hidden from the chat while the region is holding a height chosen for a screenful of cards
+- **THEN** the region is exactly as tall as the hidden-count line and its handle, not the chosen height
+
+#### Scenario: Content shorter than the chosen height
+
+- **WHEN** the open decisions and any hidden-count line together are shorter than the height the human chose
+- **THEN** the region is exactly as tall as they are, and does not grow to fill the chosen height
+
+#### Scenario: Re-showing hidden cards restores the chosen height's worth of content
+
+- **WHEN** the human shows every hidden decision again while the region is holding a height chosen for a screenful of cards
+- **THEN** the region grows back up to that height's worth of content, without the human resizing again
 
 ### Requirement: The resize handle is reachable without a pointer
 

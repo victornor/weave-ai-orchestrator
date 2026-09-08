@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+goal: Diff highlighting covers the languages our projects actually contain — C#,
+  Rust, Java, PHP, C++ and the rest — decided on a measured comparison

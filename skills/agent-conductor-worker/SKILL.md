@@ -57,11 +57,11 @@ For `change` tickets also load `agent-conductor-openspec` — it holds the propo
 
 ## When to ask
 
-`ac_ask(ticketId, {title, context, options:[{key,label,detail}], recommendation, allowFreeText, correlationKey})`, then **end the turn**. The answer arrives as your next wake.
+`ac_ask(ticketId, {title, context, kind, options:[{key,label,detail}], recommendation, allowFreeText, correlationKey})`, then **end the turn**. Whichever `kind` you name — `question`, `concern` or `gate_finding` — the ask is owned by the conductor, never the human, and wakes it immediately. The answer arrives as your next wake, on this ticket.
 
-Ask when: the request is materially ambiguous and the choice changes what you build; the work would expand the agreed contract; the action is destructive or irreversible; you need a credential; resolving a merge conflict would change behavior the spec described.
+Ask when: the request is materially ambiguous and the choice changes what you build; the work would expand the agreed contract; the action is destructive or irreversible; you need a credential; resolving a merge conflict would change behavior the spec described; **or you are stuck** — the ticket's stated fix turns out to be insufficient, you need a second opinion before continuing. For that last case, use `kind: "concern"` and say what you tried and what would unblock you — you do not need to invent options for a decision you are not making.
 
-Do not ask when: the answer is in the repo, the specs, the project KB, or the ticket; it is a judgement call inside the accepted design (make it, and say what you chose); you just want reassurance. Never answer your own gate finding, and never ask a question in prose instead of `ac_ask` — prose questions reach nobody.
+Do not ask when: the answer is in the repo, the specs, the project KB, or the ticket; it is a judgement call inside the accepted design (make it, and say what you chose); you just want reassurance. Never answer your own gate finding, and never ask a question in prose instead of `ac_ask` — prose questions reach nobody, and you can never reach the human this way regardless of which `kind` you pick.
 
 ## Worktree and git
 
@@ -102,7 +102,7 @@ Your last message is one fenced ```json block:
 | Retrying a 409 | Another run owns the ticket; retrying will never succeed | Report and end the turn |
 | Assuming a write landed because the call did not throw | An error response is a silent failure | Read `ok`; treat anything else as a failure to report |
 | Retrying a failing write all turn | Burns the whole turn on one call | Two attempts, then stop and report it |
-| Asking a question in a comment or in plain text | Nobody is reading; the turn ends with nothing routed | `ac_ask` with options and a recommendation |
+| Asking a question in a comment or in plain text | Nobody is reading; the turn ends with nothing routed | `ac_ask` — options and a recommendation for a real decision, or `kind: "concern"` with no options when you are stuck |
 | `ac_report("working")` to acknowledge a wake | Wakes the conductor for nothing | Report only material phase changes |
 | `blocked` with a prose reason | No owner, no action, no route out | `blockedBy` ids, or `{owner, action}` |
 | `in_review` with no work product | There is nothing to review | Record the PR or branch first |

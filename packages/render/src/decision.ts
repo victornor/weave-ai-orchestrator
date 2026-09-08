@@ -27,6 +27,7 @@ const VARIANTS: Record<string, CardVariant> = {
   hire_approval: 'hire_approval',
   discard_approval: 'discard_approval',
   question: 'question',
+  concern: 'concern',
   approval: 'approval',
   gate_finding: 'gate_finding',
   retry_approval: 'approval',
@@ -53,6 +54,7 @@ const DEFAULTS: Record<CardVariant, CardOption[]> = {
   approval: [opt('approve', 'Approve', 'primary', null), opt('reject', 'Reject', 'default', null)],
   gate_finding: [opt('acknowledge', 'Acknowledge', 'primary', null), opt('ignore', 'Ignore', 'default', null)],
   question: [],
+  concern: [],
 };
 
 function opt(key: string, label: string, tone: CardOption['tone'], consequence: string | null): CardOption {
@@ -65,9 +67,10 @@ export function decisionToCard(decision: Decision, ctx: DecisionCardContext = {}
   const target = (d.target ?? {}) as Record<string, unknown>;
   const provided: RawOption[] = Array.isArray(d.options) ? d.options.filter((o) => o && typeof o.key === 'string') : [];
 
-  const options = variant === 'question' ? questionOptions(provided) : mergeOptions(DEFAULTS[variant], provided, variant);
+  const freeform = variant === 'question' || variant === 'concern';
+  const options = freeform ? questionOptions(provided) : mergeOptions(DEFAULTS[variant], provided, variant);
   const destructive = variant === 'discard_approval';
-  const allowFreeText = typeof d.allowFreeText === 'boolean' ? d.allowFreeText : variant === 'question' || variant === 'plan_approval';
+  const allowFreeText = typeof d.allowFreeText === 'boolean' ? d.allowFreeText : freeform || variant === 'plan_approval';
 
   const identifier = ctx.ticketIdentifier ?? tstr(target, 'ticketIdentifier', 'identifier') ?? d.ticketId ?? null;
   // Always a project chunk (VS-92): a card with no label reads as one whose project is unknown, and
@@ -89,7 +92,7 @@ export function decisionToCard(decision: Decision, ctx: DecisionCardContext = {}
     body: body(variant, d, target),
     options,
     allowFreeText,
-    freeTextLabel: allowFreeText ? (variant === 'question' ? 'Something else…' : 'Add a note…') : null,
+    freeTextLabel: allowFreeText ? (freeform ? 'Something else…' : 'Add a note…') : null,
     confirm: destructive
       ? { expect: identifier ?? d.ticketId ?? d.id, prompt: `Type ${identifier ?? d.ticketId ?? d.id} to confirm` }
       : null,

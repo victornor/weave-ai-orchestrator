@@ -57,6 +57,32 @@ describe('decisions', () => {
     expect(decisions.create(AGENT, { kind: 'gate_finding', title: 'z' }).owner).toBe('conductor');
   });
 
+  it('resolves a worker-asked question or concern to the conductor, and wakes it immediately', () => {
+    const t = ticket();
+    const workerId = h.addWorker(t.id);
+    for (const kind of ['question', 'concern'] as const) {
+      const d = decisions.create(AGENT, { ticketId: t.id, kind, title: kind, askedByAgentId: workerId, correlationKey: `${kind}:${newId()}` });
+      expect(d.owner).toBe('conductor');
+      const w = wake.calls.find((c) => c.agentId === h.conductorId && (c.input.payload as { decisionId?: string })?.decisionId === d.id);
+      expect(w).toBeDefined();
+    }
+  });
+
+  it('keeps a question or concern owned by the human when the conductor itself asks (or nobody is named)', () => {
+    const t = ticket();
+    for (const kind of ['question', 'concern'] as const) {
+      expect(decisions.create(AGENT, { ticketId: t.id, kind, title: kind, askedByAgentId: h.conductorId, correlationKey: `${kind}:${newId()}` }).owner).toBe('human');
+      expect(decisions.create(AGENT, { ticketId: t.id, kind, title: kind, correlationKey: `${kind}:nobody:${newId()}` }).owner).toBe('human');
+    }
+  });
+
+  it('keeps gate_finding owned by the conductor regardless of who asks', () => {
+    const t = ticket();
+    const workerId = h.addWorker(t.id);
+    expect(decisions.create(AGENT, { ticketId: t.id, kind: 'gate_finding', title: 'x', askedByAgentId: workerId, correlationKey: newId() }).owner).toBe('conductor');
+    expect(decisions.create(AGENT, { ticketId: t.id, kind: 'gate_finding', title: 'y', askedByAgentId: h.conductorId, correlationKey: newId() }).owner).toBe('conductor');
+  });
+
   it('records the answer verbatim and wakes the asking agent', async () => {
     const t = ticket();
     const workerId = h.addWorker(t.id);

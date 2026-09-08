@@ -10,7 +10,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   COMMON_TOOLS, CONDUCTOR_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES,
-  COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, DECISION_KINDS, DECISION_INPUT_TYPES,
+  COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope,
 } from '@agent-conductor/shared';
 import type { Actor, CoreServices } from '@agent-conductor/core';
@@ -148,7 +148,7 @@ const AskSchema = z.object({
   projectId: z.string().optional().describe('which project this question is about, when it concerns no ticket. A ticket\'s own project always wins.'),
   title: z.string().min(1),
   context: z.string().optional(),
-  kind: z.enum(DECISION_KINDS).default('question'),
+  kind: z.enum(ASKABLE_DECISION_KINDS).default('question'),
   options: z.array(z.object({ key: z.string(), label: z.string(), description: z.string().optional(), recommended: z.boolean().optional() })).default([]),
   inputs: z.array(AskInputSchema).optional().describe('values to collect on the card as well as, or instead of, an option'),
   recommendation: z.string().nullish(),
@@ -271,7 +271,10 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'ac_ask', scope: 'all', input: AskSchema,
     description:
-      'Ask for a decision. Owned by the human by default; kind=gate_finding is routed to the conductor. Give real options and a recommendation with a one-line why. '
+      'Ask for a decision. A worker\'s ask is always owned by the conductor — whichever of question, concern or gate_finding you name, it wakes the conductor immediately, never the human. '
+      + 'The conductor\'s own use of this tool still reaches the human. Use kind=concern when you are stuck and need help or feedback rather than making a decision: '
+      + 'say what you tried and what would unblock you — no options required. Use kind=question for a genuine open question, and kind=gate_finding for a finding toward the accepted design. '
+      + 'When you do have real options, give them and a recommendation with a one-line why. plan_approval, merge_approval, hire_approval, discard_approval and retry_approval cannot be raised this way — those are always system-raised. '
       + 'Use `inputs` when the answer is a value rather than a choice: text, multiline, multiselect (with `choices`), or secret. '
       + 'A `secret` input is how you ask for a credential — never ask for one in prose. Its value is registered under the input\'s `secretName` and you receive only that name in `answerInputs`; '
       + 'the value never appears in the answer, the chat, a ticket, a log or a transcript. Attach it to a role with ac_role_set_secrets to give that role\'s workers the environment variable. '
@@ -279,7 +282,7 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx, i) => svc(ctx).decisions.create(ctx.actor, {
       ticketId: i.ticketId ? writeTicket(ctx, i.ticketId).id : (ctx.claims.ticketId ?? null),
       projectId: i.projectId ?? ctx.claims.projectId ?? null,
-      kind: i.kind, owner: i.kind === 'gate_finding' ? 'conductor' : 'human', title: i.title, context: i.context,
+      kind: i.kind, title: i.title, context: i.context,
       options: i.options, inputs: i.inputs, allowFreeText: i.allowFreeText, recommendation: i.recommendation ?? null,
       correlationKey: i.correlationKey, expiresInHours: i.expiresInHours,
       askedByAgentId: ctx.claims.agentId, askedInRunId: ctx.claims.runId,

@@ -90,6 +90,24 @@ describe('decisionToCard', () => {
     expect(card.options.map((o) => o.key)).toEqual(['a', 'b', 'c']);
   });
 
+  it('renders a concern like a question: free text, no forced options', () => {
+    const card = decisionToCard(decision({
+      kind: 'concern', title: "The ticket's stated fix looks insufficient",
+      context: 'Tried X and Y; the bug still reproduces. Need a second look before I keep going.',
+    }), { now });
+    expect(card.variant).toBe('concern');
+    expect(card.options).toEqual([]);
+    expect(card.allowFreeText).toBe(true);
+    expect(card.freeTextLabel).toBe('Something else…');
+  });
+
+  it('still renders any options a concern is given', () => {
+    const card = decisionToCard(decision({
+      kind: 'concern', options: [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }],
+    }), { now });
+    expect(card.options.map((o) => o.key)).toEqual(['a', 'b']);
+  });
+
   it('renders a discard approval as destructive with typed confirmation', () => {
     const card = decisionToCard(decision({
       kind: 'discard_approval', title: 'Discard the ACME-42 worktree',

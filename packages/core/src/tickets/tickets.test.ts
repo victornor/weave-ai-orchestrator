@@ -137,6 +137,29 @@ describe('tickets', () => {
       expect(restored.blockedFromStatus).toBeNull();
     });
 
+    // VS-127: a blocked ticket used to be visible only at the conductor's next digest — this is what
+    // makes a conductor-owned unblock action wake it the same turn instead.
+    it('wakes the conductor immediately when blocked on an unblock action it owns', async () => {
+      const t = make();
+      await tickets.transition(AGENT, t.id, { to: 'blocked', unblock: { owner: 'conductor', action: 'pick a store' } });
+      const w = wake.calls.find((c) => c.agentId === h.conductorId && c.input.source === 'ticket_blocked');
+      expect(w).toBeDefined();
+      expect(w?.input.reason).toContain(t.identifier);
+    });
+
+    it('does not wake the conductor when blocked on an unblock action the human owns', async () => {
+      const t = make();
+      await tickets.transition(AGENT, t.id, { to: 'blocked', unblock: { owner: 'human', action: 'decide' } });
+      expect(wake.calls.some((c) => c.input.source === 'ticket_blocked')).toBe(false);
+    });
+
+    it('does not wake the conductor when blocked on unresolved blockers alone', async () => {
+      const t = make();
+      const blocker = make({ title: 'blocker' });
+      await tickets.transition(AGENT, t.id, { to: 'blocked', blockedBy: [blocker.id] });
+      expect(wake.calls.some((c) => c.input.source === 'ticket_blocked')).toBe(false);
+    });
+
     it('rejects blocked without a routable action path', async () => {
       const t = make();
       await expect(tickets.transition(AGENT, t.id, { to: 'blocked', note: 'stuck' })).rejects.toMatchObject({ code: 'missing_action_path' });

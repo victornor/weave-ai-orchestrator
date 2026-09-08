@@ -36,8 +36,18 @@ export type MergeMethod = (typeof MERGE_METHODS)[number];
 export const APPROVAL_OWNERS = ['human', 'conductor', 'none'] as const;
 export type ApprovalOwner = (typeof APPROVAL_OWNERS)[number];
 
-export const DECISION_KINDS = ['approval', 'question', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval', 'retry_approval'] as const;
+export const DECISION_KINDS = ['approval', 'question', 'concern', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval', 'retry_approval'] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
+
+/**
+ * What the general-purpose ask tool (`ac_ask`) may construct (VS-127): `question`, `concern` and
+ * `gate_finding` only. `plan_approval`, `merge_approval`, `hire_approval`, `discard_approval`,
+ * `retry_approval` and the generic `approval` stay exclusively system-raised — each of those already
+ * sets its own owner directly (tickets, roles, the run engine) — so a caller of `ac_ask` can never
+ * construct one and collide its correlation key with a real approval's.
+ */
+export const ASKABLE_DECISION_KINDS = ['question', 'concern', 'gate_finding'] as const;
+export type AskableDecisionKind = (typeof ASKABLE_DECISION_KINDS)[number];
 
 export const DECISION_OWNERS = ['human', 'conductor'] as const;
 export type DecisionOwner = (typeof DECISION_OWNERS)[number];
@@ -69,7 +79,7 @@ export type DecisionInputType = (typeof DECISION_INPUT_TYPES)[number];
 export const SECRET_SCOPES = ['workspace', 'project', 'role'] as const;
 export type SecretScope = (typeof SECRET_SCOPES)[number];
 
-export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved'] as const;
+export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'ticket_blocked', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved'] as const;
 export type WakeSource = (typeof WAKE_SOURCES)[number];
 
 export const WAKE_STATUSES = ['queued', 'claimed', 'coalesced', 'skipped', 'completed', 'failed', 'cancelled'] as const;

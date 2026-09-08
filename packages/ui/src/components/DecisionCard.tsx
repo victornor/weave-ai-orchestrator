@@ -61,6 +61,7 @@ const HEAD: Record<string, { label: string; status: UiStatus }> = {
   hire_approval: { label: 'Hire approval', status: 'needs-you' },
   discard_approval: { label: 'Discard worktree', status: 'failed' },
   question: { label: 'Worker question', status: 'blocked' },
+  concern: { label: 'Worker needs help', status: 'blocked' },
   gate_finding: { label: 'Gate finding', status: 'blocked' },
   approval: { label: 'Needs you', status: 'needs-you' },
   retry_approval: { label: 'Worker stopped', status: 'failed' },

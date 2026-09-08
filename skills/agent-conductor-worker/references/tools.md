@@ -19,7 +19,7 @@ The `conductor` CLI mirrors every tool (`conductor ticket get`, `conductor ask`,
 | `ac_ticket_document_get` | `id`, `key` (default `report`), `revision?` | the document's body and revision — a scout's report, or the daemon's `plan` digest, on any ticket in your project; `not_found` lists the keys that do exist |
 | `ac_ticket_transition` | `id`, `to`, `{note?, unblock?: {owner, action}, blockedBy?: [ids]}` | the new status, or the guard's rejection reasons |
 | `ac_ticket_work_product` | `id`, `{type, url, title, state}` — type is `pull_request` \| `branch` \| `commit` \| `artifact` \| `preview_url` \| `report` | the recorded work product |
-| `ac_ask` | `ticketId?`, `{title, context, options: [{key, label, detail}], recommendation, allowFreeText, correlationKey}` | the created decision; **end the turn after asking** |
+| `ac_ask` | `ticketId?`, `{title, context, kind: 'question' \| 'concern' \| 'gate_finding', options: [{key, label, detail}], recommendation, allowFreeText, correlationKey}` | the created decision, owned by the conductor whichever `kind` you name; **end the turn after asking** |
 | `ac_report` | `{state, key?, note}` — state is `working` \| `needs_decision` \| `blocked` \| `paused` \| `done` \| `failed` | a `status` comment and updated liveness |
 | `ac_knowledge_get` | `scope`: `shared` \| `project` \| `workspace` (conductor) \| `decisions` (conductor); conductor may pass a project id | the file's current body |
 | `ac_knowledge_note` | `scope`, `section`, `text` (≤ 60 words), `doc?` (slug) | remaining budget, or a rejection: duplicate, too long, over budget, or `not_found` if `doc` names a document that does not exist yet; `doc` appends into that linked document's section instead of the hub |

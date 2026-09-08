@@ -202,9 +202,15 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     async outbound(actor, threadId, body, opts = {}) {
       const t = get(threadId);
       const kind = kindOf(t.id);
+      // Resolved before anything is written, same posture as inbound: an invalid or cross-thread
+      // target is rejected rather than stored, and `repliedToMessage` cannot return a row from
+      // another thread by construction.
+      const repliedTo = opts.replyToMessageId ? repliedToMessage(t.id, opts.replyToMessageId) : null;
       return tx(db, () => {
         const msg = insertMessage(t.id, 'outbound', actor, body, {
           ...opts,
+          replyToMessageId: repliedTo?.id ?? null,
+          replyToExcerpt: repliedTo ? excerpt(repliedTo.body) : null,
           deliveryStatus: kind === 'web' ? 'delivered' : 'pending',
         });
         recordActivity(db, ws, actor, 'thread.outbound', 'thread_message', msg.id, { threadId: t.id, channel: kind }, t.ticketId);

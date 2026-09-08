@@ -15,7 +15,7 @@ export { describeLiveInput, type LiveInputStatus } from './runs/active.js';
 export * from './workspace/index.js';
 export { registerBuiltinWorktreeProviders, GitWorktreeProvider, WorktrunkProvider, landedWorkTest, renderWtConfig, writeWtConfig, type LandedInput, type LandedVerdict } from './worktrees/index.js';
 export { registerBuiltinForges, GhForge } from './forge/index.js';
-export { humanName, buildTurnPrompt, renderTemplate, renderCharter, renderBrief, renderWorkerInstructions, renderConductorInstructions, type TurnPromptOptions } from './prompts/index.js';
+export { humanName, buildTurnPrompt, renderTemplate, renderCharter, renderBrief, renderWorkerInstructions, renderConductorInstructions, flattenWakes, type TurnPromptOptions } from './prompts/index.js';
 export { createSessions, type SessionsService, type SessionRow } from './sessions/index.js';
 export { createModelsService, modelSettingFor, deriveModelSettings, hasModelSettings, migrationSummary, MIGRATION_SETTINGS_KEY, WORKERS_RUNTIME_CORRELATION, type ModelMigration, type RoleRuntimeRow } from './models/index.js';
 export { ticketBranch, openspecChangeName, skillsFor } from './workers/index.js';

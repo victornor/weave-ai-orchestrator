@@ -14,7 +14,7 @@ import {
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock,
 } from '@agent-conductor/shared';
-import type { Actor, CoreServices } from '@agent-conductor/core';
+import { flattenWakes, type Actor, type CoreServices } from '@agent-conductor/core';
 import type { RunTokenClaims } from './runtoken.js';
 import type { WorkspaceRuntime } from './types.js';
 import { toOcError } from './http.js';
@@ -147,6 +147,19 @@ function originThreadId(ctx: ToolCtx): string | null {
     if (typeof tid === 'string') return tid;
   }
   return null;
+}
+
+/**
+ * The message that woke this turn, when exactly one human message did — the default reply target for
+ * `ac_human_send`. Flattened through `flattenWakes` (the same unpacking `buildTurnPrompt` uses for "why
+ * you were woken"): several human messages arriving before a turn dispatches coalesce into one queued
+ * wake with the rest folded into its payload's `bundle`, so counting raw wake rows would undercount them.
+ */
+function defaultReplyToMessageId(ctx: ToolCtx): string | null {
+  const humanMessages = flattenWakes(bundledWakes(ctx)).filter((w) => w.source === 'human_message');
+  if (humanMessages.length !== 1) return null;
+  const id = (humanMessages[0]!.payload as { messageId?: unknown } | null)?.messageId;
+  return typeof id === 'string' ? id : null;
 }
 
 // ---------- input schemas ----------
@@ -545,11 +558,14 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
-    name: 'ac_human_send', scope: 'conductor', input: z.object({ threadId: z.string().optional(), body: z.string().min(1) }),
-    description: 'Send text to the human on the originating channel. This is the ONLY way your words reach them — plain assistant text is recorded as the run summary and never delivered. One decision per message; never batch unrelated asks.',
+    name: 'ac_human_send', scope: 'conductor',
+    input: z.object({ threadId: z.string().optional(), body: z.string().min(1), replyToMessageId: z.string().nullable().optional() }),
+    description: 'Send text to the human on the originating channel. This is the ONLY way your words reach them — plain assistant text is recorded as the run summary and never delivered. One decision per message; never batch unrelated asks. ' +
+      'replyToMessageId marks this message as answering one specific earlier human message, shown in the chat as a compact quote: omit it to default to the message that woke this turn, when exactly one did; pass null explicitly to send with no target regardless (use this for anything unrelated to what woke the turn, e.g. relaying a landed ticket in the same turn as answering a question). An id naming no message of the thread, or one from another thread, is rejected.',
     handler: async (ctx, i) => {
       const threadId = i.threadId ?? originThreadId(ctx);
-      if (threadId) return svc(ctx).threads.outbound(ctx.actor, threadId, i.body, { runId: ctx.claims.runId });
+      const replyToMessageId = i.replyToMessageId === undefined ? defaultReplyToMessageId(ctx) : i.replyToMessageId;
+      if (threadId) return svc(ctx).threads.outbound(ctx.actor, threadId, i.body, { runId: ctx.claims.runId, replyToMessageId });
       await svc(ctx).threads.notifyHuman(ctx.actor, { text: i.body });
       return { delivered: 'primary-thread' };
     },

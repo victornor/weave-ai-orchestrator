@@ -596,6 +596,13 @@ export interface PresentationSurfaces {
   surfaces: string[];
 }
 
+/** `GET /channels/telegram/token` (VS-125) — never a value, only whether one is configured and where it came from. */
+export interface TelegramTokenStatus {
+  configured: boolean;
+  source: 'secret' | 'env' | null;
+  botUsername: string | null;
+}
+
 export type { PresentationConfig };
 
 export type { Agent, Briefing, Decision, Project, Role, Run, RunEvent, Ticket, TicketComment, ThreadMessage, Workspace };

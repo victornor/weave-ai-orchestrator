@@ -291,6 +291,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       list: () => [...secretValues.keys()].map((name) => ({ name, envVarName: name, scope: 'workspace' as const, scopeId: null, hasValue: true })),
       has: (name: string) => secretValues.has(name),
       value: (name: string) => secretValues.get(name) ?? null,
+      clear: (_actor: Actor, name: string) => { secretValues.delete(name); },
     }),
   } as unknown as CoreServices;
 

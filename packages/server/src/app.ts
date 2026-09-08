@@ -31,6 +31,7 @@ import { changelogRoutes } from './routes/changelog.js';
 import { usageRoutes } from './routes/usage.js';
 import { threadRoutes } from './routes/threads.js';
 import { agentRoutes } from './routes/agent.js';
+import { channelRoutes } from './routes/channels.js';
 
 export type { WorkspaceAdmin };
 
@@ -80,6 +81,7 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   ws.route('/presenter', presenterRoutes(deps));
   ws.route(PUSH_BASE, pushRoutes(deps));
   ws.route('/agent', agentRoutes());
+  ws.route('/channels', channelRoutes());
   app.route('/api/w/:ws', ws);
 
   // ---- MCP (loopback listener, run tokens) ----

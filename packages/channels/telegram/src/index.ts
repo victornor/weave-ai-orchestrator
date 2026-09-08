@@ -95,6 +95,7 @@ export function createTelegramAdapter(options: TelegramAdapterOptions = {}): Cha
     const validated = validateTelegramConfig(ctx.config);
     if (!validated.ok) throw new PermanentChannelError(`invalid telegram config: ${validated.errors.join('; ')}`, 'validation');
     const cfg = validated.value;
+    if (!cfg.botToken) throw new PermanentChannelError('no bot token resolved for this workspace', 'validation');
     const client = new TelegramClient({
       botToken: cfg.botToken,
       ...(cfg.apiBaseUrl ? { apiBaseUrl: cfg.apiBaseUrl } : {}),
@@ -105,6 +106,8 @@ export function createTelegramAdapter(options: TelegramAdapterOptions = {}): Cha
     state = running;
 
     const allowed = new Set(cfg.allowedUserIds);
+    /** Meaningful only when `allowed` is empty (VS-125): an empty list otherwise means nobody, not everybody. */
+    const openToAll = cfg.allowAll && allowed.size === 0;
     const loop = (async (): Promise<void> => {
       let offset = 0;
       let backoffMs = 1000;
@@ -130,7 +133,7 @@ export function createTelegramAdapter(options: TelegramAdapterOptions = {}): Cha
           offset = update.update_id + 1;
           if (running.stopped) break;
           try {
-            await handleUpdate(update, running, allowed, codec, rejectedUsers);
+            await handleUpdate(update, running, allowed, openToAll, codec, rejectedUsers);
           } catch (err) {
             ctx.log('warn', 'telegram update handling failed', { message: (err as Error).message, updateId: update.update_id });
           }
@@ -181,6 +184,7 @@ async function handleUpdate(
   update: TelegramUpdate,
   running: RunningState,
   allowed: Set<number>,
+  openToAll: boolean,
   codec: CallbackCodec,
   rejectedUsers: Set<string>,
 ): Promise<void> {
@@ -190,7 +194,12 @@ async function handleUpdate(
     ctx.log('debug', 'telegram update ignored', { reason: parsed.reason, updateId: update.update_id });
     return;
   }
-  if (allowed.size && !allowed.has(parsed.userId)) {
+  /**
+   * A populated list always restricts to itself. An empty list admits nobody unless the workspace
+   * is explicitly marked open to all (VS-125) — the old behavior, where an empty list admitted
+   * everyone, was the exact trap this ticket exists to close.
+   */
+  if (allowed.size ? !allowed.has(parsed.userId) : !openToAll) {
     const key = String(parsed.userId);
     if (!rejectedUsers.has(key)) {
       rejectedUsers.add(key);

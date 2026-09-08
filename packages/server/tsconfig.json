@@ -32,6 +32,9 @@
     },
     {
       "path": "../../packages/release"
+    },
+    {
+      "path": "../../packages/channels/telegram"
     }
   ]
 }

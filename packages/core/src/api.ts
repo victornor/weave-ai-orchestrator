@@ -520,6 +520,8 @@ export interface SecretsService {
   has(name: string): boolean;
   /** Daemon-only. Do not expose through a route, a tool or an event. */
   value(name: string): string | null;
+  /** Removes the registration and the stored value. A name that was never registered is a no-op. */
+  clear(actor: Actor, name: string): void;
 }
 
 export interface CoreServices {

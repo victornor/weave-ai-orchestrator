@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: The Telegram bot token is set from Settings and held in the secret store,
+  not written into a config file

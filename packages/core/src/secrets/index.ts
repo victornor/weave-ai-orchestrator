@@ -61,6 +61,14 @@ export function createSecretsService(ctx: WorkspaceContext, store: SecretStore =
     value(name: string): string | null {
       return store.get(name);
     },
+
+    clear(actor: Actor, name: string): void {
+      const existing = row(name);
+      store.clear(name);
+      if (!existing) return;
+      db.run('DELETE FROM secrets WHERE id = ?', [existing.id]);
+      recordActivity(db, ws, actor, 'secret.cleared', 'secret', existing.id, { name });
+    },
   };
 }
 

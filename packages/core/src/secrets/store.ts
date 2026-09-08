@@ -75,6 +75,7 @@ export interface SecretStore {
   get(name: string): string | null;
   has(name: string): boolean;
   names(): string[];
+  clear(name: string): void;
 }
 
 export function createSecretStore(paths: { secretsFile: string; secretsKey: string }): SecretStore {
@@ -94,6 +95,12 @@ export function createSecretStore(paths: { secretsFile: string; secretsKey: stri
     },
     names() {
       return Object.keys(load(paths.secretsFile));
+    },
+    clear(name) {
+      const all = load(paths.secretsFile);
+      if (!(name in all)) return;
+      delete all[name];
+      writePrivate(paths.secretsFile, JSON.stringify(all));
     },
   };
 }

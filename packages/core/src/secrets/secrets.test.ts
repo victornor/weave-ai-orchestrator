@@ -105,4 +105,33 @@ describe('secrets', () => {
     expect(h.services.secrets!.list()).toEqual([]);
     h.cleanup();
   });
+
+  it('clears a registered value: gone from the store, the row, and has()', () => {
+    const h = makeHarness();
+    h.services.secrets!.put(actor, { name: 'API_KEY' }, FAKE);
+    h.services.secrets!.clear(actor, 'API_KEY');
+    expect(h.services.secrets!.has('API_KEY')).toBe(false);
+    expect(h.services.secrets!.value('API_KEY')).toBeNull();
+    expect(h.db.all('SELECT id FROM secrets')).toHaveLength(0);
+    h.cleanup();
+  });
+
+  it('clearing an unregistered name does not throw and leaves other secrets untouched', () => {
+    const h = makeHarness();
+    h.services.secrets!.put(actor, { name: 'API_KEY' }, FAKE);
+    expect(() => h.services.secrets!.clear(actor, 'NOPE')).not.toThrow();
+    expect(h.services.secrets!.value('API_KEY')).toBe(FAKE);
+    h.cleanup();
+  });
+
+  it('records the clear without the value', () => {
+    const h = makeHarness();
+    h.services.secrets!.put(actor, { name: 'API_KEY' }, FAKE);
+    h.services.secrets!.clear(actor, 'API_KEY');
+    const rows = h.db.all<{ action: string; details: Record<string, unknown> }>("SELECT action, details_json FROM activity WHERE action = 'secret.cleared'");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ name: 'API_KEY' });
+    expect(JSON.stringify(rows[0])).not.toContain(FAKE);
+    h.cleanup();
+  });
 });

@@ -14,6 +14,7 @@ import {
   useAddProject,
   useAuthSessions,
   useCancelUpgrade,
+  useClearTelegramToken,
   useDaemonUpdate,
   useDaemonUpgrade,
   useMe,
@@ -29,6 +30,8 @@ import {
   useRuntimeModels,
   useRuntimes,
   useSetModels,
+  useSetTelegramToken,
+  useTelegramTokenStatus,
   useWorkspaceSummary,
   useWorkspaces,
 } from '../api/hooks';
@@ -517,11 +520,35 @@ function ModelSettingFields({ label, hint, setting, runtimes, onChange }: {
   );
 }
 
+/** Which of the three rules is in force for an empty-or-populated allowlist (VS-125 criterion: state it, don't leave it implicit). */
+function allowlistRuleLabel(telegram: { allowedUserIds?: number[]; allowAll?: boolean }): { text: string; tone: 'added' | 'accent' | 'removed' } {
+  const ids = telegram.allowedUserIds ?? [];
+  if (ids.length) return { text: `Locked to ${ids.length} user${ids.length === 1 ? '' : 's'}`, tone: 'accent' };
+  if (telegram.allowAll) return { text: 'Open to any Telegram user', tone: 'removed' };
+  return { text: 'Off — no user is allowed', tone: 'added' };
+}
+
 function ChannelsSection(): React.ReactElement {
   const summary = useWorkspaceSummary();
   const patch = usePatchConfig();
-  const channels = (summary.data?.config?.['channels'] ?? {}) as Record<string, { enabled?: boolean; allowlist?: string[] }>;
+  const tokenStatus = useTelegramTokenStatus();
+  const setTelegramToken = useSetTelegramToken();
+  const clearToken = useClearTelegramToken();
+  const toast = useToast();
+  const [pendingToken, setPendingToken] = useState('');
+  const channels = (summary.data?.config?.['channels'] ?? {}) as Record<string, { enabled?: boolean; allowedUserIds?: number[]; allowAll?: boolean }>;
   const telegram = channels['telegram'] ?? {};
+  const rule = allowlistRuleLabel(telegram);
+
+  const save = (): void => {
+    void setTelegramToken
+      .mutateAsync(pendingToken)
+      .then((r) => {
+        toast.push({ title: 'Telegram token saved', detail: r.botUsername ? `Confirmed as @${r.botUsername}` : undefined, status: 'done' });
+        setPendingToken('');
+      })
+      .catch((e: Error) => toast.push({ title: 'Could not save the token', detail: e.message, status: 'failed' }));
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -536,14 +563,64 @@ function ChannelsSection(): React.ReactElement {
           <option value="on">on</option>
         </select>
       </Field>
-      <Field label="Allowlist" hint="Comma-separated Telegram user ids that may talk to the conductor.">
-        <input
-          className={cx(inputCx, 'ac-mono')}
-          defaultValue={(telegram.allowlist ?? []).join(', ')}
-          onBlur={(e) =>
-            patch.mutate({ channels: { telegram: { ...telegram, allowlist: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) } } })
-          }
-        />
+
+      <Field
+        label="Bot token"
+        hint={
+          tokenStatus.data?.configured
+            ? tokenStatus.data.source === 'env'
+              ? "Configured via an ${ENV_VAR} reference in workspace.yaml. Saving here switches this workspace to the secret store, which then takes precedence."
+              : `Configured, held in the workspace secret store${tokenStatus.data.botUsername ? ` — confirmed as @${tokenStatus.data.botUsername}` : ''}. Never shown here again once saved.`
+            : 'Not configured — the channel is off for lack of a token. Paste one from @BotFather and save; it is validated against Telegram before it is accepted.'
+        }
+      >
+        <div className="flex gap-2">
+          <input
+            type="password"
+            aria-label="Bot token"
+            className={cx(inputCx, 'ac-mono')}
+            placeholder={tokenStatus.data?.configured ? 'Replace the current token…' : 'Paste the bot token…'}
+            value={pendingToken}
+            onChange={(e) => setPendingToken(e.target.value)}
+            autoComplete="off"
+          />
+          <Button variant="primary" size="sm" disabled={!pendingToken || setTelegramToken.isPending} onClick={save}>
+            Save
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            disabled={!tokenStatus.data?.configured || clearToken.isPending}
+            onClick={() =>
+              void clearToken
+                .mutateAsync()
+                .then(() => toast.push({ title: 'Telegram token cleared', detail: 'The channel is off.', status: 'done' }))
+                .catch((e: Error) => toast.push({ title: 'Could not clear the token', detail: e.message, status: 'failed' }))
+            }
+          >
+            Clear
+          </Button>
+        </div>
+      </Field>
+
+      <Field label="Allowlist" hint="Comma-separated Telegram user ids that may talk to the conductor. Empty means nobody, unless the workspace was carried over already open.">
+        <div className="flex items-center gap-2">
+          <input
+            aria-label="Allowlist"
+            className={cx(inputCx, 'ac-mono')}
+            defaultValue={(telegram.allowedUserIds ?? []).join(', ')}
+            onBlur={(e) => {
+              const allowedUserIds = e.target.value
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .map(Number)
+                .filter((n) => Number.isInteger(n));
+              patch.mutate({ channels: { telegram: { ...telegram, allowedUserIds } } });
+            }}
+          />
+          <Badge tone={rule.tone}>{rule.text}</Badge>
+        </div>
       </Field>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, UsageGrain, UsageWindow, Workspace } from '@agent-conductor/shared';
 import { dayKey } from '@agent-conductor/render';
@@ -250,6 +250,34 @@ export function useBriefing(): UseQueryResult<T.Briefing> {
 export function useProjects(): UseQueryResult<Project[]> {
   const ws = useWs();
   return useQuery({ queryKey: qk.projects(ws), queryFn: () => api.ws<Project[]>(ws, '/projects') });
+}
+
+export interface WorkspaceProjectsState {
+  status: 'pending' | 'error' | 'success';
+  projects: Project[];
+}
+
+/**
+ * A workspace's projects are fetched, and kept, only for the ids passed in — the active workspace
+ * plus whichever groups the sidebar has expanded (VS-128). An id dropped from `ids` stops being
+ * refetched but its cached result is not discarded, so re-adding it (re-expanding the group) is
+ * instant.
+ */
+export function useWorkspaceProjects(ids: readonly string[]): Record<string, WorkspaceProjectsState> {
+  const results = useQueries({
+    // `staleTime: Infinity` is what "keep them" means here: TanStack Query refetches an inactive
+    // query as soon as it gains an observer again unless told the data is still fresh, and a
+    // collapsed-then-re-expanded group re-adds its id to `ids`, which is exactly that.
+    queries: ids.map((id) => ({ queryKey: qk.projects(id), queryFn: () => api.ws<Project[]>(id, '/projects'), staleTime: Infinity })),
+  });
+  return useMemo(() => {
+    const map: Record<string, WorkspaceProjectsState> = {};
+    ids.forEach((id, i) => {
+      const r = results[i];
+      map[id] = { status: r?.isError ? 'error' : r?.isSuccess ? 'success' : 'pending', projects: r?.data ?? [] };
+    });
+    return map;
+  }, [ids, results]);
 }
 
 export function useAddProject(): UseMutationResult<Project, Error, { url: string; id?: string; runtime?: string; maxWorkers?: number; setupCommand?: string; autoMerge?: boolean }> {

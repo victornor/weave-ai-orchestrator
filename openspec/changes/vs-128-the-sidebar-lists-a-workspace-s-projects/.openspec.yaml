@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: The sidebar lists a workspace's projects without having to switch to that
+  workspace first

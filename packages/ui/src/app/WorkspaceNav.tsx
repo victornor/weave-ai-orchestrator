@@ -1,8 +1,9 @@
 import { A } from './link';
 import { RAIL, href } from './nav';
 import { PlusGlyph } from './PlusGlyph';
+import { Skeleton } from '../components/Skeleton';
 import type { WorkspaceListItem } from '../api/types';
-import type { Project } from '../api/types';
+import type { WorkspaceProjectsState } from '../api/hooks';
 import { cx } from '../lib/cx';
 
 export interface WorkspaceNavProps {
@@ -18,10 +19,12 @@ export interface WorkspaceNavProps {
    */
   needsCount: number;
   /**
-   * The active workspace's projects. A non-active workspace's are not loaded, so none are shown.
-   * Each opens that project's overview (VS-95); the board's project filter is one click on from it.
+   * Each open group's own projects (VS-128) — keyed by workspace id, present for the active
+   * workspace and every expanded one; absent for a workspace whose group has never been opened, since
+   * nothing has fetched it. Each project opens its own overview (VS-95); the board's project filter
+   * is one click on from it.
    */
-  projects: Project[];
+  projectsByWs: Record<string, WorkspaceProjectsState>;
   onNewWorkspace: () => void;
 }
 
@@ -41,7 +44,7 @@ function Chevron({ open }: { open: boolean }): React.ReactElement {
  * with plain data instead of the wholesale `api/hooks` mock the shell's own test needs.
  */
 export function WorkspaceNav({
-  workspaces, activeWs, activePath, expanded, onToggle, needsCount, projects, onNewWorkspace,
+  workspaces, activeWs, activePath, expanded, onToggle, needsCount, projectsByWs, onNewWorkspace,
 }: WorkspaceNavProps): React.ReactElement {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -84,21 +87,7 @@ export function WorkspaceNav({
                   })}
                 </nav>
               ) : null}
-              {active && projects.length > 0 ? (
-                <div className="mt-2 flex flex-col gap-px" aria-label={`${w.name} projects`}>
-                  {projects.map((p, i) => (
-                    <A
-                      key={p.id}
-                      to="/w/$ws/p/$project"
-                      params={{ ws: w.id, project: p.slug }}
-                      className="flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5 hover:bg-bg-2"
-                    >
-                      <span className="size-1.5 rounded-r4" style={{ background: `var(--status-${PROJECT_DOT[i % PROJECT_DOT.length] ?? 'done'})` }} aria-hidden />
-                      <span className="ac-mono flex-1 truncate text-meta text-text-2">{p.slug}</span>
-                    </A>
-                  ))}
-                </div>
-              ) : null}
+              {open ? <ProjectsGroup wsId={w.id} wsName={w.name} state={projectsByWs[w.id]} /> : null}
             </div>
           );
         })}
@@ -112,6 +101,40 @@ export function WorkspaceNav({
         <PlusGlyph className="size-2" />
         <span>New workspace</span>
       </button>
+    </div>
+  );
+}
+
+/**
+ * An open group's own project list: loading, failed and ready-with-projects each render their own
+ * row so loading is never mistaken for empty (VS-128); a workspace with genuinely no projects
+ * contributes nothing here, exactly like today.
+ */
+function ProjectsGroup({ wsId, wsName, state }: { wsId: string; wsName: string; state: WorkspaceProjectsState | undefined }): React.ReactElement | null {
+  if (!state || (state.status === 'success' && state.projects.length === 0)) return null;
+  return (
+    <div className="mt-2 flex flex-col gap-px" aria-label={`${wsName} projects`}>
+      {state.status === 'pending' ? (
+        <div className="flex h-7 items-center gap-2.5 pl-5 pr-2.5" role="status" aria-label="Loading">
+          <Skeleton className="h-2 w-16" />
+        </div>
+      ) : state.status === 'error' ? (
+        <div className="flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5 text-micro text-failed" role="alert">
+          Couldn&rsquo;t load projects
+        </div>
+      ) : (
+        state.projects.map((p, i) => (
+          <A
+            key={p.id}
+            to="/w/$ws/p/$project"
+            params={{ ws: wsId, project: p.slug }}
+            className="flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5 hover:bg-bg-2"
+          >
+            <span className="size-1.5 rounded-r4" style={{ background: `var(--status-${PROJECT_DOT[i % PROJECT_DOT.length] ?? 'done'})` }} aria-hidden />
+            <span className="ac-mono flex-1 truncate text-meta text-text-2">{p.slug}</span>
+          </A>
+        ))
+      )}
     </div>
   );
 }

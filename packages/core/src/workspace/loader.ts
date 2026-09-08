@@ -4,7 +4,7 @@ import { join, resolve, dirname } from 'node:path';
 import YAML from 'yaml';
 import { openDb, newId, nowIso } from '@agent-conductor/db';
 import {
-  DaemonConfigSchema, DEFAULT_KNOWLEDGE_BUDGETS, WorkspaceConfigSchema, WorkspaceRegistrySchema, OcError,
+  DaemonConfigSchema, DEFAULT_KNOWLEDGE_BUDGETS, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, WorkspaceRegistrySchema, OcError,
   type DaemonConfig, type KnowledgeBudgets, type WorkspaceConfig, type WorkspaceRegistry,
 } from '@agent-conductor/shared';
 import type { Registries, WorkspaceContext } from '../context.js';
@@ -18,6 +18,8 @@ import {
   ROLE_RUNTIMES_META_KEY, deriveModelSettings, hasModelSettings, migrationLogFields, migrationSummary,
   recordPendingMigration, type RoleRuntimeRow,
 } from '../models/index.js';
+import { createSecretStore } from '../secrets/store.js';
+import { planTelegramAllowlistMigration } from './telegramAllowlistMigration.js';
 import type { LoadOptions, WorkspaceLoader } from './index.js';
 
 export const WORKSPACE_FILE = 'workspace.yaml';
@@ -224,6 +226,28 @@ class Loader implements WorkspaceLoader {
         if (migration.ambiguous) recordPendingMigration(db, ws.id, migration);
       }
       db.run('DELETE FROM meta WHERE key = ?', [ROLE_RUNTIMES_META_KEY]);
+    }
+
+    // VS-125: see telegramAllowlistMigration.ts for the full reasoning. Runs once per workspace,
+    // gated by this meta row rather than by the shape of the config alone — a value-only check
+    // ("no allowAll key, no ids") cannot tell a workspace that has been open for months apart from
+    // one enabling Telegram for the very first time after this code shipped.
+    const telegramAllowlistMigrated = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'telegram_allowlist_migrated'");
+    if (!telegramAllowlistMigrated) {
+      const rawTelegram = (raw as { channels?: Record<string, unknown> } | undefined)?.channels?.['telegram'] as Record<string, unknown> | undefined;
+      const configuredToken = config.channels['telegram']?.['botToken'] as string | undefined;
+      const hasResolvableToken = Boolean(configuredToken && !ENV_REF.test(configuredToken)) || Boolean(createSecretStore(paths).get(TELEGRAM_BOT_TOKEN_SECRET_NAME));
+      const plan = planTelegramAllowlistMigration(rawTelegram, hasResolvableToken);
+      if (plan.dropped.length) {
+        log.warn({ dropped: plan.dropped, kept: 'allowedUserIds' in (plan.patch ?? {}) ? (plan.patch as { allowedUserIds: number[] }).allowedUserIds.length : 0 },
+          'telegram allowlist: entries that were not valid ids were dropped during migration');
+      }
+      if (plan.patch) {
+        config.channels['telegram'] = { ...(config.channels['telegram'] ?? {}), ...plan.patch };
+        writeYamlFile(file, unresolveEnvRefs(config, envBack));
+        log.info({ patch: plan.patch }, 'telegram allowlist migrated');
+      }
+      db.run('INSERT INTO meta (key, value) VALUES (?, ?)', ['telegram_allowlist_migrated', '1']);
     }
 
     // Per-workspace runtime config homes (CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_CONFIG_HOME …).

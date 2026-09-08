@@ -142,6 +142,71 @@ describe('ChannelManager', () => {
   });
 });
 
+describe('restartChannel (VS-125)', () => {
+  /** Tracks start/stop calls explicitly, unlike `fakeAdapter`, so a restart is unambiguous. */
+  function trackingAdapter(): ChannelAdapter & { starts: number; stops: number } {
+    const state = {
+      kind: 'telegram',
+      capabilities: { supportsButtons: false, supportsMarkdown: true, supportsEdit: false, supportsThreads: true, supportsFiles: false, maxTextBytes: 4096 },
+      starts: 0,
+      stops: 0,
+      configSchema: () => ({}),
+      validateConfig: () => ({ ok: true as const }),
+      async start() { state.starts += 1; return { stop: async () => { state.stops += 1; } }; },
+      async send(): Promise<SendResult> { return { delivered: true }; },
+    };
+    return state as unknown as ChannelAdapter & { starts: number; stops: number };
+  }
+
+  it('does not start a configured channel with no resolvable token', async () => {
+    harness = makeHarness();
+    const adapter = trackingAdapter();
+    harness.runtime.ctx.registries.channels.set('telegram', adapter);
+    harness.runtime.ctx.config.channels = { telegram: {} };
+    wireThreads(harness);
+    manager = new ChannelManager(harness.runtime.ctx, harness.runtime.services);
+    await manager.start();
+    expect(adapter.starts).toBe(0);
+  });
+
+  it('restartChannel starts it once a secret-store token resolves, and stops it again once cleared', async () => {
+    harness = makeHarness();
+    const adapter = trackingAdapter();
+    harness.runtime.ctx.registries.channels.set('telegram', adapter);
+    harness.runtime.ctx.config.channels = { telegram: {} };
+    wireThreads(harness);
+    manager = new ChannelManager(harness.runtime.ctx, harness.runtime.services);
+    await manager.start();
+    expect(adapter.starts).toBe(0);
+
+    harness.runtime.services.secrets!.put({ kind: 'human', id: 'op1' }, { name: 'telegram-bot-token' }, 'T');
+    await manager.restartChannel('telegram');
+    expect(adapter.starts).toBe(1);
+    expect(adapter.stops).toBe(0);
+
+    harness.runtime.services.secrets!.clear({ kind: 'human', id: 'op1' }, 'telegram-bot-token');
+    await manager.restartChannel('telegram');
+    expect(adapter.starts).toBe(1);
+    expect(adapter.stops).toBe(1);
+  });
+
+  it('restartChannel stops the running adapter and starts a fresh one when the token changes', async () => {
+    harness = makeHarness();
+    const adapter = trackingAdapter();
+    harness.runtime.ctx.registries.channels.set('telegram', adapter);
+    harness.runtime.ctx.config.channels = { telegram: { botToken: 'first' } };
+    wireThreads(harness);
+    manager = new ChannelManager(harness.runtime.ctx, harness.runtime.services);
+    await manager.start();
+    expect(adapter.starts).toBe(1);
+
+    harness.runtime.services.secrets!.put({ kind: 'human', id: 'op1' }, { name: 'telegram-bot-token' }, 'second');
+    await manager.restartChannel('telegram');
+    expect(adapter.starts).toBe(2);
+    expect(adapter.stops).toBe(1);
+  });
+});
+
 /** PLAN §14.2: the manager owns the commands, so every channel kind gets the same set. */
 describe('manager commands on every channel kind', () => {
   const KINDS = ['web', 'cli', 'telegram'] as const;
@@ -155,7 +220,10 @@ describe('manager commands on every channel kind', () => {
       adapters[kind] = adapter;
       harness.runtime.ctx.registries.channels.set(kind, adapter);
     }
-    harness.runtime.ctx.config.channels = Object.fromEntries(KINDS.map((k) => [k, {}]));
+    // 'telegram' is a fake stand-in adapter here like 'web' and 'cli' — it needs a token in config
+    // only because ChannelManager now resolves one for the literal kind 'telegram' before starting
+    // it (VS-125); the fake adapter itself does not care what the value is.
+    harness.runtime.ctx.config.channels = Object.fromEntries(KINDS.map((k) => [k, k === 'telegram' ? { botToken: 'test-token' } : {}]));
     harness.runtime.ctx.config.conductor.channels = [...KINDS];
     wireThreads(harness);
     manager = new ChannelManager(harness.runtime.ctx, harness.runtime.services);

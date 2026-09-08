@@ -47,19 +47,25 @@ const okBody = (result: unknown): Reply => ({ body: { ok: true, result } });
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('config validation', () => {
-  it('requires a bot token and rejects unresolved env references', () => {
+  it('accepts a missing bot token at the schema level (VS-125: it may live in the secret store instead) but rejects an unresolved env reference', () => {
     const adapter = createTelegramAdapter();
     expect(adapter.validateConfig({ botToken: 't', allowedUserIds: [1] })).toEqual({ ok: true });
-    expect(adapter.validateConfig({}).ok).toBe(false);
+    expect(adapter.validateConfig({}).ok).toBe(true);
     const unresolved = adapter.validateConfig({ botToken: '${TELEGRAM_BOT_TOKEN}' });
     expect(unresolved.ok).toBe(false);
     expect(unresolved.ok === false && unresolved.errors[0]).toContain('unresolved');
   });
 
-  it('publishes a json schema with botToken and allowedUserIds', () => {
+  it('refuses to start without a resolved token even though the schema allows it', async () => {
+    const adapter = createTelegramAdapter();
+    const ctx = makeCtx({ allowedUserIds: [] });
+    await expect(adapter.start(ctx)).rejects.toThrow(/no bot token resolved/);
+  });
+
+  it('publishes a json schema with botToken and allowedUserIds, neither required', () => {
     const schema = createTelegramAdapter().configSchema() as { properties: Record<string, unknown>; required: string[] };
     expect(Object.keys(schema.properties)).toContain('allowedUserIds');
-    expect(schema.required).toEqual(['botToken']);
+    expect(schema.required).toEqual([]);
   });
 });
 
@@ -145,6 +151,60 @@ describe('polling', () => {
     expect(ctx.inboundMessages[0]).toMatchObject({ externalThreadId: '5', externalUserId: '7', text: 'ship it' });
     expect(calls.some((c) => c.method === 'sendChatAction')).toBe(true);
     expect(ctx.logs.some((l) => l.level === 'warn' && l.msg.includes('allowedUserIds'))).toBe(true);
+  });
+
+  it('an empty allowlist admits nobody by default (VS-125 — the old "empty means everyone" trap)', async () => {
+    let served = false;
+    const { fetchImpl } = makeFetch((method) => {
+      if (method === 'getUpdates') {
+        if (served) return 'hang';
+        served = true;
+        return okBody([{ update_id: 1, message: { message_id: 1, chat: { id: 5 }, from: { id: 7, username: 'vic' }, text: 'hi' } }]);
+      }
+      return okBody(true);
+    });
+    const adapter = createTelegramAdapter({ fetchImpl, sleep: async () => undefined });
+    const ctx = makeCtx({ botToken: 'T', allowedUserIds: [] });
+    const running = await adapter.start(ctx);
+    await vi.waitFor(() => expect(ctx.logs.some((l) => l.msg.includes('allowedUserIds'))).toBe(true));
+    await running.stop();
+    expect(ctx.inboundMessages).toHaveLength(0);
+  });
+
+  it('an empty allowlist with allowAll admits everyone', async () => {
+    let served = false;
+    const { fetchImpl } = makeFetch((method) => {
+      if (method === 'getUpdates') {
+        if (served) return 'hang';
+        served = true;
+        return okBody([{ update_id: 1, message: { message_id: 1, chat: { id: 5 }, from: { id: 7, username: 'vic' }, text: 'hi' } }]);
+      }
+      return okBody(true);
+    });
+    const adapter = createTelegramAdapter({ fetchImpl, sleep: async () => undefined });
+    const ctx = makeCtx({ botToken: 'T', allowedUserIds: [], allowAll: true });
+    const running = await adapter.start(ctx);
+    await vi.waitFor(() => expect(ctx.inboundMessages).toHaveLength(1));
+    await running.stop();
+    expect(ctx.inboundMessages[0]).toMatchObject({ externalUserId: '7', text: 'hi' });
+  });
+
+  it('a populated allowlist restricts even when allowAll is true', async () => {
+    let served = false;
+    const { fetchImpl } = makeFetch((method) => {
+      if (method === 'getUpdates') {
+        if (served) return 'hang';
+        served = true;
+        return okBody([{ update_id: 1, message: { message_id: 1, chat: { id: 5 }, from: { id: 99 }, text: 'hi' } }]);
+      }
+      return okBody(true);
+    });
+    const adapter = createTelegramAdapter({ fetchImpl, sleep: async () => undefined });
+    const ctx = makeCtx({ botToken: 'T', allowedUserIds: [7], allowAll: true });
+    const running = await adapter.start(ctx);
+    await vi.waitFor(() => expect(ctx.logs.some((l) => l.msg.includes('allowedUserIds'))).toBe(true));
+    await running.stop();
+    expect(ctx.inboundMessages).toHaveLength(0);
   });
 
   it('answers callback queries and forwards the decision action', async () => {

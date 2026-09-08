@@ -44,6 +44,9 @@ vi.mock('../api/hooks', () => ({
   useDaemonUpgrade: () => ({ data: { upgrade: null, waitingFor: [] }, isError: false }),
   useRefreshDaemonUpdate: () => ({ mutate: vi.fn(), isPending: false }),
   useRequestUpgrade: () => ({ mutate: vi.fn(), isPending: false }),
+  useTelegramTokenStatus: () => ({ data: { configured: false, source: null, botUsername: null } }),
+  useSetTelegramToken: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useClearTelegramToken: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCancelUpgrade: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 

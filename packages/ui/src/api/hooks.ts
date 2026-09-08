@@ -1137,6 +1137,31 @@ export function usePutPresentation(): UseMutationResult<T.PresentationConfig, Er
   });
 }
 
+// ---------------------------------------------------------------- channels
+
+export function useTelegramTokenStatus(): UseQueryResult<T.TelegramTokenStatus> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.telegramToken(ws), queryFn: () => api.ws<T.TelegramTokenStatus>(ws, '/channels/telegram/token') });
+}
+
+export function useSetTelegramToken(): UseMutationResult<{ ok: true; botUsername: string | null }, Error, string> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (token) => api.ws<{ ok: true; botUsername: string | null }>(ws, '/channels/telegram/token', { method: 'POST', body: { token } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.telegramToken(ws) }),
+  });
+}
+
+export function useClearTelegramToken(): UseMutationResult<{ ok: true }, Error, void> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.ws<{ ok: true }>(ws, '/channels/telegram/token', { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.telegramToken(ws) }),
+  });
+}
+
 // ---------------------------------------------------------------- changelog
 
 const CHANGELOG_PAGE_SIZE = 50;

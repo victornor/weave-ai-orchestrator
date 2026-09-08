@@ -5,15 +5,27 @@
  */
 import type { ChannelAdapter, CanonicalMessage, CanonicalPart, InboundMessage, RunningChannel } from '@agent-conductor/channel-sdk';
 import { degrade, textMessage } from '@agent-conductor/channel-sdk';
-import type { Actor, CoreServices, WorkspaceContext } from '@agent-conductor/core';
+import type { Actor, CoreServices, SecretsService, WorkspaceContext } from '@agent-conductor/core';
 import { getLogger } from '@agent-conductor/core';
 import { newId, nowIso } from '@agent-conductor/db';
-import type { Decision, WorkspaceEvent } from '@agent-conductor/shared';
+import { UNRESOLVED_ENV_REF } from '@agent-conductor/channel-telegram';
+import { TELEGRAM_BOT_TOKEN_SECRET_NAME, type Decision, type WorkspaceEvent } from '@agent-conductor/shared';
 
 const log = getLogger('channel');
 const SYSTEM: Actor = { kind: 'system', id: null };
 const MAX_ATTEMPTS = 5;
 const SWEEP_MS = 10_000;
+
+/** The Telegram bot token, and which of the two possible sources it came from — the secret store wins over a resolved `${ENV_VAR}` in workspace.yaml. Never returns an unresolved `${...}` reference as a token. */
+export type TelegramTokenResolution = { token: string; source: 'secret' } | { token: string; source: 'env' } | { token: null; source: null };
+
+export function resolveTelegramToken(ctx: WorkspaceContext, secrets: SecretsService): TelegramTokenResolution {
+  const fromStore = secrets.value(TELEGRAM_BOT_TOKEN_SECRET_NAME);
+  if (fromStore) return { token: fromStore, source: 'secret' };
+  const configured = (ctx.config.channels['telegram'] as { botToken?: string } | undefined)?.botToken;
+  if (configured && !UNRESOLVED_ENV_REF.test(configured)) return { token: configured, source: 'env' };
+  return { token: null, source: null };
+}
 
 export const HELP_TEXT = [
   'Commands',
@@ -48,25 +60,7 @@ export class ChannelManager {
 
   async start(): Promise<void> {
     for (const kind of this.configuredKinds()) {
-      const adapter = this.ctx.registries.channels.get(kind);
-      if (!adapter) { log.warn({ kind, workspace: this.ctx.workspaceId }, 'channel is configured but no adapter is registered'); continue; }
-      const config = this.ctx.config.channels[kind] ?? {};
-      const valid = adapter.validateConfig(config);
-      if (!valid.ok) { log.error({ kind, errors: valid.errors }, 'channel config rejected by the adapter'); continue; }
-      try {
-        this.ensureChannelRow(kind, config);
-        const handle = await adapter.start({
-          workspaceId: this.ctx.workspaceId,
-          config,
-          inbound: (msg) => this.onInbound(kind, msg),
-          log: (level, msg, data) => log[level]({ kind, ...data }, msg),
-        });
-        this.adapters.set(kind, adapter);
-        this.running.set(kind, handle);
-        log.info({ kind }, 'channel started');
-      } catch (e) {
-        log.error({ err: e, kind }, 'channel failed to start');
-      }
+      await this.startOne(kind);
     }
     this.unsubscribe = this.ctx.events.on((ev) => { void this.onEvent(ev); });
     this.sweep = setInterval(() => { void this.drain(); }, SWEEP_MS);
@@ -82,6 +76,55 @@ export class ChannelManager {
       await handle.stop().catch((e: unknown) => log.warn({ err: e, kind }, 'channel stop failed'));
     }
     this.running.clear();
+  }
+
+  /**
+   * The config to start `kind` with — for `telegram`, the workspace-yaml config with the token
+   * replaced by whichever source `resolveTelegramToken` picks (VS-125); every other kind is
+   * unchanged. `null` means "do not start": a configured-but-tokenless Telegram channel is off, not
+   * an error (criterion 7 — "off because it has no token").
+   */
+  private effectiveConfig(kind: string): Record<string, unknown> | null {
+    const base = this.ctx.config.channels[kind] ?? {};
+    if (kind !== 'telegram') return base;
+    const resolved = resolveTelegramToken(this.ctx, this.services.secrets);
+    if (!resolved.token) return null;
+    return { ...base, botToken: resolved.token };
+  }
+
+  /** Starts one channel kind, stopping and clearing any bookkeeping for it first is the caller's job (see `restartChannel`). */
+  private async startOne(kind: string): Promise<void> {
+    const adapter = this.ctx.registries.channels.get(kind);
+    if (!adapter) { log.warn({ kind, workspace: this.ctx.workspaceId }, 'channel is configured but no adapter is registered'); return; }
+    const config = this.effectiveConfig(kind);
+    if (!config) { log.info({ kind }, 'channel has no resolvable token; not starting'); return; }
+    const valid = adapter.validateConfig(config);
+    if (!valid.ok) { log.error({ kind, errors: valid.errors }, 'channel config rejected by the adapter'); return; }
+    try {
+      this.ensureChannelRow(kind, config);
+      const handle = await adapter.start({
+        workspaceId: this.ctx.workspaceId,
+        config,
+        inbound: (msg) => this.onInbound(kind, msg),
+        log: (level, msg, data) => log[level]({ kind, ...data }, msg),
+      });
+      this.adapters.set(kind, adapter);
+      this.running.set(kind, handle);
+      log.info({ kind }, 'channel started');
+    } catch (e) {
+      log.error({ err: e, kind }, 'channel failed to start');
+    }
+  }
+
+  /** Stops `kind` if running, then starts it again with the current effective config — the live-reload primitive VS-125 needs for the token and, in principle, any future channel-config change. Never restarts the daemon. */
+  async restartChannel(kind: string): Promise<void> {
+    const running = this.running.get(kind);
+    if (running) {
+      this.running.delete(kind);
+      this.adapters.delete(kind);
+      await running.stop().catch((e: unknown) => log.warn({ err: e, kind }, 'channel stop failed during restart'));
+    }
+    await this.startOne(kind);
   }
 
   // ---------- inbound ----------
@@ -220,14 +263,37 @@ export class ChannelManager {
   }
 
   private ensureChannelRow(kind: string, config: Record<string, unknown>): void {
+    // VS-125: `config` here is the *effective* config — for telegram it carries the real, resolved
+    // token so the adapter can use it. Never let that value reach the database; `config_json` is
+    // for debugging the non-secret shape of a channel's config, not a credential store.
+    const { botToken: _redacted, ...stored } = config;
+    const json = JSON.stringify(stored);
     const existing = this.ctx.db.get<{ id: string }>('SELECT id FROM channels WHERE workspace_id = ? AND kind = ?', [this.ctx.workspaceId, kind]);
     if (existing) {
-      this.ctx.db.run('UPDATE channels SET config_json = ?, status = ?, last_error = NULL WHERE id = ?', [JSON.stringify(config), 'active', existing.id]);
+      this.ctx.db.run('UPDATE channels SET config_json = ?, status = ?, last_error = NULL WHERE id = ?', [json, 'active', existing.id]);
       return;
     }
     this.ctx.db.run('INSERT INTO channels (id, workspace_id, kind, config_json, status) VALUES (?,?,?,?,?)',
-      [newId(), this.ctx.workspaceId, kind, JSON.stringify(config), 'active']);
+      [newId(), this.ctx.workspaceId, kind, json, 'active']);
     log.debug({ kind, at: nowIso() }, 'channel row created');
+  }
+
+  /** The Telegram bot's username, as last confirmed by `getMe` at token-save time — never the token itself (VS-125). Upserts the row if the channel has never started (no token yet). `null` clears it. */
+  setTelegramBotUsername(username: string | null): void {
+    const existing = this.ctx.db.get<{ id: string }>('SELECT id FROM channels WHERE workspace_id = ? AND kind = ?', [this.ctx.workspaceId, 'telegram']);
+    if (existing) {
+      this.ctx.db.run('UPDATE channels SET bot_username = ? WHERE id = ?', [username, existing.id]);
+      return;
+    }
+    this.ctx.db.run('INSERT INTO channels (id, workspace_id, kind, config_json, status, bot_username) VALUES (?,?,?,?,?,?)',
+      [newId(), this.ctx.workspaceId, 'telegram', '{}', 'active', username]);
+  }
+
+  /** `null` when the channel has never saved a bot username. */
+  telegramBotUsername(): string | null {
+    return this.ctx.db.get<{ botUsername: string | null }>(
+      "SELECT bot_username FROM channels WHERE workspace_id = ? AND kind = 'telegram'", [this.ctx.workspaceId],
+    )?.botUsername ?? null;
   }
 }
 

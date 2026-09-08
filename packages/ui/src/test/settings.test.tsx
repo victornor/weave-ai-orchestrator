@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
@@ -9,6 +9,11 @@ const state = vi.hoisted(() => ({
   workspaces: [] as Array<Record<string, unknown>>,
   went: [] as string[],
   search: {} as Record<string, string | undefined>,
+  telegramStatus: { configured: false, source: null as 'secret' | 'env' | null, botUsername: null as string | null },
+  telegramSetCalls: [] as string[],
+  telegramSetResult: null as { ok: true; botUsername: string | null } | { error: string } | null,
+  telegramClearCalls: 0,
+  toasts: [] as Array<{ title: string; detail?: string; status?: string }>,
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
@@ -17,7 +22,7 @@ vi.mock('../app/link', () => ({
   useSearchParams: () => state.search,
 }));
 vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
-vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
+vi.mock('../components/Toast', () => ({ useToast: () => ({ push: (t: { title: string; detail?: string; status?: string }) => state.toasts.push(t), dismiss: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
   useWorkspaceSummary: () => ({ data: { workspace: { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME' }, config: state.config }, isLoading: false }),
   useWorkspaces: () => ({ data: state.workspaces }),
@@ -28,6 +33,19 @@ vi.mock('../api/hooks', () => ({
   usePatchProject: () => ({ mutate: (p: { id: string; patch: Record<string, unknown> }) => state.projectPatches.push(p), isPending: false }),
   useDaemonUpdate: () => ({ data: undefined, isLoading: false, isError: false, refetch: vi.fn() }),
   useDaemonUpgrade: () => ({ data: undefined, isError: false }),
+  useTelegramTokenStatus: () => ({ data: state.telegramStatus }),
+  useSetTelegramToken: () => ({
+    isPending: false,
+    mutateAsync: async (token: string) => {
+      state.telegramSetCalls.push(token);
+      if (state.telegramSetResult && 'error' in state.telegramSetResult) throw new Error(state.telegramSetResult.error);
+      return state.telegramSetResult ?? { ok: true, botUsername: 'acme_bot' };
+    },
+  }),
+  useClearTelegramToken: () => ({
+    isPending: false,
+    mutateAsync: async () => { state.telegramClearCalls += 1; return { ok: true }; },
+  }),
 }));
 
 const { SettingsRoute } = await import('../routes/Settings');
@@ -42,6 +60,11 @@ beforeEach(() => {
   state.config = {
     defaults: { bootstrapBudgetTokens: 16000, turnTimeoutSec: 2700, knowledgeBudgetTokens: { workspace: 10000, shared: 2000, decisions: 4000, project: 10000, document: 10000 } },
   };
+  state.telegramStatus = { configured: false, source: null, botUsername: null };
+  state.telegramSetCalls = [];
+  state.telegramSetResult = null;
+  state.telegramClearCalls = 0;
+  state.toasts = [];
 });
 
 describe('Settings — knowledge budgets', () => {
@@ -144,5 +167,77 @@ describe('Settings — the workspace list', () => {
     render(<SettingsRoute />);
     fireEvent.click(screen.getByText('Beta'));
     expect(state.went).toContain('/w/beta/needs');
+  });
+});
+
+/** VS-125: the Telegram bot token field, and the allowlist writing the field the channel reads. */
+describe('Settings — Telegram', () => {
+  const openChannels = (): void => {
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Channels' }));
+  };
+
+  it('saving a token clears the input and confirms the bot username', async () => {
+    state.telegramSetResult = { ok: true, botUsername: 'acme_bot' };
+    openChannels();
+    const input = screen.getByLabelText('Bot token');
+    fireEvent.change(input, { target: { value: 'a-real-looking-token' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(state.telegramSetCalls).toEqual(['a-real-looking-token']));
+    await waitFor(() => expect(input).toHaveValue(''));
+    expect(state.toasts.at(-1)).toMatchObject({ title: 'Telegram token saved', detail: 'Confirmed as @acme_bot' });
+  });
+
+  it('a failed save leaves the input untouched and toasts the server error', async () => {
+    state.telegramSetResult = { error: 'Telegram said: Unauthorized' };
+    openChannels();
+    const input = screen.getByLabelText('Bot token');
+    fireEvent.change(input, { target: { value: 'a-bad-token' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(state.telegramSetCalls).toEqual(['a-bad-token']));
+    expect(input).toHaveValue('a-bad-token');
+    expect(state.toasts.at(-1)).toMatchObject({ title: 'Could not save the token', detail: 'Telegram said: Unauthorized' });
+  });
+
+  it('clearing calls the clear mutation and toasts confirmation', async () => {
+    state.telegramStatus = { configured: true, source: 'secret', botUsername: 'acme_bot' };
+    openChannels();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    await waitFor(() => expect(state.telegramClearCalls).toBe(1));
+    expect(state.toasts.at(-1)).toMatchObject({ title: 'Telegram token cleared' });
+  });
+
+  it('Clear is disabled when nothing is configured', () => {
+    state.telegramStatus = { configured: false, source: null, botUsername: null };
+    openChannels();
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeDisabled();
+  });
+
+  it('the allowlist field writes allowedUserIds, parsed to integers, dropping non-numeric entries', () => {
+    openChannels();
+    const input = screen.getByLabelText('Allowlist');
+    fireEvent.change(input, { target: { value: '111, not-a-number, 222' } });
+    fireEvent.blur(input);
+    expect(state.patches).toEqual([{ channels: { telegram: { allowedUserIds: [111, 222] } } }]);
+  });
+
+  it('shows "Locked to N users" when the allowlist is populated', () => {
+    state.config = { channels: { telegram: { allowedUserIds: [111, 222] } } };
+    openChannels();
+    expect(screen.getByText('Locked to 2 users')).toBeInTheDocument();
+  });
+
+  it('shows "Open to any Telegram user" when allowAll is set and the allowlist is empty', () => {
+    state.config = { channels: { telegram: { allowedUserIds: [], allowAll: true } } };
+    openChannels();
+    expect(screen.getByText('Open to any Telegram user')).toBeInTheDocument();
+  });
+
+  it('shows "Off — no user is allowed" when the allowlist is empty and allowAll is not set', () => {
+    state.config = { channels: { telegram: {} } };
+    openChannels();
+    expect(screen.getByText('Off — no user is allowed')).toBeInTheDocument();
   });
 });

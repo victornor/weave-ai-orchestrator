@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
 import { DaemonConfigSchema, type WorkspaceConfig } from '@agent-conductor/shared';
-import { createRegistries } from '../context.js';
+import { createRegistries, workspacePaths } from '../context.js';
 import { openDbAsOf } from '@agent-conductor/db';
+import { createSecretStore } from '../secrets/store.js';
 import { loader, projectKnowledgeSkeleton } from './loader.js';
 
 describe('workspace loader', () => {
@@ -227,6 +228,93 @@ describe('workspace loader', () => {
       const ctx = await load();
       const settings = ctx.db.get<{ settings: Record<string, unknown> }>('SELECT settings_json FROM workspaces WHERE id = ?', [ctx.workspaceId])!.settings;
       expect(settings['modelsMigration']).toBeUndefined();
+    });
+  });
+
+  describe('telegram allowlist migration (VS-125)', () => {
+    /** Writes `channels.telegram` into a fresh workspace.yaml exactly as given, pre-Zod. */
+    async function withTelegram(telegram: Record<string, unknown> | undefined): Promise<void> {
+      await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      const file = join(root, 'workspace.yaml');
+      const raw = YAML.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      const channels = telegram === undefined ? {} : { telegram };
+      writeFileSync(file, YAML.stringify({ ...raw, channels }), 'utf8');
+    }
+
+    const yamlOf = (): Record<string, unknown> => YAML.parse(readFileSync(join(root, 'workspace.yaml'), 'utf8')) as Record<string, unknown>;
+
+    const envVar = 'AC_TEST_TELEGRAM_TOKEN';
+    afterEach(() => { delete process.env[envVar]; });
+
+    it('no channels.telegram block at all: nothing written, migration still marked done', async () => {
+      await withTelegram(undefined);
+      const ctx = await load();
+      expect((yamlOf()['channels'] as Record<string, unknown> | undefined)?.['telegram']).toBeUndefined();
+      expect(ctx.db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'telegram_allowlist_migrated'")?.value).toBe('1');
+    });
+
+    it('allowlist key never set, a secret-store token resolves: grandfathered to allowAll', async () => {
+      await withTelegram({ enabled: true });
+      createSecretStore(workspacePaths(root)).put('telegram-bot-token', 'stored-token');
+      await load();
+      expect((yamlOf()['channels'] as { telegram: Record<string, unknown> })['telegram']).toMatchObject({ allowAll: true });
+    });
+
+    it('allowlist key never set, a resolved ${ENV_VAR} token: also grandfathered to allowAll', async () => {
+      process.env[envVar] = 'resolved-value';
+      await withTelegram({ enabled: true, botToken: `\${${envVar}}` });
+      await load();
+      expect((yamlOf()['channels'] as { telegram: Record<string, unknown> })['telegram']).toMatchObject({ allowAll: true });
+    });
+
+    it('allowlist key never set, no token resolves anywhere: never reachable, not grandfathered', async () => {
+      await withTelegram({ enabled: true });
+      await load();
+      expect((yamlOf()['channels'] as { telegram: Record<string, unknown> } | undefined)?.['telegram']).not.toHaveProperty('allowAll');
+    });
+
+    // This workspace's own config, verbatim, per the conductor's finding during review: an
+    // allowlist explicitly set to empty is evidence of intent to restrict, not evidence of nothing.
+    it('{enabled: true, allowlist: []} with a resolvable token: NOT grandfathered', async () => {
+      await withTelegram({ enabled: true, allowlist: [] });
+      createSecretStore(workspacePaths(root)).put('telegram-bot-token', 'stored-token');
+      await load();
+      const telegram = (yamlOf()['channels'] as { telegram: Record<string, unknown> })['telegram'];
+      expect(telegram).not.toHaveProperty('allowAll');
+    });
+
+    it('a populated allowlist is migrated into allowedUserIds, invalid entries dropped, not grandfathered', async () => {
+      await withTelegram({ enabled: true, allowlist: [111, 'not-an-id', 222] });
+      createSecretStore(workspacePaths(root)).put('telegram-bot-token', 'stored-token');
+      await load();
+      const telegram = (yamlOf()['channels'] as { telegram: Record<string, unknown> })['telegram'];
+      expect(telegram['allowedUserIds']).toEqual([111, 222]);
+      expect(telegram).not.toHaveProperty('allowAll');
+    });
+
+    it('runs once: a second load makes no further change even if the allowlist is emptied afterward', async () => {
+      await withTelegram({ enabled: true });
+      createSecretStore(workspacePaths(root)).put('telegram-bot-token', 'stored-token');
+      await load();
+      expect((yamlOf()['channels'] as { telegram: Record<string, unknown> })['telegram']).toMatchObject({ allowAll: true });
+
+      // Captain later clears the (now-honoured) allowlist back to empty — must not be re-evaluated.
+      const file = join(root, 'workspace.yaml');
+      const raw = yamlOf();
+      writeFileSync(file, YAML.stringify({ ...raw, channels: { telegram: { enabled: true, allowAll: true, allowedUserIds: [] } } }), 'utf8');
+      await load();
+      expect((yamlOf()['channels'] as { telegram: Record<string, unknown> })['telegram']).toMatchObject({ allowAll: true, allowedUserIds: [] });
+    });
+
+    it('a fresh workspace configuring Telegram for the first time after migration has already run is not retroactively grandfathered', async () => {
+      await withTelegram(undefined);
+      await load(); // marks the workspace migrated with no telegram config yet
+
+      const file = join(root, 'workspace.yaml');
+      writeFileSync(file, YAML.stringify({ ...yamlOf(), channels: { telegram: { enabled: true } } }), 'utf8');
+      createSecretStore(workspacePaths(root)).put('telegram-bot-token', 'stored-token');
+      await load();
+      expect((yamlOf()['channels'] as { telegram: Record<string, unknown> })['telegram']).not.toHaveProperty('allowAll');
     });
   });
 

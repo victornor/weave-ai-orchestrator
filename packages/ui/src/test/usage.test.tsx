@@ -210,14 +210,14 @@ const CREDENTIAL: RuntimeCredential = {
 };
 
 describe('the runtime credential panel', () => {
-  const view = (c: RuntimeCredential) => render(<RuntimeCredentials credentials={[{ ...c, displayName: c.runtimeId }]} now={NOW} />);
+  const view = (c: RuntimeCredential) => render(<RuntimeCredentials credentials={[{ ...c, displayName: c.runtimeId }]} />);
 
-  it('shows a valid credential with when it expires', () => {
+  it('shows a healthy credential with when it was last verified, never a countdown to its expiry', () => {
     const { container } = view(CREDENTIAL);
     const row = container.querySelector('[data-testid="credential-claude"]')!;
     expect(row.textContent).toContain('valid');
-    expect(row.textContent).toContain('expires in');
     expect(row.textContent).toContain('last verified');
+    expect(row.textContent).not.toContain('expires');
   });
 
   it('shows an expired login with when the refresh failed and what to run', () => {
@@ -229,13 +229,16 @@ describe('the runtime credential panel', () => {
     expect(row.textContent).toContain('resumes on its own');
   });
 
-  it('says so rather than guessing when a credential carries no expiry', () => {
-    const { container } = view({ ...CREDENTIAL, expiresAt: null });
-    expect(container.querySelector('[data-testid="credential-claude"]')!.textContent).toContain('no expiry');
+  it('shows a healthy credential with no last-verified moment as just healthy', () => {
+    const { container } = view({ ...CREDENTIAL, lastVerifiedAt: null });
+    const row = container.querySelector('[data-testid="credential-claude"]')!;
+    expect(row.textContent).toContain('valid');
+    expect(row.textContent).not.toContain('last verified');
+    expect(row.textContent).not.toContain('expires');
   });
 
   it('renders nothing when no credential state is known', () => {
-    const { container } = render(<RuntimeCredentials credentials={[]} now={NOW} />);
+    const { container } = render(<RuntimeCredentials credentials={[]} />);
     expect(container.innerHTML).toBe('');
   });
 

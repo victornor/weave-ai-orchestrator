@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: The credential row answers whether the human needs to do anything, not a
+  countdown on a self-refreshing access token

@@ -318,9 +318,12 @@ describe('contextStrip', () => {
     expect(v?.meter).toEqual({ percent: 41, toCompaction: null, tone: 'ok' });
   });
 
-  it('clamps a context that has outgrown the numbers we were given', () => {
+  it('shows a context that has outgrown the numbers we were given as anomalous, not clamped (VS-129)', () => {
+    // 500k against a declared 200k window is evidence the declared window is wrong, not a context
+    // that has simply filled it — the old behaviour clamped both figures to 100, indistinguishable
+    // from a context that had genuinely just reached the top.
     expect(contextStrip({ usage: { contextTokens: 500_000 }, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true })?.meter)
-      .toEqual({ percent: 100, toCompaction: 100, tone: 'over' });
+      .toEqual({ percent: 250, toCompaction: 272, tone: 'over' });
   });
 
   it('says nothing at all before the conductor has finished a turn', () => {

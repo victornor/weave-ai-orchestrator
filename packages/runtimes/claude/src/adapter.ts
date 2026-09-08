@@ -17,11 +17,14 @@ import { asClaudeSession, type ClaudeSessionRef } from './session.js';
 export const CONTEXT_COMPACTION_AT = 0.92;
 
 /**
- * Every Claude Code model shares the 200k context window today. A variant with a different window —
- * the 1M-context one — is a separate entry carrying its own `contextWindowTokens`, never a special
- * case at the point of use.
+ * Not every Claude Code model shares one window: `fable`/`opus`/`sonnet` and their pinned `-5`/`-5-1`
+ * ids resolve to natively 1M-context models today, and only `haiku` is still 200k. Verified against
+ * the installed CLI's own hand-maintained model catalog (`context.window` per model id), not guessed
+ * — see VS-129's `design.md` for the extraction method and the full per-model evidence table. Check
+ * this against the CLI's own catalog again whenever a model in `MODELS` below changes.
  */
-const CONTEXT_WINDOW_TOKENS = 200_000;
+const CONTEXT_WINDOW_TOKENS_STANDARD = 200_000;
+const CONTEXT_WINDOW_TOKENS_1M = 1_000_000;
 
 export const capabilities: RuntimeCapabilities = {
   resumableSessions: true,
@@ -42,14 +45,14 @@ export const capabilities: RuntimeCapabilities = {
 
 /** Aliases plus pinned ids. Claude Code has no machine-readable model list, so this is `static`. */
 const MODELS: RuntimeModel[] = [
-  { id: 'fable', label: 'Fable (latest)', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS },
-  { id: 'opus', label: 'Opus (latest)', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS },
-  { id: 'sonnet', label: 'Sonnet (latest)', provider: 'anthropic', source: 'static', tier: 'balanced', contextWindowTokens: CONTEXT_WINDOW_TOKENS },
-  { id: 'haiku', label: 'Haiku (latest)', provider: 'anthropic', source: 'static', tier: 'fast', contextWindowTokens: CONTEXT_WINDOW_TOKENS },
-  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS },
-  { id: 'claude-opus-5', label: 'Claude Opus 5', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS },
-  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', provider: 'anthropic', source: 'static', tier: 'balanced', contextWindowTokens: CONTEXT_WINDOW_TOKENS },
-  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'anthropic', source: 'static', tier: 'fast', contextWindowTokens: CONTEXT_WINDOW_TOKENS },
+  { id: 'fable', label: 'Fable (latest)', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
+  { id: 'opus', label: 'Opus (latest)', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
+  { id: 'sonnet', label: 'Sonnet (latest)', provider: 'anthropic', source: 'static', tier: 'balanced', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
+  { id: 'haiku', label: 'Haiku (latest)', provider: 'anthropic', source: 'static', tier: 'fast', contextWindowTokens: CONTEXT_WINDOW_TOKENS_STANDARD },
+  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
+  { id: 'claude-opus-5', label: 'Claude Opus 5', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
+  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', provider: 'anthropic', source: 'static', tier: 'balanced', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
+  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'anthropic', source: 'static', tier: 'fast', contextWindowTokens: CONTEXT_WINDOW_TOKENS_STANDARD },
 ];
 
 const CONFIG_SCHEMA: JsonSchema = {

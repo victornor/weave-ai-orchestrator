@@ -268,9 +268,12 @@ export function contextStrip(input: {
   if (tokens <= 0) return { ...bare, reason: 'Context size unreported' };
   if (!window || !Number.isFinite(window) || window <= 0) return { ...bare, reason: 'Context window unknown' };
 
-  const percent = Math.max(0, Math.min(100, Math.round((tokens / window) * 100)));
+  // Not clamped past 100: a size larger than the declared window is evidence the declaration is
+  // wrong, not a context that has simply filled it, and clamping would make the two indistinguishable
+  // (VS-129). The caller draws the bar no wider than its own space; the number keeps saying the truth.
+  const percent = Math.max(0, Math.round((tokens / window) * 100));
   const compactionTokens = input.compactionAt && input.compactionAt > 0 ? window * input.compactionAt : null;
-  const toCompaction = compactionTokens ? Math.max(0, Math.min(100, Math.round((tokens / compactionTokens) * 100))) : null;
+  const toCompaction = compactionTokens ? Math.max(0, Math.round((tokens / compactionTokens) * 100)) : null;
   return {
     ...bare,
     meter: { percent, toCompaction, tone: limitTone(toCompaction ?? percent) },

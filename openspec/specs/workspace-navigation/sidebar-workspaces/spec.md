@@ -271,25 +271,77 @@ Unsent composer text is outside this capability.
 
 ### Requirement: A workspace group lists its projects, each opening that project's overview
 
-The sidebar group of the workspace the app is currently showing SHALL list that workspace's
-projects, below its section links, each identified by the project's slug. Activating a project SHALL
-open that project's overview page.
+Every expanded sidebar group — the active workspace's, which is always expanded, and any other
+workspace's group the human has expanded — SHALL list that workspace's projects, below its section
+links, each identified by the project's slug. Activating a project SHALL open that project's
+overview page; when the project belongs to a workspace other than the one currently being shown,
+activating it SHALL also make that project's workspace the active one, as part of the same
+navigation, so the rail and the content never disagree about which workspace is showing. Following a
+project SHALL navigate within the running application, without a document reload.
 
-Projects SHALL be listed for the active workspace only, since another workspace's projects are not
-loaded; a workspace with no projects SHALL simply list none, without an empty block or an error.
-Following a project SHALL navigate within the running application, without a document reload.
+A workspace's projects SHALL be fetched the first time its group is expanded, and kept from then on:
+collapsing and re-expanding the same group SHALL NOT fetch again. A workspace whose group has never
+been expanded SHALL NOT have its projects fetched. The active workspace's projects SHALL be fetched
+regardless of whether its group has been explicitly expanded, since that group is always open.
+
+While a group's projects are being fetched for the first time, that group SHALL show a loading state
+distinguishable from having no projects — a group SHALL NOT render as though a workspace has no
+projects while its fetch is still outstanding. A workspace that genuinely has no projects SHALL show
+its section links and no project list, without an empty block or an error. When a workspace's project
+fetch fails, that group alone SHALL show that it could not load its projects; every other group,
+expanded or collapsed, SHALL be unaffected and SHALL keep working.
 
 #### Scenario: Opening a project
 
 - **WHEN** the human activates a project in the active workspace's sidebar group
 - **THEN** that project's overview opens, without a document reload
 
-#### Scenario: A workspace with no projects
+#### Scenario: Opening a project in a non-active workspace
 
-- **WHEN** the active workspace has no projects
-- **THEN** its group shows its section links and no project list, and no error is shown
+- **WHEN** the human expands a non-active workspace's group, its projects have loaded, and the human
+  activates one of them
+- **THEN** that project's overview opens, that workspace becomes the active one, and the rail and the
+  content agree on which workspace is showing
 
 #### Scenario: Another workspace's group
 
-- **WHEN** a non-active workspace's group is expanded
-- **THEN** it shows that workspace's section links and no project list
+- **WHEN** a non-active workspace's group is expanded and its projects have loaded
+- **THEN** it shows that workspace's section links and that workspace's own projects, each identified
+  by its slug
+
+#### Scenario: Expanding a non-active workspace lists its projects
+
+- **WHEN** the human expands a workspace group that has never been expanded before, and that
+  workspace has projects
+- **THEN** its projects are fetched and then listed, each identified by its slug
+
+#### Scenario: A workspace with no projects
+
+- **WHEN** a workspace's group is expanded (or, for the active workspace, shown) and that fetch
+  completes with no projects
+- **THEN** its group shows its section links and no project list, and no error is shown
+
+#### Scenario: Loading is not mistaken for empty
+
+- **WHEN** a workspace's group is expanded and its project fetch has not yet completed
+- **THEN** the group shows a loading state, not an empty project list and not the workspace's
+  projects from before the fetch started
+
+#### Scenario: A failed fetch is scoped to its own group
+
+- **WHEN** one workspace's project fetch fails while another workspace's group is also expanded
+- **THEN** the failed workspace's group shows that its projects could not load, and the other
+  expanded group still lists its own projects normally
+
+#### Scenario: Collapsing and re-expanding does not refetch
+
+- **WHEN** the human collapses a non-active workspace's group whose projects already loaded, then
+  expands it again
+- **THEN** its projects are shown immediately from what was already fetched, with no new request
+
+#### Scenario: A workspace never expanded costs nothing
+
+- **WHEN** the sidebar renders with several workspaces listed and only some of their groups ever
+  expanded
+- **THEN** projects are never fetched for a workspace whose group has not been expanded and is not
+  the active workspace

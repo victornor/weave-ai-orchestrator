@@ -87,6 +87,19 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
   }
 
   /**
+   * The decision that replaced a superseded one, if it is still open — `create()` always supersedes
+   * every open decision under a correlation key before inserting the new one, so at most one can
+   * exist. Used only to tell a stale answer which card to point the human at (VS-140).
+   */
+  function replacementFor(d: Decision): string | null {
+    if (!d.correlationKey) return null;
+    return db.get<{ id: string }>(
+      'SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id IS ? AND correlation_key = ? AND status = ?',
+      [ws, d.ticketId, d.correlationKey, 'open'],
+    )?.id ?? null;
+  }
+
+  /**
    * Which project a decision belongs to, resolved once here rather than derived on every read
    * (VS-92): the ticket's project wins and is not overridable — a card naming a project other than
    * its ticket's would be a lie — then the project the asker named, then the asker's own. Null is
@@ -335,7 +348,10 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
 
   async function answer(actor: Actor, id: string, ans: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }): Promise<Decision> {
     const d = get(id);
-    if (d.status !== 'open') throw new OcError('wrong_status', `decision ${id} is ${d.status}`);
+    if (d.status !== 'open') {
+      const supersededBy = d.status === 'superseded' ? replacementFor(d) : null;
+      throw new OcError('wrong_status', `decision ${id} is ${d.status}`, { status: d.status, ...(supersededBy ? { supersededBy } : {}) });
+    }
     const suppliedInputs = ans.inputs ?? {};
     const hasInputs = (d.inputs ?? []).length > 0;
     if (!hasInputs && Object.keys(suppliedInputs).length) throw new OcError('validation', `decision ${id} asks for no inputs`);

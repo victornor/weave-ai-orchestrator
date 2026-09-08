@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   projects: [] as Array<Record<string, unknown>>,
   config: {} as Record<string, unknown>,
   connection: 'connected' as string,
+  go: vi.fn() as unknown as ReturnType<typeof vi.fn>,
 }));
 
 vi.mock('../api/context', () => ({
@@ -35,7 +36,7 @@ vi.mock('../api/hooks', () => ({
   useTicketDocument: () => ({ data: state.planDoc ?? undefined, isLoading: false, isError: state.planDoc === null }),
 }));
 
-vi.mock('../app/link', () => ({ useGo: () => vi.fn(), A: ({ children }: { children?: React.ReactNode }) => <a href="#">{children}</a> }));
+vi.mock('../app/link', () => ({ useGo: () => state.go, A: ({ children }: { children?: React.ReactNode }) => <a href="#">{children}</a> }));
 const enqueueMock = vi.hoisted(() => vi.fn());
 vi.mock('../lib/queue', () => ({ enqueue: enqueueMock, useQueue: () => [] }));
 vi.mock('../components/Toast', () => ({
@@ -66,6 +67,7 @@ beforeEach(() => {
   state.projects = [];
   state.config = {};
   state.connection = 'connected';
+  state.go = vi.fn();
   enqueueMock.mockClear();
   localStorage.clear();
   clearHiddenCache();
@@ -103,6 +105,37 @@ describe('NeedsYouRoute', () => {
     fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
     expect(state.toasts).toEqual([{ title: 'Could not record that answer', detail: 'decision d1 is answered', status: 'failed' }]);
+  });
+
+  it('says a stale card was superseded and offers a way to the replacement, instead of a raw error', async () => {
+    const { ApiError } = await import('../api/client');
+    state.decisions = [asked({ ticketId: 'tk_1' })];
+    state.answer = vi.fn((_vars: unknown, opts: { onError: (e: Error) => void }) =>
+      opts.onError(new ApiError(409, { code: 'wrong_status', message: 'decision d1 is superseded', details: { status: 'superseded', supersededBy: 'd2' } })));
+
+    render(<NeedsYouRoute />);
+    fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+
+    expect(state.toasts).toHaveLength(1);
+    expect(state.toasts[0]).toMatchObject({ title: 'This changed while you were looking at it', status: 'failed' });
+    expect(state.go).not.toHaveBeenCalled();
+    (state.toasts[0]!.action as { run: () => void }).run();
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'tk_1' } });
+  });
+
+  it('never treats a stale answer as reaching the decision that replaced it', async () => {
+    const { ApiError } = await import('../api/client');
+    state.decisions = [asked({ ticketId: 'tk_1' })];
+    state.answer = vi.fn((_vars: unknown, opts: { onError: (e: Error) => void }) =>
+      opts.onError(new ApiError(409, { code: 'wrong_status', message: 'decision d1 is superseded', details: { status: 'superseded', supersededBy: 'd2' } })));
+
+    render(<NeedsYouRoute />);
+    fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+
+    expect(state.answer).toHaveBeenCalledTimes(1);
+    expect(state.answer).toHaveBeenCalledWith({ id: 'd1', key: 'file' }, expect.anything());
   });
 
   it('puts the plan one tap from the approval, and says so when there is none', () => {

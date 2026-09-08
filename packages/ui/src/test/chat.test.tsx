@@ -41,6 +41,7 @@ const state = vi.hoisted(() => ({
   answer: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   toasts: [] as Array<Record<string, unknown>>,
   ws: 'ws1',
+  go: vi.fn() as unknown as ReturnType<typeof vi.fn>,
 }));
 
 vi.mock('../api/context', async () => {
@@ -94,7 +95,7 @@ vi.mock('../api/hooks', () => ({
   useTicketDocument: () => ({ data: undefined, isLoading: false, isError: true }),
 }));
 
-vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
+vi.mock('../app/link', () => ({ useGo: () => state.go }));
 vi.mock('../components/Toast', () => ({
   useToast: () => ({ push: (t: Record<string, unknown>) => { state.toasts.push(t); return 't1'; }, dismiss: vi.fn() }),
 }));
@@ -184,6 +185,7 @@ beforeEach(() => {
   state.answer = vi.fn();
   state.toasts = [];
   state.ws = 'ws1';
+  state.go = vi.fn();
   // Hidden decisions are a device preference in localStorage behind a module-level cache; one
   // test's hidden card must not open the next test with an empty pinned area.
   localStorage.clear();
@@ -1050,6 +1052,58 @@ describe('ChatRoute decision cards', () => {
     fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
     expect(state.toasts).toEqual([{ title: 'Could not record that answer', detail: 'decision d1 is answered', status: 'failed' }]);
+  });
+
+  it('says a stale card was superseded and offers a way to the replacement, instead of a raw error', async () => {
+    const { ApiError } = await import('../api/client');
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked({ ticketId: 'tk_1' })];
+    state.answer = vi.fn((_vars: unknown, opts: { onError: (e: Error) => void }) =>
+      opts.onError(new ApiError(409, { code: 'wrong_status', message: 'decision d1 is superseded', details: { status: 'superseded', supersededBy: 'd2' } })));
+
+    render(<ChatRoute />);
+    fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+
+    expect(state.toasts).toHaveLength(1);
+    expect(state.toasts[0]).toMatchObject({ title: 'This changed while you were looking at it', status: 'failed' });
+    expect(state.go).not.toHaveBeenCalled();
+    (state.toasts[0]!.action as { run: () => void }).run();
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'tk_1' } });
+  });
+
+  it('never treats a stale answer as reaching the decision that replaced it', async () => {
+    const { ApiError } = await import('../api/client');
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked({ ticketId: 'tk_1' })];
+    state.answer = vi.fn((_vars: unknown, opts: { onError: (e: Error) => void }) =>
+      opts.onError(new ApiError(409, { code: 'wrong_status', message: 'decision d1 is superseded', details: { status: 'superseded', supersededBy: 'd2' } })));
+
+    render(<ChatRoute />);
+    fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+
+    expect(state.answer).toHaveBeenCalledTimes(1);
+    expect(state.answer).toHaveBeenCalledWith({ id: 'd1', key: 'file' }, expect.anything());
+  });
+
+  it('shows an answered-elsewhere refusal with no replacement action', async () => {
+    const { ApiError } = await import('../api/client');
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked({ ticketId: 'tk_1' })];
+    state.answer = vi.fn((_vars: unknown, opts: { onError: (e: Error) => void }) =>
+      opts.onError(new ApiError(409, { code: 'wrong_status', message: 'decision d1 is answered', details: { status: 'answered' } })));
+
+    render(<ChatRoute />);
+    fireEvent.click(screen.getByRole('radio', { name: /File it/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+
+    expect(state.toasts).toEqual([{
+      title: 'Already answered',
+      detail: 'Someone else answered this before your response reached the daemon.',
+      status: 'failed',
+      action: undefined,
+    }]);
   });
 
   it('queues a non-secret answer while offline, the same way Needs You does', () => {

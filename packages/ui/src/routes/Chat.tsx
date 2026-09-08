@@ -50,6 +50,7 @@ import { isAtBottom, useStickToBottom } from '../lib/stickToBottom';
 import { readChatScroll, writeChatScroll } from '../lib/chatScroll';
 import { enqueue, useQueueCount } from '../lib/queue';
 import { decisionCarriesSecret } from '../lib/decisionSecrets';
+import { staleAnswerCopy } from '../lib/decisionStaleness';
 import { useToast } from '../components/Toast';
 import { useGo } from '../app/link';
 import { clock } from '../lib/format';
@@ -496,8 +497,21 @@ export function ChatRoute(): React.ReactElement {
       { id, ...a },
       {
         onError: (e) => {
-          if (!carriesSecret && e instanceof NetworkError) queueThisAnswer();
-          else refuse(e.message);
+          if (!carriesSecret && e instanceof NetworkError) { queueThisAnswer(); return; }
+          // A stale card (superseded, answered or expired elsewhere) is not a delivery failure — the
+          // request reached the daemon and was refused on purpose. Say what happened instead of the
+          // raw error, and offer a way to the replacement when there is one (VS-140).
+          const stale = staleAnswerCopy(e, decisions.data?.find((d) => d.id === id)?.ticketId ?? null);
+          if (stale) {
+            toast.push({
+              title: stale.title,
+              detail: stale.detail,
+              status: 'failed',
+              action: stale.ticketId ? { label: 'View the new one', run: () => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: stale.ticketId! } }) } : undefined,
+            });
+            return;
+          }
+          refuse(e.message);
         },
       },
     );

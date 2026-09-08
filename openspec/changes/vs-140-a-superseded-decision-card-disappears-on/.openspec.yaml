@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-08
+goal: A superseded/answered/expired decision card leaves every view live, and
+  acting on a stale one explains what happened without applying to the wrong
+  decision

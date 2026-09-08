@@ -13,6 +13,8 @@ export interface Toast {
   /** milliseconds; the arrival toast auto-dismisses after 8s. */
   ttl?: number;
   undo?: { label: string; run: () => void };
+  /** A single labelled action, rendered like `undo` but without implying anything was reverted. */
+  action?: { label: string; run: () => void };
 }
 
 interface ToastCtx {
@@ -65,16 +67,16 @@ export function ToastProvider({ children }: { children: ReactNode }): React.Reac
                 <div className="text-ui font-medium text-text-1">{t.title}</div>
                 {t.detail ? <div className="mt-0.5 text-micro text-text-3">{t.detail}</div> : null}
               </div>
-              {t.undo ? (
+              {t.undo || t.action ? (
                 <button
                   type="button"
                   className="text-micro font-medium text-accent-link"
                   onClick={() => {
-                    t.undo?.run();
+                    (t.undo ?? t.action)?.run();
                     dismiss(t.id);
                   }}
                 >
-                  {t.undo.label}
+                  {(t.undo ?? t.action)?.label}
                 </button>
               ) : (
                 <button type="button" aria-label="Dismiss" className="text-text-3 hover:text-text-1" onClick={() => dismiss(t.id)}>

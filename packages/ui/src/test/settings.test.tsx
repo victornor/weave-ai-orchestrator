@@ -30,7 +30,11 @@ vi.mock('../components/Toast', () => ({ useToast: () => ({ push: (t: { title: st
 vi.mock('../api/hooks', () => ({
   useWorkspaceSummary: () => ({ data: { workspace: { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME' }, config: state.config }, isLoading: false }),
   useWorkspaces: () => ({ data: state.workspaces }),
-  usePatchConfig: () => ({ mutate: (body: Record<string, unknown>) => state.patches.push(body), isPending: false }),
+  usePatchConfig: () => ({
+    mutate: (body: Record<string, unknown>) => state.patches.push(body),
+    mutateAsync: async (body: Record<string, unknown>) => { state.patches.push(body); return {}; },
+    isPending: false,
+  }),
   useProjects: () => ({ data: state.projects, isLoading: false }),
   useRuntimes: () => ({ data: [] }),
   useAddProject: () => ({ mutate: vi.fn(), isPending: false }),
@@ -39,6 +43,11 @@ vi.mock('../api/hooks', () => ({
       state.projectPatches.push(p);
       if (state.projectPatchError) opts?.onError?.(new Error(state.projectPatchError));
       else opts?.onSuccess?.();
+    },
+    mutateAsync: async (p: { id: string; patch: Record<string, unknown> }) => {
+      state.projectPatches.push(p);
+      if (state.projectPatchError) throw new Error(state.projectPatchError);
+      return {};
     },
     isPending: false,
   }),
@@ -101,15 +110,15 @@ describe('Settings — knowledge budgets', () => {
     expect(screen.getByLabelText('Bootstrap digest')).toHaveValue(16000);
   });
 
-  it('patches only the budget that changed', () => {
+  it('patches only the budget that changed', async () => {
     render(<SettingsRoute />);
     const input = screen.getByLabelText('Project knowledge base');
     fireEvent.change(input, { target: { value: '25000' } });
     fireEvent.blur(input);
-    expect(state.patches).toEqual([{ defaults: { knowledgeBudgetTokens: { project: 25000 } } }]);
+    await waitFor(() => expect(state.patches).toEqual([{ defaults: { knowledgeBudgetTokens: { project: 25000 } } }]));
   });
 
-  it('says nothing to the daemon when a budget is unchanged or not a sane token count', () => {
+  it('says nothing to the daemon when a budget is unchanged or not a sane token count', async () => {
     render(<SettingsRoute />);
     const input = screen.getByLabelText('Project knowledge base');
     fireEvent.blur(input);
@@ -117,7 +126,52 @@ describe('Settings — knowledge budgets', () => {
     fireEvent.blur(input);
     fireEvent.change(input, { target: { value: '' } });
     fireEvent.blur(input);
+    await waitFor(() => expect(screen.getByText('Must be a whole number of at least 500')).toBeInTheDocument());
     expect(state.patches).toEqual([]);
+  });
+
+  it('an out-of-range value is rejected and keeps the typed number visible (VS-141 AC #3)', async () => {
+    render(<SettingsRoute />);
+    const input = screen.getByLabelText('Project knowledge base');
+    fireEvent.change(input, { target: { value: '12' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(screen.getByText('Must be a whole number of at least 500')).toBeInTheDocument());
+    expect(input).toHaveValue(12);
+    expect(state.patches).toEqual([]);
+  });
+
+  it('shows a visible confirmation once a commit resolves, without reloading (VS-141 AC #2)', async () => {
+    render(<SettingsRoute />);
+    const input = screen.getByLabelText('Project knowledge base');
+    fireEvent.change(input, { target: { value: '25000' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(screen.getByText('Saved')).toBeInTheDocument());
+  });
+
+  it('Enter commits the value without blurring (VS-141 AC #4)', async () => {
+    render(<SettingsRoute />);
+    const input = screen.getByLabelText('Project knowledge base');
+    fireEvent.change(input, { target: { value: '25000' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(state.patches).toEqual([{ defaults: { knowledgeBudgetTokens: { project: 25000 } } }]));
+  });
+
+  it('a dirty field survives switching sections without an explicit blur (VS-141 AC #1/#6)', async () => {
+    render(<SettingsRoute />);
+    const input = screen.getByLabelText('Project knowledge base');
+    fireEvent.change(input, { target: { value: '25000' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+    await waitFor(() => expect(state.patches).toEqual([{ defaults: { knowledgeBudgetTokens: { project: 25000 } } }]));
+  });
+
+  it('shows an unsaved indicator and an explicit save action while a field is dirty', async () => {
+    render(<SettingsRoute />);
+    const input = screen.getByLabelText('Project knowledge base');
+    expect(screen.queryByText('Unsaved')).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '25000' } });
+    expect(screen.getByText('Unsaved')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(state.patches).toEqual([{ defaults: { knowledgeBudgetTokens: { project: 25000 } } }]));
   });
 });
 
@@ -163,7 +217,7 @@ describe('Settings — a project landing branch (VS-122)', () => {
     state.projects = [{ id: 'p1', slug: 'api', status: 'ready', gitUrl: 'g', maxWorkers: 2, defaultBranch: 'main', landingBranch: null, policies: {} }];
   });
 
-  it('shows the default branch as a placeholder when none is declared, and sets one on blur', () => {
+  it('shows the default branch as a placeholder when none is declared, and sets one on blur', async () => {
     render(<SettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
 
@@ -173,10 +227,10 @@ describe('Settings — a project landing branch (VS-122)', () => {
 
     fireEvent.change(field, { target: { value: 'edge' } });
     fireEvent.blur(field);
-    expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: 'edge' } });
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: 'edge' } }));
   });
 
-  it('shows an already-declared landing branch and changes it on blur', () => {
+  it('shows an already-declared landing branch and changes it on blur', async () => {
     state.projects = [{ ...state.projects[0]!, landingBranch: 'edge' }];
     render(<SettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
@@ -186,10 +240,10 @@ describe('Settings — a project landing branch (VS-122)', () => {
 
     fireEvent.change(field, { target: { value: 'staging' } });
     fireEvent.blur(field);
-    expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: 'staging' } });
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: 'staging' } }));
   });
 
-  it('clearing the field sends an empty string', () => {
+  it('clearing the field sends an empty string', async () => {
     state.projects = [{ ...state.projects[0]!, landingBranch: 'edge' }];
     render(<SettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
@@ -197,10 +251,10 @@ describe('Settings — a project landing branch (VS-122)', () => {
     const field = screen.getByLabelText('landing branch for api');
     fireEvent.change(field, { target: { value: '' } });
     fireEvent.blur(field);
-    expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: '' } });
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: '' } }));
   });
 
-  it('a rejected branch is toasted and the field reverts rather than keeping the bad value', () => {
+  it('a rejected branch keeps the typed value and states why, instead of reverting it (VS-141 AC #3)', async () => {
     state.projectPatchError = "branch 'nope' was not found on origin";
     render(<SettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
@@ -209,8 +263,72 @@ describe('Settings — a project landing branch (VS-122)', () => {
     fireEvent.change(field, { target: { value: 'nope' } });
     fireEvent.blur(field);
 
-    expect(state.toasts.at(-1)).toMatchObject({ title: 'Landing branch not changed', detail: "branch 'nope' was not found on origin" });
-    expect(field).toHaveValue('');
+    await waitFor(() => expect(screen.getByText("branch 'nope' was not found on origin")).toBeInTheDocument());
+    expect(field).toHaveValue('nope');
+  });
+
+  it('correcting and retrying after a rejection sends the corrected draft', async () => {
+    state.projectPatchError = "branch 'nope' was not found on origin";
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+
+    const field = screen.getByLabelText('landing branch for api');
+    fireEvent.change(field, { target: { value: 'nope' } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(screen.getByText("branch 'nope' was not found on origin")).toBeInTheDocument());
+
+    state.projectPatchError = null;
+    fireEvent.change(field, { target: { value: 'edge' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: 'edge' } }));
+  });
+
+  it('Enter commits the value, on a phone keyboard exactly as on desktop (VS-141 AC #4)', async () => {
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+
+    const field = screen.getByLabelText('landing branch for api');
+    fireEvent.change(field, { target: { value: 'edge' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: 'edge' } }));
+  });
+
+  it('a dirty landing-branch field survives switching sections without an explicit blur (VS-141 AC #1/#6)', async () => {
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+
+    const field = screen.getByLabelText('landing branch for api');
+    fireEvent.change(field, { target: { value: 'edge' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: 'edge' } }));
+  });
+});
+
+describe('Settings — the workspace name (VS-141)', () => {
+  it('commits on blur', async () => {
+    render(<SettingsRoute />);
+    const input = screen.getByDisplayValue('Acme');
+    fireEvent.change(input, { target: { value: 'Acme Renamed' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(state.patches).toEqual([{ name: 'Acme Renamed' }]));
+  });
+
+  it('rejects an empty name without touching the daemon, and keeps it correctable', async () => {
+    render(<SettingsRoute />);
+    const input = screen.getByDisplayValue('Acme');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(screen.getByText('Name cannot be empty')).toBeInTheDocument());
+    expect(state.patches).toEqual([]);
+  });
+
+  it('a dirty name survives switching sections without an explicit blur', async () => {
+    render(<SettingsRoute />);
+    const input = screen.getByDisplayValue('Acme');
+    fireEvent.change(input, { target: { value: 'Acme Renamed' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+    await waitFor(() => expect(state.patches).toEqual([{ name: 'Acme Renamed' }]));
   });
 });
 
@@ -295,12 +413,20 @@ describe('Settings — Telegram', () => {
     expect(screen.getByRole('button', { name: 'Clear' })).toBeDisabled();
   });
 
-  it('the allowlist field writes allowedUserIds, parsed to integers, dropping non-numeric entries', () => {
+  it('the allowlist field writes allowedUserIds, parsed to integers, dropping non-numeric entries', async () => {
     openChannels();
     const input = screen.getByLabelText('Allowlist');
     fireEvent.change(input, { target: { value: '111, not-a-number, 222' } });
     fireEvent.blur(input);
-    expect(state.patches).toEqual([{ channels: { telegram: { allowedUserIds: [111, 222] } } }]);
+    await waitFor(() => expect(state.patches).toEqual([{ channels: { telegram: { allowedUserIds: [111, 222] } } }]));
+  });
+
+  it('Enter commits the allowlist without blurring (VS-141 AC #4)', async () => {
+    openChannels();
+    const input = screen.getByLabelText('Allowlist');
+    fireEvent.change(input, { target: { value: '111, 222' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(state.patches).toEqual([{ channels: { telegram: { allowedUserIds: [111, 222] } } }]));
   });
 
   it('shows "Locked to N users" when the allowlist is populated', () => {

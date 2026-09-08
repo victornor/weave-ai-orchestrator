@@ -2,7 +2,7 @@
  * Settings → Models: the two settings, and the only place the web app offers a runtime or a model
  * to choose (VS-77).
  */
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceModels } from '../api/types';
 
@@ -19,7 +19,16 @@ vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
   useModels: () => ({ data: state.models, isLoading: false }),
-  useSetModels: () => ({ mutate: (v: WorkspaceModels) => state.saved.push(v), isPending: false, error: state.saveError }),
+  useSetModels: () => ({
+    mutate: (v: WorkspaceModels) => state.saved.push(v),
+    mutateAsync: async (v: WorkspaceModels) => {
+      state.saved.push(v);
+      if (state.saveError) throw state.saveError;
+      return v;
+    },
+    isPending: false,
+    error: state.saveError,
+  }),
   useRuntimes: () => ({ data: [
     { id: 'claude', displayName: 'Claude', detection: { status: 'available' }, capabilities: {} },
     { id: 'codex', displayName: 'Codex', detection: { status: 'available' }, capabilities: {} },
@@ -82,13 +91,13 @@ describe('Settings — the two model settings', () => {
     expect(state.saved[0]!.conductor.model).toBeNull();
   });
 
-  it('takes a model the runtime does not list', () => {
+  it('takes a model the runtime does not list', async () => {
     openModels();
     fireEvent.change(screen.getByLabelText('Workers model'), { target: { value: '__other' } });
     const box = screen.getByLabelText('Workers model id');
     fireEvent.change(box, { target: { value: 'some-unlisted-model' } });
     fireEvent.blur(box);
-    expect(state.saved[0]!.workers.model).toBe('some-unlisted-model');
+    await waitFor(() => expect(state.saved[0]?.workers.model).toBe('some-unlisted-model'));
   });
 
   it('reveals the free-text box for a stored model the runtime does not list', () => {

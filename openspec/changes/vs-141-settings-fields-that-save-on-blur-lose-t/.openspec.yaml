@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: Settings fields that save on blur lose the edit on a phone; the landing
+  branch needs a save the human can see

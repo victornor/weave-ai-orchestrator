@@ -259,6 +259,46 @@ describe('decisions', () => {
     expect(decisions.list({ ticketId: t.id, status: ['open'] })).toHaveLength(0);
   });
 
+  it('withdrawForTicket closes every open decision on a ticket, whatever kind, and leaves other decisions alone', async () => {
+    const t = ticket();
+    const merge = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'merge' });
+    const question = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'q' });
+    const answered = decisions.create(AGENT, { ticketId: t.id, kind: 'gate_finding', title: 'already answered' });
+    await decisions.answer(HUMAN, answered.id, { key: 'ack' });
+    const untied = decisions.create(HUMAN, { kind: 'hire_approval', title: 'hire someone' });
+
+    expect(decisions.withdrawForTicket(SYSTEM, t.id, `${t.identifier} reached done`)).toBe(2);
+
+    expect(decisions.get(merge.id)).toMatchObject({ status: 'withdrawn', answerText: `${t.identifier} reached done` });
+    expect(decisions.get(question.id)).toMatchObject({ status: 'withdrawn', answerText: `${t.identifier} reached done` });
+    expect(decisions.get(answered.id)).toMatchObject({ status: 'answered', answerKey: 'ack' });
+    expect(decisions.get(untied.id).status).toBe('open');
+  });
+
+  it('closes an open decision when its ticket reaches done', async () => {
+    const t = ticket({ kind: 'task' });
+    await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+    const merge = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Approve the merge' });
+    await tickets.transition(AGENT, t.id, { to: 'done' });
+    expect(decisions.get(merge.id).status).toBe('withdrawn');
+  });
+
+  it('closes an open decision when its ticket is cancelled', () => {
+    const t = ticket({ kind: 'task' });
+    const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Approve the plan' });
+    tickets.cancel(HUMAN, t.id, 'not needed after all');
+    expect(decisions.get(plan.id).status).toBe('withdrawn');
+  });
+
+  it('leaves an already-answered decision alone when its ticket reaches a terminal status', async () => {
+    const t = ticket({ kind: 'task' });
+    await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+    const finding = decisions.create(AGENT, { ticketId: t.id, kind: 'gate_finding', title: 'Something noticed' });
+    const answered = await decisions.answer(HUMAN, finding.id, { key: 'ack', text: 'noted' });
+    await tickets.transition(AGENT, t.id, { to: 'done' });
+    expect(decisions.get(finding.id)).toMatchObject({ status: 'answered', answerKey: 'ack', answerText: 'noted', answeredAt: answered.answeredAt });
+  });
+
   it('creates workspace-level decisions without a ticket', () => {
     const d = decisions.create(HUMAN, { kind: 'approval', title: 'Add a project?' });
     expect(d.ticketId).toBeNull();

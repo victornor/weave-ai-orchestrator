@@ -20,7 +20,7 @@ describe('merge queue', () => {
     workers = { spawnForTicket: vi.fn(async (_actor: Actor, ticketId: string) => ({ id: h.addWorker(ticketId) })) };
     h.services.wake = wake as never;
     h.services.workers = workers as never;
-    h.services.decisions = { create: vi.fn(() => ({ id: newId() })), supersedeForTarget: vi.fn(() => 0) } as never;
+    h.services.decisions = { create: vi.fn(() => ({ id: newId() })), supersedeForTarget: vi.fn(() => 0), withdrawForTicket: vi.fn(() => 0) } as never;
     h.services.openspec = {
       validateForProposed: vi.fn(async () => ({ ok: true as const, plan: '# Plan' })),
       archiveAfterMerge: vi.fn(async () => ({ archivedAs: null, skipped: 'no change' })),

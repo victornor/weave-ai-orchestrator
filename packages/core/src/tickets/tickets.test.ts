@@ -13,14 +13,14 @@ describe('tickets', () => {
   let h: TestHarness;
   let tickets: TicketsService;
   let wake: ReturnType<typeof fakeWake>;
-  let decisions: { create: ReturnType<typeof vi.fn>; supersedeForTarget: ReturnType<typeof vi.fn> };
+  let decisions: { create: ReturnType<typeof vi.fn>; supersedeForTarget: ReturnType<typeof vi.fn>; withdrawForTicket: ReturnType<typeof vi.fn> };
   let openspec: { validateForProposed: ReturnType<typeof vi.fn>; archiveAfterMerge: ReturnType<typeof vi.fn> };
   let specs: ReturnType<typeof fakeSpecs>;
 
   beforeEach(() => {
     h = makeHarness();
     wake = fakeWake();
-    decisions = { create: vi.fn(() => ({ id: newId() })), supersedeForTarget: vi.fn(() => 0) };
+    decisions = { create: vi.fn(() => ({ id: newId() })), supersedeForTarget: vi.fn(() => 0), withdrawForTicket: vi.fn(() => 0) };
     openspec = {
       validateForProposed: vi.fn(async () => ({ ok: true as const, plan: '# Plan\n\n## Proposal\nbody' })),
       archiveAfterMerge: vi.fn(async () => ({ archivedAs: '2026-09-04-tst-1-thing', skipped: null })),

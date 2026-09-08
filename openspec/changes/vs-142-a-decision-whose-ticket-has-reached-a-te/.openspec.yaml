@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: An open decision closes on its own when the ticket it belongs to reaches a
+  terminal status, instead of lingering in the human's queue

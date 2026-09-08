@@ -91,6 +91,8 @@ export interface DecisionsService {
   /** Async: side effects drive ticket transitions and role activation. */
   answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean; inputs?: S.DecisionAnswerInputs }): Promise<S.Decision>;
   withdraw(actor: Actor, id: string, reason: string): S.Decision;
+  /** Withdraws every still-open decision scoped to this ticket (e.g. once it reaches a terminal status). Returns the count closed. */
+  withdrawForTicket(actor: Actor, ticketId: string, reason: string): number;
   supersedeForTarget(actor: Actor, ticketId: string, correlationKey: string): number;
   expireDue(): Promise<S.Decision[]>;
 }

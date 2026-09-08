@@ -255,7 +255,10 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     try { systemPromptText = readFileSync(instructionsPath, 'utf8'); } catch { systemPromptText = ''; }
 
     const configHome = join(ctx.paths.runtimesHome, setting.runtime);
-    const reconcileCredential = (): void => reconcileRuntimeCredential(setting.runtime, configHome, { readCredential: credentialReaderFor(ctx.registries, setting.runtime) });
+    const reconcileCredential = (): void => reconcileRuntimeCredential(setting.runtime, configHome, {
+      readCredential: credentialReaderFor(ctx.registries, setting.runtime),
+      isolated: ctx.isolated, daemonConfigDir: ctx.daemonConfigDir,
+    });
     reconcileCredential();
     const turnTimeoutMs = (ctx.config.defaults.turnTimeoutSec ?? 2700) * 1000;
 

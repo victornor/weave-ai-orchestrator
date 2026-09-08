@@ -187,14 +187,22 @@ export interface TurnPromptOptions {
   runId?: string;
 }
 
-interface BundledWake { source: string; reason: string; payload: Record<string, unknown> }
+interface BundledWake { source: string; reason: string; payload: Record<string, unknown>; requestedByKind: string; requestedById: string | null }
 
 export function flattenWakes(wakes: S.Wakeup[]): BundledWake[] {
   const out: BundledWake[] = [];
   for (const w of wakes) {
-    out.push({ source: w.source, reason: w.reason, payload: (w.payload ?? {}) as Record<string, unknown> });
-    const bundle = (w.payload as { bundle?: Array<{ source?: string; reason?: string; payload?: Record<string, unknown> }> } | null)?.bundle;
-    if (Array.isArray(bundle)) for (const b of bundle) out.push({ source: String(b.source ?? 'system'), reason: String(b.reason ?? ''), payload: (b.payload ?? {}) as Record<string, unknown> });
+    out.push({
+      source: w.source, reason: w.reason, payload: (w.payload ?? {}) as Record<string, unknown>,
+      requestedByKind: w.requestedByKind ?? 'system', requestedById: w.requestedById ?? null,
+    });
+    const bundle = (w.payload as { bundle?: Array<{ source?: string; reason?: string; payload?: Record<string, unknown>; requestedByKind?: string; requestedById?: string | null }> } | null)?.bundle;
+    if (Array.isArray(bundle)) for (const b of bundle) {
+      out.push({
+        source: String(b.source ?? 'system'), reason: String(b.reason ?? ''), payload: (b.payload ?? {}) as Record<string, unknown>,
+        requestedByKind: b.requestedByKind ?? 'system', requestedById: b.requestedById ?? null,
+      });
+    }
   }
   return out;
 }

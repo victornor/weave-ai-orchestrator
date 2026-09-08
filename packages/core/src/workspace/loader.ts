@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, chmodSync, lstatSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, basename } from 'node:path';
 import YAML from 'yaml';
 import { openDb, newId, nowIso } from '@agent-conductor/db';
 import {
@@ -30,6 +30,21 @@ function configDir(): string {
   if (process.env.AC_CONFIG_HOME) return process.env.AC_CONFIG_HOME;
   const xdg = process.env.XDG_CONFIG_HOME;
   return xdg && xdg.trim().length ? join(xdg, 'agent-conductor') : join(homedir(), '.config', 'agent-conductor');
+}
+
+/** The plain default with no override of any kind considered — VS-143's isolation boundary. */
+function plainDefaultConfigDir(): string {
+  return join(homedir(), '.config', 'agent-conductor');
+}
+
+/**
+ * VS-143: whether `resolved` is the host's one conventional config directory, regardless of how it
+ * got there (no flag, or an env override that happens to point at the same place — the generated
+ * systemd unit sets `AC_CONFIG_HOME` to exactly this path). Anything else is an isolated daemon:
+ * see `daemon-isolation/credential-scope` and `daemon-isolation/dispatch-gate`.
+ */
+function isDefaultConfigDir(resolved: string): boolean {
+  return resolve(resolved) === resolve(plainDefaultConfigDir());
 }
 
 function readYamlFile(path: string): unknown {
@@ -158,6 +173,7 @@ function ensureLayout(root: string, stateDir?: string): void {
 
 class Loader implements WorkspaceLoader {
   configDir(): string { return configDir(); }
+  isDefaultConfigDir(resolved: string): boolean { return isDefaultConfigDir(resolved); }
 
   async initWorkspace(dir: string, init: { id: string; name: string; ticketPrefix: string }): Promise<WorkspaceConfig> {
     const root = resolve(dir);
@@ -255,7 +271,10 @@ class Loader implements WorkspaceLoader {
     for (const id of runtimeIds) {
       if (!id) continue;
       mkdirSync(join(paths.runtimesHome, id), { recursive: true });
-      linkRuntimeCredentials(id, join(paths.runtimesHome, id), { readCredential: credentialReaderFor(opts.registries, id) });
+      linkRuntimeCredentials(id, join(paths.runtimesHome, id), {
+        readCredential: credentialReaderFor(opts.registries, id),
+        isolated: opts.isolated, daemonConfigDir: opts.daemonConfigDir,
+      });
     }
 
     writeWtConfig(paths.wtConfig, config.projects);
@@ -274,6 +293,8 @@ class Loader implements WorkspaceLoader {
       loopbackUrl: opts.loopbackUrl,
       skillsDir: opts.skillsDir,
       templatesDir: opts.templatesDir,
+      isolated: opts.isolated,
+      daemonConfigDir: opts.daemonConfigDir,
       async saveConfig(next: WorkspaceConfig): Promise<void> {
         const validated = WorkspaceConfigSchema.parse(next);
         writeYamlFile(file, unresolveEnvRefs(validated, envBack));
@@ -323,8 +344,14 @@ export const loader: WorkspaceLoader = new Loader();
  * and project state stay per workspace, so `CLAUDE_CONFIG_DIR` still points here.
  */
 
-/** Host path -> workspace path, per runtime. The host path is always the canonical one. */
-function credentialPaths(runtimeId: string, home: string): Array<[string, string]> {
+/**
+ * Host path -> workspace path, per runtime. The host path is always the canonical one — except for
+ * an isolated daemon (VS-143), which never resolves to the real host path: each pair's host side
+ * moves inside that daemon's own config directory instead, so the daemon needs its own login for the
+ * runtime to work at all rather than silently reading the owner's real credential. See
+ * `daemon-isolation/credential-scope`.
+ */
+function credentialPaths(runtimeId: string, home: string, host: { isolated: boolean; daemonConfigDir: string }): Array<[string, string]> {
   const h = process.env.HOME ?? '';
   const candidates: Record<string, Array<[string, string]>> = {
     claude: [[join(h, '.claude', '.credentials.json'), join(home, '.credentials.json')]],
@@ -332,7 +359,9 @@ function credentialPaths(runtimeId: string, home: string): Array<[string, string
     gemini: [[join(h, '.gemini', 'oauth_creds.json'), join(home, 'oauth_creds.json')], [join(h, '.gemini', 'google_accounts.json'), join(home, 'google_accounts.json')]],
     opencode: [[join(h, '.local', 'share', 'opencode', 'auth.json'), join(home, 'opencode', 'auth.json')]],
   };
-  return candidates[runtimeId] ?? [];
+  const pairs = candidates[runtimeId] ?? [];
+  if (!host.isolated) return pairs;
+  return pairs.map(([, dst]) => [join(host.daemonConfigDir, 'credentials', runtimeId, basename(dst)), dst]);
 }
 
 /**
@@ -402,8 +431,12 @@ function reconcileOne(src: string, dst: string, read?: CredentialReader): void {
  * repair the sharing if a CLI has replaced the link. Idempotent and best-effort per file: one
  * unreadable path must not stop the others.
  */
-export function linkRuntimeCredentials(runtimeId: string, home: string, opts: { readCredential?: CredentialReader } = {}): void {
-  for (const [src, dst] of credentialPaths(runtimeId, home)) {
+export function linkRuntimeCredentials(
+  runtimeId: string, home: string,
+  opts: { readCredential?: CredentialReader; isolated?: boolean; daemonConfigDir?: string } = {},
+): void {
+  const host = { isolated: opts.isolated ?? false, daemonConfigDir: opts.daemonConfigDir ?? '' };
+  for (const [src, dst] of credentialPaths(runtimeId, home, host)) {
     try { reconcileOne(src, dst, opts.readCredential); } catch { /* best effort */ }
   }
 }

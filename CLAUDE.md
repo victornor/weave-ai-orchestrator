@@ -153,6 +153,19 @@ process spawned by the system it is changing. Rules that keep that sane:
   human commands; they refuse to run inside a worker.
 - **Test against throwaway daemons only**: `--config-dir <tmp> --listen 127.0.0.1:0` (or the
   loopback port of your choice), with `auth.loopbackTrusted: true` in that dir's `daemon.yaml`.
+  Since VS-143, any config dir other than the plain default (`~/.config/agent-conductor`, or
+  whatever `AC_CONFIG_HOME`/`XDG_CONFIG_HOME` resolves to) makes the daemon **isolated** by
+  default, with no extra flag needed: it never resolves a runtime's credential to the host's real
+  `~/.claude/.credentials.json` (each runtime gets its own, empty-until-logged-in home under
+  `<config-dir>/credentials/<runtime>/`), and its dispatcher never spawns a run nobody explicitly
+  asked for — a `project add`'s scout ticket, an auto-assignment, a retry all stay queued; only a
+  wake a human sent directly (a chat message, answering a decision) is dispatched. This is a
+  daemon-level property: `--share-host-credentials` (or `AC_SHARE_HOST_CREDENTIALS=1`) is the
+  explicit, rarely-needed opt-out of both, for a deliberate second real daemon on the host. It does
+  **not** relax the `agent-conductor-worker` skill's "never run a coding CLI against live
+  credentials" rule: an isolated daemon's own credential home starts empty, so a real turn on it
+  just fails to authenticate rather than spending anything, but a fake CLI and a scratch config dir
+  are still how you verify launcher/adapter changes.
 - **The test suite clears `AC_*` from the environment** (`vitest.setup.ts`), because your run's
   `AC_RUN_TOKEN` / `AC_API_URL` would otherwise point tests at the live daemon. Keep it that way.
 - **Deliver through the ticket**: PR, plan, report. The human runs `conductor daemon upgrade`

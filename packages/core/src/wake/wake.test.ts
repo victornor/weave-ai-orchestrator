@@ -36,6 +36,22 @@ describe('wake queue', () => {
     expect(bundle[0]).toMatchObject({ source: 'ticket_comment', reason: 'two' });
   });
 
+  it('carries requestedBy into the bundle entry (VS-143: an isolated daemon\'s dispatch gate needs it)', () => {
+    wake.enqueue(h.conductorId, { source: 'system', reason: 'one', requestedBy: { kind: 'system', id: null } });
+    wake.enqueue(h.conductorId, { source: 'human_message', reason: 'two', requestedBy: { kind: 'human', id: 'u1' } });
+    const queued = wake.listForAgent(h.conductorId, ['queued']);
+    const bundle = (queued[0]!.payload as { bundle: Array<{ requestedByKind: string; requestedById: string | null }> }).bundle;
+    expect(bundle[0]).toMatchObject({ requestedByKind: 'human', requestedById: 'u1' });
+  });
+
+  it('defaults a bundled entry with no requestedBy to system', () => {
+    wake.enqueue(h.conductorId, { source: 'system', reason: 'one' });
+    wake.enqueue(h.conductorId, { source: 'system', reason: 'two' });
+    const queued = wake.listForAgent(h.conductorId, ['queued']);
+    const bundle = (queued[0]!.payload as { bundle: Array<{ requestedByKind: string; requestedById: string | null }> }).bundle;
+    expect(bundle[0]).toMatchObject({ requestedByKind: 'system', requestedById: null });
+  });
+
   it('skips a paused agent with a skip reason and records a skipped row', async () => {
     h.db.update('agents', h.conductorId, { status: 'paused' });
     const w = wake.enqueue(h.conductorId, { source: 'timer', reason: 'tick' });

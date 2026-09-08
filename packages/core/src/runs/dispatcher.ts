@@ -5,6 +5,7 @@ import type { CoreServices, Dispatcher } from '../api.js';
 import { executeRun } from './engine.js';
 import { runState } from './active.js';
 import { modelSettingFor } from '../models/resolve.js';
+import { flattenWakes } from '../prompts/index.js';
 
 export interface CoreDispatcher extends Dispatcher {
   /** Await every run this dispatcher started (tests and shutdown). */
@@ -62,6 +63,23 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
     return n;
   };
 
+  /**
+   * VS-143: an isolated daemon only dispatches a run a human explicitly asked for — see
+   * `daemon-isolation/dispatch-gate`. A wake nobody asked for (a project add's `project_added`, an
+   * auto-assignment, a retry, a timer) stays `queued` until a human-requested wake for the same
+   * agent — a chat message, answering a decision, anything already enqueued with
+   * `requestedBy: { kind: 'human' }` — makes it eligible. Bundled (coalesced) wake-ups carry their
+   * own `requestedByKind`, so a human-requested one buried in an otherwise system-requested bundle
+   * still counts.
+   */
+  const isEligibleWhileIsolated = (agentId: string, now: string): boolean => {
+    const queued = ctx.db.all<Wakeup>(
+      "SELECT * FROM wakeups WHERE agent_id = ? AND status = 'queued' AND (not_before IS NULL OR not_before <= ?)",
+      [agentId, now],
+    );
+    return flattenWakes(queued).some((w) => w.requestedByKind === 'human');
+  };
+
   const claim = (agent: Agent): Run | null => {
     return ctx.db.transaction((): Run | null => {
       const now = nowIso();
@@ -112,6 +130,7 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
           if (state.active.has(agent.id)) continue;
           if ([...state.active.values()].some((r) => r.agentId === agent.id)) continue;
           if (runningInDb(agent.id)) continue;
+          if (ctx.isolated && !isEligibleWhileIsolated(agent.id, now)) continue;
           if (agent.projectId) {
             const project = ctx.db.get<{ maxWorkers: number }>('SELECT max_workers FROM projects WHERE id = ?', [agent.projectId]);
             if (project && projectRunning(agent.projectId) >= project.maxWorkers) continue;

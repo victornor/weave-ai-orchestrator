@@ -1,12 +1,12 @@
 /** Smoke test: boot a real daemon over a temp config dir and workspace, then shut it down. */
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
 import { workspaceLoader, initLogger } from '@agent-conductor/core';
-import { pluginSpecifier, startDaemon, type DaemonHandle } from '../src/daemon.js';
+import { pluginSpecifier, startDaemon, resolveIsolation, type DaemonHandle } from '../src/daemon.js';
 
 initLogger(process.env.AC_LOG_LEVEL ?? 'silent');
 
@@ -31,6 +31,9 @@ describe('startDaemon', () => {
 
     daemon = await startDaemon({ configDir });
     expect(daemon.workspaces.has('smoke')).toBe(true);
+    // VS-143: a throwaway config dir is isolated by default — see daemon-isolation/credential-scope.
+    expect(daemon.workspaces.get('smoke')!.ctx.isolated).toBe(true);
+    expect(daemon.workspaces.get('smoke')!.ctx.daemonConfigDir).toBe(configDir);
 
     const health = await fetch(new URL('/api/health', daemon.loopbackUrl));
     expect(health.status).toBe(200);
@@ -71,6 +74,39 @@ describe('startDaemon', () => {
     daemon = null;
     expect(order).toEqual(['tickets.stop', 'db.close']);
   }, 30_000);
+
+  it('shareHostCredentials makes a throwaway config dir behave as not isolated (VS-143)', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'ac-cfg-'));
+    const wsDir = mkdtempSync(join(tmpdir(), 'ac-ws-'));
+    dirs = [configDir, wsDir];
+
+    await workspaceLoader.initWorkspace(wsDir, { id: 'shared', name: 'Shared', ticketPrefix: 'SHR' });
+    workspaceLoader.writeRegistry({ workspaces: [{ id: 'shared', path: wsDir }] }, configDir);
+    workspaceLoader.writeDaemonConfig({ ...workspaceLoader.readDaemonConfig(configDir), http: { listen: '127.0.0.1:0', trustProxy: false, tls: { mode: 'none', domains: [] } } }, configDir);
+
+    daemon = await startDaemon({ configDir, shareHostCredentials: true });
+    expect(daemon.workspaces.get('shared')!.ctx.isolated).toBe(false);
+  }, 30_000);
+});
+
+describe('resolveIsolation (VS-143)', () => {
+  const plainDefault = join(homedir(), '.config', 'agent-conductor');
+
+  it('is not isolated at the plain default config dir', () => {
+    expect(resolveIsolation(plainDefault)).toBe(false);
+  });
+
+  it('is isolated at any other config dir, with no flag required', () => {
+    expect(resolveIsolation('/tmp/ac-cfg-somewhere-else')).toBe(true);
+  });
+
+  it('the sharing opt-in restores non-isolated behavior for a custom config dir', () => {
+    expect(resolveIsolation('/tmp/ac-cfg-somewhere-else', true)).toBe(false);
+  });
+
+  it('the sharing opt-in is a no-op at the plain default, which is already not isolated', () => {
+    expect(resolveIsolation(plainDefault, true)).toBe(false);
+  });
 });
 
 describe('plugin loading', () => {

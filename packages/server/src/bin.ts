@@ -8,8 +8,13 @@ const flag = (name: string): string | undefined => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : undefined;
 };
+const boolFlag = (name: string): boolean => args.includes(`--${name}`);
 
-startDaemon({ configDir: flag('config-dir'), listen: flag('listen'), uiDir: flag('ui-dir') })
+startDaemon({
+  configDir: flag('config-dir'), listen: flag('listen'), uiDir: flag('ui-dir'),
+  // VS-143: the escape hatch out of an isolated daemon's default — see daemon-isolation/credential-scope.
+  shareHostCredentials: boolFlag('share-host-credentials') || process.env.AC_SHARE_HOST_CREDENTIALS === '1',
+})
   .then((daemon) => {
     getLogger('daemon').info({ publicUrl: daemon.publicUrl, loopbackUrl: daemon.loopbackUrl }, 'daemon ready');
   })

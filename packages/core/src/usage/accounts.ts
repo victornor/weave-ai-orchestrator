@@ -88,7 +88,10 @@ export function createAccountsService(ctx: WorkspaceContext): AccountsService {
     if (!adapter?.describeAccount) return { account: null, error: `the ${runtimeId} runtime does not describe its account` };
     const configHome = join(ctx.paths.runtimesHome, runtimeId);
     try {
-      reconcileRuntimeCredential(runtimeId, configHome, { readCredential: credentialReaderFor(ctx.registries, runtimeId) });
+      reconcileRuntimeCredential(runtimeId, configHome, {
+        readCredential: credentialReaderFor(ctx.registries, runtimeId),
+        isolated: ctx.isolated, daemonConfigDir: ctx.daemonConfigDir,
+      });
       const d = await adapter.describeAccount({ configHome, env: {}, timeoutMs: ACCOUNT_PROBE_TIMEOUT_MS });
       const row = {
         workspaceId: ctx.workspaceId,

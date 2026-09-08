@@ -44,6 +44,15 @@ export interface WorkspaceContext {
   /** Skills shipped with the package, to be installed into homes. */
   skillsDir: string;
   templatesDir: string;
+  /**
+   * VS-143: true when this daemon's own config directory is not the host's plain default (and it
+   * was not given the explicit sharing opt-in). An isolated daemon never resolves a runtime
+   * credential to the host's file and never dispatches a run nobody asked for. See
+   * `daemon-isolation/credential-scope` and `daemon-isolation/dispatch-gate`.
+   */
+  isolated: boolean;
+  /** The daemon's own resolved config directory — where an isolated daemon's own credentials live. */
+  daemonConfigDir: string;
   /** Persist the (possibly updated) workspace.yaml. */
   saveConfig(next: WorkspaceConfig): Promise<void>;
 }

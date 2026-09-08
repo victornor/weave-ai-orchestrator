@@ -37,6 +37,8 @@ export interface HarnessOptions {
   config?: Partial<WorkspaceConfig>;
   /** Skip creating a project + role (workspace-only tests). */
   bare?: boolean;
+  /** VS-143: build the harness as an isolated daemon would see it. Default false. */
+  isolated?: boolean;
 }
 
 export function makeHarness(opts: HarnessOptions = {}): TestHarness {
@@ -92,6 +94,8 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
     loopbackUrl: 'http://127.0.0.1:7433',
     skillsDir: join(root, 'skills'),
     templatesDir: join(root, 'templates'),
+    isolated: opts.isolated ?? false,
+    daemonConfigDir: join(root, 'daemon-config'),
     // The real loader replaces `ctx.config` with what it validated, and code that changes a
     // setting then reads it back through the context — so the fake has to do the same.
     saveConfig: async (next) => { ctx.config = WorkspaceConfigSchema.parse(next); },

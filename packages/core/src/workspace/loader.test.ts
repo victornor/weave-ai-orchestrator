@@ -1,5 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
@@ -19,6 +19,7 @@ describe('workspace loader', () => {
     const ctx = await loader.loadWorkspace(dir, {
       daemon: DaemonConfigSchema.parse({}), registries: createRegistries(),
       loopbackUrl: 'http://127.0.0.1:7433', skillsDir: join(dir, 'skills'), templatesDir: join(dir, 'templates'),
+      daemonConfigDir: cfgDir, isolated: false,
     });
     opened.push(ctx.db);
     return ctx;
@@ -328,5 +329,39 @@ describe('workspace loader', () => {
     expect(daemon.http.listen).toBe('127.0.0.1:7433');
     loader.writeDaemonConfig({ ...daemon, logLevel: 'debug' });
     expect(loader.readDaemonConfig().logLevel).toBe('debug');
+  });
+
+  describe('isDefaultConfigDir (VS-143)', () => {
+    it('is true for the plain default, regardless of how the value got there', () => {
+      const plainDefault = join(homedir(), '.config', 'agent-conductor');
+      expect(loader.isDefaultConfigDir(plainDefault)).toBe(true);
+      // The generated systemd unit sets AC_CONFIG_HOME to exactly this path — still the default.
+      expect(loader.isDefaultConfigDir(join(homedir(), '.config', 'agent-conductor'))).toBe(true);
+    });
+
+    it('is false for a throwaway config dir, such as XDG_CONFIG_HOME resolves to in this suite', () => {
+      expect(loader.isDefaultConfigDir(loader.configDir())).toBe(false);
+      expect(loader.isDefaultConfigDir('/tmp/ac-dev/agent-conductor')).toBe(false);
+    });
+  });
+
+  describe('isolation is carried onto the WorkspaceContext (VS-143)', () => {
+    it('defaults to not isolated when the loader is given isolated: false', async () => {
+      await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      const ctx = await load();
+      expect(ctx.isolated).toBe(false);
+      expect(ctx.daemonConfigDir).toBe(cfgDir);
+    });
+
+    it('is isolated when the loader is given isolated: true', async () => {
+      await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      const ctx = await loader.loadWorkspace(root, {
+        daemon: DaemonConfigSchema.parse({}), registries: createRegistries(),
+        loopbackUrl: 'http://127.0.0.1:7433', skillsDir: join(root, 'skills'), templatesDir: join(root, 'templates'),
+        daemonConfigDir: cfgDir, isolated: true,
+      });
+      opened.push(ctx.db);
+      expect(ctx.isolated).toBe(true);
+    });
   });
 });

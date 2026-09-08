@@ -6,6 +6,10 @@ import type { Job, Project, ProjectConfig, WorkspaceConfig } from '@agent-conduc
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createProjectsService } from './index.js';
 import { createJobsService } from '../jobs/index.js';
+import { createTicketsService } from '../tickets/service.js';
+import { createWakeService } from '../wake/index.js';
+import { createWorkersService } from '../workers/index.js';
+import { createDispatcher, type CoreDispatcher } from '../runs/dispatcher.js';
 import { git } from '../util/git.js';
 import { PROJECT_SECTIONS, parseDoc } from '../knowledge/files.js';
 import type { Actor, JobsService, ProjectsService } from '../api.js';
@@ -400,5 +404,48 @@ describe('projects', () => {
     expect(h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!.status).toBe('archived');
     expect(saved.at(-1)!.projects).toEqual([]);
     expect(existsSync(project.clonePath)).toBe(true);   // the clone is never deleted
+  });
+});
+
+describe('adding a project to an isolated daemon (VS-143, daemon-isolation/dispatch-gate)', () => {
+  let h: TestHarness;
+  let projects: ProjectsService;
+  let dispatcher: CoreDispatcher;
+
+  beforeEach(() => {
+    h = makeHarness({ bare: true, isolated: true });
+    h.ctx.saveConfig = async (next) => { h.ctx.config = next; };
+    h.services.jobs = createJobsService(h.ctx, h.deps);
+    h.services.tickets = createTicketsService(h.ctx, h.deps);
+    h.services.wake = createWakeService(h.ctx, h.deps);
+    h.services.workers = createWorkersService(h.ctx, h.deps);
+    dispatcher = createDispatcher(h.ctx, h.deps);
+    h.services.dispatcher = dispatcher;
+    projects = createProjectsService(h.ctx, h.deps);
+  });
+  afterEach(async () => { await jobs().stop(); h.cleanup(); while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
+  const jobs = (): JobsService => h.services.jobs!;
+  const quick = (url: string): ProjectConfig => ({
+    id: 'web', url, defaultBranch: 'main', maxWorkers: 4, warmPaths: [], openspec: { enabled: false }, policies: {},
+  } as ProjectConfig);
+
+  it('creates the scout ticket and the conductor wake as usual, but dispatches neither', async () => {
+    const src = await sourceRepo();
+    await projects.add(HUMAN, quick(src));
+
+    // The scout ticket is created exactly as it is in a non-isolated daemon.
+    const scout = h.db.get<{ kind: string; originKind: string }>("SELECT kind, origin_kind as originKind FROM tickets WHERE kind = 'scout'");
+    expect(scout).toMatchObject({ kind: 'scout', originKind: 'project_describe' });
+
+    // So is the conductor's wake about it — nobody skipped enqueueing it.
+    const queued = h.services.wake!.listForAgent(h.services.workers!.conductor().id, ['queued']);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.payload).toMatchObject({ kind: 'project_added' });
+
+    // But nobody asked for a turn: the dispatcher leaves it queued rather than spawning one.
+    await dispatcher.tick();
+    await dispatcher.drain();
+    expect(h.db.all('SELECT id FROM runs')).toHaveLength(0);
+    expect(h.services.wake!.listForAgent(h.services.workers!.conductor().id, ['queued'])).toHaveLength(1);
   });
 });

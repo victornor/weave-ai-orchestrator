@@ -42,6 +42,14 @@ export interface StartOptions {
   /** Override the public listen address (`host:port`), e.g. from `conductor daemon start --listen`. */
   listen?: string;
   uiDir?: string | null;
+  /**
+   * VS-143: opt out of isolation for a daemon whose config directory is not the host's plain
+   * default — shares the host's runtime credentials and dispatches autonomously, exactly as a
+   * daemon at the default config directory does. Default false: isolation is otherwise automatic,
+   * with no flag required to get it. See `daemon-isolation/credential-scope` and
+   * `daemon-isolation/dispatch-gate`.
+   */
+  shareHostCredentials?: boolean;
 }
 
 export interface DaemonHandle {
@@ -54,8 +62,18 @@ export interface DaemonHandle {
 
 export const VERSION: string = readVersion();
 
+/**
+ * VS-143: a daemon whose config directory is not the host's plain default is isolated by default —
+ * no flag required to get the safe behavior. `shareHostCredentials` is the explicit opt-out. Exported
+ * standalone so this decision is testable without booting a daemon or touching the real default path.
+ */
+export function resolveIsolation(configDir: string, shareHostCredentials?: boolean): boolean {
+  return !workspaceLoader.isDefaultConfigDir(configDir) && !shareHostCredentials;
+}
+
 export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle> {
   const configDir = opts.configDir ?? workspaceLoader.configDir();
+  const isolated = resolveIsolation(configDir, opts.shareHostCredentials);
   const daemonCfg = withListen(workspaceLoader.readDaemonConfig(configDir), opts.listen);
   initLogger(daemonCfg.logLevel);
   await mkdir(configDir, { recursive: true });
@@ -88,10 +106,10 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   };
   loopback.setDeps({ ...deps, listener: 'loopback' });
 
-  const admin = makeAdmin(configDir, daemonCfg, registries, workspaces, loopback.url, hooks);
+  const admin = makeAdmin(configDir, isolated, daemonCfg, registries, workspaces, loopback.url, hooks);
   const registry = workspaceLoader.readRegistry(configDir);
   for (const entry of registry.workspaces) {
-    try { await loadWorkspaceInto(workspaces, entry.path, { daemon: daemonCfg, registries, loopbackUrl: loopback.url, ...dirs() }, hooks); }
+    try { await loadWorkspaceInto(workspaces, entry.path, { daemon: daemonCfg, registries, loopbackUrl: loopback.url, daemonConfigDir: configDir, isolated, ...dirs() }, hooks); }
     catch (e) { log.error({ err: e, workspace: entry.id, path: entry.path }, 'workspace failed to load'); }
   }
 
@@ -166,7 +184,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
 async function loadWorkspaceInto(
   workspaces: Map<string, WorkspaceRuntime>,
   path: string,
-  opts: { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string },
+  opts: { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; daemonConfigDir: string; isolated: boolean },
   hooks: Array<{ events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }>,
 ): Promise<WorkspaceRuntime> {
   const ctx: WorkspaceContext = await workspaceLoader.loadWorkspace(path, opts);
@@ -213,10 +231,10 @@ async function cancelRunningRuns(ws: WorkspaceRuntime): Promise<void> {
 }
 
 function makeAdmin(
-  configDir: string, daemon: DaemonConfig, registries: Registries, workspaces: Map<string, WorkspaceRuntime>,
+  configDir: string, isolated: boolean, daemon: DaemonConfig, registries: Registries, workspaces: Map<string, WorkspaceRuntime>,
   loopbackUrl: string, hooks: Array<{ events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }>,
 ): WorkspaceAdmin {
-  const opts = () => ({ daemon, registries, loopbackUrl, ...dirs() });
+  const opts = () => ({ daemon, registries, loopbackUrl, daemonConfigDir: configDir, isolated, ...dirs() });
   const remember = (id: string, path: string): void => {
     const registry = workspaceLoader.readRegistry(configDir);
     if (!registry.workspaces.some((w) => w.id === id)) registry.workspaces.push({ id, path });

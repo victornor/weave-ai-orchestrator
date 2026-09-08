@@ -226,6 +226,79 @@ describe('adopting an existing workspace credential once', () => {
   });
 });
 
+describe('an isolated daemon (VS-143)', () => {
+  let configDirA: string;
+  let configDirB: string;
+
+  beforeEach(() => {
+    configDirA = mkdtempSync(join(tmpdir(), 'ac-daemon-a-'));
+    configDirB = mkdtempSync(join(tmpdir(), 'ac-daemon-b-'));
+  });
+  afterEach(() => {
+    rmSync(configDirA, { recursive: true, force: true });
+    rmSync(configDirB, { recursive: true, force: true });
+  });
+
+  const linkIsolated = (daemonConfigDir: string): void =>
+    linkRuntimeCredentials('claude', wsHome, { readCredential: read, isolated: true, daemonConfigDir });
+
+  it('reports needing a login rather than silently reading the real host credential', () => {
+    writeHost(credential('2026-09-08T10:00:00Z', 'host'));
+    linkIsolated(configDirA);
+
+    // No credential of its own, so no link is created at all — never one that quietly reaches the
+    // real host file.
+    expect(() => lstatSync(wsPath())).toThrow();
+  });
+
+  it('never touches or links to the real host credential, even once it has its own', () => {
+    writeHost(credential('2026-09-08T10:00:00Z', 'host'));
+    const isolatedHostPath = join(configDirA, 'credentials', 'claude', '.credentials.json');
+    mkdirSync(dirname(isolatedHostPath), { recursive: true });
+    writeFileSync(isolatedHostPath, credential('2026-09-08T10:00:00Z', 'isolated-own-login'));
+
+    linkIsolated(configDirA);
+
+    expect(readlinkSync(wsPath())).not.toBe(hostPath());
+    expect(readlinkSync(wsPath()).startsWith(home)).toBe(false);
+    expect(markerOf(hostPath())).toBe('host');
+    expect(markerOf(wsPath())).toBe('isolated-own-login');
+  });
+
+  it('works once the isolated daemon has its own credential', () => {
+    linkIsolated(configDirA);
+    const isolatedHostPath = join(configDirA, 'credentials', 'claude', '.credentials.json');
+    mkdirSync(dirname(isolatedHostPath), { recursive: true });
+    writeFileSync(isolatedHostPath, credential('2026-09-08T10:00:00Z', 'isolated-own-login'));
+
+    linkIsolated(configDirA);
+
+    expect(isLink(wsPath())).toBe(true);
+    expect(markerOf(wsPath())).toBe('isolated-own-login');
+  });
+
+  it('gives two different isolated daemons two distinct, non-conflicting credential files', () => {
+    const isolatedHostPathA = join(configDirA, 'credentials', 'claude', '.credentials.json');
+    const isolatedHostPathB = join(configDirB, 'credentials', 'claude', '.credentials.json');
+    mkdirSync(dirname(isolatedHostPathA), { recursive: true });
+    mkdirSync(dirname(isolatedHostPathB), { recursive: true });
+    writeFileSync(isolatedHostPathA, credential('2026-09-08T10:00:00Z', 'daemon-a'));
+    writeFileSync(isolatedHostPathB, credential('2026-09-08T10:00:00Z', 'daemon-b'));
+
+    linkIsolated(configDirA);
+    expect(markerOf(wsPath())).toBe('daemon-a');
+
+    // A second workspace runtime home, as a second daemon-B workspace would have.
+    const wsHomeB = join(mkdtempSync(join(tmpdir(), 'ac-rt-b-')), 'claude');
+    mkdirSync(wsHomeB, { recursive: true });
+    linkRuntimeCredentials('claude', wsHomeB, { readCredential: read, isolated: true, daemonConfigDir: configDirB });
+    expect(markerOf(join(wsHomeB, '.credentials.json'))).toBe('daemon-b');
+
+    expect(isolatedHostPathA).not.toBe(isolatedHostPathB);
+    rmSync(dirname(wsHomeB), { recursive: true, force: true });
+  });
+});
+
 describe('runtimes that cannot describe their credential', () => {
   it('still shares the file, and never overwrites the host copy', () => {
     const codexHost = join(home, '.codex', 'auth.json');

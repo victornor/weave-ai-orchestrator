@@ -76,7 +76,13 @@ export function createWakeService(ctx: WorkspaceContext, _deps: () => CoreServic
       if (target) {
         const payload = (target.payload ?? {}) as Record<string, unknown> & { bundle?: unknown[] };
         const bundle = Array.isArray(payload.bundle) ? payload.bundle : [];
-        bundle.push({ source: input.source, reason: input.reason, payload: input.payload ?? {}, at: nowIso() });
+        // requestedBy travels with the bundle entry (VS-143) so a human-requested wake that
+        // coalesces into an already-queued one is still visible as human-requested to a consumer
+        // that only sees the target row — the isolated-daemon dispatch gate in particular.
+        bundle.push({
+          source: input.source, reason: input.reason, payload: input.payload ?? {}, at: nowIso(),
+          requestedByKind: input.requestedBy?.kind ?? 'system', requestedById: input.requestedBy?.id ?? null,
+        });
         ctx.db.update('wakeups', target.id, { payloadJson: { ...payload, bundle } });
         const coalesced = insert(agentId, input, 'coalesced', { coalescedIntoId: target.id, finishedAt: nowIso() });
         ctx.events.emit('wake.queued', 'wakeup', target.id, { agentId, source: input.source, reason: input.reason, coalescedFrom: coalesced.id });

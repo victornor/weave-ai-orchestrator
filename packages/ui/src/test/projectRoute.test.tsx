@@ -71,7 +71,7 @@ vi.mock('../api/hooks', () => ({
 }));
 
 const { ProjectOverviewRoute } = await import('../routes/project/ProjectOverview');
-const { PROJECT_SECTIONS } = await import('../routes/project/sections');
+const { PROJECT_SECTIONS, ProjectSection } = await import('../routes/project/sections');
 
 const NOW = new Date('2026-09-10T12:00:00.000Z');
 const daysAgo = (n: number): string => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000).toISOString();
@@ -359,6 +359,50 @@ describe('the sections', () => {
     const card = section('Pull requests');
     expect(within(card).getByText(/no forge/)).toBeTruthy();
     expect(within(card).queryByRole('alert')).toBeNull();
+  });
+});
+
+describe('scrollable sections', () => {
+  it('caps every section but Activity, which already bounds itself to SHOWN=12', () => {
+    const capped = PROJECT_SECTIONS.filter((s) => s.scrollable).map((s) => s.key);
+    expect(capped).toEqual(['needs', 'work', 'landing', 'history', 'pulls', 'landings', 'knowledge']);
+    expect(PROJECT_SECTIONS.find((s) => s.key === 'activity')?.scrollable).toBe(false);
+  });
+
+  it('caps a scrollable section at a share of --ac-app-h with plain overflow-y-auto, whether it has few rows or many', () => {
+    const few = <ProjectSection id="x" label="X" scrollable><ul><li>one</li><li>two</li></ul></ProjectSection>;
+    const { container: shortContainer, unmount } = render(few);
+    const shortBody = shortContainer.querySelector('#project-section-x');
+    expect(shortBody?.className).toContain('overflow-y-auto');
+    expect(shortBody?.className).toContain('max-h-[calc(var(--ac-app-h)*0.4)]');
+    // Not .ac-scroll: that utility sets overscroll-behavior: contain, which would trap the page
+    // scroll at the section's boundary instead of letting it continue (criterion 3).
+    expect(shortBody?.className).not.toContain('ac-scroll');
+    expect(within(shortBody as HTMLElement).getAllByRole('listitem')).toHaveLength(2);
+    unmount();
+
+    const many = (
+      <ProjectSection id="x" label="X" scrollable>
+        <ul>{Array.from({ length: 50 }, (_, i) => <li key={i}>row {i}</li>)}</ul>
+      </ProjectSection>
+    );
+    const { container: longContainer } = render(many);
+    const longBody = longContainer.querySelector('#project-section-x');
+    // Same classes regardless of content — the cap is a maximum, not a fixed height, and nothing is
+    // sliced out of the DOM to fit it.
+    expect(longBody?.className).toBe(shortBody?.className);
+    expect(within(longBody as HTMLElement).getAllByRole('listitem')).toHaveLength(50);
+  });
+
+  it('gives a non-scrollable section no cap and no scroll class', () => {
+    const { container } = render(
+      <ProjectSection id="x" label="X">
+        <p>content</p>
+      </ProjectSection>,
+    );
+    const body = container.querySelector('#project-section-x');
+    expect(body?.className).not.toContain('overflow-y-auto');
+    expect(body?.className).not.toContain('max-h-');
   });
 });
 

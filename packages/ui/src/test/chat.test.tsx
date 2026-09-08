@@ -80,6 +80,11 @@ vi.mock('../api/hooks', () => ({
       if (state.postError) opts?.onError?.(state.postError);
       else state.posted.push(v);
     },
+    mutateAsync: (v: Record<string, unknown>) => {
+      if (state.postError) return Promise.reject(state.postError);
+      state.posted.push(v);
+      return Promise.resolve(undefined);
+    },
   }),
   useDecisions: (p: Record<string, unknown>) => { state.decisionQuery = p; return { data: state.decisions }; },
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
@@ -751,6 +756,52 @@ describe('ChatRoute sending while the daemon is unreachable', () => {
     expect(state.posted).toHaveLength(0);
     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
     expect(state.toasts[0]).toMatchObject({ title: 'Message not sent', status: 'failed' });
+  });
+});
+
+describe('ChatRoute attachments (VS-133)', () => {
+  it('sends a pasted/browsed file with the text as one multipart request', async () => {
+    render(<ChatRoute />);
+    const file = new File(['x'], 'shot.png', { type: 'image/png' });
+    fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText('Message the conductor…'), { target: { value: 'look at this' } });
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Send'));
+      await Promise.resolve();
+    });
+
+    expect(state.posted).toEqual([{ threadId: 'th_1', body: 'look at this', projectId: null, files: [file] }]);
+  });
+
+  it('leaves the composer populated and toasts when an attachment is rejected', async () => {
+    state.postError = Object.assign(new Error('shot.png: exceeds the cap'), { name: 'ApiError' });
+    render(<ChatRoute />);
+    const file = new File(['x'], 'shot.png', { type: 'image/png' });
+    fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'too big' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+
+    await act(async () => { await Promise.resolve(); });
+    expect(box.value).toBe('too big');
+    expect(screen.getByText('shot.png')).toBeInTheDocument();
+    expect(state.toasts[0]).toMatchObject({ title: 'Message not sent', status: 'failed' });
+  });
+
+  it('shows an image attachment as a thumbnail, and a text attachment as a download chip', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'a screenshot', direction: 'inbound', parts: [{ type: 'attachment', id: 'att1', filename: 'shot.png', mediaType: 'image/png', byteSize: 2048 }] }),
+      message({ id: 'm2', body: 'and some notes', direction: 'inbound', parts: [{ type: 'attachment', id: 'att2', filename: 'notes.txt', mediaType: 'text/plain', byteSize: 40 }] }),
+    ];
+    render(<ChatRoute />);
+
+    const img = messageAround('a screenshot').querySelector('img');
+    expect(img).toHaveAttribute('src', '/api/w/ws1/threads/th_1/attachments/att1');
+    expect(img).toHaveAttribute('alt', 'shot.png');
+
+    const chip = within(messageAround('and some notes')).getByText('notes.txt').closest('a');
+    expect(chip).toHaveAttribute('href', '/api/w/ws1/threads/th_1/attachments/att2');
+    expect(chip).toHaveAttribute('download', 'notes.txt');
   });
 });
 

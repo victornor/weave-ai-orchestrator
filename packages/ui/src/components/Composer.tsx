@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYPES } from '@agent-conductor/shared';
 import { useDictation } from '../lib/dictation';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
 import { VoiceMeter } from './VoiceMeter';
+
+const ACCEPTED_ATTACHMENT_TYPES = [...ATTACHMENT_IMAGE_TYPES, ...ATTACHMENT_TEXT_TYPES];
+const ACCEPT_ATTR = ACCEPTED_ATTACHMENT_TYPES.join(',');
 
 export type ComposerState = 'idle' | 'queued';
 
@@ -22,12 +26,28 @@ export interface ComposerProps {
   autoFocus?: boolean;
   value?: string;
   onChange?: (v: string) => void;
-  onSubmit: (text: string) => void | Promise<void>;
+  onSubmit: (text: string, files?: File[]) => void | Promise<void>;
   /** rendered above the input; used by "Revise…" to show what it is scoped to. */
   scope?: React.ReactNode;
   rows?: number;
   submitLabel?: string;
   className?: string;
+  /** Browse + paste, conductor chat only (VS-133) — ticket comments, decision notes and revise-plan notes carry none. */
+  allowAttachments?: boolean;
+  /** Controlled, like `value`/`onChange`: the parent clears it on a confirmed send and leaves it alone on a failed one. */
+  attachments?: File[];
+  onAttachmentsChange?: (files: File[]) => void;
+}
+
+function AttachIcon(): React.ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" className="size-4" aria-hidden>
+      <path
+        d="M11 4.5v6a3 3 0 0 1-6 0V4a2 2 0 0 1 4 0v5.5a1 1 0 0 1-2 0V5"
+        stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 function MicIcon({ slashed }: { slashed?: boolean }): React.ReactElement {
@@ -66,6 +86,9 @@ export function Composer({
   rows = 1,
   submitLabel = 'Send',
   className,
+  allowAttachments,
+  attachments,
+  onAttachmentsChange,
 }: ComposerProps): React.ReactElement {
   const [internal, setInternal] = useState('');
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
@@ -75,6 +98,23 @@ export function Composer({
   const base = useRef('');
   const [explain, setExplain] = useState(false);
   const startedByKey = useRef(false);
+
+  const [internalFiles, setInternalFiles] = useState<File[]>([]);
+  const files = attachments ?? internalFiles;
+  const setFiles = useCallback((f: File[]) => (onAttachmentsChange ? onAttachmentsChange(f) : setInternalFiles(f)), [onAttachmentsChange]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [attachError, setAttachError] = useState<string | null>(null);
+
+  const addFiles = useCallback((incoming: File[]): void => {
+    const accepted = incoming.filter((f) => (ACCEPTED_ATTACHMENT_TYPES as readonly string[]).includes(f.type));
+    if (accepted.length < incoming.length) setAttachError('Only images (PNG/JPEG/GIF/WebP) and plain text/markdown files are accepted.');
+    else setAttachError(null);
+    const combined = [...files, ...accepted].slice(0, ATTACHMENT_MAX_PER_MESSAGE);
+    if (files.length + accepted.length > ATTACHMENT_MAX_PER_MESSAGE) setAttachError(`At most ${ATTACHMENT_MAX_PER_MESSAGE} files per message.`);
+    setFiles(combined);
+  }, [files, setFiles]);
+
+  const removeFile = useCallback((i: number): void => setFiles(files.filter((_, idx) => idx !== i)), [files, setFiles]);
 
   // `base` is whatever was in the box when the mic opened, and it does not move while it is open:
   // the hook hands over the whole transcript so far on every event, so each one replaces the last.
@@ -156,10 +196,35 @@ export function Composer({
       startedByKey.current = false;
       dictation.stop();
     }
+    if (files.length > 0) {
+      // Cleared only once the send is confirmed: a rejected attachment (or a transport failure)
+      // leaves the composer exactly as the human left it, text and files both, so nothing already
+      // typed is lost and the attempt can be retried (openspec spec.md — "A failed attachment
+      // upload leaves the composer's text intact"). `onSubmit` is expected to report the failure
+      // itself (a toast); this only decides what to keep on screen.
+      Promise.resolve(onSubmit(t, files)).then(() => {
+        set('');
+        base.current = '';
+        setFiles([]);
+        setAttachError(null);
+      }).catch(() => { /* kept for retry */ });
+      return;
+    }
     void onSubmit(t);
     set('');
     base.current = '';
-  }, [text, disabled, onSubmit, set, dictation]);
+  }, [text, disabled, onSubmit, set, dictation, files, setFiles]);
+
+  const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    if (!allowAttachments) return;
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const pasted = items.filter((i) => i.kind === 'file').map((i) => i.getAsFile()).filter((f): f is File => f !== null);
+    if (pasted.length === 0) return;
+    // A pasted image replaces the clipboard's plain-text fallback, which browsers offer alongside a
+    // copied screenshot but which is never what the human meant to paste here.
+    e.preventDefault();
+    addFiles(pasted);
+  }, [allowAttachments, addFiles]);
 
   const dictating = dictation.listening;
 
@@ -182,6 +247,23 @@ export function Composer({
           dictating ? 'border-accent' : 'border-line-2',
         )}
       >
+        {allowAttachments && files.length > 0 ? (
+          <ul className="flex flex-wrap gap-1.5 px-3.5 pt-2" aria-label="Attached files">
+            {files.map((f, i) => (
+              <li key={`${f.name}-${i}`} className="flex items-center gap-1.5 rounded-r6 border border-line-2 bg-bg-2 py-1 pl-2 pr-1 text-micro text-text-2">
+                <span className="max-w-40 truncate">{f.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${f.name}`}
+                  onClick={() => removeFile(i)}
+                  className="inline-flex size-4 items-center justify-center rounded-full text-text-4 hover:bg-bg-3 hover:text-text-1"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div className="flex items-end gap-2.5 p-2 pl-3.5">
           <textarea
             ref={ta}
@@ -191,6 +273,7 @@ export function Composer({
             placeholder={placeholder}
             aria-label={placeholder}
             onChange={(e) => set(e.target.value)}
+            onPaste={onPaste}
             // Enter sends only where there is a modifier to hold for a newline. On touch the key is
             // left entirely to the browser, so the textarea's own undo, IME composition and autosize
             // keep working — inserting the '\n' by hand breaks all three (VS-89).
@@ -203,6 +286,31 @@ export function Composer({
             }}
             className="max-h-[min(12rem,calc(var(--ac-app-h)*0.35))] flex-1 resize-none overflow-y-auto bg-transparent py-1.5 text-body text-text-1 outline-none placeholder:text-text-4 focus-visible:[box-shadow:none]"
           />
+          {allowAttachments ? (
+            <>
+              <input
+                ref={fileInput}
+                type="file"
+                multiple
+                accept={ACCEPT_ATTR}
+                data-testid="composer-file-input"
+                className="hidden"
+                onChange={(e) => {
+                  addFiles(Array.from(e.target.files ?? []));
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                aria-label="Attach a file"
+                disabled={disabled}
+                onClick={() => fileInput.current?.click()}
+                className="inline-flex size-8 flex-none items-center justify-center rounded-r6 border border-line-2 text-text-2 transition-colors duration-(--dur-fast) ease-ac hover:bg-bg-3 hover:text-text-1"
+              >
+                <AttachIcon />
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
             aria-label={dictation.mode === 'unavailable' ? 'Dictation unavailable' : dictating ? 'Stop dictation' : 'Dictate'}
@@ -258,6 +366,11 @@ export function Composer({
       {dictation.error ? (
         <p className="rounded-r6 border border-blocked/35 bg-blocked/8 px-3 py-2 text-micro leading-relaxed text-text-1" role="alert">
           {dictation.error}
+        </p>
+      ) : null}
+      {attachError ? (
+        <p className="rounded-r6 border border-blocked/35 bg-blocked/8 px-3 py-2 text-micro leading-relaxed text-text-1" role="alert">
+          {attachError}
         </p>
       ) : null}
       {explain && dictation.mode === 'unavailable' ? (

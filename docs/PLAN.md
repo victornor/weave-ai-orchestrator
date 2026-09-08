@@ -362,6 +362,8 @@ Rule: one open decision per `(ticket_id, correlation_key)`. Answering a decision
 
 **channels** — `id, workspace_id, kind (web|cli|telegram|…), config_json (secrets by env ref), status, last_error`. **channel_threads** — `id, channel_id, agent_id (the conductor), ticket_id (set when the thread is bound to a ticket; messages then land as ticket comments and wake that ticket's worker), external_thread_id, external_user_id, human_label, created_at, last_message_at`. **thread_messages** — `id, thread_id, direction (inbound|outbound), author_kind, author_id, run_id, body, parts_json (CanonicalMessage), external_message_id, delivery_status, created_at`.
 
+**attachments** (VS-133) — `id, thread_id, message_id, filename (display only, sanitized, never a path), media_type, byte_size, storage_key (server-generated, never the client's filename), created_at`. Always written in the same transaction as the `thread_messages` row it belongs to, so `message_id` is `NOT NULL` and there is no orphan-upload state to sweep. Bytes live under the workspace state dir (`WorkspacePaths.attachments`), outside anything served as static content; served back only via the authenticated `GET /threads/:threadId/attachments/:id`, scoped to the thread by the query itself. Accepted types and caps, and how the content reaches the conductor, are in ADR 0015.
+
 **operator** — `id, username, password_hash (argon2id), totp_secret_enc (nullable), created_at, updated_at`. One row in v1.
 
 **auth_sessions** — `id, operator_id, token_hash, kind (web|cli|presenter), device_name, created_at, last_seen_at, expires_at, revoked_at, ip, user_agent`.

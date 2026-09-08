@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: Let a human attach files/images to a conductor chat message, by browsing
+  or by pasting, and have the conductor actually receive the content

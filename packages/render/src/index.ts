@@ -12,3 +12,4 @@ export * from './briefing.js';
 export * from './usage.js';
 export * from './changelog.js';
 export * from './diff.js';
+export * from './attachments.js';

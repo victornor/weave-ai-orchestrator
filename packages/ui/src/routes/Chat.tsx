@@ -38,7 +38,7 @@ import {
 import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import { NetworkError } from '../api/client';
-import { contextStrip, resolveModel, runtimeLimitStrip } from '@agent-conductor/render';
+import { attachmentPartsOf, attachmentToView, contextStrip, resolveModel, runtimeLimitStrip } from '@agent-conductor/render';
 import { chatEntries, chatRows } from '../lib/dispatch';
 import { useShowSilentTurns } from '../lib/chatPrefs';
 import { readExpandedTraces, toggleExpandedTrace } from '../lib/traceExpansion';
@@ -153,6 +153,9 @@ export function ChatRoute(): React.ReactElement {
   /** Bridges the gap between posting and the daemon starting the run, so "working" shows at once. */
   const [sending, setSending] = useState(false);
   const offline = conn.state === 'offline' || conn.state === 'unreachable';
+  // Not part of the draft: a File cannot be persisted to localStorage, and there is no offline-queue
+  // replay for one either (VS-133 — out of scope). Cleared only on a confirmed send.
+  const [attachments, setAttachments] = useState<File[]>([]);
 
   const { events: runEvents, status: runStreamStatus, retryNow: retryRunStream } = useRunEventStream(runId, { live: live?.running ?? false });
   // The reply renders as the thread message ac_human_send created; showing the call too would
@@ -504,7 +507,7 @@ export function ChatRoute(): React.ReactElement {
   const projectSlugOf = (d: { projectId: string | null; ticketId: string | null }): string | null =>
     projects.data?.find((p) => p.id === (d.projectId ?? tickets.data?.find((t) => t.id === d.ticketId)?.projectId))?.slug ?? null;
 
-  const send = (text: string): void => {
+  const send = (text: string, files: File[] = []): void | Promise<void> => {
     if (!threadId) return;
     const queueThisMessage = (): void => {
       enqueue({
@@ -514,6 +517,26 @@ export function ChatRoute(): React.ReactElement {
         label: text.slice(0, 60),
       });
     };
+
+    if (files.length > 0) {
+      // No offline-queue replay for an attachment (VS-133 — out of scope): a send while unreachable
+      // fails visibly, leaving the composer's text and files for a retry, rather than silently
+      // dropping the file or claiming it queued when it did not.
+      if (offline) {
+        toast.push({ title: 'Not sent', detail: 'Attachments cannot be queued offline — reconnect and try again.', status: 'failed' });
+        return Promise.reject(new Error('offline'));
+      }
+      setSending(true);
+      return post
+        .mutateAsync({ threadId, body: text, projectId, files, ...(replyToId ? { replyToMessageId: replyToId } : {}) })
+        .then(() => { patch({ replyToId: null, projectId: null }); })
+        .catch((e: unknown) => {
+          setSending(false);
+          toast.push({ title: 'Message not sent', detail: e instanceof Error ? e.message : 'unknown error', status: 'failed' });
+          throw e;
+        });
+    }
+
     if (offline) {
       queueThisMessage();
       // Cleared on both paths: the next message must not be silently attributed to the same question,
@@ -621,6 +644,7 @@ export function ChatRoute(): React.ReactElement {
                   <div key={row.key} className="flex flex-col gap-2">
                     <ChatMessage
                       message={row.entry.message}
+                      ws={ws}
                       onTicket={openTicket}
                       ticketStatus={ticketStatus}
                       projectName={projectName}
@@ -778,6 +802,9 @@ export function ChatRoute(): React.ReactElement {
               </>
             }
             onSubmit={send}
+            allowAttachments
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
           />
         </div>
       </div>
@@ -847,14 +874,49 @@ function ReplyQuote({ body, onDismiss }: { body: string; onDismiss: () => void }
   );
 }
 
+/**
+ * A message's `attachment` parts (VS-133): a thumbnail for an image, a filename chip with a download
+ * link for text — both pointing at the authenticated serving route, which the browser's own session
+ * cookie already covers (no token plumbing needed for an `<img src>` on this same origin).
+ */
+function AttachmentGallery({ ws, threadId, parts }: { ws: string; threadId: string; parts: unknown[] }): React.ReactElement | null {
+  const attachments = attachmentPartsOf(parts).map(attachmentToView);
+  if (attachments.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {attachments.map((a) => {
+        const href = `/api/w/${encodeURIComponent(ws)}/threads/${threadId}/attachments/${a.id}`;
+        if (a.kind === 'image') {
+          return (
+            <a key={a.id} href={href} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-r6 border border-line-2">
+              <img src={href} alt={a.filename} className="block max-h-48 max-w-full object-contain" />
+            </a>
+          );
+        }
+        return (
+          <a
+            key={a.id} href={href} download={a.filename}
+            className="flex items-center gap-1.5 rounded-r6 border border-line-2 bg-bg-2 px-2 py-1 text-micro text-text-2 hover:bg-bg-3 hover:text-text-1"
+          >
+            <span className="max-w-40 truncate">{a.filename}</span>
+            <span className="ac-mono text-nano text-text-4">{a.sizeLabel}</span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 function ChatMessage({
   message,
+  ws,
   onTicket,
   ticketStatus,
   projectName,
   onReply,
 }: {
   message: ThreadMessage;
+  ws: string;
   onTicket: (id: string) => void;
   ticketStatus: (id: string) => ReturnType<typeof ticketUiStatus> | null;
   projectName: (id: string) => string;
@@ -878,6 +940,7 @@ function ChatMessage({
         {/* Both directions through the same renderer: what the human typed reads back the way they
             typed it, and the two sides of the thread stay consistent. */}
         <MessageBody body={message.body} onTicket={onTicket} ticketStatus={ticketStatus} />
+        <AttachmentGallery ws={ws} threadId={message.threadId} parts={message.parts} />
       </div>
       <span className="flex items-center gap-1.5">
         {message.projectId ? (

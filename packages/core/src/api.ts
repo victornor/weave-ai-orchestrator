@@ -397,9 +397,12 @@ export interface ThreadsService {
   get(id: string): S.ChannelThread;
   list(filter?: { channelKind?: string; agentId?: string; ticketId?: string }): S.ChannelThread[];
   bindTicket(actor: Actor, threadId: string, ticketId: string | null): S.ChannelThread;
-  inbound(actor: Actor, threadId: string, body: string, opts?: { externalMessageId?: string; parts?: unknown[]; projectId?: string | null; replyToMessageId?: string | null }): Promise<S.ThreadMessage>;  // stores + wakes
+  /** `attachments` bytes are already validated (type/size) by the caller; `inbound` only stores and links them. Rejected with `validation` if the thread is ticket-bound (VS-133 — out of scope there). */
+  inbound(actor: Actor, threadId: string, body: string, opts?: { externalMessageId?: string; parts?: unknown[]; projectId?: string | null; replyToMessageId?: string | null; attachments?: Array<{ filename: string; mediaType: S.AttachmentMediaType; bytes: Buffer }> }): Promise<S.ThreadMessage>;  // stores + wakes
   outbound(actor: Actor, threadId: string, body: string, opts?: { parts?: unknown[]; runId?: string | null }): Promise<S.ThreadMessage>;
   messages(threadId: string, opts?: { before?: string; limit?: number }): S.ThreadMessage[];
+  /** `not_found` when the attachment does not exist, or exists but under a different thread — the same response either way, so a thread id cannot be used to probe for one that belongs elsewhere. */
+  attachment(threadId: string, attachmentId: string): { attachment: S.Attachment; bytes: Buffer };
   primaryThread(): S.ChannelThread | null;
   notifyHuman(actor: Actor, message: { text: string; parts?: unknown[] }): Promise<void>;   // primary thread + web
 }

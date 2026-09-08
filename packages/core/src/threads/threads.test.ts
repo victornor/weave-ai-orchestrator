@@ -260,4 +260,42 @@ describe('threads', () => {
   it('rejects unknown threads', () => {
     expect(() => threads.get('nope')).toThrowError(expect.objectContaining({ code: 'not_found' }));
   });
+
+  describe('attachments', () => {
+    it('stores an attachment on disk and links it to the message, its parts, and the wake payload', async () => {
+      const t = threads.bindOrGet('web', 'web-att1', null, 'Victor');
+      const bytes = Buffer.from('a screenshot, allegedly');
+      const msg = await threads.inbound(HUMAN, t.id, 'look at this', {
+        attachments: [{ filename: 'shot.png', mediaType: 'image/png', bytes }],
+      });
+
+      expect(msg.parts).toEqual([
+        expect.objectContaining({ type: 'attachment', filename: 'shot.png', mediaType: 'image/png', byteSize: bytes.byteLength }),
+      ]);
+      const stored = threads.messages(t.id)[0];
+      expect(stored?.parts).toEqual(msg.parts); // survives a re-read exactly as sent
+      const row = h.db.get<{ id: string; storageKey: string }>('SELECT id, storage_key as storageKey FROM attachments WHERE message_id = ?', [msg.id]);
+      expect(row).toBeTruthy();
+      expect(wake.calls[0]?.input.payload).toEqual(expect.objectContaining({ attachmentIds: [row!.id] }));
+    });
+
+    it('rejects an attachment on a ticket-bound thread before storing anything', async () => {
+      const ticket = tickets.create(HUMAN, { kind: 'change', title: 'No attachments here', projectId: h.projectId, assigneeRoleId: h.roleId });
+      h.addWorker(ticket.id);
+      const t = threads.bindOrGet('web', 'web-att2', null, 'Victor');
+      threads.bindTicket(HUMAN, t.id, ticket.id);
+
+      await expect(
+        threads.inbound(HUMAN, t.id, 'see attached', { attachments: [{ filename: 'x.txt', mediaType: 'text/plain', bytes: Buffer.from('x') }] }),
+      ).rejects.toThrowError(expect.objectContaining({ code: 'validation' }));
+      expect(threads.messages(t.id)).toHaveLength(0);
+      expect(h.db.all('SELECT * FROM attachments')).toHaveLength(0);
+    });
+
+    it('a message sent with no attachments carries an empty parts array, exactly as before this capability existed', async () => {
+      const t = threads.bindOrGet('web', 'web-att3', null);
+      const msg = await threads.inbound(HUMAN, t.id, 'plain text');
+      expect(msg.parts).toEqual([]);
+    });
+  });
 });

@@ -11,4 +11,5 @@ export * from './events.js';
 export * from './types.js';
 export * from './push.js';
 export * from './channels.js';
+export * from './attachments.js';
 export { estimateTokens } from './tokens.js';

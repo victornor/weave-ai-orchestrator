@@ -23,7 +23,7 @@ const RUN_UI = {
 } as const;
 
 /** How a turn ended, in words. `needs_decision` means it asked the human; the card may have been answered since. */
-const LIVENESS_TEXT: Record<string, string> = { advanced: 'made progress', plan_only: 'planned only', empty: 'no progress', blocked: 'blocked', needs_decision: 'asked you', failed: 'failed' };
+const LIVENESS_TEXT: Record<string, string> = { advanced: 'made progress', plan_only: 'planned only', empty: 'no progress', idle: 'correctly idle', blocked: 'blocked', needs_decision: 'asked you', failed: 'failed' };
 
 export function RunsRoute(): React.ReactElement {
   const ws = useWs();

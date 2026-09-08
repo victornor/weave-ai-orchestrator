@@ -344,7 +344,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'ac_report', scope: 'all', input: z.object({ state: z.enum(REPORT_STATES), note: z.string().optional(), key: z.string().optional() }),
-    description: 'Report a phase change (working, needs_decision, blocked, paused, done, failed, idle). Sparingly — phase changes only, not progress narration. Writes a status comment on your ticket and updates liveness.',
+    description: 'Report a phase change (working, needs_decision, blocked, paused, done, failed, idle). Sparingly — phase changes only, not progress narration. Writes a status comment on your ticket; it does not by itself set your turn\'s liveness (that comes from your final structured report), but the comment counts as evidence toward the stuck-worker gate.',
     handler: async (ctx, i) => {
       const bodyText = `[${i.state}]${i.key ? ` ${i.key}` : ''}${i.note ? ` ${i.note}` : ''}`.trim();
       const target = ctx.claims.ticketId;

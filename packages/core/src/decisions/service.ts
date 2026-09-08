@@ -28,6 +28,11 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
   function conductorId(): string | null {
     return db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND kind = 'conductor'", [ws])?.id ?? null;
   }
+  /** Whether the agent asking is a worker (VS-127) — a worker's ask is never the human's to answer. */
+  function askedByWorker(askedByAgentId: string | null | undefined): boolean {
+    if (!askedByAgentId) return false;
+    return db.get<{ kind: string }>('SELECT kind FROM agents WHERE id = ?', [askedByAgentId])?.kind === 'worker';
+  }
   function wake(agentId: string | null | undefined, source: Parameters<CoreServices['wake']['enqueue']>[1]['source'], reason: string, payload: Record<string, unknown> = {}): void {
     if (!agentId) return;
     try {
@@ -37,11 +42,20 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     }
   }
 
-  /** Default owner per kind (PLAN §15), overridable per project for plan approvals only. */
-  function defaultOwner(kind: DecisionKind, ticketId: string | null | undefined): DecisionOwner {
+  /**
+   * Default owner per kind (PLAN §15), overridable per project for plan approvals only. `question`
+   * and `concern` are the two askable kinds with no fixed owner: whoever is asking decides who
+   * answers them (VS-127) — a worker's ask is always the conductor's, never the human's, so a
+   * worker cannot land in the human's queue merely by naming a kind. `gate_finding` stays
+   * unconditionally the conductor's regardless of who raises it, as it always has been.
+   */
+  function defaultOwner(kind: DecisionKind, ticketId: string | null | undefined, askedByAgentId?: string | null): DecisionOwner {
     switch (kind) {
       case 'gate_finding':
         return 'conductor';
+      case 'question':
+      case 'concern':
+        return askedByWorker(askedByAgentId) ? 'conductor' : 'human';
       case 'merge_approval':
         return 'human';
       case 'hire_approval':
@@ -124,7 +138,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     const projectId = resolveProject(input, ticketId);
     const inputs = validateInputs(input.inputs ?? []);
     const correlationKey = input.correlationKey ?? `${input.kind}:${ticketId ?? 'workspace'}`;
-    const owner = input.owner ?? defaultOwner(input.kind, ticketId);
+    const owner = input.owner ?? defaultOwner(input.kind, ticketId, input.askedByAgentId);
     const id = newId();
     const now = nowIso();
     return tx(db, () => {

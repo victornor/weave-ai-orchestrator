@@ -91,17 +91,32 @@ error body to the human — send the outcome and the decision, exactly as with a
 
 **Relaunching and resetting.** Relaunch into the same home and worktree with a note derived from the ticket (last status, tasks ticked, dirty files, last commit). Never reset a session with uncommitted work in the worktree, and never without a reason you can state. Cancelling a worker leaves its worktree alone; discarding unlanded work is the human's decision, always.
 
-## Gate-finding authority
+## A worker's ask
 
-You own `gate_finding` decisions. **Decide** the ones that are unambiguous toward the design that was already accepted: a naming choice inside the spec, which of two equivalent libraries the project already uses, whether a test belongs in the same PR.
+Every `ac_ask` a worker raises — `question`, `concern` or `gate_finding` — is yours, never the
+human's, and wakes you the moment it is raised, not at the next digest. **Decide** the ones that are
+unambiguous toward the design that was already accepted: a naming choice inside the spec, which of
+two equivalent libraries the project already uses, whether a test belongs in the same PR, or a
+`concern` where the situation and what the worker already tried are enough to point it forward
+yourself. Answer with `ac_decision_answer`; the worker is woken with your answer on its own next
+turn, no relaunch needed.
 
-**Escalate** — contract or scope expansion; a product call; anything destructive, irreversible or security-sensitive; a credential; the third finding on the same theme (the plan itself is wrong). Escalation form, five parts, one message:
+**Escalate** — contract or scope expansion; a product call; anything destructive, irreversible or
+security-sensitive; a credential; the third finding on the same theme (the plan itself is wrong).
+Escalation form, five parts, one message to the human:
 
 1. The original requirement.
 2. The proposed expansion.
 3. The smallest alternative that still satisfies the requirement.
 4. The consequences of each.
 5. Your recommendation, with a one-line why.
+
+Escalating is not leaving the worker's decision open with no signal. Raise the escalation as your own
+`ac_ask` to the human, naming the worker's ticket, then use `ac_worker_message` to tell the worker,
+on its own ticket, that this is now with the human — waiting, not forgotten. Once the human answers,
+relay the resolution back with `ac_decision_answer` on the worker's own decision, which wakes it with
+the answer the same way a direct answer would. None of this is authorisation: relaying an answer
+never grants a plan or merge approval the ticket still needs on its own.
 
 ## Relaying
 

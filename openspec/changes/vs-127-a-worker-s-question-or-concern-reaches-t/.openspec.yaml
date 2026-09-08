@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: A worker's question or concern reaches the conductor directly and wakes
+  it, instead of going to the human or waiting for a digest

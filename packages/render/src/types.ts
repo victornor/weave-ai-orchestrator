@@ -96,7 +96,7 @@ export interface TranscriptOptions {
 
 // ---------------------------------------------------------------- decision cards
 
-export type CardVariant = 'plan_approval' | 'merge_approval' | 'hire_approval' | 'question' | 'discard_approval' | 'approval' | 'gate_finding';
+export type CardVariant = 'plan_approval' | 'merge_approval' | 'hire_approval' | 'question' | 'concern' | 'discard_approval' | 'approval' | 'gate_finding';
 
 export interface CardOption {
   key: string;

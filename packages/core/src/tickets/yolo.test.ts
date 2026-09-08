@@ -226,7 +226,9 @@ describe('YOLO mode', () => {
       await tickets.autoMergeSweep();
       for (const d of raised) expect(decisions.get(d.id).status).toBe('open');
       expect(decisions.get(raised[2]!.id).owner).toBe('conductor');
-      expect(decisions.get(raised[3]!.id).owner).toBe('human');
+      // VS-127: a worker's `question` now resolves to the conductor, never the human, whichever
+      // askable kind it names — YOLO does not touch this path either way.
+      expect(decisions.get(raised[3]!.id).owner).toBe('conductor');
     });
   });
 

@@ -389,6 +389,12 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     // knows how to wait for that, so it runs for a YOLO ticket as well as an `autoMerge` one.
     if (to === 'in_review' && (next.autoMerge || yolo(next))) schedule(50, 'auto-merge sweep after in_review', () => service.autoMergeSweep());
     if (to === 'approved') wake(next.workerId, 'ticket_assigned', `plan approved for ${next.identifier}`, { ticketId: t.id });
+    // A ticket blocked on the conductor is not left for the next digest to notice (VS-127): the
+    // digest is a periodic, batched sweep, and a stuck worker's unblock action deserves the same
+    // immediate wake a gate finding already gets the moment it is raised.
+    if (to === 'blocked' && input.unblock?.owner === 'conductor') {
+      wake(conductorId(), 'ticket_blocked', `${next.identifier} is blocked on you: ${input.unblock.action}`, { ticketId: t.id });
+    }
     // Entering `merging` joins the project's merge queue instead of starting the merge (PLAN §11.4);
     // leaving it gives the slot back. Either way the queue decides who merges next, and it is the
     // queue — never this transition — that wakes a worker to merge.

@@ -79,6 +79,35 @@ describe('MCP endpoint', () => {
     await client.close();
   });
 
+  it.each(['plan_approval', 'merge_approval', 'hire_approval', 'discard_approval', 'retry_approval', 'approval'])(
+    'refuses to construct a %s decision through ac_ask, for a worker or the conductor',
+    async (kind) => {
+      const { client, h } = await connect();
+      const before = h.decisionInputs.length;
+      const res = await client.callTool({ name: 'ac_ask', arguments: { kind, title: 'x' } });
+      const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+      expect(payload.ok).toBe(false);
+      expect(h.decisionInputs.length).toBe(before);
+      await client.close();
+    },
+  );
+
+  it('ac_ask never hard-codes an owner — ownership is left to the service to resolve (VS-127)', async () => {
+    // The regression this guards: `ac_ask`'s handler used to pass `owner` itself, keyed only off
+    // `kind`, which is how a worker's default `question` ended up in the human's queue. The service
+    // layer (`decisions/service.ts`'s `defaultOwner`, covered directly in decisions.test.ts) is
+    // what must resolve ownership now, from who asked — this only proves the tool stopped
+    // second-guessing it.
+    const { client, h } = await connect();
+    for (const kind of ['question', 'concern', 'gate_finding'] as const) {
+      const res = await client.callTool({ name: 'ac_ask', arguments: { kind, title: kind } });
+      const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+      expect(payload.ok).toBe(true);
+    }
+    expect(h.decisionInputs.every((i) => i.owner === undefined)).toBe(true);
+    await client.close();
+  });
+
   it('enforces the ticket subtree scope on writes', async () => {
     const { client, h } = await connect();
     h.tickets.set('tk_other', { ...h.tickets.get('tk_1')!, id: 'tk_other', identifier: 'ACME-99', parentId: null });

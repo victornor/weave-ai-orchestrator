@@ -1,5 +1,5 @@
 /** The rail: its workspace list, its daemon-update entry, and the shell's own indicators. */
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UpdateStatus, Upgrade } from '../api/types';
 
@@ -10,7 +10,16 @@ const state = vi.hoisted(() => ({
   config: {} as Record<string, unknown>,
   workspaces: [] as Array<Record<string, unknown>>,
   decisions: [] as unknown[],
+  /** What the mocked `useWorkspaceProjects` answers for each workspace id, keyed by id. */
+  projectsByWs: {} as Record<string, { status: 'pending' | 'error' | 'success'; projects: Array<Record<string, unknown>> }>,
 }));
+
+/** Every `ids` array the mocked `useWorkspaceProjects` was called with, in render order. */
+const projectRequests = vi.hoisted(() => ({ calls: [] as string[][] }));
+/** What the mocked `CommandPalette` was last handed for the project scope. */
+const paletteScope = vi.hoisted(() => ({ scope: null as string | null, onScopeCycle: (() => {}) as () => void }));
+/** What the mocked `MoreSheet` was last handed. */
+const moreSheet = vi.hoisted(() => ({ projects: [] as Array<Record<string, unknown>> }));
 
 /** The hotkey bindings the shell registered, so a test can fire one without a real keydown. */
 const hotkeys = vi.hoisted(() => ({ current: [] as Array<{ key: string; run: () => void }> }));
@@ -46,8 +55,16 @@ vi.mock('../api/context', () => ({
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 // Children with their own data hooks; none of them is what this file is about.
 vi.mock('../components/CommandPalette', () => ({
-  CommandPalette: ({ commands }: { commands: Array<{ id: string; label: string; sub?: string }> }) => {
+  CommandPalette: ({ commands, scope, onScopeCycle }: { commands: Array<{ id: string; label: string; sub?: string }>; scope: string | null; onScopeCycle: () => void }) => {
     palette.commands = commands;
+    paletteScope.scope = scope;
+    paletteScope.onScopeCycle = onScopeCycle;
+    return null;
+  },
+}));
+vi.mock('../app/MoreSheet', () => ({
+  MoreSheet: ({ projects }: { projects: Array<Record<string, unknown>> }) => {
+    moreSheet.projects = projects;
     return null;
   },
 }));
@@ -66,7 +83,12 @@ vi.mock('../api/hooks', () => ({
   useDaemonUpdate: () => ({ data: state.update ?? undefined, isError: state.updateError }),
   useDaemonUpgrade: () => ({ data: { upgrade: state.upgrade, waitingFor: [] }, isError: false }),
   useDecisions: () => ({ data: state.decisions }),
-  useProjects: () => ({ data: [] }),
+  useWorkspaceProjects: (ids: string[]) => {
+    projectRequests.calls.push(ids);
+    const map: Record<string, { status: 'pending' | 'error' | 'success'; projects: Array<Record<string, unknown>> }> = {};
+    for (const id of ids) map[id] = state.projectsByWs[id] ?? { status: 'success', projects: [] };
+    return map;
+  },
   useTickets: () => ({ data: [] }),
   useTransitionTicket: () => ({ mutate: vi.fn() }),
   useWorkspaceSummary: () => ({ data: { workspace: { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME' }, config: state.config }, isError: false, error: null, refetch: vi.fn() }),
@@ -106,6 +128,10 @@ beforeEach(() => {
   went.calls = [];
   palette.commands = [];
   state.config = {};
+  state.projectsByWs = {};
+  projectRequests.calls = [];
+  paletteScope.scope = null;
+  moreSheet.projects = [];
   localStorage.clear();
 });
 
@@ -212,6 +238,48 @@ describe('the rail workspace list', () => {
     render(<AppShell />);
     fireEvent.click(screen.getByText('New workspace'));
     expect(went.calls).toContain('/onboarding');
+  });
+});
+
+describe('the rail\'s per-workspace projects (VS-128)', () => {
+  it('requests and shows a non-active workspace\'s projects once its group is expanded', () => {
+    state.workspaces = [listItem(), listItem({ id: 'beta', name: 'Beta', ticketPrefix: 'BET' })];
+    state.projectsByWs = { beta: { status: 'success', projects: [{ id: 'p1', slug: 'api' }] } };
+    render(<AppShell />);
+    fireEvent.click(screen.getByText('Beta'));
+    expect(projectRequests.calls.at(-1)).toContain('beta');
+    const link = within(screen.getByLabelText('Beta projects')).getByText('api').closest('a');
+    expect(link?.getAttribute('href')).toBe('/w/beta/p/api');
+  });
+
+  it('never requests projects for a workspace whose group has not been expanded', () => {
+    state.workspaces = [listItem(), listItem({ id: 'beta', name: 'Beta' }), listItem({ id: 'gamma', name: 'Gamma' })];
+    render(<AppShell />);
+    fireEvent.click(screen.getByText('Beta'));
+    expect(projectRequests.calls.at(-1)).not.toContain('gamma');
+  });
+
+  it('always requests the active workspace\'s projects, expanded or not', () => {
+    render(<AppShell />);
+    expect(projectRequests.calls.at(-1)).toContain('ws1');
+  });
+
+  it('hands the active workspace\'s projects to MoreSheet', () => {
+    state.projectsByWs = { ws1: { status: 'success', projects: [{ id: 'p1', slug: 'web' }] } };
+    render(<AppShell />);
+    expect(moreSheet.projects).toEqual([{ id: 'p1', slug: 'web' }]);
+  });
+
+  it('cycles the command palette scope through the active workspace\'s own projects', () => {
+    state.projectsByWs = { ws1: { status: 'success', projects: [{ id: 'p1', slug: 'web' }, { id: 'p2', slug: 'api' }] } };
+    render(<AppShell />);
+    expect(paletteScope.scope).toBeNull();
+    act(() => paletteScope.onScopeCycle());
+    expect(paletteScope.scope).toBe('web');
+    act(() => paletteScope.onScopeCycle());
+    expect(paletteScope.scope).toBe('api');
+    act(() => paletteScope.onScopeCycle());
+    expect(paletteScope.scope).toBeNull();
   });
 });
 

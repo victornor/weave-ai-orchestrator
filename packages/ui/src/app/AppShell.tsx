@@ -10,7 +10,7 @@ import { CommandPalette } from '../components/CommandPalette';
 import type { Command } from '../components/CommandPalette';
 import { ConnectionBanner, UnreachableScreen } from '../components/ConnectionBanner';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
-import { useDaemonUpdate, useDaemonUpgrade, useDecisions, useProjects, useTickets, useTransitionTicket, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
+import { useDaemonUpdate, useDaemonUpgrade, useDecisions, useTickets, useTransitionTicket, useWorkspaceProjects, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
 import { useToast } from '../components/Toast';
 import { useHotkeys } from '../lib/hotkeys';
 import { flushQueue, useQueueCount } from '../lib/queue';
@@ -39,7 +39,6 @@ export function AppShell(): React.ReactElement {
 
   const summary = useWorkspaceSummary();
   const decisions = useDecisions({ status: 'open', owner: 'human' });
-  const projects = useProjects();
   const tickets = useTickets({ limit: 100 });
   const workspaces = useWorkspaces();
   const daemonUpdate = useDaemonUpdate();
@@ -53,6 +52,15 @@ export function AppShell(): React.ReactElement {
    * this — not the raw route param — is what a listed workspace is compared against.
    */
   const activeWs = summary.data?.workspace.id ?? ws;
+  /**
+   * The workspaces whose projects are needed: the active one, always, since its rail group is always
+   * open, plus every group the human has expanded (VS-128). A workspace outside this set has never
+   * had its projects fetched, and `useWorkspaceProjects` keeps a previously fetched one cached even
+   * once its group collapses back out of this set.
+   */
+  const projectIds = useMemo(() => Array.from(new Set([activeWs, ...expanded])), [activeWs, expanded]);
+  const projectsByWs = useWorkspaceProjects(projectIds);
+  const activeProjects = projectsByWs[activeWs]?.projects ?? [];
   // Nothing is shown when the daemon is up to date, when checking is not configured, or when it failed.
   // One fact, one entry: the rail block on desktop, the More badge on a phone (PLAN §20).
   const update = updateEntry(daemonUpdate.data, daemonUpgrade.data?.upgrade ?? null);
@@ -70,7 +78,7 @@ export function AppShell(): React.ReactElement {
       if (r.sent) toast.push({ title: `${r.sent} queued ${r.sent === 1 ? 'message' : 'messages'} sent`, status: 'done', ttl: 4000 });
     });
   }, [conn.state, queuedCount, ws, toast]);
-  const scope = scopeIndex >= 0 ? projects.data?.[scopeIndex]?.slug ?? null : null;
+  const scope = scopeIndex >= 0 ? activeProjects[scopeIndex]?.slug ?? null : null;
 
   // Arrival: a toast plus the Needs-you badge is the primary notification path.
   useWorkspaceEvents(
@@ -201,7 +209,7 @@ export function AppShell(): React.ReactElement {
           expanded={expanded}
           onToggle={(key) => setExpanded((cur) => toggleExpanded(cur, key))}
           needsCount={needsCount}
-          projects={projects.data ?? []}
+          projectsByWs={projectsByWs}
           onNewWorkspace={() => go('/onboarding')}
         />
 
@@ -250,7 +258,7 @@ export function AppShell(): React.ReactElement {
         onClose={() => setPaletteOpen(false)}
         commands={commands}
         scope={scope}
-        onScopeCycle={() => setScopeIndex((i) => (i + 1 >= (projects.data?.length ?? 0) ? -1 : i + 1))}
+        onScopeCycle={() => setScopeIndex((i) => (i + 1 >= activeProjects.length ? -1 : i + 1))}
       />
       <MoreSheet
         open={moreOpen}
@@ -258,7 +266,7 @@ export function AppShell(): React.ReactElement {
         ws={ws}
         activeWs={activeWs}
         workspaces={listed}
-        projects={projects.data ?? []}
+        projects={activeProjects}
         needsCount={needsCount}
         update={update}
         isActive={isActive}

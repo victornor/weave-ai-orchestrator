@@ -2,6 +2,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkspaceListItem } from '../api/types';
+import type { WorkspaceProjectsState } from '../api/hooks';
 import { project } from './factories';
 
 // The rail assembles hrefs at runtime; rendering them as plain anchors is what lets a test read
@@ -27,6 +28,10 @@ const WORKSPACES = [
   workspace({ id: 'gamma', name: 'Gamma', ticketPrefix: 'GAM' }),
 ];
 
+const ready = (projects: ReturnType<typeof project>[] = []): WorkspaceProjectsState => ({ status: 'success', projects });
+const pending: WorkspaceProjectsState = { status: 'pending', projects: [] };
+const failed: WorkspaceProjectsState = { status: 'error', projects: [] };
+
 function nav(over: Partial<React.ComponentProps<typeof WorkspaceNav>> = {}): React.ReactElement {
   return (
     <WorkspaceNav
@@ -36,7 +41,7 @@ function nav(over: Partial<React.ComponentProps<typeof WorkspaceNav>> = {}): Rea
       expanded={[]}
       onToggle={vi.fn()}
       needsCount={0}
-      projects={[]}
+      projectsByWs={{ alpha: ready() }}
       onNewWorkspace={vi.fn()}
       {...over}
     />
@@ -115,8 +120,8 @@ describe('the active workspace and section', () => {
     expect(within(group('Beta')).queryByText(',')).not.toBeInTheDocument();
   });
 
-  it('nests the projects under the active workspace only', () => {
-    render(nav({ projects: [project()], expanded: ['beta'] }));
+  it('lists the active workspace"s projects, and a non-active but unexpanded workspace has none loaded', () => {
+    render(nav({ projectsByWs: { alpha: ready([project()]) }, expanded: [] }));
     expect(screen.getByLabelText('Alpha projects')).toBeInTheDocument();
     expect(screen.queryByLabelText('Beta projects')).not.toBeInTheDocument();
   });
@@ -124,9 +129,54 @@ describe('the active workspace and section', () => {
   // VS-95: a project used to open the board with its filter set; it now opens its own overview,
   // from which the board is one click on.
   it('opens a project"s overview, addressed by its slug', () => {
-    render(nav({ projects: [project({ id: 'p1', slug: 'web' })] }));
+    render(nav({ projectsByWs: { alpha: ready([project({ id: 'p1', slug: 'web' })]) } }));
     const link = within(screen.getByLabelText('Alpha projects')).getByText('web').closest('a');
     expect(link?.getAttribute('href')).toBe('/w/alpha/p/web');
+  });
+
+  // VS-128: expanding another workspace now fetches and lists its own projects too.
+  it('lists a non-active workspace"s projects once its group is expanded and loaded', () => {
+    render(nav({ projectsByWs: { alpha: ready(), beta: ready([project({ id: 'p2', slug: 'api' })]) }, expanded: ['beta'] }));
+    const link = within(screen.getByLabelText('Beta projects')).getByText('api').closest('a');
+    expect(link?.getAttribute('href')).toBe('/w/beta/p/api');
+  });
+
+  it('shows a loading state rather than treating an outstanding fetch as empty', () => {
+    render(nav({ projectsByWs: { alpha: ready(), beta: pending }, expanded: ['beta'] }));
+    const group = screen.getByLabelText('Beta projects');
+    expect(within(group).getByRole('status')).toBeInTheDocument();
+  });
+
+  it('shows a genuinely empty workspace as no project block, not an error or loading state', () => {
+    render(nav({ projectsByWs: { alpha: ready(), beta: ready([]) }, expanded: ['beta'] }));
+    expect(screen.queryByLabelText('Beta projects')).not.toBeInTheDocument();
+  });
+
+  it('scopes a failed fetch to its own group, leaving another expanded group unaffected', () => {
+    render(nav({
+      projectsByWs: { alpha: ready(), beta: failed, gamma: ready([project({ id: 'p3', slug: 'gam-proj' })]) },
+      expanded: ['beta', 'gamma'],
+    }));
+    expect(within(screen.getByLabelText('Beta projects')).getByRole('alert')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Gamma projects')).getByText('gam-proj')).toBeInTheDocument();
+  });
+
+  it('does not refetch on re-expansion: a workspace absent from projectsByWs after being collapsed keeps no stale block', () => {
+    // Collapsing drops a workspace out of `expanded`; WorkspaceNav itself renders purely from props,
+    // so a collapsed group simply stops being open — AppShell (not this component) is what keeps the
+    // cached result for the next expansion, per the `useWorkspaceProjects` hook.
+    const { rerender } = render(nav({ projectsByWs: { alpha: ready(), beta: ready([project({ id: 'p2', slug: 'api' })]) }, expanded: ['beta'] }));
+    expect(screen.getByLabelText('Beta projects')).toBeInTheDocument();
+    rerender(nav({ projectsByWs: { alpha: ready(), beta: ready([project({ id: 'p2', slug: 'api' })]) }, expanded: [] }));
+    expect(screen.queryByLabelText('Beta projects')).not.toBeInTheDocument();
+  });
+
+  // VS-128: a non-active project's link already carries its own workspace id, so following it
+  // switches the active workspace as part of the same navigation, with no extra click handler.
+  it('addresses a non-active workspace"s project with that workspace"s id, switching it on navigation', () => {
+    render(nav({ projectsByWs: { alpha: ready(), beta: ready([project({ id: 'p2', slug: 'api' })]) }, expanded: ['beta'] }));
+    const link = within(screen.getByLabelText('Beta projects')).getByText('api').closest('a');
+    expect(link?.getAttribute('href')).toBe('/w/beta/p/api');
   });
 });
 

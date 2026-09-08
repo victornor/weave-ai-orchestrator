@@ -1,7 +1,8 @@
 /**
  * `lib/highlight.ts` (ADR 0013): the extension table, escaping when no grammar has loaded or none is
  * recognised, and the real `highlight.js` output once loaded — covering every language ADR 0013 named
- * (C#, Rust, Java, PHP, C++, HTML, JavaScript) on top of what VS-107's own tokenizer had.
+ * (C#, Rust, Java, PHP, C++, HTML, JavaScript) on top of what VS-107's own tokenizer had, plus Go,
+ * Python, Ruby, Kotlin and Swift (VS-112), which `EXTENSIONS` already mapped but no fixture exercised.
  */
 import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -17,6 +18,8 @@ describe('languageForPath', () => {
     ['page.html', 'xml'], ['App.razor.cs', 'csharp'], ['main.cs', 'csharp'],
     ['lib.rs', 'rust'], ['Main.java', 'java'], ['index.php', 'php'],
     ['main.cpp', 'cpp'], ['header.h', 'cpp'],
+    ['main.go', 'go'], ['script.py', 'python'], ['app.rb', 'ruby'],
+    ['Main.kt', 'kotlin'], ['App.swift', 'swift'],
     ['image.png', null], ['Makefile', null], ['no-extension', null],
   ] as const)('%s -> %s', (path, expected) => {
     expect(languageForPath(path)).toBe(expected);
@@ -45,12 +48,24 @@ describe('highlightLine before a grammar is ready', () => {
   });
 });
 
+const FIXTURE_LINES: Partial<Record<string, string>> = {
+  xml: '<div class="a">hi</div>',
+  go: 'const x = 1 // note',
+  python: 'import os  # note',
+  ruby: 'x = 1 # note',
+  kotlin: 'val x = 1 // note',
+  swift: 'let x = 1 // note',
+};
+
 describe('highlightLine once the real grammar bundle is loaded', () => {
-  it.each(['csharp', 'rust', 'java', 'php', 'cpp', 'xml', 'javascript', 'typescript'] as const)(
+  it.each([
+    'csharp', 'rust', 'java', 'php', 'cpp', 'xml', 'javascript', 'typescript',
+    'go', 'python', 'ruby', 'kotlin', 'swift',
+  ] as const)(
     'tokenizes %s without throwing, reconstructing the same text',
     async (lang) => {
       const hljs = (await import('highlight.js/lib/common')).default;
-      const line = lang === 'xml' ? '<div class="a">hi</div>' : 'const x = 1; // note';
+      const line = FIXTURE_LINES[lang] ?? 'const x = 1; // note';
       const html = highlightLine(hljs, line, lang);
       expect(html).toContain('hljs-');
       // Stripping tags and un-escaping entities recovers the original text: nothing was dropped.

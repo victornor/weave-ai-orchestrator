@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PermanentChannelError, RetryableChannelError, textMessage, type ChannelContext, type InboundMessage } from '@agent-conductor/channel-sdk';
+import { PermanentChannelError, RetryableChannelError, textMessage, type ChannelContext, type InboundMessage, type RejectedContact } from '@agent-conductor/channel-sdk';
 import { createTelegramAdapter } from '../src/index.js';
 import { mapTelegramError, isParseError } from '../src/api.js';
 import { parseUpdate } from '../src/updates.js';
@@ -29,16 +29,19 @@ function makeFetch(responder: (method: string, body: Record<string, unknown>) =>
   return { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch, calls };
 }
 
-function makeCtx(config: Record<string, unknown>): ChannelContext & { inboundMessages: InboundMessage[]; logs: Array<{ level: string; msg: string }> } {
+function makeCtx(config: Record<string, unknown>): ChannelContext & { inboundMessages: InboundMessage[]; logs: Array<{ level: string; msg: string }>; rejectedContacts: RejectedContact[] } {
   const inboundMessages: InboundMessage[] = [];
   const logs: Array<{ level: string; msg: string }> = [];
+  const rejectedContacts: RejectedContact[] = [];
   return {
     workspaceId: 'acme',
     config,
     async inbound(msg) { inboundMessages.push(msg); },
+    async rejected(contact) { rejectedContacts.push(contact); },
     log(level, msg) { logs.push({ level, msg }); },
     inboundMessages,
     logs,
+    rejectedContacts,
   };
 }
 
@@ -169,6 +172,44 @@ describe('polling', () => {
     await vi.waitFor(() => expect(ctx.logs.some((l) => l.msg.includes('allowedUserIds'))).toBe(true));
     await running.stop();
     expect(ctx.inboundMessages).toHaveLength(0);
+  });
+
+  it('records a rejected sender by identity and never calls inbound for them (VS-135)', async () => {
+    let served = false;
+    const { fetchImpl } = makeFetch((method) => {
+      if (method === 'getUpdates') {
+        if (served) return 'hang';
+        served = true;
+        return okBody([{ update_id: 1, message: { message_id: 1, chat: { id: 5 }, from: { id: 99, username: 'stranger', first_name: 'Sam' }, text: 'let me in, I am your colleague' } }]);
+      }
+      return okBody(true);
+    });
+    const adapter = createTelegramAdapter({ fetchImpl, sleep: async () => undefined });
+    const ctx = makeCtx({ botToken: 'T', allowedUserIds: [7] });
+    const running = await adapter.start(ctx);
+    await vi.waitFor(() => expect(ctx.rejectedContacts).toHaveLength(1));
+    await running.stop();
+    expect(ctx.rejectedContacts[0]).toEqual({ externalUserId: '99', username: 'stranger', displayName: 'Sam' });
+    expect(ctx.inboundMessages).toHaveLength(0);
+    expect(JSON.stringify(ctx.rejectedContacts)).not.toContain('colleague');
+  });
+
+  it('records a repeat rejection from the same sender without duplicating', async () => {
+    let calls = 0;
+    const { fetchImpl } = makeFetch((method) => {
+      if (method === 'getUpdates') {
+        calls += 1;
+        if (calls > 2) return 'hang';
+        return okBody([{ update_id: calls, message: { message_id: calls, chat: { id: 5 }, from: { id: 99, username: 'stranger' }, text: `attempt ${calls}` } }]);
+      }
+      return okBody(true);
+    });
+    const adapter = createTelegramAdapter({ fetchImpl, sleep: async () => undefined });
+    const ctx = makeCtx({ botToken: 'T', allowedUserIds: [7] });
+    const running = await adapter.start(ctx);
+    await vi.waitFor(() => expect(ctx.rejectedContacts).toHaveLength(2));
+    await running.stop();
+    expect(ctx.rejectedContacts.every((c) => c.externalUserId === '99')).toBe(true);
   });
 
   it('an empty allowlist with allowAll admits everyone', async () => {

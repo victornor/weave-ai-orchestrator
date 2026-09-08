@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: Telegram is on when it has a token, and access is granted by approving
+  someone who messaged the bot rather than typing user ids

@@ -3,18 +3,27 @@
  * messages into `threads`, and drains outbound `thread_messages` rows with `delivery_status =
  * 'pending'` through the owning adapter with capability degradation and backoff.
  */
-import type { ChannelAdapter, CanonicalMessage, CanonicalPart, InboundMessage, RunningChannel } from '@agent-conductor/channel-sdk';
+import type { ChannelAdapter, CanonicalMessage, CanonicalPart, InboundMessage, RejectedContact, RunningChannel } from '@agent-conductor/channel-sdk';
 import { degrade, textMessage } from '@agent-conductor/channel-sdk';
 import type { Actor, CoreServices, SecretsService, WorkspaceContext } from '@agent-conductor/core';
 import { getLogger } from '@agent-conductor/core';
 import { newId, nowIso } from '@agent-conductor/db';
 import { UNRESOLVED_ENV_REF } from '@agent-conductor/channel-telegram';
-import { TELEGRAM_BOT_TOKEN_SECRET_NAME, type Decision, type WorkspaceEvent } from '@agent-conductor/shared';
+import { OcError, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, type Decision, type WorkspaceEvent } from '@agent-conductor/shared';
 
 const log = getLogger('channel');
 const SYSTEM: Actor = { kind: 'system', id: null };
 const MAX_ATTEMPTS = 5;
 const SWEEP_MS = 10_000;
+/** VS-135: a flood of distinct strangers costs at most this many rows; existing entries always update. */
+const PENDING_CAP = 50;
+/** VS-135: long enough that a weekly check of Settings still finds who is waiting, short enough that a leaked bot handle does not accumulate forever. */
+const PENDING_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface PendingTelegramUser {
+  externalUserId: string; username: string | null; displayName: string | null;
+  firstSeenAt: string; lastSeenAt: string; attemptCount: number;
+}
 
 /** The Telegram bot token, and which of the two possible sources it came from — the secret store wins over a resolved `${ENV_VAR}` in workspace.yaml. Never returns an unresolved `${...}` reference as a token. */
 export type TelegramTokenResolution = { token: string; source: 'secret' } | { token: string; source: 'env' } | { token: null; source: null };
@@ -50,6 +59,8 @@ export class ChannelManager {
   private draining = false;
   private stopped = false;
   private cardsSent = new Set<string>();
+  /** The effective config each kind was last (re)started with, so `workspace.updated` only restarts a kind whose config actually changed (VS-135). */
+  private lastEffectiveConfig = new Map<string, string>();
 
   constructor(private ctx: WorkspaceContext, private services: CoreServices) {}
 
@@ -94,9 +105,10 @@ export class ChannelManager {
 
   /** Starts one channel kind, stopping and clearing any bookkeeping for it first is the caller's job (see `restartChannel`). */
   private async startOne(kind: string): Promise<void> {
+    const config = this.effectiveConfig(kind);
+    this.lastEffectiveConfig.set(kind, JSON.stringify(config));
     const adapter = this.ctx.registries.channels.get(kind);
     if (!adapter) { log.warn({ kind, workspace: this.ctx.workspaceId }, 'channel is configured but no adapter is registered'); return; }
-    const config = this.effectiveConfig(kind);
     if (!config) { log.info({ kind }, 'channel has no resolvable token; not starting'); return; }
     const valid = adapter.validateConfig(config);
     if (!valid.ok) { log.error({ kind, errors: valid.errors }, 'channel config rejected by the adapter'); return; }
@@ -106,6 +118,7 @@ export class ChannelManager {
         workspaceId: this.ctx.workspaceId,
         config,
         inbound: (msg) => this.onInbound(kind, msg),
+        rejected: (contact) => this.onRejected(kind, contact),
         log: (level, msg, data) => log[level]({ kind, ...data }, msg),
       });
       this.adapters.set(kind, adapter);
@@ -191,6 +204,20 @@ export class ChannelManager {
     if (this.stopped) return;
     if (ev.type === 'thread.message') { await this.drain(); return; }
     if (ev.type === 'decision.created') await this.pushDecisionCard(ev.entityId);
+    if (ev.type === 'workspace.updated') await this.reconcileChannels();
+  }
+
+  /**
+   * A config edit (allowlist, token, `allowAll`, or anything else) reaches the running channel only
+   * through a restart — `startOne` closes over the config it was given. Restart only the kinds whose
+   * *effective* config actually changed, not every channel on every unrelated settings edit (VS-135).
+   */
+  private async reconcileChannels(): Promise<void> {
+    for (const kind of this.configuredKinds()) {
+      const next = JSON.stringify(this.effectiveConfig(kind));
+      if (this.lastEffectiveConfig.get(kind) === next) continue;
+      await this.restartChannel(kind);
+    }
   }
 
   /** Human-owned decisions are pushed to the primary thread as a card; degradation makes it text. */
@@ -294,6 +321,80 @@ export class ChannelManager {
     return this.ctx.db.get<{ botUsername: string | null }>(
       "SELECT bot_username FROM channels WHERE workspace_id = ? AND kind = 'telegram'", [this.ctx.workspaceId],
     )?.botUsername ?? null;
+  }
+
+  // ---------- pending Telegram identities (VS-135) ----------
+
+  /** Records that `contact` was rejected by `kind`'s allowlist. Telegram only for now — other kinds have nothing to record. Caps at `PENDING_CAP`; an existing row always updates regardless of the cap. */
+  async onRejected(kind: string, contact: RejectedContact): Promise<void> {
+    if (kind !== 'telegram') return;
+    this.prunePendingTelegramUsers();
+    const existing = this.ctx.db.get<{ id: string; attemptCount: number }>(
+      'SELECT id, attempt_count FROM telegram_pending_users WHERE workspace_id = ? AND external_user_id = ?',
+      [this.ctx.workspaceId, contact.externalUserId],
+    );
+    const now = nowIso();
+    if (existing) {
+      this.ctx.db.run(
+        'UPDATE telegram_pending_users SET username = ?, display_name = ?, last_seen_at = ?, attempt_count = ? WHERE id = ?',
+        [contact.username ?? null, contact.displayName ?? null, now, existing.attemptCount + 1, existing.id],
+      );
+      return;
+    }
+    const { n } = this.ctx.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM telegram_pending_users WHERE workspace_id = ?', [this.ctx.workspaceId])!;
+    if (n >= PENDING_CAP) { log.debug({ workspace: this.ctx.workspaceId }, 'pending Telegram identity dropped: at cap'); return; }
+    this.ctx.db.run(
+      'INSERT INTO telegram_pending_users (id, workspace_id, external_user_id, username, display_name, first_seen_at, last_seen_at, attempt_count) VALUES (?,?,?,?,?,?,?,1)',
+      [newId(), this.ctx.workspaceId, contact.externalUserId, contact.username ?? null, contact.displayName ?? null, now, now],
+    );
+  }
+
+  private prunePendingTelegramUsers(): void {
+    const cutoff = new Date(Date.now() - PENDING_EXPIRY_MS).toISOString();
+    this.ctx.db.run('DELETE FROM telegram_pending_users WHERE workspace_id = ? AND last_seen_at < ?', [this.ctx.workspaceId, cutoff]);
+  }
+
+  /** Everyone currently waiting for approval, most recent attempt first. */
+  pendingTelegramUsers(): PendingTelegramUser[] {
+    this.prunePendingTelegramUsers();
+    return this.ctx.db.all<PendingTelegramUser>(
+      `SELECT external_user_id, username, display_name, first_seen_at, last_seen_at, attempt_count
+         FROM telegram_pending_users WHERE workspace_id = ? ORDER BY last_seen_at DESC`,
+      [this.ctx.workspaceId],
+    );
+  }
+
+  /** Adds `externalUserId` to the Telegram allowlist, clears its pending row, and restarts the channel so their next message is accepted — no-op on the allowlist if already present. */
+  async approveTelegramUser(externalUserId: string): Promise<{ allowedUserIds: number[] }> {
+    const id = Number(externalUserId);
+    if (!Number.isInteger(id)) throw new OcError('validation', `not a Telegram user id: ${externalUserId}`);
+    const telegram = (this.ctx.config.channels['telegram'] as { allowedUserIds?: number[] } | undefined) ?? {};
+    const already = telegram.allowedUserIds ?? [];
+    const allowedUserIds = already.includes(id) ? already : [...already, id];
+    await this.saveTelegramConfig({ ...telegram, allowedUserIds });
+    this.ctx.db.run('DELETE FROM telegram_pending_users WHERE workspace_id = ? AND external_user_id = ?', [this.ctx.workspaceId, externalUserId]);
+    return { allowedUserIds };
+  }
+
+  /** Turns off a workspace's `allowAll` grandfathering (VS-125/VS-135). There is no interface path that turns it on. */
+  async disableTelegramAllowAll(): Promise<void> {
+    const telegram = (this.ctx.config.channels['telegram'] as Record<string, unknown> | undefined) ?? {};
+    await this.saveTelegramConfig({ ...telegram, allowAll: false });
+  }
+
+  /**
+   * Validates and persists a telegram config patch the same way `PATCH /config` does, then
+   * reconciles the running channel synchronously so the caller can rely on the restart having
+   * happened by the time this resolves. Deliberately does not also emit `workspace.updated`: that
+   * event is what a `PATCH /config` request emits for `reconcileChannels` to react to elsewhere, and
+   * firing it here too would race a second, concurrent reconcile against this one (both reading the
+   * pre-restart snapshot before either had updated it) and restart the channel twice.
+   */
+  private async saveTelegramConfig(telegram: Record<string, unknown>): Promise<void> {
+    const merged = WorkspaceConfigSchema.safeParse({ ...this.ctx.config, channels: { ...this.ctx.config.channels, telegram } });
+    if (!merged.success) throw new OcError('validation', 'the patched telegram config is invalid', { issues: merged.error.issues });
+    await this.ctx.saveConfig(merged.data);
+    await this.reconcileChannels();
   }
 }
 

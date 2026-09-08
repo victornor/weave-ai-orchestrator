@@ -10,7 +10,15 @@ export interface CanonicalMessage { parts: CanonicalPart[]; text: string }
 export interface InboundMessage { externalThreadId: string; externalUserId: string; externalMessageId?: string; text: string; userLabel?: string; replyToExternalId?: string; action?: { decisionId: string; key: string } }
 export interface OutboundMessage { threadExternalId: string; message: CanonicalMessage; replyToExternalId?: string }
 export interface SendResult { externalMessageId?: string; delivered: boolean; error?: { code: string; retryable: boolean; message: string } }
-export interface ChannelContext { workspaceId: string; config: Record<string, unknown>; inbound(msg: InboundMessage): Promise<void>; log(level: 'debug' | 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>): void }
+/** A sender an adapter rejected before calling `inbound` (VS-135) — identity only, never the message that triggered the rejection. */
+export interface RejectedContact { externalUserId: string; username?: string; displayName?: string }
+export interface ChannelContext {
+  workspaceId: string; config: Record<string, unknown>;
+  inbound(msg: InboundMessage): Promise<void>;
+  /** Optional: only meaningful for a channel that enforces its own sender allowlist (Telegram). */
+  rejected?(contact: RejectedContact): Promise<void>;
+  log(level: 'debug' | 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>): void;
+}
 export interface RunningChannel { stop(): Promise<void> }
 export interface ChannelAdapter {
   readonly kind: string; readonly capabilities: ChannelCapabilities;

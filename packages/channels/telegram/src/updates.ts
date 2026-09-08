@@ -33,6 +33,21 @@ export function userLabel(user: TgUser | undefined): string | undefined {
   return name || undefined;
 }
 
+/** The `from` user of a message or callback update, whichever shape it is — `undefined` for anything without a sender. */
+export function senderOf(update: TelegramUpdate): TgUser | undefined {
+  return update.callback_query?.from ?? update.message?.from ?? update.edited_message?.from;
+}
+
+/** `username` and `displayName` split out for recording an identity (VS-135) — `userLabel` collapses them into one string, which is right for a transcript but wrong for a record meant to show both. */
+export function senderIdentity(user: TgUser | undefined): { username?: string; displayName?: string } {
+  if (!user) return {};
+  const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
+  return {
+    ...(user.username ? { username: user.username } : {}),
+    ...(displayName ? { displayName } : {}),
+  };
+}
+
 /** Translate one Telegram update into the canonical inbound shape. Pure. */
 export function parseUpdate(update: TelegramUpdate, decode: (data: string) => CallbackRef | null): ParsedUpdate {
   const cq = update.callback_query;

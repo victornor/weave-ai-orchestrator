@@ -563,6 +563,32 @@ describe('DecisionCard', () => {
     // No `inputs` key at all, so nothing downstream has to distinguish empty from absent.
     expect(onAnswer).toHaveBeenCalledWith({ key: 'local' });
   });
+
+  // ---------- VS-139: context renders as markdown, with the chat's copy affordance ----------
+
+  it('renders context as markdown instead of literal asterisks and backticks', () => {
+    render(<DecisionCard decision={decision({ context: '**bold** and `git status`' })} onAnswer={() => undefined} />);
+    expect(screen.getByText('bold').tagName).toBe('STRONG');
+    expect(screen.queryByText(/\*\*bold\*\*/)).not.toBeInTheDocument();
+    expect(screen.getByText('git status')).toHaveClass('ac-copy');
+  });
+
+  it('renders a worker-raised question\'s context as markdown exactly as a conductor\'s is', () => {
+    render(<DecisionCard decision={question({ context: 'run `pnpm test` first' })} asker="worker" onAnswer={() => undefined} />);
+    expect(screen.getByText('pnpm test')).toHaveClass('ac-copy');
+  });
+
+  it('cannot turn a worker-authored context into a script or an unsafe link', () => {
+    const hostile = 'see <script>alert(1)</script>, [click](javascript:alert(1)), [[looks-like-a-doc]]';
+    const { container } = render(<DecisionCard decision={question({ context: hostile })} asker="worker" onAnswer={() => undefined} />);
+    expect(container.querySelector('script')).not.toBeInTheDocument();
+    expect(container.innerHTML).not.toContain('javascript:');
+    // The doc-link syntax is still recognised — inert, not a way out — since a card's context can
+    // legitimately reference a knowledge doc; what matters is it never becomes an unsafe target.
+    const doclink = container.querySelector('a.ac-doclink');
+    expect(doclink).toBeInTheDocument();
+    expect(doclink).toHaveAttribute('href', '#doc:looks-like-a-doc');
+  });
 });
 
 describe('Composer', () => {

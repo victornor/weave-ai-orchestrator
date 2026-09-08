@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { RunEvent } from '@agent-conductor/shared';
 import { runEventsToTranscript } from '../lib/transcript';
 import { Transcript } from '../components/Transcript';
+import { Markdown } from '../components/Markdown';
 import { markdownToHtml } from '../lib/markdown';
 import { qrMatrix } from '../lib/qr';
 
@@ -113,7 +114,7 @@ describe('markdown', () => {
     const html = markdownToHtml('# Title\n\n- one\n- two\n\n`code` and <script>alert(1)</script>');
     expect(html).toContain('<h1>Title</h1>');
     expect(html).toContain('<li>one</li>');
-    expect(html).toContain('<code>code</code>');
+    expect(html).toContain('<code class="ac-copy" data-copy="code">code</code>');
     expect(html).not.toContain('<script>');
   });
 
@@ -132,12 +133,103 @@ describe('markdown', () => {
   it('leaves lists, fences and escaping alone under breaks', () => {
     const html = markdownToHtml('- one\n- two\n\n```\na\nb <b>\n```', { breaks: true });
     expect(html).toContain('<ul>\n<li>one</li>\n<li>two</li>\n</ul>');
-    expect(html).toContain('<pre><code>\na\nb &lt;b&gt;\n</code></pre>');
+    expect(html).toContain('<pre><code>a\nb &lt;b&gt;</code></pre>');
     expect(html).not.toContain('<br />');
   });
 
   it('still renders an inline span that spans a hard break', () => {
     expect(markdownToHtml('**bold\nacross**', { breaks: true })).toBe('<p><strong>bold<br />across</strong></p>');
+  });
+
+  // ---------- VS-139: copy source and the inline-code order-dependency fix ----------
+
+  it('attaches the exact fenced-block source, with no leading or trailing blank line', () => {
+    const html = markdownToHtml('```\nfirst  \nsecond\n\nfourth\n```');
+    expect(html).toContain('<div class="ac-codeblock">');
+    expect(html).toContain('<pre><code>first  \nsecond\n\nfourth</code></pre>');
+    expect(html).toContain('data-copy="first  \nsecond\n\nfourth"');
+    expect(html).toContain('<button type="button" class="ac-copy-btn"');
+  });
+
+  it('renders an empty fenced block without a copy source that would confuse an empty copy for a failure', () => {
+    const html = markdownToHtml('```\n```');
+    expect(html).toContain('data-copy=""');
+  });
+
+  it('gives an inline code span the same data-copy value as its visible text, entity for entity', () => {
+    const html = markdownToHtml('run `a && b "q" <x>` now');
+    expect(html).toContain('<code class="ac-copy" data-copy="a &amp;&amp; b &quot;q&quot; &lt;x&gt;">a &amp;&amp; b &quot;q&quot; &lt;x&gt;</code>');
+  });
+
+  it('does not add or drop a trailing newline relative to the fenced source', () => {
+    expect(markdownToHtml('```\nline one\nline two\n```')).toContain('data-copy="line one\nline two"');
+  });
+
+  it('shows inline code containing markdown-special characters as literal text, not reinterpreted', () => {
+    const html = markdownToHtml('`**not bold**` and `[[not-a-doclink]]`');
+    expect(html).toContain('<code class="ac-copy" data-copy="**not bold**">**not bold**</code>');
+    expect(html).toContain('<code class="ac-copy" data-copy="[[not-a-doclink]]">[[not-a-doclink]]</code>');
+    expect(html).not.toContain('<strong>not bold</strong>');
+    expect(html).not.toContain('ac-doclink');
+  });
+
+  it('still applies bold and doc-links outside of code spans in the same line', () => {
+    const html = markdownToHtml('**bold** then `code` then [[a-doc]]');
+    expect(html).toContain('<strong>bold</strong>');
+    expect(html).toContain('<code class="ac-copy" data-copy="code">code</code>');
+    expect(html).toContain('class="ac-doclink"');
+  });
+});
+
+describe('Markdown copy control', () => {
+  const setClipboard = (value: { writeText: (t: string) => Promise<void> } | undefined): void => {
+    Object.defineProperty(navigator, 'clipboard', { value, configurable: true });
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('copies a fenced block\'s exact source when its button is used, and confirms visibly', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    render(<Markdown source={'```\nfoo  \nbar\n```'} />);
+    const button = screen.getByRole('button', { name: 'Copy code' });
+    fireEvent.click(button);
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('foo  \nbar');
+    await waitFor(() => expect(button).toHaveAttribute('data-copy-state', 'copied'));
+  });
+
+  it('copies an inline code span\'s exact source when it is tapped', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    render(<Markdown source="run `ls -la` now" />);
+    fireEvent.click(screen.getByText('ls -la'));
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('ls -la');
+  });
+
+  it('does not copy when the tap is really the end of selecting the surrounding paragraph', () => {
+    const writeText = vi.fn();
+    setClipboard({ writeText });
+    vi.spyOn(window, 'getSelection').mockReturnValue({ toString: () => 'run ls -la now' } as unknown as Selection);
+    render(<Markdown source="run `ls -la` now" />);
+    fireEvent.click(screen.getByText('ls -la'));
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('says it cannot copy when the clipboard is unavailable, rather than doing nothing', () => {
+    setClipboard(undefined);
+    render(<Markdown source="run `ls -la` now" />);
+    fireEvent.click(screen.getByText('ls -la'));
+    expect(screen.getByText('ls -la')).toHaveAttribute('data-copy-state', 'unavailable');
+  });
+
+  it('shows a failed state, not a silent no-op, when the clipboard write is refused', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    setClipboard({ writeText });
+    render(<Markdown source="run `ls -la` now" />);
+    fireEvent.click(screen.getByText('ls -la'));
+    await waitFor(() => expect(screen.getByText('ls -la')).toHaveAttribute('data-copy-state', 'failed'));
   });
 });
 

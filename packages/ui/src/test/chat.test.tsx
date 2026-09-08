@@ -359,7 +359,7 @@ describe('ChatRoute message formatting', () => {
     const { container } = render(<ChatRoute />);
 
     const pre = container.querySelector('.ac-prose pre code');
-    expect(pre?.textContent).toBe('\npnpm test\npnpm lint\n');
+    expect(pre?.textContent).toBe('pnpm test\npnpm lint');
     expect(pre?.innerHTML).not.toContain('<br>');
   });
 

@@ -7,7 +7,7 @@ import { TelegramClient, isParseError, mapTelegramError, type FetchLike, type Ma
 import { CallbackCodec } from './callbacks.js';
 import { TELEGRAM_CONFIG_JSON_SCHEMA, validateTelegramConfig, type TelegramConfig } from './config.js';
 import { buildCalls, type TelegramCall } from './render.js';
-import { parseUpdate, type TelegramUpdate } from './updates.js';
+import { parseUpdate, senderIdentity, senderOf, type TelegramUpdate } from './updates.js';
 
 export * from './api.js';
 export * from './callbacks.js';
@@ -205,6 +205,8 @@ async function handleUpdate(
       rejectedUsers.add(key);
       ctx.log('warn', 'telegram message from user not in allowedUserIds (ignored)', { userId: key });
     }
+    await ctx.rejected?.({ externalUserId: key, ...senderIdentity(senderOf(update)) }).catch((e: unknown) =>
+      ctx.log('warn', 'recording the rejected sender failed', { userId: key, message: (e as Error)?.message }));
     if (parsed.kind === 'callback') await client.answerCallbackQuery(parsed.callbackQueryId, 'Not authorised.', abort.signal).catch(() => undefined);
     return;
   }

@@ -12,11 +12,13 @@ import { ErrorState, EmptyState } from '../components/States';
 import { useToast } from '../components/Toast';
 import {
   useAddProject,
+  useApproveTelegramUser,
   useAuthSessions,
   useCancelUpgrade,
   useClearTelegramToken,
   useDaemonUpdate,
   useDaemonUpgrade,
+  useDisableTelegramAllowAll,
   useMe,
   useModels,
   usePatchConfig,
@@ -31,6 +33,7 @@ import {
   useRuntimes,
   useSetModels,
   useSetTelegramToken,
+  useTelegramPending,
   useTelegramTokenStatus,
   useWorkspaceSummary,
   useWorkspaces,
@@ -51,6 +54,7 @@ import { cx } from '../lib/cx';
 import { workspaceYolo } from '../lib/yolo';
 import { SETTINGS_AREAS, firstSectionOf, resolveSettingsLocation, sectionsOfArea } from '../lib/settings';
 import { disablePush, enablePush, subscriptionId } from '../lib/push';
+import { ago } from '../lib/format';
 
 /**
  * Settings is two areas: what belongs to this workspace, and what belongs to this daemon and so
@@ -534,9 +538,12 @@ function ChannelsSection(): React.ReactElement {
   const tokenStatus = useTelegramTokenStatus();
   const setTelegramToken = useSetTelegramToken();
   const clearToken = useClearTelegramToken();
+  const pending = useTelegramPending();
+  const approveUser = useApproveTelegramUser();
+  const disableAllowAll = useDisableTelegramAllowAll();
   const toast = useToast();
   const [pendingToken, setPendingToken] = useState('');
-  const channels = (summary.data?.config?.['channels'] ?? {}) as Record<string, { enabled?: boolean; allowedUserIds?: number[]; allowAll?: boolean }>;
+  const channels = (summary.data?.config?.['channels'] ?? {}) as Record<string, { allowedUserIds?: number[]; allowAll?: boolean }>;
   const telegram = channels['telegram'] ?? {};
   const rule = allowlistRuleLabel(telegram);
 
@@ -553,16 +560,7 @@ function ChannelsSection(): React.ReactElement {
   return (
     <div className="flex flex-col gap-3">
       <div className="ac-label">Telegram</div>
-      <Field label="Enabled" hint="The bot token itself lives in the daemon's secrets, never here.">
-        <select
-          className={cx(inputCx, 'ac-mono')}
-          value={telegram.enabled ? 'on' : 'off'}
-          onChange={(e) => patch.mutate({ channels: { telegram: { ...telegram, enabled: e.target.value === 'on' } } })}
-        >
-          <option value="off">off</option>
-          <option value="on">on</option>
-        </select>
-      </Field>
+      <p className="text-micro text-text-3">The channel is on exactly when a bot token is configured below, and off when it is not.</p>
 
       <Field
         label="Bot token"
@@ -603,7 +601,7 @@ function ChannelsSection(): React.ReactElement {
         </div>
       </Field>
 
-      <Field label="Allowlist" hint="Comma-separated Telegram user ids that may talk to the conductor. Empty means nobody, unless the workspace was carried over already open.">
+      <Field label="Allowlist" hint="Comma-separated Telegram user ids that may talk to the conductor. Nobody allowed is the safe, intended state — approve people below instead of typing ids.">
         <div className="flex items-center gap-2">
           <input
             aria-label="Allowlist"
@@ -620,8 +618,69 @@ function ChannelsSection(): React.ReactElement {
             }}
           />
           <Badge tone={rule.tone}>{rule.text}</Badge>
+          {telegram.allowAll ? (
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={disableAllowAll.isPending}
+              onClick={() =>
+                void disableAllowAll
+                  .mutateAsync()
+                  .then(() => toast.push({ title: 'Open access turned off', detail: 'Approve people individually instead.', status: 'done' }))
+                  .catch((e: Error) => toast.push({ title: 'Could not turn off open access', detail: e.message, status: 'failed' }))
+              }
+            >
+              Turn off open access
+            </Button>
+          ) : null}
         </div>
       </Field>
+
+      <PendingTelegramUsers
+        users={pending.data?.pending ?? []}
+        approving={approveUser.isPending}
+        onApprove={(externalUserId) =>
+          void approveUser
+            .mutateAsync(externalUserId)
+            .then(() => toast.push({ title: 'Approved', detail: 'They can now direct work in this workspace through the conductor.', status: 'done' }))
+            .catch((e: Error) => toast.push({ title: 'Could not approve', detail: e.message, status: 'failed' }))
+        }
+      />
+    </div>
+  );
+}
+
+/**
+ * Everyone who has messaged the bot while not on the allowlist (VS-135) — identity only, the
+ * message that triggered a record is never shown. A plain `<div>`, not `Field` (a `<label>`): there
+ * is no form control here for it to label, and with no `<input>` present the Approve button would
+ * become the label's only labelable descendant, giving it the whole section's text as its
+ * accessible name instead of "Approve".
+ */
+function PendingTelegramUsers({ users, approving, onApprove }: { users: T.TelegramPendingUser[]; approving: boolean; onApprove: (externalUserId: string) => void }): React.ReactElement | null {
+  if (!users.length) return null;
+  return (
+    <div className="flex flex-col gap-1.5 py-2.5">
+      <span className="ac-label">Waiting for approval</span>
+      <div className="flex flex-col divide-y divide-line-1 rounded-r6 border border-line-2">
+        {users.map((u) => (
+          <div key={u.externalUserId} className="flex items-center gap-3 px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="ac-truncate text-ui text-text-1">
+                {u.displayName ?? u.username ?? u.externalUserId}
+                {u.username ? <span className="ac-mono ml-1.5 text-micro text-text-3">@{u.username}</span> : null}
+              </div>
+              <div className="ac-mono mt-0.5 text-micro text-text-3">
+                first seen {ago(u.firstSeenAt)} ago · last tried {ago(u.lastSeenAt)} ago · {u.attemptCount} attempt{u.attemptCount === 1 ? '' : 's'}
+              </div>
+            </div>
+            <Button variant="primary" size="sm" disabled={approving} onClick={() => onApprove(u.externalUserId)}>
+              Approve
+            </Button>
+          </div>
+        ))}
+      </div>
+      <span className="text-micro text-text-3">Approving adds them to the allowlist so they can direct work in this workspace through the conductor.</span>
     </div>
   );
 }

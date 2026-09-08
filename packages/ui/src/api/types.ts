@@ -603,6 +603,16 @@ export interface TelegramTokenStatus {
   botUsername: string | null;
 }
 
+/** One row of `GET /channels/telegram/pending` (VS-135) — identity only, never the message that triggered it. */
+export interface TelegramPendingUser {
+  externalUserId: string;
+  username: string | null;
+  displayName: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  attemptCount: number;
+}
+
 export type { PresentationConfig };
 
 export type { Agent, Briefing, Decision, Project, Role, Run, RunEvent, Ticket, TicketComment, ThreadMessage, Workspace };

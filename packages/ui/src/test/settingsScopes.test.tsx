@@ -47,6 +47,9 @@ vi.mock('../api/hooks', () => ({
   useTelegramTokenStatus: () => ({ data: { configured: false, source: null, botUsername: null } }),
   useSetTelegramToken: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useClearTelegramToken: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useTelegramPending: () => ({ data: { pending: [] } }),
+  useApproveTelegramUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDisableTelegramAllowAll: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCancelUpgrade: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 

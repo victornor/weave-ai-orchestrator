@@ -51,5 +51,26 @@ export function channelRoutes(): Hono<AppEnv> {
     return c.json({ ok: true });
   });
 
+  // ---------- pending identities (VS-135) ----------
+
+  app.get('/telegram/pending', (c) => {
+    const ws = c.get('ws');
+    return c.json({ pending: ws.channels?.pendingTelegramUsers() ?? [] });
+  });
+
+  app.post('/telegram/pending/:externalUserId/approve', async (c) => {
+    const ws = c.get('ws');
+    if (!ws.channels) throw new OcError('validation', 'the Telegram channel is not running for this workspace');
+    const result = await ws.channels.approveTelegramUser(c.req.param('externalUserId'));
+    return c.json(result);
+  });
+
+  app.post('/telegram/allow-all/disable', async (c) => {
+    const ws = c.get('ws');
+    if (!ws.channels) throw new OcError('validation', 'the Telegram channel is not running for this workspace');
+    await ws.channels.disableTelegramAllowAll();
+    return c.json({ ok: true });
+  });
+
   return app;
 }

@@ -100,4 +100,5 @@ export const qk = {
   presentation: (ws: string) => ['w', ws, 'presentation'] as const,
   presentationSurfaces: (ws: string) => ['w', ws, 'presentation', 'surfaces'] as const,
   telegramToken: (ws: string) => ['w', ws, 'channels', 'telegram', 'token'] as const,
+  telegramPending: (ws: string) => ['w', ws, 'channels', 'telegram', 'pending'] as const,
 } as const;

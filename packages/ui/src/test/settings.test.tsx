@@ -13,6 +13,9 @@ const state = vi.hoisted(() => ({
   telegramSetCalls: [] as string[],
   telegramSetResult: null as { ok: true; botUsername: string | null } | { error: string } | null,
   telegramClearCalls: 0,
+  telegramPending: [] as Array<{ externalUserId: string; username: string | null; displayName: string | null; firstSeenAt: string; lastSeenAt: string; attemptCount: number }>,
+  approveCalls: [] as string[],
+  disableAllowAllCalls: 0,
   toasts: [] as Array<{ title: string; detail?: string; status?: string }>,
 }));
 
@@ -46,6 +49,15 @@ vi.mock('../api/hooks', () => ({
     isPending: false,
     mutateAsync: async () => { state.telegramClearCalls += 1; return { ok: true }; },
   }),
+  useTelegramPending: () => ({ data: { pending: state.telegramPending } }),
+  useApproveTelegramUser: () => ({
+    isPending: false,
+    mutateAsync: async (externalUserId: string) => { state.approveCalls.push(externalUserId); return { allowedUserIds: [] }; },
+  }),
+  useDisableTelegramAllowAll: () => ({
+    isPending: false,
+    mutateAsync: async () => { state.disableAllowAllCalls += 1; return { ok: true }; },
+  }),
 }));
 
 const { SettingsRoute } = await import('../routes/Settings');
@@ -64,6 +76,9 @@ beforeEach(() => {
   state.telegramSetCalls = [];
   state.telegramSetResult = null;
   state.telegramClearCalls = 0;
+  state.telegramPending = [];
+  state.approveCalls = [];
+  state.disableAllowAllCalls = 0;
   state.toasts = [];
 });
 
@@ -239,5 +254,53 @@ describe('Settings — Telegram', () => {
     state.config = { channels: { telegram: {} } };
     openChannels();
     expect(screen.getByText('Off — no user is allowed')).toBeInTheDocument();
+  });
+
+  it('there is no Enabled control (VS-135: the toggle was dead and is removed)', () => {
+    openChannels();
+    expect(screen.queryByText('Enabled')).not.toBeInTheDocument();
+  });
+});
+
+/** VS-135: pending identities and turning off legacy open access, both from the interface. */
+describe('Settings — Telegram pending identities', () => {
+  const openChannels = (): void => {
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Channels' }));
+  };
+
+  it('nothing renders when nobody is pending', () => {
+    openChannels();
+    expect(screen.queryByText('Waiting for approval')).not.toBeInTheDocument();
+  });
+
+  it('lists a pending identity by id, username, display name and attempt count — never message text', () => {
+    state.telegramPending = [{ externalUserId: '99', username: 'stranger', displayName: 'Sam', firstSeenAt: '2026-09-01T00:00:00.000Z', lastSeenAt: '2026-09-01T00:00:00.000Z', attemptCount: 3 }];
+    openChannels();
+    expect(screen.getByText('Sam')).toBeInTheDocument();
+    expect(screen.getByText('@stranger')).toBeInTheDocument();
+    expect(screen.getByText(/3 attempts/)).toBeInTheDocument();
+  });
+
+  it('approving calls the approve mutation with the id and states the consequence', async () => {
+    state.telegramPending = [{ externalUserId: '99', username: 'stranger', displayName: 'Sam', firstSeenAt: '2026-09-01T00:00:00.000Z', lastSeenAt: '2026-09-01T00:00:00.000Z', attemptCount: 1 }];
+    openChannels();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(state.approveCalls).toEqual(['99']));
+    expect(state.toasts.at(-1)).toMatchObject({ title: 'Approved', detail: 'They can now direct work in this workspace through the conductor.' });
+  });
+
+  it('no "Turn off open access" action when allowAll is not set', () => {
+    state.config = { channels: { telegram: { allowedUserIds: [] } } };
+    openChannels();
+    expect(screen.queryByRole('button', { name: 'Turn off open access' })).not.toBeInTheDocument();
+  });
+
+  it('turning off open access calls the disable mutation', async () => {
+    state.config = { channels: { telegram: { allowedUserIds: [], allowAll: true } } };
+    openChannels();
+    fireEvent.click(screen.getByRole('button', { name: 'Turn off open access' }));
+    await waitFor(() => expect(state.disableAllowAllCalls).toBe(1));
+    expect(state.toasts.at(-1)).toMatchObject({ title: 'Open access turned off' });
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ChannelAdapter, InboundMessage, OutboundMessage, SendResult } from '@agent-conductor/channel-sdk';
+import type { ChannelAdapter, ChannelContext, InboundMessage, OutboundMessage, RejectedContact, SendResult } from '@agent-conductor/channel-sdk';
 import { newId, nowIso } from '@agent-conductor/db';
 import { ChannelManager } from '../src/channels.js';
 import { makeHarness, decision, type Harness } from './fakes.js';
@@ -270,5 +270,131 @@ describe('manager commands on every channel kind', () => {
     const { h, adapters } = await bootKinds();
     await adapters.telegram!.inbound!({ externalThreadId: 'chat-telegram', externalUserId: 'u1', text: 'ship the thing' });
     expect(h.db.get<{ body: string }>('SELECT body FROM thread_messages WHERE direction = ?', ['inbound'])?.body).toBe('ship the thing');
+  });
+});
+
+describe('pending Telegram identities (VS-135)', () => {
+  /** Captures `ctx.rejected` so a test can call it the way the Telegram adapter would, and tracks starts to prove a restart happened. */
+  function trackingAdapter(): ChannelAdapter & { starts: number; stops: number; rejected: ChannelContext['rejected'] } {
+    const state = {
+      kind: 'telegram',
+      capabilities: { supportsButtons: false, supportsMarkdown: true, supportsEdit: false, supportsThreads: true, supportsFiles: false, maxTextBytes: 4096 },
+      starts: 0,
+      stops: 0,
+      rejected: undefined as ChannelContext['rejected'],
+      configSchema: () => ({}),
+      validateConfig: () => ({ ok: true as const }),
+      async start(ctx: ChannelContext) { state.starts += 1; state.rejected = ctx.rejected; return { stop: async () => { state.stops += 1; } }; },
+      async send(): Promise<SendResult> { return { delivered: true }; },
+    };
+    return state as unknown as ChannelAdapter & { starts: number; stops: number; rejected: ChannelContext['rejected'] };
+  }
+
+  async function boot(): Promise<{ h: Harness; adapter: ReturnType<typeof trackingAdapter>; m: ChannelManager }> {
+    harness = makeHarness();
+    const adapter = trackingAdapter();
+    harness.runtime.ctx.registries.channels.set('telegram', adapter);
+    harness.runtime.ctx.config.channels = { telegram: { botToken: 'T', allowedUserIds: [] } };
+    // The default fake `saveConfig` is a no-op; ChannelManager's approve/disable actions need it to
+    // behave like the real loader (packages/core/src/workspace/loader.ts), which reassigns `ctx.config`.
+    harness.runtime.ctx.saveConfig = async (next) => { harness!.runtime.ctx.config = next; };
+    manager = new ChannelManager(harness.runtime.ctx, harness.runtime.services);
+    await manager.start();
+    return { h: harness, adapter, m: manager };
+  }
+
+  const contact = (id: number, extra: Partial<RejectedContact> = {}): RejectedContact => ({ externalUserId: String(id), username: 'stranger', displayName: 'A Stranger', ...extra });
+
+  it('records a first rejection and appears in the pending list', async () => {
+    const { m } = await boot();
+    await m.onRejected('telegram', contact(99));
+    const pending = m.pendingTelegramUsers();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ externalUserId: '99', username: 'stranger', displayName: 'A Stranger', attemptCount: 1 });
+  });
+
+  it('updates the same record on a repeat rejection instead of duplicating', async () => {
+    const { m } = await boot();
+    await m.onRejected('telegram', contact(99));
+    await m.onRejected('telegram', contact(99));
+    await m.onRejected('telegram', contact(99));
+    const pending = m.pendingTelegramUsers();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.attemptCount).toBe(3);
+  });
+
+  it('drops a new identity once at the cap, leaving existing ones untouched', async () => {
+    const { h, m } = await boot();
+    for (let i = 0; i < 50; i += 1) await m.onRejected('telegram', contact(i));
+    await m.onRejected('telegram', contact(999));
+    expect(h.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM telegram_pending_users')?.n).toBe(50);
+    expect(m.pendingTelegramUsers().some((p) => p.externalUserId === '999')).toBe(false);
+    expect(m.pendingTelegramUsers().some((p) => p.externalUserId === '0')).toBe(true);
+  });
+
+  it('expires a pending identity 7 days after its last attempt', async () => {
+    const { h, m } = await boot();
+    await m.onRejected('telegram', contact(1));
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    h.db.run('UPDATE telegram_pending_users SET last_seen_at = ? WHERE external_user_id = ?', [eightDaysAgo, '1']);
+    expect(m.pendingTelegramUsers()).toHaveLength(0);
+  });
+
+  it('wires the adapter\'s rejected callback to the manager', async () => {
+    const { m, adapter } = await boot();
+    await adapter.rejected!({ externalUserId: '7' });
+    expect(m.pendingTelegramUsers()).toHaveLength(1);
+  });
+
+  it('approving adds the id to the allowlist, clears the pending row, and restarts the channel', async () => {
+    const { h, m, adapter } = await boot();
+    await m.onRejected('telegram', contact(99));
+    expect(adapter.starts).toBe(1);
+
+    const result = await m.approveTelegramUser('99');
+    expect(result.allowedUserIds).toEqual([99]);
+    expect((h.runtime.ctx.config.channels['telegram'] as { allowedUserIds: number[] }).allowedUserIds).toEqual([99]);
+    expect(m.pendingTelegramUsers()).toHaveLength(0);
+    expect(adapter.starts).toBe(2);
+  });
+
+  it('approving the same id twice does not duplicate the allowlist entry', async () => {
+    const { m } = await boot();
+    await m.approveTelegramUser('99');
+    const result = await m.approveTelegramUser('99');
+    expect(result.allowedUserIds).toEqual([99]);
+  });
+
+  it('rejects a non-numeric id', async () => {
+    const { m } = await boot();
+    await expect(m.approveTelegramUser('not-a-number')).rejects.toThrow();
+  });
+
+  it('disableTelegramAllowAll turns allowAll off and restarts the channel', async () => {
+    harness = makeHarness();
+    const adapter = trackingAdapter();
+    harness.runtime.ctx.registries.channels.set('telegram', adapter);
+    harness.runtime.ctx.config.channels = { telegram: { botToken: 'T', allowedUserIds: [], allowAll: true } };
+    harness.runtime.ctx.saveConfig = async (next) => { harness!.runtime.ctx.config = next; };
+    manager = new ChannelManager(harness.runtime.ctx, harness.runtime.services);
+    await manager.start();
+    expect(adapter.starts).toBe(1);
+
+    await manager.disableTelegramAllowAll();
+    expect((harness.runtime.ctx.config.channels['telegram'] as { allowAll: boolean }).allowAll).toBe(false);
+    expect(adapter.starts).toBe(2);
+  });
+
+  it('a plain config-patch allowlist edit (not the approve action) restarts only telegram, and an unrelated edit restarts nothing', async () => {
+    const { h, adapter } = await boot();
+    const next = { ...h.runtime.ctx.config, channels: { ...h.runtime.ctx.config.channels, telegram: { botToken: 'T', allowedUserIds: [42] } } };
+    h.runtime.ctx.config = next;
+    h.bus.emit('workspace.updated', 'workspace', h.runtime.id, { config: next });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(adapter.starts).toBe(2);
+
+    h.bus.emit('workspace.updated', 'workspace', h.runtime.id, { config: next });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(adapter.starts).toBe(2);
   });
 });

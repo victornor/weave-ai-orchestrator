@@ -1027,7 +1027,7 @@ export interface ChannelAdapter {
   readonly capabilities: ChannelCapabilities;  // { supportsButtons, supportsMarkdown, supportsEdit, supportsThreads, supportsFiles, maxTextBytes }
   configSchema(): JsonSchema;
   validateConfig(config: unknown): ValidationResult;
-  start(ctx: ChannelContext): Promise<RunningChannel>;   // ctx.inbound(message), ctx.log; returns { stop() }
+  start(ctx: ChannelContext): Promise<RunningChannel>;   // ctx.inbound(message), ctx.rejected?(contact), ctx.log; returns { stop() }
   send(msg: OutboundMessage): Promise<SendResult>;      // { externalMessageId?, delivered: boolean, error?: {code, retryable} }
   renderDecision?(decision: DecisionView): CanonicalMessage;   // default renderer used when absent
   handleWebhook?(req): Promise<WebhookResult>;
@@ -1040,7 +1040,7 @@ export interface ChannelAdapter {
 
 ### 14.2 Routing
 
-- **First contact binds.** An inbound external conversation (Telegram chat id) binds to a `channel_thread` for the conductor. `/talk <ticket>` (or a UI action) binds the thread to that ticket: messages become ticket comments and wake the ticket's live worker (§11.7); `/conductor` unbinds. Unknown senders are ignored unless in `allowedUserIds` (Telegram) — never auto-onboard.
+- **First contact binds.** An inbound external conversation (Telegram chat id) binds to a `channel_thread` for the conductor. `/talk <ticket>` (or a UI action) binds the thread to that ticket: messages become ticket comments and wake the ticket's live worker (§11.7); `/conductor` unbinds. Unknown senders are ignored unless in `allowedUserIds` (Telegram) — never auto-onboard. A rejected sender's identity (never their message) is recorded through `ctx.rejected` (VS-135) and offered for approval in Settings, capped and expiring, so gaining access never requires typing a numeric user id.
 - Inbound message → `thread_messages` row → `enqueueWakeup(agent, {source: human_message, payload: {threadId, messageId}})`.
 - Outbound: the conductor only through `ac_human_send`; workers only through ticket comments, which the daemon relays to bound threads. A run's plain final text is stored on the run but not sent; the charters say so explicitly.
 - Decisions owned by the human are pushed to the human's **primary thread** (the most recently active thread, or the one configured as `notify`) as a card; answering on any channel resolves the decision everywhere (idempotent by decision id; late clicks return "already answered").

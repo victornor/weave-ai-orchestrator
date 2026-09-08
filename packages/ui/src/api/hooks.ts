@@ -1173,6 +1173,33 @@ export function useClearTelegramToken(): UseMutationResult<{ ok: true }, Error, 
   });
 }
 
+/** VS-135: everyone who has messaged the bot while not on the allowlist — identity only, never their message. */
+export function useTelegramPending(): UseQueryResult<{ pending: T.TelegramPendingUser[] }> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.telegramPending(ws), queryFn: () => api.ws<{ pending: T.TelegramPendingUser[] }>(ws, '/channels/telegram/pending') });
+}
+
+export function useApproveTelegramUser(): UseMutationResult<{ allowedUserIds: number[] }, Error, string> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (externalUserId) => api.ws<{ allowedUserIds: number[] }>(ws, `/channels/telegram/pending/${externalUserId}/approve`, { method: 'POST' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.telegramPending(ws) });
+      void qc.invalidateQueries({ queryKey: qk.workspace(ws) });
+    },
+  });
+}
+
+export function useDisableTelegramAllowAll(): UseMutationResult<{ ok: true }, Error, void> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.ws<{ ok: true }>(ws, '/channels/telegram/allow-all/disable', { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.workspace(ws) }),
+  });
+}
+
 // ---------------------------------------------------------------- changelog
 
 const CHANGELOG_PAGE_SIZE = 50;

@@ -563,7 +563,10 @@ describe('ChatRoute dispatch labels', () => {
 });
 
 describe('project context', () => {
-  const picker = (): HTMLSelectElement => screen.getByLabelText('Project for this message') as HTMLSelectElement;
+  const group = (): HTMLElement => screen.getByRole('radiogroup', { name: 'Project for this message' });
+  const tags = (): (string | null)[] => within(group()).getAllByRole('radio').map((r) => r.textContent);
+  const active = (): string | null | undefined => within(group()).queryByRole('radio', { checked: true })?.textContent;
+  const choose = (name: string): void => { fireEvent.click(within(group()).getByRole('radio', { name })); };
   const sent = (body: string): void => {
     const box = screen.getByLabelText('Message the conductor…');
     fireEvent.change(box, { target: { value: body } });
@@ -574,18 +577,26 @@ describe('project context', () => {
     state.projects = [project({ id: 'p1', name: 'API' }), project({ id: 'p2', slug: 'web', name: 'Web' })];
   });
 
-  it('offers every non-archived project plus "all projects"', () => {
+  it('offers every non-archived project plus "Auto"', () => {
     state.projects = [...state.projects, project({ id: 'p3', slug: 'old', name: 'Retired', status: 'archived' })];
     render(<ChatRoute />);
-    expect([...picker().options].map((o) => o.textContent)).toEqual(['All projects', 'API', 'Web']);
+    expect(tags()).toEqual(['Auto', 'API', 'Web']);
   });
 
-  it('offers only "all projects" in a workspace with none, and still sends', () => {
+  it('offers only "Auto" in a workspace with none, and still sends', () => {
     state.projects = [];
     render(<ChatRoute />);
-    expect([...picker().options].map((o) => o.textContent)).toEqual(['All projects']);
+    expect(tags()).toEqual(['Auto']);
     sent('set me up');
     expect(state.posted).toEqual([{ threadId: 'th_1', body: 'set me up', projectId: null }]);
+  });
+
+  it('keeps an archived project the thread already used, shown as the current selection', () => {
+    state.projects = [...state.projects, project({ id: 'p3', slug: 'old', name: 'Retired', status: 'archived' })];
+    state.messages = [message({ id: 'm1', body: 'first', direction: 'inbound', projectId: 'p3' })];
+    render(<ChatRoute />);
+    expect(tags()).toEqual(['Auto', 'API', 'Web', 'Retired']);
+    expect(active()).toBe('Retired');
   });
 
   it('defaults to the project the thread last used', () => {
@@ -595,42 +606,81 @@ describe('project context', () => {
       message({ id: 'm3', body: 'second', direction: 'inbound', projectId: 'p2' }),
     ];
     render(<ChatRoute />);
-    expect(picker().value).toBe('p2');
+    expect(active()).toBe('Web');
   });
 
-  it('defaults to "all projects" when the thread last used none, and on an empty thread', () => {
+  it('defaults to "Auto" when the thread last used none, and on an empty thread', () => {
     state.messages = [
       message({ id: 'm1', body: 'first', direction: 'inbound', projectId: 'p1' }),
       message({ id: 'm2', body: 'second', direction: 'inbound', projectId: null }),
     ];
     const first = render(<ChatRoute />);
-    expect(picker().value).toBe('');
+    expect(active()).toBe('Auto');
     first.unmount();
 
     state.messages = [];
     render(<ChatRoute />);
-    expect(picker().value).toBe('');
+    expect(active()).toBe('Auto');
   });
 
-  it('sends the chosen project, and nothing when "all projects" is chosen', () => {
+  it('sends the chosen project, and nothing when "Auto" is chosen', () => {
     render(<ChatRoute />);
-    fireEvent.change(picker(), { target: { value: 'p2' } });
+    choose('Web');
     sent('do the thing');
     expect(state.posted).toEqual([{ threadId: 'th_1', body: 'do the thing', projectId: 'p2' }]);
+  });
 
-    // The pick sticks for the next message until it is changed back.
+  it('resets the selection to Auto after sending, so the next message needs a fresh pick', () => {
+    render(<ChatRoute />);
+    choose('Web');
+    sent('do the thing');
+    expect(active()).toBe('Auto');
+
     sent('and this too');
-    expect(state.posted[1]).toMatchObject({ projectId: 'p2' });
+    expect(state.posted[1]).toMatchObject({ projectId: null });
+  });
 
-    fireEvent.change(picker(), { target: { value: '' } });
-    sent('workspace-wide');
-    expect(state.posted[2]).toMatchObject({ body: 'workspace-wide', projectId: null });
+  it('resets to Auto after an offline-queued send too', () => {
+    state.connection = 'offline';
+    render(<ChatRoute />);
+    choose('Web');
+    sent('later then');
+    expect(active()).toBe('Auto');
+  });
+
+  it('does not restore the cleared selection after a reload', () => {
+    const view = render(<ChatRoute />);
+    choose('Web');
+    sent('do the thing');
+    view.unmount();
+
+    render(<ChatRoute />);
+    expect(active()).toBe('Auto');
+  });
+
+  it('activating the active project tag returns to Auto rather than staying active', () => {
+    render(<ChatRoute />);
+    choose('Web');
+    expect(active()).toBe('Web');
+
+    choose('Web');
+    expect(active()).toBe('Auto');
+    sent('after toggling back');
+    expect(state.posted[0]).toMatchObject({ projectId: null });
+  });
+
+  it('scrolls the selected tag into view when the strip mounts with a project already selected', () => {
+    state.messages = [message({ id: 'm1', body: 'first', direction: 'inbound', projectId: 'p2' })];
+    render(<ChatRoute />);
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith(
+      expect.objectContaining({ block: 'nearest', inline: 'nearest' }),
+    );
   });
 
   it('keeps the project on a message queued while offline', () => {
     state.connection = 'offline';
     render(<ChatRoute />);
-    fireEvent.change(picker(), { target: { value: 'p1' } });
+    choose('API');
     sent('later then');
 
     expect(state.posted).toHaveLength(0);
@@ -1024,7 +1074,7 @@ describe('ChatRoute decision cards', () => {
     expect(precedes(screen.getByText('One thing before I start.'), card)).toBe(true);
     expect(precedes(card, screen.getByText('Done.'))).toBe(true);
     expect(screen.getByText('File it')).toBeInTheDocument();
-    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('radio')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Send answer' })).not.toBeInTheDocument();
   });
 
@@ -1545,16 +1595,18 @@ describe('ChatRoute drafts', () => {
     state.projects = [project({ id: 'p1', name: 'API' }), project({ id: 'p2', slug: 'web', name: 'Web' })];
     state.messages = [message({ id: 'm1', body: 'Should I ship it behind a flag?' })];
 
+    const group = (): HTMLElement => screen.getByRole('radiogroup', { name: 'Project for this message' });
+
     const view = render(<ChatRoute />);
     fireEvent.click(screen.getByLabelText('Reply to this message'));
-    fireEvent.change(screen.getByLabelText('Project for this message'), { target: { value: 'p2' } });
+    fireEvent.click(within(group()).getByRole('radio', { name: 'Web' }));
     type('yes, do it');
     view.unmount();
 
     render(<ChatRoute />);
     expect(box().value).toBe('yes, do it');
     expect(screen.getByText('Replying to the conductor')).toBeInTheDocument();
-    expect((screen.getByLabelText('Project for this message') as HTMLSelectElement).value).toBe('p2');
+    expect(within(group()).getByRole('radio', { name: 'Web' })).toHaveAttribute('aria-checked', 'true');
 
     fireEvent.click(screen.getByLabelText('Send'));
     expect(state.posted[0]).toEqual({ threadId: 'th_1', body: 'yes, do it', projectId: 'p2', replyToMessageId: 'm1' });

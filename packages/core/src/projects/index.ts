@@ -279,8 +279,20 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
 
     async update(actor: Actor, id: string, patch: Partial<ProjectConfig>): Promise<Project> {
       const project = get(id);
+      // An empty string is the "clear the landing branch" sentinel (the schema field has no `null`
+      // — it's `z.string().optional()`, matching every other optional string here); a non-empty
+      // value is checked against the project's last-fetched remote state before it is accepted, so a
+      // typo is rejected here rather than discovered when a ticket's merge fails to verify.
+      if (typeof patch.landingBranch === 'string' && patch.landingBranch !== '') {
+        const exists = await git(['rev-parse', '--verify', '--quiet', `origin/${patch.landingBranch}`], project.clonePath, 15_000);
+        if (!exists.ok || !exists.stdout.trim()) {
+          throw new OcError('validation', `branch '${patch.landingBranch}' was not found on origin as of ${project.slug}'s last fetch — fetch the project first if the branch was just created, then try again`);
+        }
+      }
       const existing = ctx.config.projects.find((p) => p.id === project.slug);
-      const merged = ProjectConfigSchema.parse({ ...(existing ?? { id: project.slug, url: project.gitUrl }), ...patch, id: project.slug });
+      const patchForMerge: Partial<ProjectConfig> = { ...patch };
+      if (patch.landingBranch === '') patchForMerge.landingBranch = undefined;
+      const merged = ProjectConfigSchema.parse({ ...(existing ?? { id: project.slug, url: project.gitUrl }), ...patchForMerge, id: project.slug });
       ctx.db.update('projects', project.id, {
         name: merged.name ?? project.name, defaultBranch: merged.defaultBranch, landingBranch: merged.landingBranch ?? null, maxWorkers: merged.maxWorkers,
         setupCommand: merged.setupCommand ?? null, warmPathsJson: merged.warmPaths, worktreeProvider: merged.worktrees ?? project.worktreeProvider,

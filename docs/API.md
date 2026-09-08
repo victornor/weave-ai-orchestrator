@@ -39,6 +39,8 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `ac_session` httpOn
 
 ### Projects
 `GET /projects` · `POST /projects` `{ url, id?, defaultBranch?, landingBranch?, maxWorkers?, setupCommand? }` (strict: a project carries no runtime or model; `landingBranch` (VS-119) is the branch its tickets' work actually lands on when it differs from `defaultBranch` — Fernwood's is `edge`, promoted to `main` separately by a human — and falls back to `defaultBranch` when unset) → **202** `{ project, jobId }` · `GET /projects/:id` · `PATCH /projects/:id` · `DELETE /projects/:id` · `POST /projects/:id/fetch`
+
+`PATCH /projects/:id` also declares, changes or clears a project's landing branch after creation (VS-122): a non-empty `landingBranch` is rejected with a `validation` 400 naming the branch when it is not found on the project's remote as of its last fetch; `landingBranch: ''` clears it back to "use `defaultBranch`". Every check that resolves a project's effective landing branch reads the project row fresh, so a change takes effect on the next ticket action — no daemon restart.
 `POST /projects/:id/retry` → **202** `{ project, jobId }` — re-run a failed add against whatever is already on disk; `conflict` unless the project's status is `error` and no job for it is running.
 
 **BREAKING (VS-37):** `POST /projects` used to answer `201` with the finished project after the clone, the OpenSpec adoption and the knowledge seed — minutes of work. It now answers `202` as soon as the row exists, with the project in its `cloning` status and the id of the job doing the rest. Follow `GET /jobs/:id/stream` for progress, or poll `GET /projects/:id` until its status leaves `cloning`.

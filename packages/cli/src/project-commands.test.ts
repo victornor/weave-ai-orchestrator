@@ -151,6 +151,51 @@ describe('conductor project add', () => {
   });
 });
 
+describe('conductor project set-landing-branch (VS-122)', () => {
+  it('sets the landing branch and reports what is in effect', async () => {
+    routes['PATCH /api/w/ws1/projects/api'] = () => ({ body: project({ status: 'ready', landingBranch: 'edge' }) });
+
+    const { out } = await cli('project', 'set-landing-branch', 'api', 'edge');
+    const patched = calls.find((c) => c.method === 'PATCH' && c.path === '/api/w/ws1/projects/api');
+    expect(patched?.body).toEqual({ landingBranch: 'edge' });
+    expect(out).toContain('updated api: landing branch = edge');
+  });
+
+  it('--clear sends an empty string and reports the default branch is in effect', async () => {
+    routes['PATCH /api/w/ws1/projects/api'] = () => ({ body: project({ status: 'ready', landingBranch: null }) });
+
+    const { out } = await cli('project', 'set-landing-branch', 'api', '--clear');
+    const patched = calls.find((c) => c.method === 'PATCH' && c.path === '/api/w/ws1/projects/api');
+    expect(patched?.body).toEqual({ landingBranch: '' });
+    expect(out).toContain('updated api: landing branch = using default branch `main`');
+  });
+
+  it('rejects passing both a branch and --clear, without sending a request', async () => {
+    const { err } = await cli('project', 'set-landing-branch', 'api', 'edge', '--clear');
+    expect(err).toContain('pass a branch or --clear, not both');
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false);
+    expect(process.exitCode).toBeGreaterThan(0);
+  });
+
+  it('rejects passing neither a branch nor --clear, without sending a request', async () => {
+    const { err } = await cli('project', 'set-landing-branch', 'api');
+    expect(err).toContain('pass a branch to set, or --clear to clear the landing branch');
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false);
+    expect(process.exitCode).toBeGreaterThan(0);
+  });
+
+  it('prints the daemon rejection when the branch does not exist on the remote', async () => {
+    routes['PATCH /api/w/ws1/projects/api'] = () => ({
+      status: 400,
+      body: { error: { code: 'validation', message: "branch 'nope' was not found on origin as of api's last fetch", retryable: false } },
+    });
+
+    const { err } = await cli('project', 'set-landing-branch', 'api', 'nope');
+    expect(err).toContain("branch 'nope' was not found on origin");
+    expect(process.exitCode).toBeGreaterThan(0);
+  });
+});
+
 describe('conductor project retry', () => {
   it('posts the retry and follows the new job', async () => {
     routes['POST /api/w/ws1/projects/api/retry'] = () => ({ status: 202, body: { project: project(), jobId: 'j1' } });

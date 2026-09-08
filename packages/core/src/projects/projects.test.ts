@@ -98,6 +98,56 @@ describe('projects', () => {
     expect(project.landingBranch).toBeNull();
   });
 
+  it('sets, changes and clears a landing branch after creation (VS-122)', async () => {
+    const src = await sourceRepo();
+    await git(['checkout', '-b', 'edge'], src);
+    writeFileSync(join(src, 'edge-only.txt'), 'edge work', 'utf8');
+    await git(['add', '.'], src);
+    await git(['commit', '-m', 'edge: work'], src);
+    await git(['checkout', '-b', 'staging'], src);
+    await git(['checkout', 'main'], src);
+
+    const project = await projects.add(HUMAN, cfg(src));
+    expect(project.landingBranch).toBeNull();
+
+    const set = await projects.update(HUMAN, project.id, { landingBranch: 'edge' });
+    expect(set.landingBranch).toBe('edge');
+    expect(saved.at(-1)!.projects[0]!.landingBranch).toBe('edge');
+
+    const changed = await projects.update(HUMAN, project.id, { landingBranch: 'staging' });
+    expect(changed.landingBranch).toBe('staging');
+    expect(saved.at(-1)!.projects[0]!.landingBranch).toBe('staging');
+
+    const cleared = await projects.update(HUMAN, project.id, { landingBranch: '' });
+    expect(cleared.landingBranch).toBeNull();
+    expect(saved.at(-1)!.projects[0]!.landingBranch).toBeUndefined();
+  });
+
+  it('rejects a landing branch absent from the remote, at the point of setting (VS-122)', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, cfg(src));
+
+    await expect(projects.update(HUMAN, project.id, { landingBranch: 'does-not-exist' })).rejects.toMatchObject({
+      code: 'validation',
+      message: expect.stringContaining('does-not-exist'),
+    });
+    expect(projects.get(project.id).landingBranch).toBeNull();
+  });
+
+  it('picks up a changed landing branch on the next read with no restart (VS-122)', async () => {
+    const src = await sourceRepo();
+    await git(['checkout', '-b', 'edge'], src);
+    writeFileSync(join(src, 'edge-only.txt'), 'edge work', 'utf8');
+    await git(['add', '.'], src);
+    await git(['commit', '-m', 'edge: work'], src);
+    await git(['checkout', 'main'], src);
+
+    const project = await projects.add(HUMAN, cfg(src));
+    await projects.update(HUMAN, project.id, { landingBranch: 'edge' });
+    // No restart, no re-instantiation of the service — the very next read reflects it.
+    expect(projects.get(project.id).landingBranch).toBe('edge');
+  });
+
   it('refuses a duplicate slug and reports a clone failure on the row', async () => {
     const src = await sourceRepo();
     await projects.add(HUMAN, cfg(src));

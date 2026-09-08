@@ -123,6 +123,25 @@ export function register(program: Command): void {
     }));
 
   project
+    .command('set-landing-branch')
+    .argument('<id>', 'project id')
+    .argument('[branch]', "the branch tickets' work is expected to reach (VS-119); omit with --clear")
+    .option('--clear', 'clear it — checks run against the default branch again')
+    .description("set, change or clear a project's landing branch after it was added")
+    .action(async (id: string, branch: string | undefined, opts: Record<string, boolean>, command: Command) => run(async () => {
+      const clear = opts['clear'] === true;
+      if (clear && branch) throw new ApiError('validation', 'pass a branch or --clear, not both', 400);
+      if (!clear && !branch) throw new ApiError('validation', 'pass a branch to set, or --clear to clear the landing branch', 400);
+      const { client } = await session(command);
+      const updated = await client.patch<Record<string, unknown>>(client.w(`/projects/${encodeURIComponent(id)}`), { landingBranch: branch ?? '' });
+      emit(updated, () => {
+        const inEffect = updated['landingBranch'] ? String(updated['landingBranch']) : `using default branch \`${String(updated['defaultBranch'] ?? '')}\``;
+        write(`${style.ok('updated')} ${id}: landing branch = ${inEffect}`);
+        write(style.dim('applies to the next ticket action; no daemon restart needed'));
+      });
+    }));
+
+  project
     .command('set-policy')
     .argument('<project>', 'project id')
     .argument('<assignments...>', 'one or more key=value pairs')

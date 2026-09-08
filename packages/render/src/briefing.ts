@@ -46,8 +46,12 @@ export function briefingToSections(briefing: Briefing | null | undefined, ctx: B
       uiStatus: 'working' as const,
       glyph: statusGlyph('working'),
       primary: oneLine(redact(str(u?.title) ?? ''), 100),
-      secondary: str(u?.lastStatus) ? oneLine(redact(str(u?.lastStatus)!), 90) : null,
-      meta: joinMeta(str(u?.identifier), str(u?.workerName), str(u?.status)) || null,
+      // VS-137: a paused worker's reason says why this ticket is not actually moving, whatever its
+      // last status comment said — a stalled ticket must not read like an ordinary one in progress.
+      secondary: str(u?.workerPauseReason)
+        ? `paused · ${oneLine(redact(str(u?.workerPauseReason)!), 80)}`
+        : str(u?.lastStatus) ? oneLine(redact(str(u?.lastStatus)!), 90) : null,
+      meta: joinMeta(str(u?.identifier), str(u?.workerName), str(u?.status), str(u?.workerStatus)) || null,
       ref: str(u?.identifier) ?? str(u?.ticketId) ?? null,
     })), 'No workers are running.'),
 

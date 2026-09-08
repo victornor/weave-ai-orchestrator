@@ -77,6 +77,21 @@ describe('ensureFreshCredential', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('never reports a successfully described account\'s own note as the reason a refresh failed (VS-137)', async () => {
+    // A metered/API-key account has no OAuth expiry `readCredential` can ever find, so the freshness
+    // check always fails it — but `describeAccount` succeeded here and its note is about billing,
+    // not about the credential, and must never stand in for the real reason.
+    const runtime = new FakeCredentialRuntime({ present: false, expiresAt: null });
+    runtime.describeAccount = async (): Promise<AccountDescription> => {
+      runtime.calls += 1;
+      return { billingType: 'metered_api', planLabel: null, limitsAvailable: false, limits: [], note: 'claude: this account is billed per token; it has no plan limits' };
+    };
+    const result = await ensureFreshCredential(input(runtime));
+    expect(result.ok).toBe(false);
+    expect((result as { message: string }).message).not.toContain('billed per token');
+    expect((result as { message: string }).message).toContain('metered_api');
+  });
+
   it('collapses a burst of concurrent callers into exactly one probe (acceptance criterion 3)', async () => {
     const runtime = new FakeCredentialRuntime({ present: true, expiresAt: PAST });
     runtime.describeDelayMs = 10;

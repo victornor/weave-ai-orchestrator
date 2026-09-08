@@ -373,6 +373,20 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   const liveness = classifyLiveness(status, f.report, f.ticket?.status ?? null);
   const summary = f.report?.summary ?? (r?.finalText ? r.finalText.slice(0, 1000) : f.failure?.message ?? null);
 
+  // VS-137: an authentication failure that keeps recurring on one worker, with the runtime confirmed
+  // healthy enough to release every other agent in between, is a fact about the worker rather than
+  // the runtime. Three in a row — this run plus its two immediate predecessors, none of which
+  // succeeded — stops the automatic resume below and falls through to the human instead, the same way
+  // the retry ladder stops when its own attempts are spent.
+  let authFailuresExhausted = false;
+  if (errorFamily === 'auth') {
+    const prior = ctx.db.all<{ status: string; errorFamily: string | null }>(
+      'SELECT status, error_family FROM runs WHERE agent_id = ? AND id != ? ORDER BY created_at DESC, rowid DESC LIMIT 2',
+      [f.agent.id, runId],
+    );
+    authFailuresExhausted = prior.length === 2 && prior.every((r2) => r2.status === 'failed' && r2.errorFamily === 'auth');
+  }
+
   ctx.db.transaction(() => {
     ctx.db.update('runs', runId, {
       status, finishedAt: now, exitCode: r?.exitCode ?? null, signal: r?.signal ?? null,
@@ -403,8 +417,18 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
       updatedAt: now,
     });
 
+    // VS-137: the wake that discovered a runtime authentication outage is not this turn's fault — it
+    // is preserved, exactly as every other agent's still-queued wake on the gated runtime already is,
+    // so the same recovery path resumes this agent too once the runtime is confirmed healthy again.
+    // A wake preserved this way is put back to `queued` rather than left `claimed`, so the dispatcher
+    // (which only claims `queued` wakes) can pick it up the moment this agent is active again.
+    const preserveWake = errorFamily === 'auth' && !authFailuresExhausted;
     for (const w of f.wakes) {
-      ctx.db.update('wakeups', w.id, { status: status === 'succeeded' ? 'completed' : 'failed', runId, finishedAt: now });
+      if (preserveWake) {
+        ctx.db.update('wakeups', w.id, { status: 'queued', runId: null, claimedAt: null });
+      } else {
+        ctx.db.update('wakeups', w.id, { status: status === 'succeeded' ? 'completed' : 'failed', runId, finishedAt: now });
+      }
     }
 
     if (f.ticket) ctx.db.run('UPDATE tickets SET execution_run_id = NULL, execution_locked_at = NULL WHERE id = ? AND execution_run_id = ?', [f.ticket.id, runId]);
@@ -431,8 +455,14 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   // outage. It leaves the ladder entirely and gates the runtime once instead (VS-75). Nothing here
   // rewrites the credential — there is no second copy to restore, and the owner may have renewed it
   // since this turn failed.
-  if (errorFamily === 'auth') {
-    gateRuntimeForLogin(ctx, deps, { runtimeId: f.run.runtimeId, agentId: f.agent.id, runId }, f.failure?.message ?? r?.error?.message ?? null);
+  //
+  // VS-137: unless this is the third such failure in a row on this same worker with the runtime
+  // confirmed healthy in between — at that point it is this worker's own problem, not the runtime's,
+  // and it is put to the human exactly as the retry ladder does when its own attempts are spent.
+  if (errorFamily === 'auth' && authFailuresExhausted) {
+    parkForHuman(ctx, deps, f, errorFamily, errorCode, f.failure?.message ?? r?.error?.message ?? null);
+  } else if (errorFamily === 'auth') {
+    gateRuntimeForLogin(ctx, deps, { runtimeId: f.run.runtimeId, agentId: f.agent.id, agentName: f.agent.name, runId, ticketId: f.agent.ticketId }, f.failure?.message ?? r?.error?.message ?? null);
   } else if (errorFamily && RETRYABLE.includes(errorFamily)) {
     // Retry the transient family with backoff (30 s / 2 min / 10 min, max 3).
     // A usage limit is not in RETRYABLE and falls through to parking below.
@@ -466,6 +496,18 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
     try {
       for (const d of deps().decisions.list({ status: ['open'], ticketId: f.agent.ticketId ?? undefined })) {
         if (d.kind === 'retry_approval' && (d.target as { agentId?: string } | null)?.agentId === f.agent.id) deps().decisions.withdraw({ kind: 'system', id: null }, d.id, 'the worker recovered');
+      }
+    } catch { /* best effort */ }
+  }
+  // VS-137: the conductor's per-ticket notice that this ticket's worker paused for a runtime login
+  // outage is withdrawn the next time that worker finishes a turn that is not itself another auth
+  // failure — success or an unrelated failure both mean the outage is no longer why this ticket
+  // looks stalled. A further auth failure leaves it open; `gateRuntimeForLogin` keeps it to one card.
+  if (errorFamily !== 'auth' && f.agent.ticketId) {
+    try {
+      const key = `auth-outage:${f.agent.ticketId}`;
+      for (const d of deps().decisions.list({ status: ['open'], ticketId: f.agent.ticketId })) {
+        if (d.correlationKey === key) deps().decisions.withdraw({ kind: 'system', id: null }, d.id, 'the ticket moved again');
       }
     } catch { /* best effort */ }
   }

@@ -7,9 +7,10 @@ import { A } from '../../app/link';
 import { useRuns, useTickets, useWorkers } from '../../api/hooks';
 import { StatusGlyph } from '../../components/StatusGlyph';
 import { SkeletonRows } from '../../components/Skeleton';
-import { filterTickets, foldBoard, liveWorkersByTicket, ticketBoardStatus } from '../../lib/board';
+import { filterTickets, foldBoard, liveWorkersByTicket, pausedWorkersByTicket, ticketBoardStatus } from '../../lib/board';
 import { lastLinesByAgent } from '../../lib/projectOverview';
 import { ago, statusText } from '../../lib/format';
+import { workerPauseReason } from '@agent-conductor/render';
 import type { ProjectSectionProps } from './sections';
 
 export function WorkSection({ project, ws }: ProjectSectionProps): React.ReactElement {
@@ -19,6 +20,9 @@ export function WorkSection({ project, ws }: ProjectSectionProps): React.ReactEl
   const runs = useRuns({ limit: 100 });
 
   const live = useMemo(() => liveWorkersByTicket(workers.data ?? []), [workers.data]);
+  // `paused` is never in `live` (VS-137: a paused worker is, by definition, not live), so a
+  // ticket's pause reason needs this separate lookup rather than falling out of the live map.
+  const paused = useMemo(() => pausedWorkersByTicket(workers.data ?? []), [workers.data]);
   const lines = useMemo(() => lastLinesByAgent(runs.data ?? []), [runs.data]);
   const columns = useMemo(() => {
     const mine = filterTickets(tickets.data ?? [], { project: project.id }).filter(
@@ -43,6 +47,10 @@ export function WorkSection({ project, ws }: ProjectSectionProps): React.ReactEl
             {c.items.map((t) => {
               const worker = live.get(t.id);
               const line = worker ? lines.get(worker.id) : undefined;
+              const pausedReason = worker ? null : (() => {
+                const p = paused.get(t.id);
+                return p ? workerPauseReason(p) : null;
+              })();
               return (
                 <li key={t.id}>
                   <A
@@ -60,7 +68,9 @@ export function WorkSection({ project, ws }: ProjectSectionProps): React.ReactEl
                       <span>{statusText(t.status)}</span>
                       {worker ? <span className="truncate">{worker.name}</span> : null}
                     </span>
-                    {line ? (
+                    {pausedReason ? (
+                      <span className="ac-mono ac-truncate ml-5 rounded-r4 bg-bg-2 px-2 py-1 text-nano text-text-3">paused · {pausedReason}</span>
+                    ) : line ? (
                       <span className="ac-mono ac-truncate ml-5 rounded-r4 bg-bg-2 px-2 py-1 text-nano text-text-2">{line}</span>
                     ) : null}
                   </A>

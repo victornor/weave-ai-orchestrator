@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-08
+goal: A run's failure is visible on its worker and ticket without inspecting the
+  run row, the conductor is told, and a failure caused by a transient runtime
+  outage resumes the ticket automatically when the runtime recovers

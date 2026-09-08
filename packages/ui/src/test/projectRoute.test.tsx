@@ -263,6 +263,17 @@ describe('work under way', () => {
     expect(within(card).queryByText('Implemented tasks 1-3')).toBeNull();
   });
 
+  it('names a paused worker\'s reason instead of its last line (VS-137)', () => {
+    state.tickets = [ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Landing branch settable', projectId: 'p1', status: 'approved', workerId: 'a1' })];
+    state.workers = [agent({ id: 'a1', name: 'Platform Engineer #3', ticketId: 'tk_1', status: 'paused', pauseReason: 'runtime_login_expired: the claude login expired' })];
+    render(<ProjectOverviewRoute />);
+    const card = section('Work under way');
+    // A paused worker is not "live" (VS-137), so it names no worker on the summary line...
+    expect(within(card).queryByText('Platform Engineer #3')).toBeNull();
+    // ...but its pause reason still shows, in place of a last-status line it has none of.
+    expect(within(card).getByText('paused · runtime_login_expired: the claude login expired')).toBeTruthy();
+  });
+
   it('leaves out another project"s tickets and anything finished', () => {
     state.tickets = [
       ticket({ id: 'tk_1', identifier: 'WEB-1', title: 'Another project', projectId: 'p2', status: 'in_progress' }),

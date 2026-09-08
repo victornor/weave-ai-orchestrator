@@ -7,7 +7,7 @@ const now = new Date('2026-09-04T12:00:00.000Z');
 const full: Briefing = {
   needsYou: [{ decisionId: 'dec_1', ticketId: 'tkt_1', title: 'Approve the plan for ACME-42', kind: 'plan_approval', recommendation: 'Approve: the tasks match the proposal', createdAt: '2026-09-04T11:58:00.000Z' }],
   landed: [{ ticketId: 'tkt_0', identifier: 'ACME-41', title: 'Add tokens', completedAt: '2026-09-04T09:00:00.000Z', prUrl: 'https://example.com/pr/1' }],
-  underway: [{ workerId: 'ag_1', workerName: 'Backend Engineer #7', ticketId: 'tkt_1', identifier: 'ACME-42', title: 'Theme tokens', status: 'in_progress', lastStatus: 'running vitest' }],
+  underway: [{ workerId: 'ag_1', workerName: 'Backend Engineer #7', workerStatus: 'active', workerPauseReason: null, ticketId: 'tkt_1', identifier: 'ACME-42', title: 'Theme tokens', status: 'in_progress', lastStatus: 'running vitest' }],
   queued: [{ ticketId: 'tkt_2', identifier: 'ACME-43', title: 'Docs pass', reason: 'role at max workers' }],
   warnings: ['project KB over budget'],
   generatedAt: '2026-09-04T12:00:00.000Z',
@@ -34,9 +34,25 @@ describe('briefingToSections', () => {
       meta: 'plan approval · 2m ago', ref: 'dec_1',
     });
     expect(landed.items[0]!.glyph).toBe('●');
-    expect(underway.items[0]!.meta).toBe('ACME-42 · Backend Engineer #7 · in_progress');
+    expect(underway.items[0]!.meta).toBe('ACME-42 · Backend Engineer #7 · in_progress · active');
+    expect(underway.items[0]!.secondary).toBe('running vitest');
     expect(queued.items[0]!.ref).toBe('ACME-43');
     expect(out.warnings).toEqual(['project KB over budget']);
+  });
+
+  it('names a paused worker\'s reason ahead of its last status comment (VS-137)', () => {
+    const paused: Briefing = {
+      ...full,
+      underway: [{
+        workerId: 'ag_2', workerName: 'Platform Engineer #3', workerStatus: 'paused',
+        workerPauseReason: 'runtime_login_expired: the claude login expired', ticketId: 'tkt_9',
+        identifier: 'ACME-50', title: 'Landing branch settable', status: 'approved', lastStatus: 'implementing task 3',
+      }],
+    };
+    const out = briefingToSections(paused, { now });
+    const underway = out.sections[2]!;
+    expect(underway.items[0]!.secondary).toBe('paused · runtime_login_expired: the claude login expired');
+    expect(underway.items[0]!.meta).toBe('ACME-50 · Platform Engineer #3 · approved · paused');
   });
 
   it('carries empty-state lines that mention running workers', () => {

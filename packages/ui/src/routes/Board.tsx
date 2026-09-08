@@ -23,6 +23,7 @@ import {
   isFolded,
   liveWorkersByTicket,
   mergeStrip,
+  pausedWorkersByTicket,
   recentlyFinished,
   ticketBoardStatus,
 } from '../lib/board';
@@ -84,8 +85,11 @@ export function BoardRoute(): React.ReactElement {
   );
   const live = useMemo(() => liveWorkersByTicket(workers.data ?? []), [workers.data]);
   // A paused worker is why a ticket stopped moving; the board says so rather than looking idle.
+  // `paused` is never in `live` (VS-137: a paused worker is, by definition, not live), so this needs
+  // its own lookup rather than falling out of the same map `live` uses for column placement.
+  const paused = useMemo(() => pausedWorkersByTicket(workers.data ?? []), [workers.data]);
   const pausedFor = (ticketId: string): string | null => {
-    const w = live.get(ticketId);
+    const w = paused.get(ticketId);
     return w ? workerPauseReason(w) : null;
   };
   const columns = useMemo(

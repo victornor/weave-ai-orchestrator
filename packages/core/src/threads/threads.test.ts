@@ -225,6 +225,37 @@ describe('threads', () => {
     expect(out.replyToExcerpt).toBeNull();
   });
 
+  it('carries a reply reference on an outbound message the same way an inbound one does', async () => {
+    const t = threads.bindOrGet('web', 'web-r10', null);
+    const asked = await threads.inbound(HUMAN, t.id, 'which page did you mean by "settings"?');
+    const out = await threads.outbound(CONDUCTOR, t.id, 'the account settings page', { replyToMessageId: asked.id });
+
+    expect(out.replyToMessageId).toBe(asked.id);
+    expect(out.replyToExcerpt).toBe('which page did you mean by "settings"?');
+    const stored = threads.messages(t.id).find((m) => m.id === out.id);
+    expect(stored?.replyToMessageId).toBe(asked.id);
+    expect(stored?.replyToExcerpt).toBe('which page did you mean by "settings"?');
+  });
+
+  it('rejects an outbound reply to an unknown message, storing no message', async () => {
+    const t = threads.bindOrGet('web', 'web-r11', null);
+    await expect(threads.outbound(CONDUCTOR, t.id, 'answering the void', { replyToMessageId: 'nope' })).rejects.toThrowError(
+      expect.objectContaining({ code: 'not_found' }),
+    );
+    expect(threads.messages(t.id)).toHaveLength(0);
+  });
+
+  it('rejects an outbound reply naming a message of another thread', async () => {
+    const other = threads.bindOrGet('web', 'web-r12a', null);
+    const elsewhere = await threads.inbound(HUMAN, other.id, 'a question over here');
+    const t = threads.bindOrGet('web', 'web-r12b', null);
+
+    await expect(threads.outbound(CONDUCTOR, t.id, 'crossing over', { replyToMessageId: elsewhere.id })).rejects.toThrowError(
+      expect.objectContaining({ code: 'not_found' }),
+    );
+    expect(threads.messages(t.id)).toHaveLength(0);
+  });
+
   it('marks outbound web messages delivered and other channels pending', async () => {
     const web = threads.bindOrGet('web', 'web-3', null);
     const tg = threads.bindOrGet('telegram', 'chat-9', null);

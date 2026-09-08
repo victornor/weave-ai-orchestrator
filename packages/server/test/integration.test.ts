@@ -153,6 +153,84 @@ describe('real core services over HTTP', () => {
     expect(services.tickets.comments(ticket.id).at(-1)?.body).toBe('checked out and working');
   });
 
+  describe('ac_human_send reply targets', () => {
+    /** Raises a real human_message wake for the conductor and binds it to a run, the way a dispatched turn would. */
+    async function turnWokenBy(
+      harness: ReturnType<typeof makeHarness>,
+      services: ReturnType<typeof createCore>,
+      bodies: string[],
+    ): Promise<{ threadId: string; token: string; messageIds: string[] }> {
+      const thread = services.threads.bindOrGet('web', `web-${Math.random()}`, null, 'Victor');
+      const messageIds: string[] = [];
+      for (const body of bodies) {
+        const msg = await services.threads.inbound({ kind: 'human', id: null }, thread.id, body);
+        messageIds.push(msg.id);
+      }
+      const wakes = services.wake.listForAgent(harness.conductorId, ['queued']).filter((w) => messageIds.includes((w.payload as { messageId?: string }).messageId ?? ''));
+      const runId = 'run_reply';
+      harness.db.insert('runs', {
+        id: runId, workspaceId: harness.workspaceId, agentId: harness.conductorId, ticketId: null,
+        wakeupIdsJson: wakes.map((w) => w.id), runtimeId: 'claude', model: null, status: 'queued',
+        turnEpoch: 1, cwd: '/tmp', retryOfRunId: null, createdAt: new Date().toISOString(),
+      });
+      const token = await signRunToken(runTokenSecret(harness.ctx.db), {
+        workspaceId: harness.workspaceId, runId, agentId: harness.conductorId, agentKind: 'conductor', projectId: null, ticketId: null, roleId: null,
+      });
+      return { threadId: thread.id, token, messageIds };
+    }
+
+    it('defaults the reply target to the single message that woke the turn', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const { threadId, token, messageIds } = await turnWokenBy(harness, services, ['are you still there?']);
+
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_human_send`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { body: 'yes, still here' } }),
+      }));
+      expect((await res.json()).ok).toBe(true);
+
+      const sent = services.threads.messages(threadId).at(-1);
+      expect(sent?.body).toBe('yes, still here');
+      expect(sent?.replyToMessageId).toBe(messageIds[0]);
+      expect(sent?.replyToExcerpt).toBe('are you still there?');
+    });
+
+    it('sends with no reply target when replyToMessageId is explicitly null, even with a single wake', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const { threadId, token } = await turnWokenBy(harness, services, ['are you still there?']);
+
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_human_send`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { body: 'unrelated: a ticket just landed', replyToMessageId: null } }),
+      }));
+      expect((await res.json()).ok).toBe(true);
+
+      const sent = services.threads.messages(threadId).at(-1);
+      expect(sent?.replyToMessageId).toBeNull();
+      expect(sent?.replyToExcerpt).toBeNull();
+    });
+
+    it('applies no default when the turn was woken by more than one human message', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const { threadId, token } = await turnWokenBy(harness, services, ['first question', 'second question']);
+
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_human_send`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { body: 'answering both' } }),
+      }));
+      expect((await res.json()).ok).toBe(true);
+
+      const sent = services.threads.messages(threadId).at(-1);
+      expect(sent?.replyToMessageId).toBeNull();
+    });
+  });
+
   it('changes a role max workers through the conductor tool, as a new revision', async () => {
     const { deps, harness } = boot();
     const app = createApp(deps);

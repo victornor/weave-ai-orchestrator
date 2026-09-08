@@ -48,17 +48,28 @@ The state SHALL be updated when a turn or a probe succeeds, and when one fails t
 
 ### Requirement: The usage surfaces and the diagnostic command show the credential's state
 
-The usage view SHALL show, for each runtime it lists, whether that runtime's credential is valid,
-when it expires when that is known, and when a refresh last failed when one has. When a login is
-needed it SHALL say so and SHALL say what the human must do.
+The usage view SHALL show, for each runtime it lists, whether that runtime's credential is healthy or
+needs the human. A healthy credential SHALL be shown as healthy; when a last-verified moment is known
+it SHALL be shown as evidence that it is working, not as a deadline. The usage view SHALL NOT show a
+countdown to a credential's expiry unless that expiry is a genuine deadline a human could act on — an
+access token's self-refreshing expiry is not one, and no runtime's `expiresAt` known to the system
+today is anything else, so none is shown as a countdown. When a login is needed the usage view SHALL
+say so, SHALL show when the refresh failed, and SHALL say what the human must do.
 
-The diagnostic command SHALL report the same state as one of its checks, and SHALL fail that check
-when a login is needed, naming the command the human should run.
+The diagnostic command SHALL report the same underlying state as one of its checks, and SHALL fail
+that check when a login is needed, naming the command the human should run.
 
 #### Scenario: The usage view shows a valid credential
 
-- **WHEN** the usage view lists a runtime whose credential is valid and carries an expiry
-- **THEN** it shows the credential as valid and shows when it expires
+- **WHEN** the usage view lists a runtime whose credential is present and no login is needed
+- **THEN** it shows the credential as healthy and shows no countdown to its expiry; when a
+  last-verified moment is known it shows that instead
+
+#### Scenario: A healthy credential with no last-verified moment
+
+- **WHEN** the usage view lists a runtime whose credential is present, no login is needed, and no
+  last-verified moment is recorded yet
+- **THEN** it shows the credential as healthy and shows neither a countdown nor a last-verified line
 
 #### Scenario: The usage view shows an expired login
 

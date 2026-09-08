@@ -25,6 +25,11 @@ Nothing about which questions the conductor asks, or how it words them, is chang
 
 A decision awaiting the human SHALL be presented as a card showing the question, the context or recommendation behind it, and each of its options with its label and, when there is one, what that option means. An option the asker recommended SHALL be marked as such.
 
+The context or recommendation text SHALL be rendered as markdown, through the same rendering and
+one-tap copy treatment the conductor chat gives a message, rather than as plain text — so a command
+the asker wrote for the human to run is exactly as copyable on a card as it is in the chat. This
+holds whoever asked: a worker's context is rendered the same way a conductor's is.
+
 When the decision permits an answer in the human's own words, the card SHALL offer that as an alternative alongside the options. When it does not, the card SHALL offer only its options.
 
 A card SHALL show what the decision is attached to — the ticket it concerns, when it concerns one — and SHALL say who is asking, distinguishing a question raised by the conductor from one raised by a worker.
@@ -37,6 +42,29 @@ The project label SHALL be shown on every surface that offers the card, and SHAL
 
 - **WHEN** a decision carrying two or more options is shown to the human
 - **THEN** the card shows the question and every option, each exactly once, with the recommended option marked
+
+#### Scenario: Context rendered as markdown
+
+- **WHEN** a decision's context contains markdown — bold text, a backticked command, a bulleted list
+- **THEN** the card shows it formatted rather than as literal asterisks, backticks or list markers
+
+#### Scenario: A command in a card's context is copyable
+
+- **WHEN** a decision's context contains a fenced or inline code span
+- **THEN** the card offers the same one-tap copy control a chat message would offer for that span
+
+#### Scenario: A worker's context is rendered the same way
+
+- **WHEN** a decision raised by a worker carries context text
+- **THEN** it is rendered as markdown exactly as a conductor-raised decision's context would be
+
+#### Scenario: Untrusted context cannot escalate
+
+- **WHEN** a decision's context — which may come from a worker's repository contents or tool
+  output rather than from the conductor — contains an attempted script, or a link or image whose
+  target is not a plain web address, an absolute path or a page anchor
+- **THEN** it is rendered as inert text with nothing executed, and no such link or image is
+  produced
 
 #### Scenario: An answer in the human's own words is allowed
 

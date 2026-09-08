@@ -10,6 +10,8 @@ import { TOTPInput } from '../components/TOTPInput';
 import { SkeletonRows } from '../components/Skeleton';
 import { ErrorState, EmptyState } from '../components/States';
 import { useToast } from '../components/Toast';
+import { CommitStatus } from '../components/CommitStatus';
+import { useCommittableField } from '../lib/commit-field';
 import {
   useAddProject,
   useApproveTelegramUser,
@@ -40,7 +42,7 @@ import {
 } from '../api/hooks';
 import { api, setToken } from '../api/client';
 import { qk } from '../api/keys';
-import type { PresentationBlock } from '@agent-conductor/shared';
+import type { PresentationBlock, Project } from '@agent-conductor/shared';
 import type * as T from '../api/types';
 import type { TotpSetup } from '../api/types';
 import { useWs } from '../api/context';
@@ -162,7 +164,14 @@ function WorkspaceSection(): React.ReactElement {
   const summary = useWorkspaceSummary();
   const workspaces = useWorkspaces();
   const patch = usePatchConfig();
-  const [name, setName] = useState('');
+  const name = useCommittableField({
+    value: summary.data?.workspace.name ?? '',
+    onCommit: async (raw) => {
+      const trimmed = raw.trim();
+      if (!trimmed) throw new Error('Name cannot be empty');
+      await patch.mutateAsync({ name: trimmed });
+    },
+  });
   /** The daemon answers `/w/:ws` with the workspace's canonical id, whichever form the URL used. */
   const activeId = summary.data?.workspace.id ?? ws;
 
@@ -195,12 +204,16 @@ function WorkspaceSection(): React.ReactElement {
 
       <section>
         <Field label="Name">
-          <input
-            className={inputCx}
-            defaultValue={summary.data?.workspace.name ?? ''}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => name && patch.mutate({ name })}
-          />
+          <div className="flex items-center gap-2">
+            <input
+              className={inputCx}
+              value={name.draft}
+              onChange={(e) => name.onChange(e.target.value)}
+              onBlur={name.onBlur}
+              onKeyDown={name.onKeyDown}
+            />
+            <CommitStatus status={name.status} error={name.error} onSave={name.commitNow} />
+          </div>
         </Field>
         <Field label="Ticket prefix" hint="Used for every identifier in this workspace.">
           <input className={cx(inputCx, 'ac-mono')} defaultValue={summary.data?.workspace.ticketPrefix ?? ''} readOnly />
@@ -270,16 +283,47 @@ const BUDGET_FIELDS = [
   { key: 'decisions', label: 'Decision log', hint: 'decisions.md. Appended by the daemon; only its last 30 lines reach a digest.' },
 ] as const;
 
+/** One budget field: its own commit state, so a validation rejection on one field never touches another. */
+function BudgetField({ label, hint, value, min, step, onCommit }: {
+  label: string;
+  hint?: string;
+  value: number | undefined;
+  min: number;
+  step: number;
+  onCommit: (n: number) => Promise<void>;
+}): React.ReactElement {
+  const field = useCommittableField({
+    value: value !== undefined ? String(value) : '',
+    onCommit: async (raw) => {
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < min) throw new Error(`Must be a whole number of at least ${min}`);
+      await onCommit(n);
+    },
+  });
+  return (
+    <Field label={label} hint={hint}>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={min}
+          step={step}
+          aria-label={label}
+          className={cx(inputCx, 'ac-mono')}
+          value={field.draft}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          onKeyDown={field.onKeyDown}
+        />
+        <CommitStatus status={field.status} error={field.error} onSave={field.commitNow} />
+      </div>
+    </Field>
+  );
+}
+
 function KnowledgeBudgetsSection({ config }: { config: Record<string, unknown> }): React.ReactElement {
   const patch = usePatchConfig();
-  const toast = useToast();
   const defaults = (config['defaults'] ?? {}) as Record<string, unknown>;
   const budgets = (defaults['knowledgeBudgetTokens'] ?? {}) as Record<string, number | undefined>;
-
-  const save = (body: Record<string, unknown>, current: number | undefined, next: number): void => {
-    if (!Number.isInteger(next) || next < 500 || next === current) return;
-    patch.mutate(body, { onError: (e) => toast.push({ title: 'Could not save the budget', detail: e.message, status: 'failed' }) });
-  };
 
   return (
     <section>
@@ -289,38 +333,104 @@ function KnowledgeBudgetsSection({ config }: { config: Record<string, unknown> }
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         {BUDGET_FIELDS.map((f) => (
-          <Field key={f.key} label={f.label} hint={f.hint}>
-            <input
-              type="number"
-              min={500}
-              step={500}
-              aria-label={f.label}
-              className={cx(inputCx, 'ac-mono')}
-              defaultValue={budgets[f.key] ?? ''}
-              onBlur={(e) => save({ defaults: { knowledgeBudgetTokens: { [f.key]: Number(e.target.value) } } }, budgets[f.key], Number(e.target.value))}
-            />
-          </Field>
-        ))}
-        <Field label="Bootstrap digest" hint="The knowledge injected on an agent's first turn. Keep it above shared + project.">
-          <input
-            type="number"
+          <BudgetField
+            key={f.key}
+            label={f.label}
+            hint={f.hint}
+            value={budgets[f.key]}
             min={500}
-            step={1000}
-            aria-label="Bootstrap digest"
-            className={cx(inputCx, 'ac-mono')}
-            defaultValue={(defaults['bootstrapBudgetTokens'] as number | undefined) ?? ''}
-            onBlur={(e) => save({ defaults: { bootstrapBudgetTokens: Number(e.target.value) } }, defaults['bootstrapBudgetTokens'] as number | undefined, Number(e.target.value))}
+            step={500}
+            onCommit={(n) => patch.mutateAsync({ defaults: { knowledgeBudgetTokens: { [f.key]: n } } }).then(() => undefined)}
           />
-        </Field>
+        ))}
+        <BudgetField
+          label="Bootstrap digest"
+          hint="The knowledge injected on an agent's first turn. Keep it above shared + project."
+          value={defaults['bootstrapBudgetTokens'] as number | undefined}
+          min={500}
+          step={1000}
+          onCommit={(n) => patch.mutateAsync({ defaults: { bootstrapBudgetTokens: n } }).then(() => undefined)}
+        />
       </div>
     </section>
+  );
+}
+
+/** One project's row: its own `maxWorkers`/`landingBranch` commit state, independent of every other row. */
+function ProjectRow({ p, workspaceOn }: { p: Project; workspaceOn: boolean }): React.ReactElement {
+  const patch = usePatchProject();
+
+  const maxWorkers = useCommittableField({
+    value: String(p.maxWorkers),
+    onCommit: async (raw) => {
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 1) throw new Error('Must be a whole number of at least 1');
+      await patch.mutateAsync({ id: p.id, patch: { maxWorkers: n } });
+    },
+  });
+
+  const landingBranch = useCommittableField({
+    value: p.landingBranch ?? '',
+    onCommit: async (raw) => {
+      await patch.mutateAsync({ id: p.id, patch: { landingBranch: raw.trim() } });
+    },
+  });
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-3.5 py-3">
+      <span className="ac-mono text-meta text-text-1">{p.slug}</span>
+      <Badge>{p.status}</Badge>
+      <span className="ac-mono ac-truncate flex-1 text-micro text-text-3">{p.gitUrl}</span>
+      <label className="flex flex-wrap items-center gap-1.5">
+        <span className="ac-label">workers</span>
+        <input
+          type="number"
+          min={1}
+          value={maxWorkers.draft}
+          onChange={(e) => maxWorkers.onChange(e.target.value)}
+          onBlur={maxWorkers.onBlur}
+          onKeyDown={maxWorkers.onKeyDown}
+          className="ac-mono h-7 w-14 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+        />
+        <CommitStatus status={maxWorkers.status} error={maxWorkers.error} onSave={maxWorkers.commitNow} />
+      </label>
+      <label className="flex flex-wrap items-center gap-1.5">
+        <span className="ac-label">landing branch</span>
+        <input
+          aria-label={`landing branch for ${p.slug}`}
+          placeholder={p.defaultBranch}
+          value={landingBranch.draft}
+          onChange={(e) => landingBranch.onChange(e.target.value)}
+          onBlur={landingBranch.onBlur}
+          onKeyDown={landingBranch.onKeyDown}
+          className="ac-mono h-7 w-28 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+        />
+        <CommitStatus status={landingBranch.status} error={landingBranch.error} onSave={landingBranch.commitNow} />
+      </label>
+      <label className="flex items-center gap-1.5">
+        <span className="ac-label">yolo</span>
+        <select
+          aria-label={`YOLO mode for ${p.slug}`}
+          className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+          value={yoloOverrideOf(p.policies)}
+          onChange={(e) =>
+            // `policies` is replaced wholesale, so dropping the key is what clears the
+            // override and puts the project back on the workspace setting.
+            patch.mutate({ id: p.id, patch: { policies: withYolo(p.policies, e.target.value) } })
+          }
+        >
+          <option value="inherit">{workspaceOn ? 'inherit (on)' : 'inherit (off)'}</option>
+          <option value="on">on</option>
+          <option value="off">off</option>
+        </select>
+      </label>
+    </div>
   );
 }
 
 function ProjectsSection(): React.ReactElement {
   const projects = useProjects();
   const add = useAddProject();
-  const patch = usePatchProject();
   const toast = useToast();
   const [url, setUrl] = useState('');
   const [maxWorkers, setMaxWorkers] = useState(2);
@@ -376,54 +486,7 @@ function ProjectsSection(): React.ReactElement {
       ) : (
         <div className="ac-card divide-y divide-line-1">
           {(projects.data ?? []).map((p) => (
-            <div key={p.id} className="flex flex-wrap items-center gap-3 px-3.5 py-3">
-              <span className="ac-mono text-meta text-text-1">{p.slug}</span>
-              <Badge>{p.status}</Badge>
-              <span className="ac-mono ac-truncate flex-1 text-micro text-text-3">{p.gitUrl}</span>
-              <label className="flex items-center gap-1.5">
-                <span className="ac-label">workers</span>
-                <input
-                  type="number"
-                  min={1}
-                  defaultValue={p.maxWorkers}
-                  onBlur={(e) => patch.mutate({ id: p.id, patch: { maxWorkers: Number(e.target.value) } })}
-                  className="ac-mono h-7 w-14 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
-                />
-              </label>
-              <label className="flex items-center gap-1.5">
-                <span className="ac-label">landing branch</span>
-                <input
-                  aria-label={`landing branch for ${p.slug}`}
-                  placeholder={p.defaultBranch}
-                  defaultValue={p.landingBranch ?? ''}
-                  onBlur={(e) => {
-                    const value = e.target.value.trim();
-                    patch.mutate(
-                      { id: p.id, patch: { landingBranch: value } },
-                      { onError: (err) => { e.target.value = p.landingBranch ?? ''; toast.push({ title: 'Landing branch not changed', detail: err.message, status: 'failed' }); } },
-                    );
-                  }}
-                  className="ac-mono h-7 w-28 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
-                />
-              </label>
-              <label className="flex items-center gap-1.5">
-                <span className="ac-label">yolo</span>
-                <select
-                  aria-label={`YOLO mode for ${p.slug}`}
-                  className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
-                  value={yoloOverrideOf(p.policies)}
-                  onChange={(e) =>
-                    // `policies` is replaced wholesale, so dropping the key is what clears the
-                    // override and puts the project back on the workspace setting.
-                    patch.mutate({ id: p.id, patch: { policies: withYolo(p.policies, e.target.value) } })
-                  }
-                >
-                  <option value="inherit">{workspaceOn ? 'inherit (on)' : 'inherit (off)'}</option>
-                  <option value="on">on</option>
-                  <option value="off">off</option>
-                </select>
-              </label>
-            </div>
+            <ProjectRow key={p.id} p={p} workspaceOn={workspaceOn} />
           ))}
         </div>
       )}
@@ -445,6 +508,7 @@ function ModelsSection(): React.ReactElement {
 
   const current = models.data;
   const set = (kind: 'conductor' | 'workers', next: T.ModelSetting): void => save.mutate({ ...current, [kind]: next });
+  const commit = (kind: 'conductor' | 'workers', next: T.ModelSetting): Promise<void> => save.mutateAsync({ ...current, [kind]: next }).then(() => undefined);
 
   return (
     <div className="flex flex-col gap-5">
@@ -454,6 +518,7 @@ function ModelsSection(): React.ReactElement {
         setting={current.conductor}
         runtimes={runtimes.data ?? []}
         onChange={(next) => set('conductor', next)}
+        onCommit={(next) => commit('conductor', next)}
       />
       <ModelSettingFields
         label="Workers"
@@ -461,6 +526,7 @@ function ModelsSection(): React.ReactElement {
         setting={current.workers}
         runtimes={runtimes.data ?? []}
         onChange={(next) => set('workers', next)}
+        onCommit={(next) => commit('workers', next)}
       />
       {save.error ? <ErrorState code="MODELS_NOT_SAVED" message={save.error.message} /> : null}
       <p className="text-micro leading-relaxed text-text-3">
@@ -471,12 +537,13 @@ function ModelsSection(): React.ReactElement {
   );
 }
 
-function ModelSettingFields({ label, hint, setting, runtimes, onChange }: {
+function ModelSettingFields({ label, hint, setting, runtimes, onChange, onCommit }: {
   label: string;
   hint: string;
   setting: T.ModelSetting;
   runtimes: T.RuntimeInfo[];
   onChange: (next: T.ModelSetting) => void;
+  onCommit: (next: T.ModelSetting) => Promise<void>;
 }): React.ReactElement {
   const models = useRuntimeModels(setting.runtime);
   const known = models.data ?? [];
@@ -484,6 +551,13 @@ function ModelSettingFields({ label, hint, setting, runtimes, onChange }: {
   // picker carries a "something else" entry that reveals a text box rather than losing the value.
   const [freeText, setFreeText] = useState(false);
   const custom = freeText || (setting.model !== null && known.length > 0 && !known.some((m) => m.id === setting.model));
+  const modelId = useCommittableField({
+    value: setting.model ?? '',
+    onCommit: async (raw) => {
+      const model = raw.trim() === '' ? null : raw.trim();
+      await onCommit({ ...setting, model });
+    },
+  });
 
   return (
     <div className="flex flex-col gap-1">
@@ -527,13 +601,17 @@ function ModelSettingFields({ label, hint, setting, runtimes, onChange }: {
       </Field>
       {custom ? (
         <Field label={`${label} model id`} hint="A model this runtime offers that is not in the list.">
-          <input
-            className={cx(inputCx, 'ac-mono')}
-            aria-label={`${label} model id`}
-            defaultValue={setting.model ?? ''}
-            onBlur={(e) => onChange({ ...setting, model: e.target.value.trim() === '' ? null : e.target.value.trim() })}
-            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-          />
+          <div className="flex items-center gap-2">
+            <input
+              className={cx(inputCx, 'ac-mono')}
+              aria-label={`${label} model id`}
+              value={modelId.draft}
+              onChange={(e) => modelId.onChange(e.target.value)}
+              onBlur={modelId.onBlur}
+              onKeyDown={modelId.onKeyDown}
+            />
+            <CommitStatus status={modelId.status} error={modelId.error} onSave={modelId.commitNow} />
+          </div>
         </Field>
       ) : null}
     </div>
@@ -562,6 +640,18 @@ function ChannelsSection(): React.ReactElement {
   const channels = (summary.data?.config?.['channels'] ?? {}) as Record<string, { allowedUserIds?: number[]; allowAll?: boolean }>;
   const telegram = channels['telegram'] ?? {};
   const rule = allowlistRuleLabel(telegram);
+  const allowlist = useCommittableField({
+    value: (telegram.allowedUserIds ?? []).join(', '),
+    onCommit: async (raw) => {
+      const allowedUserIds = raw
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map(Number)
+        .filter((n) => Number.isInteger(n));
+      await patch.mutateAsync({ channels: { telegram: { ...telegram, allowedUserIds } } });
+    },
+  });
 
   const save = (): void => {
     void setTelegramToken
@@ -622,17 +712,12 @@ function ChannelsSection(): React.ReactElement {
           <input
             aria-label="Allowlist"
             className={cx(inputCx, 'ac-mono')}
-            defaultValue={(telegram.allowedUserIds ?? []).join(', ')}
-            onBlur={(e) => {
-              const allowedUserIds = e.target.value
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean)
-                .map(Number)
-                .filter((n) => Number.isInteger(n));
-              patch.mutate({ channels: { telegram: { ...telegram, allowedUserIds } } });
-            }}
+            value={allowlist.draft}
+            onChange={(e) => allowlist.onChange(e.target.value)}
+            onBlur={allowlist.onBlur}
+            onKeyDown={allowlist.onKeyDown}
           />
+          <CommitStatus status={allowlist.status} error={allowlist.error} onSave={allowlist.commitNow} />
           <Badge tone={rule.tone}>{rule.text}</Badge>
           {telegram.allowAll ? (
             <Button

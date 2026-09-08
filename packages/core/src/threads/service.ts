@@ -1,9 +1,10 @@
 import { newId, nowIso, threadRow, type Db } from '@agent-conductor/db';
-import { OcError, type ChannelThread, type ThreadMessage } from '@agent-conductor/shared';
+import { OcError, type Attachment, type AttachmentPart, type ChannelThread, type ThreadMessage } from '@agent-conductor/shared';
 import type { Actor, CoreServices, ThreadsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
+import { readAttachmentBytes, sanitizeAttachmentFilename, writeAttachment } from './attachmentStorage.js';
 
 interface ThreadRow extends ChannelThread { isPrimary: boolean; channelKind?: string }
 
@@ -136,6 +137,12 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     async inbound(actor, threadId, body, opts = {}) {
       const t = get(threadId);
       const human: Actor = { kind: 'human', id: actor.id ?? t.externalUserId ?? null };
+      // Attachments are out of scope on a ticket-bound thread (its message becomes a ticket comment,
+      // with no wake payload to carry metadata through) — rejected before the transaction opens
+      // rather than stored with no way to ever reach the conductor.
+      if (t.ticketId && opts.attachments?.length) {
+        throw new OcError('validation', 'attachments are not supported on a ticket-bound thread');
+      }
       // Resolved before anything is written, so a reference to a project this workspace does not
       // have stores no message and wakes nobody. `get` takes an id or a slug and is workspace-scoped.
       const project = opts.projectId ? deps().projects.get(opts.projectId) : null;
@@ -151,6 +158,21 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
           replyToExcerpt: repliedTo ? excerpt(repliedTo.body) : null,
           deliveryStatus: 'received',
         });
+        // Written in the same transaction as the message: an attachment row never exists without the
+        // message that owns it, so there is no orphan state to sweep (openspec design.md Decision 1).
+        const attachmentParts: AttachmentPart[] = (opts.attachments ?? []).map((a) => {
+          const stored = writeAttachment(ctx, a.mediaType, a.bytes);
+          const filename = sanitizeAttachmentFilename(a.filename);
+          db.insert('attachments', {
+            id: stored.id, threadId: t.id, messageId: msg.id, filename, mediaType: a.mediaType,
+            byteSize: stored.byteSize, storageKey: stored.storageKey, createdAt: msg.createdAt,
+          });
+          return { type: 'attachment', id: stored.id, filename, mediaType: a.mediaType, byteSize: stored.byteSize };
+        });
+        if (attachmentParts.length) {
+          db.update('thread_messages', msg.id, { partsJson: attachmentParts });
+          msg.parts = attachmentParts;
+        }
         recordActivity(db, ws, human, 'thread.inbound', 'thread_message', msg.id, { threadId: t.id }, t.ticketId);
         ctx.events.emit('thread.message', 'thread_message', msg.id, { ...msg, ticketId: t.ticketId });
         if (t.ticketId) {
@@ -165,6 +187,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
                 threadId: t.id, messageId: msg.id, body: body.slice(0, 2000),
                 projectId: project?.id ?? null, projectSlug: project?.slug ?? null,
                 replyToMessageId: msg.replyToMessageId, replyToExcerpt: msg.replyToExcerpt,
+                ...(attachmentParts.length ? { attachmentIds: attachmentParts.map((p) => p.id) } : {}),
               },
               requestedBy: human,
             });
@@ -206,6 +229,15 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
         .all<ThreadMessage>(sql, params)
         .map((m) => (m.replyToExcerpt === null ? m : { ...m, replyToExcerpt: excerpt(m.replyToExcerpt) }))
         .reverse();
+    },
+
+    attachment(threadId, attachmentId) {
+      // Scoped to the thread in the query itself, not checked after the fact: a row from another
+      // thread — or another workspace's database entirely — simply does not match, and both come
+      // back as the same `not_found` (openspec spec.md — cross-thread and cross-workspace fetches).
+      const row = db.get<Attachment>('SELECT * FROM attachments WHERE id = ? AND thread_id = ?', [attachmentId, threadId]);
+      if (!row) throw new OcError('not_found', `attachment ${attachmentId} not found in thread ${threadId}`);
+      return { attachment: row, bytes: readAttachmentBytes(ctx, row.storageKey) };
     },
 
     primaryThread() {

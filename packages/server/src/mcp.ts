@@ -24,8 +24,12 @@ export function createMcpServer(ctx: ToolCtx, version: string): Server {
   }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const result = await runTool(req.params.name, ctx, req.params.arguments ?? {});
+    // `mcpContent` (set only by `ac_inbox` today, VS-133) carries real image bytes the model can see —
+    // appended after the JSON summary, never in place of it, so the agent still gets the structured
+    // data even when a tool that has no images to report leaves it unset.
+    const images = (result.ok && result.mcpContent) || [];
     return {
-      content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+      content: [{ type: 'text' as const, text: JSON.stringify(result) }, ...images],
       structuredContent: result as unknown as Record<string, unknown>,
       isError: !result.ok,
     };

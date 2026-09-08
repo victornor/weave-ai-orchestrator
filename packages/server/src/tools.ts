@@ -11,7 +11,8 @@ import {
   COMMON_TOOLS, CONDUCTOR_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
-  type ToolResult, type Ticket, type Wakeup, type KnowledgeScope,
+  isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
+  type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock,
 } from '@agent-conductor/shared';
 import type { Actor, CoreServices } from '@agent-conductor/core';
 import type { RunTokenClaims } from './runtoken.js';
@@ -109,6 +110,37 @@ function bundledWakes(ctx: ToolCtx): Wakeup[] {
   return picked.length ? picked : all;
 }
 
+/**
+ * A `human_message` wake's attachments (VS-133), resolved to real content: an image's bytes are
+ * pushed onto `images` (base64, for the MCP `image` content block the caller assembles) and a text
+ * document's decoded content is inlined directly in the returned entry — the conductor gets the
+ * content, not a filename it would have to fetch separately. A deleted/unreadable attachment is
+ * dropped rather than failing the whole `ac_inbox` call.
+ */
+function attachmentsForWake(ctx: ToolCtx, w: Wakeup, images: McpImageBlock[]): unknown[] {
+  const payload = w.payload as { threadId?: unknown; attachmentIds?: unknown } | null;
+  const threadId = payload?.threadId;
+  const ids = payload?.attachmentIds;
+  if (typeof threadId !== 'string' || !Array.isArray(ids)) return [];
+  const out: unknown[] = [];
+  for (const id of ids) {
+    if (typeof id !== 'string') continue;
+    try {
+      const { attachment, bytes } = svc(ctx).threads.attachment(threadId, id);
+      const base = { id: attachment.id, filename: attachment.filename, mediaType: attachment.mediaType, byteSize: attachment.byteSize };
+      if (isAttachmentImageType(attachment.mediaType)) {
+        images.push({ type: 'image', data: bytes.toString('base64'), mimeType: attachment.mediaType });
+        out.push(base);
+      } else if (isAttachmentTextType(attachment.mediaType)) {
+        out.push({ ...base, text: bytes.toString('utf8') });
+      } else {
+        out.push(base);
+      }
+    } catch { /* attachment gone or unreadable; the wake still shows it was sent */ }
+  }
+  return out;
+}
+
 function originThreadId(ctx: ToolCtx): string | null {
   for (const w of bundledWakes(ctx)) {
     const tid = (w.payload as { threadId?: unknown } | null)?.threadId;
@@ -180,10 +212,18 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx) => {
       const wakes = bundledWakes(ctx);
       const bucket = { messages: [] as unknown[], tickets: [] as unknown[], decisions: [] as unknown[], steering: [] as unknown[], other: [] as unknown[] };
+      // Image bytes for any attachment on a bundled human_message wake, collected across every
+      // entry so one ac_inbox call surfaces every image the conductor was woken with, not just the
+      // first (openspec design.md — Decision 5).
+      const images: McpImageBlock[] = [];
       for (const w of wakes) {
         const entry: Record<string, unknown> = { wakeId: w.id, source: w.source, reason: w.reason, payload: w.payload, createdAt: w.createdAt };
         switch (w.source) {
-          case 'human_message': bucket.messages.push(entry); break;
+          case 'human_message': {
+            entry.attachments = attachmentsForWake(ctx, w, images);
+            bucket.messages.push(entry);
+            break;
+          }
           case 'ticket_assigned': case 'ticket_comment': case 'blockers_resolved': case 'children_completed': case 'merge_approved': bucket.tickets.push(entry); break;
           case 'decision_answered': {
             const id = (w.payload as { decisionId?: unknown } | null)?.decisionId;
@@ -194,7 +234,8 @@ export const TOOLS: ToolDef[] = [
           default: bucket.other.push(entry);
         }
       }
-      return { runId: ctx.claims.runId, agentId: ctx.claims.agentId, agentKind: ctx.claims.agentKind, ticketId: ctx.claims.ticketId, ...bucket };
+      const result = { runId: ctx.claims.runId, agentId: ctx.claims.agentId, agentKind: ctx.claims.agentKind, ticketId: ctx.claims.ticketId, ...bucket };
+      return images.length ? withMcpContent(result, images) : result;
     },
   },
   {
@@ -596,7 +637,8 @@ export async function runTool(name: string, ctx: ToolCtx, rawInput: unknown): Pr
     if (!toolNamesFor(ctx.claims.agentKind).includes(name)) throw new OcError('forbidden', `tool ${name} is not available to a ${ctx.claims.agentKind}`);
     const parsed = def.input.safeParse(rawInput ?? {});
     if (!parsed.success) throw toOcError(parsed.error);
-    return ok(await def.handler(ctx, parsed.data));
+    const result = await def.handler(ctx, parsed.data);
+    return isWithMcpContent(result) ? ok(result.data, mcpContentOf(result)) : ok(result);
   } catch (e) {
     return fail(toOcError(e));
   }

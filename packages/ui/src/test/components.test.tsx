@@ -1,5 +1,5 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { UI_STATUSES, NAMED_CARD_OPTION_KEYS } from '@agent-conductor/shared';
 import type { Decision } from '@agent-conductor/shared';
 import { StatusGlyph, StatusBadge } from '../components/StatusGlyph';
@@ -645,6 +645,92 @@ describe('Composer', () => {
     rerender(<Composer onSubmit={() => undefined} value="one two three" onChange={() => undefined} placeholder="Message the conductor…" />);
 
     expect(box.scrollTop).toBe(420);
+  });
+
+  // ---------- VS-133: attachments ----------
+
+  it('offers no browse control and ignores a pasted image when attachments are not allowed', () => {
+    render(<Composer onSubmit={() => undefined} placeholder="Message the conductor…" />);
+    expect(screen.queryByLabelText('Attach a file')).not.toBeInTheDocument();
+    const box = screen.getByLabelText('Message the conductor…');
+    const file = new File(['x'], 'shot.png', { type: 'image/png' });
+    fireEvent.paste(box, { clipboardData: { items: [{ kind: 'file', getAsFile: () => file }] } });
+    expect(screen.queryByText('shot.png')).not.toBeInTheDocument();
+  });
+
+  it('adds a browsed file as a pending attachment, shown as a chip', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const file = new File(['x'], 'shot.png', { type: 'image/png' });
+    fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
+    expect(screen.getByText('shot.png')).toBeInTheDocument();
+  });
+
+  it('adds a pasted image to the same pending state browse produces', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const box = screen.getByLabelText('Message the conductor…');
+    const file = new File(['x'], 'clipboard.png', { type: 'image/png' });
+    fireEvent.paste(box, { clipboardData: { items: [{ kind: 'file', getAsFile: () => file }] } });
+    expect(screen.getByText('clipboard.png')).toBeInTheDocument();
+  });
+
+  it('rejects a disallowed file type client-side, without adding it', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const file = new File(['x'], 'doc.pdf', { type: 'application/pdf' });
+    fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
+    expect(screen.queryByText('doc.pdf')).not.toBeInTheDocument();
+    expect(screen.getByText(/Only images .* and plain text\/markdown/)).toBeInTheDocument();
+  });
+
+  it('a removed chip drops the file from what will be sent', () => {
+    const onSubmit = vi.fn();
+    render(<Composer onSubmit={onSubmit} allowAttachments placeholder="Message the conductor…" />);
+    const file = new File(['x'], 'shot.png', { type: 'image/png' });
+    fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
+    fireEvent.click(screen.getByLabelText('Remove shot.png'));
+    expect(screen.queryByText('shot.png')).not.toBeInTheDocument();
+
+    const box = screen.getByLabelText('Message the conductor…');
+    fireEvent.change(box, { target: { value: 'no attachment now' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+    expect(onSubmit).toHaveBeenCalledWith('no attachment now');
+  });
+
+  it('sends the pending files with the text, and clears both once the send resolves', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<Composer onSubmit={onSubmit} allowAttachments placeholder="Message the conductor…" />);
+    const file = new File(['x'], 'shot.png', { type: 'image/png' });
+    fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'look at this' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+
+    expect(onSubmit).toHaveBeenCalledWith('look at this', [file]);
+    await waitFor(() => expect(screen.queryByText('shot.png')).not.toBeInTheDocument());
+    expect(box.value).toBe('');
+  });
+
+  it('a rejected send leaves the text and the attachment exactly as they were', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error('too large'));
+    render(<Composer onSubmit={onSubmit} allowAttachments placeholder="Message the conductor…" />);
+    const file = new File(['x'], 'shot.png', { type: 'image/png' });
+    fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'look at this' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    // Give the rejected promise's .catch a turn, then assert nothing was cleared.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(box.value).toBe('look at this');
+    expect(screen.getByText('shot.png')).toBeInTheDocument();
+  });
+
+  it('caps pending attachments at four and says so', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const files = Array.from({ length: 5 }, (_, i) => new File(['x'], `f${i}.txt`, { type: 'text/plain' }));
+    fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files } });
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.getByText(/At most 4 files per message/)).toBeInTheDocument();
   });
 
   // The composer reads `(hover: none)` at render to tell a phone from a desk. jsdom answers every

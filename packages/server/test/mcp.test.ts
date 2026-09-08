@@ -5,7 +5,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import type { RunTokenClaims } from '../src/runtoken.js';
-import { makeHarness, type Harness } from './fakes.js';
+import { makeHarness, wakeup, type Harness } from './fakes.js';
 
 let harness: Harness | null = null;
 afterEach(async () => { await harness?.close(); harness = null; });
@@ -324,6 +324,66 @@ describe('agent REST mirror', () => {
     const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
     expect(payload.ok).toBe(false);
     expect(payload.error.code).toBe('wrong_status');
+    await client.close();
+  });
+});
+
+// ---------- VS-133 ----------
+
+describe('ac_inbox delivers attachment content, not just a reference', () => {
+  it('turns an image attachment into a real MCP image content block, alongside the JSON summary', async () => {
+    const { client, h } = await connect();
+    h.impls.wake!['listForAgent'] = () => [wakeup({ payload: { threadId: 'th_1', attachmentIds: ['att_img'] } })];
+    h.impls.threads!['attachment'] = (threadId: string, id: string) => {
+      expect([threadId, id]).toEqual(['th_1', 'att_img']);
+      return { attachment: { id: 'att_img', threadId: 'th_1', messageId: 'msg_1', filename: 'shot.png', mediaType: 'image/png', byteSize: 3, storageKey: 'x.png', createdAt: '2026-09-08T00:00:00.000Z' }, bytes: Buffer.from([1, 2, 3]) };
+    };
+
+    const res = await client.callTool({ name: 'ac_inbox', arguments: {} });
+    expect(res.isError).toBeFalsy();
+    const blocks = res.content as Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+    expect(blocks[0]!.type).toBe('text');
+    const payload = JSON.parse(blocks[0]!.text!);
+    expect(payload.data.messages[0].attachments).toEqual([{ id: 'att_img', filename: 'shot.png', mediaType: 'image/png', byteSize: 3 }]);
+    const image = blocks.find((b) => b.type === 'image');
+    expect(image).toEqual({ type: 'image', data: Buffer.from([1, 2, 3]).toString('base64'), mimeType: 'image/png' });
+    await client.close();
+  });
+
+  it('inlines a text attachment\'s content directly, with no separate image block', async () => {
+    const { client, h } = await connect();
+    h.impls.wake!['listForAgent'] = () => [wakeup({ payload: { threadId: 'th_1', attachmentIds: ['att_txt'] } })];
+    h.impls.threads!['attachment'] = () => ({
+      attachment: { id: 'att_txt', threadId: 'th_1', messageId: 'msg_1', filename: 'notes.txt', mediaType: 'text/plain', byteSize: 11, storageKey: 'x.txt', createdAt: '2026-09-08T00:00:00.000Z' },
+      bytes: Buffer.from('do the thing'),
+    });
+
+    const res = await client.callTool({ name: 'ac_inbox', arguments: {} });
+    const blocks = res.content as Array<{ type: string; text?: string }>;
+    expect(blocks).toHaveLength(1); // no image block for a text attachment
+    const payload = JSON.parse(blocks[0]!.text!);
+    expect(payload.data.messages[0].attachments).toEqual([{ id: 'att_txt', filename: 'notes.txt', mediaType: 'text/plain', byteSize: 11, text: 'do the thing' }]);
+    await client.close();
+  });
+
+  it('produces exactly the one text block when nothing has an attachment (no regression)', async () => {
+    const { client } = await connect();
+    const res = await client.callTool({ name: 'ac_inbox', arguments: {} });
+    expect(res.content).toHaveLength(1);
+    expect((res.content as Array<{ type: string }>)[0]!.type).toBe('text');
+    await client.close();
+  });
+
+  it('drops a deleted/unreadable attachment rather than failing the whole call', async () => {
+    const { client, h } = await connect();
+    h.impls.wake!['listForAgent'] = () => [wakeup({ payload: { threadId: 'th_1', attachmentIds: ['att_gone'] } })];
+    h.impls.threads!['attachment'] = () => { throw new OcError('not_found', 'attachment att_gone not found in thread th_1'); };
+
+    const res = await client.callTool({ name: 'ac_inbox', arguments: {} });
+    expect(res.isError).toBeFalsy();
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.ok).toBe(true);
+    expect(payload.data.messages[0].attachments).toEqual([]);
     await client.close();
   });
 });

@@ -522,19 +522,26 @@ describe('ChatRoute dispatch labels', () => {
       lastRun: { id: 'r1', status: 'succeeded', model: 'claude-opus-5-20260115', finishedAt: '2026-09-07T10:00:00.000Z', usage: { inputTokens: 320_119, cachedInputTokens: 667_671, outputTokens: 1_022, contextTokens: 82_000 } },
     } as unknown as typeof state.conductor;
     render(<ChatRoute />);
-    expect(screen.getByText('41%')).toBeInTheDocument();
+    // The headline is the raw count, not a fraction of a denominator that has been wrong before
+    // (VS-129); the only percentage left in words is the distance to compaction.
+    expect(screen.getByText('82k')).toBeInTheDocument();
+    expect(screen.queryByText('41%')).not.toBeInTheDocument();
     expect(screen.getByText('· 45% to compaction')).toBeInTheDocument();
     expect(screen.getByTestId('context-meter').getAttribute('title')).toContain('82k of 200k tokens');
   });
 
-  it('says the window is unknown rather than guessing when the model is not in the runtime\u2019s list', () => {
+  it('shows the bare size rather than guessing a fraction when the model is not in the runtime\u2019s list (VS-129)', () => {
     state.models = [{ id: 'sonnet' }];
     state.conductor = {
       agent: { id: 'ag_conductor', runtimeId: 'claude', model: 'claude-opus-5' },
       lastRun: { id: 'r1', status: 'succeeded', model: 'claude-opus-5', finishedAt: '2026-09-07T10:00:00.000Z', usage: { inputTokens: 320_119, cachedInputTokens: 667_671, outputTokens: 1_022, contextTokens: 82_000 } },
     } as unknown as typeof state.conductor;
     render(<ChatRoute />);
-    expect(screen.getByText('Context window unknown')).toBeInTheDocument();
+    // The size is still known even though the window is not, so the header shows it rather than
+    // only the quiet reason line.
+    expect(screen.getByText('82k')).toBeInTheDocument();
+    expect(screen.queryByText('Context window unknown')).not.toBeInTheDocument();
+    expect(screen.getByTestId('context-meter').getAttribute('title')).toContain('Context window unknown');
   });
 
   it('shows no context meter until the conductor has finished a turn', () => {

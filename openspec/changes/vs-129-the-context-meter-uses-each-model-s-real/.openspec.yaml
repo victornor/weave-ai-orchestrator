@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: The context meter uses each model's real context window instead of a
+  single hardcoded 200k, and says so when it cannot know

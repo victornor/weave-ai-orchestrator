@@ -302,9 +302,14 @@ export interface ContextStripView {
   /** `200k` — the window it is a fraction of. */
   windowLabel: string;
   meter: {
-    /** Percentage of the model's context window, 0..100. */
+    /**
+     * Percentage of the model's context window, floored at 0 but not capped at 100: a measured size
+     * larger than the declared window is shown past 100 rather than clamped, since that is evidence
+     * the declared window is wrong, not that the context has simply filled it (VS-129). The caller
+     * that draws a bar clamps its own width, not this number.
+     */
     percent: number;
-    /** Percentage of the way to the runtime's compaction point; null when the runtime has none. */
+    /** Percentage of the way to the runtime's compaction point; null when the runtime has none. Not capped at 100, for the same reason `percent` is not. */
     toCompaction: number | null;
     tone: 'ok' | 'warn' | 'over';
   } | null;

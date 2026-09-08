@@ -20,11 +20,16 @@ const TONE: Record<'ok' | 'warn' | 'over', string> = {
 export function ContextMeter({ view, className }: { view: ContextStripView | null; className?: string }): React.ReactElement | null {
   if (!view) return null;
 
-  // The absolute count belongs on hover: the header carries the fraction, which is the part that
-  // says whether to keep going or start a fresh thread.
   const title = view.meter
     ? `Context ${view.tokensLabel} of ${view.windowLabel} tokens${view.meter.toCompaction === null ? '' : ` · ${view.meter.toCompaction}% of the way to this runtime's compaction point`}`
     : `${view.reason} — the last turn reported ${view.tokensLabel} tokens`;
+
+  // A percentage is only as trustworthy as its denominator, and that denominator has been wrong
+  // twice (VS-129) — so the headline is the raw count, which a human can check against reality on
+  // sight, never a fraction. The bar still carries the proportion visually; the one percentage left
+  // in words is the distance to compaction, which is exactly where an over-window reading now shows
+  // up as visibly impossible (>100%) beside a headline count that is not.
+  const showBareSize = !view.meter && view.reason === 'Context window unknown';
 
   return (
     <span
@@ -35,9 +40,12 @@ export function ContextMeter({ view, className }: { view: ContextStripView | nul
       {view.meter ? (
         <>
           <span className="hidden text-micro text-text-soft sm:inline">Context</span>
-          <span className="ac-mono text-micro text-text-1">{view.meter.percent}%</span>
+          <span className="ac-mono text-micro text-text-1">{view.tokensLabel}</span>
           <span className="hidden h-1.5 w-14 overflow-hidden rounded-pill bg-bg-2 sm:block" aria-hidden>
-            <span className={cx('block h-full rounded-pill opacity-75', TONE[view.meter.tone])} style={{ width: `${view.meter.percent}%` }} />
+            {/* The bar cannot be drawn past its own track; `view.meter.percent` itself is left
+                uncapped so the tone and the compaction percentage beside it can still say a true
+                reading past 100 %. */}
+            <span className={cx('block h-full rounded-pill opacity-75', TONE[view.meter.tone])} style={{ width: `${Math.min(100, view.meter.percent)}%` }} />
           </span>
           {view.meter.toCompaction === null ? null : (
             // Off the phone header, where the two meters together would not fit on one line; the
@@ -45,8 +53,15 @@ export function ContextMeter({ view, className }: { view: ContextStripView | nul
             <span className="ac-mono hidden text-nano text-text-4 sm:inline">· {view.meter.toCompaction}% to compaction</span>
           )}
         </>
+      ) : showBareSize ? (
+        // The window is unknown, but the size is not: showing it beats the quiet reason line, which
+        // is exactly what a human wants to sanity-check when the denominator cannot be trusted.
+        <>
+          <span className="hidden text-micro text-text-soft sm:inline">Context</span>
+          <span className="ac-mono text-micro text-text-1">{view.tokensLabel}</span>
+        </>
       ) : (
-        // One quiet reason, never a percentage of a window we had to invent.
+        // Nothing measured at all — no size to fall back to either.
         <span className="text-micro text-text-3">{view.reason}</span>
       )}
     </span>

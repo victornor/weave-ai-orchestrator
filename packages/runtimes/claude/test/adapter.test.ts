@@ -27,6 +27,18 @@ describe('claude adapter', () => {
     expect(models.map((m) => m.id)).toEqual(expect.arrayContaining(['fable', 'opus', 'sonnet', 'haiku', 'claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001']));
   });
 
+  it('declares each model’s own context window rather than one constant for all of them (VS-129)', async () => {
+    const windowOf = async (id: string) => (await adapter.listModels()).find((m) => m.id === id)?.contextWindowTokens;
+    // fable/opus/sonnet and their pinned -5/-5-1 ids resolve to natively 1M-context models; only
+    // haiku is genuinely 200k. See design.md on VS-129 for the per-model evidence.
+    for (const id of ['fable', 'opus', 'sonnet', 'claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']) {
+      expect(await windowOf(id)).toBe(1_000_000);
+    }
+    for (const id of ['haiku', 'claude-haiku-4-5-20251001']) {
+      expect(await windowOf(id)).toBe(200_000);
+    }
+  });
+
   it('installs CLAUDE.md as an @AGENTS.md pointer, plus skills and settings', async () => {
     const home = tmp('ac-home-');
     const skill = tmp('ac-skill-');

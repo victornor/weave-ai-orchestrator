@@ -814,3 +814,33 @@ describe("a pull request's diff (VS-107)", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("a project's sync state (VS-131)", () => {
+  it('answers the read-only check without touching the mutating fetch path', async () => {
+    const { h, fetch } = app();
+    h.impls.projects!.checkSync = async (id: string) => { expect(id).toBe('proj1'); return { syncState: 'behind' as const, behindBy: 3 }; };
+    h.impls.projects!.fetch = async () => { throw new Error('GET /sync must never call the mutating fetch'); };
+
+    const res = await fetch('/api/w/ws1/projects/proj1/sync', { headers: authed() });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ syncState: 'behind', behindBy: 3 });
+  });
+
+  it('reports diverged the same way, with no behindBy count', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/projects/proj1/sync', { headers: authed() });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ syncState: 'in_sync', behindBy: null });
+  });
+
+  it('still runs the mutating fetch through POST /projects/:id/fetch', async () => {
+    const { h, fetch } = app();
+    let called = false;
+    h.impls.projects!.fetch = async (id: string) => { called = true; expect(id).toBe('proj1'); return { head: 'abc123', fastForwarded: true }; };
+
+    const res = await fetch('/api/w/ws1/projects/proj1/fetch', { method: 'POST', headers: authed() });
+    expect(res.status).toBe(200);
+    expect(called).toBe(true);
+    await expect(res.json()).resolves.toEqual({ head: 'abc123', fastForwarded: true });
+  });
+});

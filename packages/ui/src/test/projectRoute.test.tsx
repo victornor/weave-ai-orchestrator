@@ -27,6 +27,9 @@ const state = vi.hoisted(() => ({
   pullRequests: null as ProjectPullRequests | null,
   history: null as { refs: unknown[]; commits: unknown[] } | null,
   go: vi.fn() as ReturnType<typeof vi.fn>,
+  sync: null as { syncState: string; behindBy: number | null } | null,
+  fetchMutate: vi.fn() as ReturnType<typeof vi.fn>,
+  fetchPending: false,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -68,6 +71,8 @@ vi.mock('../api/hooks', () => ({
     isLoading: false, isError: false, refetch: vi.fn(), hasMore: false, isLoadingMore: false, loadMore: vi.fn(),
   }),
   useCommit: () => ({ data: null, isLoading: false, isError: false, refetch: vi.fn() }),
+  useProjectSync: () => ({ data: state.sync }),
+  useProjectFetch: () => ({ mutate: state.fetchMutate, isPending: state.fetchPending }),
 }));
 
 const { ProjectOverviewRoute } = await import('../routes/project/ProjectOverview');
@@ -119,6 +124,9 @@ beforeEach(() => {
   state.health = null;
   state.pullRequests = null;
   state.go = vi.fn();
+  state.sync = null;
+  state.fetchMutate = vi.fn();
+  state.fetchPending = false;
 });
 
 describe('the address', () => {
@@ -177,6 +185,36 @@ describe('the header', () => {
     const queue = screen.getByText('Merge queue').closest('a');
     expect(JSON.parse(queue?.getAttribute('data-search') ?? '{}')).toEqual({ project: 'p1' });
     expect(screen.getByText('Chat').closest('a')?.getAttribute('data-to')).toBe('/w/$ws/chat');
+  });
+});
+
+describe("the project's sync state (VS-131)", () => {
+  it('shows nothing when the clone is in sync', () => {
+    state.sync = { syncState: 'in_sync', behindBy: null };
+    render(<ProjectOverviewRoute />);
+    expect(within(about()).queryByText(/behind|diverged/i)).toBeNull();
+  });
+
+  it('shows nothing before the sync check has answered', () => {
+    state.sync = null;
+    render(<ProjectOverviewRoute />);
+    expect(within(about()).queryByText(/behind|diverged/i)).toBeNull();
+  });
+
+  it('shows how many commits behind, with a Sync action that fast-forwards it', () => {
+    state.sync = { syncState: 'behind', behindBy: 3 };
+    render(<ProjectOverviewRoute />);
+    expect(within(about()).getByText(/3 behind/i)).toBeTruthy();
+    fireEvent.click(within(about()).getByRole('button', { name: /sync/i }));
+    expect(state.fetchMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a diverged clone plainly, with no Sync button offered as a fix', () => {
+    state.sync = { syncState: 'diverged', behindBy: null };
+    render(<ProjectOverviewRoute />);
+    expect(within(about()).getByText(/diverged/i)).toBeTruthy();
+    expect(within(about()).getByText(/human must resolve/i)).toBeTruthy();
+    expect(within(about()).queryByRole('button', { name: /sync/i })).toBeNull();
   });
 });
 

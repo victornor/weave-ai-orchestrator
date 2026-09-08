@@ -180,6 +180,36 @@ describe('the active workspace and section', () => {
   });
 });
 
+describe("a project's sync marker (VS-131)", () => {
+  const dotOf = (slug: string): HTMLElement | null =>
+    within(screen.getByLabelText('Alpha projects')).getByText(slug).closest('a')!.querySelector('span[aria-hidden]');
+
+  it('shows no marker for a project that is in sync', () => {
+    render(nav({ projectsByWs: { alpha: ready([project({ id: 'p1', slug: 'web', syncState: 'in_sync' })]) } }));
+    expect(dotOf('web')?.style.background).toBe('');
+  });
+
+  it('marks a behind project with the calmer, in-progress weight', () => {
+    render(nav({ projectsByWs: { alpha: ready([project({ id: 'p1', slug: 'web', syncState: 'behind' })]) } }));
+    expect(dotOf('web')?.style.background).toBe('var(--status-working)');
+  });
+
+  it('marks a diverged project with the same severity the rail uses for something that needs a human', () => {
+    render(nav({ projectsByWs: { alpha: ready([project({ id: 'p1', slug: 'web', syncState: 'diverged' })]) } }));
+    expect(dotOf('web')?.style.background).toBe('var(--status-blocked)');
+  });
+
+  it('costs no extra request: the marker reads syncState off the already-fetched project list', () => {
+    const projects = [
+      project({ id: 'p1', slug: 'web', syncState: 'behind' }),
+      project({ id: 'p2', slug: 'api', syncState: 'diverged' }),
+    ];
+    render(nav({ projectsByWs: { alpha: ready(projects) } }));
+    expect(dotOf('web')?.style.background).toBe('var(--status-working)');
+    expect(dotOf('api')?.style.background).toBe('var(--status-blocked)');
+  });
+});
+
 describe('the Needs-you count', () => {
   it('shows a collapsed workspace its own count', () => {
     render(nav());

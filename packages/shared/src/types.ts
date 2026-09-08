@@ -1,7 +1,7 @@
 import type * as E from './enums.js';
 
 export interface Workspace { id: string; slug: string; name: string; ticketPrefix: string; status: E.WorkspaceStatus; rootPath: string; createdAt: string; updatedAt: string }
-export interface Project { id: string; workspaceId: string; slug: string; name: string; gitUrl: string; defaultBranch: string; landingBranch: string | null; clonePath: string; maxWorkers: number; setupCommand: string | null; worktreeProvider: E.WorktreeProviderId; openspecEnabled: boolean; openspecVersion: string | null; policies: Record<string, unknown>; status: E.ProjectStatus; lastFetchedAt: string | null; errorText: string | null }
+export interface Project { id: string; workspaceId: string; slug: string; name: string; gitUrl: string; defaultBranch: string; landingBranch: string | null; clonePath: string; maxWorkers: number; setupCommand: string | null; worktreeProvider: E.WorktreeProviderId; openspecEnabled: boolean; openspecVersion: string | null; policies: Record<string, unknown>; status: E.ProjectStatus; syncState: E.ProjectSyncState; lastFetchedAt: string | null; errorText: string | null }
 /**
  * Where a ticket's work actually lands (VS-119): the ticket's own declaration first, else the
  * project's, else the project's default branch. The one place every merge-verification, worktree,

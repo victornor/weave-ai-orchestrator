@@ -61,6 +61,7 @@ export function project(over: Partial<Project> = {}): Project {
     openspecVersion: null,
     policies: {},
     status: 'ready',
+    syncState: 'in_sync',
     lastFetchedAt: null,
     errorText: null,
     ...over,

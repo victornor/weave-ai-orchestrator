@@ -28,7 +28,13 @@ export interface WorkspaceNavProps {
   onNewWorkspace: () => void;
 }
 
-const PROJECT_DOT = ['needs-you', 'done', 'working', 'merging', 'blocked'] as const;
+/**
+ * A project's sync marker (VS-131), read from `Project.syncState` — data the sidebar already
+ * fetched, never a check made for the marker itself. `in_sync` shows nothing, so a fine project
+ * never becomes permanent furniture; `diverged` gets the same severity the rail uses for something
+ * that needs a human, `behind` the calmer weight already used for ordinary work in flight.
+ */
+const SYNC_DOT: Record<string, string | undefined> = { diverged: 'blocked', behind: 'working' };
 
 function Chevron({ open }: { open: boolean }): React.ReactElement {
   return (
@@ -123,17 +129,20 @@ function ProjectsGroup({ wsId, wsName, state }: { wsId: string; wsName: string; 
           Couldn&rsquo;t load projects
         </div>
       ) : (
-        state.projects.map((p, i) => (
-          <A
-            key={p.id}
-            to="/w/$ws/p/$project"
-            params={{ ws: wsId, project: p.slug }}
-            className="flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5 hover:bg-bg-2"
-          >
-            <span className="size-1.5 rounded-r4" style={{ background: `var(--status-${PROJECT_DOT[i % PROJECT_DOT.length] ?? 'done'})` }} aria-hidden />
-            <span className="ac-mono flex-1 truncate text-meta text-text-2">{p.slug}</span>
-          </A>
-        ))
+        state.projects.map((p) => {
+          const dot = SYNC_DOT[p.syncState];
+          return (
+            <A
+              key={p.id}
+              to="/w/$ws/p/$project"
+              params={{ ws: wsId, project: p.slug }}
+              className="flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5 hover:bg-bg-2"
+            >
+              {dot ? <span className="size-1.5 rounded-r4" style={{ background: `var(--status-${dot})` }} aria-hidden /> : <span className="size-1.5" aria-hidden />}
+              <span className="ac-mono flex-1 truncate text-meta text-text-2">{p.slug}</span>
+            </A>
+          );
+        })
       )}
     </div>
   );

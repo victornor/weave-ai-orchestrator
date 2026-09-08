@@ -30,6 +30,8 @@ export function projectRoutes(): Hono<AppEnv> {
   app.patch('/:id', async (c) => c.json(await c.get('ws').services.projects.update(c.get('actor'), c.req.param('id'), await body(c, ProjectConfigSchema.partial().strict()))));
   app.delete('/:id', async (c) => { await c.get('ws').services.projects.remove(c.get('actor'), c.req.param('id')); return c.json({ ok: true }); });
   app.post('/:id/fetch', async (c) => c.json(await c.get('ws').services.projects.fetch(c.req.param('id'))));
+  /** Read-only (VS-131): classifies the clone against its remote without checkout or merge. */
+  app.get('/:id/sync', async (c) => c.json(await c.get('ws').services.projects.checkSync(c.req.param('id'))));
   // The project's merge queue: what is landing now and who is waiting, in order (PLAN §11.4).
   app.get('/:id/merge-queue', (c) => {
     const s = c.get('ws').services;

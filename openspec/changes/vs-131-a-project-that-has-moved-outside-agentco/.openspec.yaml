@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-08
+goal: A project that has moved outside AgentConductor is visible and syncable,
+  instead of being picked up up to an hour later or silently failing to
+  fast-forward

@@ -466,4 +466,38 @@ describe('migrations', () => {
       reopened.close();
     });
   });
+
+  describe('0019_project_sync_state', () => {
+    const cols = (db: Db, table: string): string[] => db.all<{ name: string }>(`PRAGMA table_info(${table})`).map((c) => c.name);
+
+    const seedProject = (db: Db, id: string): void => {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at)
+         VALUES (?, 'w1', ?, 'API', 'git@e:a/b.git', 'main', '/tmp/p', 4, 'git', 1, '{}', 'ready', 't0', 't0')`, [id, id]);
+    };
+
+    it('defaults every existing project row to in_sync', () => {
+      const path = join(dir, 'sync1.sqlite');
+      const before = openDbAsOf(path, '0018_decision_concern_kind.sql');
+      expect(cols(before, 'projects')).not.toContain('sync_state');
+      seedProject(before, 'p1');
+      before.close();
+
+      const db = openDb(path);
+      expect(db.get<{ syncState: string }>('SELECT sync_state FROM projects WHERE id = ?', ['p1'])!.syncState).toBe('in_sync');
+      db.close();
+    });
+
+    it('accepts behind and diverged, and refuses anything else', () => {
+      const db = openDb(join(dir, 'sync2.sqlite'));
+      seedProject(db, 'p1');
+      db.run("UPDATE projects SET sync_state = 'behind' WHERE id = 'p1'");
+      db.run("UPDATE projects SET sync_state = 'diverged' WHERE id = 'p1'");
+      expect(() => db.run("UPDATE projects SET sync_state = 'ahead' WHERE id = 'p1'")).toThrow(/CHECK constraint failed/);
+      db.close();
+    });
+  });
 });

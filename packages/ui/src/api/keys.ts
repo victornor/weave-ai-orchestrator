@@ -13,6 +13,8 @@ export const qk = {
   briefing: (ws: string) => ['w', ws, 'briefing'] as const,
   projects: (ws: string) => ['w', ws, 'projects'] as const,
   project: (ws: string, id: string) => ['w', ws, 'projects', id] as const,
+  /** How a project's clone compares to its remote (VS-131) — its own key so a `project.updated` invalidation of `qk.projects` doesn't force a re-check on every render. */
+  projectSync: (ws: string, id: string) => ['w', ws, 'projects', id, 'sync'] as const,
   /**
    * Deliberately not under `projects`: what a project's queue holds is decided by ticket events, and
    * nested there only `project.*` reached it — so the queue sat on whatever it fetched on mount.

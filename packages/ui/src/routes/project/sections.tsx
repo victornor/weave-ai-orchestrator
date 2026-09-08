@@ -42,8 +42,18 @@ export interface ProjectSectionDef {
   label: string;
   /** `main` spans the wide column at the desktop breakpoint, `side` takes one. */
   column: 'main' | 'side';
+  /**
+   * Whether the body has no built-in limit on how much it renders, and so can grow arbitrarily tall
+   * with data. A `true` section's body is capped at a share of the viewport and scrolls past it; a
+   * section that already bounds its own output (see `ActivitySection`'s `SHOWN`) stays `false` and
+   * gets no scrollbar it does not need.
+   */
+  scrollable: boolean;
   Body: (props: ProjectSectionProps) => React.ReactElement;
 }
+
+/** A section's height cap, as a share of the region the browser is showing (`--ac-app-h`). */
+const SCROLL_CAP = 'max-h-[calc(var(--ac-app-h)*0.4)]';
 
 /**
  * The shell: heading, disclosure and the anchor. It owns no data, so a body can be replaced without
@@ -54,11 +64,13 @@ export function ProjectSection({
   label,
   children,
   className,
+  scrollable = false,
 }: {
   id: string;
   label: string;
   children: React.ReactNode;
   className?: string;
+  scrollable?: boolean;
 }): React.ReactElement {
   const [open, setOpen] = useState(true);
   const bodyId = `project-section-${id}`;
@@ -77,7 +89,10 @@ export function ProjectSection({
         </button>
       </div>
       {open ? (
-        <div id={bodyId} className="border-t border-line-1 px-3.5 py-3">
+        <div
+          id={bodyId}
+          className={cx('border-t border-line-1 px-3.5 py-3', scrollable && cx('overflow-y-auto', SCROLL_CAP))}
+        >
           {children}
         </div>
       ) : null}
@@ -105,12 +120,14 @@ function Chevron({ open }: { open: boolean }): React.ReactElement {
  * VS-96 and VS-97 give them content. A test pins this list so neither can be dropped meanwhile.
  */
 export const PROJECT_SECTIONS: readonly ProjectSectionDef[] = [
-  { key: 'needs', label: 'Needs you', column: 'side', Body: NeedsYouSection },
-  { key: 'work', label: 'Work under way', column: 'main', Body: WorkSection },
-  { key: 'landing', label: 'Landing', column: 'side', Body: LandingSection },
-  { key: 'history', label: 'History', column: 'main', Body: HistorySection },
-  { key: 'pulls', label: 'Pull requests', column: 'main', Body: PullRequestsSection },
-  { key: 'landings', label: 'Recent landings', column: 'side', Body: LandingsSection },
-  { key: 'activity', label: 'Activity', column: 'main', Body: ActivitySection },
-  { key: 'knowledge', label: 'Knowledge', column: 'side', Body: KnowledgeSection },
+  { key: 'needs', label: 'Needs you', column: 'side', scrollable: true, Body: NeedsYouSection },
+  { key: 'work', label: 'Work under way', column: 'main', scrollable: true, Body: WorkSection },
+  { key: 'landing', label: 'Landing', column: 'side', scrollable: true, Body: LandingSection },
+  { key: 'history', label: 'History', column: 'main', scrollable: true, Body: HistorySection },
+  { key: 'pulls', label: 'Pull requests', column: 'main', scrollable: true, Body: PullRequestsSection },
+  { key: 'landings', label: 'Recent landings', column: 'side', scrollable: true, Body: LandingsSection },
+  // Already bounded to SHOWN=12 entries (ActivitySection.tsx) independent of how much changelog
+  // data exists, so it cannot grow the page and gets no scrollbar it does not need.
+  { key: 'activity', label: 'Activity', column: 'main', scrollable: false, Body: ActivitySection },
+  { key: 'knowledge', label: 'Knowledge', column: 'side', scrollable: true, Body: KnowledgeSection },
 ];

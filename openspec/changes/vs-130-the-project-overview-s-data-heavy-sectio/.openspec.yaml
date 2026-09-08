@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: The project overview's data-heavy sections cap their height and scroll
+  inside, instead of stretching the page

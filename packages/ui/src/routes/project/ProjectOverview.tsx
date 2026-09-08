@@ -93,8 +93,14 @@ export function ProjectOverviewRoute(): React.ReactElement {
 
           {/* One flow: a phone reads it top to bottom, the desktop grid packs it into columns. */}
           <div className="grid grid-cols-1 gap-4 md:grid-flow-row-dense md:grid-cols-3">
-            {PROJECT_SECTIONS.map(({ key, label, column, Body }) => (
-              <ProjectSection key={key} id={key} label={label} className={cx(column === 'main' && 'md:col-span-2')}>
+            {PROJECT_SECTIONS.map(({ key, label, column, scrollable, Body }) => (
+              <ProjectSection
+                key={key}
+                id={key}
+                label={label}
+                className={cx(column === 'main' && 'md:col-span-2')}
+                scrollable={scrollable}
+              >
                 <Body project={project} ws={ws} />
               </ProjectSection>
             ))}

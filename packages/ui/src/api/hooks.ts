@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, UsageGrain, UsageWindow, Workspace } from '@agent-conductor/shared';
+import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace } from '@agent-conductor/shared';
 import { dayKey } from '@agent-conductor/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -295,6 +295,31 @@ export function usePatchProject(): UseMutationResult<Project, Error, { id: strin
   return useMutation({
     mutationFn: ({ id, patch }) => api.ws<Project>(ws, `/projects/${id}`, { method: 'PATCH', body: patch }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: qk.projects(ws) }),
+  });
+}
+
+export interface ProjectSync { syncState: ProjectSyncState; behindBy: number | null }
+
+/**
+ * How a project's clone compares to its remote (VS-131). `staleTime: 60_000` is the one place this
+ * check is throttled: opening the overview re-renders freely within that window without triggering
+ * another `git fetch` — see design.md's cost accounting.
+ */
+export function useProjectSync(id: string): UseQueryResult<ProjectSync> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.projectSync(ws, id), queryFn: () => api.ws<ProjectSync>(ws, `/projects/${id}/sync`), staleTime: 60_000 });
+}
+
+/** The existing fetch-and-fast-forward (VS-131), now with a UI entry point: resolves `behind`, reports rather than resolving `diverged`. */
+export function useProjectFetch(id: string): UseMutationResult<{ head: string; fastForwarded: boolean }, Error, void> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.ws<{ head: string; fastForwarded: boolean }>(ws, `/projects/${id}/fetch`, { method: 'POST' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.projectSync(ws, id) });
+      void qc.invalidateQueries({ queryKey: qk.projects(ws) });
+    },
   });
 }
 

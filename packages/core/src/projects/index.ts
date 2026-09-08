@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, PROJECT_ADD_STEPS, ProjectConfigSchema, landingBranchOf, type Project, type ProjectAddStepId, type ProjectConfig } from '@agent-conductor/shared';
+import { OcError, PROJECT_ADD_STEPS, ProjectConfigSchema, landingBranchOf, type Project, type ProjectAddStepId, type ProjectConfig, type ProjectSyncState } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CommitDetail, CoreServices, HistoryPage, HistoryQuery, ProjectsService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -10,6 +10,20 @@ import { git } from '../util/git.js';
 import { projectKnowledgeSkeleton } from '../workspace/loader.js';
 import { modelSettingFor } from '../models/resolve.js';
 import { createHistoryReader } from './history.js';
+
+/**
+ * The prefix `fetch()` and `checkSync()` share (VS-131): resolve the landing branch, then
+ * `git fetch origin` so `origin/<landing>` is current. Kept as a helper rather than one function
+ * with a `merge: boolean` flag — the merge/no-merge distinction is a safety property (a read-only
+ * check must never `checkout`/`merge`), not an implementation detail, and stays visible at each
+ * call site instead of threaded through a boolean.
+ */
+async function fetchLanding(project: Project): Promise<string> {
+  const landing = landingBranchOf(project);
+  const fetched = await git(['fetch', 'origin'], project.clonePath, 300_000);
+  if (!fetched.ok) throw new OcError('internal', `git fetch failed: ${fetched.stderr.trim().slice(0, 300)}`, { project: project.slug });
+  return landing;
+}
 
 function looksLocal(url: string): boolean {
   if (/^[a-z+]+:\/\//i.test(url)) return false;
@@ -321,19 +335,44 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       // Kept on the project's own landing branch (VS-119, project-level regardless of any one
       // ticket's override — see design.md), not just fast-forwarded: `git clone` may have left the
       // clone on the repository's actual default branch, which differs from the landing branch.
-      const landing = landingBranchOf(project);
-      const fetched = await git(['fetch', 'origin'], project.clonePath, 300_000);
-      if (!fetched.ok) throw new OcError('internal', `git fetch failed: ${fetched.stderr.trim().slice(0, 300)}`, { project: project.slug });
+      const landing = await fetchLanding(project);
       const before = await git(['rev-parse', 'HEAD'], project.clonePath, 15_000);
       await git(['checkout', landing], project.clonePath, 30_000);
       const merged = await git(['merge', '--ff-only', `origin/${landing}`], project.clonePath, 120_000);
       const after = await git(['rev-parse', 'HEAD'], project.clonePath, 15_000);
       const head = after.ok ? after.stdout.trim() : before.stdout.trim();
       const fastForwarded = merged.ok && before.stdout.trim() !== head;
-      ctx.db.update('projects', project.id, { lastFetchedAt: nowIso(), updatedAt: nowIso() });
+      const syncState: ProjectSyncState = merged.ok ? 'in_sync' : 'diverged';
+      ctx.db.update('projects', project.id, { syncState, lastFetchedAt: nowIso(), updatedAt: nowIso() });
+      ctx.events.emit('project.updated', 'project', project.id, { slug: project.slug, syncState });
       if (!merged.ok) log.warn({ project: project.slug, stderr: merged.stderr.trim().slice(0, 200) }, 'primary clone could not be fast-forwarded');
       if (fastForwarded) { try { await deps().specs.index(project.id); } catch (e) { log.debug({ err: String(e) }, 'spec reindex after fetch failed'); } }
       return { head, fastForwarded };
+    },
+
+    async checkSync(id: string): Promise<{ syncState: ProjectSyncState; behindBy: number | null }> {
+      const project = get(id);
+      const landing = await fetchLanding(project);
+      const remote = `origin/${landing}`;
+      const head = await git(['rev-parse', 'HEAD'], project.clonePath, 15_000);
+      const remoteHead = await git(['rev-parse', remote], project.clonePath, 15_000);
+      let syncState: ProjectSyncState;
+      let behindBy: number | null = null;
+      if (head.ok && remoteHead.ok && head.stdout.trim() === remoteHead.stdout.trim()) {
+        syncState = 'in_sync';
+      } else {
+        const ancestor = await git(['merge-base', '--is-ancestor', 'HEAD', remote], project.clonePath, 15_000);
+        if (ancestor.ok) {
+          syncState = 'behind';
+          const count = await git(['rev-list', '--count', `HEAD..${remote}`], project.clonePath, 15_000);
+          behindBy = count.ok ? Number(count.stdout.trim()) || 0 : null;
+        } else {
+          syncState = 'diverged';
+        }
+      }
+      ctx.db.update('projects', project.id, { syncState, updatedAt: nowIso() });
+      ctx.events.emit('project.updated', 'project', project.id, { slug: project.slug, syncState });
+      return { syncState, behindBy };
     },
 
     async history(id: string, query?: HistoryQuery): Promise<HistoryPage> {

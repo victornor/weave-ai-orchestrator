@@ -13,7 +13,7 @@ import { Button } from '../../components/Button';
 import { SkeletonRows } from '../../components/Skeleton';
 import { EmptyState } from '../../components/States';
 import { Markdown } from '../../components/Markdown';
-import { useKnowledgeDoc, useProjects, useWorkspaceSummary } from '../../api/hooks';
+import { useKnowledgeDoc, useProjectFetch, useProjectSync, useProjects, useWorkspaceSummary } from '../../api/hooks';
 import { useWs } from '../../api/context';
 import { A, useGo } from '../../app/link';
 import { currentFocus, deliveryModeOf, resolveProject } from '../../lib/projectOverview';
@@ -87,6 +87,7 @@ export function ProjectOverviewRoute(): React.ReactElement {
                 {delivery.inherited ? ' · inherited' : ''}
               </Badge>
               {project.status !== 'ready' ? <Badge tone="modified">{project.status}</Badge> : null}
+              <ProjectSyncStatus projectId={project.id} />
             </div>
             <CurrentFocus projectId={project.id} />
           </section>
@@ -108,6 +109,45 @@ export function ProjectOverviewRoute(): React.ReactElement {
         </div>
       </PageBody>
     </Page>
+  );
+}
+
+/**
+ * A project that is `in_sync` renders nothing (VS-131, criterion 4). `behind` is the routine case —
+ * an ordinary merge landing on the remote before the next check catches it up — so it gets the same
+ * unalarming tone as `project.status`'s `modified` badge above, plus the one action that resolves
+ * it. `diverged` gets the alarm tone and says plainly that a human must act outside AgentConductor;
+ * it is never offered the Sync button, which cannot fix it.
+ */
+function ProjectSyncStatus({ projectId }: { projectId: string }): React.ReactElement | null {
+  const sync = useProjectSync(projectId);
+  const fetchMutation = useProjectFetch(projectId);
+  const state = sync.data?.syncState;
+  if (!state || state === 'in_sync') return null;
+
+  if (state === 'diverged') {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <Badge tone="removed">Diverged</Badge>
+        <span className="text-micro text-text-2">
+          the clone holds history the remote no longer recognises — a human must resolve this outside AgentConductor
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Badge tone="modified">{sync.data?.behindBy ?? '?'} behind</Badge>
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => fetchMutation.mutate()}
+        disabled={fetchMutation.isPending}
+      >
+        {fetchMutation.isPending ? 'Syncing…' : 'Sync'}
+      </Button>
+    </span>
   );
 }
 

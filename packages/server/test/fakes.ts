@@ -147,7 +147,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   /** A row a test inserted with `h.db.run("INSERT INTO projects ...")`, else the same stub `projects.get` always returned. */
   const getProject = (id: string): Project =>
     db.get<Project>('SELECT * FROM projects WHERE id = ? OR slug = ?', [id, id])
-    ?? ({ id, slug: id, name: id, gitUrl: '', defaultBranch: 'main', landingBranch: null, clonePath: tmpdir(), maxWorkers: 4, setupCommand: null, worktreeProvider: 'git', openspecEnabled: true, openspecVersion: null, policies: {}, status: 'ready', lastFetchedAt: null, errorText: null } as Project);
+    ?? ({ id, slug: id, name: id, gitUrl: '', defaultBranch: 'main', landingBranch: null, clonePath: tmpdir(), maxWorkers: 4, setupCommand: null, worktreeProvider: 'git', openspecEnabled: true, openspecVersion: null, policies: {}, status: 'ready', syncState: 'in_sync', lastFetchedAt: null, errorText: null } as Project);
   // Real, like the changelog: read-only over this fake's real db and a real git clone a test points `clonePath` at.
   const historyReader = createHistoryReader(db);
 
@@ -239,6 +239,8 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       list: () => [], get: getProject,
       history: (id: string, query?: HistoryQuery) => historyReader.history(getProject(id), query),
       commit: (id: string, sha: string) => historyReader.commit(getProject(id), sha),
+      checkSync: async () => ({ syncState: 'in_sync' as const, behindBy: null }),
+      fetch: async () => ({ head: 'deadbeef', fastForwarded: false }),
     }),
     roles: impl('roles', {
       list: () => [],

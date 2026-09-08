@@ -205,6 +205,83 @@ describe('projects', () => {
     expect(existsSync(join(project.clonePath, 'edge-only.txt'))).toBe(true);
   });
 
+  it('marks the clone diverged, not just failed, when it cannot be fast-forwarded (VS-131)', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, cfg(src));
+    // Rewrite the remote's tip in place (an amend) rather than adding on top of it: the clone's HEAD
+    // is then not an ancestor of the new tip at all, the same shape a force-push leaves behind.
+    writeFileSync(join(src, 'README.md'), '# web (rewritten)\n', 'utf8');
+    await git(['add', '.'], src);
+    await git(['commit', '--amend', '-m', 'init (rewritten)'], src);
+
+    const before = (await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim();
+    const result = await projects.fetch(project.id);
+    expect(result.fastForwarded).toBe(false);
+    expect((await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim()).toBe(before);
+    expect(h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!.syncState).toBe('diverged');
+    expect(h.events.some((e) => e.type === 'project.updated' && (e.payload as { syncState?: string }).syncState === 'diverged')).toBe(true);
+  });
+
+  it('marks the clone in_sync once fetch fast-forwards it', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, cfg(src));
+    expect(h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!.syncState).toBe('in_sync');
+    writeFileSync(join(src, 'second.txt'), 'more', 'utf8');
+    await git(['add', '.'], src);
+    await git(['commit', '-m', 'second'], src);
+
+    await projects.fetch(project.id);
+    expect(h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!.syncState).toBe('in_sync');
+    expect(h.events.some((e) => e.type === 'project.updated' && (e.payload as { syncState?: string }).syncState === 'in_sync')).toBe(true);
+  });
+
+  describe('checkSync (VS-131)', () => {
+    it('reports in_sync without touching the clone', async () => {
+      const src = await sourceRepo();
+      const project = await projects.add(HUMAN, cfg(src));
+      const before = (await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim();
+
+      const result = await projects.checkSync(project.id);
+      expect(result).toEqual({ syncState: 'in_sync', behindBy: null });
+      expect((await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim()).toBe(before);
+      expect(h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!.syncState).toBe('in_sync');
+    });
+
+    it('reports behind with a commit count, and never fast-forwards the clone itself', async () => {
+      const src = await sourceRepo();
+      const project = await projects.add(HUMAN, cfg(src));
+      const before = (await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim();
+      writeFileSync(join(src, 'second.txt'), 'more', 'utf8');
+      await git(['add', '.'], src);
+      await git(['commit', '-m', 'second'], src);
+      writeFileSync(join(src, 'third.txt'), 'more still', 'utf8');
+      await git(['add', '.'], src);
+      await git(['commit', '-m', 'third'], src);
+
+      const result = await projects.checkSync(project.id);
+      expect(result).toEqual({ syncState: 'behind', behindBy: 2 });
+      // Read-only: HEAD and the working tree are unchanged, unlike fetch()'s merge --ff-only.
+      expect((await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim()).toBe(before);
+      expect(existsSync(join(project.clonePath, 'second.txt'))).toBe(false);
+      expect(h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!.syncState).toBe('behind');
+    });
+
+    it('reports diverged and discards nothing when the remote was rewritten', async () => {
+      const src = await sourceRepo();
+      const project = await projects.add(HUMAN, cfg(src));
+      const before = (await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim();
+      writeFileSync(join(src, 'README.md'), '# web (rewritten)\n', 'utf8');
+      await git(['add', '.'], src);
+      await git(['commit', '--amend', '-m', 'init (rewritten)'], src);
+
+      const result = await projects.checkSync(project.id);
+      expect(result).toEqual({ syncState: 'diverged', behindBy: null });
+      expect((await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim()).toBe(before);
+      expect((await git(['cat-file', '-e', before], project.clonePath)).ok).toBe(true);
+      expect(h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!.syncState).toBe('diverged');
+    });
+  });
+
   it('reconcile creates rows for declared projects and leaves orphans alone', async () => {
     const src = await sourceRepo();
     h.ctx.config = { ...h.ctx.config, projects: [cfg(src)] };

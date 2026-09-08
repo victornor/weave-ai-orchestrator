@@ -131,6 +131,14 @@ export type WorktreeProviderId = (typeof WORKTREE_PROVIDERS)[number];
 export const PROJECT_STATUSES = ['cloning', 'ready', 'error', 'archived'] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
+/**
+ * How a project's primary clone compares to `origin/<landingBranch>` (VS-131): `behind` is
+ * fast-forwardable and routine; `diverged` means the clone holds a commit the remote's tip no
+ * longer recognises (a force-push or rebase upstream) and needs a human, never an automatic fix.
+ */
+export const PROJECT_SYNC_STATES = ['in_sync', 'behind', 'diverged'] as const;
+export type ProjectSyncState = (typeof PROJECT_SYNC_STATES)[number];
+
 export const WORKSPACE_STATUSES = ['active', 'paused', 'archived'] as const;
 export type WorkspaceStatus = (typeof WORKSPACE_STATUSES)[number];
 

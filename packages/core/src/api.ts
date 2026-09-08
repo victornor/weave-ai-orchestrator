@@ -129,6 +129,8 @@ export interface ProjectsService {
   update(actor: Actor, id: string, patch: Partial<S.ProjectConfig>): Promise<S.Project>;
   remove(actor: Actor, id: string): Promise<void>;
   fetch(id: string): Promise<{ head: string; fastForwarded: boolean }>;   // git fetch + ff primary clone
+  /** Read-only (VS-131): fetches and classifies against origin/<landingBranch> without checkout or merge. */
+  checkSync(id: string): Promise<{ syncState: S.ProjectSyncState; behindBy: number | null }>;
   reconcile(): Promise<void>;                                              // declared vs db
   /** The project's commit graph (VS-96): default branch plus every live worker/ticket branch, paged. */
   history(id: string, query?: HistoryQuery): Promise<HistoryPage>;

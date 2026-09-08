@@ -112,6 +112,19 @@ describe("a project's commit graph (VS-96)", () => {
   });
 });
 
+describe("a project's sync state (VS-131)", () => {
+  it('is made stale, for that project alone, by project.updated', () => {
+    const keys = invalidated(event('project.updated', { entityId: 'p1', entityType: 'project' }));
+    expect(keys).toContain(JSON.stringify(qk.projectSync('ws1', 'p1')));
+    expect(keys).not.toContain(JSON.stringify(qk.projectSync('ws1', 'p2')));
+  });
+
+  it('is left alone by an event on something other than a project', () => {
+    expect(invalidated(event('ticket.updated', { entityId: 'tk_1', entityType: 'ticket' })))
+      .not.toContain(JSON.stringify(qk.projectSync('ws1', 'tk_1')));
+  });
+});
+
 describe('knowledge context events (VS-110)', () => {
   it('makes the knowledge-usage root and the naming ticket\'s own key stale', () => {
     const keys = invalidated(event('knowledge_usage.recorded', { entityId: 'run_1', entityType: 'run', payload: { runId: 'run_1', ticketId: 'tk_1' } }));

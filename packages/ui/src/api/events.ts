@@ -171,6 +171,8 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       inv(qk.projects(ws));
       // The default branch or the repository itself can change (VS-96).
       inv(qk.historyRoot(ws));
+      // A fetch or a sync check just ran against this project (VS-131) — its cached sync state is stale.
+      inv(qk.projectSync(ws, id));
       break;
     case 'role.hired':
     case 'role.activated':

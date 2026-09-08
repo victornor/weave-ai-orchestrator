@@ -48,7 +48,7 @@ describe('history: reading a project clone', () => {
     h = makeHarness();
     const row = h.db.get<{ clonePath: string; gitUrl: string; defaultBranch: string; slug: string }>('SELECT clone_path, git_url, default_branch, slug FROM projects WHERE id = ?', [h.projectId])!;
     await initRepo(row.clonePath);
-    project = { id: h.projectId, workspaceId: h.workspaceId, slug: row.slug, name: 'API', gitUrl: row.gitUrl, defaultBranch: row.defaultBranch, landingBranch: null, clonePath: row.clonePath, maxWorkers: 4, setupCommand: null, worktreeProvider: 'git', openspecEnabled: true, openspecVersion: null, policies: {}, status: 'ready', lastFetchedAt: null, errorText: null };
+    project = { id: h.projectId, workspaceId: h.workspaceId, slug: row.slug, name: 'API', gitUrl: row.gitUrl, defaultBranch: row.defaultBranch, landingBranch: null, clonePath: row.clonePath, maxWorkers: 4, setupCommand: null, worktreeProvider: 'git', openspecEnabled: true, openspecVersion: null, policies: {}, status: 'ready', syncState: 'in_sync', lastFetchedAt: null, errorText: null };
     history = createHistoryReader(h.db);
   });
   afterEach(() => h.cleanup());

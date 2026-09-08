@@ -513,6 +513,51 @@
 }
 .ac-prose a.ac-doclink:hover { border-bottom-style: solid; }
 
+/* VS-139: one-tap copy for a fenced code block or an inline code span in rendered markdown.
+   The button sits in its own row under the block rather than floating over it — the block itself
+   scrolls horizontally (`.ac-prose pre { overflow-x: auto }`), and an overlay button would end up
+   covering whatever text had scrolled beneath it instead of staying clear of it. */
+.ac-codeblock { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); margin: 0 0 var(--space-5); }
+.ac-prose .ac-codeblock:last-child { margin-bottom: 0; }
+.ac-prose .ac-codeblock pre { margin: 0; width: 100%; }
+.ac-copy-btn {
+  position: relative;
+  padding: 0.125rem var(--space-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r4);
+  background: var(--bg-1);
+  color: var(--text-3);
+  font-family: var(--ff-mono);
+  font-size: var(--fs-nano);
+  line-height: 1.4;
+  cursor: pointer;
+}
+.ac-copy-btn:hover { color: var(--text-1); border-color: var(--accent-edge); }
+.ac-prose code.ac-copy {
+  position: relative;
+  cursor: pointer;
+  text-decoration: underline dotted var(--line-3);
+  text-underline-offset: 2px;
+}
+/* A transient confirmation, positioned off the tapped element rather than replacing its text, so
+   the code or the button's own label is never overwritten by the state that says what happened to it. */
+[data-copy-state]::after {
+  content: 'Copied';
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  right: 0;
+  padding: 0.0625rem var(--space-3);
+  border-radius: var(--r4);
+  background: var(--text-strong);
+  color: var(--bg-1);
+  font-family: var(--ff-mono);
+  font-size: var(--fs-nano);
+  white-space: nowrap;
+  pointer-events: none;
+}
+[data-copy-state='unavailable']::after { content: "Can't copy here"; }
+[data-copy-state='failed']::after { content: "Couldn't copy"; }
+
 /* highlight.js token classes (VS-107 diff viewer): scoped under one class so a plain diff line
    (no language recognised, or the grammar still loading) is unaffected. */
 .ac-diff-code .hljs-keyword,

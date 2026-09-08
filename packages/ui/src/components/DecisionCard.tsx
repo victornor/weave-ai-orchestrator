@@ -4,6 +4,7 @@ import type { Decision, DecisionAnswerInputs, DecisionInput, UiStatus } from '@a
 import { A } from '../app/link';
 import { Button } from './Button';
 import { Composer } from './Composer';
+import { Markdown } from './Markdown';
 import { StatusGlyph } from './StatusGlyph';
 import { clock } from '../lib/format';
 import { cx } from '../lib/cx';
@@ -237,7 +238,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
 
       <div className="p-3.5">
         <h3 className="mb-1.5 text-head font-semibold leading-snug tracking-head text-text-strong">{decision.title}</h3>
-        {decision.context ? <p className="mb-3 text-meta leading-relaxed text-text-2">{decision.context}</p> : null}
+        {decision.context ? <Markdown source={decision.context} className="mb-3 text-meta leading-relaxed text-text-2" /> : null}
 
         {/* plan approval — the proposal's task list */}
         {target.tasks?.length ? (

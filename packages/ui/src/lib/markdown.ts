@@ -8,15 +8,32 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/**
+ * Marks where an inline code span was, so it survives the doc-link/bold/italic/link passes below
+ * untouched — those regexes don't know a `<code>` tag is off limits, and used to reinterpret
+ * markdown-looking characters inside one (`` `**not bold**` `` rendered as `<strong>`). The marker
+ * character can't occur in normal input; if it somehow does, restoring it below just leaves that
+ * literal character in place, and the surrounding code span above will not become HTML.
+ */
+const CODE_MARK = '\u0000';
+
 function inline(s: string): string {
-  return esc(s)
+  const spans: string[] = [];
+  const withPlaceholders = esc(s).replace(/`([^`]+)`/g, (_m, c: string) => {
+    spans.push(c);
+    return `${CODE_MARK}${spans.length - 1}${CODE_MARK}`;
+  });
+  const rest = withPlaceholders
     .replace(/\[\[([a-z0-9][a-z0-9-]*)(?:\|([^\]]+))?\]\]/g, (_m, slug: string, label?: string) => `<a href="#doc:${slug}" class="ac-doclink">${label ?? slug}</a>`)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|\W)\*([^*\n]+)\*/g, '$1<em>$2</em>')
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, t: string, h: string) =>
       /^(https?:|\/|#)/.test(h) ? `<a href="${h}" target="_blank" rel="noreferrer">${t}</a>` : `${t}`,
     );
+  return rest.replace(new RegExp(`${CODE_MARK}(\\d+)${CODE_MARK}`, 'g'), (_m, i: string) => {
+    const c = spans[Number(i)]!;
+    return `<code class="ac-copy" data-copy="${c}">${c}</code>`;
+  });
 }
 
 /**
@@ -29,6 +46,7 @@ export function markdownToHtml(src: string, opts: { breaks?: boolean } = {}): st
   const lines = src.replace(/\r\n/g, '\n').split('\n');
   const out: string[] = [];
   let inCode = false;
+  let codeLines: string[] = [];
   let listType: 'ul' | 'ol' | null = null;
   let para: string[] = [];
 
@@ -47,6 +65,16 @@ export function markdownToHtml(src: string, opts: { breaks?: boolean } = {}): st
       listType = null;
     }
   };
+  // Buffered rather than streamed line by line: the copy button needs the block's whole exact
+  // source in one `data-copy` attribute, and emitting it in one shot avoids the extra blank line
+  // `<pre><code>` used to leave at the top and bottom of every block (one array entry per line,
+  // joined with `\n`, put a bare newline right after the opening tag and right before the closing
+  // one).
+  const flushCode = (): void => {
+    const raw = esc(codeLines.join('\n'));
+    out.push(`<div class="ac-codeblock"><pre><code>${raw}</code></pre><button type="button" class="ac-copy-btn" data-copy="${raw}" aria-label="Copy code">Copy</button></div>`);
+    codeLines = [];
+  };
 
   for (const raw of lines) {
     const line = raw.replace(/\s+$/, '');
@@ -54,12 +82,12 @@ export function markdownToHtml(src: string, opts: { breaks?: boolean } = {}): st
     if (/^```/.test(line)) {
       flushPara();
       closeList();
-      out.push(inCode ? '</code></pre>' : '<pre><code>');
+      if (inCode) flushCode();
       inCode = !inCode;
       continue;
     }
     if (inCode) {
-      out.push(esc(raw));
+      codeLines.push(raw);
       continue;
     }
     if (!line.trim()) {
@@ -108,6 +136,6 @@ export function markdownToHtml(src: string, opts: { breaks?: boolean } = {}): st
   }
   flushPara();
   closeList();
-  if (inCode) out.push('</code></pre>');
+  if (inCode) flushCode();
   return out.join('\n');
 }

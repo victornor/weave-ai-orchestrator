@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: Commands in chat messages and decision cards can be copied with one tap,
+  and decision card text renders as markdown at all

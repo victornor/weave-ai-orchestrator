@@ -67,13 +67,13 @@ pull request. Collapsing a file and opening it again SHALL NOT necessarily reque
 
 ### Requirement: Syntax highlighting for the languages this workspace uses
 
-A file's diff SHALL be syntax-highlighted for the languages this workspace's repositories are written
-in, at minimum. A file whose language is not recognised SHALL render unhighlighted rather than fail to
-render.
+A file's diff SHALL be syntax-highlighted for at least: TypeScript, TSX, JavaScript, JSX, JSON, YAML,
+Markdown, CSS, SQL, shell, HTML, C#, Rust, Java, PHP, C++, C, Go, Python, Ruby, Kotlin, Swift and XML.
+A file whose language is not recognised SHALL render unhighlighted rather than fail to render.
 
 #### Scenario: A recognised language
 
-- **WHEN** a changed file's language is one this workspace's repositories use
+- **WHEN** a changed file's language is one of the named minimum
 - **THEN** its diff is syntax-highlighted
 
 #### Scenario: An unrecognised language
@@ -178,3 +178,14 @@ width without a horizontal-scroll trap, keeping the section's own collapse behav
 
 - **WHEN** a pull request's diff is opened at a phone width
 - **THEN** it is usable in a single column, with no horizontal scrolling required to read a line
+
+### Requirement: Highlighting never changes what the diff says
+
+Syntax highlighting SHALL be a rendering concern only. The lines, addition/removal markers, line
+numbers and structure a diff shows SHALL be identical whether or not the file's language is
+highlighted.
+
+#### Scenario: Highlighting does not alter diff content
+
+- **WHEN** a changed file's language is highlighted, partially highlighted, or not recognised at all
+- **THEN** the diff shows exactly the same lines, additions and removals in every case

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   patches: [] as Array<Record<string, unknown>>,
   projectPatches: [] as Array<{ id: string; patch: Record<string, unknown> }>,
+  projectPatchError: null as string | null,
   projects: [] as Array<Record<string, unknown>>,
   config: {} as Record<string, unknown>,
   workspaces: [] as Array<Record<string, unknown>>,
@@ -33,7 +34,14 @@ vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: state.projects, isLoading: false }),
   useRuntimes: () => ({ data: [] }),
   useAddProject: () => ({ mutate: vi.fn(), isPending: false }),
-  usePatchProject: () => ({ mutate: (p: { id: string; patch: Record<string, unknown> }) => state.projectPatches.push(p), isPending: false }),
+  usePatchProject: () => ({
+    mutate: (p: { id: string; patch: Record<string, unknown> }, opts?: { onSuccess?: () => void; onError?: (e: Error) => void }) => {
+      state.projectPatches.push(p);
+      if (state.projectPatchError) opts?.onError?.(new Error(state.projectPatchError));
+      else opts?.onSuccess?.();
+    },
+    isPending: false,
+  }),
   useDaemonUpdate: () => ({ data: undefined, isLoading: false, isError: false, refetch: vi.fn() }),
   useDaemonUpgrade: () => ({ data: undefined, isError: false }),
   useTelegramTokenStatus: () => ({ data: state.telegramStatus }),
@@ -65,6 +73,7 @@ const { SettingsRoute } = await import('../routes/Settings');
 beforeEach(() => {
   state.patches = [];
   state.projectPatches = [];
+  state.projectPatchError = null;
   state.projects = [];
   state.workspaces = [];
   state.went = [];
@@ -146,6 +155,62 @@ describe('Settings — YOLO mode', () => {
     state.projects = [{ ...state.projects[0]!, policies: { requireCi: true, yolo: false } }];
     fireEvent.change(screen.getByLabelText('YOLO mode for api'), { target: { value: 'inherit' } });
     expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { policies: { requireCi: true } } });
+  });
+});
+
+describe('Settings — a project landing branch (VS-122)', () => {
+  beforeEach(() => {
+    state.projects = [{ id: 'p1', slug: 'api', status: 'ready', gitUrl: 'g', maxWorkers: 2, defaultBranch: 'main', landingBranch: null, policies: {} }];
+  });
+
+  it('shows the default branch as a placeholder when none is declared, and sets one on blur', () => {
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+
+    const field = screen.getByLabelText('landing branch for api');
+    expect(field).toHaveValue('');
+    expect(field).toHaveAttribute('placeholder', 'main');
+
+    fireEvent.change(field, { target: { value: 'edge' } });
+    fireEvent.blur(field);
+    expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: 'edge' } });
+  });
+
+  it('shows an already-declared landing branch and changes it on blur', () => {
+    state.projects = [{ ...state.projects[0]!, landingBranch: 'edge' }];
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+
+    const field = screen.getByLabelText('landing branch for api');
+    expect(field).toHaveValue('edge');
+
+    fireEvent.change(field, { target: { value: 'staging' } });
+    fireEvent.blur(field);
+    expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: 'staging' } });
+  });
+
+  it('clearing the field sends an empty string', () => {
+    state.projects = [{ ...state.projects[0]!, landingBranch: 'edge' }];
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+
+    const field = screen.getByLabelText('landing branch for api');
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.blur(field);
+    expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: '' } });
+  });
+
+  it('a rejected branch is toasted and the field reverts rather than keeping the bad value', () => {
+    state.projectPatchError = "branch 'nope' was not found on origin";
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+
+    const field = screen.getByLabelText('landing branch for api');
+    fireEvent.change(field, { target: { value: 'nope' } });
+    fireEvent.blur(field);
+
+    expect(state.toasts.at(-1)).toMatchObject({ title: 'Landing branch not changed', detail: "branch 'nope' was not found on origin" });
+    expect(field).toHaveValue('');
   });
 });
 

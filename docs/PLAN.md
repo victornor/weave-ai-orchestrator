@@ -1228,6 +1228,7 @@ conductor presenter [--surface ...]                     client-side window manag
 conductor project add <git-url> [--id] [--branch] [--no-follow]              clone, init openspec, create the scout ticket that seeds the project KB; follows the job's sub-steps and output live
 conductor project retry <id> [--no-follow]              re-run a failed add against whatever is already on disk
 conductor project list|show|remove|fetch|set-policy <key>=<value>...
+conductor project set-landing-branch <id> [branch] [--clear]        set/change/clear the landing branch after creation (VS-122); applies to the next ticket action, no restart needed
 conductor runtime list|detect|login <id>              runtime availability and auth per workspace
 conductor role list|show|activate|pause|resume|retire|charter show|charter rollback|memory show
 conductor worker list|show|pause|resume|relaunch|cancel|purge

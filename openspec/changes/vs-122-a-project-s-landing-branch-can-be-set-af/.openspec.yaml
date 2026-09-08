@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: Let a project's landing branch be set, changed and cleared after creation,
+  from the web app and conductor CLI

@@ -391,6 +391,22 @@ function ProjectsSection(): React.ReactElement {
                 />
               </label>
               <label className="flex items-center gap-1.5">
+                <span className="ac-label">landing branch</span>
+                <input
+                  aria-label={`landing branch for ${p.slug}`}
+                  placeholder={p.defaultBranch}
+                  defaultValue={p.landingBranch ?? ''}
+                  onBlur={(e) => {
+                    const value = e.target.value.trim();
+                    patch.mutate(
+                      { id: p.id, patch: { landingBranch: value } },
+                      { onError: (err) => { e.target.value = p.landingBranch ?? ''; toast.push({ title: 'Landing branch not changed', detail: err.message, status: 'failed' }); } },
+                    );
+                  }}
+                  className="ac-mono h-7 w-28 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+                />
+              </label>
+              <label className="flex items-center gap-1.5">
                 <span className="ac-label">yolo</span>
                 <select
                   aria-label={`YOLO mode for ${p.slug}`}

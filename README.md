@@ -307,6 +307,7 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | `conductor project retry <id> [--no-follow]` | re-run an add that failed, reusing whatever is already on disk |
 | `conductor project list \| show <id> \| remove <id> \| fetch [id]` | projects; `fetch` fast-forwards the primary clone |
 | `conductor project set-policy <id> <key>=<value>...` | per-project policies (`deliveryMode`, `mergeMethod`, `requireCi`, …) |
+| `conductor project set-landing-branch <id> [branch] \| --clear` | set, change or clear the branch tickets' work is expected to reach, after the project was added |
 | `conductor runtime list \| detect \| models <id> \| login <id> [--print]` | coding CLIs and their auth |
 
 ### Talking and deciding

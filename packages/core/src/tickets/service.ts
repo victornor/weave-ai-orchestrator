@@ -226,6 +226,13 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         }
       }
     }
+    // A decision still open on a ticket that just finished has nothing left to decide (VS-142) —
+    // closing it here covers every path that reaches a terminal status (transition, cancel, mergeDone).
+    try {
+      deps().decisions.withdrawForTicket(actor, t.id, `${t.identifier} reached ${t.status}`);
+    } catch (e) {
+      log.warn({ err: e, ticketId: t.id }, 'closing open decisions for a terminal ticket failed');
+    }
   }
 
   function facts(t: Ticket, input: TransitionInput): GuardFacts {

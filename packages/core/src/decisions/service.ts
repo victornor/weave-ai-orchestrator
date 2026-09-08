@@ -73,6 +73,17 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     }
   }
 
+  /** Every still-open decision scoped to `ticketId`, withdrawn with `reason` (VS-142: a ticket that reaches done/cancelled leaves nothing open behind it). */
+  function withdrawOpenForTicket(actor: Actor, ticketId: string, reason: string): number {
+    const rows = db.all<{ id: string }>('SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND status = ?', [ws, ticketId, 'open']);
+    for (const r of rows) {
+      db.update('decisions', r.id, { status: 'withdrawn' as DecisionStatus, answerText: reason });
+      recordActivity(db, ws, actor, 'decision.withdraw', 'decision', r.id, { reason }, ticketId);
+      ctx.events.emit('decision.answered', 'decision', r.id, get(r.id));
+    }
+    return rows.length;
+  }
+
   function supersedeOpen(actor: Actor, ticketId: string | null, correlationKey: string): number {
     const rows = db.all<{ id: string }>(
       'SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id IS ? AND correlation_key = ? AND status = ?',
@@ -451,6 +462,10 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
 
     supersedeForTarget(actor, ticketId, correlationKey) {
       return tx(db, () => supersedeOpen(actor, ticketId, correlationKey));
+    },
+
+    withdrawForTicket(actor, ticketId, reason) {
+      return tx(db, () => withdrawOpenForTicket(actor, ticketId, reason));
     },
 
     async expireDue() {

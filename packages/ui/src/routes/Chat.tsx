@@ -6,7 +6,7 @@ import { Composer } from '../components/Composer';
 import { DecisionCard } from '../components/DecisionCard';
 import { PlanPreview } from '../components/PlanPreview';
 import { DispatchLabel } from '../components/DispatchLabel';
-import { WorkerChip } from '../components/Chips';
+import { WorkerChip, ProjectTag } from '../components/Chips';
 import { Skeleton } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Markdown } from '../components/Markdown';
@@ -516,8 +516,9 @@ export function ChatRoute(): React.ReactElement {
     };
     if (offline) {
       queueThisMessage();
-      // Cleared on both paths: the next message must not be silently attributed to the same question.
-      patch({ replyToId: null });
+      // Cleared on both paths: the next message must not be silently attributed to the same question,
+      // or land against a stale project the human forgot was still picked (VS-126).
+      patch({ replyToId: null, projectId: null });
       return;
     }
     setSending(true);
@@ -534,7 +535,7 @@ export function ChatRoute(): React.ReactElement {
         },
       },
     );
-    patch({ replyToId: null });
+    patch({ replyToId: null, projectId: null });
   };
 
   // Onboarding: the conductor's first-run interview is just Chat with a
@@ -801,21 +802,25 @@ function ProjectPicker({
   // leaving the control blank about what the next message would carry.
   const choosable = projects.filter((p) => p.status !== 'archived' || p.id === value);
   const orphan = value !== null && !choosable.some((p) => p.id === value);
+  const groupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Only on mount: a thread can open with a selection already scrolled out of view, but
+    // scrolling again on every later click would fight the human's own scroll position. Auto is
+    // always the leading tag, so a selection of Auto is never the one that needs scrolling into view.
+    const el = groupRef.current;
+    const chosen = el?.querySelector<HTMLElement>('[aria-checked="true"]');
+    if (chosen && chosen !== el?.firstElementChild) chosen.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, []);
+
   return (
-    <select
-      aria-label="Project for this message"
-      value={value ?? ''}
-      onChange={(e) => onChange(e.target.value || null)}
-      className="rounded-r4 border border-line-2 bg-bg-1 px-1.5 py-0.5 text-micro text-text-2 outline-none"
-    >
-      <option value="">All projects</option>
-      {orphan ? <option value={value}>{value}</option> : null}
+    <div ref={groupRef} role="radiogroup" aria-label="Project for this message" className="flex gap-1 overflow-x-auto">
+      <ProjectTag label="Auto" active={value === null} onClick={() => onChange(null)} />
+      {orphan ? <ProjectTag label={value} active onClick={() => onChange(null)} /> : null}
       {choosable.map((p) => (
-        <option key={p.id} value={p.id}>
-          {p.name}
-        </option>
+        <ProjectTag key={p.id} label={p.name} active={p.id === value} onClick={() => onChange(p.id === value ? null : p.id)} />
       ))}
-    </select>
+    </div>
   );
 }
 

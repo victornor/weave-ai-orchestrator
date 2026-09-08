@@ -32,6 +32,36 @@ export function TicketChip({
   );
 }
 
+/** One entry in a single-select tag strip, e.g. the chat's project picker (`role="radio"`, expects a `role="radiogroup"` parent). */
+export function ProjectTag({
+  label,
+  active,
+  onClick,
+  className,
+}: {
+  label: string;
+  active: boolean;
+  onClick?: () => void;
+  className?: string;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onClick}
+      className={cx(
+        'inline-flex max-w-full shrink-0 items-center gap-1.5 rounded-r4 border px-2 py-1 text-micro',
+        'transition-colors duration-(--dur-fast) ease-ac',
+        active ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 bg-bg-2 text-text-3 hover:bg-bg-3',
+        className,
+      )}
+    >
+      <span className="ac-truncate max-w-32">{label}</span>
+    </button>
+  );
+}
+
 export function WorkerChip({
   name,
   status,

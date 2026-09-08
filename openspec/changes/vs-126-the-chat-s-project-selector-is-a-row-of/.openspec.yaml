@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: Replace the chat project dropdown with a horizontal strip of selectable
+  tags plus an Auto option

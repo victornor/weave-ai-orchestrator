@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type { EventType, WorkspaceEvent } from '@agent-conductor/shared';
+import type { Decision, EventType, WorkspaceEvent } from '@agent-conductor/shared';
 import { qk } from './keys';
 import { BACKOFF, type ConnectionState, type ConnectionStatus } from './sseStream';
 
@@ -20,6 +20,9 @@ export class EventStream {
   private eventListeners = new Set<EventListener>();
   private status: ConnectionStatus = { state: 'connecting', capturedAt: null, lastSeq: 0, attempts: 0 };
   private stopped = false;
+  /** Whether an earlier connection has already opened this session — the first `onopen` is a fresh
+   *  mount, already covered by every query's own initial fetch; every one after it is a reconnect. */
+  private everConnected = false;
 
   constructor(
     private readonly workspace: string,
@@ -82,6 +85,11 @@ export class EventStream {
 
     es.onopen = () => {
       this.set({ state: 'connected', attempts: 0, capturedAt: new Date().toISOString() });
+      // Whatever caused the previous connection to end — a clean drop or one that stalled silently
+      // and was never seen as an error — the decisions list may have moved on without us. Reconcile
+      // it against the server rather than trusting whatever event replay already caught (VS-140).
+      if (this.everConnected) void this.qc.invalidateQueries({ queryKey: qk.decisions(this.workspace) });
+      this.everConnected = true;
     };
     es.onerror = () => {
       es.close();
@@ -155,6 +163,34 @@ const TRACKED: EventType[] = [
   'auth.revoked',
   'presentation.updated',
 ];
+
+/**
+ * Applies a decision's current state to every cached decisions-list query directly from the event
+ * payload — `decision.superseded`/`answered`/`expired` already carry the full row — so the view stops
+ * showing a stale card the instant the event arrives, without waiting on the round trip the
+ * `invalidateQueries` call below still kicks off as a backstop (VS-140).
+ *
+ * A list query's own requested `status` filter, read off its query key's params, decides whether the
+ * updated decision still belongs in that particular cached array (Chat's `['open','answered']` query
+ * keeps an answered card as the record of the conversation) or has to be removed from it (Needs You's
+ * `status: 'open'` query, once the decision is no longer open).
+ */
+function patchDecisionCaches(qc: QueryClient, ws: string, next: Decision | null | undefined): void {
+  if (!next?.id) return;
+  for (const query of qc.getQueryCache().findAll({ queryKey: qk.decisions(ws) })) {
+    const key = query.queryKey as readonly unknown[];
+    const params = key[key.length - 1];
+    // `qk.decision(ws, id)` ends in a string id, not a params object — skip it here; it is patched below.
+    if (!params || typeof params !== 'object' || Array.isArray(params)) continue;
+    const old = query.state.data as Decision[] | undefined;
+    if (!old?.some((d) => d.id === next.id)) continue;
+    const status = (params as { status?: string | string[] }).status;
+    const statuses = status === undefined ? null : Array.isArray(status) ? status : [status];
+    const stillMatches = statuses === null || statuses.includes(next.status);
+    qc.setQueryData<Decision[]>(query.queryKey, stillMatches ? old.map((d) => (d.id === next.id ? next : d)) : old.filter((d) => d.id !== next.id));
+  }
+  qc.setQueryData<Decision>(qk.decision(ws, next.id), (old) => (old ? next : old));
+}
 
 /** Map one event onto the query keys it makes stale. */
 export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent): void {
@@ -235,10 +271,16 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       // A recorded `branch` work product can add a ref the History section covers (VS-96).
       inv(qk.historyRoot(ws));
       break;
-    case 'decision.created':
     case 'decision.answered':
     case 'decision.expired':
     case 'decision.superseded':
+      patchDecisionCaches(qc, ws, evt.payload as Decision);
+      inv(qk.decisions(ws));
+      inv(qk.decision(ws, id));
+      inv(qk.briefing(ws));
+      inv(qk.workspaces());
+      break;
+    case 'decision.created':
       inv(qk.decisions(ws));
       inv(qk.decision(ws, id));
       inv(qk.briefing(ws));

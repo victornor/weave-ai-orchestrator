@@ -10,6 +10,7 @@ import { useAnswerDecision, useDecisions, useProjects, useTickets, useWorkers, u
 import { useConnection, useWs } from '../api/context';
 import { enqueue, useQueue } from '../lib/queue';
 import { decisionCarriesSecret } from '../lib/decisionSecrets';
+import { staleAnswerCopy } from '../lib/decisionStaleness';
 import { useToast } from '../components/Toast';
 import { useGo } from '../app/link';
 import { useListNav } from '../lib/hotkeys';
@@ -65,11 +66,25 @@ export function NeedsYouRoute(): React.ReactElement {
       { id, ...a },
       {
         onSuccess: () => toast.push({ title: 'Recorded', detail: a.key ? `Answer: ${a.key}` : undefined, status: 'done', ttl: 4000 }),
-        onError: (e) => toast.push({
-          title: carriesSecret ? 'Not sent' : 'Could not record that answer',
-          detail: carriesSecret ? `${e.message} — nothing was stored on this device; send it again.` : e.message,
-          status: 'failed',
-        }),
+        onError: (e) => {
+          // A stale card (superseded, answered or expired elsewhere) is not a delivery failure — say
+          // what happened instead of the raw error, and offer a way to the replacement (VS-140).
+          const stale = staleAnswerCopy(e, decisions.data?.find((d) => d.id === id)?.ticketId ?? null);
+          if (stale) {
+            toast.push({
+              title: stale.title,
+              detail: stale.detail,
+              status: 'failed',
+              action: stale.ticketId ? { label: 'View the new one', run: () => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: stale.ticketId! } }) } : undefined,
+            });
+            return;
+          }
+          toast.push({
+            title: carriesSecret ? 'Not sent' : 'Could not record that answer',
+            detail: carriesSecret ? `${e.message} — nothing was stored on this device; send it again.` : e.message,
+            status: 'failed',
+          });
+        },
       },
     );
   };

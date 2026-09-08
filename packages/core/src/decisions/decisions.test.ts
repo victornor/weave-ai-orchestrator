@@ -101,7 +101,35 @@ describe('decisions', () => {
     const d = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'q', options: [{ key: 'a', label: 'A' }] });
     await expect(decisions.answer(HUMAN, d.id, { key: 'nope' })).rejects.toMatchObject({ code: 'validation' });
     await decisions.answer(HUMAN, d.id, { key: 'a' });
-    await expect(decisions.answer(HUMAN, d.id, { key: 'a' })).rejects.toMatchObject({ code: 'wrong_status' });
+    await expect(decisions.answer(HUMAN, d.id, { key: 'a' })).rejects.toMatchObject({ code: 'wrong_status', details: { status: 'answered' } });
+  });
+
+  it('names the replacement when a stale answer hits a superseded decision, and never applies to it', async () => {
+    const t = ticket();
+    const first = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'v1', correlationKey: `plan_approval:${t.id}` });
+    const second = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'v2', correlationKey: `plan_approval:${t.id}` });
+
+    await expect(decisions.answer(HUMAN, first.id, { key: 'approve' })).rejects.toMatchObject({
+      code: 'wrong_status',
+      details: { status: 'superseded', supersededBy: second.id },
+    });
+
+    // The stale answer left the replacement exactly as it was — nothing about it was ever touched.
+    const untouched = decisions.get(second.id);
+    expect(untouched.status).toBe('open');
+    expect(untouched.answerKey).toBeNull();
+    expect(untouched.answeredAt).toBeNull();
+  });
+
+  it('omits supersededBy for an expired decision, which has no replacement', async () => {
+    const t = ticket();
+    const d = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'q', allowFreeText: true });
+    h.db.update('decisions', d.id, { status: 'expired' });
+    await expect(decisions.answer(HUMAN, d.id, { text: 'too late' })).rejects.toMatchObject({
+      code: 'wrong_status',
+      details: { status: 'expired' },
+    });
+    expect(decisions.get(d.id).answerText).toBeNull();
   });
 
   describe('plan approval side effects', () => {

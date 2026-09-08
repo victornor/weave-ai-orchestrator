@@ -1,12 +1,20 @@
 /** Which query keys one workspace event makes stale (`api/events.ts`). */
 import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
-import type { WorkspaceEvent } from '@agent-conductor/shared';
+import type { Decision, WorkspaceEvent } from '@agent-conductor/shared';
 import { invalidateFor } from '../api/events';
 import { qk } from '../api/keys';
 
 const event = (type: WorkspaceEvent['type'], over: Partial<WorkspaceEvent> = {}): WorkspaceEvent =>
   ({ type, seq: 1, entityId: 'dec_1', entityType: 'decision', payload: null, createdAt: '2026-09-05T10:00:00.000Z', ...over }) as WorkspaceEvent;
+
+const fakeDecision = (id: string, status: Decision['status'], over: Partial<Decision> = {}): Decision => ({
+  id, workspaceId: 'ws1', ticketId: 'tk_1', projectId: null, kind: 'plan_approval', owner: 'human',
+  askedByAgentId: null, askedInRunId: null, title: 'Plan', context: 'ctx', options: [], inputs: [],
+  allowFreeText: false, recommendation: null, status, answerKey: null, answerText: null,
+  answerInputs: null, answeredByKind: null, answeredById: null, answeredAt: null, expiresAt: null,
+  target: null, correlationKey: `plan_approval:tk_1`, createdAt: '2026-09-05T10:00:00.000Z', ...over,
+});
 
 /** The keys `invalidateQueries` was called with, as JSON so they compare by value. */
 function invalidated(evt: WorkspaceEvent): string[] {
@@ -29,6 +37,50 @@ describe('decision events', () => {
 
   it('leaves the workspace list alone for events that cannot change a Needs-you count', () => {
     expect(invalidated(event('ticket.created', { entityId: 'tk_1' }))).not.toContain(JSON.stringify(qk.workspaces()));
+  });
+});
+
+/**
+ * VS-140: closing the round trip between a decision leaving `open` and the view reflecting it.
+ * `invalidateFor` patches every cached decisions-list query synchronously from the event's own
+ * payload, before the `invalidateQueries` refetch it also still triggers.
+ */
+describe('decision cache patching', () => {
+  const withPatched = (evt: WorkspaceEvent, key: readonly unknown[], seed: Decision[]): unknown => {
+    const qc = new QueryClient();
+    vi.spyOn(qc, 'invalidateQueries').mockReturnValue(Promise.resolve());
+    qc.setQueryData(key, seed);
+    invalidateFor(qc, 'ws1', evt);
+    return qc.getQueryData(key);
+  };
+
+  it('removes a superseded decision from a query filtered to status: open, without a refetch', () => {
+    const key = [...qk.decisions('ws1'), { status: 'open', owner: 'human' }];
+    const seed = [fakeDecision('dec_1', 'open'), fakeDecision('dec_2', 'open')];
+    const next = event('decision.superseded', { payload: fakeDecision('dec_1', 'superseded') });
+    expect(withPatched(next, key, seed)).toEqual([fakeDecision('dec_2', 'open')]);
+  });
+
+  it('replaces an answered decision in place in a query whose filter still includes answered', () => {
+    const key = [...qk.decisions('ws1'), { status: ['open', 'answered'], owner: 'human', limit: 200 }];
+    const seed = [fakeDecision('dec_1', 'open')];
+    const answered = fakeDecision('dec_1', 'answered', { answerKey: 'approve', answeredByKind: 'human', answeredAt: '2026-09-08T19:00:00.000Z' });
+    const next = event('decision.answered', { payload: answered });
+    expect(withPatched(next, key, seed)).toEqual([answered]);
+  });
+
+  it('leaves a query untouched when the event names a decision it never had', () => {
+    const key = [...qk.decisions('ws1'), { status: 'open', owner: 'human' }];
+    const seed = [fakeDecision('dec_2', 'open')];
+    const next = event('decision.superseded', { entityId: 'dec_1', payload: fakeDecision('dec_1', 'superseded') });
+    expect(withPatched(next, key, seed)).toBe(seed);
+  });
+
+  it('does not touch the single-decision detail cache key when it has never been fetched', () => {
+    const qc = new QueryClient();
+    vi.spyOn(qc, 'invalidateQueries').mockReturnValue(Promise.resolve());
+    invalidateFor(qc, 'ws1', event('decision.superseded', { payload: fakeDecision('dec_1', 'superseded') }));
+    expect(qc.getQueryData(qk.decision('ws1', 'dec_1'))).toBeUndefined();
   });
 });
 

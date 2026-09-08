@@ -58,6 +58,21 @@ export function liveWorkersByTicket(workers: readonly Agent[]): Map<string, Agen
   return byTicket;
 }
 
+/**
+ * Ticket id → its paused worker, independent of `liveWorkersByTicket`. A paused worker is, by
+ * definition, not live (VS-137): a lookup filtered to `isLiveWorker` can never contain one, so the
+ * board's "paused · reason" badge needs this separate map rather than the live one to ever render.
+ */
+export function pausedWorkersByTicket(workers: readonly Agent[]): Map<string, Agent> {
+  const byTicket = new Map<string, Agent>();
+  for (const w of workers) {
+    if (!w.ticketId || w.status !== 'paused') continue;
+    const seen = byTicket.get(w.ticketId);
+    if (!seen || w.createdAt > seen.createdAt) byTicket.set(w.ticketId, w);
+  }
+  return byTicket;
+}
+
 /** Anything with `has(ticketId)`: the map above, or a plain set of ids. */
 export interface LiveLookup {
   has: (ticketId: string) => boolean;

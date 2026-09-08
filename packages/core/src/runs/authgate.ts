@@ -38,6 +38,24 @@ export function loginDecisionContext(runtimeId: string, detail: string | null): 
   ].filter((l) => l !== null).join('\n');
 }
 
+/** One open finding per ticket, whatever fails and however often, while the ticket's worker stays paused for this. */
+export const authOutageCorrelationKey = (ticketId: string): string => `auth-outage:${ticketId}`;
+
+export function authOutageTitle(agentName: string): string {
+  return `${agentName} is paused: its runtime's login expired`;
+}
+
+export function authOutageContext(runtimeId: string, detail: string | null): string {
+  return [
+    `${runtimeId}'s login expired and could not be refreshed, so this ticket's worker is paused.`,
+    detail ? `The runtime said: ${detail}` : null,
+    '',
+    'This is a fact about the runtime\'s one shared credential, not about this ticket or this worker:',
+    'it resumes on its own, on the same ticket, once the login is restored. No action is needed here',
+    'unless it keeps failing after several such outages.',
+  ].filter((l) => l !== null).join('\n');
+}
+
 /** Agents this workspace would run on `runtimeId`, whatever their current status. */
 function agentsOn(ctx: WorkspaceContext, runtimeId: string): Agent[] {
   return ctx.db.all<Agent>(
@@ -57,7 +75,7 @@ function agentsOn(ctx: WorkspaceContext, runtimeId: string): Agent[] {
 export function gateRuntimeForLogin(
   ctx: WorkspaceContext,
   deps: () => CoreServices,
-  input: { runtimeId: string; agentId?: string | null; runId?: string | null },
+  input: { runtimeId: string; agentId?: string | null; agentName?: string | null; runId?: string | null; ticketId?: string | null },
   rawDetail: string | null,
 ): void {
   const log = ctx.log('run');
@@ -111,6 +129,25 @@ export function gateRuntimeForLogin(
     });
     raised = true;
   });
+
+  // VS-137: the runtime-wide decision above is deliberately not attached to a ticket, so the
+  // conductor also gets a per-ticket notice — the same `gate_finding` escalation VS-127 already
+  // routes to it — naming exactly which ticket looks stalled and why. One per ticket per outage,
+  // the same idiom as the one card above; withdrawn by `finalize` on this ticket's next non-auth turn.
+  if (input.ticketId) {
+    step('tell the conductor about this ticket', () => {
+      const key = authOutageCorrelationKey(input.ticketId!);
+      const open = deps().decisions.list({ status: ['open'], ticketId: input.ticketId! }).find((d) => d.correlationKey === key);
+      if (open) return;
+      deps().decisions.create({ kind: 'system', id: null }, {
+        kind: 'gate_finding', owner: 'conductor', ticketId: input.ticketId!,
+        title: authOutageTitle(input.agentName ?? 'the worker'),
+        context: authOutageContext(runtimeId, detail),
+        target: { runtimeId, agentId: input.agentId ?? null },
+        correlationKey: key,
+      });
+    });
+  }
 
   // The channel path, deliberately: the conductor may be on this same runtime and unable to take a
   // turn, and an outage must not be able to hide behind an agent the outage itself has stopped.

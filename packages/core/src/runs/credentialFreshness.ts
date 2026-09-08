@@ -42,8 +42,19 @@ function isCurrentlyValid(facts: CredentialFacts): boolean {
   return Number.isFinite(expiresAt) && expiresAt > Date.now();
 }
 
-function messageFor(description: AccountDescription | null): string {
-  return description?.note ?? 'the credential could not be confirmed valid after a refresh attempt';
+/**
+ * VS-137: `description.note` is an informational fact about the account (how it is billed, or why it
+ * could not be described) — it is never a diagnosis of why the local credential did not check out,
+ * and must not be presented as one. It is only reused verbatim when `describeAccount` itself reported
+ * a problem (`billingType: 'unknown'`) or could not be reached at all (`description === null`); a
+ * successfully described account gets an honest message built from what was actually checked instead
+ * of its own unrelated note (this is what previously surfaced a billing note — "this account is
+ * billed per token; it has no plan limits" — as the reason a `credential_refresh_failed`).
+ */
+function messageFor(description: AccountDescription | null, facts: CredentialFacts): string {
+  if (!description) return 'the account could not be described, and the local credential is not currently confirmed valid';
+  if (description.billingType === 'unknown') return description.note ?? 'the credential could not be confirmed valid after a refresh attempt';
+  return `the account was described successfully (billing: ${description.billingType}) but the local credential is ${facts.present ? 'present with no confirmed valid session' : 'missing'} after a refresh attempt`;
 }
 
 async function refresh(input: EnsureFreshCredentialInput): Promise<FreshResult> {
@@ -56,7 +67,7 @@ async function refresh(input: EnsureFreshCredentialInput): Promise<FreshResult> 
   input.reconcile();
   const facts = input.adapter.readCredential!({ configHome: input.configHome });
   if (isCurrentlyValid(facts)) return { ok: true };
-  return { ok: false, message: messageFor(description) };
+  return { ok: false, message: messageFor(description, facts) };
 }
 
 /**

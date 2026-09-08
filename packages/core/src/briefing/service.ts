@@ -44,8 +44,9 @@ export function createBriefingService(ctx: WorkspaceContext): BriefingService {
     });
 
   const underway = (): S.Briefing['underway'] =>
-    ctx.db.all<{ workerId: string; workerName: string; ticketId: string; identifier: string; title: string; status: string }>(
-      `SELECT a.id AS workerId, a.name AS workerName, t.id AS ticketId, t.identifier AS identifier, t.title AS title, t.status AS status
+    ctx.db.all<{ workerId: string; workerName: string; workerStatus: string; workerPauseReason: string | null; ticketId: string; identifier: string; title: string; status: string }>(
+      `SELECT a.id AS workerId, a.name AS workerName, a.status AS workerStatus, a.pause_reason AS workerPauseReason,
+              t.id AS ticketId, t.identifier AS identifier, t.title AS title, t.status AS status
        FROM agents a JOIN tickets t ON t.id = a.ticket_id
        WHERE a.workspace_id = ? AND a.kind = 'worker' AND a.status <> 'retired' AND t.status NOT IN (${terminal})
        ORDER BY t.updated_at DESC`,

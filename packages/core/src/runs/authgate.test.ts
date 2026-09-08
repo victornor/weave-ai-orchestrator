@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAccountsService } from '../usage/accounts.js';
 import { createDispatcher } from './dispatcher.js';
 import { makeHarness, type TestHarness } from '../testing/context.js';
-import { LOGIN_PAUSE_CODE, gateRuntimeForLogin, loginCorrelationKey, ungateRuntime } from './authgate.js';
+import { LOGIN_PAUSE_CODE, authOutageCorrelationKey, gateRuntimeForLogin, loginCorrelationKey, ungateRuntime } from './authgate.js';
 
 let h: TestHarness;
 /** Every decision the fake service was asked to create, in order. */
@@ -240,6 +240,34 @@ describe('resume is not offered into a failure', () => {
 
     expect(() => workers.resume({ kind: 'human', id: null }, w)).not.toThrow();
     expect(agentRow(w).status).toBe('active');
+  });
+});
+
+describe('a ticket whose worker pauses for a login outage tells the conductor (VS-137)', () => {
+  it('raises a conductor-owned gate_finding on the ticket', () => {
+    gateRuntimeForLogin(h.ctx, h.deps, { runtimeId: 'claude', agentId: 'ag_1', agentName: 'Backend Engineer #7', ticketId: 'tkt_1' }, 'expired');
+
+    const onTicket = created.filter((d) => d['ticketId'] === 'tkt_1');
+    expect(onTicket).toHaveLength(1);
+    expect(onTicket[0]!['kind']).toBe('gate_finding');
+    expect(onTicket[0]!['owner']).toBe('conductor');
+    expect(onTicket[0]!['correlationKey']).toBe(authOutageCorrelationKey('tkt_1'));
+    // The runtime-wide, human-owned card is unaffected: this is additional, not a replacement.
+    expect(created.filter((d) => d['ticketId'] === null)).toHaveLength(1);
+  });
+
+  it('raises no second card on the same ticket while one is open', () => {
+    gateRuntimeForLogin(h.ctx, h.deps, { runtimeId: 'claude', agentId: 'ag_1', ticketId: 'tkt_1' }, 'expired');
+    gateRuntimeForLogin(h.ctx, h.deps, { runtimeId: 'claude', agentId: 'ag_1', ticketId: 'tkt_1' }, 'expired again');
+
+    expect(created.filter((d) => d['ticketId'] === 'tkt_1')).toHaveLength(1);
+  });
+
+  it('raises no error and no per-ticket card for an agent with no ticket', () => {
+    expect(() => gateRuntimeForLogin(h.ctx, h.deps, { runtimeId: 'claude', agentId: 'ag_1' }, 'expired')).not.toThrow();
+    expect(created.filter((d) => d['ticketId'] !== null)).toHaveLength(0);
+    // The workspace-wide decision still raises normally.
+    expect(created).toHaveLength(1);
   });
 });
 

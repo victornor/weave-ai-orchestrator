@@ -14,6 +14,7 @@ import {
   isLiveWorker,
   liveWorkersByTicket,
   mergeStrip,
+  pausedWorkersByTicket,
   recentlyFinished,
   ticketBoardStatus,
 } from '../lib/board';
@@ -125,6 +126,30 @@ describe('live workers on the board', () => {
   it('lets an open decision and a stall still win over a live worker', () => {
     expect(ticketBoardStatus('todo', { live: true, needsYou: true })).toBe('needs-you');
     expect(ticketBoardStatus('todo', { live: true, stalled: true })).toBe('stalled');
+  });
+});
+
+describe('paused workers on the board (VS-137)', () => {
+  it('is never in liveWorkersByTicket, since paused is not a live status', () => {
+    const paused = agent({ ticketId: 'tk_1', status: 'paused' });
+    expect(liveWorkersByTicket([paused]).has('tk_1')).toBe(false);
+  });
+
+  it('finds a ticket\'s paused worker independently of the live map', () => {
+    const map = pausedWorkersByTicket([
+      agent({ id: 'a1', ticketId: 'tk_1', status: 'paused' }),
+      agent({ id: 'a2', ticketId: 'tk_2', status: 'active' }),
+    ]);
+    expect(map.get('tk_1')?.id).toBe('a1');
+    expect(map.has('tk_2')).toBe(false);
+  });
+
+  it('prefers the newest paused worker when a ticket was relaunched', () => {
+    const map = pausedWorkersByTicket([
+      agent({ id: 'a1', ticketId: 'tk_1', status: 'paused', createdAt: '2026-09-01T09:00:00.000Z' }),
+      agent({ id: 'a2', ticketId: 'tk_1', status: 'paused', createdAt: '2026-09-02T09:00:00.000Z' }),
+    ]);
+    expect(map.get('tk_1')?.id).toBe('a2');
   });
 });
 

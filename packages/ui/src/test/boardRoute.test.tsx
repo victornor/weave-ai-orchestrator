@@ -1,12 +1,13 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Ticket } from '@agent-conductor/shared';
-import { ticket } from './factories';
+import type { Agent, Ticket } from '@agent-conductor/shared';
+import { agent, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
   search: {} as Record<string, string | undefined>,
   active: [] as Ticket[],
   finished: [] as Ticket[],
+  workers: [] as Agent[],
   queries: [] as Array<{ params: Record<string, unknown>; enabled: boolean }>,
   decisions: [] as Array<Record<string, unknown>>,
   config: {} as Record<string, unknown>,
@@ -25,7 +26,7 @@ vi.mock('../api/hooks', () => ({
   },
   useProjects: () => ({ data: [] }),
   useRoles: () => ({ data: [] }),
-  useWorkers: () => ({ data: [] }),
+  useWorkers: () => ({ data: state.workers }),
   useDecisions: () => ({ data: state.decisions }),
   useWorkspaceSummary: () => ({ data: { config: state.config } }),
 }));
@@ -48,6 +49,7 @@ beforeEach(() => {
   state.queries = [];
   state.decisions = [];
   state.config = {};
+  state.workers = [];
   state.go = vi.fn();
   state.active = [ticket({ id: 'tk_1', identifier: 'VS-1', title: 'Still going', status: 'in_progress' })];
   state.finished = [
@@ -55,6 +57,16 @@ beforeEach(() => {
     ticket({ id: 'tk_3', identifier: 'VS-3', title: 'Dropped yesterday', status: 'cancelled', completedAt: null, cancelledAt: daysAgo(1) }),
     ticket({ id: 'tk_4', identifier: 'VS-4', title: 'Landed last month', status: 'done', completedAt: daysAgo(31) }),
   ];
+});
+
+describe('BoardRoute paused-worker reason (VS-137)', () => {
+  it('shows a paused worker\'s reason on its ticket card, though it is not a live worker', () => {
+    state.workers = [agent({ id: 'a1', ticketId: 'tk_1', status: 'paused', pauseReason: 'runtime_login_expired: the claude login expired' })];
+    render(<BoardRoute />);
+    // The board renders both the phone row and the desktop kanban card at once; either counts.
+    const matches = screen.getAllByText((_, el) => el?.textContent === 'paused · runtime_login_expired: the claude login expired');
+    expect(matches.length).toBeGreaterThan(0);
+  });
 });
 
 describe('BoardRoute finished tickets', () => {

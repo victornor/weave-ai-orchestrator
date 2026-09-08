@@ -10,7 +10,7 @@ import { createTicketsService } from '../tickets/service.js';
 import { createWakeService } from '../wake/index.js';
 import { createAccountsService } from '../usage/accounts.js';
 import { createKnowledgeUsageService } from '../knowledge/index.js';
-import { LOGIN_PAUSE_CODE, loginCorrelationKey } from './authgate.js';
+import { LOGIN_PAUSE_CODE, loginCorrelationKey, ungateRuntime } from './authgate.js';
 import { createRunsService } from './index.js';
 import { createDispatcher, type CoreDispatcher } from './dispatcher.js';
 import { countRetries, executeRun } from './engine.js';
@@ -697,6 +697,87 @@ describe('run engine', () => {
 
         expect(h.db.get<Run>('SELECT * FROM runs WHERE id = ?', [runId])!.status).toBe('succeeded');
         expect(h.services.accounts!.gatedRuntimes()).toEqual([]);
+      });
+
+      // VS-137: the wake that discovered the outage is the one wake the release-on-recovery path
+      // cannot resume unless it survives the pause — every other agent's still-queued wake already
+      // does; this pins that the triggering agent's does too.
+      describe('the triggering agent keeps its own work across the pause (VS-137)', () => {
+        it('preserves the wake instead of failing it, with no new retry wake', async () => {
+          const { workerId } = await failAuth();
+          const wakeRow = h.db.get<Wakeup>("SELECT * FROM wakeups WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1", [workerId])!;
+          expect(wakeRow.status).toBe('queued');
+          expect(wakeRow.runId).toBeNull();
+          expect(h.db.all<Wakeup>("SELECT * FROM wakeups WHERE agent_id = ? AND source = 'retry'", [workerId])).toHaveLength(0);
+        });
+
+        it('resumes the same ticket on its own once the runtime recovers, with no human resuming it', async () => {
+          const { workerId, ticketId } = await failAuth();
+          expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('paused');
+
+          ungateRuntime(h.ctx, h.deps, 'fake');
+          expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('active');
+
+          runtime.queue.push({ structured: { state: 'done', summary: 'resumed', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } } as never);
+          const run = await runOnce();
+          expect(run.status).toBe('succeeded');
+          expect(run.agentId).toBe(workerId);
+          expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('in_progress');
+        });
+
+        it('stops resuming automatically on the third consecutive authentication failure, and parks for the human', async () => {
+          const { workerId, ticketId } = await failAuth();
+          ungateRuntime(h.ctx, h.deps, 'fake');
+          runtime.queue.push({ error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } } as never);
+          await runOnce();
+          await tick();
+          ungateRuntime(h.ctx, h.deps, 'fake');
+          runtime.queue.push({ error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } } as never);
+          await runOnce();
+          await tick();
+
+          // Third in a row, no success in between: parked for the human like the retry ladder's own
+          // exhaustion, not preserved-and-gated again.
+          expect(openFor(ticketId).some((d) => d.kind === 'retry_approval')).toBe(true);
+          expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('blocked');
+          expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('paused');
+          const wakeRow = h.db.get<Wakeup>("SELECT * FROM wakeups WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1", [workerId])!;
+          expect(wakeRow.status).toBe('failed');
+        });
+
+        it('withdraws the per-ticket gate_finding once the ticket moves again', async () => {
+          const { ticketId } = await failAuth();
+          expect(openFor(ticketId).some((d) => d.kind === 'gate_finding' && d.owner === 'conductor')).toBe(true);
+
+          ungateRuntime(h.ctx, h.deps, 'fake');
+          runtime.queue.push({ structured: { state: 'done', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } } as never);
+          await runOnce();
+          await tick();
+
+          expect(openFor(ticketId).some((d) => d.kind === 'gate_finding' && d.owner === 'conductor')).toBe(false);
+        });
+
+        it('a success between two authentication failures resets the streak', async () => {
+          const { workerId, ticketId } = await failAuth();
+          ungateRuntime(h.ctx, h.deps, 'fake');
+
+          runtime.queue.push({ structured: { state: 'done', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } } as never);
+          await runOnce();
+          await tick();
+
+          h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'more work' });
+          runtime.queue.push({ error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } } as never);
+          await runOnce();
+          await tick();
+
+          // Only one failure in a row, since the success in between reset the count: preserved and
+          // gated again, not parked for the human.
+          expect(openFor(ticketId).some((d) => d.kind === 'retry_approval')).toBe(false);
+          expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('in_progress');
+          expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('paused');
+          const wakeRow = h.db.get<Wakeup>("SELECT * FROM wakeups WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1", [workerId])!;
+          expect(wakeRow.status).toBe('queued');
+        });
       });
     });
 

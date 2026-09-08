@@ -91,11 +91,27 @@ describe('briefing underway', () => {
     expect(snap.underway[0]).toMatchObject({
       workerId: worker, workerName: 'Backend Engineer #7', ticketId: active.id,
       identifier: active.identifier, status: 'in_progress', lastStatus: 'running the tests',
+      workerStatus: 'active', workerPauseReason: null,
     });
 
     const noComment = mkTicket({ status: 'in_progress' });
     h.addWorker(noComment.id, { name: 'Backend Engineer #9' });
     expect(briefing().snapshot().underway.find((u) => u.ticketId === noComment.id)?.lastStatus).toBeNull();
+  });
+
+  it('names a paused worker\'s status and reason (VS-137)', () => {
+    h = makeHarness();
+    const t = mkTicket({ status: 'approved' });
+    h.addWorker(t.id, {
+      name: 'Platform Engineer #3', status: 'paused',
+      pauseReason: 'runtime_login_expired: the claude login expired',
+    });
+
+    const snap = briefing().snapshot();
+    expect(snap.underway).toHaveLength(1);
+    expect(snap.underway[0]).toMatchObject({
+      workerStatus: 'paused', workerPauseReason: 'runtime_login_expired: the claude login expired',
+    });
   });
 });
 

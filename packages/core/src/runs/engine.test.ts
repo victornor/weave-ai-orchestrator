@@ -5,6 +5,7 @@ import { newId, nowIso } from '@agent-conductor/db';
 import { FakeRuntime, type AccountDescription, type CredentialFacts, type TurnInput, type TurnSink, type TurnResult } from '@agent-conductor/runtime-sdk';
 import { RECORDED_RUN_PHASES, RUN_PHASES, type Decision, type Run, type Wakeup } from '@agent-conductor/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
+import type { Actor } from '../api.js';
 import { createDecisionsService } from '../decisions/service.js';
 import { createTicketsService } from '../tickets/service.js';
 import { createWakeService } from '../wake/index.js';
@@ -1064,6 +1065,132 @@ describe('run engine', () => {
 
       expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('approved');
       expect(openFor(ticketId).filter((d) => d.kind === 'plan_approval')).toHaveLength(0);
+    });
+  });
+
+  describe('the stuck-worker gate (VS-145)', () => {
+    beforeEach(() => {
+      h.services.tickets = createTicketsService(h.ctx, h.deps);
+      h.services.decisions = createDecisionsService(h.ctx, h.deps);
+    });
+
+    const openGateFindings = (ticketId: string): Decision[] =>
+      h.services.decisions!.list({ status: ['open'], ticketId }).filter((d) => d.kind === 'gate_finding');
+
+    /** Runs one worker turn on `ticketId`, returning the finished run. */
+    async function runWorkerTurn(workerId: string, ticketId: string, reason = 'go'): Promise<Run> {
+      h.services.wake!.enqueue(workerId, { source: 'ticket_comment', reason });
+      return runOnce();
+    }
+
+    it('records a validly idle report as its own liveness, not empty (PLAN §9.4)', async () => {
+      const ticketId = seedTicket(h, { status: 'in_review' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      runtime.queue.push({ structured: { state: 'idle', summary: 'nothing actionable', tickets: [], knowledge: { recorded: false, reason: 'idle turn' } } });
+      const run = await runWorkerTurn(workerId, ticketId);
+      expect(run.liveness).toBe('idle');
+    });
+
+    it('does not count a run against the worker when it left evidence, whichever reporting channel produced it', async () => {
+      // "Empty" turn one: the terminal report never parses (no StructuredOutput channel used), but the
+      // turn posted a ticket comment mid-run — exactly what `ac_report` does today.
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      for (let i = 0; i < 3; i += 1) {
+        runtime.queue.push((input) => {
+          h.db.insert('ticket_comments', {
+            id: newId(), ticketId, authorKind: 'agent', authorId: workerId, runId: input.runId,
+            body: `[working] turn ${i}`, kind: 'status', sourceTrust: 'agent', createdAt: nowIso(),
+          });
+          return { structured: undefined, finalText: 'not a valid report' };
+        });
+        const run = await runWorkerTurn(workerId, ticketId);
+        expect(run.liveness).toBe('empty');
+      }
+      expect(openGateFindings(ticketId)).toHaveLength(0);
+    });
+
+    it('still raises the gate for three genuinely inert turns — no report, no evidence, a ticket the worker was expected to act on', async () => {
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      for (let i = 0; i < 3; i += 1) {
+        runtime.queue.push({ structured: undefined, finalText: 'I looked around and did nothing' });
+        const run = await runWorkerTurn(workerId, ticketId);
+        expect(run.liveness).toBe('empty');
+      }
+      const findings = openGateFindings(ticketId);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]!.title).toContain('three empty turns');
+    });
+
+    it('does not raise the gate for a worker correctly idle on a ticket awaiting human approval', async () => {
+      const ticketId = seedTicket(h, { status: 'in_review' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      for (let i = 0; i < 3; i += 1) {
+        runtime.queue.push({ structured: { state: 'idle', summary: 'still waiting on review', tickets: [], knowledge: { recorded: false, reason: 'nothing new' } } });
+        const run = await runWorkerTurn(workerId, ticketId, `unrelated activity ${i}`);
+        expect(run.liveness).toBe('idle');
+      }
+      expect(openGateFindings(ticketId)).toHaveLength(0);
+    });
+
+    it('trips the gate once the same worker is expected to act again, counting only turns from that point', async () => {
+      const HUMAN: Actor = { kind: 'human', id: 'victor' };
+      const ticketId = seedTicket(h, { status: 'in_review' });
+      // A raw-seeded ticket carries no creation history; anchor its starting status the way
+      // `tickets.create()` would, so reconstructing an earlier run's status doesn't fall back to
+      // reading the ticket's *current* status once it later transitions.
+      h.db.insert('activity', {
+        id: newId(), workspaceId: h.workspaceId, actorKind: 'human', actorId: 'victor', ticketId, entityType: 'ticket', entityId: ticketId,
+        action: 'ticket.create', detailsJson: { kind: 'task', identifier: 'TST-1', status: 'in_review' }, createdAt: nowIso(),
+      });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+
+      // Two turns while correctly parked: idle, no evidence, not expected to act.
+      for (let i = 0; i < 2; i += 1) {
+        runtime.queue.push({ structured: { state: 'idle', summary: 'waiting on review', tickets: [], knowledge: { recorded: false, reason: 'nothing new' } } });
+        await runWorkerTurn(workerId, ticketId, `parked ${i}`);
+      }
+      expect(openGateFindings(ticketId)).toHaveLength(0);
+
+      // The ticket is sent back for more work — logged through the real transition, so the gate can
+      // tell "expected to act" apart from "still parked" for these two prior turns.
+      await h.services.tickets!.transition(HUMAN, ticketId, { to: 'in_progress', note: 'needs another pass' });
+
+      // Only one inert turn since then: not enough on its own.
+      runtime.queue.push({ structured: undefined, finalText: 'nothing yet' });
+      await runWorkerTurn(workerId, ticketId, 'back to it');
+      expect(openGateFindings(ticketId)).toHaveLength(0);
+
+      // A second and third inert turn while expected to act completes three in a row from that point.
+      for (let i = 0; i < 2; i += 1) {
+        runtime.queue.push({ structured: undefined, finalText: 'still nothing' });
+        await runWorkerTurn(workerId, ticketId, `stuck ${i}`);
+      }
+      expect(openGateFindings(ticketId)).toHaveLength(1);
+    });
+
+    it('never counts an advanced turn toward the gate, whether or not it also called ac_report mid-turn', async () => {
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+
+      // Channel A: only the terminal structured report, no mid-turn comment.
+      runtime.queue.push({ structured: { state: 'working', summary: 'made progress', tickets: [], knowledge: { recorded: false, reason: 'mid-task' } } });
+      const runA = await runWorkerTurn(workerId, ticketId, 'first');
+      expect(runA.liveness).toBe('advanced');
+
+      // Channel B: the same valid terminal report, plus a mid-turn `ac_report`-shaped comment.
+      runtime.queue.push((input) => {
+        h.db.insert('ticket_comments', {
+          id: newId(), ticketId, authorKind: 'agent', authorId: workerId, runId: input.runId,
+          body: '[working] still going', kind: 'status', sourceTrust: 'agent', createdAt: nowIso(),
+        });
+        return { structured: { state: 'working', summary: 'made more progress', tickets: [], knowledge: { recorded: false, reason: 'mid-task' } } };
+      });
+      const runB = await runWorkerTurn(workerId, ticketId, 'second');
+      expect(runB.liveness).toBe('advanced');
+
+      expect(openGateFindings(ticketId)).toHaveLength(0);
     });
   });
 });

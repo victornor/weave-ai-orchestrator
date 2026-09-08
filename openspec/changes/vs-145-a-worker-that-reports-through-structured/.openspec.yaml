@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: Fix stuck-worker liveness classification so a productive turn, or a
+  correctly-idle one, is never scored as an empty turn

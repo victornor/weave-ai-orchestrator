@@ -110,10 +110,64 @@ function classifyLiveness(status: Run['status'], report: RunReport | null, ticke
     case 'needs_decision': return 'needs_decision';
     case 'blocked': return 'blocked';
     case 'failed': return 'failed';
-    case 'idle': return 'empty';
+    case 'idle': return 'idle';
     case 'working': return ticketStatus === 'proposing' || ticketStatus === 'proposed' ? 'plan_only' : 'advanced';
     default: return 'advanced';
   }
+}
+
+/**
+ * Ticket statuses in which a worker is correctly waiting on someone else rather than expected to
+ * act on its own (VS-145): a plan awaiting approval, a delivered PR awaiting review/merge, or a
+ * blocker only its owner can clear. A run that finishes while its ticket is in one of these never
+ * counts toward the stuck-worker gate, whatever it reported.
+ */
+const TICKET_STATUSES_NOT_EXPECTING_ACTION = new Set(['proposed', 'in_review', 'blocked']);
+
+/** Tables carrying the authoring run's id for a durable, ticket-facing artifact a turn can produce. */
+const EVIDENCE_TABLES = ['ticket_comments', 'ticket_document_revisions', 'ticket_work_products', 'knowledge_revisions'] as const;
+
+/**
+ * Whether a finished run left any observable trace of progress on its ticket, independent of
+ * whether its own terminal report happened to parse (VS-145): a comment, a document revision, a
+ * work product, a knowledge write, or a logged ticket transition — all already keyed by `run_id`
+ * with no schema change needed. `recordActivity` (`core/src/events.ts`) logs `ticket.transition`
+ * under the acting run's id on every status change, note or not, so that alone also answers "did the
+ * ticket's status move during this run" without needing a before/after snapshot.
+ */
+function runProducedEvidence(ctx: WorkspaceContext, runId: string, ticketId: string | null): boolean {
+  if (!ticketId) return false;
+  for (const table of EVIDENCE_TABLES) {
+    if (ctx.db.get(`SELECT 1 FROM ${table} WHERE run_id = ? LIMIT 1`, [runId])) return true;
+  }
+  // Scoped to an actual status change, not just any activity row this run happens to have logged —
+  // `recordUsage` (packages/core/src/usage/service.ts) logs a `usage.recorded` activity row against
+  // the ticket for every successful run with usage, which would otherwise match every turn.
+  return Boolean(ctx.db.get(
+    "SELECT 1 FROM activity WHERE run_id = ? AND ticket_id = ? AND action = 'ticket.transition' LIMIT 1",
+    [runId, ticketId],
+  ));
+}
+
+/**
+ * The ticket's status as of a given moment, reconstructed from its own history rather than a stored
+ * per-run snapshot (there is none): the most recent `ticket.transition` or `ticket.create` activity
+ * row at or before that time names the status it was in — `ticket.create`'s own `details.status`
+ * anchors a ticket that had not yet transitioned by that point, so a later transition can never
+ * retroactively make an earlier run look like it happened on the ticket's current status. Only a
+ * ticket with no creation record at all (a raw seed, never `tickets.create()`) falls back to reading
+ * its current status live.
+ */
+function ticketStatusAsOf(ctx: WorkspaceContext, ticketId: string, atIso: string): string | null {
+  // `Db.get`/`Db.all` decode a `*_json` column and drop its suffix (`packages/db/src/db.ts` `camel`),
+  // so the row comes back as `{ details: {...} }`, already parsed — not a `detailsJson` string.
+  const last = ctx.db.get<{ details: { to?: string; status?: string } | null }>(
+    "SELECT details_json FROM activity WHERE ticket_id = ? AND action IN ('ticket.transition', 'ticket.create') AND created_at <= ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+    [ticketId, atIso],
+  );
+  const status = last?.details?.to ?? last?.details?.status;
+  if (status) return status;
+  return ctx.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])?.status ?? null;
 }
 
 function sessionPolicyFor(agent: Agent, role: Role | null): SessionPolicy {
@@ -515,10 +569,24 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
     } catch { /* best effort */ }
   }
 
-  // Three consecutive empty turns on non-digest wakes is a gate finding for the conductor (PLAN §9.4).
-  if (liveness === 'empty' && f.agent.kind === 'worker') {
-    const recent = ctx.db.all<{ liveness: string }>("SELECT liveness FROM runs WHERE agent_id = ? AND status = 'succeeded' ORDER BY created_at DESC LIMIT 3", [f.agent.id]);
-    if (recent.length === 3 && recent.every((x) => x.liveness === 'empty')) {
+  // Three consecutive turns with no observable progress is a gate finding for the conductor (PLAN
+  // §9.4). A run counts against the worker only when its own report said nothing actionable
+  // happened (`empty` or a validly-idle turn), it left no evidence of progress on the ticket, and the
+  // ticket was in a status where the worker was actually expected to act — not one where it is
+  // correctly waiting on someone else (`proposed`, `in_review`, `blocked`) (VS-145).
+  if ((liveness === 'empty' || liveness === 'idle') && f.agent.kind === 'worker' && f.agent.ticketId) {
+    const ticketId = f.agent.ticketId;
+    const countsAgainst = (run: { id: string; liveness: string; finishedAt: string | null }): boolean => {
+      if (run.liveness !== 'empty' && run.liveness !== 'idle') return false;
+      const statusThen = ticketStatusAsOf(ctx, ticketId, run.finishedAt ?? now);
+      if (statusThen !== null && TICKET_STATUSES_NOT_EXPECTING_ACTION.has(statusThen)) return false;
+      return !runProducedEvidence(ctx, run.id, ticketId);
+    };
+    const recent = ctx.db.all<{ id: string; liveness: string; finishedAt: string | null }>(
+      "SELECT id, liveness, finished_at FROM runs WHERE agent_id = ? AND status = 'succeeded' ORDER BY created_at DESC, rowid DESC LIMIT 3",
+      [f.agent.id],
+    );
+    if (recent.length === 3 && recent.every(countsAgainst)) {
       try {
         deps().decisions.create({ kind: 'system', id: null }, {
           ticketId: f.agent.ticketId, kind: 'gate_finding', owner: 'conductor',

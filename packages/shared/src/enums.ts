@@ -94,7 +94,7 @@ export const isActiveRun = (status: string | null | undefined): boolean => ACTIV
 export const RUN_ERROR_FAMILIES = ['transient_upstream', 'provider_quota', 'model_refusal', 'auth', 'tooling', 'unknown'] as const;
 export type RunErrorFamily = (typeof RUN_ERROR_FAMILIES)[number];
 
-export const RUN_LIVENESS = ['advanced', 'plan_only', 'empty', 'blocked', 'needs_decision', 'failed'] as const;
+export const RUN_LIVENESS = ['advanced', 'plan_only', 'empty', 'idle', 'blocked', 'needs_decision', 'failed'] as const;
 export type RunLiveness = (typeof RUN_LIVENESS)[number];
 
 export const REPORT_STATES = ['working', 'needs_decision', 'blocked', 'paused', 'done', 'failed', 'idle'] as const;

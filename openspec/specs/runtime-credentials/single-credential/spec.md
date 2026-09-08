@@ -21,6 +21,10 @@ session.
 The rest of a runtime's configuration — its settings, its session history and its project state —
 SHALL remain isolated per workspace as before. Only the credential is shared.
 
+This requirement governs a daemon that is not isolated. A daemon started isolated, per
+`daemon-isolation/credential-scope`, is the documented exception: it does not resolve a runtime's
+credential to the host's file at all, unless it was explicitly told to share it.
+
 #### Scenario: An agent turn reads the owner's credential
 
 - **WHEN** an agent takes a turn on a runtime whose host credential exists
@@ -47,6 +51,12 @@ SHALL remain isolated per workspace as before. Only the credential is shared.
 - **WHEN** a runtime has no credential on the host at all
 - **THEN** the system creates none, and a turn on that runtime fails as an authentication failure
   rather than silently running unauthenticated
+
+#### Scenario: An isolated daemon is the documented exception
+
+- **WHEN** a daemon is isolated per `daemon-isolation/credential-scope`
+- **THEN** this requirement does not apply to it, and it does not share the host's credential unless
+  explicitly told to
 
 ### Requirement: A repair of the shared credential is monotonic in the credential's own expiry
 

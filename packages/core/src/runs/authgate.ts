@@ -16,6 +16,7 @@ import { nowIso } from '@agent-conductor/db';
 import { LOGIN_PAUSE_CODE, type Agent } from '@agent-conductor/shared';
 import type { CoreServices } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
+import { modelSettingFor } from '../models/resolve.js';
 import { redactSecrets } from '../util/redact.js';
 
 export { LOGIN_PAUSE_CODE } from '@agent-conductor/shared';
@@ -100,7 +101,7 @@ export function gateRuntimeForLogin(
         status: 'paused',
         pauseReason: pauseReason(runtimeId),
         pauseDetailJson: {
-          family: 'auth', code: LOGIN_PAUSE_CODE,
+          family: 'auth', code: LOGIN_PAUSE_CODE, runtimeId,
           message: detail ? detail.slice(0, 400) : null,
           resetAt: null, runId: a.id === input.agentId ? input.runId ?? null : null,
         },
@@ -193,5 +194,77 @@ export function ungateRuntime(ctx: WorkspaceContext, deps: () => CoreServices, r
   });
 
   if (released > 0) log.info({ runtimeId, released }, 'runtime login restored: paused agents released');
+  return released;
+}
+
+/** The runtime a login pause was raised for: the detail row, or the reason string on rows gated before `runtimeId` was recorded. */
+export function loginPauseRuntime(agent: Agent): string | null {
+  const detail = agent.pauseDetail as { runtimeId?: string } | null;
+  if (typeof detail?.runtimeId === 'string') return detail.runtimeId;
+  const m = new RegExp(`^${LOGIN_PAUSE_CODE}: the (\\S+) login expired$`).exec(agent.pauseReason ?? '');
+  return m?.[1] ?? null;
+}
+
+/**
+ * Release the pauses VS-77 leaves behind when the workspace moves off a dead runtime.
+ *
+ * A login pause is a fact about the runtime an agent is *about to run on* — `modelSettingFor`
+ * decides that at dispatch, not the agent's stamped row. `ungateRuntime` only releases agents still
+ * stamped with the gated runtime, so a login that is never coming back (a cancelled subscription, a
+ * moved workspace) pauses them forever while the setting already points somewhere healthy.
+ *
+ * For each login-paused agent: when its next turn's runtime is the one it was paused for, nothing
+ * changes (VS-75 stands). When that runtime moved and the new one is healthy, release and restamp —
+ * the dispatcher's candidate filter reads `runtime_id` before the engine re-resolves it, so the
+ * stamp must not stay on a gated runtime. When the new one is *also* gated, re-target the pause at
+ * it rather than releasing into a runtime the dispatcher will skip anyway: the pause then reads as
+ * the new gate's own, and `ungateRuntime` on that runtime releases it the honest way. Wake-ups were
+ * left queued by the gate, so nothing is re-enqueued here. The gate's card is withdrawn once no
+ * setting runs anything on that runtime at all.
+ */
+export function releaseLoginPausesForAbandonedRuntimes(ctx: WorkspaceContext, deps: () => CoreServices): number {
+  const log = ctx.log('daemon');
+  const governing = new Set([modelSettingFor(ctx.config, 'conductor').runtime, modelSettingFor(ctx.config, 'worker').runtime]);
+  const gated = new Set(deps().accounts.gatedRuntimes());
+  let released = 0;
+  let repointed = 0;
+  for (const a of ctx.db.all<Agent>(
+    'SELECT * FROM agents WHERE workspace_id = ? AND status = ? AND retired_at IS NULL',
+    [ctx.workspaceId, 'paused'],
+  )) {
+    const detail = a.pauseDetail as { code?: string; message?: string | null } | null;
+    if (detail?.code !== LOGIN_PAUSE_CODE) continue;
+    const target = modelSettingFor(ctx.config, a.kind).runtime;
+    const pausedFor = loginPauseRuntime(a) ?? a.runtimeId;
+    if (pausedFor === target) continue;  // the pause still describes the runtime its next turn runs on
+    if (gated.has(target)) {
+      ctx.db.update('agents', a.id, {
+        runtimeId: target, pauseReason: pauseReason(target),
+        pauseDetailJson: { family: 'auth', code: LOGIN_PAUSE_CODE, runtimeId: target, message: detail?.message ?? null, resetAt: null, runId: null },
+        updatedAt: nowIso(),
+      });
+      repointed += 1;
+      continue;
+    }
+    ctx.db.update('agents', a.id, {
+      status: 'active', runtimeId: target, pauseReason: null, pauseDetailJson: null, updatedAt: nowIso(),
+    });
+    ctx.events.emit('worker.status', 'agent', a.id, { status: 'active' });
+    released += 1;
+  }
+  // A gated runtime nothing runs on anymore keeps a card that promises work "resumes on its own"
+  // — a lie once no agent will ever take a turn on it. Withdraw those; runtimes still governing an
+  // agent keep theirs until `ungateRuntime` clears them the honest way.
+  for (const runtimeId of gated) {
+    if (governing.has(runtimeId)) continue;
+    const key = loginCorrelationKey(runtimeId);
+    for (const d of deps().decisions.list({ status: ['open'] })) {
+      if (d.correlationKey !== key) continue;
+      try { deps().decisions.withdraw({ kind: 'system', id: null }, d.id, 'this workspace no longer runs anything on that runtime'); } catch (e) {
+        log.error({ err: String(e), decisionId: d.id }, 'could not withdraw an abandoned runtime\'s login card');
+      }
+    }
+  }
+  if (released > 0 || repointed > 0) log.info({ governing: [...governing], released, repointed }, 'login pauses reconciled with the workspace\'s runtimes');
   return released;
 }

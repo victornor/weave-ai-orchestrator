@@ -351,9 +351,12 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const agent = get(id);
       // A worker stopped by its runtime's expired login cannot be resumed into a working turn: the
       // dispatcher will not start one while the runtime is gated, and the credential is still the
-      // dead one. It resumes by itself when the login is restored (VS-75).
-      if (waitingOnRuntimeLogin(agent) && gatedRuntime(agent.runtimeId)) {
-        throw new OcError('conflict', `${agent.name} is waiting on the ${agent.runtimeId} login, not on you. Log that CLI in again and it resumes on its own.`, { runtimeId: agent.runtimeId }, true);
+      // dead one. It resumes by itself when the login is restored (VS-75). The runtime that decides
+      // is the one its next turn would run on — the workspace's setting, not the row the gate
+      // stamped, which VS-77 may have left pointing at a runtime nothing runs on anymore.
+      const runtimeId = modelSettingFor(ctx.config, agent.kind).runtime;
+      if (waitingOnRuntimeLogin(agent) && gatedRuntime(runtimeId)) {
+        throw new OcError('conflict', `${agent.name} is waiting on the ${runtimeId} login, not on you. Log that CLI in again and it resumes on its own.`, { runtimeId }, true);
       }
       const wasPaused = agent.status === 'paused';
       ctx.db.update('agents', id, { status: 'active', pauseReason: null, pauseDetailJson: null, updatedAt: nowIso() });

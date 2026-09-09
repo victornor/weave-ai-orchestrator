@@ -54,10 +54,11 @@ describe('opencode buildArgs', () => {
     expect(buildArgs(input()).files).toHaveLength(0);
   });
 
-  it('isolates config via XDG dirs', () => {
+  it('isolates config via XDG dirs and HOME (VS-161)', () => {
     expect(buildArgs(input({ configHome: '/ws/.agent-conductor/runtimes/opencode' })).env).toMatchObject({
       XDG_CONFIG_HOME: '/ws/.agent-conductor/runtimes/opencode',
       XDG_DATA_HOME: '/ws/.agent-conductor/runtimes/opencode',
+      HOME: '/ws/.agent-conductor/runtimes/opencode',
     });
   });
 

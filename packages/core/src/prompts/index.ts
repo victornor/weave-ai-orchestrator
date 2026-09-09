@@ -323,7 +323,8 @@ export async function buildTurnPrompt(
       // recording failure can never wipe out a digest that was already built successfully.
       try { if (opts.runId) deps().knowledgeUsage.recordBootstrap(opts.runId, agent.id, agent.ticketId ?? null, d.parts ?? []); } catch { /* measurement only */ }
     } catch { digest = ''; }
-    if (digest) notes.push(`- Bootstrap:\n\n${digest}`);
+    // Workers already inline SHARED + PROJECT in AGENTS.md; pasting the digest again doubles the first-turn bill (VS-161).
+    if (digest && agent.kind !== 'worker') notes.push(`- Bootstrap:\n\n${digest}`);
   }
   if (notes.length) { parts.push('\n## Notes'); parts.push(notes.join('\n')); }
 

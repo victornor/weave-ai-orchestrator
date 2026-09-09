@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { OcError } from '@agent-conductor/shared';
+import { OcError, ok } from '@agent-conductor/shared';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createApp } from '../src/app.js';
+import { capListResult, encodeMcpToolResult, MCP_LIST_RESULT_CAP } from '../src/mcp.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import type { RunTokenClaims } from '../src/runtoken.js';
 import { makeHarness, wakeup, type Harness } from './fakes.js';
@@ -385,5 +386,60 @@ describe('ac_inbox delivers attachment content, not just a reference', () => {
     expect(payload.ok).toBe(true);
     expect(payload.data.messages[0].attachments).toEqual([]);
     await client.close();
+  });
+
+  it('ac_ticket_list omits description by default (VS-161)', async () => {
+    const { client, h } = await connect();
+    h.tickets.set('tk_1', { ...h.tickets.get('tk_1')!, description: 'a long body that must not list' });
+
+    const listed = JSON.parse(((await client.callTool({ name: 'ac_ticket_list', arguments: {} })).content as Array<{ text: string }>)[0]!.text);
+    expect(listed.ok).toBe(true);
+    expect(listed.data.items[0]).toMatchObject({ id: 'tk_1', identifier: 'ACME-42', status: 'in_progress', kind: 'change', title: 'Add dark mode' });
+    expect(listed.data.items[0]).not.toHaveProperty('description');
+
+    const fat = JSON.parse(((await client.callTool({ name: 'ac_ticket_list', arguments: { includeDescription: true } })).content as Array<{ text: string }>)[0]!.text);
+    expect(fat.data.items[0].description).toBe('a long body that must not list');
+
+    const got = JSON.parse(((await client.callTool({ name: 'ac_ticket_get', arguments: { id: 'ACME-42' } })).content as Array<{ text: string }>)[0]!.text);
+    expect(got.data.ticket.description).toBe('a long body that must not list');
+    await client.close();
+  });
+
+  it('does not cap ac_ticket_get when the description exceeds the list cap (VS-161)', async () => {
+    const { client, h } = await connect();
+    const huge = 'x'.repeat(MCP_LIST_RESULT_CAP + 1024);
+    h.tickets.set('tk_1', { ...h.tickets.get('tk_1')!, description: huge });
+    const res = await client.callTool({ name: 'ac_ticket_get', arguments: { id: 'ACME-42' } });
+    const text = (res.content as Array<{ text: string }>)[0]!.text;
+    expect(text.length).toBeGreaterThan(MCP_LIST_RESULT_CAP);
+    const payload = JSON.parse(text);
+    expect(payload.data.ticket.description).toBe(huge);
+    expect(payload.data.truncated).toBeUndefined();
+    await client.close();
+  });
+});
+
+describe('MCP list-result cap (VS-161)', () => {
+  it('marks an oversized list truncated and stays under the cap', () => {
+    const items = Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, description: 'y'.repeat(3000) }));
+    const fat = ok({ items, total: items.length });
+    expect(JSON.stringify(fat).length).toBeGreaterThan(MCP_LIST_RESULT_CAP);
+    const capped = capListResult(fat, MCP_LIST_RESULT_CAP);
+    const text = JSON.stringify(capped);
+    expect(text.length).toBeLessThanOrEqual(MCP_LIST_RESULT_CAP);
+    expect(capped.ok).toBe(true);
+    if (capped.ok) {
+      const data = capped.data as { items: unknown[]; truncated: boolean; total: number };
+      expect(data.truncated).toBe(true);
+      expect(data.items.length).toBeLessThan(items.length);
+      expect(data.total).toBe(items.length);
+    }
+  });
+
+  it('does not cap a get-by-id encode', () => {
+    const huge = ok({ ticket: { description: 'z'.repeat(MCP_LIST_RESULT_CAP + 100) } });
+    const text = encodeMcpToolResult('ac_ticket_get', huge);
+    expect(text.length).toBeGreaterThan(MCP_LIST_RESULT_CAP);
+    expect(text).not.toContain('"truncated":true');
   });
 });

@@ -1,14 +1,16 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { OcError, ProjectConfigSchema } from '@agent-conductor/shared';
+import { OcError, ProjectConfigSchema, ProjectPoliciesSchema } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
 
 const AddSchema = z.object({
   url: z.string().min(1), id: z.string().optional(), name: z.string().optional(),
   defaultBranch: z.string().optional(), landingBranch: z.string().optional(), maxWorkers: z.number().int().min(1).max(32).optional(), setupCommand: z.string().optional(),
+  policies: ProjectPoliciesSchema.optional(),
 // Strict: a project carries no runtime or model since VS-77, and a body that still sends one is a
-// caller that would otherwise believe it had chosen something.
+// caller that would otherwise believe it had chosen something. Ticket-level autoMerge is not a
+// project field — Auto-merge default is policies.autoMergeDefault (VS-153).
 }).strict();
 
 export function projectRoutes(): Hono<AppEnv> {

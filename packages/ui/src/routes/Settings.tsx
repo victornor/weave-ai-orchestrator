@@ -435,7 +435,7 @@ function ProjectsSection(): React.ReactElement {
   const [url, setUrl] = useState('');
   const [maxWorkers, setMaxWorkers] = useState(2);
   const [setupCommand, setSetupCommand] = useState('');
-  const [autoMerge, setAutoMerge] = useState(false);
+  const [autoMergeDefault, setAutoMergeDefault] = useState(false);
   const workspaceOn = workspaceYolo(useWorkspaceSummary().data?.config ?? {});
 
   return (
@@ -450,7 +450,7 @@ function ProjectsSection(): React.ReactElement {
             <input type="number" min={1} max={16} className={cx(inputCx, 'ac-mono')} value={maxWorkers} onChange={(e) => setMaxWorkers(Number(e.target.value))} />
           </Field>
           <Field label="Auto-merge default">
-            <select className={cx(inputCx, 'ac-mono')} value={autoMerge ? 'on' : 'off'} onChange={(e) => setAutoMerge(e.target.value === 'on')}>
+            <select className={cx(inputCx, 'ac-mono')} value={autoMergeDefault ? 'on' : 'off'} onChange={(e) => setAutoMergeDefault(e.target.value === 'on')}>
               <option value="off">off</option>
               <option value="on">on</option>
             </select>
@@ -464,7 +464,7 @@ function ProjectsSection(): React.ReactElement {
           disabled={!url || add.isPending}
           onClick={() =>
             add.mutate(
-              { url, maxWorkers, ...(setupCommand ? { setupCommand } : {}), autoMerge },
+              { url, maxWorkers, ...(setupCommand ? { setupCommand } : {}), policies: { autoMergeDefault } },
               {
                 onSuccess: () => {
                   toast.push({ title: 'Cloning…', detail: url, status: 'working' });

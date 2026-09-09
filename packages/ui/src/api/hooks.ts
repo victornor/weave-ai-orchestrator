@@ -280,7 +280,7 @@ export function useWorkspaceProjects(ids: readonly string[]): Record<string, Wor
   }, [ids, results]);
 }
 
-export function useAddProject(): UseMutationResult<Project, Error, { url: string; id?: string; runtime?: string; maxWorkers?: number; setupCommand?: string; autoMerge?: boolean }> {
+export function useAddProject(): UseMutationResult<Project, Error, { url: string; id?: string; runtime?: string; maxWorkers?: number; setupCommand?: string; policies?: { autoMergeDefault?: boolean } }> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({

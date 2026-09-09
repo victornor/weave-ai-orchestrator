@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   approveCalls: [] as string[],
   disableAllowAllCalls: 0,
   toasts: [] as Array<{ title: string; detail?: string; status?: string }>,
+  addCalls: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
@@ -37,7 +38,10 @@ vi.mock('../api/hooks', () => ({
   }),
   useProjects: () => ({ data: state.projects, isLoading: false }),
   useRuntimes: () => ({ data: [] }),
-  useAddProject: () => ({ mutate: vi.fn(), isPending: false }),
+  useAddProject: () => ({
+    mutate: (body: Record<string, unknown>) => { state.addCalls.push(body); },
+    isPending: false,
+  }),
   usePatchProject: () => ({
     mutate: (p: { id: string; patch: Record<string, unknown> }, opts?: { onSuccess?: () => void; onError?: (e: Error) => void }) => {
       state.projectPatches.push(p);
@@ -98,6 +102,7 @@ beforeEach(() => {
   state.approveCalls = [];
   state.disableAllowAllCalls = 0;
   state.toasts = [];
+  state.addCalls = [];
 });
 
 describe('Settings — knowledge budgets', () => {
@@ -209,6 +214,34 @@ describe('Settings — YOLO mode', () => {
     state.projects = [{ ...state.projects[0]!, policies: { requireCi: true, yolo: false } }];
     fireEvent.change(screen.getByLabelText('YOLO mode for api'), { target: { value: 'inherit' } });
     expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { policies: { requireCi: true } } });
+  });
+});
+
+describe('Settings — add project Auto-merge default (VS-153)', () => {
+  function openProjects(): void {
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+  }
+
+  it('posts policies.autoMergeDefault false when the control is off, never top-level autoMerge', () => {
+    openProjects();
+    fireEvent.change(screen.getByPlaceholderText('git@github.com:acme/api.git'), { target: { value: 'git@github.com:acme/api.git' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add project' }));
+    expect(state.addCalls).toHaveLength(1);
+    const body = state.addCalls[0]!;
+    expect(body).not.toHaveProperty('autoMerge');
+    expect(body['policies']).toEqual({ autoMergeDefault: false });
+  });
+
+  it('posts policies.autoMergeDefault true when the control is on, never top-level autoMerge', () => {
+    openProjects();
+    fireEvent.change(screen.getByPlaceholderText('git@github.com:acme/api.git'), { target: { value: 'git@github.com:acme/api.git' } });
+    fireEvent.change(screen.getByLabelText('Auto-merge default'), { target: { value: 'on' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add project' }));
+    expect(state.addCalls).toHaveLength(1);
+    const body = state.addCalls[0]!;
+    expect(body).not.toHaveProperty('autoMerge');
+    expect(body['policies']).toEqual({ autoMergeDefault: true });
   });
 });
 

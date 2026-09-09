@@ -38,7 +38,7 @@ Credentials never go in the image. The daemon host needs them at run time:
 
 | Need | How to provide it |
 |---|---|
-| Coding CLI auth (claude, codex, opencode, gemini) | `docker exec -it conductor node packages/cli/dist/bin.js runtime login <id>`, or mount the host's config dir |
+| Coding CLI auth (claude, codex, opencode, gemini, cursor) | `docker exec -it conductor node packages/cli/dist/bin.js runtime login <id>`, or mount the host's config dir |
 | `gh` auth (required for `deliveryMode: pr`) | `-e GH_TOKEN=...`, or `docker exec -it conductor gh auth login` |
 | git over SSH | mount a key: `-v ~/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro` |
 | Channel tokens and other `${ENV}` refs in `workspace.yaml` | `-e TELEGRAM_BOT_TOKEN=...` |

@@ -41,7 +41,7 @@ packages/
   tui/            Ink components behind `conductor chat`, `conductor attach`, `conductor top`, `conductor specs explore`
   ui/             React 19 + Vite + Tailwind v4 web app; built to `dist/`, served by the daemon
   presenter/      the client-side reconciler behind `conductor presenter`
-  runtimes/       claude, codex, opencode, gemini adapters
+  runtimes/       claude, codex, opencode, gemini, cursor adapters
   channels/       web, cli, telegram
   surfaces/       headless, tmux, herdr, hyprland
 skills/           agent-facing SKILL.md packages installed into agent homes (see skills/README.md)

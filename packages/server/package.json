@@ -31,6 +31,7 @@
     "@agent-conductor/render": "workspace:*",
     "@agent-conductor/runtime-claude": "workspace:*",
     "@agent-conductor/runtime-codex": "workspace:*",
+    "@agent-conductor/runtime-cursor": "workspace:*",
     "@agent-conductor/runtime-gemini": "workspace:*",
     "@agent-conductor/runtime-opencode": "workspace:*",
     "@agent-conductor/runtime-sdk": "workspace:*",

@@ -15,6 +15,7 @@
     "claude":   { "path": ".claude/skills/<name>/SKILL.md" },
     "codex":    { "path": ".agents/skills/<name>/SKILL.md", "invocation": "$<name>" },
     "opencode": { "path": ".opencode/skills/<name>/SKILL.md" },
-    "gemini":   { "path": ".gemini/skills/<name>/SKILL.md" }
+    "gemini":   { "path": ".gemini/skills/<name>/SKILL.md" },
+    "cursor":   { "path": ".cursor/skills/<name>/SKILL.md" }
   }
 }

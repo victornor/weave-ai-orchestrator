@@ -50,6 +50,9 @@
       "path": "./packages/runtimes/gemini"
     },
     {
+      "path": "./packages/runtimes/cursor"
+    },
+    {
       "path": "./packages/channels/web"
     },
     {

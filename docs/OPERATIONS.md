@@ -382,6 +382,7 @@ is no second copy anywhere.
 | `codex` | `~/.codex/auth.json` | `…/runtimes/codex/auth.json` → symlink |
 | `gemini` | `~/.gemini/oauth_creds.json`, `~/.gemini/google_accounts.json` | symlinks |
 | `opencode` | `~/.local/share/opencode/auth.json` | `…/runtimes/opencode/opencode/auth.json` → symlink |
+| `cursor` | `~/.config/cursor/auth.json` | `…/runtimes/cursor/auth.json` → symlink |
 
 Only the credential file is shared. The rest of each runtime's config home — settings, session
 history, project state — stays per workspace, which is why `CLAUDE_CONFIG_DIR` still points at the

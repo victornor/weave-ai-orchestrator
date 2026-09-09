@@ -2,7 +2,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 const rules = [
-  { pkg: 'packages/core', forbid: ['@agent-conductor/server', '@agent-conductor/cli', '@agent-conductor/runtime-claude', '@agent-conductor/runtime-codex', '@agent-conductor/runtime-opencode', '@agent-conductor/runtime-gemini', '@agent-conductor/channel-web', '@agent-conductor/channel-cli', '@agent-conductor/channel-telegram', '@agent-conductor/surface-headless', '@agent-conductor/surface-tmux', '@agent-conductor/surface-herdr', '@agent-conductor/surface-hyprland', '@agent-conductor/tui', '@agent-conductor/ui', '@agent-conductor/presenter'] },
+  { pkg: 'packages/core', forbid: ['@agent-conductor/server', '@agent-conductor/cli', '@agent-conductor/runtime-claude', '@agent-conductor/runtime-codex', '@agent-conductor/runtime-opencode', '@agent-conductor/runtime-gemini', '@agent-conductor/runtime-cursor', '@agent-conductor/channel-web', '@agent-conductor/channel-cli', '@agent-conductor/channel-telegram', '@agent-conductor/surface-headless', '@agent-conductor/surface-tmux', '@agent-conductor/surface-herdr', '@agent-conductor/surface-hyprland', '@agent-conductor/tui', '@agent-conductor/ui', '@agent-conductor/presenter'] },
   { pkg: 'packages/shared', forbid: ['@agent-conductor/'] },
   { pkg: 'packages/runtime-sdk', forbid: ['@agent-conductor/core', '@agent-conductor/db', '@agent-conductor/server'] },
   { pkg: 'packages/channel-sdk', forbid: ['@agent-conductor/core', '@agent-conductor/db', '@agent-conductor/server'] },

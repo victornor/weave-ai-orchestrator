@@ -500,7 +500,7 @@ Modules: `core/wakeups/{queue,gates}.ts`, `core/runs/{engine,dispatcher,supervis
 
 ```ts
 export interface RuntimeAdapter {
-  readonly id: string;                       // "claude" | "codex" | "opencode" | "gemini" | plugin ids
+  readonly id: string;                       // "claude" | "codex" | "opencode" | "gemini" | "cursor" | plugin ids
   readonly displayName: string;
   readonly capabilities: RuntimeCapabilities;
   detect(): Promise<RuntimeDetection>;       // { status: available|missing_binary|broken|unsupported, version?, path?, notes? }
@@ -569,20 +569,20 @@ Closed enum (`shared/src/run-events.ts`): `session.started, session.resumed, tur
 
 ### 8.3 Per-CLI mapping (verified against installed versions on 2026-09-03)
 
-| Concern | claude 2.1.258 | codex 0.149.1 | opencode 1.18.27 | gemini 0.58.0 |
-|---|---|---|---|---|
-| Headless turn | `claude -p --output-format stream-json --verbose --input-format stream-json --replay-user-messages`, prompt as the turn's first `user` frame on stdin (VS-99, ADR 0012; `--input-format text` with an argv/stdin prompt when `defaults.liveInput: false`) | `codex exec --json -C <cwd> -` (prompt on stdin) | `opencode run --format json --dir <cwd>` | `gemini -p <prompt> -o stream-json` |
-| New session with known id | `--session-id <uuid>` | (id returned in events) | (id returned in events) | `--session-id <uuid>` |
-| Resume | `--resume <id>` | `codex exec resume <id> -` | `opencode run -s <id>` | `--resume <id>` |
-| Fork | `--resume <id> --fork-session` | `codex exec fork <id>` | `--fork` with `-s` | not supported |
-| System prompt | `--system-prompt-file` (replace) or `--append-system-prompt-file` (first turn only) | `-c` instructions via `AGENTS.md` in cwd / `--add-dir`; no direct flag → `file_only` | `--agent <name>` with agent file in `.opencode/` or AGENTS.md → `file_only` | `GEMINI.md` in cwd → `file_only` |
-| Structured output | `--json-schema <schema>` | `--output-schema <file>` + `-o <file>` | not native → parse fenced JSON in final text | `-o json` then parse |
-| MCP | `--mcp-config <file> --strict-mcp-config` | `-c mcp_servers.<name>.url=...` or `codex mcp add` in `CODEX_HOME` | `opencode mcp` config in `.opencode/opencode.json` in cwd | `--mcp-config`-equivalent via `.gemini/settings.json` |
-| Permissions | `--permission-mode {auto,acceptEdits,dontAsk,bypassPermissions}`, `--allowedTools`, `--disallowedTools` | `--sandbox {read-only,workspace-write,danger-full-access}`, `--approve-for-me` | `--auto` | `--approval-mode {auto_edit,yolo,plan}` |
-| Budget | `--max-budget-usd` | n/a | n/a | n/a |
-| Model / effort | `--model`, `--effort` | `-m`, `-c model_reasoning_effort=` | `-m provider/model`, `--variant` | `-m` |
-| Isolation of config | `--setting-sources user` + `--bare` optional; `CLAUDE_CONFIG_DIR` env for a per-workspace config dir | `CODEX_HOME` env per workspace | `XDG_CONFIG_HOME`/`OPENCODE_CONFIG` per workspace | `GEMINI_CLI_HOME`-style env per workspace (verify) |
-| Mid-turn input | shipped (VS-99, ADR 0012): the stdin channel above stays open for the turn's lifetime; a human's message is delivered as another `user` frame while a turn is running, and queued for the next turn otherwise | not supported — `codex app-server` (JSON-RPC) would be an unrelated warm-process build | not supported — `opencode serve` + `run --attach` would be an unrelated warm-process build | not supported |
+| Concern | claude 2.1.258 | codex 0.149.1 | opencode 1.18.27 | gemini 0.58.0 | cursor (`cursor-agent`, 2026.09.08) |
+|---|---|---|---|---|---|
+| Headless turn | `claude -p --output-format stream-json --verbose --input-format stream-json --replay-user-messages`, prompt as the turn's first `user` frame on stdin (VS-99, ADR 0012; `--input-format text` with an argv/stdin prompt when `defaults.liveInput: false`) | `codex exec --json -C <cwd> -` (prompt on stdin) | `opencode run --format json --dir <cwd>` | `gemini -p <prompt> -o stream-json` | `cursor-agent -p --output-format stream-json --trust --force`, prompt as the first Claude-shaped `user` frame on stdin (VS-155); argv prompt when `defaults.liveInput: false`. Never `--worktree`, never Cloud Agent `&` prefix, never `acp`/`worker` |
+| New session with known id | `--session-id <uuid>` | (id returned in events) | (id returned in events) | `--session-id <uuid>` | (id returned in `session_id`) |
+| Resume | `--resume <id>` | `codex exec resume <id> -` | `opencode run -s <id>` | `--resume <id>` | `--resume <id>` (never `--continue`) |
+| Fork | `--resume <id> --fork-session` | `codex exec fork <id>` | `--fork` with `-s` | not supported | not supported |
+| System prompt | `--system-prompt-file` (replace) or `--append-system-prompt-file` (first turn only) | `-c` instructions via `AGENTS.md` in cwd / `--add-dir`; no direct flag → `file_only` | `--agent <name>` with agent file in `.opencode/` or AGENTS.md → `file_only` | `GEMINI.md` in cwd → `file_only` | `AGENTS.md` in cwd (`file_only`); `CLAUDE.md` pointer |
+| Structured output | `--json-schema <schema>` | `--output-schema <file>` + `-o <file>` | not native → parse fenced JSON in final text | `-o json` then parse | not native → parse fenced JSON in final text |
+| MCP | `--mcp-config <file> --strict-mcp-config` | `-c mcp_servers.<name>.url=...` or `codex mcp add` in `CODEX_HOME` | `opencode mcp` config in `.opencode/opencode.json` in cwd | `--mcp-config`-equivalent via `.gemini/settings.json` | `.cursor/mcp.json` in cwd + `--approve-mcps` |
+| Permissions | `--permission-mode {auto,acceptEdits,dontAsk,bypassPermissions}`, `--allowedTools`, `--disallowedTools` | `--sandbox {read-only,workspace-write,danger-full-access}`, `--approve-for-me` | `--auto` | `--approval-mode {auto_edit,yolo,plan}` | `--force`/`--yolo`; `--sandbox enabled` when restricted |
+| Budget | `--max-budget-usd` | n/a | n/a | n/a | n/a |
+| Model / effort | `--model`, `--effort` | `-m`, `-c model_reasoning_effort=` | `-m provider/model`, `--variant` | `-m` | `--model` |
+| Isolation of config | `--setting-sources user` + `--bare` optional; `CLAUDE_CONFIG_DIR` env for a per-workspace config dir | `CODEX_HOME` env per workspace | `XDG_CONFIG_HOME`/`OPENCODE_CONFIG` per workspace | `GEMINI_CLI_HOME`-style env per workspace (verify) | `CURSOR_CONFIG_DIR` per workspace |
+| Mid-turn input | shipped (VS-99, ADR 0012): the stdin channel above stays open for the turn's lifetime; a human's message is delivered as another `user` frame while a turn is running, and queued for the next turn otherwise | not supported — `codex app-server` (JSON-RPC) would be an unrelated warm-process build | not supported — `opencode serve` + `run --attach` would be an unrelated warm-process build | not supported | shipped (VS-155): same Claude-shaped stdin `user` frames; close stdin on the CLI `result` line |
 
 Decisions:
 - **Claude is the reference adapter** and the only one required for M1. It supports every capability.

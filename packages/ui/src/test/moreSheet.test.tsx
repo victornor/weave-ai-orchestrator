@@ -229,8 +229,28 @@ describe('the projects block', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('contributes no block at all for a workspace with no projects', () => {
+  it('still offers New project when the workspace has no projects', () => {
     open({ projects: [] });
-    expect(within(sheet()).queryByRole('region', { name: 'Projects' })).toBeNull();
+    const block = within(sheet()).getByRole('region', { name: 'Projects' });
+    expect(within(block).queryByText('web')).toBeNull();
+    const link = within(block).getByRole('link', { name: 'New project' });
+    expect(link).toHaveAttribute('href', '/w/ws1/settings');
+    expect(JSON.parse(link.getAttribute('data-search') ?? '{}')).toEqual({ section: 'projects' });
+  });
+
+  it('puts New project under the listed projects', () => {
+    open({ projects: [web] });
+    const block = within(sheet()).getByRole('region', { name: 'Projects' });
+    expect(within(block).getByText('web')).toBeInTheDocument();
+    expect(within(block).getByRole('link', { name: 'New project' })).toBeInTheDocument();
+  });
+
+  it('dismisses the menu and addresses Settings Projects when New project is chosen', () => {
+    open({ projects: [web] });
+    const link = within(sheet()).getByRole('link', { name: 'New project' });
+    expect(link).toHaveAttribute('href', '/w/ws1/settings');
+    expect(JSON.parse(link.getAttribute('data-search') ?? '{}')).toEqual({ section: 'projects' });
+    fireEvent.click(link);
+    expect(onClose).toHaveBeenCalled();
   });
 });

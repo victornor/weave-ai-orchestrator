@@ -85,10 +85,11 @@ export function MoreSheet({
           })}
         </nav>
 
-        {/* The sidebar is desktop-only, so this is the phone's way to a project's overview. */}
-        {projects.length > 0 ? (
-          <section aria-label="Projects">
-            <div className="ac-label mb-2">Projects</div>
+        {/* The sidebar is desktop-only, so this is the phone's way to a project's overview and
+            to add one (VS-158). The block stays even when there are no projects yet. */}
+        <section aria-label="Projects">
+          <div className="ac-label mb-2">Projects</div>
+          {projects.length > 0 ? (
             <div className="ac-card divide-y divide-line-1">
               {projects.map((p) => (
                 <A
@@ -103,8 +104,18 @@ export function MoreSheet({
                 </A>
               ))}
             </div>
-          </section>
-        ) : null}
+          ) : null}
+          <A
+            to="/w/$ws/settings"
+            params={{ ws }}
+            search={{ section: 'projects' }}
+            onClick={onClose}
+            className="mt-1.5 flex h-9 w-full items-center gap-2.5 rounded-r6 px-2.5 text-left text-meta text-text-3 hover:bg-bg-2"
+          >
+            <PlusGlyph className="size-2.5" />
+            <span>New project</span>
+          </A>
+        </section>
 
         {/* The bottom bar addresses the active workspace only, so this is where the others are
             reached on a phone. It stays at the top of Settings as well — the same list, one tap

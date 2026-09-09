@@ -114,23 +114,22 @@ export function WorkspaceNav({
 
 /**
  * An open group's own project list: loading, failed and ready-with-projects each render their own
- * row so loading is never mistaken for empty (VS-128); a workspace with genuinely no projects
- * contributes nothing here, exactly like today.
+ * row so loading is never mistaken for empty (VS-128). New project is always last, including when
+ * the workspace has no projects yet (VS-158) — returning null here would hide it.
  */
-function ProjectsGroup({ wsId, wsName, state }: { wsId: string; wsName: string; state: WorkspaceProjectsState | undefined }): React.ReactElement | null {
-  if (!state || (state.status === 'success' && state.projects.length === 0)) return null;
+function ProjectsGroup({ wsId, wsName, state }: { wsId: string; wsName: string; state: WorkspaceProjectsState | undefined }): React.ReactElement {
   return (
     <div className="mt-2 flex flex-col gap-px" aria-label={`${wsName} projects`}>
-      {state.status === 'pending' ? (
+      {state?.status === 'pending' ? (
         <div className="flex h-7 items-center gap-2.5 pl-5 pr-2.5" role="status" aria-label="Loading">
           <Skeleton className="h-2 w-16" />
         </div>
-      ) : state.status === 'error' ? (
+      ) : state?.status === 'error' ? (
         <div className="flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5 text-micro text-failed" role="alert">
           Couldn&rsquo;t load projects
         </div>
       ) : (
-        state.projects.map((p) => {
+        (state?.projects ?? []).map((p) => {
           const dot = SYNC_DOT[p.syncState];
           return (
             <A
@@ -146,6 +145,15 @@ function ProjectsGroup({ wsId, wsName, state }: { wsId: string; wsName: string; 
           );
         })
       )}
+      <A
+        to="/w/$ws/settings"
+        params={{ ws: wsId }}
+        search={{ section: 'projects' }}
+        className="flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5 text-meta text-text-3 hover:bg-bg-2"
+      >
+        <PlusGlyph className="size-2" />
+        <span>New project</span>
+      </A>
     </div>
   );
 }

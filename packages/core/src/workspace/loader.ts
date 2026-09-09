@@ -340,8 +340,11 @@ export const loader: WorkspaceLoader = new Loader();
  * The workspace's runtime config home holds a *symlink* to the credential file the machine owner's
  * own CLI reads and writes, never a copy of it. Claude's OAuth rotates the refresh token on every
  * refresh, so two live copies race and whichever refreshes first invalidates the other; the outage
- * of 2026-09-07 was exactly that. Only the credential file is shared — settings, session history
- * and project state stay per workspace, so `CLAUDE_CONFIG_DIR` still points here.
+ * of 2026-09-07 was exactly that. Session history and project state stay per workspace.
+ *
+ * OpenCode also shares the host config (`opencode.json` / `opencode.jsonc`): that is where custom
+ * providers and their keys live, so a model the owner's CLI can run is a model a turn can run.
+ * Isolated daemons (VS-143) still never resolve to the real host path.
  */
 
 /**
@@ -357,7 +360,11 @@ function credentialPaths(runtimeId: string, home: string, host: { isolated: bool
     claude: [[join(h, '.claude', '.credentials.json'), join(home, '.credentials.json')]],
     codex: [[join(h, '.codex', 'auth.json'), join(home, 'auth.json')]],
     gemini: [[join(h, '.gemini', 'oauth_creds.json'), join(home, 'oauth_creds.json')], [join(h, '.gemini', 'google_accounts.json'), join(home, 'google_accounts.json')]],
-    opencode: [[join(h, '.local', 'share', 'opencode', 'auth.json'), join(home, 'opencode', 'auth.json')]],
+      opencode: [
+        [join(h, '.local', 'share', 'opencode', 'auth.json'), join(home, 'opencode', 'auth.json')],
+        [join(h, '.config', 'opencode', 'opencode.json'), join(home, 'opencode', 'opencode.json')],
+        [join(h, '.config', 'opencode', 'opencode.jsonc'), join(home, 'opencode', 'opencode.jsonc')],
+      ],
   };
   const pairs = candidates[runtimeId] ?? [];
   if (!host.isolated) return pairs;

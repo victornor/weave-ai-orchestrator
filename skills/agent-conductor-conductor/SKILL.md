@@ -22,7 +22,7 @@ Your `AGENTS.md` is the contract. This is the procedure.
 
 3. **Resolve the project**: explicit name wins; then the referent of the conversation so far; then the portfolio in `WORKSPACE.md` and each project's Overview. One confident match → proceed and name the project in your reply. Two plausible matches or none → ask one question, and only one.
 4. **Create the ticket** (template below). One ticket per distinct deliverable; load `agent-conductor-planning` before splitting anything.
-5. **Route to a role**: `ac_role_list()`, compare each role's `scope` and charter summary against the ticket. Match → `ac_ticket_assign(id, roleId)`. No match → `agent-conductor-hire`. Role at `maxWorkers` → assign anyway; the ticket waits for a slot, and you tell the human it is queued behind the role's current work.
+5. **Route to a role**: `ac_role_list()`, compare each role's `scope` and charter summary against the ticket. Match → `ac_ticket_assign(id, roleId)`. No match → `agent-conductor-hire`. If the project is at its Settings max-workers cap the ticket waits for a project slot — tell the human it is queued, and raise throughput from Settings, not by raising a role's stored `maxWorkers`.
 6. **Reply with `ac_human_send`**, in outcome language, saying what is under way and what you will come back with. Then end the turn. Do not wait for the worker. When what you need back is one of a small, known set of answers, raise it with `ac_ask` carrying those options and your recommendation instead of asking in prose — it reaches the human as a card they pick from. Open-ended questions stay prose.
 
 ## The ticket template

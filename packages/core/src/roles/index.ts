@@ -279,8 +279,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
     },
 
     freeSlots(id: string): number {
-      const role = get(id);
-      return Math.max(0, role.maxWorkers - liveWorkers(id));
+      return service.concurrency(id).free;
     },
 
     concurrency(id: string): RoleConcurrency {
@@ -288,10 +287,11 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
       const projectMax = ctx.db.get<{ maxWorkers: number }>('SELECT max_workers FROM projects WHERE id = ?', [role.projectId])?.maxWorkers ?? role.maxWorkers;
       const live = liveWorkers(id);
       const projectLive = liveInProject(role.projectId);
+      // roleMax is the stored field (hire / ac_role_set_max_workers); it is not a spawn gate.
+      // Spawn and freeSlots honour only the project cap (VS-156).
       return {
-        roleMax: role.maxWorkers, projectMax, effective: Math.min(role.maxWorkers, projectMax), live, projectLive,
-        // exactly what workers.spawn enforces: the role's own headroom and the project's, whichever runs out first
-        free: Math.max(0, Math.min(role.maxWorkers - live, projectMax - projectLive)),
+        roleMax: role.maxWorkers, projectMax, effective: projectMax, live, projectLive,
+        free: Math.max(0, projectMax - projectLive),
       };
     },
   };

@@ -33,11 +33,9 @@ vi.mock('../api/hooks', () => ({
 
 const { TeamRoute } = await import('../routes/Team');
 
-/** Open the role sheet, which is where the max-workers control lives. */
-function openSheet(): HTMLElement {
+function openSheet(): void {
   render(<TeamRoute />);
   fireEvent.click(screen.getByText('Charter'));
-  return screen.getByLabelText('max workers');
 }
 
 beforeEach(() => {
@@ -82,44 +80,17 @@ describe('Team — start an interactive session (VS-101)', () => {
 });
 
 describe('Team — role max workers', () => {
-  it('shows the current limit and the effective concurrency', () => {
-    const input = openSheet();
-    expect(input).toHaveValue(2);
-    expect(screen.getByText(/2 effective · 1 live · 1 free/)).toBeInTheDocument();
-  });
-
-  it('says which limit is doing the capping when the project is the smaller one', () => {
-    state.role['maxWorkers'] = 8;
-    state.concurrency = { roleMax: 8, projectMax: 4, effective: 4, live: 1, projectLive: 1, free: 3 };
+  it('does not offer a per-role max-workers editor', () => {
     openSheet();
-    expect(screen.getByText(/capped by the project limit of 4/)).toBeInTheDocument();
-  });
-
-  it('patches the role once, on blur, with the new limit', () => {
-    const input = openSheet();
-    fireEvent.change(input, { target: { value: '6' } });
-    expect(state.updates).toEqual([]);          // nothing per keystroke
-    fireEvent.blur(input);
-    expect(state.updates).toEqual([{ id: 'backend', patch: { maxWorkers: 6 }, reason: 'changed from the web app' }]);
-  });
-
-  it('says nothing to the daemon for an unchanged or out-of-range value, and snaps back', () => {
-    const input = openSheet();
-    fireEvent.blur(input);
-    fireEvent.change(input, { target: { value: '2' } });
-    fireEvent.blur(input);
-    fireEvent.change(input, { target: { value: '99' } });
-    fireEvent.blur(input);
-    expect(input).toHaveValue(2);
-    fireEvent.change(input, { target: { value: '0' } });
-    fireEvent.blur(input);
-    expect(state.updates).toEqual([]);
-  });
-
-  it('renders without the concurrency block when the daemon predates it', () => {
-    state.concurrency = undefined;
-    expect(openSheet()).toHaveValue(2);
+    expect(screen.queryByLabelText('max workers')).not.toBeInTheDocument();
     expect(screen.queryByText(/effective/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+\/\d+ workers/)).not.toBeInTheDocument();
+  });
+
+  it('shows a live worker count without a per-role denominator', () => {
+    render(<TeamRoute />);
+    expect(screen.getByText('0 workers')).toBeInTheDocument();
+    expect(screen.queryByText(/0\/2 workers/)).not.toBeInTheDocument();
   });
 });
 

@@ -128,7 +128,8 @@ describe('briefing queued', () => {
     expect(snap.queued.find((q) => q.ticketId === unassigned.id)!.reason).toBe('unassigned');
     expect(snap.queued.find((q) => q.ticketId === pickup.id)!.reason).toBe('waiting to be picked up');
 
-    // Fill the role's two slots: the assigned ticket is now waiting on capacity.
+    // Fill the project's four slots: the assigned ticket is now waiting on capacity.
+    h.addWorker(null);
     h.addWorker(null);
     h.addWorker(null);
     snap = briefing().snapshot();

@@ -446,8 +446,8 @@ Wake sources and who enqueues them:
 
 ### 7.2 Turn gate and dispatcher
 
-- One run at a time per agent (one session ⇒ strictly serial per worker; workers of the same role run in parallel up to `role.max_workers` and `project.max_workers`). The dispatcher claims the oldest `queued` wake for each idle agent, bundles every other queued wake for that agent into the same run (`wakeup_ids_json`), and starts a run with a fresh `turn_epoch = agent.turn_epoch + 1`.
-- Caps: `daemon.maxConcurrentRuns` (default 6 per host), `project.max_workers`, `role.max_workers`. A ticket assigned to a role with no free worker slot waits in `todo` with a visible reason; the conductor is told when the wait exceeds `spawnWaitWarnSec` (default 10 min).
+- One run at a time per agent (one session ⇒ strictly serial per worker; workers of every role in a project run in parallel up to `project.max_workers`). The dispatcher claims the oldest `queued` wake for each idle agent, bundles every other queued wake for that agent into the same run (`wakeup_ids_json`), and starts a run with a fresh `turn_epoch = agent.turn_epoch + 1`.
+- Caps: `daemon.maxConcurrentRuns` (default 6 per host — concurrent *turns*, not spawned workers), `project.max_workers` (the only spawn cap). A ticket assigned to a role with no free *project* slot waits in `todo` with a visible reason; the conductor is told when the wait exceeds `spawnWaitWarnSec` (default 10 min).
 - The dispatcher is a 1 s tick reading the DB; no in-memory queue is authoritative. Restart-safe: on boot, runs in `running` whose pid is dead are marked `interrupted` and their wakes are re-queued (`retry`, one attempt).
 
 ### 7.3 Run lifecycle
@@ -632,7 +632,7 @@ Conductor only:
 - `ac_role_list()`, `ac_role_get(id)` (spec, charter, scope, status, live workers, recent outcomes).
 - `ac_role_hire(spec)` → §10.4; returns a `pending_activation` role, or `active` when `hireApproval=none`.
 - `ac_role_update_charter(id, {charter, reason, applyToRunning?})` → new role revision.
-- `ac_role_set_max_workers(id, {maxWorkers, reason})` → new role revision; returns the role and its `concurrency`. Raising applies from the next spawn sweep; lowering never cancels a live worker. The project limit still applies, so the effective concurrency is the smaller of the two.
+- `ac_role_set_max_workers(id, {maxWorkers, reason})` → new role revision; writes the stored field and returns the role and its `concurrency`. The field is not a spawn gate (VS-156); `concurrency.effective` is the project's Settings max-workers. Raising throughput is that Settings field.
 - `ac_role_pause(id, reason)` / `ac_role_resume(id)` / `ac_role_retire(id, reason)` (retire with live workers requires a human decision).
 - `ac_worker_list(filter)`, `ac_worker_get(id)` (ticket, status, worktree state, last report, spend).
 - `ac_worker_message(workerId, message, {live?})` → steering: a comment on the worker's ticket, attributed to the conductor, then — by default (`live: true`) — an attempt to deliver it to the worker's currently executing turn (VS-99's mid-turn channel); `live: false` skips straight to queuing. Returns `{ delivery: 'mid_turn' | 'queued', runId, wake }`: `mid_turn` means it landed inside the running turn; `queued` means it fell back to a wake (`conductor_request`) and the worker sees it at the start of its next turn. Never both, never neither, and never a change to the worker's permission mode, tool list or an open decision (VS-103).
@@ -768,13 +768,13 @@ The conductor speaks in outcomes: the fix, the PR, the review, the decision, the
 
 ### 11.1 Model
 
-A **role** is what the conductor hires: a template scoped to one project (charter, runtime, model, `max_workers`). A **worker** is what runs: spawned from a role for one ticket, with its own home, brief, worktree and session, and retired when the ticket's work has landed. This is firstmate's crewmate model: the conductor never talks to "the backend engineer" as a person; it assigns a ticket to the Backend Engineer role and a fresh worker picks it up. Concurrency is the number of live workers, bounded per role and per project.
+A **role** is what the conductor hires: a template scoped to one project (charter, runtime, model). A **worker** is what runs: spawned from a role for one ticket, with its own home, brief, worktree and session, and retired when the ticket's work has landed. This is firstmate's crewmate model: the conductor never talks to "the backend engineer" as a person; it assigns a ticket to the Backend Engineer role and a fresh worker picks it up. Concurrency is the number of live workers, bounded per project (`project.max_workers`).
 
 A worker's write scope: its worktree (`workers/<id>/work/`), its ticket and that ticket's descendants, and its project's KB (`knowledge/projects/<project>/PROJECT.md`, concise dated entries only). It reads its project repo (through the worktree), its project KB, `SHARED.md`, and its ticket. It cannot see other projects' code, tickets or KBs, other workers' worktrees, or `WORKSPACE.md` (which lists the portfolio). Cross-project needs become a `blocked` transition with `unblock_json {owner: conductor, action}` or an `ac_ask`; the conductor creates the courier ticket in the other project.
 
 ### 11.2 Spawn, brief, home
 
-Trigger: a ticket is assigned to a role and the role has a free slot (`role.max_workers`, `project.max_workers`). When several assigned tickets are waiting, the supervisor takes them in queue order — highest priority first (`critical` > `high` > `medium` > `low`), creation time breaking ties; running workers are never preempted. The supervisor spawns transactionally:
+Trigger: a ticket is assigned to a role and the project has a free slot (`project.max_workers`). When several assigned tickets are waiting, the supervisor takes them in queue order — highest priority first (`critical` > `high` > `medium` > `low`), creation time breaking ties; running workers are never preempted. The supervisor spawns transactionally:
 
 1. Create the `agents` row (`kind=worker`, `status=provisioning`), name `<Role name> #<n>` (n increments per role, for humans; the id is a ULID).
 2. Create the home `workers/<id>/` with skills for the runtime.

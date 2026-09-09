@@ -70,13 +70,15 @@ export function createBriefingService(ctx: WorkspaceContext): BriefingService {
 
   const queueReason = (roleId: string | null): string => {
     if (!roleId) return 'unassigned';
-    const role = ctx.db.get<{ maxWorkers: number }>('SELECT max_workers FROM roles WHERE id = ? AND workspace_id = ?', [roleId, ctx.workspaceId]);
+    const role = ctx.db.get<{ projectId: string }>('SELECT project_id FROM roles WHERE id = ? AND workspace_id = ?', [roleId, ctx.workspaceId]);
     if (!role) return 'unassigned';
+    const project = ctx.db.get<{ maxWorkers: number }>('SELECT max_workers FROM projects WHERE id = ?', [role.projectId]);
+    if (!project) return 'waiting to be picked up';
     const live = ctx.db.get<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM agents WHERE workspace_id = ? AND role_id = ? AND kind = 'worker' AND status IN ${LIVE_WORKER_STATUSES}`,
-      [ctx.workspaceId, roleId],
+      `SELECT COUNT(*) AS n FROM agents WHERE project_id = ? AND kind = 'worker' AND status IN ${LIVE_WORKER_STATUSES}`,
+      [role.projectId],
     )?.n ?? 0;
-    return Number(live) >= Number(role.maxWorkers) ? 'waiting for a worker slot' : 'waiting to be picked up';
+    return Number(live) >= Number(project.maxWorkers) ? 'waiting for a worker slot' : 'waiting to be picked up';
   };
 
   const warnings = (cutoff: string): string[] => {

@@ -59,6 +59,7 @@ describe('decisionToCard', () => {
     expect(card.options[2]!.tone).toBe('default');
     expect(card.body[0]).toEqual({ label: null, value: 'Backend Engineer · api', format: 'text' });
     expect(card.body).toContainEqual({ label: 'Runtime', value: 'claude · claude-fable-5-1', format: 'mono' });
+    expect(card.body.some((row) => row.label === 'Max workers')).toBe(false);
   });
 
   it('renders a question with the recommended option first and free text', () => {

@@ -156,14 +156,16 @@ dismissible dialog, containing:
 
 - a link to every destination the application has that the bar's tabs do not carry, including the
   merge queue and Live, each named and addressing the active workspace;
-- the active workspace's projects, each named by its slug and opening that project's overview;
+- the active workspace's projects, each named by its slug and opening that project's overview, and
+  the action that begins adding a project;
 - the workspace list, with each workspace's Needs-you count, where choosing a workspace navigates to
   it and makes it active;
 - the action that begins creating a new workspace;
 - the daemon's release state, when there is something to say about it, opening the section that
   shows it.
 
-A workspace with no projects SHALL contribute no project block to the menu.
+A workspace with no projects SHALL still contribute the New project action to the menu, and SHALL
+contribute no project rows.
 
 The menu SHALL be dismissed by choosing any of its items, by a tap outside it, by Escape, and by
 dragging it downwards past a threshold. While it is open, keyboard focus SHALL stay within it, and
@@ -287,9 +289,10 @@ regardless of whether its group has been explicitly expanded, since that group i
 While a group's projects are being fetched for the first time, that group SHALL show a loading state
 distinguishable from having no projects — a group SHALL NOT render as though a workspace has no
 projects while its fetch is still outstanding. A workspace that genuinely has no projects SHALL show
-its section links and no project list, without an empty block or an error. When a workspace's project
-fetch fails, that group alone SHALL show that it could not load its projects; every other group,
-expanded or collapsed, SHALL be unaffected and SHALL keep working.
+its section links and no project rows, without an empty-list error; the New project action SHALL
+still be shown. When a workspace's project fetch fails, that group alone SHALL show that it could
+not load its projects; every other group, expanded or collapsed, SHALL be unaffected and SHALL keep
+working.
 
 #### Scenario: Opening a project
 
@@ -319,7 +322,8 @@ expanded or collapsed, SHALL be unaffected and SHALL keep working.
 
 - **WHEN** a workspace's group is expanded (or, for the active workspace, shown) and that fetch
   completes with no projects
-- **THEN** its group shows its section links and no project list, and no error is shown
+- **THEN** its group shows its section links and no project rows, the New project action is shown,
+  and no error is shown
 
 #### Scenario: Loading is not mistaken for empty
 
@@ -389,3 +393,60 @@ in place of — the sync marker. Both SHALL be visible at once when the project 
 - **WHEN** a sidebar group lists two or more projects
 - **THEN** each is shown with its own project's colour, distinguishable from the other projects
   listed in that group
+
+### Requirement: An expanded workspace group offers a New project action
+
+Every expanded sidebar group SHALL offer an action labelled "New project" under that group's
+project rows, using the same plus mark the sidebar already uses for creating a workspace. The
+action SHALL be a named link or button, not an icon-only control.
+
+Activating it SHALL navigate, without a document reload, to that group's workspace's Settings at
+the Projects section — the existing add-project form, addressed by the Settings URL's section key.
+The sidebar SHALL NOT present a git-URL form or any other add-project UI of its own.
+
+The action SHALL be shown whenever the group is expanded: while that group's projects are loading,
+when the fetch failed, when the workspace has projects, and when it has none. A collapsed group
+SHALL NOT show it.
+
+On a phone viewport, where the sidebar is not shown, the same action SHALL be reachable in the menu
+the More tab opens, in the place that menu already shows that workspace's projects, and SHALL
+dismiss the menu on activate.
+
+#### Scenario: Adding a project from an open group that has projects
+
+- **WHEN** the human activates New project under the active workspace's listed projects
+- **THEN** the app shows that workspace's Settings at the Projects section, without a document
+  reload, and no add-project form is shown in the sidebar
+
+#### Scenario: An empty workspace still offers New project
+
+- **WHEN** a workspace's group is expanded (or, for the active workspace, shown) and that workspace
+  has no projects
+- **THEN** New project is shown under where the project rows would be, and no error is shown
+
+#### Scenario: Loading and a failed fetch still offer New project
+
+- **WHEN** a workspace's group is expanded and its project fetch is still outstanding, or has failed
+- **THEN** New project is shown in that group along with the loading or error state
+
+#### Scenario: A collapsed group has no New project
+
+- **WHEN** a non-active workspace's group is collapsed
+- **THEN** New project is not shown for that workspace
+
+#### Scenario: New project in another workspace switches to it
+
+- **WHEN** the human activates New project in a non-active workspace's expanded group
+- **THEN** the app shows that workspace's Settings at the Projects section and that workspace
+  becomes the active one
+
+#### Scenario: Adding a project on a phone
+
+- **WHEN** the human opens More on a phone and activates New project
+- **THEN** the app shows the active workspace's Settings at the Projects section and the menu is
+  dismissed
+
+#### Scenario: An empty workspace still offers New project on a phone
+
+- **WHEN** the human opens More on a phone and the active workspace has no projects
+- **THEN** New project is shown where that workspace's projects would be listed

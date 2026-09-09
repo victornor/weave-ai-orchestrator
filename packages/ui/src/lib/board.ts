@@ -45,6 +45,17 @@ export function isLiveWorker(worker: Pick<Agent, 'status'> | null | undefined): 
 }
 
 /**
+ * Live workers currently on a ticket, newest first. The Live page's working set: same liveness
+ * predicate as the board, listed as workers rather than keyed by ticket, so two live workers on
+ * one ticket both appear. The conductor is excluded (`kind === 'worker'`).
+ */
+export function liveWorkingAgents(workers: readonly Agent[]): Agent[] {
+  return workers
+    .filter((w) => w.kind === 'worker' && w.ticketId && isLiveWorker(w))
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/**
  * Ticket id → the live worker on it. A ticket's `workerId` stays set after the worker
  * retires, so liveness can only come from the workers themselves.
  */

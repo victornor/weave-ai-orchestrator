@@ -1,0 +1,183 @@
+/**
+ * VS-152: the Live page is a grid of currently-working workers, each streaming its run.
+ */
+import { act, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Agent, Run, RunEvent, Ticket } from '@agent-conductor/shared';
+import { agent, run as makeRun, ticket } from './factories';
+
+const state = vi.hoisted(() => ({
+  workers: undefined as Agent[] | undefined,
+  workersError: false,
+  tickets: [] as Ticket[],
+  running: [] as Run[],
+  queued: [] as Run[],
+  persisted: [] as RunEvent[],
+}));
+
+vi.mock('@tanstack/react-router', () => ({ useParams: () => ({}) }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../app/link', () => ({
+  A: ({ to, params, children, ...rest }: { to: string; params?: Record<string, string>; children?: React.ReactNode }) => (
+    <a href={Object.entries(params ?? {}).reduce((acc, [k, v]) => acc.replace(`$${k}`, v), to)} {...rest}>{children}</a>
+  ),
+  useGo: () => vi.fn(),
+  useSearchParams: () => ({}),
+}));
+
+vi.mock('../api/hooks', () => ({
+  useWorkers: () => ({
+    data: state.workers,
+    isError: state.workersError,
+    refetch: vi.fn(),
+  }),
+  useTickets: () => ({ data: state.tickets, isLoading: false, isError: false }),
+  useRuns: (params: { status?: string } = {}) => ({
+    data: params.status === 'queued' ? state.queued : params.status === 'running' ? state.running : [...state.queued, ...state.running],
+    isLoading: false,
+  }),
+  useRunEvents: (id: string) => ({ data: id ? state.persisted : [], isLoading: false }),
+}));
+
+const { LiveRoute } = await import('../routes/Live');
+
+class FakeEventSource {
+  static open: FakeEventSource[] = [];
+  readonly listeners = new Map<string, Array<(m: MessageEvent<string>) => void>>();
+  onmessage: ((m: MessageEvent<string>) => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+  constructor(readonly url: string) { FakeEventSource.open.push(this); }
+  addEventListener(type: string, fn: (m: MessageEvent<string>) => void): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+  }
+  close(): void { this.closed = true; }
+  emit(event: RunEvent): void {
+    act(() => {
+      for (const fn of this.listeners.get(event.type) ?? []) fn({ data: JSON.stringify(event) } as MessageEvent<string>);
+    });
+  }
+}
+
+const live = (): FakeEventSource[] => FakeEventSource.open.filter((s) => !s.closed);
+
+beforeEach(() => {
+  FakeEventSource.open = [];
+  state.workers = [];
+  state.workersError = false;
+  state.tickets = [];
+  state.running = [];
+  state.queued = [];
+  state.persisted = [];
+  (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
+  window.HTMLElement.prototype.scrollIntoView = vi.fn();
+});
+afterEach(() => vi.clearAllMocks());
+
+describe('Live page membership', () => {
+  it('shows one cell per live worker on a ticket, and names the worker and the ticket', () => {
+    state.workers = [
+      agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'running' }),
+      agent({ id: 'a2', name: 'Backend Engineer #1', ticketId: 'tk_2', status: 'active' }),
+    ];
+    state.tickets = [
+      ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode for the dashboard' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-7', title: 'Fix the flaky test' }),
+    ];
+    render(<LiveRoute />);
+    expect(screen.getByText('Frontend Engineer #7')).toBeInTheDocument();
+    expect(screen.getByText('Backend Engineer #1')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /ACME-42/ })).toHaveAttribute('href', '/w/ws1/tickets/ACME-42');
+    expect(screen.getByRole('link', { name: /ACME-7/ })).toHaveAttribute('href', '/w/ws1/tickets/ACME-7');
+    expect(screen.getByText('2 working')).toBeInTheDocument();
+  });
+
+  it('excludes paused, idle, retired workers and the conductor', () => {
+    state.workers = [
+      agent({ id: 'live', name: 'Frontend Engineer #7', status: 'running' }),
+      agent({ id: 'paused', name: 'Paused #1', status: 'paused' }),
+      agent({ id: 'done', name: 'Done #1', status: 'done' }),
+      agent({ id: 'retired', name: 'Retired #1', status: 'retired' }),
+      agent({ id: 'cond', name: 'Conductor', kind: 'conductor', status: 'running', ticketId: 'tk_1' }),
+    ];
+    state.tickets = [ticket({ id: 'tk_1', identifier: 'ACME-42' })];
+    render(<LiveRoute />);
+    expect(screen.getByText('Frontend Engineer #7')).toBeInTheDocument();
+    expect(screen.queryByText('Paused #1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Done #1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Retired #1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Conductor')).not.toBeInTheDocument();
+    expect(screen.getByText('1 working')).toBeInTheDocument();
+  });
+
+  it('says nobody is working when the loaded set is empty, without filling in paused workers', () => {
+    state.workers = [agent({ id: 'paused', name: 'Paused #1', status: 'paused' })];
+    render(<LiveRoute />);
+    expect(screen.getByText('Nobody is working.')).toBeInTheDocument();
+    expect(screen.queryByText('Paused #1')).not.toBeInTheDocument();
+  });
+
+  it('shows loading, not empty, while the working set has not arrived', () => {
+    state.workers = undefined;
+    render(<LiveRoute />);
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
+    expect(screen.queryByText('Nobody is working.')).not.toBeInTheDocument();
+  });
+
+  it('shows an error with retry when the working set fails to load', () => {
+    state.workers = undefined;
+    state.workersError = true;
+    render(<LiveRoute />);
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText('WORKERS_QUERY_FAILED')).toBeInTheDocument();
+    expect(screen.queryByText('Nobody is working.')).not.toBeInTheDocument();
+  });
+});
+
+describe('Live page streaming', () => {
+  it('opens a run stream for a worker with an in-progress run, and not for one between turns', () => {
+    state.workers = [
+      agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'running' }),
+      agent({ id: 'a2', name: 'Backend Engineer #1', ticketId: 'tk_2', status: 'active' }),
+    ];
+    state.tickets = [
+      ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-7', title: 'Flaky test' }),
+    ];
+    state.running = [makeRun({ id: 'run_1', agentId: 'a1', status: 'running' })];
+    render(<LiveRoute />);
+
+    expect(live().map((s) => s.url)).toEqual(['/api/w/ws1/runs/run_1/events/stream']);
+    expect(screen.getByText('Waiting for the next turn.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /ACME-7/ })).toBeInTheDocument();
+
+    live()[0]!.emit({
+      id: 'e1', runId: 'run_1', seq: 1, ts: '2026-09-01T09:00:00.000Z', type: 'assistant.text',
+      stream: 'stdout', level: 'info', payload: { text: 'Reading the failing test.' },
+    });
+    expect(screen.getByText('Reading the failing test.')).toBeInTheDocument();
+  });
+
+  it('drops a cell when the worker leaves the live set, without a remount of the others', () => {
+    state.workers = [
+      agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'running' }),
+      agent({ id: 'a2', name: 'Backend Engineer #1', ticketId: 'tk_2', status: 'running' }),
+    ];
+    state.tickets = [
+      ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-7', title: 'Flaky test' }),
+    ];
+    const { rerender } = render(<LiveRoute />);
+    expect(screen.getByText('Frontend Engineer #7')).toBeInTheDocument();
+    expect(screen.getByText('Backend Engineer #1')).toBeInTheDocument();
+
+    state.workers = [
+      agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'paused' }),
+      agent({ id: 'a2', name: 'Backend Engineer #1', ticketId: 'tk_2', status: 'running' }),
+    ];
+    rerender(<LiveRoute />);
+    expect(screen.queryByText('Frontend Engineer #7')).not.toBeInTheDocument();
+    expect(screen.getByText('Backend Engineer #1')).toBeInTheDocument();
+    expect(screen.getByText('1 working')).toBeInTheDocument();
+  });
+});

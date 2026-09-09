@@ -268,3 +268,25 @@ describe('end to end: a sent attachment reaches ac_inbox as real content (VS-133
     await client.close();
   });
 });
+
+describe('POST /threads/:id/messages — JSON idempotency (VS-148)', () => {
+  it('two requests with the same idempotencyKey produce one stored message', async () => {
+    const { h, fetch } = withRealThreads();
+    const t = h.runtime.services.threads.bindOrGet('web', 'web-idem', null, 'Victor');
+    const send = () => fetch(`/api/w/ws1/threads/${t.id}/messages`, {
+      method: 'POST',
+      headers: authed({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ body: 'ship it', idempotencyKey: 'k-retry' }),
+    });
+
+    const first = await send();
+    expect(first.status).toBe(201);
+    const a = await first.json() as { id: string };
+    const second = await send();
+    expect(second.status).toBe(201);
+    const b = await second.json() as { id: string };
+
+    expect(b.id).toBe(a.id);
+    expect(h.runtime.services.threads.messages(t.id)).toHaveLength(1);
+  });
+});

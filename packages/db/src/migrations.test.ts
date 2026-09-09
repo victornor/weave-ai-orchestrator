@@ -508,4 +508,55 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0020_thread_message_idempotency_key', () => {
+    const cols = (db: Db): string[] => db.all<{ name: string }>('PRAGMA table_info(thread_messages)').map((c) => c.name);
+
+    function seedMessage(db: Db, id: string, key: string | null): void {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(`INSERT INTO channels (id, workspace_id, kind, config_json, status) VALUES ('c1', 'w1', 'web', '{}', 'active')`);
+      db.run(`INSERT INTO channel_threads (id, channel_id, agent_id, is_primary, created_at) VALUES ('th1', 'c1', 'a1', 1, 't0')`);
+      db.run(
+        `INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at${key !== null ? ', idempotency_key' : ''})
+         VALUES (?, 'th1', 'inbound', 'human', 'hi', 't0'${key !== null ? ', ?' : ''})`,
+        key !== null ? [id, key] : [id],
+      );
+    }
+
+    it('adds the column and a unique index that ignores nulls', () => {
+      const path = join(dir, 'idem1.sqlite');
+      const before = openDbAsOf(path, '0019_telegram_pending_users.sql');
+      expect(cols(before)).not.toContain('idempotency_key');
+      seedMessage(before, 'm1', null);
+      before.close();
+
+      const db = openDb(path);
+      expect(cols(db)).toContain('idempotency_key');
+      expect(db.all<{ name: string }>('PRAGMA index_list(thread_messages)').map((i) => i.name))
+        .toContain('thread_messages_idempotency');
+      expect(db.get<{ idempotencyKey: string | null }>('SELECT idempotency_key FROM thread_messages WHERE id = ?', ['m1'])!.idempotencyKey).toBeNull();
+      db.close();
+    });
+
+    it('rejects a second row with the same key on the same thread, and allows two nulls', () => {
+      const db = openDb(join(dir, 'idem2.sqlite'));
+      seedMessage(db, 'm1', 'k1');
+      expect(() => db.run(
+        `INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at, idempotency_key)
+         VALUES ('m2', 'th1', 'inbound', 'human', 'again', 't1', 'k1')`,
+      )).toThrow(/UNIQUE constraint failed/);
+      db.run(
+        `INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at)
+         VALUES ('m3', 'th1', 'inbound', 'human', 'no key', 't2')`,
+      );
+      db.run(
+        `INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at)
+         VALUES ('m4', 'th1', 'inbound', 'human', 'also no key', 't3')`,
+      );
+      expect(db.all('SELECT id FROM thread_messages')).toHaveLength(3);
+      db.close();
+    });
+  });
 });

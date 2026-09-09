@@ -647,14 +647,14 @@ describe('DecisionCard', () => {
 });
 
 describe('Composer', () => {
-  it('submits on Enter and clears', () => {
+  it('submits on Enter and clears', async () => {
     const onSubmit = vi.fn();
     render(<Composer onSubmit={onSubmit} placeholder="Message the conductor…" />);
     const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: 'add dark mode' } });
     fireEvent.keyDown(box, { key: 'Enter' });
-    expect(onSubmit).toHaveBeenCalledWith('add dark mode');
-    expect(box.value).toBe('');
+    expect(onSubmit).toHaveBeenCalledWith('add dark mode', undefined, expect.any(String));
+    await waitFor(() => expect(box.value).toBe(''));
   });
 
   it('leaves the line break to Shift+Enter at a desk', () => {
@@ -685,7 +685,7 @@ describe('Composer', () => {
     expect(onSubmit).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByLabelText('Send'));
-    expect(onSubmit).toHaveBeenCalledWith('first line');
+    expect(onSubmit).toHaveBeenCalledWith('first line', undefined, expect.any(String));
   });
 
   it('asks the on-screen keyboard for a newline key on touch', () => {
@@ -773,7 +773,7 @@ describe('Composer', () => {
     const box = screen.getByLabelText('Message the conductor…');
     fireEvent.change(box, { target: { value: 'no attachment now' } });
     fireEvent.click(screen.getByLabelText('Send'));
-    expect(onSubmit).toHaveBeenCalledWith('no attachment now');
+    expect(onSubmit).toHaveBeenCalledWith('no attachment now', undefined, expect.any(String));
   });
 
   it('sends the pending files with the text, and clears both once the send resolves', async () => {
@@ -785,7 +785,7 @@ describe('Composer', () => {
     fireEvent.change(box, { target: { value: 'look at this' } });
     fireEvent.click(screen.getByLabelText('Send'));
 
-    expect(onSubmit).toHaveBeenCalledWith('look at this', [file]);
+    expect(onSubmit).toHaveBeenCalledWith('look at this', [file], expect.any(String));
     await waitFor(() => expect(screen.queryByText('shot.png')).not.toBeInTheDocument());
     expect(box.value).toBe('');
   });
@@ -812,6 +812,70 @@ describe('Composer', () => {
     fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files } });
     expect(screen.getAllByRole('listitem')).toHaveLength(4);
     expect(screen.getByText(/At most 4 files per message/)).toBeInTheDocument();
+  });
+
+  it('disables send and ignores a second tap while the first request is in flight', async () => {
+    let resolve!: () => void;
+    const onSubmit = vi.fn(() => new Promise<void>((r) => { resolve = r; }));
+    render(<Composer onSubmit={onSubmit} placeholder="Message the conductor…" />);
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'once' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+    fireEvent.click(screen.getByLabelText('Send'));
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByLabelText('Send')).toBeDisabled());
+    expect(screen.getByRole('status')).toHaveTextContent('Sending…');
+    resolve();
+    await waitFor(() => expect(box.value).toBe(''));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('re-enables send once a failed request settles, and keeps the typed text', async () => {
+    let reject!: (e: Error) => void;
+    const onSubmit = vi.fn(() => new Promise<void>((_, r) => { reject = r; }));
+    render(<Composer onSubmit={onSubmit} placeholder="Message the conductor…" />);
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'keep me' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+    await waitFor(() => expect(screen.getByLabelText('Send')).toBeDisabled());
+    reject(new Error('nope'));
+    await waitFor(() => expect(screen.getByLabelText('Send')).not.toBeDisabled());
+    expect(box.value).toBe('keep me');
+    expect(screen.getByRole('alert')).toHaveTextContent(/Message not sent/);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('shows Uploading and sending… while an attachment send is in flight', async () => {
+    const onSubmit = vi.fn(() => new Promise<void>(() => { /* pending */ }));
+    render(<Composer onSubmit={onSubmit} allowAttachments placeholder="Message the conductor…" />);
+    fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [new File(['x'], 'shot.png', { type: 'image/png' })] } });
+    fireEvent.change(screen.getByLabelText('Message the conductor…'), { target: { value: 'look' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Uploading and sending…'));
+  });
+
+  it('reuses the idempotency key on an unedited retry, and issues a new one after an edit', async () => {
+    const onSubmit = vi.fn()
+      .mockRejectedValueOnce(new Error('fail'))
+      .mockRejectedValueOnce(new Error('fail'))
+      .mockRejectedValueOnce(new Error('fail'));
+    render(<Composer onSubmit={onSubmit} placeholder="Message the conductor…" />);
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'same' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Message not sent/));
+    fireEvent.click(screen.getByLabelText('Send'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Message not sent/));
+    const first = onSubmit.mock.calls[0]![2] as string;
+    const second = onSubmit.mock.calls[1]![2] as string;
+    expect(second).toBe(first);
+
+    fireEvent.change(box, { target: { value: 'edited' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(3));
+    expect(onSubmit.mock.calls[2]![2]).not.toBe(first);
   });
 
   // The composer reads `(hover: none)` at render to tell a phone from a desk. jsdom answers every

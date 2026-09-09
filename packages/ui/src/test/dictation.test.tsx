@@ -236,7 +236,7 @@ describe('dictation — speech mode', () => {
 
     fireEvent.click(screen.getByLabelText('Send'));
 
-    expect(onSubmit).toHaveBeenCalledWith('ship the release');
+    expect(onSubmit).toHaveBeenCalledWith('ship the release', undefined, expect.any(String));
     expect(rec.stop).toHaveBeenCalled();
     expect(screen.getByLabelText('Dictate')).toBeInTheDocument();
     expect(screen.queryByLabelText('Stop dictation')).not.toBeInTheDocument();
@@ -254,7 +254,7 @@ describe('dictation — speech mode', () => {
 
     fireEvent.keyDown(box, { key: 'Enter' });
 
-    expect(onSubmit).toHaveBeenCalledWith('ship the release');
+    expect(onSubmit).toHaveBeenCalledWith('ship the release', undefined, expect.any(String));
     expect(rec.stop).toHaveBeenCalled();
     expect(screen.getByLabelText('Dictate')).toBeInTheDocument();
     expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
@@ -268,7 +268,7 @@ describe('dictation — speech mode', () => {
     fireEvent.change(box, { target: { value: 'typed by hand' } });
     fireEvent.click(screen.getByLabelText('Send'));
 
-    expect(onSubmit).toHaveBeenCalledWith('typed by hand');
+    expect(onSubmit).toHaveBeenCalledWith('typed by hand', undefined, expect.any(String));
     expect(FakeRecognition.last).toBeNull();
     expect(screen.getByLabelText('Dictate')).toBeInTheDocument();
   });

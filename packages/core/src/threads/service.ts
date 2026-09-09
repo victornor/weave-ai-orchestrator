@@ -72,7 +72,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     direction: 'inbound' | 'outbound',
     actor: Actor,
     body: string,
-    opts: { parts?: unknown[]; runId?: string | null; externalMessageId?: string; deliveryStatus?: string; projectId?: string | null; replyToMessageId?: string | null; replyToExcerpt?: string | null } = {},
+    opts: { parts?: unknown[]; runId?: string | null; externalMessageId?: string; deliveryStatus?: string; projectId?: string | null; replyToMessageId?: string | null; replyToExcerpt?: string | null; idempotencyKey?: string | null } = {},
   ): ThreadMessage {
     const msg: ThreadMessage = {
       id: newId(), threadId, direction, authorKind: actor.kind, authorId: actor.id, runId: opts.runId ?? actor.runId ?? null,
@@ -84,6 +84,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       id: msg.id, threadId, direction, authorKind: msg.authorKind, authorId: msg.authorId, runId: msg.runId, projectId: msg.projectId,
       replyToMessageId: msg.replyToMessageId, body,
       partsJson: msg.parts, externalMessageId: msg.externalMessageId, deliveryStatus: msg.deliveryStatus, createdAt: msg.createdAt,
+      idempotencyKey: opts.idempotencyKey ?? null,
     });
     db.run('UPDATE channel_threads SET last_message_at = ? WHERE id = ?', [msg.createdAt, threadId]);
     return msg;
@@ -150,13 +151,28 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       // it: the query cannot return a row from another thread, so a reference can never cross a thread
       // — and therefore a workspace — boundary. It is also the read that produces the excerpt.
       const repliedTo = opts.replyToMessageId ? repliedToMessage(t.id, opts.replyToMessageId) : null;
+      const idempotencyKey = opts.idempotencyKey || undefined;
       return tx(db, () => {
+        // A client retry after a lost response carries the same key; return the stored message
+        // without a second row, event, or wake (VS-148).
+        if (idempotencyKey) {
+          const existing = db.get<ThreadMessage>(
+            `SELECT m.*, r.body AS reply_to_excerpt FROM thread_messages m
+             LEFT JOIN thread_messages r ON r.id = m.reply_to_message_id AND r.thread_id = m.thread_id
+             WHERE m.thread_id = ? AND m.idempotency_key = ?`,
+            [t.id, idempotencyKey],
+          );
+          if (existing) {
+            return existing.replyToExcerpt === null ? existing : { ...existing, replyToExcerpt: excerpt(existing.replyToExcerpt) };
+          }
+        }
         const msg = insertMessage(t.id, 'inbound', human, body, {
           ...opts,
           projectId: project?.id ?? null,
           replyToMessageId: repliedTo?.id ?? null,
           replyToExcerpt: repliedTo ? excerpt(repliedTo.body) : null,
           deliveryStatus: 'received',
+          idempotencyKey: idempotencyKey ?? null,
         });
         // Written in the same transaction as the message: an attachment row never exists without the
         // message that owns it, so there is no orphan state to sweep (openspec design.md Decision 1).

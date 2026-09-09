@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-09
+goal: Add a Cursor CLI runtime adapter that never uses Cloud Agent handoff

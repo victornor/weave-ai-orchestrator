@@ -365,6 +365,7 @@ function credentialPaths(runtimeId: string, home: string, host: { isolated: bool
         [join(h, '.config', 'opencode', 'opencode.json'), join(home, 'opencode', 'opencode.json')],
         [join(h, '.config', 'opencode', 'opencode.jsonc'), join(home, 'opencode', 'opencode.jsonc')],
       ],
+      cursor: [[join(h, '.config', 'cursor', 'auth.json'), join(home, 'auth.json')]],
   };
   const pairs = candidates[runtimeId] ?? [];
   if (!host.isolated) return pairs;

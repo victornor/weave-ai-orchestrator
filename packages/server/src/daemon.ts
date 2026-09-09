@@ -33,7 +33,7 @@ import type { AppDeps, WorkspaceRuntime } from './types.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const log = getLogger('daemon');
 
-const RUNTIME_PACKAGES = ['@agent-conductor/runtime-claude', '@agent-conductor/runtime-codex', '@agent-conductor/runtime-opencode', '@agent-conductor/runtime-gemini'];
+const RUNTIME_PACKAGES = ['@agent-conductor/runtime-claude', '@agent-conductor/runtime-codex', '@agent-conductor/runtime-opencode', '@agent-conductor/runtime-gemini', '@agent-conductor/runtime-cursor'];
 const CHANNEL_PACKAGES = ['@agent-conductor/channel-web', '@agent-conductor/channel-cli', '@agent-conductor/channel-telegram'];
 const SURFACE_PACKAGES = ['@agent-conductor/surface-headless', '@agent-conductor/surface-tmux', '@agent-conductor/surface-herdr', '@agent-conductor/surface-hyprland'];
 

@@ -345,6 +345,28 @@ describe('opencode shares the host config, not only auth.json', () => {
   });
 });
 
+describe('cursor shares ~/.config/cursor/auth.json', () => {
+  const cursorHost = (): string => join(home, '.config', 'cursor', 'auth.json');
+  const linkCursor = (): void => linkRuntimeCredentials('cursor', wsHome);
+
+  it('links the host auth.json into the workspace runtime home', () => {
+    mkdirSync(dirname(cursorHost()), { recursive: true });
+    writeFileSync(cursorHost(), '{"accessToken":"host"}');
+    linkCursor();
+    expect(isLink(join(wsHome, 'auth.json'))).toBe(true);
+    expect(readlinkSync(join(wsHome, 'auth.json'))).toBe(cursorHost());
+  });
+
+  it('remaps the host side under credentials/cursor for an isolated daemon', () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'ac-daemon-cursor-'));
+    mkdirSync(dirname(cursorHost()), { recursive: true });
+    writeFileSync(cursorHost(), '{"accessToken":"host"}');
+    linkRuntimeCredentials('cursor', wsHome, { isolated: true, daemonConfigDir: configDir });
+    expect(() => lstatSync(join(wsHome, 'auth.json'))).toThrow();
+    rmSync(configDir, { recursive: true, force: true });
+  });
+});
+
 describe('runtimes that cannot describe their credential', () => {
   it('still shares the file, and never overwrites the host copy', () => {
     const codexHost = join(home, '.codex', 'auth.json');

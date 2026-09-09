@@ -242,6 +242,18 @@ importers:
         specifier: ^9.6.0
         version: 9.6.1
 
+  packages/runtimes/cursor:
+    dependencies:
+      '@agent-conductor/runtime-sdk':
+        specifier: workspace:*
+        version: link:../../runtime-sdk
+      '@agent-conductor/shared':
+        specifier: workspace:*
+        version: link:../../shared
+      execa:
+        specifier: ^9.6.0
+        version: 9.6.1
+
   packages/runtimes/gemini:
     dependencies:
       '@agent-conductor/runtime-sdk':
@@ -301,6 +313,9 @@ importers:
       '@agent-conductor/runtime-codex':
         specifier: workspace:*
         version: link:../runtimes/codex
+      '@agent-conductor/runtime-cursor':
+        specifier: workspace:*
+        version: link:../runtimes/cursor
       '@agent-conductor/runtime-gemini':
         specifier: workspace:*
         version: link:../runtimes/gemini

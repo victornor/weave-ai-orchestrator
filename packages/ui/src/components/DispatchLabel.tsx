@@ -14,6 +14,7 @@ export function DispatchLabel({
   status,
   onClick,
   className,
+  projectColorVar,
 }: {
   /** The dispatched agent's name, or the ticket's title until a worker exists. */
   name: string;
@@ -21,6 +22,7 @@ export function DispatchLabel({
   status: UiStatus;
   onClick?: () => void;
   className?: string;
+  projectColorVar?: string;
 }): React.ReactElement {
   return (
     <button
@@ -34,6 +36,7 @@ export function DispatchLabel({
       )}
     >
       <StatusGlyph status={status} size="xs" pulse={status === 'working'} />
+      {projectColorVar ? <span className="size-1.5 rounded-full" style={{ background: projectColorVar }} data-project-color aria-hidden /> : null}
       <span className="ac-mono text-micro text-text-soft">{identifier}</span>
       <span className="ac-truncate text-micro text-text-3">{name}</span>
       <span className={cx('ac-mono text-micro', STATUS_TEXT[status])}>{STATUS_LABEL[status]}</span>

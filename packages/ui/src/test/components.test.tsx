@@ -7,6 +7,7 @@ import { TicketCard } from '../components/TicketCard';
 import { WorkerCard } from '../components/WorkerCard';
 import { DecisionCard } from '../components/DecisionCard';
 import { DispatchLabel } from '../components/DispatchLabel';
+import { ProjectTag, WorkerChip } from '../components/Chips';
 import { Composer } from '../components/Composer';
 import { BudgetMeter } from '../components/BudgetMeter';
 import { TOTPInput } from '../components/TOTPInput';
@@ -188,6 +189,35 @@ describe('DispatchLabel', () => {
     render(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="done" onClick={onClick} />);
     fireEvent.click(screen.getByRole('button'));
     expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it('shows a project colour dot only when given one', () => {
+    const { rerender } = render(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="working" projectColorVar="var(--project-1)" />);
+    expect(screen.getByRole('button').querySelector('[data-project-color]')?.getAttribute('style')).toContain('var(--project-1)');
+    rerender(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="working" />);
+    expect(screen.getByRole('button').querySelector('[data-project-color]')).toBeNull();
+  });
+});
+
+describe('ProjectTag', () => {
+  it('shows a colour dot when colorVar is given, in both active states, and none without it', () => {
+    const { rerender } = render(<ProjectTag label="Web" active={false} colorVar="var(--project-2)" />);
+    expect(screen.getByRole('radio').querySelector('[data-project-color]')?.getAttribute('style')).toContain('var(--project-2)');
+    rerender(<ProjectTag label="Web" active colorVar="var(--project-2)" />);
+    expect(screen.getByRole('radio').querySelector('[data-project-color]')?.getAttribute('style')).toContain('var(--project-2)');
+    rerender(<ProjectTag label="Auto" active={false} />);
+    expect(screen.getByRole('radio').querySelector('[data-project-color]')).toBeNull();
+    rerender(<ProjectTag label="Auto" active />);
+    expect(screen.getByRole('radio').querySelector('[data-project-color]')).toBeNull();
+  });
+});
+
+describe('WorkerChip', () => {
+  it('shows a project colour dot only when given one', () => {
+    const { rerender } = render(<WorkerChip name="Frontend Engineer #7" status="working" projectColorVar="var(--project-3)" />);
+    expect(screen.getByRole('button').querySelector('[data-project-color]')?.getAttribute('style')).toContain('var(--project-3)');
+    rerender(<WorkerChip name="Frontend Engineer #7" status="working" />);
+    expect(screen.getByRole('button').querySelector('[data-project-color]')).toBeNull();
   });
 });
 

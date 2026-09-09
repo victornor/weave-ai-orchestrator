@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { RunEvent } from '@agent-conductor/shared';
-import { runEventsToTranscript } from '../lib/transcript';
+import { reportUiStatus, runEventsToTranscript } from '../lib/transcript';
 import type { TranscriptBlock } from '../lib/transcript';
 import { StatusGlyph } from './StatusGlyph';
 import { duration, tokens as fmtTokens } from '../lib/format';
@@ -58,6 +58,31 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
 
   if (block.type === 'text') {
     return <p className={cx('whitespace-pre-wrap text-body leading-relaxed', block.thinking ? 'text-text-3 italic' : 'text-text-body')}>{block.text}</p>;
+  }
+
+  if (block.type === 'report') {
+    const status = reportUiStatus(block.report.state);
+    const head = (
+      <div className="flex items-center gap-2.5 bg-bg-2 px-2.5 py-1.5">
+        <span className="ac-mono text-nano text-text-3">{open ? '▾' : '▸'}</span>
+        <StatusGlyph status={status} size="xs" />
+        <span className="ac-mono ac-truncate flex-1 text-micro text-text-2">{block.report.summary}</span>
+      </div>
+    );
+    return (
+      <div className="overflow-hidden rounded-r4 border border-line-1">
+        <button
+          type="button"
+          className="w-full text-left"
+          aria-expanded={open}
+          aria-label={`Turn report: ${block.report.summary}`}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {head}
+        </button>
+        {open ? <DiffBlock diff={block.text} /> : null}
+      </div>
+    );
   }
 
   if (block.type === 'phase') {

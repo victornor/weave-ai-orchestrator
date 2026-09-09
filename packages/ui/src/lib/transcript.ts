@@ -1,4 +1,5 @@
-import type { RunEvent } from '@agent-conductor/shared';
+import type { ReportState, RunEvent, RunReport, UiStatus } from '@agent-conductor/shared';
+import { extractReport } from '@agent-conductor/shared';
 
 export type TranscriptBlock =
   | { id: string; type: 'text'; text: string; thinking?: boolean }
@@ -6,7 +7,14 @@ export type TranscriptBlock =
   | { id: string; type: 'phase'; phase: string; durationMs: number | null; tokens: number | null }
   | { id: string; type: 'status'; text: string; status: 'needs-you' | 'blocked' | 'failed' | 'done' | 'working' }
   | { id: string; type: 'command'; command: string; exitCode: number | null; output: string | null }
-  | { id: string; type: 'human'; text: string; delivery: 'mid_turn' | 'queued' };
+  | { id: string; type: 'human'; text: string; delivery: 'mid_turn' | 'queued' }
+  | { id: string; type: 'report'; report: RunReport; text: string };
+
+export function reportUiStatus(state: ReportState): UiStatus {
+  if (state === 'needs_decision') return 'needs-you';
+  if (state === 'paused') return 'stalled';
+  return state;
+}
 
 function str(v: unknown, fallback = ''): string {
   return typeof v === 'string' ? v : fallback;
@@ -164,6 +172,13 @@ export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBl
       default:
         break;
     }
+  }
+  for (let i = out.length - 1; i >= 0; i--) {
+    const block = out[i];
+    if (!block || block.type !== 'text' || block.thinking) continue;
+    const report = extractReport(block.text);
+    if (report) out[i] = { id: block.id, type: 'report', report, text: block.text };
+    break;
   }
   return out;
 }

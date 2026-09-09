@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { RunEvent } from '@agent-conductor/shared';
-import { runEventsToTranscript } from '../lib/transcript';
+import { reportUiStatus, runEventsToTranscript } from '../lib/transcript';
 import { Transcript } from '../components/Transcript';
 import { Markdown } from '../components/Markdown';
 import { markdownToHtml } from '../lib/markdown';
@@ -87,6 +87,79 @@ describe('runEventsToTranscript', () => {
     ]);
     expect(blocks.map((b) => b.type)).toEqual(['phase', 'status']);
   });
+
+  const REPORT = {
+    state: 'working',
+    summary: 'Opened the PR for VS-147.',
+    tickets: [{ id: 'VS-147', status: 'in_review' }],
+    nextAction: { owner: 'human', what: 'Review the PR' },
+    knowledge: { recorded: false, reason: 'mid-task; nothing durable to record yet' },
+    uncommittedWork: false,
+  } as const;
+  const FENCED_REPORT = `\`\`\`json\n${JSON.stringify(REPORT, null, 2)}\n\`\`\``;
+
+  it('replaces a trailing fenced report with a report block', () => {
+    const blocks = runEventsToTranscript([
+      ev({ id: 't', type: 'assistant.text', payload: { text: "I'll add a token layer first." } }),
+      ev({ id: 'c', type: 'tool.call', payload: { id: 'c1', name: 'Read', input: { file_path: 'src/theme/tokens.ts' } } }),
+      ev({ id: 'r', type: 'assistant.text', payload: { text: FENCED_REPORT } }),
+    ]);
+    expect(blocks.map((b) => b.type)).toEqual(['text', 'tool', 'report']);
+    expect(blocks[0]).toMatchObject({ type: 'text', text: "I'll add a token layer first." });
+    expect(blocks[2]).toMatchObject({ type: 'report', report: REPORT, text: FENCED_REPORT });
+  });
+
+  it('treats consecutive prose-plus-report as one report block, not a split', () => {
+    const mixed = `I'll open the PR.\n\n${FENCED_REPORT}`;
+    const blocks = runEventsToTranscript([
+      ev({ id: 't', type: 'assistant.text', payload: { text: mixed } }),
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: 'report', report: REPORT, text: mixed });
+  });
+
+  it('still detects the report when a later event follows the last text block', () => {
+    const blocks = runEventsToTranscript([
+      ev({ id: 'r', type: 'assistant.text', payload: { text: FENCED_REPORT } }),
+      ev({ id: 'so', type: 'tool.call', payload: { id: 'so1', name: 'StructuredOutput' } }),
+      ev({ id: 'done', type: 'turn.completed', payload: { durationMs: 1200, tokens: 400 } }),
+    ]);
+    expect(blocks.map((b) => b.type)).toEqual(['report', 'tool', 'phase']);
+    expect(blocks[0]).toMatchObject({ type: 'report', report: { state: 'working', summary: REPORT.summary } });
+  });
+
+  it('leaves ordinary trailing assistant text as a text block', () => {
+    const blocks = runEventsToTranscript([
+      ev({ id: 't', type: 'assistant.text', payload: { text: 'The PR is up. Waiting on review.' } }),
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: 'text', text: 'The PR is up. Waiting on review.' });
+  });
+
+  it('does not treat thinking text that happens to look like a report as the report', () => {
+    const blocks = runEventsToTranscript([
+      ev({ id: 'th', type: 'assistant.thinking', payload: { text: FENCED_REPORT } }),
+      ev({ id: 't', type: 'assistant.text', payload: { text: 'Done.' } }),
+    ]);
+    expect(blocks.map((b) => b.type)).toEqual(['text', 'text']);
+    expect(blocks[0]).toMatchObject({ thinking: true, text: FENCED_REPORT });
+    expect(blocks[1]).toMatchObject({ type: 'text', text: 'Done.' });
+  });
+});
+
+describe('reportUiStatus', () => {
+  it('maps report states that have no matching UiStatus spelling', () => {
+    expect(reportUiStatus('needs_decision')).toBe('needs-you');
+    expect(reportUiStatus('paused')).toBe('stalled');
+  });
+
+  it('keeps the shared spellings', () => {
+    expect(reportUiStatus('working')).toBe('working');
+    expect(reportUiStatus('blocked')).toBe('blocked');
+    expect(reportUiStatus('done')).toBe('done');
+    expect(reportUiStatus('failed')).toBe('failed');
+    expect(reportUiStatus('idle')).toBe('idle');
+  });
 });
 
 describe('Transcript', () => {
@@ -106,6 +179,37 @@ describe('Transcript', () => {
     expect(screen.getByText('src/theme/tokens.ts')).toBeInTheDocument();
     expect(screen.getByText(/phase: implementing/)).toBeInTheDocument();
     expect(screen.getByText('asked you a question · waiting 2m')).toBeInTheDocument();
+  });
+
+  const REPORT = {
+    state: 'working' as const,
+    summary: 'Opened the PR for VS-147.',
+    tickets: [{ id: 'VS-147', status: 'in_review' }],
+    nextAction: { owner: 'human' as const, what: 'Review the PR' },
+    knowledge: { recorded: false, reason: 'mid-task; nothing durable to record yet' },
+    uncommittedWork: false,
+  };
+  const FENCED_REPORT = `\`\`\`json\n${JSON.stringify(REPORT, null, 2)}\n\`\`\``;
+
+  it('renders a trailing report collapsed to its summary, and expands to the JSON', () => {
+    render(
+      <Transcript
+        events={[
+          ev({ id: 'a', type: 'assistant.text', payload: { text: "I'll open the PR." } }),
+          ev({ id: 'b', type: 'tool.call', payload: { callId: 'c', name: 'Read', input: { file_path: 'src/theme/tokens.ts' } } }),
+          ev({ id: 'r', type: 'assistant.text', payload: { text: FENCED_REPORT } }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("I'll open the PR.")).toBeInTheDocument();
+    expect(screen.getByText('src/theme/tokens.ts')).toBeInTheDocument();
+    expect(screen.getByText('Opened the PR for VS-147.')).toBeInTheDocument();
+    expect(screen.queryByText(/"uncommittedWork"/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/"nextAction"/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Turn report: Opened the PR for VS-147.' }));
+    expect(screen.getByText(/"uncommittedWork"/)).toBeInTheDocument();
+    expect(screen.getByText(/"nextAction"/)).toBeInTheDocument();
   });
 });
 

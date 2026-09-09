@@ -4,7 +4,7 @@ import type {
   AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
   RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@agent-conductor/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, spawnLines, which, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
 import { describeOpenCodeAccount } from './account.js';
 import { buildArgs, CONFIG_RELATIVE_PATH, opencodeConfig } from './args.js';
@@ -67,7 +67,8 @@ export const adapter: RuntimeAdapter = {
 
   async listModels(): Promise<RuntimeModel[]> {
     try {
-      const { stdout } = await pExecFile('opencode', ['models'], { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 });
+      const exe = (await which('opencode')) ?? 'opencode';
+      const { stdout } = await pExecFile(exe, ['models'], { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 });
       const models = parseModels(stdout);
       if (models.length > 0) return models;
     } catch { /* fall through to the static list */ }

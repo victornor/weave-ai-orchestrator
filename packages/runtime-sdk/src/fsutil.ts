@@ -1,19 +1,47 @@
 import { execFile } from 'node:child_process';
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { accessSync, constants, cpSync, mkdirSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { delimiter, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { AgentHome, InstructionBundle, RuntimeDetection } from './index.js';
 
 const pExecFile = promisify(execFile);
+
+/**
+ * Per-user toolchain dirs searched when PATH misses. Daemons under systemd get a minimal
+ * PATH (`/usr/local/bin:/usr/bin`) that never contains mise/asdf shims or ~/.local/bin.
+ */
+function extraBinDirs(): string[] {
+  const home = process.env['HOME'] ?? homedir();
+  return [
+    process.env['MISE_SHIMS'],
+    join(home, '.local/share/mise/shims'),
+    join(home, '.asdf/shims'),
+    join(home, '.local/bin'),
+    '/usr/local/bin',
+    '/usr/bin',
+  ].filter((p): p is string => typeof p === 'string' && p.length > 0);
+}
 
 /** Locate a binary on PATH. Returns the resolved path or null. */
 export async function which(cmd: string): Promise<string | null> {
   try {
     const { stdout } = await pExecFile('which', [cmd], { timeout: 5000 });
     const p = stdout.trim().split('\n')[0];
-    return p ? p : null;
-  } catch { return null; }
+    if (p) return p;
+  } catch { /* fall through to the dir scan */ }
+  return whichSync(cmd);
+}
+
+/** Sync variant for spawn sites: PATH dirs first, then the per-user toolchain fallbacks. Null when not found. */
+export function whichSync(cmd: string): string | null {
+  if (cmd.includes('/')) return null;
+  const dirs = [...(process.env['PATH'] ?? '').split(delimiter).filter(Boolean), ...extraBinDirs()];
+  for (const dir of dirs) {
+    const p = join(dir, cmd);
+    try { accessSync(p, constants.X_OK); return p; } catch { /* keep scanning */ }
+  }
+  return null;
 }
 
 /** `detect()` for a CLI that answers `--version`. */
@@ -21,7 +49,7 @@ export async function detectBinary(cmd: string, versionArgs: string[] = ['--vers
   const path = await which(cmd);
   if (!path) return { status: 'missing_binary', notes: `${cmd} not found on PATH` };
   try {
-    const { stdout, stderr } = await pExecFile(cmd, versionArgs, { timeout: 20000 });
+    const { stdout, stderr } = await pExecFile(path, versionArgs, { timeout: 20000 });
     const raw = (stdout || stderr).trim();
     const version = /(\d+\.\d+\.\d+[\w.-]*)/.exec(raw)?.[1] ?? raw.split('\n')[0] ?? undefined;
     return { status: 'available', path, ...(version ? { version } : {}) };

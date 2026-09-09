@@ -263,5 +263,6 @@ describe('prompt rendering', () => {
     expect(conductor).toContain('`ac_ask`');
     // The rule adds a form, it does not replace the ordinary reply path.
     expect(conductor).toContain('Reply with `ac_human_send`');
+    expect(conductor).toContain('[short label](https://url)');
   });
 });

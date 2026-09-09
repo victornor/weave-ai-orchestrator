@@ -398,6 +398,38 @@ describe('ChatRoute message formatting', () => {
     expect(quote.innerHTML).not.toContain('<br>');
     expect(quote.closest('.ac-prose')).toBeNull();
   });
+
+  it('renders a titled https link as a compact button, not the URL', () => {
+    state.messages = [message({
+      id: 'm2',
+      body: 'Opened it.\n\n[GitHub pull request 130](https://github.com/acme/repo/pull/130)',
+    })];
+    const { container } = render(<ChatRoute />);
+
+    const prose = container.querySelector('.ac-prose');
+    expect(prose).toHaveClass('ac-chat-prose');
+    const link = screen.getByRole('link', { name: 'GitHub pull request 130' });
+    expect(link).toHaveAttribute('href', 'https://github.com/acme/repo/pull/130');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(prose?.textContent).not.toContain('https://github.com/acme/repo/pull/130');
+  });
+
+  it('renders several titled https links, and drops a javascript: target', () => {
+    state.messages = [message({
+      id: 'm2',
+      body: '[GitHub pull request 130](https://github.com/acme/repo/pull/130) [Diff](https://github.com/acme/repo/pull/130/files) [nope](javascript:alert(1))',
+    })];
+    render(<ChatRoute />);
+
+    const links = screen.getAllByRole('link');
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      'https://github.com/acme/repo/pull/130',
+      'https://github.com/acme/repo/pull/130/files',
+    ]);
+    expect(screen.getByRole('link', { name: 'GitHub pull request 130' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Diff' })).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain('javascript:');
+  });
 });
 
 

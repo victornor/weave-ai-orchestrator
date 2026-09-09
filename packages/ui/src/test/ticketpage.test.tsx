@@ -84,6 +84,7 @@ describe('TicketRoute comments', () => {
     const para = container.querySelector('article .ac-prose p')!;
     expect(para.innerHTML).toBe('first line<br>second line');
     expect([...container.querySelectorAll('article .ac-prose li')].map((li) => li.textContent)).toEqual(['one', 'two']);
+    expect(container.querySelector('.ac-chat-prose')).toBeNull();
   });
 
   it('still reflows a hard-wrapped description', () => {

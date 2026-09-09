@@ -11,7 +11,6 @@ Run through this before `ac_role_hire`. A "no" means fix it, not proceed.
 - [ ] 5–9 responsibilities, each a deliverable rather than an activity.
 - [ ] `exclusions` name the adjacent work a worker would otherwise absorb.
 - [ ] Every entry in `rules` came from this project's `PROJECT.md`, not from my assumptions about the stack.
-- [ ] `maxWorkers` reflects how many tickets this role should genuinely run at once.
 - [ ] `sessionPolicy` is `fresh` if and only if this is a reviewer-shaped role.
 - [ ] `permission.mode` is not `bypass`. (Only the human opts into that, explicitly.)
 - [ ] `secrets` lists names only — I have not written a credential anywhere in this spec.

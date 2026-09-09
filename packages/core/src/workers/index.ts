@@ -66,7 +66,6 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     if (role.status !== 'active') throw new OcError('wrong_status', `role ${role.id} is ${role.status}`);
     const project = projectOf(role.projectId);
 
-    if (deps().roles.freeSlots(role.id) <= 0) throw new OcError('role_full', `role ${role.name} has no free worker slot (max ${role.maxWorkers})`, { roleId: role.id });
     if (liveInProject(project.id) >= project.maxWorkers) throw new OcError('role_full', `project ${project.slug} is at its worker limit (${project.maxWorkers})`, { projectId: project.id });
 
     const id = newId();

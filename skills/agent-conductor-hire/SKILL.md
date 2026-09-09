@@ -5,7 +5,7 @@ description: Hiring a role in AgentConductor — check for overlap first, draft 
 
 # Hiring a role
 
-A **role** is a kind of work, not a person. One "Backend Engineer" role serves any number of concurrent tickets — concurrency comes from `maxWorkers`, never from hiring a second copy of the same charter. Hire only when no existing role covers the work.
+A **role** is a kind of work, not a person. One "Backend Engineer" role serves any number of concurrent tickets — concurrency comes from the project's Settings max-workers cap, never from hiring a second copy of the same charter. Hire only when no existing role covers the work.
 
 ## 1. Overlap check — before you draft anything
 
@@ -29,7 +29,6 @@ Fields and constraints: `references/spec-schema.md`. Worked examples for backend
 - **capabilities** — the stack and tooling the work needs.
 - **exclusions** — the adjacent things a worker would otherwise absorb.
 - **rules** — project-specific rules, pulled from that project's `PROJECT.md` (Conventions and Landmines), not invented.
-- **maxWorkers** — how many tickets this role should run at once. 2 unless the project's throughput says otherwise.
 - **sessionPolicy** — `per_ticket` for anything that builds; `fresh` for reviewers, so each review starts unbiased.
 
 Run the checklist in `references/checklist.md` before submitting.

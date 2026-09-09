@@ -140,11 +140,12 @@ describe('workers', () => {
     expect(b.id).toBe(a.id);
   });
 
-  it('refuses to spawn when the role has no free slot', async () => {
+  it('still spawns when the role is at its stored maxWorkers and the project has room', async () => {
     h.db.update('roles', h.roleId, { maxWorkers: 1 });
     await workers.spawnForTicket(SYSTEM, seedTicket().id);
     const second = seedTicket({ number: 2, identifier: 'TST-2', title: 'Second thing' });
-    await expect(workers.spawnForTicket(SYSTEM, second.id)).rejects.toMatchObject({ code: 'role_full' });
+    const spawned = await workers.spawnForTicket(SYSTEM, second.id);
+    expect(spawned.status).toBe('active');
   });
 
   it('refuses to spawn when the project is at its worker limit', async () => {
@@ -154,23 +155,42 @@ describe('workers', () => {
     await expect(workers.spawnForTicket(SYSTEM, second.id)).rejects.toMatchObject({ code: 'role_full' });
   });
 
-  it('picks a new role limit up on the next spawn, and lowering it never cancels a live worker', async () => {
-    // roles.update writes the row; spawn re-reads it every time, so no restart is involved
-    h.db.update('roles', h.roleId, { maxWorkers: 1 });
+  it('picks a new project limit up on the next spawn, and lowering it never cancels a live worker', async () => {
+    h.db.update('projects', h.projectId, { maxWorkers: 1 });
     const first = await workers.spawnForTicket(SYSTEM, seedTicket().id);
     const second = seedTicket({ number: 2, identifier: 'TST-2', title: 'Second thing' });
     await expect(workers.spawnForTicket(SYSTEM, second.id)).rejects.toMatchObject({ code: 'role_full' });
 
-    // raised: the very next spawn sees it, with nothing restarted in between
-    h.db.update('roles', h.roleId, { maxWorkers: 2 });
+    h.db.update('projects', h.projectId, { maxWorkers: 2 });
     const spawned = await workers.spawnForTicket(SYSTEM, second.id);
     expect(spawned.status).toBe('active');
 
-    // lowered under the live count: both workers keep running, only the next spawn is refused
-    h.db.update('roles', h.roleId, { maxWorkers: 1 });
+    h.db.update('projects', h.projectId, { maxWorkers: 1 });
     for (const w of [first, spawned]) expect(workers.get(w.id).status).toBe('active');
     const third = seedTicket({ number: 3, identifier: 'TST-3', title: 'Third thing' });
     await expect(workers.spawnForTicket(SYSTEM, third.id)).rejects.toMatchObject({ code: 'role_full' });
+  });
+
+  it('spawns a third worker of one role when the project still has a slot, even if that role is at its stored max', async () => {
+    h.db.update('projects', h.projectId, { maxWorkers: 3 });
+    h.db.update('roles', h.roleId, { maxWorkers: 2 });
+    const now = nowIso();
+    const otherRoleId = newId();
+    h.db.insert('roles', {
+      id: otherRoleId, workspaceId: h.workspaceId, projectId: h.projectId, slug: 'frontend', name: 'Frontend Engineer',
+      charterSummary: 'Owns the ui.', scopeText: 'Frontend work.', sessionPolicy: 'per_ticket', maxWorkers: 2,
+      status: 'active', specRevision: 1, createdBy: 'conductor', createdAt: now, updatedAt: now,
+    });
+
+    await workers.spawnForTicket(SYSTEM, seedTicket().id);
+    await workers.spawnForTicket(SYSTEM, seedTicket({ number: 2, identifier: 'TST-2', title: 'Second thing' }).id);
+    const third = await workers.spawnForTicket(SYSTEM, seedTicket({ number: 3, identifier: 'TST-3', title: 'Third thing' }).id);
+    expect(third.status).toBe('active');
+
+    const fourth = seedTicket({ number: 4, identifier: 'TST-4', title: 'Fourth thing' });
+    await expect(workers.spawnForTicket(SYSTEM, fourth.id)).rejects.toMatchObject({ code: 'role_full' });
+    const otherTicket = seedTicket({ number: 5, identifier: 'TST-5', title: 'Other role', assigneeRoleId: otherRoleId });
+    await expect(workers.spawnForTicket(SYSTEM, otherTicket.id)).rejects.toMatchObject({ code: 'role_full' });
   });
 
   it('rolls back the agent row, the home and the ticket binding when the worktree fails', async () => {

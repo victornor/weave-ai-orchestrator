@@ -191,8 +191,6 @@ function body(variant: CardVariant, d: Decision, target: Record<string, unknown>
       push(null, joinMeta(tstr(target, 'roleName', 'name'), tstr(target, 'projectName', 'project')) || null);
       push('Charter', tstr(target, 'charterSummary', 'charter') ? oneLine(redact(tstr(target, 'charterSummary', 'charter')!), 200) : null);
       push('Runtime', joinMeta(tstr(target, 'runtime', 'runtimeId'), tstr(target, 'model')) || null, 'mono');
-      const maxWorkers = tnum(target, 'maxWorkers');
-      push('Max workers', maxWorkers !== null ? String(maxWorkers) : null, 'mono');
       break;
     }
     case 'plan_approval': {

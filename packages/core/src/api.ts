@@ -172,7 +172,7 @@ export interface RolesService {
   freeSlots(id: string): number;
   concurrency(id: string): RoleConcurrency;
 }
-/** What actually caps a role's workers: its own limit, its project's, and how much of it is in use. */
+/** Project-pooled spawn headroom (VS-156). `roleMax` is the stored field, not a spawn gate; `effective` is `projectMax`. */
 export interface RoleConcurrency { roleMax: number; projectMax: number; effective: number; live: number; projectLive: number; free: number }
 /** What happened to a message sent to a worker (VS-99): which delivery occurred, never both, never neither. */
 export interface WorkerMessageOutcome { delivery: 'mid_turn' | 'queued'; runId: string | null; wake: S.Wakeup | null }

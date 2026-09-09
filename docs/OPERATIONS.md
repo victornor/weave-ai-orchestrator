@@ -589,11 +589,11 @@ gets a fresh session; a third marks the worker `error` and the ticket `blocked` 
 woken. Manual overrides: `conductor worker relaunch <id> --note "..."`, `conductor worker cancel <id>`,
 `conductor runs cancel <id> --mode kill`.
 
-If work is not starting at all: check `role_full` (a role's `maxWorkers`, or the project's
-`maxWorkers` across all roles), that the role is `active` (`conductor role list`), and that the workspace is
+If work is not starting at all: check `role_full` (the project's `maxWorkers` across all its roles),
+that the role is `active` (`conductor role list`), and that the workspace is
 not paused (`POST /api/w/<ws>/resume`; there is no `conductor workspace pause|resume` yet).
-`conductor role show <id>` prints the effective concurrency and which of the two limits is binding;
-`conductor role set-max-workers <id> <n>` raises the role's, and it applies from the next spawn sweep.
+`conductor role show <id>` prints the project's effective concurrency; raise throughput from the
+project's Settings max-workers field, not `conductor role set-max-workers`.
 
 ### Nothing is reachable
 

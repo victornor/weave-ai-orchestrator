@@ -56,6 +56,18 @@ describe('real core services over HTTP', () => {
     expect(listed.total).toBe(1);
   });
 
+  it('HTTP ticket list still includes description (VS-161)', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+    await app.fetch(new Request(`${base}/tickets`, {
+      method: 'POST', headers: H,
+      body: JSON.stringify({ projectId: harness.projectId, kind: 'task', title: 'Keep the body', description: 'the body' }),
+    }));
+    const listed = await (await app.fetch(new Request(`${base}/tickets`, { headers: H }))).json();
+    expect(listed.items[0].description).toBe('the body');
+  });
+
   it('round-trips a ticket summary on create and patch (VS-146)', async () => {
     const { deps, harness } = boot();
     const app = createApp(deps);

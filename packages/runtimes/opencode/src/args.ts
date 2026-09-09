@@ -51,7 +51,11 @@ export function buildArgs(input: TurnInput): OpenCodeBuiltCommand {
   }
 
   const env: Record<string, string> = { ...input.env };
-  if (input.configHome) { env['XDG_CONFIG_HOME'] = input.configHome; env['XDG_DATA_HOME'] = input.configHome; }
+  if (input.configHome) {
+    env['XDG_CONFIG_HOME'] = input.configHome;
+    env['XDG_DATA_HOME'] = input.configHome;
+    env['HOME'] = input.configHome;
+  }
 
   // The message is positional; `--` keeps a prompt that starts with `-` out of yargs' hands.
   args.push('--', input.prompt);

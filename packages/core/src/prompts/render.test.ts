@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
@@ -136,8 +137,25 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('yes, use CSS variables');
     expect(prompt).toContain('brief was updated');
     expect(prompt).toContain('picked up after a crash');
-    expect(prompt).toContain('SHARED.md + PROJECT.md digest');
+    expect(prompt).not.toContain('SHARED.md + PROJECT.md digest');
     expect(prompt).toContain('## What to do now');
+  });
+
+  it('records worker bootstrap without pasting it into the first-turn prompt (VS-161)', async () => {
+    const recorded: unknown[][] = [];
+    h.services.knowledgeUsage = {
+      recordBootstrap: (...args: unknown[]) => { recorded.push(args); },
+    } as never;
+    const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: worker.id, source: 'system', reason: 'assigned', payload: {}, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], { isFirstTurn: true, runId: 'run-1' });
+    expect(prompt).not.toContain('SHARED.md + PROJECT.md digest');
+    expect(recorded).toEqual([['run-1', worker.id, ticketId, []]]);
+  });
+
+  it('still pastes the bootstrap digest into the conductor first-turn prompt (VS-161)', async () => {
+    const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [{ id: 'w2', source: 'system', reason: 'digest', payload: {} } as never], { isFirstTurn: true });
+    expect(prompt).toContain('SHARED.md + PROJECT.md digest');
   });
 
   it('tells the admitted worker it holds the project merge slot and must re-sync', async () => {
@@ -214,6 +232,17 @@ describe('prompt rendering', () => {
     const plain = await buildTurnPrompt(h.ctx, h.deps, conductor, [{ id: 'w4', source: 'system', reason: 'digest', payload: {} } as never], {});
     expect(plain).toContain('(paused)');
     expect(plain).not.toContain('the human owns the resume');
+  });
+
+  it.runIf(existsSync(SHIPPED_TEMPLATES))('renders the shipped worker charter exactly once (VS-161)', () => {
+    h.ctx.templatesDir = SHIPPED_TEMPLATES;
+    const src = readFileSync(join(SHIPPED_TEMPLATES, 'worker.AGENTS.md.tmpl'), 'utf8');
+    for (const comment of src.matchAll(/<!--[\s\S]*?-->/g)) {
+      expect(comment[0]).not.toContain('{{');
+    }
+    const out = renderWorkerInstructions(h.ctx, h.deps, worker);
+    expect(out.split('## Charter').length - 1).toBe(1);
+    expect(out).not.toContain('definitionOfDone');
   });
 
   it.runIf(existsSync(SHIPPED_TEMPLATES))('renders the shipped templates without leaving placeholders', () => {

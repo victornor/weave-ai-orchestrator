@@ -41,6 +41,17 @@ export interface ToolDef<I extends ZodTypeAny = ZodTypeAny> {
 const svc = (ctx: ToolCtx): CoreServices => ctx.ws.services;
 const isConductor = (ctx: ToolCtx): boolean => ctx.claims.agentKind === 'conductor';
 
+const TICKET_LIST_LEAN = [
+  'id', 'identifier', 'number', 'status', 'kind', 'title', 'summary', 'priority',
+  'projectId', 'assigneeRoleId', 'workerId', 'parentId', 'openspecChangeName', 'updatedAt',
+] as const;
+
+function leanTicket(t: Ticket): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of TICKET_LIST_LEAN) out[k] = t[k];
+  return out;
+}
+
 // ---------- scope enforcement (PLAN §9.1) ----------
 
 /** Reads: the conductor sees everything; a worker only its own project. */
@@ -267,9 +278,14 @@ export const TOOLS: ToolDef[] = [
       projectId: z.string().optional(), status: z.array(z.enum(TICKET_STATUSES)).optional(), kind: z.array(z.enum(TICKET_KINDS)).optional(),
       roleId: z.string().optional(), search: z.string().optional(), limit: z.number().int().min(1).max(200).default(50), offset: z.number().int().min(0).default(0),
       includeTerminal: z.boolean().optional(),
+      includeDescription: z.boolean().optional(),
     }),
-    description: 'List tickets. Workers are pinned to their own project regardless of the filter.',
-    handler: (ctx, i) => svc(ctx).tickets.list({ ...i, projectId: isConductor(ctx) ? i.projectId : (ctx.claims.projectId ?? undefined) }),
+    description: 'List tickets (lean by default: identifiers, status, kind, title — no description). Use ac_ticket_get or includeDescription for bodies. Workers are pinned to their own project regardless of the filter.',
+    handler: (ctx, i) => {
+      const { includeDescription, ...filter } = i;
+      const page = svc(ctx).tickets.list({ ...filter, projectId: isConductor(ctx) ? i.projectId : (ctx.claims.projectId ?? undefined) });
+      return includeDescription ? page : { ...page, items: page.items.map(leanTicket) };
+    },
   },
   {
     name: 'ac_ticket_comments', scope: 'all', input: z.object({ id: ticketId, after: z.string().optional() }),

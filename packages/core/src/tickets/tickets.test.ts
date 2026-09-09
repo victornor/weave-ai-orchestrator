@@ -616,10 +616,11 @@ describe('tickets', () => {
   });
 
   it('lists and filters tickets', () => {
-    make({ title: 'one' });
+    make({ title: 'one', description: 'the body' });
     const two = make({ title: 'two', kind: 'scout' });
     tickets.cancel(HUMAN, two.id, 'nope');
     expect(tickets.list().total).toBe(1);
+    expect(tickets.list().items[0]?.description).toBe('the body');
     expect(tickets.list({ includeTerminal: true }).total).toBe(2);
     expect(tickets.list({ kind: ['scout'], includeTerminal: true }).items[0]?.id).toBe(two.id);
     expect(tickets.list({ search: 'one' }).total).toBe(1);

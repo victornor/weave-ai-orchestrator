@@ -10,7 +10,7 @@ The `conductor` CLI mirrors every tool (`conductor ticket get`, `conductor ask`,
 |---|---|---|
 | `ac_inbox` | — | the wakes bundled into this run: messages, ticket events, answered decisions, mentions, conductor steering |
 | `ac_ticket_get` | `id` | the ticket, including `status`, `kind`, `acceptance`, `openspecChangeName`, `documents`, `blockedBy` |
-| `ac_ticket_list` | `filter: {status?, kind?, assigneeRoleId?, projectId?, limit?}` | tickets you are allowed to see |
+| `ac_ticket_list` | `filter: {status?, kind?, assigneeRoleId?, projectId?, limit?, includeDescription?}` | lean tickets (id, identifier, status, kind, title, … — no `description`). Pass `includeDescription: true` or call `ac_ticket_get` for the body |
 | `ac_ticket_comments` | `id`, `after?` (cursor) | comments since the cursor, with `authorKind` and `sourceTrust` |
 | `ac_ticket_checkout` | `id` | ownership of the ticket for this run; `409` if held elsewhere |
 | `ac_ticket_release` | `id`, `note` | releases ownership |

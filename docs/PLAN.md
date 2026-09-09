@@ -611,7 +611,7 @@ Prefix `ac_`. Names are stable API; descriptions carry the rules so skills can s
 
 Common (all agents):
 - `ac_inbox()` → wakes bundled into this run: messages, ticket events, answered decisions, mentions, steering from the conductor. Call first.
-- `ac_ticket_get(id)`, `ac_ticket_list(filter)`, `ac_ticket_comments(id, after?)`.
+- `ac_ticket_get(id)`, `ac_ticket_list(filter, includeDescription?)` — list is lean by default (no `description`); pass `includeDescription: true` or call `get` for the body. `ac_ticket_comments(id, after?)`.
 - `ac_ticket_checkout(id)` → 409 on conflict (never retry). `ac_ticket_release(id, note)`.
 - `ac_ticket_comment(id, body, kind=comment)`; `ac_ticket_document_put(id, key, body)` (revisioned; plan/report); `ac_ticket_document_get(id, key=report, revision?)` (read scope: own project for a worker, everything for the conductor; `not_found` carries the keys that do exist).
 - `ac_ticket_transition(id, to, {note, unblock?: {owner, action}, blockedBy?: [ids]})` → applies guards.

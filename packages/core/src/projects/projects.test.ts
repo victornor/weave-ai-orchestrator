@@ -102,6 +102,18 @@ describe('projects', () => {
     expect(project.landingBranch).toBeNull();
   });
 
+  it('persists autoMergeDefault on add (VS-153)', async () => {
+    const src = await sourceRepo();
+    const on = await projects.add(HUMAN, cfg(src, { policies: { autoMergeDefault: true } }));
+    expect(on.policies.autoMergeDefault).toBe(true);
+  });
+
+  it('does not store autoMergeDefault true when omitted (VS-153)', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, cfg(src));
+    expect(project.policies.autoMergeDefault).not.toBe(true);
+  });
+
   it('sets, changes and clears a landing branch after creation (VS-122)', async () => {
     const src = await sourceRepo();
     await git(['checkout', '-b', 'edge'], src);

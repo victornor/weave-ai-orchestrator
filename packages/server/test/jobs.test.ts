@@ -45,6 +45,33 @@ describe('project add answers before the work finishes', () => {
     expect(harness.runtime.services.jobs.get(payload.jobId).state).toBe('running');
   });
 
+  it('POST /projects accepts policies.autoMergeDefault and rejects top-level autoMerge (VS-153)', async () => {
+    harness = makeHarness();
+    const received: unknown[] = [];
+    harness.impls['projects']!['startAdd'] = (_actor: unknown, cfg: unknown) => {
+      received.push(cfg);
+      const job = harness!.runtime.services.jobs.start('project_add', { type: 'project', id: 'p1' }, HUMAN);
+      return { project: { id: 'p1', slug: 'api', status: 'cloning' }, jobId: job.id };
+    };
+
+    const post = (body: unknown) => createApp(harness!.deps).fetch(new Request('http://127.0.0.1/api/w/ws1/projects', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify(body),
+    }));
+
+    const on = await post({ url: 'git@github.com:acme/api.git', policies: { autoMergeDefault: true } });
+    expect(on.status).toBe(202);
+    expect(received.at(-1)).toEqual(expect.objectContaining({ policies: expect.objectContaining({ autoMergeDefault: true }) }));
+
+    const bare = await post({ url: 'git@github.com:acme/web.git' });
+    expect(bare.status).toBe(202);
+
+    const rejected = await post({ url: 'git@github.com:acme/api.git', autoMerge: false });
+    expect(rejected.status).toBe(400);
+    const err = await rejected.json() as { error: { code: string; details: { issues: Array<{ code: string; message: string }> } } };
+    expect(err.error.code).toBe('validation');
+    expect(err.error.details.issues.some((i) => i.code === 'unrecognized_keys' && i.message.includes('autoMerge'))).toBe(true);
+  });
+
   it('POST /projects/:id/retry is 202, and passes a conflict through', async () => {
     harness = makeHarness();
     harness.impls['projects']!['retryAdd'] = (_actor: unknown, id: string) => {

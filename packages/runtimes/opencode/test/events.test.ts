@@ -23,6 +23,8 @@ describe('opencode run --format json parser', () => {
     expect(state.sessionId).toBe('ses_f9649ed9bffeRTKyRYoqBVKK1G');
     expect(state.finalText).toBe('pong');
     expect(state.usage).toEqual({ inputTokens: 10018, outputTokens: 14, cachedInputTokens: 1792 });
+    // One request: input 10018 + cache.write 0 + cache.read 1792.
+    expect(state.contextTokens).toBe(11_810);
     expect(state.costUsd).toBe(0);
     expect(state.isError).toBe(false);
   });
@@ -39,11 +41,23 @@ describe('opencode run --format json parser', () => {
     expect(state.finalText).toBe('```json\n{"state":"done","summary":"said pong"}\n```');
   });
 
+  it('measures the context from the last request, while usage stays the turn’s total', () => {
+    // Two-step fixture: first step 4294 + 0 + 7424, second 257 + 0 + 11520. Cumulative
+    // input+cache-read is 23,495 — the VS-98 bug if used as a size (VS-157).
+    const { state } = run('turn-tool-report');
+    expect(state.contextTokens).toBe(11_777);
+    const cumulative = state.usage!.inputTokens + state.usage!.cachedInputTokens;
+    expect(cumulative).toBe(23_495);
+    expect(state.contextTokens).toBeLessThan(cumulative);
+  });
+
   it('normalizes an error line', () => {
     const { types, state } = run('turn-error');
     expect(types).toEqual(['session.started', 'error', 'turn.completed']);
     expect(state.isError).toBe(true);
     expect(state.errorMessage).toContain('Unexpected server error');
+    expect(state.contextTokens).toBeNull();
+    expect(state.usage).toBeNull();
   });
 
   it('reports session.resumed when resuming', () => {

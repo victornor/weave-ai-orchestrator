@@ -144,7 +144,9 @@ export const adapter: RuntimeAdapter = {
       session: st.sessionId ? { sessionId: st.sessionId } : (built.sessionId ? { sessionId: built.sessionId } : null),
       finalText: st.finalText,
       ...(structured !== undefined ? { structured } : {}),
-      ...(st.usage ? { usage: { ...st.usage, basis: 'per_turn' as const } } : {}),
+      ...(st.usage
+        ? { usage: { ...st.usage, ...(st.contextTokens != null ? { contextTokens: st.contextTokens } : {}), basis: 'per_turn' as const } }
+        : {}),
       ...(st.costUsd != null ? { cost: { usd: st.costUsd, status: 'reported' as const } } : {}),
       ...(input.model ? { model: input.model } : {}),
       provider: 'opencode',

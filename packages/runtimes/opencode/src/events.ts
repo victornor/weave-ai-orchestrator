@@ -5,6 +5,12 @@ export interface OpenCodeParseState {
   sessionId: string | null;
   finalText: string | null;
   usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } | null;
+  /**
+   * Size of the last `step_finish` request: input + cache.write + cache.read. The `usage`
+   * totals above sum every step and are not a context size. Null when the stream reported
+   * no `tokens` object.
+   */
+  contextTokens: number | null;
   costUsd: number | null;
   isError: boolean;
   errorMessage: string | null;
@@ -25,7 +31,7 @@ const EDIT_TOOLS = new Set(['edit', 'write', 'patch', 'multiedit']);
  * OpenCode emits no terminal event, so `finish()` closes the turn.
  */
 export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: false }) {
-  const state: OpenCodeParseState = { sessionId: null, finalText: null, usage: null, costUsd: null, isError: false, errorMessage: null };
+  const state: OpenCodeParseState = { sessionId: null, finalText: null, usage: null, contextTokens: null, costUsd: null, isError: false, errorMessage: null };
   const textByMessage = new Map<string, string[]>();
   let lastMessageId: string | null = null;
   let announced = false;
@@ -73,12 +79,17 @@ export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: fal
         const t = obj(part?.['tokens']);
         if (t) {
           sawTokens = true;
+          const cache = obj(t['cache']);
+          const input = num(t['input']) ?? 0;
+          const write = num(cache?.['write']) ?? 0;
+          const read = num(cache?.['read']) ?? 0;
           tokens = {
-            inputTokens: tokens.inputTokens + (num(t['input']) ?? 0),
+            inputTokens: tokens.inputTokens + input,
             outputTokens: tokens.outputTokens + (num(t['output']) ?? 0),
-            cachedInputTokens: tokens.cachedInputTokens + (num(obj(t['cache'])?.['read']) ?? 0),
+            cachedInputTokens: tokens.cachedInputTokens + read,
           };
           state.usage = { ...tokens };
+          state.contextTokens = input + write + read;
           out.push({ ts, type: 'usage.delta', payload: { ...tokens, basis: 'per_turn', reason: str(part?.['reason']) } });
         }
         const cost = num(part?.['cost']);

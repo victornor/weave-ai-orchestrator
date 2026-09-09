@@ -7,6 +7,7 @@ import type { Db } from '@agent-conductor/db';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, ModelsService } from '../api.js';
 import { recordActivity } from '../events.js';
+import { releaseLoginPausesForAbandonedRuntimes } from '../runs/authgate.js';
 import { migrationSummary, type ModelMigration } from './migrate.js';
 
 export { modelSettingFor } from './resolve.js';
@@ -63,6 +64,9 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
       // The conductor's row records the runtime it is on; correcting it here means the change is
       // visible before its next turn, and `forTurn` retires a session the old runtime issued.
       try { await deps().workers.ensureConductor(); } catch (e) { log.warn({ err: String(e) }, 'could not restamp the conductor after a model change'); }
+      // A move off a dead runtime must also lift the login pauses that runtime raised — they
+      // guard turns that will never be taken on it again (VS-75 meets VS-77).
+      try { releaseLoginPausesForAbandonedRuntimes(ctx, deps); } catch (e) { log.warn({ err: String(e) }, 'could not release login pauses for abandoned runtimes'); }
       recordActivity(ctx.db, ctx.workspaceId, actor, 'workspace.models_changed', 'workspace', ctx.workspaceId, { before, after: parsed.data });
       ctx.events.emit('workspace.updated', 'workspace', ctx.workspaceId, { models: parsed.data });
       log.info({ before, after: parsed.data }, 'model settings changed');
@@ -70,6 +74,10 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
     },
 
     reconcile(): void {
+      // The startup sweep for workspaces that moved off a dead runtime while its agents were
+      // login-paused: their pauses outlived the runtime that raised them and nothing else lifts
+      // those. Runs before the pending-migration card so both can be settled in one start.
+      try { releaseLoginPausesForAbandonedRuntimes(ctx, deps); } catch (e) { log.error({ err: String(e) }, 'could not release login pauses for abandoned runtimes'); }
       const pending = readPending(ctx);
       if (!pending) return;
       const chosen = pending.chosen ?? ctx.config.models.workers.runtime;

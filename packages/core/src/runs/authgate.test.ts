@@ -8,12 +8,12 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
-import type { Decision } from '@agent-conductor/shared';
+import type { Agent, Decision } from '@agent-conductor/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAccountsService } from '../usage/accounts.js';
 import { createDispatcher } from './dispatcher.js';
 import { makeHarness, type TestHarness } from '../testing/context.js';
-import { LOGIN_PAUSE_CODE, authOutageCorrelationKey, gateRuntimeForLogin, loginCorrelationKey, ungateRuntime } from './authgate.js';
+import { LOGIN_PAUSE_CODE, authOutageCorrelationKey, gateRuntimeForLogin, loginCorrelationKey, loginPauseRuntime, releaseLoginPausesForAbandonedRuntimes, ungateRuntime } from './authgate.js';
 
 let h: TestHarness;
 /** Every decision the fake service was asked to create, in order. */
@@ -298,5 +298,70 @@ describe('no surface exposes the credential', () => {
     expect(Object.keys(h.services.accounts!.credential('claude')).sort()).toEqual([
       'detail', 'expiresAt', 'lastVerifiedAt', 'needsLogin', 'present', 'refreshFailedAt', 'runtimeId', 'updatedAt', 'workspaceId',
     ]);
+  });
+});
+
+/**
+ * VS-77 meets VS-75: moving the workspace's model settings off a dead runtime must lift the login
+ * pauses that runtime raised. `ungateRuntime` only releases agents still stamped with the gated
+ * runtime, and a login that never comes back (a cancelled subscription) releases nothing — so the
+ * pauses outlive the runtime that raised them and every chat message queues forever.
+ */
+describe('a login pause outliving a runtime the workspace abandoned', () => {
+  const moveTo = async (runtime: string): Promise<void> => {
+    await h.ctx.saveConfig({
+      ...h.ctx.config,
+      models: {
+        conductor: { ...h.ctx.config.models.conductor, runtime },
+        workers: { ...h.ctx.config.models.workers, runtime },
+      },
+    });
+  };
+
+  it('releases and restamps the paused agents, and withdraws the gate card', async () => {
+    const w = h.addWorker(null);
+    gate();
+    expect(agentRow(w).status).toBe('paused');
+    await moveTo('opencode');
+
+    expect(releaseLoginPausesForAbandonedRuntimes(h.ctx, h.deps)).toBe(2);  // the worker and the conductor
+
+    expect(agentRow(w).status).toBe('active');
+    expect(h.db.get<{ runtimeId: string }>('SELECT * FROM agents WHERE id = ?', [w])!.runtimeId).toBe('opencode');
+    expect(withdrawn).toHaveLength(1);
+    expect(releaseLoginPausesForAbandonedRuntimes(h.ctx, h.deps)).toBe(0);  // idempotent: the second sweep finds nothing
+  });
+
+  it('keeps the pause while the gated runtime still governs the agents', () => {
+    const w = h.addWorker(null);
+    gate();
+
+    expect(releaseLoginPausesForAbandonedRuntimes(h.ctx, h.deps)).toBe(0);
+    expect(agentRow(w).status).toBe('paused');
+    expect(withdrawn).toHaveLength(0);
+  });
+
+  it('keeps a pause raised for one runtime after a move to another gated one', async () => {
+    const w = h.addWorker(null);
+    gate();
+    // opencode is gated too, and now governs: the move trades one dead login for another.
+    gateRuntimeForLogin(h.ctx, h.deps, { runtimeId: 'opencode' }, 'expired');
+    await moveTo('opencode');
+
+    expect(releaseLoginPausesForAbandonedRuntimes(h.ctx, h.deps)).toBe(0);
+    expect(agentRow(w).status).toBe('paused');
+    // The pause now names the runtime its next turn would actually fail on, and ungate of that
+    // runtime releases it in the ordinary way.
+    expect(agentRow(w).pauseReason).toBe(`${LOGIN_PAUSE_CODE}: the opencode login expired`);
+    expect(h.db.get<{ runtimeId: string }>('SELECT * FROM agents WHERE id = ?', [w])!.runtimeId).toBe('opencode');
+  });
+
+  it('reads the paused-for runtime off a reason string from before the detail row recorded it', () => {
+    const w = h.addWorker(null);
+    gate();
+    h.db.update('agents', w, { pauseDetailJson: { family: 'auth', code: LOGIN_PAUSE_CODE, message: null, resetAt: null, runId: null } });
+
+    const agent = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [w])!;
+    expect(loginPauseRuntime(agent)).toBe('claude');
   });
 });

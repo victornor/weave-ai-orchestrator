@@ -501,6 +501,31 @@
   to { opacity: 1; transform: none; }
 }
 
+/* VS-163: titled https markdown links in conductor chat are compact buttons, not
+   underlined URLs. Scoped to `.ac-chat-prose` so ticket comments, knowledge and
+   decision cards keep today's inline links. Ticket chips (`#ticket:`) and
+   doc-links (`#doc:`) do not match this selector. */
+.ac-chat-prose a[href^='https://'] {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  margin: 0 var(--space-1) var(--space-2) 0;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r6);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  vertical-align: baseline;
+}
+.ac-chat-prose a[href^='https://']:hover {
+  border-color: var(--accent-edge);
+  color: var(--accent-link);
+}
+
 /* Ticket identifiers inside markdown (chat, comments): a chip, not a link. */
 .ac-prose a[href^='#ticket:'] {
   display: inline-flex;

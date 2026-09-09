@@ -578,6 +578,7 @@ export const TOOLS: ToolDef[] = [
     name: 'ac_human_send', scope: 'conductor',
     input: z.object({ threadId: z.string().optional(), body: z.string().min(1), replyToMessageId: z.string().nullable().optional() }),
     description: 'Send text to the human on the originating channel. This is the ONLY way your words reach them — plain assistant text is recorded as the run summary and never delivered. One decision per message; never batch unrelated asks. ' +
+      'Titled links go in body as `[label](https://url)` and render as compact buttons in chat. ' +
       'replyToMessageId marks this message as answering one specific earlier human message, shown in the chat as a compact quote: omit it to default to the message that woke this turn, when exactly one did; pass null explicitly to send with no target regardless (use this for anything unrelated to what woke the turn, e.g. relaying a landed ticket in the same turn as answering a question). An id naming no message of the thread, or one from another thread, is rejected.',
     handler: async (ctx, i) => {
       const threadId = i.threadId ?? originThreadId(ctx);

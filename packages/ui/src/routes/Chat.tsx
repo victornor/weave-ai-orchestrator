@@ -82,7 +82,7 @@ function MessageBody({
   };
   return (
     <div onClick={onClick}>
-      <Markdown source={source} className="text-body" breaks />
+      <Markdown source={source} className="ac-chat-prose text-body" breaks />
     </div>
   );
 }

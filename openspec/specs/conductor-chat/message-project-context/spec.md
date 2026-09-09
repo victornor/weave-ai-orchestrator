@@ -71,6 +71,12 @@ archived. The current choice SHALL be visually distinct at a glance — by more 
 single-select group with an accessible label equivalent to "Project for this message", every tag
 reachable and operable by keyboard.
 
+Every project's tag, whether or not it is the active selection, SHALL also show that project's own
+colour (`workspace-navigation/project-colour`), so the same colour that identifies a project
+elsewhere in the app identifies it here too. The **Auto** tag, having no project, SHALL show no
+colour marker. The active-selection styling and a project's colour marker are independent and both
+SHALL be visible together when a project's tag is the active choice.
+
 An archived project SHALL NOT be offered, except one the thread's most recent human message
 already carries, which stays visible so the strip is honest about what the next message would
 carry; this holds even when that archived project is the current selection.
@@ -111,6 +117,16 @@ with no project reference.
 
 - **WHEN** the human activates the tag that is currently the active selection
 - **THEN** either nothing changes, or the selection returns to Auto — the tag does not send any other project as a result
+
+#### Scenario: Each project's tag shows its own colour
+
+- **WHEN** the strip renders with two or more projects offered
+- **THEN** each project's tag shows that project's own colour, and the Auto tag shows none
+
+#### Scenario: A project's colour is shown whether or not it is selected
+
+- **WHEN** a project's tag is the active selection
+- **THEN** the tag shows both the active-selection styling and that project's own colour
 
 ### Requirement: The selector defaults to the thread's last choice
 

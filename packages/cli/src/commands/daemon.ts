@@ -8,14 +8,28 @@ import { parse as parseYaml } from 'yaml';
 import { join } from 'node:path';
 import { configHome } from '../contexts.js';
 import { LAUNCHD_LABEL, SERVICE_NAME, followLog, installLaunchdAgent, installService, isRunning, logFile, pidFile, readPid, renderLaunchdPlist, renderServiceUnit, resolveServerBin, serviceUnitPath, startDaemon, stopDaemon, tailLog } from '../daemon.js';
-import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, switchRelease } from '../release.js';
+import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, releaseStamp, switchRelease } from '../release.js';
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { AC_ENV, isTerminalUpgrade, type Upgrade } from '@agent-conductor/shared';
 import { run, session } from './util.js';
 import { runUpgradeRunner } from '../upgrade-runner.js';
 
-interface Health { ok?: boolean; version?: string; workspaces?: Array<{ id?: string; name?: string; status?: string }>; operatorConfigured?: boolean; tlsMode?: string; publicUrl?: string }
+interface Health {
+  ok?: boolean;
+  version?: string;
+  release?: { version?: string; path?: string; sha?: string | null };
+  workspaces?: Array<{ id?: string; name?: string; status?: string }>;
+  operatorConfigured?: boolean;
+  tlsMode?: string;
+  publicUrl?: string;
+}
+
+function displayVersion(version: string | null | undefined, path?: string | null): string {
+  const ver = version ?? '?';
+  const stamp = path ? releaseStamp(path) : null;
+  return stamp ? `${ver} · ${stamp}` : ver;
+}
 interface DaemonYaml { upgrade?: { source?: string; ref?: string; keep?: number; drainTimeoutSec?: number } }
 
 export function register(program: Command): void {
@@ -77,7 +91,7 @@ export function register(program: Command): void {
     .action(async (opts: Record<string, string>, command: Command) => run(async () => {
       if (process.env[AC_ENV.RUN_TOKEN]) throw new ApiError('forbidden', 'not available inside a worker run', 403);
       const result = await drainAndRestart(command, Number.parseInt(String(opts['drainTimeout'] ?? '900'), 10));
-      emit(result, () => write(`${style.ok('restarted')} ${result.how} · v${result.version ?? '?'}`));
+      emit(result, () => write(`${style.ok('restarted')} ${result.how} · ${result.version ?? '?'}`));
     }));
 
   daemon
@@ -98,7 +112,7 @@ export function register(program: Command): void {
         fields([
           ['process', local.running ? `running (pid ${pid})` : 'not running here'],
           ['log', local.log],
-          ['version', health?.version],
+          ['version', health ? displayVersion(health.version, health.release?.path) : undefined],
           ['tls', health?.tlsMode],
           ['operator', health?.operatorConfigured === undefined ? undefined : health.operatorConfigured ? 'configured' : style.warn('not configured — run `conductor daemon set-password`')],
           ['error', error ? style.bad(error) : undefined],
@@ -241,7 +255,7 @@ worker run (AC_RUN_TOKEN set): agents propose upgrades through tickets, humans r
       }
       const result = await drainAndRestart(command, drainTimeout);
       emit({ release: built.path, sha: built.sha, restarted: true, backups, ...result }, () => {
-        write(`${style.ok('restarted')} ${result.how} · v${result.version ?? '?'}`);
+        write(`${style.ok('restarted')} ${result.how} · ${result.version ?? '?'}`);
         if (result.interrupted.length) write(style.warn(`${result.interrupted.length} run(s) were still going and got interrupted; they resume on their own`));
         write(style.dim('next: conductor doctor'));
       });
@@ -299,7 +313,7 @@ when the daemon is not answering and has to be replaced from here.`)
     .description('internal: restart the daemon for a deferred upgrade and verify it came back')
     .action(async (upgradeId: string) => run(async () => {
       const verdict = await runUpgradeRunner(upgradeId);
-      emit(verdict, () => write(verdict.outcome === 'completed' ? `${style.ok('upgraded')} v${verdict.version ?? '?'}` : style.bad(verdict.message)));
+      emit(verdict, () => write(verdict.outcome === 'completed' ? `${style.ok('upgraded')} ${verdict.version ?? '?'}` : style.bad(verdict.message)));
     }));
 
   daemon
@@ -422,7 +436,7 @@ const short = (sha: string | null): string => (sha ? sha.slice(0, 10) : '?');
 
 function renderUpdate(status: UpdateStatus): void {
   fields([
-    ['running', `v${status.running.version} · ${short(status.running.sha)}`],
+    ['running', displayVersion(status.running.version, status.running.path)],
     ['release', status.running.path],
     ['source', status.configured ? `${status.source} @ ${status.ref}` : style.warn('not configured — set upgrade.source in daemon.yaml')],
     ['target', status.configured ? short(status.targetSha) : undefined],

@@ -100,3 +100,26 @@ describe('GET /api/daemon/update', () => {
     expect((await res.json()).error.code).toBe('forbidden');
   });
 });
+
+describe('GET /api/health version', () => {
+  it('reports the release sha as health version, not 0.1.0', async () => {
+    const root = releaseRoot('abc1234def');
+    const { fetch } = app({ version: 'abc1234def', releaseRoot: root });
+    const body = await (await fetch('/api/health')).json() as { version: string; release: { version: string; sha: string | null; path: string } };
+    expect(body.version).toBe('abc1234def');
+    expect(body.release.version).toBe('abc1234def');
+    expect(body.release.sha).toBe('abc1234def');
+    expect(body.release.path).toBe(root);
+    expect(body.version).not.toBe('0.1.0');
+  });
+
+  it('reports unknown as health version when the sha cannot be recovered', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'ac-upd-'));
+    tmps.push(home);
+    const { fetch } = app({ version: 'unknown', releaseRoot: home });
+    const body = await (await fetch('/api/health')).json() as { version: string; release: { version: string; sha: string | null } };
+    expect(body.version).toBe('unknown');
+    expect(body.release.version).toBe('unknown');
+    expect(body.release.sha).toBeNull();
+  });
+});

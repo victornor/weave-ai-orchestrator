@@ -268,7 +268,7 @@ export function LoginRoute(): React.ReactElement {
         )}
 
         <p className="mt-5 text-micro leading-relaxed text-text-4">
-          {health.data ? `v${health.data.version} · ${health.data.tlsMode}` : ''}
+          {health.data ? `${health.data.version} · ${health.data.tlsMode}` : ''}
         </p>
       </div>
     </div>

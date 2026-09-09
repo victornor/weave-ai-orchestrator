@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { LAUNCHD_LABEL, SERVICE_NAME, inOwnScope, planRestart } from './index.js';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { LAUNCHD_LABEL, SERVICE_NAME, inOwnScope, planRestart, releaseStamp, releaseVersion } from './index.js';
+
+const tmps: string[] = [];
+afterEach(() => { while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
 
 describe('planRestart', () => {
   const base = { platform: 'linux' as NodeJS.Platform, unitInstalled: false, launchdInstalled: false, systemdRunAvailable: false };
@@ -39,5 +45,23 @@ describe('planRestart', () => {
       cmd: 'systemd-run',
       args: ['--user', '--scope', '--collect', '--unit=ac-upgrade-1', '--quiet', 'node', 'bin.js', 'x'],
     });
+  });
+});
+
+describe('releaseVersion / releaseStamp', () => {
+  it('reads the sha and stamp from a named release directory', () => {
+    const home = mkdtempSync(join(tmpdir(), 'ac-relver-'));
+    tmps.push(home);
+    const root = join(home, '20260909-210807-abc1234def');
+    mkdirSync(root);
+    expect(releaseVersion(root)).toBe('abc1234def');
+    expect(releaseStamp(root)).toBe('20260909-210807');
+  });
+
+  it('reports unknown when neither git nor the directory name yields a sha', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ac-relver-none-'));
+    tmps.push(root);
+    expect(releaseVersion(root)).toBe('unknown');
+    expect(releaseStamp(root)).toBeNull();
   });
 });

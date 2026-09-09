@@ -1,5 +1,8 @@
 /** The `conductor` command tree (PLAN §20). Exported separately from `bin.ts` so tests can parse without exiting. */
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Command, Option } from 'commander';
+import { releaseVersion } from '@agent-conductor/release';
 import { configureOutput } from './output.js';
 import * as agent from './commands/agent.js';
 import * as auth from './commands/auth.js';
@@ -24,7 +27,8 @@ import * as worker from './commands/worker.js';
 import * as workspace from './commands/workspace.js';
 import * as worktree from './commands/worktree.js';
 
-export const VERSION = '0.1.0';
+const here = dirname(fileURLToPath(import.meta.url));
+export const VERSION = releaseVersion(resolve(here, '..', '..', '..'));
 
 export function buildProgram(): Command {
   const program = new Command();

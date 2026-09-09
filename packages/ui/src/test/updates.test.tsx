@@ -48,7 +48,7 @@ vi.mock('../api/hooks', () => ({
 
 const { SettingsRoute } = await import('../routes/Settings');
 
-const RUNNING = { version: '1.0.0', path: '/rel/20260101-120000-aaaaaaaaaa', sha: 'a'.repeat(40) };
+const RUNNING = { version: 'aaaaaaaaaa', path: '/rel/20260101-120000-aaaaaaaaaa', sha: 'a'.repeat(40) };
 
 const status = (over: Partial<UpdateStatus> = {}): UpdateStatus => ({
   configured: true, running: RUNNING, source: '/src/agent-conductor', ref: 'main',
@@ -87,7 +87,7 @@ beforeEach(() => {
 describe('Updates: the release state', () => {
   it('shows the running version, commit and release directory', () => {
     openUpdates();
-    expect(screen.getByText('v1.0.0')).toBeInTheDocument();
+    expect(screen.getByText('aaaaaaaaaa · 20260101-120000')).toBeInTheDocument();
     expect(screen.getByText('aaaaaaaaaa')).toBeInTheDocument();
     expect(screen.getByText(RUNNING.path)).toBeInTheDocument();
   });
@@ -179,10 +179,11 @@ describe('Updates: following an upgrade', () => {
   });
 
   it('shows the outcome and the version the daemon came back on', () => {
-    state.upgrade = record({ state: 'completed', cameBackVersion: '1.1.0', toRelease: '/rel/new', finishedAt: '2026-09-05T10:10:00.000Z' });
+    state.upgrade = record({ state: 'completed', cameBackVersion: 'bbbbbbbbbb', toRelease: '/rel/new', finishedAt: '2026-09-05T10:10:00.000Z' });
     openUpdates();
     expect(screen.getByText('completed')).toBeInTheDocument();
-    expect(screen.getByText('v1.1.0')).toBeInTheDocument();
+    expect(screen.getByText('Now running')).toBeInTheDocument();
+    expect(screen.getAllByText('bbbbbbbbbb').length).toBeGreaterThan(0);
   });
 
   it('shows the failure reason, the log tail and the version still running', () => {
@@ -193,7 +194,7 @@ describe('Updates: following an upgrade', () => {
     expect(screen.getByText('pnpm build exited 1')).toBeInTheDocument();
     expect(screen.getByText(/error TS1005/)).toBeInTheDocument();
     // The previous release is still the one running.
-    expect(screen.getAllByText('v1.0.0').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('aaaaaaaaaa · 20260101-120000').length).toBeGreaterThan(0);
   });
 });
 

@@ -92,12 +92,11 @@ export function buildAnnouncement(row: Upgrade, facts: AnnouncementFacts): Upgra
 
 const shortSha = (sha: string | null): string => (sha ? sha.slice(0, 7) : '');
 
-/** `v1.2.0 (a1b2c3d)`, `v1.2.0`, `a1b2c3d`, or the release's directory name when it has neither. */
+/** The running version (git sha), a short commit, or the release directory name. Never `v0.1.0`. */
 export function releaseLabel(release: UpgradeRelease): string {
-  const version = release.version ? `v${release.version}` : '';
+  if (release.version && release.version !== 'unknown') return release.version;
   const sha = shortSha(release.sha);
-  if (version && sha) return `${version} (${sha})`;
-  return version || sha || release.path?.split('/').pop() || 'an unknown release';
+  return sha || release.path?.split('/').pop() || 'an unknown release';
 }
 
 /** Local `HH:MM` on the daemon host — the only clock the human and the daemon share. */

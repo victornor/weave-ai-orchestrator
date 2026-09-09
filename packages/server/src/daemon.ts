@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { releaseVersion } from '@agent-conductor/release';
 import { createAdaptorServer } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
 import { openDb } from '@agent-conductor/db';
@@ -481,10 +482,7 @@ function defaultUiDir(): string | null {
 }
 
 function readVersion(): string {
-  try {
-    const require = createRequire(import.meta.url);
-    return (require('../package.json') as { version: string }).version;
-  } catch { return '0.0.0'; }
+  return releaseVersion(runningReleaseRoot());
 }
 
 export type { Db };

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Command } from 'commander';
-import { buildProgram } from './program.js';
+import { buildProgram, VERSION } from './program.js';
 import { configureOutput } from './output.js';
 import { parseAssignments } from './commands/workspace.js';
 
@@ -26,6 +26,12 @@ function helpOf(command: Command): string {
 
 describe('command tree', () => {
   const program = buildProgram();
+
+  it('reports a git sha as --version, not 0.1.0', () => {
+    expect(VERSION).not.toBe('0.1.0');
+    expect(VERSION).toMatch(/^(?:[0-9a-f]{7,40}|unknown)$/);
+    expect(program.version()).toBe(VERSION);
+  });
 
   it('exposes every top-level command from PLAN §20', () => {
     const expected = [

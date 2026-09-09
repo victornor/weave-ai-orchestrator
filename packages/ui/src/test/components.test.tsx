@@ -589,6 +589,61 @@ describe('DecisionCard', () => {
     expect(doclink).toBeInTheDocument();
     expect(doclink).toHaveAttribute('href', '#doc:looks-like-a-doc');
   });
+
+  // ---------- VS-146: provenance tag, plan-approval summary, compact density ----------
+
+  it('shows a Filed by conductor tag only when told the ticket was conductor-filed', () => {
+    const { unmount } = render(<DecisionCard decision={decision()} ticketFiledByConductor onAnswer={() => undefined} />);
+    expect(screen.getByText('Filed by conductor')).toBeInTheDocument();
+    unmount();
+    render(<DecisionCard decision={decision()} onAnswer={() => undefined} />);
+    expect(screen.queryByText('Filed by conductor')).not.toBeInTheDocument();
+  });
+
+  it('shows no provenance tag when the ticket is human-filed or the card has no ticket', () => {
+    const { unmount } = render(<DecisionCard decision={decision()} ticketFiledByConductor={false} onAnswer={() => undefined} />);
+    expect(screen.queryByText('Filed by conductor')).not.toBeInTheDocument();
+    unmount();
+    render(<DecisionCard decision={decision({ ticketId: null })} onAnswer={() => undefined} />);
+    expect(screen.queryByText('Filed by conductor')).not.toBeInTheDocument();
+  });
+
+  it('renders a plan-approval summary as a single plain-text line under the title', () => {
+    render(<DecisionCard decision={decision()} ticketSummary="Remind captain why this exists." onAnswer={() => undefined} />);
+    expect(screen.getByText('Remind captain why this exists.')).toBeInTheDocument();
+    expect(screen.getByText('Remind captain why this exists.').tagName).toBe('P');
+  });
+
+  it('shows no summary line when the ticket has none', () => {
+    render(<DecisionCard decision={decision({ title: 'Plan: dark mode for the dashboard' })} onAnswer={() => undefined} />);
+    expect(screen.queryByText('Remind captain why this exists.')).not.toBeInTheDocument();
+    expect(screen.getByText('Plan: dark mode for the dashboard')).toBeInTheDocument();
+  });
+
+  it('does not render a summary on a non-plan-approval card even when the prop is set', () => {
+    render(
+      <DecisionCard
+        decision={decision({ kind: 'merge_approval', title: 'Merge ACME-42' })}
+        ticketSummary="Remind captain why this exists."
+        onAnswer={() => undefined}
+      />,
+    );
+    expect(screen.queryByText('Remind captain why this exists.')).not.toBeInTheDocument();
+  });
+
+  it('applies compact density classes only when compact is set', () => {
+    const { unmount } = render(<DecisionCard decision={decision()} compact onAnswer={() => undefined} />);
+    const compactBody = screen.getByRole('article').querySelector(':scope > div:last-of-type');
+    expect(compactBody).toHaveClass('p-3');
+    expect(compactBody).not.toHaveClass('p-3.5');
+    expect(screen.getByRole('button', { name: /Approve/ })).toHaveClass('px-3', 'text-ui', 'h-thumb');
+    unmount();
+    render(<DecisionCard decision={decision()} onAnswer={() => undefined} />);
+    const defaultBody = screen.getByRole('article').querySelector(':scope > div:last-of-type');
+    expect(defaultBody).toHaveClass('p-3.5');
+    expect(screen.getByRole('button', { name: /Approve/ })).toHaveClass('px-4', 'text-body', 'h-thumb');
+    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+  });
 });
 
 describe('Composer', () => {

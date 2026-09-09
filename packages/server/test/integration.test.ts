@@ -56,6 +56,28 @@ describe('real core services over HTTP', () => {
     expect(listed.total).toBe(1);
   });
 
+  it('round-trips a ticket summary on create and patch (VS-146)', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+
+    const created = await (await app.fetch(new Request(`${base}/tickets`, {
+      method: 'POST', headers: H,
+      body: JSON.stringify({ projectId: harness.projectId, kind: 'task', title: 'Add a health check', summary: 'Why this ticket exists.' }),
+    }))).json();
+    expect(created.summary).toBe('Why this ticket exists.');
+
+    const patched = await (await app.fetch(new Request(`${base}/tickets/${created.id}`, {
+      method: 'PATCH', headers: H, body: JSON.stringify({ summary: 'Updated why.' }),
+    }))).json();
+    expect(patched.summary).toBe('Updated why.');
+
+    const cleared = await (await app.fetch(new Request(`${base}/tickets/${created.id}`, {
+      method: 'PATCH', headers: H, body: JSON.stringify({ summary: null }),
+    }))).json();
+    expect(cleared.summary).toBeNull();
+  });
+
   it('answers a decision through the REST route', async () => {
     const { deps, harness } = boot();
     const app = createApp(deps);

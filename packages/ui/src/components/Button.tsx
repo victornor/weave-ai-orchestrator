@@ -18,15 +18,20 @@ const SIZE: Record<Size, string> = {
   thumb: 'h-thumb px-4 text-body rounded-r6',
 };
 
+/** Same 44px thumb height, one step smaller padding and type (VS-146 chat density). */
+const THUMB_COMPACT = 'h-thumb px-3 text-ui rounded-r6';
+
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
   size?: Size;
+  /** VS-146: keep the 44px thumb target, shrink padding and label. */
+  compact?: boolean;
   kbd?: string;
   full?: boolean;
   children?: ReactNode;
 }
 
-export function Button({ variant = 'secondary', size = 'md', kbd, full, className, children, ...rest }: ButtonProps): React.ReactElement {
+export function Button({ variant = 'secondary', size = 'md', compact, kbd, full, className, children, ...rest }: ButtonProps): React.ReactElement {
   return (
     <button
       type="button"
@@ -36,7 +41,7 @@ export function Button({ variant = 'secondary', size = 'md', kbd, full, classNam
         'transition-colors duration-(--dur-fast) ease-ac',
         'disabled:opacity-45 disabled:pointer-events-none',
         VARIANT[variant],
-        variant === 'link' ? '' : SIZE[size],
+        variant === 'link' ? '' : compact && size === 'thumb' ? THUMB_COMPACT : SIZE[size],
         full && 'w-full',
         className,
       )}

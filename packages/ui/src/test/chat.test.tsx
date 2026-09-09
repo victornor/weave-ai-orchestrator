@@ -1220,6 +1220,44 @@ describe('ChatRoute decision cards', () => {
     render(<ChatRoute />);
     expect(screen.getByText(/1 need you/)).toBeInTheDocument();
   });
+
+  it('tags a conductor-filed plan and shows its summary, and tags neither a human-filed ticket (VS-146)', () => {
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.tickets = [
+      ticket({ id: 'tk_agent', identifier: 'VS-145', createdByKind: 'agent', summary: 'Filed after a false stuck-worker alarm.' }),
+      ticket({ id: 'tk_human', identifier: 'VS-99', createdByKind: 'human', summary: 'Captain asked for this.' }),
+    ];
+    state.decisions = [
+      decision({
+        id: 'd_agent', kind: 'plan_approval', ticketId: 'tk_agent', title: 'Plan: close the false alarm',
+        askedInRunId: 'run_1',
+      }),
+    ];
+    const { unmount } = render(<ChatRoute />);
+    const agentCard = screen.getByLabelText(/Plan: close the false alarm/);
+    expect(within(agentCard).getByText('Filed by conductor')).toBeInTheDocument();
+    expect(within(agentCard).getByText('Filed after a false stuck-worker alarm.')).toBeInTheDocument();
+    expect(agentCard.querySelector(':scope > div:last-of-type')).toHaveClass('p-3');
+    unmount();
+
+    state.decisions = [
+      decision({
+        id: 'd_human', kind: 'plan_approval', ticketId: 'tk_human', title: 'Plan: captain asked',
+        askedInRunId: 'run_1',
+      }),
+    ];
+    render(<ChatRoute />);
+    const humanCard = screen.getByLabelText(/Plan: captain asked/);
+    expect(within(humanCard).queryByText('Filed by conductor')).not.toBeInTheDocument();
+    expect(within(humanCard).queryByText('Captain asked for this.')).toBeInTheDocument();
+  });
+
+  it('shows no provenance tag on a card that concerns no ticket (VS-146)', () => {
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked({ ticketId: null })];
+    render(<ChatRoute />);
+    expect(screen.queryByText('Filed by conductor')).not.toBeInTheDocument();
+  });
 });
 
 describe('ChatRoute hiding a pinned decision', () => {

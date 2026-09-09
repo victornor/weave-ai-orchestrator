@@ -27,11 +27,12 @@ Your `AGENTS.md` is the contract. This is the procedure.
 
 ## The ticket template
 
-`ac_ticket_create({projectId, kind, title, description, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?})`
+`ac_ticket_create({projectId, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?})`
 
 - **title** — imperative, ≤ 70 characters, no ticket id, no project name. "Add dark mode to the dashboard", not "Dark mode".
 - **kind** — `change` when code changes are implied (the default for real work); `task` for a chore with no spec consequence; `scout` when the request is diagnostic or the answer would change what to build; `question` when someone must answer but nothing changes.
 - **priority** — `critical` (production is broken or someone is blocked), `high` (this week), `medium` (default), `low` (whenever).
+- **summary** — one sentence, ≤ 200 characters, why the ticket exists. Shown on the plan-approval card so the human can decide without opening it. Always set it when you file a ticket; never derive it from the description later.
 - **description** — always these five headings:
 
 ```markdown

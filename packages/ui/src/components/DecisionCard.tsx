@@ -32,6 +32,12 @@ export interface DecisionCardProps {
    * conductor chat passes one; a card that is a record rather than a prompt never offers it.
    */
   onHide?: () => void;
+  /** VS-146: the ticket was filed by the conductor, not the human. Chat only. */
+  ticketFiledByConductor?: boolean;
+  /** VS-146: one-line why, shown on plan_approval cards when the ticket has one. Chat only. */
+  ticketSummary?: string | null;
+  /** VS-146: tighter padding and button chrome. Chat only; Needs you stays at the default. */
+  compact?: boolean;
   onAnswer: (answer: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }) => void;
   className?: string;
 }
@@ -171,7 +177,7 @@ function answerLine(decision: Decision): string | null {
  * primary action sits bottom-left inside a 44 px thumb band. A decision that has
  * been answered renders the same card as an inert record of what was decided.
  */
-export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, askedBy, asker, busy, queued, plan, autoApproving, onHide, onAnswer, className }: DecisionCardProps): React.ReactElement {
+export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, askedBy, asker, busy, queued, plan, autoApproving, onHide, ticketFiledByConductor, ticketSummary, compact, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [freeText, setFreeText] = useState(false);
@@ -207,13 +213,15 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
     inputs.length ? { ...a, inputs: collected() } : a;
 
   const answer = (key: string, text?: string): void => onAnswer(withInputs(text === undefined ? { key } : { key, text }));
+  const why = decision.kind === 'plan_approval' ? ticketSummary?.trim() : '';
+  const section = compact ? 'mb-2' : 'mb-3';
 
   return (
     <article
       className={cx('overflow-hidden rounded-r8 border bg-bg-1', destructive ? 'border-failed/35' : 'border-line-2', className)}
       aria-label={`${head.label}: ${decision.title}`}
     >
-      <div className="flex items-center gap-2 border-b border-line-1 px-3.5 py-2.5">
+      <div className={cx('flex items-center gap-2 border-b border-line-1', compact ? 'px-3 py-2' : 'px-3.5 py-2.5')}>
         <StatusGlyph status={head.status} size="sm" />
         <span className={cx('text-meta font-medium', HEAD_TEXT[head.status] ?? 'text-blocked')}>
           {!inert && decision.kind === 'plan_approval' ? 'Needs you' : head.label}
@@ -233,18 +241,24 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             Show PR
           </A>
         ) : null}
+        {ticketFiledByConductor ? (
+          <span className="ac-mono rounded-r4 border border-line-2 px-1.5 py-0.5 text-nano tracking-micro text-text-3">
+            Filed by conductor
+          </span>
+        ) : null}
         {meta ? <span className="ac-mono text-micro text-text-3">{meta}</span> : null}
       </div>
 
-      <div className="p-3.5">
-        <h3 className="mb-1.5 text-head font-semibold leading-snug tracking-head text-text-strong">{decision.title}</h3>
-        {decision.context ? <Markdown source={decision.context} className="mb-3 text-meta leading-relaxed text-text-2" /> : null}
+      <div className={compact ? 'p-3' : 'p-3.5'}>
+        <h3 className={cx(compact ? 'mb-1' : 'mb-1.5', 'text-head font-semibold leading-snug tracking-head text-text-strong')}>{decision.title}</h3>
+        {why ? <p className={cx(section, 'text-meta leading-snug text-text-2')}>{why}</p> : null}
+        {decision.context ? <Markdown source={decision.context} className={cx(section, 'text-meta leading-relaxed text-text-2')} /> : null}
 
         {/* plan approval — the proposal's task list */}
         {target.tasks?.length ? (
-          <ul className="mb-3 flex flex-col gap-1.5 rounded-r6 border border-line-1 bg-bg-2 p-3">
+          <ul className={cx(section, 'flex flex-col gap-1.5 rounded-r6 border border-line-1 bg-bg-2 p-3')}>
             {target.tasks.map((t, i) => (
-              <li key={i} className="flex items-start gap-2.5">
+              <li key={i} className={cx('flex items-start', compact ? 'gap-2' : 'gap-2.5')}>
                 <span className="mt-0.5 size-3 flex-none rounded-r4 border border-line-3" aria-hidden />
                 <span className="flex-1 text-meta leading-snug text-text-soft">{t.text}</span>
                 {t.files ? <span className="ac-mono text-micro text-text-4">{t.files}</span> : null}
@@ -258,7 +272,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
 
         {/* merge approval — CI and diff stats */}
         {decision.kind === 'merge_approval' ? (
-          <div className="ac-mono mb-3 flex flex-wrap items-center gap-3.5 text-micro">
+          <div className={cx('ac-mono flex flex-wrap items-center gap-3.5 text-micro', section)}>
             {target.ci ? (
               <span className={cx('flex items-center gap-1.5', target.ci.passed === target.ci.total ? 'text-done' : 'text-working')}>
                 <span className="size-2 rounded-pill bg-current" />
@@ -273,7 +287,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
 
         {/* hire approval — runtime and model */}
         {decision.kind === 'hire_approval' && (target.runtime || target.model) ? (
-          <div className="mb-3 flex items-center gap-2 rounded-r6 border border-line-1 bg-bg-2 px-3 py-2">
+          <div className={cx(section, 'flex items-center gap-2 rounded-r6 border border-line-1 bg-bg-2 px-3 py-2')}>
             <span className="ac-mono text-micro text-text-soft">
               {target.runtime}
               {target.model ? ` · ${target.model}` : ''}
@@ -289,7 +303,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
 
         {/* options — picking one selects it; the send action below commits it */}
         {optionList && !inert ? (
-          <div className="mb-3 flex flex-col gap-2" role="radiogroup" aria-label="Options">
+          <div className={cx(section, 'flex flex-col gap-2')} role="radiogroup" aria-label="Options">
             {decision.options.map((o) => {
               const picked = o.recommended || o.key === decision.recommendation;
               const chosen = selected === o.key;
@@ -337,7 +351,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
 
         {/* the values this card collects, in the order the asker asked for them */}
         {inputs.length && !inert ? (
-          <div className="mb-3 flex flex-col gap-3 rounded-r6 border border-line-1 bg-bg-2 p-3">
+          <div className={cx(section, 'flex flex-col gap-3 rounded-r6 border border-line-1 bg-bg-2 p-3')}>
             {inputs.map((i) => (
               <InputControl
                 key={i.key}
@@ -352,7 +366,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
 
         {/* answered — the record of what was decided */}
         {answered ? (
-          <div className="mb-3 rounded-r6 border border-line-1 bg-bg-2 p-3" aria-label="The answer given">
+          <div className={cx(section, 'rounded-r6 border border-line-1 bg-bg-2 p-3')} aria-label="The answer given">
             {answerLine(decision) || !answeredInputs(decision).length ? (
               <p className="text-meta leading-relaxed text-text-1">{answerLine(decision) ?? 'No answer recorded.'}</p>
             ) : null}
@@ -379,7 +393,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
 
         {freeText && !inert ? (
           <Composer
-            className="mb-3"
+            className={section}
             rows={2}
             placeholder="Answer in your own words…"
             submitLabel="Send answer"
@@ -392,7 +406,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
 
         {revising && !inert ? (
           <Composer
-            className="mb-3"
+            className={section}
             rows={3}
             autoFocus
             scope={<span>Revising the plan for {ticketIdentifier ?? 'this ticket'} — say what to change.</span>}
@@ -422,13 +436,13 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             </p>
           ) : inert ? null : decision.kind === 'plan_approval' ? (
             <>
-              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.plan_approval.approve)} kbd="⏎">
+              <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.plan_approval.approve)} kbd="⏎">
                 Approve
               </Button>
-              <Button variant="secondary" size="thumb" className="flex-1" disabled={busy} onClick={() => setRevising((v) => !v)}>
+              <Button variant="secondary" size="thumb" compact={compact} className="flex-1" disabled={busy} onClick={() => setRevising((v) => !v)}>
                 Revise…
               </Button>
-              <Button variant="ghost" size="thumb" className="w-12 border border-line-2" aria-label="Reject" disabled={busy} onClick={() => answer(NAMED_CARD_OPTION_KEYS.plan_approval.reject)}>
+              <Button variant="ghost" size="thumb" compact={compact} className="w-12 border border-line-2" aria-label="Reject" disabled={busy} onClick={() => answer(NAMED_CARD_OPTION_KEYS.plan_approval.reject)}>
                 ✕
               </Button>
             </>
@@ -436,7 +450,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             <>
               {/* No Hold: hiding the card (VS-72) already covers "not now" without answering, and a
                   merge approval has only `approve`/`changes` to answer with (VS-111). */}
-              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.merge_approval.approve)}>
+              <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.merge_approval.approve)}>
                 Approve merge
               </Button>
               {ws && decision.ticketId ? (
@@ -452,10 +466,10 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             </>
           ) : decision.kind === 'hire_approval' ? (
             <>
-              <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.hire_approval.approve)}>
+              <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.hire_approval.approve)}>
                 Hire
               </Button>
-              <Button variant="secondary" size="thumb" className="w-24" disabled={busy} onClick={() => answer(NAMED_CARD_OPTION_KEYS.hire_approval.reject)}>
+              <Button variant="secondary" size="thumb" compact={compact} className="w-24" disabled={busy} onClick={() => answer(NAMED_CARD_OPTION_KEYS.hire_approval.reject)}>
                 Reject
               </Button>
             </>
@@ -463,6 +477,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             <Button
               variant="danger"
               size="thumb"
+              compact={compact}
               full
               disabled={busy || confirm.trim() !== (target.confirm ?? ticketIdentifier ?? '')}
               onClick={() => answer(NAMED_CARD_OPTION_KEYS.discard_approval.approve)}
@@ -470,12 +485,12 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
               Discard
             </Button>
           ) : optionList ? (
-            <Button variant="primary" size="thumb" className="flex-1" disabled={busy || selected === null || missing.length > 0} onClick={() => answer(selected!)}>
+            <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || selected === null || missing.length > 0} onClick={() => answer(selected!)}>
               Send answer
             </Button>
           ) : inputs.length ? (
             // Nothing to choose, only values to give: filling them in is the whole answer.
-            <Button variant="primary" size="thumb" className="flex-1" disabled={busy || missing.length > 0} onClick={() => onAnswer({ inputs: collected() })}>
+            <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0} onClick={() => onAnswer({ inputs: collected() })}>
               Send answer
             </Button>
           ) : null}
@@ -486,7 +501,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             to answer yet, and nothing about it is reachable by a mis-tap on the approve action. */}
         {onHide && !inert ? (
           <div className="mt-2 border-t border-line-1 pt-2">
-            <Button variant="ghost" size="thumb" full className="justify-start px-3 text-meta" onClick={onHide}>
+            <Button variant="ghost" size="thumb" compact={compact} full className="justify-start px-3 text-meta" onClick={onHide}>
               Hide from chat
               <span className="text-micro text-text-4">— stays in Needs you</span>
             </Button>

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { whichSync } from './fsutil.js';
 
 export interface SpawnOpts {
   cmd: string; args: string[]; cwd: string; env: Record<string, string>; stdin?: string | null; timeoutMs: number;
@@ -14,7 +15,7 @@ export interface SpawnOutcome { exitCode: number | null; signal: string | null; 
 
 /** Spawn a CLI in its own process group, stream lines, kill the whole group on timeout/cancel. */
 export function spawnLines(opts: SpawnOpts): { done: Promise<SpawnOutcome>; cancel(mode: 'interrupt' | 'kill'): Promise<void>; write(line: string): boolean; endStdin(): void; child: ChildProcess } {
-  const child = spawn(opts.cmd, opts.args, { cwd: opts.cwd, env: opts.env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(whichSync(opts.cmd) ?? opts.cmd, opts.args, { cwd: opts.cwd, env: opts.env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
   if (child.pid && opts.onSpawn) opts.onSpawn(child.pid);
   let timedOut = false; let stdout = ''; let stderr = ''; let stdinEnded = false;
   const buf: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };

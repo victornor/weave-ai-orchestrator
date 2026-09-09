@@ -159,6 +159,19 @@ export function releaseSha(release: string): string | null {
   return m?.[1] ?? null;
 }
 
+/** Short git sha used as the running version, or `'unknown'` when none can be recovered. */
+export function releaseVersion(release: string): string {
+  const sha = releaseSha(release);
+  if (!sha) return 'unknown';
+  return sha.length > 10 ? sha.slice(0, 10) : sha;
+}
+
+/** `YYYYMMDD-HHMMSS` from a named release directory, or `null`. */
+export function releaseStamp(release: string): string | null {
+  const m = basename(release).match(/^(\d{8}-\d{6})-/);
+  return m?.[1] ?? null;
+}
+
 /**
  * The commit a git source currently has at `ref`, without cloning it and without touching anything
  * installed. `source` is a URL or a local path — both are what `upgrade.source` may hold. A `ref` that

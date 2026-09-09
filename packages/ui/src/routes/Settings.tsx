@@ -51,7 +51,7 @@ import { useTheme } from '../lib/theme';
 import { readShowSilentTurns, writeShowSilentTurns } from '../lib/chatPrefs';
 import { useDictationDiagnosticsEnabled, writeDictationDiagnosticsEnabled } from '../lib/dictationDiagnostics';
 import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
-import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, shortSha, updateEntry, updateEntryLabel } from '../lib/upgrade';
+import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, runningVersionLabel, shortSha, updateEntry, updateEntryLabel } from '../lib/upgrade';
 import { cx } from '../lib/cx';
 import { workspaceYolo } from '../lib/yolo';
 import { SETTINGS_AREAS, firstSectionOf, resolveSettingsLocation, sectionsOfArea } from '../lib/settings';
@@ -1232,7 +1232,7 @@ function UpdatesSection(): React.ReactElement {
       <section>
         <div className="ac-label mb-2">This daemon</div>
         <div className="ac-card divide-y divide-line-1">
-          <Row label="Version" value={`v${data?.running.version ?? '?'}`} />
+          <Row label="Version" value={runningVersionLabel(data?.running.version, data?.running.path)} />
           <Row label="Commit" value={shortSha(data?.running.sha)} mono />
           <Row label="Release" value={data?.running.path ?? '—'} mono />
         </div>
@@ -1338,9 +1338,9 @@ function UpgradeProgress({
         ) : null}
 
         <Row label="Target" value={`${upgrade.source} @ ${upgrade.ref} · ${shortSha(upgrade.toSha ?? upgrade.targetSha)}`} mono />
-        {upgrade.state === 'completed' ? <Row label="Now running" value={`v${upgrade.cameBackVersion ?? runningVersion ?? '?'}`} /> : null}
+        {upgrade.state === 'completed' ? <Row label="Now running" value={runningVersionLabel(upgrade.cameBackVersion ?? runningVersion)} /> : null}
         {upgrade.state === 'failed' ? <Row label="Reason" value={upgrade.reason ?? 'unknown'} tone="failed" /> : null}
-        {upgrade.state === 'failed' ? <Row label="Still running" value={`v${runningVersion ?? '?'}`} /> : null}
+        {upgrade.state === 'failed' ? <Row label="Still running" value={runningVersionLabel(runningVersion)} /> : null}
         {upgrade.message ? <Row label="Detail" value={upgrade.message} tone={upgrade.state === 'failed' ? 'failed' : undefined} /> : null}
 
         {upgrade.log.length ? (

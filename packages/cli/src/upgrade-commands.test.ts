@@ -51,7 +51,7 @@ async function cli(...argv: string[]): Promise<string> {
   return out;
 }
 
-const runningRelease = { version: '1.0.0', path: '/rel/20260101-120000-aaaaaaaaaa', sha: 'a'.repeat(40) };
+const runningRelease = { version: 'aaaaaaaaaa', path: '/rel/20260101-120000-aaaaaaaaaa', sha: 'a'.repeat(40) };
 
 const upgrade = (over: Record<string, unknown> = {}) => ({
   id: 'u1', state: 'queued', source: '/src/agent-conductor', ref: 'main', runTest: 0, targetSha: 'b'.repeat(40),
@@ -68,7 +68,9 @@ describe('conductor daemon update', () => {
     } });
     const out = await cli('daemon', 'update');
     expect(calls).toEqual([{ method: 'GET', path: '/api/daemon/update', body: undefined }]);
-    expect(out).toContain('v1.0.0');
+    expect(out).toContain('aaaaaaaaaa · 20260101-120000');
+    expect(out).not.toContain('v0.1.0');
+    expect(out).not.toContain('v1.0.0');
     expect(out).toContain(runningRelease.path);
     expect(out).toContain('update available');
   });
@@ -89,7 +91,7 @@ describe('conductor daemon update', () => {
       updateAvailable: true, checkedAt: null, error: null,
     } });
     const out = await cli('--json', 'daemon', 'update');
-    expect(JSON.parse(out)).toMatchObject({ configured: true, updateAvailable: true, running: { version: '1.0.0' } });
+    expect(JSON.parse(out)).toMatchObject({ configured: true, updateAvailable: true, running: { version: 'aaaaaaaaaa' } });
   });
 });
 
@@ -139,6 +141,20 @@ describe('conductor daemon update apply', () => {
     expect(out).toContain('pnpm build exited 1');
     expect(out).toContain('error TS1005');
   }, 20_000);
+});
+
+describe('conductor daemon status', () => {
+  it('prints the git sha as version, not v0.1.0', async () => {
+    routes['GET /api/health'] = () => ({ body: {
+      ok: true, version: 'abc1234def',
+      release: { version: 'abc1234def', path: '/rel/20260909-210807-abc1234def', sha: 'abc1234def' },
+      tlsMode: 'none', operatorConfigured: true, workspaces: [],
+    } });
+    const out = await cli('daemon', 'status');
+    expect(out).toContain('abc1234def · 20260909-210807');
+    expect(out).not.toContain('v0.1.0');
+    expect(out).not.toContain('vabc1234def');
+  });
 });
 
 describe('conductor daemon update cancel', () => {

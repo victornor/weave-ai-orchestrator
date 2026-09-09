@@ -170,13 +170,13 @@ describe('announcing a completed upgrade', () => {
     await fx.service().announce();
 
     expect(ws.sent).toHaveLength(1);
-    expect(ws.sent[0]!.text).toMatch(/^Upgraded to v1\.1\.0 \(bbbbbbb\), back up at \d\d:\d\d\.$/);
+    expect(ws.sent[0]!.text).toMatch(/^Upgraded to 1\.1\.0, back up at \d\d:\d\d\.$/);
 
     expect(ws.woken).toHaveLength(1);
     const wake = ws.woken[0]!;
     expect(wake.agentId).toBe('ws1-conductor');
     expect(wake.source).toBe('system');
-    expect(wake.reason).toBe('The daemon upgraded to v1.1.0 (bbbbbbb) and is back up');
+    expect(wake.reason).toBe('The daemon upgraded to 1.1.0 and is back up');
     expect(wake.payload).toMatchObject({
       kind: 'daemon.upgraded', upgradeId: upgrade.id, outcome: 'completed',
       from: { path: FROM }, to: { path: TO, sha: 'b'.repeat(40), version: '1.1.0' },
@@ -232,7 +232,7 @@ describe('announcing a failure', () => {
 
     await fx.service({ releaseRoot: FROM, version: '1.0.0' }).announce();
 
-    expect(ws.sent[0]!.text).toMatch(/^The upgrade to v?.*was rolled back \(restart_failed\)\. Running v1\.0\.0 \(aaaaaaa\), back up at \d\d:\d\d\.$/);
+    expect(ws.sent[0]!.text).toMatch(/^The upgrade to ccccccc was rolled back \(restart_failed\)\. Running 1\.0\.0, back up at \d\d:\d\d\.$/);
     expect(ws.woken[0]!.payload).toMatchObject({
       outcome: 'rolled_back',
       running: { path: FROM, version: '1.0.0' },
@@ -251,7 +251,7 @@ describe('announcing a failure', () => {
     // [0] is the "upgrading" notice posted as soon as dispatch was held (VS-115); [1] is the failure.
     expect(ws.sent).toHaveLength(2);
     expect(ws.sent[0]!.text).toMatch(/^Upgrading to /);
-    expect(ws.sent[1]!.text).toMatch(/^The daemon upgrade failed \(build_failed\)\. Running v1\.1\.0 \(bbbbbbb\), back up at \d\d:\d\d\.$/);
+    expect(ws.sent[1]!.text).toMatch(/^The daemon upgrade failed \(build_failed\)\. Running 1\.1\.0, back up at \d\d:\d\d\.$/);
     expect(ws.woken[0]!.payload).toMatchObject({ outcome: 'failed', failure: { reason: 'build_failed' } });
   });
 });
@@ -358,6 +358,13 @@ describe('the announcement line', () => {
   it('names a release with no version by its commit', () => {
     const text = announcementText({ ...base, to: { path: TO, sha: 'b'.repeat(40), version: null } });
     expect(text).toMatch(/^Upgraded to bbbbbbb, back up at /);
+  });
+
+  it('names a git-sha version without a v prefix', () => {
+    const text = announcementText({ ...base, to: { path: TO, sha: 'b'.repeat(40), version: 'bbbbbbbbbb' } });
+    expect(text).toMatch(/^Upgraded to bbbbbbbbbb, back up at /);
+    expect(text).not.toMatch(/v0\.1\.0/);
+    expect(text).not.toMatch(/vbbbbbbbbbb/);
   });
 
   it('never claims a system is back up when a check failed', () => {

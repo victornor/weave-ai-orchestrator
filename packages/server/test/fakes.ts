@@ -100,6 +100,8 @@ export interface HarnessOptions {
   daemon?: Record<string, unknown>;
   /** The release directory the fake daemon reports running from. */
   releaseRoot?: string;
+  /** Injected running version (defaults to the old test placeholder). */
+  version?: string;
   resolveRemote?: (source: string, ref: string) => string;
   /** Seams handed to the upgrade service; the defaults refuse to touch the host. */
   upgrade?: Partial<UpgradeDeps>;
@@ -339,13 +341,14 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
 
   const daemonCfg = DaemonConfigSchema.parse(options.daemon ?? {});
   const releaseRoot = options.releaseRoot ?? '/tmp/release/20260101-120000-aaaaaaaaaa';
+  const version = options.version ?? '0.1.0-test';
   const updates = createUpdateChecker({
-    daemon: daemonCfg, version: '0.1.0-test', releaseRoot,
+    daemon: daemonCfg, version, releaseRoot,
     resolveRemote: options.resolveRemote ?? (() => 'f'.repeat(40)),
   });
   const workspaceMap = new Map([[workspaceId, runtime]]);
   const upgrades = createUpgradeService({
-    db, daemon: daemonCfg, configDir: '/tmp/config', workspaces: workspaceMap, updates, version: '0.1.0-test', releaseRoot,
+    db, daemon: daemonCfg, configDir: '/tmp/config', workspaces: workspaceMap, updates, version, releaseRoot,
     // Nothing in an app-level test may clone, build, back up or restart anything.
     build: () => { throw new Error('build is not stubbed in this test'); },
     backup: () => [], switchTo: () => ({ previous: null }), prune: () => [], spawnRunner: () => undefined,
@@ -354,7 +357,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   const deps: AppDeps = {
     auth, daemon: daemonCfg, workspaces: workspaceMap,
     registries: createRegistries(), listener: options.listener ?? 'public',
-    publicUrl: 'http://127.0.0.1:7433', version: '0.1.0-test', uiDir: null,
+    publicUrl: 'http://127.0.0.1:7433', version, uiDir: null,
     updates, upgrades,
   };
 

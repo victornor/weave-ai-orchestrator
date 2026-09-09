@@ -47,6 +47,18 @@ export const upgradePollInterval = (state: UpgradeState | undefined | null): num
 
 export const shortSha = (sha: string | null | undefined): string => (sha ? sha.slice(0, 10) : '—');
 
+export const releaseStamp = (path: string | null | undefined): string | null => {
+  const m = path?.split('/').pop()?.match(/^(\d{8}-\d{6})-/);
+  return m?.[1] ?? null;
+};
+
+/** Operator-facing running version: git sha, optionally with the release stamp. No `v` prefix. */
+export function runningVersionLabel(version: string | null | undefined, path?: string | null): string {
+  const ver = version && version !== '' ? version : '?';
+  const stamp = releaseStamp(path);
+  return stamp ? `${ver} · ${stamp}` : ver;
+}
+
 /**
  * What the navigation says about the daemon's release, if anything: the sidebar entry and the phone
  * badge are the same fact and are derived here once. An upgrade in flight wins over an available

@@ -78,7 +78,7 @@ export function register(program: Command): void {
       try {
         const { client } = await session(command, { workspace: 'optional' });
         const health = await client.get<Record<string, unknown>>('/api/health');
-        checks.push({ name: 'daemon api', ok: true, detail: `${client.baseUrl} · v${String(health['version'] ?? '?')} · tls ${String(health['tlsMode'] ?? 'none')}` });
+        checks.push({ name: 'daemon api', ok: true, detail: `${client.baseUrl} · ${String(health['version'] ?? '?')} · tls ${String(health['tlsMode'] ?? 'none')}` });
         checks.push({
           name: 'operator password',
           ok: health['operatorConfigured'] === true,

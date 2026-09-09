@@ -32,6 +32,7 @@ export function register(program: Command): void {
     .option('--assign <roleId>', 'assign to a role immediately')
     .option('--auto-merge', 'merge without a merge decision when checks pass')
     .option('--landing-branch <branch>', "override this ticket's landing branch, set only at creation (VS-119)")
+    .option('--summary <text>', 'one-line why, shown on plan-approval cards (VS-146)')
     .action(async (title: string[], opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const { client } = await session(command);
       const input: Record<string, unknown> = {
@@ -46,6 +47,7 @@ export function register(program: Command): void {
       if (opts['assign']) input['assigneeRoleId'] = String(opts['assign']);
       if (opts['autoMerge'] === true) input['autoMerge'] = true;
       if (opts['landingBranch']) input['landingBranch'] = String(opts['landingBranch']);
+      if (opts['summary']) input['summary'] = String(opts['summary']);
 
       const created = await client.write<Ticket>({
         tool: 'ac_ticket_create', input,
@@ -201,6 +203,7 @@ export function register(program: Command): void {
     .description('update ticket fields')
     .option('--title <title>')
     .option('--description <text>')
+    .option('--summary <text>', 'one-line why, shown on plan-approval cards (VS-146)')
     .option('--priority <priority>')
     .option('--auto-merge', 'turn auto-merge on')
     .option('--no-auto-merge', 'turn auto-merge off')
@@ -209,9 +212,10 @@ export function register(program: Command): void {
       const body: Record<string, unknown> = {};
       if (opts['title']) body['title'] = String(opts['title']);
       if (opts['description']) body['description'] = String(opts['description']);
+      if (opts['summary'] !== undefined) body['summary'] = String(opts['summary']);
       if (opts['priority']) body['priority'] = String(opts['priority']);
       if (opts['autoMerge'] !== undefined) body['autoMerge'] = opts['autoMerge'] === true;
-      if (Object.keys(body).length === 0) throw new ApiError('validation', 'nothing to set: pass --title, --description, --priority or --auto-merge', 400);
+      if (Object.keys(body).length === 0) throw new ApiError('validation', 'nothing to set: pass --title, --description, --summary, --priority or --auto-merge', 400);
       const result = await client.patch(client.w(`/tickets/${encodeURIComponent(id)}`), body);
       emit(result, () => write(`${style.ok('updated')} ${id}: ${Object.keys(body).join(', ')}`));
     }));

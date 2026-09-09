@@ -118,6 +118,11 @@ describe('command tree', () => {
     expect(find(program, ['ticket', 'discard'])!.options.map((o) => o.long)).toContain('--force');
   });
 
+  it('exposes --summary on ticket create and ticket set (VS-146)', () => {
+    expect(find(program, ['ticket', 'create'])!.options.map((o) => o.long)).toContain('--summary');
+    expect(find(program, ['ticket', 'set'])!.options.map((o) => o.long)).toContain('--summary');
+  });
+
   it('exposes the usage scope/window/grain flags', () => {
     expect(find(program, ['usage'])!.options.map((o) => o.long)).toEqual(expect.arrayContaining(['--scope', '--window', '--grain', '--start', '--end']));
   });

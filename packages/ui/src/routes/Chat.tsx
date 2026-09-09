@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Decision, DecisionAnswerInputs, Project, ThreadMessage } from '@agent-conductor/shared';
+import type { Decision, DecisionAnswerInputs, Project, ThreadMessage, Ticket } from '@agent-conductor/shared';
 import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Composer } from '../components/Composer';
@@ -521,6 +521,9 @@ export function ChatRoute(): React.ReactElement {
   const projectSlugOf = (d: { projectId: string | null; ticketId: string | null }): string | null =>
     projects.data?.find((p) => p.id === (d.projectId ?? tickets.data?.find((t) => t.id === d.ticketId)?.projectId))?.slug ?? null;
 
+  const ticketOf = (d: { ticketId: string | null }): Ticket | undefined =>
+    tickets.data?.find((t) => t.id === d.ticketId);
+
   const send = (text: string, files: File[] = []): void | Promise<void> => {
     if (!threadId) return;
     const queueThisMessage = (): void => {
@@ -686,11 +689,14 @@ export function ChatRoute(): React.ReactElement {
                           key={d.id}
                           decision={d}
                           asker="conductor"
-                          ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
+                          ticketIdentifier={ticketOf(d)?.identifier ?? d.ticketId}
                           projectSlug={projectSlugOf(d)}
                           ws={ws}
                           busy={answer.isPending}
                           plan={<PlanPreview decision={d} />}
+                          ticketFiledByConductor={ticketOf(d)?.createdByKind === 'agent'}
+                          ticketSummary={ticketOf(d)?.summary}
+                          compact
                           onAnswer={(a) => answerDecision(d.id, a)}
                         />
                       ))}
@@ -788,11 +794,14 @@ export function ChatRoute(): React.ReactElement {
                 key={d.id}
                 decision={d}
                 {...(askedByConductor(d) ? { asker: 'conductor' as const } : {})}
-                ticketIdentifier={tickets.data?.find((t) => t.id === d.ticketId)?.identifier ?? d.ticketId}
+                ticketIdentifier={ticketOf(d)?.identifier ?? d.ticketId}
                 projectSlug={projectSlugOf(d)}
                 ws={ws}
                 busy={answer.isPending}
                 plan={<PlanPreview decision={d} />}
+                ticketFiledByConductor={ticketOf(d)?.createdByKind === 'agent'}
+                ticketSummary={ticketOf(d)?.summary}
+                compact
                 onHide={() => hide(d)}
                 onAnswer={(a) => answerDecision(d.id, a)}
               />

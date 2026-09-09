@@ -460,11 +460,12 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'ac_ticket_create', scope: 'all', input: z.object({
       projectId: z.string().nullish(), kind: z.enum(TICKET_KINDS), title: z.string().min(1), description: z.string().default(''),
+      summary: z.string().max(200).nullish(),
       priority: z.enum(TICKET_PRIORITIES).default('medium'), parentId: z.string().nullish(), blockedBy: z.array(z.string()).optional(),
       assigneeRoleId: z.string().nullish(), autoMerge: z.boolean().optional(), originKind: z.string().optional(), originFingerprint: z.string().optional(),
       landingBranch: z.string().nullish(),
     }),
-    description: "Create a ticket. Set autoMerge only when the human asked for it in the same request. Set landingBranch only when the human asked this ticket's work to land somewhere other than its project's own landing branch (VS-119) — never inferred from a PR base. Workers may only create tickets in their own project.",
+    description: "Create a ticket. Set autoMerge only when the human asked for it in the same request. Set landingBranch only when the human asked this ticket's work to land somewhere other than its project's own landing branch (VS-119) — never inferred from a PR base. Set summary to a one-line why (VS-146) shown on plan-approval cards. Workers may only create tickets in their own project.",
     handler: (ctx, i) => svc(ctx).tickets.create(ctx.actor, { ...i, projectId: isConductor(ctx) ? (i.projectId ?? null) : ctx.claims.projectId }),
   },
   {

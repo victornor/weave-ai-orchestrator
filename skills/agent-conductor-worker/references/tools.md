@@ -38,7 +38,7 @@ Workers may also call `ac_ticket_create` for **child tickets inside their own pr
 
 | Tool | Input |
 |---|---|
-| `ac_ticket_create` | `{projectId?, kind, title, description, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?}` — `autoMerge` only when the human asked for it in the same request |
+| `ac_ticket_create` | `{projectId?, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?}` — `autoMerge` only when the human asked for it in the same request; `summary` is a one-line why (VS-146) |
 | `ac_ticket_assign` | `id`, `roleId` |
 | `ac_ticket_set_priority` | `id`, `priority` |
 | `ac_role_list` | — |

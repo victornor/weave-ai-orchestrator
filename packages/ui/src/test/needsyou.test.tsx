@@ -336,4 +336,16 @@ describe('NeedsYou — YOLO mode', () => {
     fireEvent.click(screen.getByRole('button', { name: /send answer/i }));
     expect(enqueueMock).toHaveBeenCalledTimes(1);
   });
+
+  it('does not compact the card or show a conductor-filed tag (VS-146)', () => {
+    state.tickets = [{ id: 'tk_1', identifier: 'VS-145', createdByKind: 'agent', summary: 'Filed after a false alarm.' }];
+    state.decisions = [decision({ ticketId: 'tk_1' })];
+    render(<NeedsYouRoute />);
+    expect(screen.queryByText('Filed by conductor')).not.toBeInTheDocument();
+    expect(screen.queryByText('Filed after a false alarm.')).not.toBeInTheDocument();
+    const body = screen.getByRole('article').querySelector(':scope > div:last-of-type');
+    expect(body).toHaveClass('p-3.5');
+    expect(screen.getByRole('button', { name: /Approve/ })).toHaveClass('px-4');
+    expect(screen.getByRole('button', { name: /Approve/ })).not.toHaveClass('px-3');
+  });
 });

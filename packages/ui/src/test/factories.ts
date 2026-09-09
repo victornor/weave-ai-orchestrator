@@ -10,6 +10,7 @@ export function ticket(over: Partial<Ticket> = {}): Ticket {
     kind: 'change',
     title: 'Dark mode for the dashboard',
     description: '',
+    summary: null,
     status: 'in_progress',
     priority: 'medium',
     autoMerge: false,

@@ -7,7 +7,7 @@ const now = new Date('2026-09-04T12:00:00.000Z');
 function ticket(over: Partial<Ticket> = {}): Ticket {
   return {
     id: 'tkt_1', workspaceId: 'ws', projectId: 'web', number: 42, identifier: 'ACME-42', kind: 'change',
-    title: 'Theme tokens', description: '', status: 'in_progress', priority: 'high', autoMerge: false,
+    title: 'Theme tokens', description: '', summary: null, status: 'in_progress', priority: 'high', autoMerge: false,
     assigneeRoleId: 'role_1', workerId: 'ag_1', assigneeHuman: false, interactiveSession: false, landingBranch: null, parentId: null, createdByKind: 'human',
     createdById: null, createdRunId: null, originKind: null, originFingerprint: null, checkoutRunId: null, executionRunId: null,
     openspecChangeName: null, openspecState: null, delivery: null, unblock: null, blockedFromStatus: null, monitorNextCheckAt: null,

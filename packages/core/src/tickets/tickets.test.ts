@@ -65,6 +65,14 @@ describe('tickets', () => {
     expect(make({ landingBranch: 'main' }).landingBranch).toBe('main');
   });
 
+  it('stores summary from the input, defaulting null, and accepts a later patch (VS-146)', () => {
+    expect(make().summary).toBeNull();
+    expect(make({ summary: 'Remind captain why this ticket exists.' }).summary).toBe('Remind captain why this ticket exists.');
+    const t = make();
+    expect(tickets.update(HUMAN, t.id, { summary: 'Added after creation.' }).summary).toBe('Added after creation.');
+    expect(tickets.update(HUMAN, t.id, { summary: null }).summary).toBeNull();
+  });
+
   it('records the run that created the ticket, and nothing when there is no run', () => {
     expect(tickets.create(AGENT, { kind: 'change', title: 'From a turn', projectId: h.projectId, assigneeRoleId: h.roleId }).createdRunId).toBe('run-1');
     expect(make().createdRunId).toBeNull();

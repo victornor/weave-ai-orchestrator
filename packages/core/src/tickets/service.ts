@@ -478,7 +478,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         try {
           db.insert('tickets', {
             id, workspaceId: ws, projectId: input.projectId ?? null, number, identifier, kind: input.kind, title: input.title,
-            description: input.description ?? '', status, priority: input.priority ?? 'medium', autoMerge: input.autoMerge ?? false,
+            description: input.description ?? '', summary: input.summary ?? null, status, priority: input.priority ?? 'medium', autoMerge: input.autoMerge ?? false,
             assigneeRoleId: input.assigneeRoleId ?? null, assigneeHuman: false, interactiveSession: input.interactiveSession ?? false, landingBranch: input.landingBranch ?? null, parentId: input.parentId ?? null,
             createdByKind: actor.kind, createdById: actor.id, createdRunId: actor.runId ?? null, originKind: input.originKind ?? null,
             originFingerprint: input.originFingerprint ?? null, blockedTransitionAt: openBlockers.length ? now : null,
@@ -531,7 +531,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     update(actor, id, patch) {
       const t = get(id);
       const clean: Record<string, unknown> = {};
-      for (const k of ['title', 'description', 'priority', 'autoMerge', 'parentId', 'projectId'] as const) {
+      for (const k of ['title', 'description', 'summary', 'priority', 'autoMerge', 'parentId', 'projectId'] as const) {
         if (patch[k] !== undefined) clean[k] = patch[k];
       }
       if (!Object.keys(clean).length) return t;

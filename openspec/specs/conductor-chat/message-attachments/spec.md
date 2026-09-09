@@ -175,23 +175,6 @@ behavior for the message text unaffected.
 - **THEN** the request is rejected before storage, and the response states that attachments are not
   supported on a ticket-bound thread
 
-### Requirement: A failed attachment upload leaves the composer's text intact
-
-When a message with an attachment fails to send — whether because of a rejected file or a transport
-failure — the composer SHALL retain the typed text and the pending attachment, and SHALL state what
-went wrong, rather than clearing the message.
-
-#### Scenario: Rejected attachment leaves the message editable
-
-- **WHEN** a human attempts to send a message with a disallowed or oversized attachment
-- **THEN** the send fails, the composer's text and the attempted attachment remain present, and a
-  reason for the failure is shown
-
-#### Scenario: Transport failure leaves the message editable
-
-- **WHEN** a message with an attachment fails to send because of a network or server error
-- **THEN** the composer's text and the attempted attachment remain present, and the failure is shown
-
 ### Requirement: An attachment persists for the life of the message that carries it
 
 An attachment SHALL be retained for as long as the message it was sent with exists, is not counted

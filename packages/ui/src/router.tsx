@@ -7,6 +7,7 @@ import { OnboardingRoute } from './routes/Onboarding';
 import { NeedsYouRoute } from './routes/NeedsYou';
 import { ChatRoute } from './routes/Chat';
 import { BoardRoute } from './routes/Board';
+import { LiveRoute } from './routes/Live';
 import { MergeQueueRoute } from './routes/MergeQueue';
 import { TicketRoute } from './routes/TicketPage';
 import { TeamRoute } from './routes/Team';
@@ -65,6 +66,7 @@ const searchPassthrough = (s: Record<string, unknown>): Record<string, unknown> 
 const needsRoute = child('/needs', NeedsYouRoute);
 const chatRoute = child('/chat', ChatRoute, searchPassthrough);
 const boardRoute = child('/board', BoardRoute, searchPassthrough);
+const liveRoute = child('/live', LiveRoute);
 const mergeQueueRoute = child('/merge-queue', MergeQueueRoute, searchPassthrough);
 const ticketRoute = child('/tickets/$ticketId', TicketRoute, searchPassthrough);
 const teamRoute = child('/team', TeamRoute, searchPassthrough);
@@ -86,6 +88,7 @@ const routeTree = rootRoute.addChildren([
     needsRoute,
     chatRoute,
     boardRoute,
+    liveRoute,
     mergeQueueRoute,
     ticketRoute,
     teamRoute,

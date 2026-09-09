@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { router } from '../router';
+import { LiveRoute } from '../routes/Live';
 import { MergeQueueRoute } from '../routes/MergeQueue';
 import { ProjectOverviewRoute } from '../routes/project/ProjectOverview';
 
@@ -16,6 +17,12 @@ const workspaceRoutes = (): RouteNode[] => {
 };
 
 describe('the workspace routes', () => {
+  it('registers Live at its own address, with its own component', () => {
+    const route = workspaceRoutes().find((r) => r.path === 'live');
+    expect(route).toBeDefined();
+    expect(route?.options?.component).toBe(LiveRoute);
+  });
+
   it('registers the merge queue at its own address, with its own component', () => {
     const route = workspaceRoutes().find((r) => r.path === 'merge-queue');
     expect(route).toBeDefined();

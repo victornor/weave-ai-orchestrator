@@ -13,6 +13,7 @@ import {
   isFolded,
   isLiveWorker,
   liveWorkersByTicket,
+  liveWorkingAgents,
   mergeStrip,
   pausedWorkersByTicket,
   recentlyFinished,
@@ -126,6 +127,32 @@ describe('live workers on the board', () => {
   it('lets an open decision and a stall still win over a live worker', () => {
     expect(ticketBoardStatus('todo', { live: true, needsYou: true })).toBe('needs-you');
     expect(ticketBoardStatus('todo', { live: true, stalled: true })).toBe('stalled');
+  });
+});
+
+describe('liveWorkingAgents (VS-152)', () => {
+  it('includes a running worker on a ticket', () => {
+    expect(liveWorkingAgents([agent({ status: 'running' })]).map((w) => w.id)).toEqual(['a1']);
+  });
+
+  it('excludes paused, idle, retired, the conductor, and a live worker with no ticket', () => {
+    expect(
+      liveWorkingAgents([
+        agent({ id: 'paused', status: 'paused' }),
+        agent({ id: 'idle', status: 'active', ticketId: null, kind: 'worker' }),
+        agent({ id: 'retired', status: 'retired' }),
+        agent({ id: 'cond', kind: 'conductor', status: 'running', ticketId: 'tk_1' }),
+        agent({ id: 'loose', status: 'running', ticketId: null }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('returns both live workers when they share a ticket, newest first', () => {
+    const list = liveWorkingAgents([
+      agent({ id: 'a1', ticketId: 'tk_1', createdAt: '2026-09-01T09:00:00.000Z' }),
+      agent({ id: 'a2', ticketId: 'tk_1', createdAt: '2026-09-02T09:00:00.000Z' }),
+    ]);
+    expect(list.map((w) => w.id)).toEqual(['a2', 'a1']);
   });
 });
 

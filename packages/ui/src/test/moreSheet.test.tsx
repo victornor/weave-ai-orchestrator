@@ -69,6 +69,7 @@ describe('what the More menu lists', () => {
     const missing = RAIL.filter((r) => !tabKeys.has(r.key)).filter((r) => !MORE_ITEMS.some((m) => m.key === r.key));
     expect(missing.map((r) => r.key)).toEqual([]);
     expect(MORE_ITEMS.map((m) => m.key)).toContain('merge-queue');
+    expect(MORE_ITEMS.map((m) => m.key)).toContain('live');
   });
 
   it('shows nothing while it is closed', () => {

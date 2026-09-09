@@ -118,9 +118,12 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
         // one credential is shared per host, so every turn on it would fail the same way. Filtering
         // at the candidate stage is what preserves the work — the wake-ups stay `queued` rather
         // than being claimed and failed, so nothing has to be re-enqueued when the login returns.
+        // A worker whose role is paused is skipped the same way (VS-154): the wake stays queued
+        // until roles.resume, rather than being skipped at enqueue and lost.
         const candidates = ctx.db.all<Agent>(
           `SELECT a.* FROM agents a WHERE a.workspace_id = ? AND a.status IN (${IDLE_AGENT_STATUSES.map(() => '?').join(',')})
              AND a.runtime_id NOT IN (SELECT runtime_id FROM runtime_credentials WHERE workspace_id = ? AND needs_login = 1)
+             AND (a.kind != 'worker' OR a.role_id IS NULL OR EXISTS (SELECT 1 FROM roles r WHERE r.id = a.role_id AND r.status = 'active'))
              AND EXISTS (SELECT 1 FROM wakeups w WHERE w.agent_id = a.id AND w.status = 'queued' AND (w.not_before IS NULL OR w.not_before <= ?))
            ORDER BY a.kind = 'conductor' DESC, a.last_run_at IS NULL DESC, a.last_run_at`,
           [ctx.workspaceId, ...IDLE_AGENT_STATUSES, ctx.workspaceId, now],

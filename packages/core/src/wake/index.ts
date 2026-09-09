@@ -48,23 +48,31 @@ export function createWakeService(ctx: WorkspaceContext, _deps: () => CoreServic
       const agent = ctx.db.get<AgentLite>('SELECT id, kind, status, role_id FROM agents WHERE id = ? AND workspace_id = ?', [agentId, ctx.workspaceId]);
       if (!agent) throw new OcError('not_found', `agent ${agentId} not found`);
 
-      // Gate 0: idempotency — an existing wake with the same key wins, whatever its status.
+      // Gate 0: idempotency — a live wake with the same key wins. Skipped/cancelled/failed do not
+      // consume the key (VS-154): `wakeups_idem` is UNIQUE on (agent_id, idempotency_key), so the
+      // dead row's key is cleared and a later enqueue can insert a new queued wake.
       if (input.idempotencyKey) {
-        const existing = ctx.db.get<{ id: string }>('SELECT id FROM wakeups WHERE agent_id = ? AND idempotency_key = ?', [agentId, input.idempotencyKey]);
-        if (existing) return row(ctx, existing.id);
+        const existing = ctx.db.get<{ id: string; status: string }>('SELECT id, status FROM wakeups WHERE agent_id = ? AND idempotency_key = ?', [agentId, input.idempotencyKey]);
+        if (existing) {
+          if (existing.status === 'queued' || existing.status === 'claimed' || existing.status === 'coalesced' || existing.status === 'completed') {
+            return row(ctx, existing.id);
+          }
+          ctx.db.update('wakeups', existing.id, { idempotencyKey: null });
+        }
       }
 
       // Gate 1: workspace must be active.
       const ws = ctx.db.get<{ status: string }>('SELECT status FROM workspaces WHERE id = ?', [ctx.workspaceId]);
       if (ws && ws.status !== 'active') return skip(agentId, input, `workspace_${ws.status}`);
 
-      // Gate 2: agent status, and a worker whose role is paused.
+      // Gate 2: agent status, and a worker whose role is retired.
+      // A paused role leaves the wake queued; the dispatcher does not claim until the role is
+      // active (VS-154) — same as an expired runtime login.
       if (agent.status === 'paused') return skip(agentId, input, 'agent_paused');
       if (agent.status === 'retired') return skip(agentId, input, 'agent_retired');
       if (agent.status === 'done') return skip(agentId, input, 'agent_done');
       if (agent.kind === 'worker' && agent.roleId) {
         const role = ctx.db.get<{ status: string }>('SELECT status FROM roles WHERE id = ?', [agent.roleId]);
-        if (role?.status === 'paused') return skip(agentId, input, 'role_paused');
         if (role?.status === 'retired') return skip(agentId, input, 'role_retired');
       }
 

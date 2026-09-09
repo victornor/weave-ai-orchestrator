@@ -299,6 +299,52 @@ describe('an isolated daemon (VS-143)', () => {
   });
 });
 
+describe('opencode shares the host config, not only auth.json', () => {
+  // Custom providers and their keys live in opencode.json / opencode.jsonc. Sharing only
+  // auth.json made OAuth providers work and every custom provider fail at spawn.
+  const ocAuthHost = (): string => join(home, '.local', 'share', 'opencode', 'auth.json');
+  const ocJsonHost = (): string => join(home, '.config', 'opencode', 'opencode.json');
+  const ocJsoncHost = (): string => join(home, '.config', 'opencode', 'opencode.jsonc');
+  const ocHome = (): string => join(wsHome, 'opencode');
+  const linkOc = (): void => linkRuntimeCredentials('opencode', wsHome);
+
+  it('links auth.json and the host config files that define custom providers', () => {
+    mkdirSync(dirname(ocAuthHost()), { recursive: true });
+    mkdirSync(dirname(ocJsonHost()), { recursive: true });
+    writeFileSync(ocAuthHost(), '{"zai-coding-plan":{}}');
+    writeFileSync(ocJsonHost(), '{"provider":{"codeify":{"options":{"apiKey":"k"}}}}');
+    writeFileSync(ocJsoncHost(), '{"provider":{"other":{}}}');
+
+    linkOc();
+
+    expect(isLink(join(ocHome(), 'auth.json'))).toBe(true);
+    expect(readlinkSync(join(ocHome(), 'auth.json'))).toBe(ocAuthHost());
+    expect(isLink(join(ocHome(), 'opencode.json'))).toBe(true);
+    expect(readlinkSync(join(ocHome(), 'opencode.json'))).toBe(ocJsonHost());
+    expect(isLink(join(ocHome(), 'opencode.jsonc'))).toBe(true);
+    expect(readFileSync(join(ocHome(), 'opencode.json'), 'utf8')).toContain('codeify');
+  });
+
+  it('does not invent a config file the host does not have', () => {
+    mkdirSync(dirname(ocAuthHost()), { recursive: true });
+    writeFileSync(ocAuthHost(), '{}');
+    linkOc();
+    expect(isLink(join(ocHome(), 'auth.json'))).toBe(true);
+    expect(() => lstatSync(join(ocHome(), 'opencode.json'))).toThrow();
+    expect(() => lstatSync(join(ocHome(), 'opencode.jsonc'))).toThrow();
+  });
+
+  it('does not share the host config from an isolated daemon', () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'ac-daemon-oc-'));
+    mkdirSync(dirname(ocJsonHost()), { recursive: true });
+    writeFileSync(ocJsonHost(), '{"provider":{"codeify":{}}}');
+    linkRuntimeCredentials('opencode', wsHome, { isolated: true, daemonConfigDir: configDir });
+    expect(() => lstatSync(join(ocHome(), 'opencode.json'))).toThrow();
+    expect(readFileSync(ocJsonHost(), 'utf8')).toContain('codeify');
+    rmSync(configDir, { recursive: true, force: true });
+  });
+});
+
 describe('runtimes that cannot describe their credential', () => {
   it('still shares the file, and never overwrites the host copy', () => {
     const codexHost = join(home, '.codex', 'auth.json');

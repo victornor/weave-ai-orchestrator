@@ -329,4 +329,29 @@ describe('threads', () => {
       expect(msg.parts).toEqual([]);
     });
   });
+
+  describe('idempotency', () => {
+    it('a repeated inbound with the same key returns the stored message and does not wake again', async () => {
+      const t = threads.bindOrGet('web', 'web-idem', null, 'Victor');
+      const first = await threads.inbound(HUMAN, t.id, 'ship it', { idempotencyKey: 'k1' });
+      const again = await threads.inbound(HUMAN, t.id, 'ship it', { idempotencyKey: 'k1' });
+
+      expect(again.id).toBe(first.id);
+      expect(threads.messages(t.id)).toHaveLength(1);
+      expect(h.db.all('SELECT id FROM thread_messages WHERE thread_id = ?', [t.id])).toHaveLength(1);
+      expect(wake.calls).toHaveLength(1);
+    });
+
+    it('a call with no key, or a different key, is a new message and a new wake', async () => {
+      const t = threads.bindOrGet('web', 'web-idem-2', null, 'Victor');
+      const a = await threads.inbound(HUMAN, t.id, 'one');
+      const b = await threads.inbound(HUMAN, t.id, 'one');
+      const c = await threads.inbound(HUMAN, t.id, 'edited', { idempotencyKey: 'k-a' });
+      const d = await threads.inbound(HUMAN, t.id, 'edited again', { idempotencyKey: 'k-b' });
+
+      expect(new Set([a.id, b.id, c.id, d.id]).size).toBe(4);
+      expect(threads.messages(t.id)).toHaveLength(4);
+      expect(wake.calls).toHaveLength(4);
+    });
+  });
 });

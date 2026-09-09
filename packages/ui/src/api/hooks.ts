@@ -1130,11 +1130,11 @@ export function useThreadMessages(id: string | null): ThreadHistory {
   };
 }
 
-export function usePostThreadMessage(): UseMutationResult<unknown, Error, { threadId: string; body: string; projectId?: string | null; replyToMessageId?: string | null; files?: File[] }> {
+export function usePostThreadMessage(): UseMutationResult<unknown, Error, { threadId: string; body: string; projectId?: string | null; replyToMessageId?: string | null; files?: File[]; idempotencyKey?: string }> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ threadId, body, projectId, replyToMessageId, files }) => {
+    mutationFn: ({ threadId, body, projectId, replyToMessageId, files, idempotencyKey }) => {
       // Attached files go as multipart/form-data, in the same request as the text (VS-133) — never
       // a separate upload step, so a failed send never leaves an orphaned upload behind.
       if (files?.length) {
@@ -1142,10 +1142,11 @@ export function usePostThreadMessage(): UseMutationResult<unknown, Error, { thre
         form.set('body', body);
         if (projectId) form.set('projectId', projectId);
         if (replyToMessageId) form.set('replyToMessageId', replyToMessageId);
+        if (idempotencyKey) form.set('idempotencyKey', idempotencyKey);
         for (const f of files) form.append('files', f);
         return api.ws(ws, `/threads/${threadId}/messages`, { method: 'POST', raw: form });
       }
-      return api.ws(ws, `/threads/${threadId}/messages`, { method: 'POST', body: { body, ...(projectId ? { projectId } : {}), ...(replyToMessageId ? { replyToMessageId } : {}) } });
+      return api.ws(ws, `/threads/${threadId}/messages`, { method: 'POST', body: { body, ...(projectId ? { projectId } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) } });
     },
     onSettled: (_d, _e, v) => void qc.invalidateQueries({ queryKey: qk.threadMessages(ws, v.threadId) }),
   });

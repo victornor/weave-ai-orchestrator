@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-08
+goal: Sending a chat message gives no feedback and the send button stays live —
+  a slow upload can be sent twice

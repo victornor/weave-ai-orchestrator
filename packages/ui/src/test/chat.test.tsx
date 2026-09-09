@@ -1,4 +1,4 @@
-import { act, cleanup, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Decision, Project, RunEvent, RunTrace, RuntimeAccount, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
 import { agent, decision, project, ticket } from './factories';
@@ -35,6 +35,8 @@ const state = vi.hoisted(() => ({
   posted: [] as Array<Record<string, unknown>>,
   /** Set to make the next `usePostThreadMessage` mutate reject instead of succeeding. */
   postError: null as Error | null,
+  /** When set, `mutateAsync` waits on this before recording the post — in-flight send tests. */
+  postDeferred: null as Promise<void> | null,
   connection: 'connected' as string,
   decisions: [] as Decision[],
   decisionQuery: null as Record<string, unknown> | null,
@@ -83,6 +85,8 @@ vi.mock('../api/hooks', () => ({
     },
     mutateAsync: (v: Record<string, unknown>) => {
       if (state.postError) return Promise.reject(state.postError);
+      const hold = state.postDeferred;
+      if (hold) return hold.then(() => { state.posted.push(v); });
       state.posted.push(v);
       return Promise.resolve(undefined);
     },
@@ -139,6 +143,11 @@ function messageAround(text: string): HTMLElement {
   return screen.getByText(text).closest('.group') as HTMLElement;
 }
 
+function withoutKey(v: Record<string, unknown>): Record<string, unknown> {
+  const { idempotencyKey: _k, ...rest } = v;
+  return rest;
+}
+
 const emit = (e: Partial<WorkspaceEvent> & Pick<WorkspaceEvent, 'type' | 'entityId'>): void => {
   act(() => {
     for (const h of bus.handlers) h({ seq: 1, workspaceId: 'ws1', entityType: 'run', payload: {}, createdAt: '', ...e } as WorkspaceEvent);
@@ -178,6 +187,7 @@ beforeEach(() => {
   state.projects = [project({ id: 'p1', name: 'API' })];
   state.posted = [];
   state.postError = null;
+  state.postDeferred = null;
   state.connection = 'connected';
   vi.mocked(enqueue).mockClear();
   state.decisions = [];
@@ -581,10 +591,11 @@ describe('project context', () => {
   const tags = (): (string | null)[] => within(group()).getAllByRole('radio').map((r) => r.textContent);
   const active = (): string | null | undefined => within(group()).queryByRole('radio', { checked: true })?.textContent;
   const choose = (name: string): void => { fireEvent.click(within(group()).getByRole('radio', { name })); };
-  const sent = (body: string): void => {
-    const box = screen.getByLabelText('Message the conductor…');
+  const sent = async (body: string): Promise<void> => {
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: body } });
     fireEvent.click(screen.getByLabelText('Send'));
+    await waitFor(() => expect(box.value).toBe(''));
   };
 
   beforeEach(() => {
@@ -597,12 +608,12 @@ describe('project context', () => {
     expect(tags()).toEqual(['Auto', 'API', 'Web']);
   });
 
-  it('offers only "Auto" in a workspace with none, and still sends', () => {
+  it('offers only "Auto" in a workspace with none, and still sends', async () => {
     state.projects = [];
     render(<ChatRoute />);
     expect(tags()).toEqual(['Auto']);
-    sent('set me up');
-    expect(state.posted).toEqual([{ threadId: 'th_1', body: 'set me up', projectId: null }]);
+    await sent('set me up');
+    expect(state.posted.map(withoutKey)).toEqual([{ threadId: 'th_1', body: 'set me up', projectId: null }]);
   });
 
   it('keeps an archived project the thread already used, shown as the current selection', () => {
@@ -637,50 +648,50 @@ describe('project context', () => {
     expect(active()).toBe('Auto');
   });
 
-  it('sends the chosen project, and nothing when "Auto" is chosen', () => {
+  it('sends the chosen project, and nothing when "Auto" is chosen', async () => {
     render(<ChatRoute />);
     choose('Web');
-    sent('do the thing');
-    expect(state.posted).toEqual([{ threadId: 'th_1', body: 'do the thing', projectId: 'p2' }]);
+    await sent('do the thing');
+    expect(state.posted.map(withoutKey)).toEqual([{ threadId: 'th_1', body: 'do the thing', projectId: 'p2' }]);
   });
 
-  it('resets the selection to Auto after sending, so the next message needs a fresh pick', () => {
+  it('resets the selection to Auto after sending, so the next message needs a fresh pick', async () => {
     render(<ChatRoute />);
     choose('Web');
-    sent('do the thing');
+    await sent('do the thing');
     expect(active()).toBe('Auto');
 
-    sent('and this too');
-    expect(state.posted[1]).toMatchObject({ projectId: null });
+    await sent('and this too');
+    expect(withoutKey(state.posted[1]!)).toMatchObject({ projectId: null });
   });
 
-  it('resets to Auto after an offline-queued send too', () => {
+  it('resets to Auto after an offline-queued send too', async () => {
     state.connection = 'offline';
     render(<ChatRoute />);
     choose('Web');
-    sent('later then');
+    await sent('later then');
     expect(active()).toBe('Auto');
   });
 
-  it('does not restore the cleared selection after a reload', () => {
+  it('does not restore the cleared selection after a reload', async () => {
     const view = render(<ChatRoute />);
     choose('Web');
-    sent('do the thing');
+    await sent('do the thing');
     view.unmount();
 
     render(<ChatRoute />);
     expect(active()).toBe('Auto');
   });
 
-  it('activating the active project tag returns to Auto rather than staying active', () => {
+  it('activating the active project tag returns to Auto rather than staying active', async () => {
     render(<ChatRoute />);
     choose('Web');
     expect(active()).toBe('Web');
 
     choose('Web');
     expect(active()).toBe('Auto');
-    sent('after toggling back');
-    expect(state.posted[0]).toMatchObject({ projectId: null });
+    await sent('after toggling back');
+    expect(withoutKey(state.posted[0]!)).toMatchObject({ projectId: null });
   });
 
   it('scrolls the selected tag into view when the strip mounts with a project already selected', () => {
@@ -691,11 +702,11 @@ describe('project context', () => {
     );
   });
 
-  it('keeps the project on a message queued while offline', () => {
+  it('keeps the project on a message queued while offline', async () => {
     state.connection = 'offline';
     render(<ChatRoute />);
     choose('API');
-    sent('later then');
+    await sent('later then');
 
     expect(state.posted).toHaveLength(0);
     expect(vi.mocked(enqueue).mock.calls[0]?.[0]).toMatchObject({
@@ -738,6 +749,7 @@ describe('ChatRoute sending while the daemon is unreachable', () => {
     render(<ChatRoute />);
 
     sent('are you there?');
+    await waitFor(() => expect(screen.getByLabelText('Message the conductor…')).toHaveValue(''));
 
     // A real network failure arrives after "working" already shows; this mock rejects
     // synchronously, so what is observable here is that the indicator never sticks around.
@@ -749,15 +761,71 @@ describe('ChatRoute sending while the daemon is unreachable', () => {
     });
   });
 
-  it('tells the human rather than dropping it, when the send is refused for another reason', () => {
+  it('tells the human rather than dropping it, when the send is refused for another reason', async () => {
     state.postError = Object.assign(new Error('body too long'), { name: 'ApiError' });
     render(<ChatRoute />);
 
     sent('a very long message');
+    await waitFor(() => expect(state.toasts[0]).toMatchObject({ title: 'Message not sent', status: 'failed' }));
 
     expect(state.posted).toHaveLength(0);
     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
-    expect(state.toasts[0]).toMatchObject({ title: 'Message not sent', status: 'failed' });
+    expect(screen.getByLabelText('Message the conductor…')).toHaveValue('a very long message');
+  });
+});
+
+describe('ChatRoute send lifecycle (VS-148)', () => {
+  it('a second tap while the first send is in flight does not post twice', async () => {
+    let release!: () => void;
+    state.postDeferred = new Promise<void>((r) => { release = r; });
+    render(<ChatRoute />);
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'once' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+    fireEvent.click(screen.getByLabelText('Send'));
+    expect(state.posted).toHaveLength(0);
+    await waitFor(() => expect(screen.getByLabelText('Send')).toBeDisabled());
+    release();
+    await waitFor(() => expect(state.posted).toHaveLength(1));
+    expect(withoutKey(state.posted[0]!)).toMatchObject({ threadId: 'th_1', body: 'once' });
+    expect(state.posted[0]!.idempotencyKey).toEqual(expect.any(String));
+  });
+
+  it('a failed plain-text send keeps the text, reply reference and project pick', async () => {
+    state.postError = Object.assign(new Error('body too long'), { name: 'ApiError' });
+    state.projects = [project({ id: 'p1', name: 'API' }), project({ id: 'p2', slug: 'web', name: 'Web' })];
+    state.messages = [message({ id: 'm1', body: 'Should I ship it behind a flag?' })];
+    render(<ChatRoute />);
+    fireEvent.click(screen.getByLabelText('Reply to this message'));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Project for this message' })).getByRole('radio', { name: 'Web' }));
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'yes, do it' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+
+    await waitFor(() => expect(state.toasts[0]).toMatchObject({ title: 'Message not sent', status: 'failed' }));
+    expect(box.value).toBe('yes, do it');
+    expect(screen.getByText('Replying to the conductor')).toBeInTheDocument();
+    expect(within(screen.getByRole('radiogroup', { name: 'Project for this message' })).getByRole('radio', { name: 'Web' })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('a successful retry after a failure clears the composer, reply and project pick', async () => {
+    state.postError = Object.assign(new Error('body too long'), { name: 'ApiError' });
+    state.projects = [project({ id: 'p1', name: 'API' }), project({ id: 'p2', slug: 'web', name: 'Web' })];
+    state.messages = [message({ id: 'm1', body: 'Should I ship it behind a flag?' })];
+    render(<ChatRoute />);
+    fireEvent.click(screen.getByLabelText('Reply to this message'));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Project for this message' })).getByRole('radio', { name: 'Web' }));
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'yes, do it' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+    await waitFor(() => expect(state.toasts[0]).toMatchObject({ title: 'Message not sent' }));
+
+    state.postError = null;
+    fireEvent.click(screen.getByLabelText('Send'));
+    await waitFor(() => expect(box.value).toBe(''));
+    expect(screen.queryByText('Replying to the conductor')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('radiogroup', { name: 'Project for this message' })).getByRole('radio', { name: 'Web' })).toHaveAttribute('aria-checked', 'false');
+    expect(withoutKey(state.posted[0]!)).toEqual({ threadId: 'th_1', body: 'yes, do it', projectId: 'p2', replyToMessageId: 'm1' });
   });
 });
 
@@ -772,7 +840,7 @@ describe('ChatRoute attachments (VS-133)', () => {
       await Promise.resolve();
     });
 
-    expect(state.posted).toEqual([{ threadId: 'th_1', body: 'look at this', projectId: null, files: [file] }]);
+    expect(state.posted.map(withoutKey)).toEqual([{ threadId: 'th_1', body: 'look at this', projectId: null, files: [file] }]);
   });
 
   it('leaves the composer populated and toasts when an attachment is rejected', async () => {
@@ -808,10 +876,11 @@ describe('ChatRoute attachments (VS-133)', () => {
 });
 
 describe('ChatRoute reply reference', () => {
-  const sent = (body: string): void => {
-    const box = screen.getByLabelText('Message the conductor…');
+  const sent = async (body: string): Promise<void> => {
+    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: body } });
     fireEvent.click(screen.getByLabelText('Send'));
+    await waitFor(() => expect(box.value).toBe(''));
   };
   const replyControls = (): HTMLElement[] => screen.queryAllByLabelText('Reply to this message');
   /** The quote above the input, which is the one inside the composer's scope slot. */
@@ -832,12 +901,12 @@ describe('ChatRoute reply reference', () => {
     expect(mine.querySelector('[aria-label="Reply to this message"]')).toBeNull();
   });
 
-  it('offers no reply control on a thread with no conductor messages, and still sends', () => {
+  it('offers no reply control on a thread with no conductor messages, and still sends', async () => {
     state.messages = [message({ id: 'm3', body: 'only mine', direction: 'inbound', authorKind: 'human' })];
     render(<ChatRoute />);
     expect(replyControls()).toHaveLength(0);
-    sent('still works');
-    expect(state.posted).toEqual([{ threadId: 'th_1', body: 'still works', projectId: null }]);
+    await sent('still works');
+    expect(state.posted.map(withoutKey)).toEqual([{ threadId: 'th_1', body: 'still works', projectId: null }]);
   });
 
   it('quotes the chosen message above the input', () => {
@@ -848,44 +917,44 @@ describe('ChatRoute reply reference', () => {
     expect(quote()!.parentElement!).toHaveTextContent('Should I ship it behind a flag?');
   });
 
-  it('replaces the quote rather than accumulating when another message is chosen', () => {
+  it('replaces the quote rather than accumulating when another message is chosen', async () => {
     render(<ChatRoute />);
     fireEvent.click(replyControls()[0]!);
     fireEvent.click(replyControls()[1]!);
 
     expect(screen.getAllByText('Replying to the conductor')).toHaveLength(1);
     expect(quote()!.parentElement!).toHaveTextContent('and here is an unrelated note');
-    sent('about that one');
+    await sent('about that one');
     expect(state.posted[0]).toMatchObject({ replyToMessageId: 'm2' });
   });
 
-  it('sends with no reference after the quote is dismissed', () => {
+  it('sends with no reference after the quote is dismissed', async () => {
     render(<ChatRoute />);
     fireEvent.click(replyControls()[0]!);
     fireEvent.click(screen.getByLabelText('Dismiss reply'));
 
     expect(quote()).toBeNull();
-    sent('never mind');
-    expect(state.posted).toEqual([{ threadId: 'th_1', body: 'never mind', projectId: null }]);
+    await sent('never mind');
+    expect(state.posted.map(withoutKey)).toEqual([{ threadId: 'th_1', body: 'never mind', projectId: null }]);
   });
 
-  it('sends the reference, then clears the quote so the next message carries none', () => {
+  it('sends the reference, then clears the quote so the next message carries none', async () => {
     render(<ChatRoute />);
     fireEvent.click(replyControls()[0]!);
-    sent('yes, do it');
+    await sent('yes, do it');
 
-    expect(state.posted[0]).toEqual({ threadId: 'th_1', body: 'yes, do it', projectId: null, replyToMessageId: 'm1' });
+    expect(withoutKey(state.posted[0]!)).toEqual({ threadId: 'th_1', body: 'yes, do it', projectId: null, replyToMessageId: 'm1' });
     expect(quote()).toBeNull();
 
-    sent('and something else');
-    expect(state.posted[1]).toEqual({ threadId: 'th_1', body: 'and something else', projectId: null });
+    await sent('and something else');
+    expect(withoutKey(state.posted[1]!)).toEqual({ threadId: 'th_1', body: 'and something else', projectId: null });
   });
 
-  it('keeps the reference on a message queued while offline, and clears the quote', () => {
+  it('keeps the reference on a message queued while offline, and clears the quote', async () => {
     state.connection = 'offline';
     render(<ChatRoute />);
     fireEvent.click(replyControls()[0]!);
-    sent('later then');
+    await sent('later then');
 
     expect(state.posted).toHaveLength(0);
     expect(vi.mocked(enqueue).mock.calls[0]?.[0]).toMatchObject({
@@ -1703,11 +1772,11 @@ describe('ChatRoute drafts', () => {
     expect(box().selectionEnd).toBe('half a thought about the'.length);
   });
 
-  it('clears the draft once the message is sent', () => {
+  it('clears the draft once the message is sent', async () => {
     const view = render(<ChatRoute />);
     type('ship it');
     fireEvent.click(screen.getByLabelText('Send'));
-    expect(state.posted).toHaveLength(1);
+    await waitFor(() => expect(state.posted).toHaveLength(1));
     expect(box().value).toBe('');
     view.unmount();
 
@@ -1741,7 +1810,7 @@ describe('ChatRoute drafts', () => {
     expect(box().value).toBe('for the first workspace');
   });
 
-  it('restores the reply reference and the project tag with the text', () => {
+  it('restores the reply reference and the project tag with the text', async () => {
     state.projects = [project({ id: 'p1', name: 'API' }), project({ id: 'p2', slug: 'web', name: 'Web' })];
     state.messages = [message({ id: 'm1', body: 'Should I ship it behind a flag?' })];
 
@@ -1759,7 +1828,7 @@ describe('ChatRoute drafts', () => {
     expect(within(group()).getByRole('radio', { name: 'Web' })).toHaveAttribute('aria-checked', 'true');
 
     fireEvent.click(screen.getByLabelText('Send'));
-    expect(state.posted[0]).toEqual({ threadId: 'th_1', body: 'yes, do it', projectId: 'p2', replyToMessageId: 'm1' });
+    await waitFor(() => expect(withoutKey(state.posted[0]!)).toEqual({ threadId: 'th_1', body: 'yes, do it', projectId: 'p2', replyToMessageId: 'm1' }));
   });
 
   it('restores what dictation transcribed before the page was left', () => {

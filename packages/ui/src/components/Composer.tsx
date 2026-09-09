@@ -26,7 +26,7 @@ export interface ComposerProps {
   autoFocus?: boolean;
   value?: string;
   onChange?: (v: string) => void;
-  onSubmit: (text: string, files?: File[]) => void | Promise<void>;
+  onSubmit: (text: string, files?: File[], idempotencyKey?: string) => void | Promise<void>;
   /** rendered above the input; used by "Revise…" to show what it is scoped to. */
   scope?: React.ReactNode;
   rows?: number;
@@ -104,6 +104,11 @@ export function Composer({
   const setFiles = useCallback((f: File[]) => (onAttachmentsChange ? onAttachmentsChange(f) : setInternalFiles(f)), [onAttachmentsChange]);
   const fileInput = useRef<HTMLInputElement>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [submitFailed, setSubmitFailed] = useState(false);
+  const lastFailed = useRef<{ key: string; text: string; fileNames: string } | null>(null);
+  const inFlightLabel = useRef<'Sending…' | 'Uploading and sending…'>('Sending…');
 
   const addFiles = useCallback((incoming: File[]): void => {
     const accepted = incoming.filter((f) => (ACCEPTED_ATTACHMENT_TYPES as readonly string[]).includes(f.type));
@@ -189,30 +194,37 @@ export function Composer({
 
   const send = useCallback(() => {
     const t = text.trim();
-    if (!t || disabled) return;
+    if (!t || disabled || submittingRef.current) return;
     // Sending ends the utterance. A mic left open would keep appending to an input the human has
     // already sent, so it closes here — button and ⏎ alike — before the input is cleared.
     if (dictation.listening) {
       startedByKey.current = false;
       dictation.stop();
     }
-    if (files.length > 0) {
-      // Cleared only once the send is confirmed: a rejected attachment (or a transport failure)
-      // leaves the composer exactly as the human left it, text and files both, so nothing already
-      // typed is lost and the attempt can be retried (openspec spec.md — "A failed attachment
-      // upload leaves the composer's text intact"). `onSubmit` is expected to report the failure
-      // itself (a toast); this only decides what to keep on screen.
-      Promise.resolve(onSubmit(t, files)).then(() => {
-        set('');
-        base.current = '';
-        setFiles([]);
-        setAttachError(null);
-      }).catch(() => { /* kept for retry */ });
-      return;
-    }
-    void onSubmit(t);
-    set('');
-    base.current = '';
+    const fileNames = files.map((f) => f.name).join('\0');
+    const reused = lastFailed.current && lastFailed.current.text === t && lastFailed.current.fileNames === fileNames
+      ? lastFailed.current.key
+      : crypto.randomUUID();
+    inFlightLabel.current = files.length > 0 ? 'Uploading and sending…' : 'Sending…';
+    submittingRef.current = true;
+    setSubmitting(true);
+    setSubmitFailed(false);
+    // Cleared only once the send is confirmed: a rejected send (attachment or plain text) leaves
+    // the composer exactly as the human left it so the attempt can be retried (VS-148). `onSubmit`
+    // is expected to report the failure itself (a toast); this only decides what to keep on screen.
+    Promise.resolve(onSubmit(t, files.length > 0 ? files : undefined, reused)).then(() => {
+      lastFailed.current = null;
+      set('');
+      base.current = '';
+      setFiles([]);
+      setAttachError(null);
+    }).catch(() => {
+      lastFailed.current = { key: reused, text: t, fileNames };
+      setSubmitFailed(true);
+    }).finally(() => {
+      submittingRef.current = false;
+      setSubmitting(false);
+    });
   }, [text, disabled, onSubmit, set, dictation, files, setFiles]);
 
   const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
@@ -252,12 +264,13 @@ export function Composer({
             {files.map((f, i) => (
               <li key={`${f.name}-${i}`} className="flex items-center gap-1.5 rounded-r6 border border-line-2 bg-bg-2 py-1 pl-2 pr-1 text-micro text-text-2">
                 <span className="max-w-40 truncate">{f.name}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${f.name}`}
-                  onClick={() => removeFile(i)}
-                  className="inline-flex size-4 items-center justify-center rounded-full text-text-4 hover:bg-bg-3 hover:text-text-1"
-                >
+                  <button
+                    type="button"
+                    aria-label={`Remove ${f.name}`}
+                    disabled={submitting}
+                    onClick={() => removeFile(i)}
+                    className="inline-flex size-4 items-center justify-center rounded-full text-text-4 hover:bg-bg-3 hover:text-text-1"
+                  >
                   ×
                 </button>
               </li>
@@ -269,7 +282,7 @@ export function Composer({
             ref={ta}
             rows={rows}
             value={text}
-            disabled={disabled}
+            disabled={disabled || submitting}
             placeholder={placeholder}
             aria-label={placeholder}
             onChange={(e) => set(e.target.value)}
@@ -303,7 +316,7 @@ export function Composer({
               <button
                 type="button"
                 aria-label="Attach a file"
-                disabled={disabled}
+                disabled={disabled || submitting}
                 onClick={() => fileInput.current?.click()}
                 className="inline-flex size-8 flex-none items-center justify-center rounded-r6 border border-line-2 text-text-2 transition-colors duration-(--dur-fast) ease-ac hover:bg-bg-3 hover:text-text-1"
               >
@@ -330,11 +343,11 @@ export function Composer({
           <button
             type="button"
             aria-label={submitLabel}
-            disabled={!text.trim() || disabled}
+            disabled={!text.trim() || disabled || submitting}
             onClick={send}
             className={cx(
               'inline-flex size-8 flex-none items-center justify-center rounded-r6 transition-colors duration-(--dur-fast) ease-ac',
-              text.trim() && !disabled ? 'bg-accent text-accent-on' : 'bg-bg-3 text-text-4',
+              text.trim() && !disabled && !submitting ? 'bg-accent text-accent-on' : 'bg-bg-3 text-text-4',
             )}
           >
             <SendIcon />
@@ -371,6 +384,17 @@ export function Composer({
       {attachError ? (
         <p className="rounded-r6 border border-blocked/35 bg-blocked/8 px-3 py-2 text-micro leading-relaxed text-text-1" role="alert">
           {attachError}
+        </p>
+      ) : null}
+      {submitting ? (
+        <p className="flex items-center gap-2 text-micro text-text-2" role="status" aria-live="polite">
+          <span className="size-2.5 animate-spin rounded-pill border border-current border-t-transparent" aria-hidden />
+          {inFlightLabel.current}
+        </p>
+      ) : null}
+      {submitFailed && !submitting ? (
+        <p className="rounded-r6 border border-blocked/35 bg-blocked/8 px-3 py-2 text-micro leading-relaxed text-text-1" role="alert">
+          Message not sent — retry when you are ready.
         </p>
       ) : null}
       {explain && dictation.mode === 'unavailable' ? (

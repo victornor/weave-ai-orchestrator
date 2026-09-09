@@ -524,18 +524,19 @@ export function ChatRoute(): React.ReactElement {
   const ticketOf = (d: { ticketId: string | null }): Ticket | undefined =>
     tickets.data?.find((t) => t.id === d.ticketId);
 
-  const send = (text: string, files: File[] = []): void | Promise<void> => {
+  const send = (text: string, files?: File[], idempotencyKey?: string): void | Promise<void> => {
     if (!threadId) return;
+    const attached = files ?? [];
     const queueThisMessage = (): void => {
       enqueue({
         kind: 'thread',
         path: `/threads/${threadId}/messages`,
-        body: { body: text, ...(projectId ? { projectId } : {}), ...(replyToId ? { replyToMessageId: replyToId } : {}) },
+        body: { body: text, ...(projectId ? { projectId } : {}), ...(replyToId ? { replyToMessageId: replyToId } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) },
         label: text.slice(0, 60),
       });
     };
 
-    if (files.length > 0) {
+    if (attached.length > 0) {
       // No offline-queue replay for an attachment (VS-133 — out of scope): a send while unreachable
       // fails visibly, leaving the composer's text and files for a retry, rather than silently
       // dropping the file or claiming it queued when it did not.
@@ -545,7 +546,7 @@ export function ChatRoute(): React.ReactElement {
       }
       setSending(true);
       return post
-        .mutateAsync({ threadId, body: text, projectId, files, ...(replyToId ? { replyToMessageId: replyToId } : {}) })
+        .mutateAsync({ threadId, body: text, projectId, files: attached, idempotencyKey, ...(replyToId ? { replyToMessageId: replyToId } : {}) })
         .then(() => { patch({ replyToId: null, projectId: null }); })
         .catch((e: unknown) => {
           setSending(false);
@@ -562,20 +563,23 @@ export function ChatRoute(): React.ReactElement {
       return;
     }
     setSending(true);
-    post.mutate(
-      { threadId, body: text, projectId, ...(replyToId ? { replyToMessageId: replyToId } : {}) },
-      {
-        // The daemon being unreachable — not a validation failure — is the same condition the
-        // `offline` branch above queues for; the device just has not noticed it yet. Anything else
-        // is a real refusal, so the human is told rather than left assuming it went through.
-        onError: (e) => {
-          setSending(false);
-          if (e instanceof NetworkError) queueThisMessage();
-          else toast.push({ title: 'Message not sent', detail: e.message, status: 'failed' });
-        },
-      },
-    );
-    patch({ replyToId: null, projectId: null });
+    // mutateAsync so the composer's in-flight lock lasts the real request (VS-148). Reply/project
+    // reset only on a confirmed send — a refusal keeps both so the retry is still scoped.
+    // A NetworkError is the same condition the `offline` branch queues for; the device just has
+    // not noticed it yet, so it is treated as settled (queued) rather than as a retryable failure.
+    return post
+      .mutateAsync({ threadId, body: text, projectId, idempotencyKey, ...(replyToId ? { replyToMessageId: replyToId } : {}) })
+      .then(() => { patch({ replyToId: null, projectId: null }); })
+      .catch((e: unknown) => {
+        setSending(false);
+        if (e instanceof NetworkError) {
+          queueThisMessage();
+          patch({ replyToId: null, projectId: null });
+          return;
+        }
+        toast.push({ title: 'Message not sent', detail: e instanceof Error ? e.message : 'unknown error', status: 'failed' });
+        throw e;
+      });
   };
 
   // Onboarding: the conductor's first-run interview is just Chat with a

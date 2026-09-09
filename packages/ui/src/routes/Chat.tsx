@@ -55,6 +55,7 @@ import { useToast } from '../components/Toast';
 import { useGo } from '../app/link';
 import { clock } from '../lib/format';
 import { cx } from '../lib/cx';
+import { projectColorVar } from '../lib/projectColor';
 
 const IDENTIFIER = /\b([A-Z][A-Z0-9]+-\d+)\b/g;
 
@@ -681,6 +682,7 @@ export function ChatRoute(): React.ReactElement {
                         identifier={d.ticket.identifier}
                         name={d.worker?.name ?? d.ticket.title}
                         status={d.status}
+                        projectColorVar={d.ticket.projectId ? projectColorVar(d.ticket.projectId) : undefined}
                         onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
                       />
                     ))}
@@ -731,7 +733,13 @@ export function ChatRoute(): React.ReactElement {
             {unattributed.length ? (
               <div className="flex flex-wrap gap-2">
                 {unattributed.map((w) => (
-                  <WorkerChip key={w.id} name={w.name} status={agentUiStatus(w.status)} onClick={() => openWorker(w.id)} />
+                  <WorkerChip
+                    key={w.id}
+                    name={w.name}
+                    status={agentUiStatus(w.status)}
+                    projectColorVar={w.projectId ? projectColorVar(w.projectId) : undefined}
+                    onClick={() => openWorker(w.id)}
+                  />
                 ))}
               </div>
             ) : null}
@@ -870,9 +878,9 @@ function ProjectPicker({
   return (
     <div ref={groupRef} role="radiogroup" aria-label="Project for this message" className="flex gap-1 overflow-x-auto">
       <ProjectTag label="Auto" active={value === null} onClick={() => onChange(null)} />
-      {orphan ? <ProjectTag label={value} active onClick={() => onChange(null)} /> : null}
+      {orphan ? <ProjectTag label={value} active colorVar={projectColorVar(value)} onClick={() => onChange(null)} /> : null}
       {choosable.map((p) => (
-        <ProjectTag key={p.id} label={p.name} active={p.id === value} onClick={() => onChange(p.id === value ? null : p.id)} />
+        <ProjectTag key={p.id} label={p.name} active={p.id === value} colorVar={projectColorVar(p.id)} onClick={() => onChange(p.id === value ? null : p.id)} />
       ))}
     </div>
   );

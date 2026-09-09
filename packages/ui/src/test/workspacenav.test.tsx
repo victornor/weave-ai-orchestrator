@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { WorkspaceListItem } from '../api/types';
 import type { WorkspaceProjectsState } from '../api/hooks';
 import { project } from './factories';
+import { projectColorVar } from '../lib/projectColor';
 
 // The rail assembles hrefs at runtime; rendering them as plain anchors is what lets a test read
 // where each link actually points.
@@ -207,6 +208,24 @@ describe("a project's sync marker (VS-131)", () => {
     render(nav({ projectsByWs: { alpha: ready(projects) } }));
     expect(dotOf('web')?.style.background).toBe('var(--status-working)');
     expect(dotOf('api')?.style.background).toBe('var(--status-blocked)');
+  });
+});
+
+describe("a project's colour identity (VS-149)", () => {
+  const colourOf = (slug: string): HTMLElement | null =>
+    within(screen.getByLabelText('Alpha projects')).getByText(slug).closest('a')!.querySelector('[data-project-color]');
+
+  it('colours a row as a pure function of the project id, regardless of sync state', () => {
+    render(nav({
+      projectsByWs: {
+        alpha: ready([
+          project({ id: 'p1', slug: 'web', syncState: 'in_sync' }),
+          project({ id: 'p2', slug: 'api', syncState: 'behind' }),
+        ]),
+      },
+    }));
+    expect(colourOf('web')?.style.background).toBe(projectColorVar('p1'));
+    expect(colourOf('api')?.style.background).toBe(projectColorVar('p2'));
   });
 });
 

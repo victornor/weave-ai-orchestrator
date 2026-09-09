@@ -38,11 +38,13 @@ export function ProjectTag({
   active,
   onClick,
   className,
+  colorVar,
 }: {
   label: string;
   active: boolean;
   onClick?: () => void;
   className?: string;
+  colorVar?: string;
 }): React.ReactElement {
   return (
     <button
@@ -57,6 +59,7 @@ export function ProjectTag({
         className,
       )}
     >
+      {colorVar ? <span className="size-1.5 rounded-full" style={{ background: colorVar }} data-project-color aria-hidden /> : null}
       <span className="ac-truncate max-w-32">{label}</span>
     </button>
   );
@@ -68,12 +71,14 @@ export function WorkerChip({
   note,
   onClick,
   className,
+  projectColorVar,
 }: {
   name: string;
   status: UiStatus;
   note?: string;
   onClick?: () => void;
   className?: string;
+  projectColorVar?: string;
 }): React.ReactElement {
   return (
     <button
@@ -86,6 +91,7 @@ export function WorkerChip({
       )}
     >
       <StatusGlyph status={status} size="xs" pulse={status === 'working'} />
+      {projectColorVar ? <span className="size-1.5 rounded-full" style={{ background: projectColorVar }} data-project-color aria-hidden /> : null}
       <span className="text-micro text-text-soft">{name}</span>
       {note ? <span className="ac-mono ac-truncate text-micro text-text-3">{note}</span> : null}
     </button>

@@ -2,6 +2,7 @@ import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within }
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Decision, Project, RunEvent, RunTrace, RuntimeAccount, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
 import { agent, decision, project, ticket } from './factories';
+import { projectColorVar } from '../lib/projectColor';
 import { enqueue } from '../lib/queue';
 import { clearChatScroll, readChatScroll, writeChatScroll } from '../lib/chatScroll';
 import { clearHiddenCache } from '../lib/hiddenDecisions';
@@ -199,6 +200,7 @@ beforeEach(() => {
   // Hidden decisions are a device preference in localStorage behind a module-level cache; one
   // test's hidden card must not open the next test with an empty pinned area.
   localStorage.clear();
+  try { sessionStorage.clear(); } catch { /* no store in this environment */ }
   clearHiddenCache();
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -531,6 +533,18 @@ describe('ChatRoute dispatch labels', () => {
     state.workers = [state.workers[0]!];
     rerender(<ChatRoute />);
     expect(screen.queryByRole('button', { name: /Backend Engineer #2/ })).not.toBeInTheDocument();
+  });
+
+  it('colours a project-bound dispatch and omits the marker when the ticket has no project', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed both.' })];
+    state.tickets = [
+      dispatch({ id: 'tk_1', identifier: 'TST-1', projectId: 'p1', createdAt: '2026-09-01T09:00:01.000Z' }),
+      dispatch({ id: 'tk_2', identifier: 'TST-2', projectId: null, createdAt: '2026-09-01T09:00:02.000Z' }),
+    ];
+
+    render(<ChatRoute />);
+    expect(label('TST-1').querySelector('[data-project-color]')?.getAttribute('style')).toContain(projectColorVar('p1'));
+    expect(label('TST-2').querySelector('[data-project-color]')).toBeNull();
   });
 
   it('meters the conductor\u2019s context in the header, from its last finished turn', () => {

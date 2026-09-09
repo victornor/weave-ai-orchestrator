@@ -52,6 +52,13 @@
   --status-failed: #e5484d;
   --status-paused: #6b7078;
 
+  /* project identity (VS-149) — kept clear of the nine status hues and --accent */
+  --project-1: #2dd4bf;
+  --project-2: #38bdf8;
+  --project-3: #e879f9;
+  --project-4: #c08552;
+  --project-5: #a3a84c;
+
   --overlay: rgb(0 0 0 / 0.62);
   --elev-sheet: 0 16px 48px rgb(0 0 0 / 0.6);
   --elev-float: 0 4px 16px rgb(94 106 210 / 0.4);
@@ -96,6 +103,12 @@
   --status-done: #1f8a34;
   --status-failed: #c22b31;
   --status-paused: #8a8f98;
+
+  --project-1: #0f766e;
+  --project-2: #0369a1;
+  --project-3: #a21caf;
+  --project-4: #8a5a2e;
+  --project-5: #6b6e1f;
 
   --overlay: rgb(16 24 32 / 0.28);
   --elev-sheet: 0 16px 48px rgb(16 24 32 / 0.18);

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-09
+goal: Give each project a stable, deterministic colour and use it consistently
+  in the sidebar, the chat project tag, ticket tags and worker tags

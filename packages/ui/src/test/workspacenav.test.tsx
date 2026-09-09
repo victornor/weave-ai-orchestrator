@@ -11,8 +11,17 @@ import { projectColorVar } from '../lib/projectColor';
 vi.mock('../app/link', () => ({
   // `params` are substituted into the path rather than spread onto the anchor, so a test reads the
   // address the human actually lands on.
-  A: ({ to, params, children, ...rest }: { to: string; params?: Record<string, string>; children: React.ReactNode }) => (
-    <a href={Object.entries(params ?? {}).reduce((acc, [k, v]) => acc.replace(`$${k}`, v), to)} {...rest}>{children}</a>
+  A: ({ to, params, search, children, ...rest }: {
+    to: string;
+    params?: Record<string, string>;
+    search?: Record<string, unknown>;
+    children: React.ReactNode;
+  }) => (
+    <a
+      href={Object.entries(params ?? {}).reduce((acc, [k, v]) => acc.replace(`$${k}`, v), to)}
+      data-search={search ? JSON.stringify(search) : undefined}
+      {...rest}
+    >{children}</a>
   ),
   useGo: () => vi.fn(),
 }));
@@ -148,9 +157,12 @@ describe('the active workspace and section', () => {
     expect(within(group).getByRole('status')).toBeInTheDocument();
   });
 
-  it('shows a genuinely empty workspace as no project block, not an error or loading state', () => {
+  it('shows a genuinely empty workspace as no project rows, with New project still offered', () => {
     render(nav({ projectsByWs: { alpha: ready(), beta: ready([]) }, expanded: ['beta'] }));
-    expect(screen.queryByLabelText('Beta projects')).not.toBeInTheDocument();
+    const block = screen.getByLabelText('Beta projects');
+    expect(within(block).queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(block).queryByRole('status')).not.toBeInTheDocument();
+    expect(within(block).getByRole('link', { name: 'New project' })).toBeInTheDocument();
   });
 
   it('scopes a failed fetch to its own group, leaving another expanded group unaffected', () => {
@@ -178,6 +190,43 @@ describe('the active workspace and section', () => {
     render(nav({ projectsByWs: { alpha: ready(), beta: ready([project({ id: 'p2', slug: 'api' })]) }, expanded: ['beta'] }));
     const link = within(screen.getByLabelText('Beta projects')).getByText('api').closest('a');
     expect(link?.getAttribute('href')).toBe('/w/beta/p/api');
+  });
+});
+
+describe('New project (VS-158)', () => {
+  const newProjectOf = (wsName: string): HTMLElement =>
+    within(screen.getByLabelText(`${wsName} projects`)).getByRole('link', { name: 'New project' });
+
+  it('sits under an open group that has projects and addresses Settings Projects', () => {
+    render(nav({ projectsByWs: { alpha: ready([project({ id: 'p1', slug: 'web' })]) } }));
+    const link = newProjectOf('Alpha');
+    expect(link).toHaveAttribute('href', '/w/alpha/settings');
+    expect(JSON.parse(link.getAttribute('data-search') ?? '{}')).toEqual({ section: 'projects' });
+    expect(link.querySelector('svg')).not.toBeNull();
+  });
+
+  it('is present while a group is loading and after its fetch failed', () => {
+    render(nav({
+      projectsByWs: { alpha: ready(), beta: pending, gamma: failed },
+      expanded: ['beta', 'gamma'],
+    }));
+    expect(newProjectOf('Beta')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Beta projects')).getByRole('status')).toBeInTheDocument();
+    expect(newProjectOf('Gamma')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Gamma projects')).getByRole('alert')).toBeInTheDocument();
+  });
+
+  it('is absent from a collapsed group', () => {
+    render(nav({ projectsByWs: { alpha: ready(), beta: ready([project({ id: 'p2', slug: 'api' })]) }, expanded: [] }));
+    expect(screen.queryByLabelText('Beta projects')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'New project' })).toHaveLength(1);
+  });
+
+  it('addresses a non-active open group\'s own workspace, not the active one', () => {
+    render(nav({ projectsByWs: { alpha: ready(), beta: ready([]) }, expanded: ['beta'] }));
+    const link = newProjectOf('Beta');
+    expect(link).toHaveAttribute('href', '/w/beta/settings');
+    expect(JSON.parse(link.getAttribute('data-search') ?? '{}')).toEqual({ section: 'projects' });
   });
 });
 

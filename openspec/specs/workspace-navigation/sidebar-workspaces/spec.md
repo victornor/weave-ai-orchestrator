@@ -36,8 +36,8 @@ The sidebar SHALL NOT present a workspace switcher that hides the other workspac
 
 Each workspace group SHALL carry a control that expands and collapses it, and SHALL report whether
 it is currently expanded to assistive technology. An expanded group SHALL contain a link to each of
-that workspace's sections — Chat, Needs you, Board, Team, Runs, Usage, Knowledge and Settings — in
-the same order the app uses for the active workspace, each addressing that section of that
+that workspace's sections — Chat, Needs you, Board, Live, Team, Runs, Usage, Knowledge and Settings
+— in the same order the app uses for the active workspace, each addressing that section of that
 workspace.
 
 A collapsed group SHALL show its header, including its signals, and none of its section links.
@@ -48,7 +48,7 @@ collapsible, so the section being viewed is never hidden.
 #### Scenario: Expanding another workspace
 
 - **WHEN** the human expands the group of a workspace that is not the active one
-- **THEN** that group's eight section links become visible, each addressing that workspace
+- **THEN** that group's section links become visible, each addressing that workspace, including Live
 
 #### Scenario: Collapsing
 
@@ -155,7 +155,7 @@ The last of those tabs SHALL NOT navigate. It SHALL open a menu, presented over 
 dismissible dialog, containing:
 
 - a link to every destination the application has that the bar's tabs do not carry, including the
-  merge queue, each named and addressing the active workspace;
+  merge queue and Live, each named and addressing the active workspace;
 - the active workspace's projects, each named by its slug and opening that project's overview;
 - the workspace list, with each workspace's Needs-you count, where choosing a workspace navigates to
   it and makes it active;
@@ -188,8 +188,8 @@ other route still reaches the other workspaces.
 #### Scenario: Reaching a destination the bar has no tab for
 
 - **WHEN** the human opens More on a phone
-- **THEN** every destination the five tabs do not carry is listed, including the merge queue, and
-  choosing one goes to that destination of the active workspace
+- **THEN** every destination the five tabs do not carry is listed, including the merge queue and
+  Live, and choosing one goes to that destination of the active workspace
 
 #### Scenario: Reaching a project on a phone
 

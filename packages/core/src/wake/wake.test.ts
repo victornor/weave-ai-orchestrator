@@ -62,10 +62,18 @@ describe('wake queue', () => {
     expect(h.events.some((e) => e.type === 'wake.skipped')).toBe(true);
   });
 
-  it('skips a worker whose role is paused', () => {
+  it('queues a worker whose role is paused (VS-154: the dispatcher holds the turn)', () => {
     const workerId = h.addWorker(null);
     h.db.update('roles', h.roleId, { status: 'paused' });
-    expect(wake.enqueue(workerId, { source: 'ticket_comment', reason: 'x' }).skipReason).toBe('role_paused');
+    const w = wake.enqueue(workerId, { source: 'ticket_comment', reason: 'x' });
+    expect(w.status).toBe('queued');
+    expect(w.skipReason).toBeNull();
+  });
+
+  it('still skips a worker whose role is retired', () => {
+    const workerId = h.addWorker(null);
+    h.db.update('roles', h.roleId, { status: 'retired' });
+    expect(wake.enqueue(workerId, { source: 'ticket_comment', reason: 'x' }).skipReason).toBe('role_retired');
   });
 
   it('skips when the workspace is not active', () => {
@@ -78,6 +86,25 @@ describe('wake queue', () => {
     const b = wake.enqueue(h.conductorId, { source: 'system', reason: 'liveness again', idempotencyKey: 'k1' });
     expect(b.id).toBe(a.id);
     expect(wake.listForAgent(h.conductorId, ['queued'])).toHaveLength(1);
+  });
+
+  it('does not let a skipped wake consume its idempotency key (VS-154)', () => {
+    h.db.update('agents', h.conductorId, { status: 'paused' });
+    const skipped = wake.enqueue(h.conductorId, { source: 'system', reason: 'liveness', idempotencyKey: 'k1' });
+    expect(skipped.status).toBe('skipped');
+    expect(skipped.skipReason).toBe('agent_paused');
+    h.db.update('agents', h.conductorId, { status: 'active' });
+    const queued = wake.enqueue(h.conductorId, { source: 'system', reason: 'liveness again', idempotencyKey: 'k1' });
+    expect(queued.status).toBe('queued');
+    expect(queued.id).not.toBe(skipped.id);
+  });
+
+  it('still returns a completed wake for the same idempotency key', () => {
+    const a = wake.enqueue(h.conductorId, { source: 'system', reason: 'liveness', idempotencyKey: 'k1' });
+    h.db.update('wakeups', a.id, { status: 'completed', finishedAt: nowIso() });
+    const b = wake.enqueue(h.conductorId, { source: 'system', reason: 'liveness again', idempotencyKey: 'k1' });
+    expect(b.id).toBe(a.id);
+    expect(wake.listForAgent(h.conductorId, ['queued'])).toHaveLength(0);
   });
 
   it('does not coalesce into a wake that is not due yet', () => {

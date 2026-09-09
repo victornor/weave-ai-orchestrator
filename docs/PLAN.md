@@ -425,7 +425,7 @@ Transitions are validated in `core/tickets/transitions.ts` (single owner). Agent
 `enqueueWakeup(agentId, {source, reason, payload, idempotencyKey?, notBefore?, requestedBy})` is the single funnel. Ordered gates (each skip writes a `skipped` row with `skip_reason`):
 
 1. Agent exists and workspace is `active`.
-2. Agent status: `paused|retired|done` → skip (`agent_paused` / `agent_retired`); a worker whose role is `paused` → skip (`role_paused`).
+2. Agent status: `paused|retired|done` → skip (`agent_paused` / `agent_retired` / `agent_done`); a worker whose role is `retired` → skip (`role_retired`). A worker whose role is `paused` is **not** skipped: the wake stays `queued` and the dispatcher does not claim it until the role is `active` (same as an expired runtime login).
 3. Coalesce: if the agent has a `queued` wake, merge payloads (append) into it (`coalesced`); if it has a `running` run, queue normally (the turn gate serializes).
 4. Insert `queued`.
 

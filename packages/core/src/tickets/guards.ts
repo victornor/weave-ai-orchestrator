@@ -1,4 +1,4 @@
-import { OcError, canTransition, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
+import { OcError, canTransition, TRANSITIONS, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
 
 /** Everything the transition guards need, gathered by the service before it decides (PLAN §6.2). */
 export interface GuardFacts {
@@ -23,7 +23,12 @@ export interface GuardFacts {
 export function checkTransition(kind: TicketKind, from: TicketStatus, to: TicketStatus, facts: GuardFacts): void {
   if (from === to) throw new OcError('invalid_disposition', `ticket is already ${to}`, { from, to });
   if (!canTransition(kind, from, to)) {
-    throw new OcError('invalid_disposition', `a ${kind} ticket cannot move from ${from} to ${to}`, { kind, from, to });
+    throw new OcError('invalid_disposition', `a ${kind} ticket cannot move from ${from} to ${to}`, {
+      kind,
+      from,
+      to,
+      allowed: TRANSITIONS[kind][from],
+    });
   }
   if (to === 'blocked') {
     const routable = (facts.hasBlockers && facts.openBlockers > 0) || facts.hasOpenDecision || facts.hasUnblockPath;

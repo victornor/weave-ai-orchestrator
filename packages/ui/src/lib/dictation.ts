@@ -6,6 +6,7 @@ import {
   useDictationDiagnosticsEnabled,
   type DictationCaptureEntry,
 } from './dictationDiagnostics.js';
+import { downsampleTo16k, encodePcm16MonoWav } from './wav.js';
 
 /* Minimal typings — the Web Speech API is not in lib.dom for all TS versions. */
 interface SpeechRecognitionAlternativeLike { transcript: string }
@@ -94,17 +95,17 @@ export interface Dictation {
  * explains itself on tap (DESIGN-CONTRACT §4).
  */
 /**
- * Which path to use. The daemon's transcriber (private, works in every browser, needs a provider on
- * the daemon host) wins when it is configured; the browser's Web Speech API is the fallback — it
- * ships audio to the browser vendor's service and fails on `network` where that is unreachable.
+ * Which path to use. Chrome / Web Speech is the default. Upload (daemon Voxtype) only when the
+ * daemon backend is `voxtype` and the host is ready — a leftover `command` provider must not steal
+ * the mic (VS-179).
  */
-function pickMode(serverConfigured: boolean): DictationMode {
+function pickMode(opts: { backend?: string; hostReady?: boolean }): DictationMode {
   if (typeof window === 'undefined') return 'unavailable';
   const md = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined;
-  const canUpload = Boolean(md) && typeof MediaRecorder !== 'undefined';
-  if (serverConfigured && canUpload) return 'upload';
+  const canRecord = Boolean(md);
+  if (opts.backend === 'voxtype' && opts.hostReady && canRecord) return 'upload';
   if (speechCtor()) return 'speech';
-  return canUpload && serverConfigured ? 'upload' : 'unavailable';
+  return 'unavailable';
 }
 
 const ERRORS: Record<string, string> = {
@@ -126,23 +127,33 @@ const NO_TRANSCRIPT = 'The browser heard audio but its speech service returned n
  * interim phrase from being appended to itself (VS-70); `final` says the recognizer considers every
  * segment in it settled.
  */
-export function useDictation(onText: (text: string, final: boolean) => void, opts: { transcribeUrl?: string; serverConfigured?: boolean } = {}): Dictation {
+export function useDictation(onText: (text: string, final: boolean) => void, opts: {
+  transcribeUrl?: string;
+  serverConfigured?: boolean;
+  backend?: 'chrome' | 'voxtype';
+} = {}): Dictation {
   const [listening, setListening] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<DictationMode>(() => pickMode(Boolean(opts.serverConfigured)));
+  const [mode, setMode] = useState<DictationMode>(() => pickMode({ backend: opts.backend, hostReady: Boolean(opts.serverConfigured) }));
   const serverConfigured = opts.serverConfigured;
-  // Ask the daemon once whether it transcribes; the composer stays free of data-layer providers.
+  const backendOpt = opts.backend;
+  // Ask the daemon once which backend to use; the composer stays free of data-layer providers.
   useEffect(() => {
-    if (serverConfigured !== undefined) { setMode(pickMode(serverConfigured)); return; }
+    if (backendOpt !== undefined || serverConfigured !== undefined) {
+      setMode(pickMode({ backend: backendOpt, hostReady: Boolean(serverConfigured) }));
+      return;
+    }
     if (typeof fetch !== 'function') return;
     let cancelled = false;
     fetch('/api/health', { credentials: 'include' })
-      .then((r) => (r.ok ? (r.json() as Promise<{ transcription?: { configured?: boolean } }>) : null))
-      .then((h) => { if (!cancelled && h) setMode(pickMode(Boolean(h.transcription?.configured))); })
+      .then((r) => (r.ok ? (r.json() as Promise<{ transcription?: { configured?: boolean; backend?: string } }>) : null))
+      .then((h) => {
+        if (!cancelled && h) setMode(pickMode({ backend: h.transcription?.backend, hostReady: Boolean(h.transcription?.configured) }));
+      })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [serverConfigured]);
+  }, [serverConfigured, backendOpt]);
   const [metered, setMetered] = useState(false);
   const wantListening = useRef(false);
   const gotResult = useRef(false);
@@ -166,8 +177,12 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
   }, []);
 
   const rec = useRef<SpeechRecognitionLike | null>(null);
-  const recorder = useRef<MediaRecorder | null>(null);
-  const chunks = useRef<Blob[]>([]);
+  const pcmChunks = useRef<Float32Array[]>([]);
+  const pcmRate = useRef(16000);
+  const processor = useRef<{ disconnect: () => void } | null>(null);
+  const uploadLive = useRef(false);
+  const transcribeUrlRef = useRef(opts.transcribeUrl);
+  transcribeUrlRef.current = opts.transcribeUrl;
   const analyser = useRef<{ ctx: AudioContext; node: AnalyserNode } | null>(null);
   const analyserNode = useRef<AnalyserNode | null>(null);
   const owned = useRef<MediaStream | null>(null);
@@ -211,14 +226,49 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     }
   }, []);
 
+  const postWav = useCallback((blob: Blob) => {
+    if (!blob.size) return;
+    const fd = new FormData();
+    fd.append('audio', blob, 'dictation.wav');
+    void fetch(transcribeUrlRef.current ?? '/api/transcribe', { method: 'POST', credentials: 'include', body: fd })
+      .then(async (res) => {
+        if (res.status === 501) {
+          setMode(speechCtor() ? 'speech' : 'unavailable');
+          setError('No transcription provider is configured on the daemon. Set one in Settings → Conductor.');
+          return;
+        }
+        if (!res.ok) throw new Error(String(res.status));
+        const json = (await res.json()) as { text?: string; error?: { message?: string } };
+        if (json.text) cb.current(json.text, true);
+      })
+      .catch(() => setError('Transcription failed on the daemon. Type instead, or retry.'));
+  }, []);
+
   const stop = useCallback(() => {
+    const uploading = uploadLive.current;
+    uploadLive.current = false;
     wantListening.current = false;
     setListening(false);
     rec.current?.stop();
     rec.current = null;
-    if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop();
+    if (processor.current) {
+      processor.current.disconnect();
+      processor.current = null;
+    }
+    let wav: Blob | null = null;
+    if (uploading) {
+      const chunks = pcmChunks.current;
+      pcmChunks.current = [];
+      let total = 0;
+      for (const c of chunks) total += c.length;
+      const samples = new Float32Array(Math.max(total, 1));
+      let o = 0;
+      for (const c of chunks) { samples.set(c, o); o += c.length; }
+      wav = encodePcm16MonoWav(downsampleTo16k(samples, pcmRate.current), 16000);
+    }
     stopMeters();
-  }, [stopMeters]);
+    if (wav) postWav(wav);
+  }, [stopMeters, postWav]);
 
   const start = useCallback(() => {
     setError(null);
@@ -326,44 +376,37 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       return;
     }
 
-    // upload mode
+    // upload mode — PCM 16 kHz mono WAV for `voxtype transcribe`
+    uploadLive.current = true;
+    pcmChunks.current = [];
     navigator.mediaDevices
       .getUserMedia({ audio: true })
       .then((stream) => {
         meter(stream);
-        chunks.current = [];
-        const mr = new MediaRecorder(stream);
-        recorder.current = mr;
-        mr.ondataavailable = (e) => {
-          if (e.data.size) chunks.current.push(e.data);
-        };
-        mr.onstop = () => {
-          for (const t of stream.getTracks()) t.stop();
-          const blob = new Blob(chunks.current, { type: mr.mimeType || 'audio/webm' });
-          if (!blob.size) return;
-          const fd = new FormData();
-          fd.append('audio', blob, 'dictation.webm');
-          void fetch(opts.transcribeUrl ?? '/api/transcribe', { method: 'POST', credentials: 'include', body: fd })
-            .then(async (res) => {
-              if (res.status === 501) {
-                setMode(speechCtor() ? 'speech' : 'unavailable');
-                setError('No transcription provider is configured on the daemon. Set one in Settings → Conductor.');
-                return;
-              }
-              if (!res.ok) throw new Error(String(res.status));
-              const json = (await res.json()) as { text?: string };
-              if (json.text) cb.current(json.text, true);
-            })
-            .catch(() => setError('Transcription failed on the daemon. Type instead, or retry.'));
-        };
-        mr.start();
+        const ctx = analyser.current?.ctx;
+        if (ctx) {
+          pcmRate.current = ctx.sampleRate || 16000;
+          if (typeof ctx.createScriptProcessor === 'function') {
+            const proc = ctx.createScriptProcessor(4096, 1, 1);
+            proc.onaudioprocess = (e) => {
+              pcmChunks.current.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+            };
+            const mute = ctx.createGain();
+            mute.gain.value = 0;
+            ctx.createMediaStreamSource(stream).connect(proc);
+            proc.connect(mute);
+            mute.connect(ctx.destination);
+            processor.current = proc;
+          }
+        }
       })
       .catch(() => {
+        uploadLive.current = false;
         setError('Microphone permission was denied.');
         setListening(false);
         stopMeters();
       });
-  }, [mode, meter, stopMeters, opts.transcribeUrl]);
+  }, [mode, meter, stopMeters]);
 
   const toggle = useCallback(() => (listening ? stop() : start()), [listening, start, stop]);
 

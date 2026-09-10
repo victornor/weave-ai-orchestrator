@@ -51,6 +51,8 @@ vi.mock('../api/hooks', () => ({
   useApproveTelegramUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDisableTelegramAllowAll: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCancelUpgrade: () => ({ mutate: vi.fn(), isPending: false }),
+  useTranscription: () => ({ data: { backend: 'chrome', model: null, voxtype: { installed: false, models: [] } }, isLoading: false }),
+  useSetTranscription: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 const { SettingsRoute } = await import('../routes/Settings');
@@ -87,7 +89,7 @@ describe('the area model', () => {
   it('puts each setting in the area its data actually belongs to', () => {
     const areaOf = (key: string): string | undefined => SETTINGS_SECTIONS.find((s) => s.key === key)?.area;
     for (const key of ['workspace', 'projects', 'models', 'channels', 'presentation']) expect(areaOf(key)).toBe('workspace');
-    for (const key of ['updates', 'security', 'device']) expect(areaOf(key)).toBe('daemon');
+    for (const key of ['updates', 'dictation', 'security', 'device']) expect(areaOf(key)).toBe('daemon');
   });
 
   it('resolves a section named without an area, and lets the section win over a contradicting one', () => {
@@ -114,7 +116,7 @@ describe('the two areas', () => {
 
     fireEvent.click(areaSwitch('This daemon'));
     expect(areaSwitch('This daemon')).toHaveAttribute('aria-checked', 'true');
-    expect(tabNames()).toEqual(['Updates', 'Security & Devices', 'This device']);
+    expect(tabNames()).toEqual(['Updates', 'Dictation', 'Security & Devices', 'This device']);
   });
 
   it('writes the area and the section into the URL without stacking history entries', () => {
@@ -134,6 +136,13 @@ describe('the two areas', () => {
     renderSettings();
     expect(areaSwitch('This daemon')).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('tab', { name: 'Updates' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens daemon Dictation from ?section=dictation', () => {
+    state.search = { section: 'dictation' };
+    renderSettings();
+    expect(areaSwitch('This daemon')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('tab', { name: 'Dictation' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('shows a valid area when the URL names one that does not exist', () => {

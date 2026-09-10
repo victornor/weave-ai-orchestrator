@@ -228,6 +228,26 @@ export function useRequestUpgrade(): UseMutationResult<T.Upgrade, Error, { ref?:
   });
 }
 
+export function useTranscription(): UseQueryResult<T.TranscriptionStatus> {
+  return useQuery({
+    queryKey: qk.daemonTranscription(),
+    queryFn: () => api.root<T.TranscriptionStatus>('/daemon/transcription'),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+export function useSetTranscription(): UseMutationResult<T.TranscriptionStatus, Error, { backend: 'chrome' | 'voxtype'; model?: string }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => api.root<T.TranscriptionStatus>('/daemon/transcription', { method: 'PUT', body }),
+    onSuccess: (data) => {
+      qc.setQueryData(qk.daemonTranscription(), data);
+      void qc.invalidateQueries({ queryKey: qk.health() });
+    },
+  });
+}
+
 export function useCancelUpgrade(): UseMutationResult<T.Upgrade, Error, void> {
   const qc = useQueryClient();
   return useMutation({

@@ -80,6 +80,28 @@ describe('YOLO mode: the setting', () => {
   });
 });
 
+describe('daemon config: transcription', () => {
+  it('defaults dictation to chrome with no model', () => {
+    const cfg = DaemonConfigSchema.parse({});
+    expect(cfg.transcription.backend).toBe('chrome');
+    expect(cfg.transcription.model).toBeUndefined();
+    expect(cfg.transcription.provider).toBe('none');
+  });
+
+  it('still parses a yaml command provider', () => {
+    const cfg = DaemonConfigSchema.parse({ transcription: { provider: 'command', command: 'whisper -' } });
+    expect(cfg.transcription.provider).toBe('command');
+    expect(cfg.transcription.command).toBe('whisper -');
+    expect(cfg.transcription.backend).toBe('chrome');
+  });
+
+  it('accepts voxtype backend and a model', () => {
+    const cfg = DaemonConfigSchema.parse({ transcription: { backend: 'voxtype', model: 'base.en' } });
+    expect(cfg.transcription.backend).toBe('voxtype');
+    expect(cfg.transcription.model).toBe('base.en');
+  });
+});
+
 describe('daemon config: upgrade', () => {
   it('defaults the deferred upgrade timings when daemon.yaml says nothing', () => {
     const cfg = DaemonConfigSchema.parse({});

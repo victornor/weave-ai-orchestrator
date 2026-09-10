@@ -18,6 +18,8 @@ import {
   useAuthSessions,
   useCancelUpgrade,
   useClearTelegramToken,
+  useSetTranscription,
+  useTranscription,
   useDaemonUpdate,
   useDaemonUpgrade,
   useDisableTelegramAllowAll,
@@ -127,6 +129,7 @@ export function SettingsRoute(): React.ReactElement {
           {section === 'presentation' ? <PresentationSection /> : null}
           {section === 'security' ? <SecuritySection /> : null}
           {section === 'device' ? <DeviceSection /> : null}
+          {section === 'dictation' ? <DictationSection /> : null}
           {section === 'updates' ? <UpdatesSection /> : null}
         </div>
       </PageBody>
@@ -1104,6 +1107,60 @@ const NOTIFS = [
   { key: 'landed', label: 'Landed work', detail: 'A PR merged, a ticket closed', def: true },
   { key: 'everything', label: 'Everything else', detail: 'Status changes, run starts, curation', def: false },
 ] as const;
+
+function DictationSection(): React.ReactElement {
+  const tx = useTranscription();
+  const put = useSetTranscription();
+  const backend = tx.data?.backend ?? 'chrome';
+  const installed = Boolean(tx.data?.voxtype.installed);
+  const models = (tx.data?.voxtype.models ?? []).filter((m) => m.installed);
+  const model = tx.data?.model ?? models[0]?.id ?? '';
+
+  return (
+    <section className="flex flex-col gap-4">
+      <p className="text-meta leading-relaxed text-text-2">
+        Chrome uses this browser&apos;s speech service (the default). Voxtype transcribes on the daemon host — audio is recorded here and sent as a WAV when you stop.
+      </p>
+      <div className="ac-card divide-y divide-line-1">
+        <div className="flex flex-col gap-2 px-3.5 py-3">
+          <span className="text-meta text-text-1">Backend</span>
+          <Segmented
+            ariaLabel="Dictation backend"
+            options={[{ value: 'chrome', label: 'Chrome' }, { value: 'voxtype', label: 'Voxtype' }]}
+            value={backend}
+            onChange={(v) => {
+              if (v === 'voxtype' && !installed) return;
+              put.mutate({ backend: v, ...(v === 'voxtype' && model ? { model } : {}) });
+            }}
+          />
+          {!installed ? (
+            <span className="text-micro text-text-3">Voxtype is not installed on the daemon host. Chrome dictation still works.</span>
+          ) : null}
+        </div>
+        {backend === 'voxtype' && installed && models.length > 0 ? (
+          <div className="px-3.5 py-3">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-meta text-text-1">Model</span>
+              <select
+                className={cx(inputCx, 'ac-mono')}
+                aria-label="Voxtype model"
+                value={model}
+                onChange={(e) => put.mutate({ backend: 'voxtype', model: e.target.value })}
+              >
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>{m.id}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
+        {backend === 'voxtype' && installed && models.length === 0 ? (
+          <p className="px-3.5 py-3 text-micro text-text-3">No Voxtype model is installed on the host.</p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
 
 function DeviceSection(): React.ReactElement {
   const ws = useWs();

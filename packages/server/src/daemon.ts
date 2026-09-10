@@ -103,7 +103,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const deps: AppDeps = {
     auth, daemon: daemonCfg, workspaces, registries, listener: 'public',
     publicUrl, version: VERSION, uiDir: opts.uiDir ?? defaultUiDir(),
-    updates, upgrades, incidents,
+    updates, upgrades, incidents, daemonConfigDir: configDir,
     onOperatorConfigured: () => onOperatorConfigured?.(),
   };
   loopback.setDeps({ ...deps, listener: 'loopback' });

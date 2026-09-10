@@ -19,6 +19,8 @@ const state = vi.hoisted(() => ({
   disableAllowAllCalls: 0,
   toasts: [] as Array<{ title: string; detail?: string; status?: string }>,
   addCalls: [] as Array<Record<string, unknown>>,
+  transcription: { backend: 'chrome' as 'chrome' | 'voxtype', model: null as string | null, voxtype: { installed: false, models: [] as Array<{ id: string; engine: string; installed: boolean }> } },
+  transcriptionPuts: [] as Array<{ backend: 'chrome' | 'voxtype'; model?: string }>,
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
@@ -79,6 +81,18 @@ vi.mock('../api/hooks', () => ({
     isPending: false,
     mutateAsync: async () => { state.disableAllowAllCalls += 1; return { ok: true }; },
   }),
+  useTranscription: () => ({ data: state.transcription, isLoading: false }),
+  useSetTranscription: () => ({
+    mutate: (body: { backend: 'chrome' | 'voxtype'; model?: string }) => {
+      state.transcriptionPuts.push(body);
+      state.transcription = {
+        ...state.transcription,
+        backend: body.backend,
+        model: body.model ?? state.transcription.model,
+      };
+    },
+    isPending: false,
+  }),
 }));
 
 const { SettingsRoute } = await import('../routes/Settings');
@@ -103,6 +117,8 @@ beforeEach(() => {
   state.disableAllowAllCalls = 0;
   state.toasts = [];
   state.addCalls = [];
+  state.transcription = { backend: 'chrome', model: null, voxtype: { installed: false, models: [] } };
+  state.transcriptionPuts = [];
 });
 
 describe('Settings — knowledge budgets', () => {
@@ -526,5 +542,37 @@ describe('Settings — Telegram pending identities', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Turn off open access' }));
     await waitFor(() => expect(state.disableAllowAllCalls).toBe(1));
     expect(state.toasts.at(-1)).toMatchObject({ title: 'Open access turned off' });
+  });
+});
+
+describe('Settings — daemon dictation', () => {
+  const open = (): void => {
+    state.search = { section: 'dictation' };
+    render(<SettingsRoute />);
+  };
+
+  it('defaults to Chrome and does not activate Voxtype when it is missing', () => {
+    open();
+    expect(screen.getByRole('radio', { name: 'Chrome' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('radio', { name: 'Voxtype' }));
+    expect(state.transcriptionPuts).toEqual([]);
+    expect(screen.getByText(/Voxtype is not installed/)).toBeInTheDocument();
+  });
+
+  it('PUTs Voxtype and a model when installed', () => {
+    state.transcription = {
+      backend: 'chrome',
+      model: null,
+      voxtype: { installed: true, models: [{ id: 'base.en', engine: 'whisper', installed: true }] },
+    };
+    open();
+    fireEvent.click(screen.getByRole('radio', { name: 'Voxtype' }));
+    expect(state.transcriptionPuts).toEqual([{ backend: 'voxtype', model: 'base.en' }]);
+  });
+
+  it('keeps diagnostics on This device', () => {
+    state.search = { section: 'device' };
+    render(<SettingsRoute />);
+    expect(screen.getByLabelText('Dictation diagnostics capture')).toBeInTheDocument();
   });
 });

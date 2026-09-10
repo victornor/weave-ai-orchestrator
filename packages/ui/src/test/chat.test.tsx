@@ -588,7 +588,7 @@ describe('ChatRoute dispatch labels', () => {
     ];
 
     render(<ChatRoute />);
-    expect(label('TST-1').querySelector('[data-project-color]')?.getAttribute('style')).toContain(projectColorVar('p1'));
+    expect(label('TST-1').querySelector('[data-project-color]')?.getAttribute('style')).toContain(projectColorVar('p1', ['p1']));
     expect(label('TST-2').querySelector('[data-project-color]')).toBeNull();
   });
 

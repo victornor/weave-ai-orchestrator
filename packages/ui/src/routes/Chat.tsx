@@ -118,6 +118,7 @@ export function ChatPage(): React.ReactElement {
   const tickets = useTickets({ limit: 200, includeTerminal: true });
   const workers = useWorkers({ includeRetired: true });
   const projects = useProjects();
+  const projectIds = useMemo(() => (projects.data ?? []).map((p) => p.id), [projects.data]);
   const queuedCount = useQueueCount('thread');
   /** The project chosen beside the input; `undefined` until the human touches it, so the thread decides. */
   const pickedProject = draft.projectId;
@@ -698,7 +699,7 @@ export function ChatPage(): React.ReactElement {
                         identifier={d.ticket.identifier}
                         name={d.worker?.name ?? d.ticket.title}
                         status={d.status}
-                        projectColorVar={d.ticket.projectId ? projectColorVar(d.ticket.projectId) : undefined}
+                        projectColorVar={d.ticket.projectId ? projectColorVar(d.ticket.projectId, projectIds) : undefined}
                         onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
                       />
                     ))}
@@ -753,7 +754,7 @@ export function ChatPage(): React.ReactElement {
                     key={w.id}
                     name={w.name}
                     status={agentUiStatus(w.status)}
-                    projectColorVar={w.projectId ? projectColorVar(w.projectId) : undefined}
+                    projectColorVar={w.projectId ? projectColorVar(w.projectId, projectIds) : undefined}
                     onClick={() => openWorker(w.id)}
                   />
                 ))}
@@ -880,6 +881,7 @@ function ProjectPicker({
   // leaving the control blank about what the next message would carry.
   const choosable = projects.filter((p) => p.status !== 'archived' || p.id === value);
   const orphan = value !== null && !choosable.some((p) => p.id === value);
+  const siblingIds = projects.map((p) => p.id);
   const groupRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -894,9 +896,9 @@ function ProjectPicker({
   return (
     <div ref={groupRef} role="radiogroup" aria-label="Project for this message" className="flex gap-1 overflow-x-auto">
       <ProjectTag label="Auto" active={value === null} onClick={() => onChange(null)} />
-      {orphan ? <ProjectTag label={value} active colorVar={projectColorVar(value)} onClick={() => onChange(null)} /> : null}
+      {orphan ? <ProjectTag label={value} active colorVar={projectColorVar(value, siblingIds)} onClick={() => onChange(null)} /> : null}
       {choosable.map((p) => (
-        <ProjectTag key={p.id} label={p.name} active={p.id === value} colorVar={projectColorVar(p.id)} onClick={() => onChange(p.id === value ? null : p.id)} />
+        <ProjectTag key={p.id} label={p.name} active={p.id === value} colorVar={projectColorVar(p.id, siblingIds)} onClick={() => onChange(p.id === value ? null : p.id)} />
       ))}
     </div>
   );

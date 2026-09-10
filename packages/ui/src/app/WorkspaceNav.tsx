@@ -134,6 +134,7 @@ export function WorkspaceNav({
  * the workspace has no projects yet (VS-158) — returning null here would hide it.
  */
 function ProjectsGroup({ wsId, wsName, state }: { wsId: string; wsName: string; state: WorkspaceProjectsState | undefined }): React.ReactElement {
+  const siblingIds = (state?.projects ?? []).map((p) => p.id);
   return (
     <div className="mt-2 flex flex-col gap-px" aria-label={`${wsName} projects`}>
       {state?.status === 'pending' ? (
@@ -155,7 +156,7 @@ function ProjectsGroup({ wsId, wsName, state }: { wsId: string; wsName: string; 
               className="flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5 hover:bg-bg-2"
             >
               {dot ? <span className="size-1.5 rounded-r4" style={{ background: `var(--status-${dot})` }} aria-hidden /> : <span className="size-1.5" aria-hidden />}
-              <span className="size-1.5 rounded-full" style={{ background: projectColorVar(p.id) }} data-project-color aria-hidden />
+              <span className="size-1.5 rounded-full" style={{ background: projectColorVar(p.id, siblingIds) }} data-project-color aria-hidden />
               <span className="ac-mono flex-1 truncate text-meta text-text-2">{p.slug}</span>
             </A>
           );

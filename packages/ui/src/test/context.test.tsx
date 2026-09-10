@@ -74,3 +74,40 @@ describe('changing the workspace', () => {
     expect(view.getByText('body')).toBe(body);
   });
 });
+
+describe('the live prop (VS-199)', () => {
+  it('opens no stream when live is false', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkspaceProvider ws="alpha" live={false}>
+          <div>body</div>
+        </WorkspaceProvider>
+      </QueryClientProvider>,
+    );
+    expect(opened).toHaveLength(0);
+  });
+
+  it('still opens a stream when live is omitted', () => {
+    render(shell('alpha'));
+    expect(opened.map((o) => o.url)).toEqual(['/api/w/alpha/events']);
+  });
+
+  it('opens a stream on becoming live, and closes it on becoming unfocused again', () => {
+    const withLive = (live: boolean): React.ReactElement => (
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkspaceProvider ws="alpha" live={live}>
+          <div>body</div>
+        </WorkspaceProvider>
+      </QueryClientProvider>
+    );
+    const view = render(withLive(false));
+    expect(opened).toHaveLength(0);
+
+    view.rerender(withLive(true));
+    expect(opened.map((o) => o.url)).toEqual(['/api/w/alpha/events']);
+    expect(opened[0]?.closed).toBe(false);
+
+    view.rerender(withLive(false));
+    expect(opened[0]?.closed).toBe(true);
+  });
+});

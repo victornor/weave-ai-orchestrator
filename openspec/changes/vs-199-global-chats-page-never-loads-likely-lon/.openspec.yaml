@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-10
+goal: Fix /chats never loading by bounding the connections it opens per
+  workspace, and confirm the exhaustion root cause with evidence

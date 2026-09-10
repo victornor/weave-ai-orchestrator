@@ -12,7 +12,11 @@ const state = vi.hoisted(() => ({
   decisions: [] as unknown[],
   /** What the mocked `useWorkspaceProjects` answers for each workspace id, keyed by id. */
   projectsByWs: {} as Record<string, { status: 'pending' | 'error' | 'success'; projects: Array<Record<string, unknown>> }>,
+  path: '/w/ws1/chat',
 }));
+
+/** Every `ids` array the mocked `FanInStreams` was rendered with, in render order (VS-199). */
+const fanIn = vi.hoisted(() => ({ calls: [] as string[][] }));
 
 /** Every `ids` array the mocked `useWorkspaceProjects` was called with, in render order. */
 const projectRequests = vi.hoisted(() => ({ calls: [] as string[][] }));
@@ -30,7 +34,7 @@ const palette = vi.hoisted(() => ({ commands: [] as Array<{ id: string; label: s
 
 vi.mock('@tanstack/react-router', () => ({
   Outlet: () => null,
-  useRouterState: () => '/w/ws1/chat',
+  useRouterState: () => state.path,
 }));
 // The rail entry is a link with a search target, so the stand-in has to keep both.
 vi.mock('../app/link', () => ({
@@ -52,7 +56,10 @@ vi.mock('../api/context', () => ({
   useOptionalWorkspace: () => ({ ws: 'ws1', connection: { state: 'connected', capturedAt: null, lastSeq: 0, attempts: 0 }, stream: null }),
   useConnection: () => ({ state: 'connected', capturedAt: null, lastSeq: 0, attempts: 0 }),
   useWorkspaceEvents: () => undefined,
-  FanInStreams: () => null,
+  FanInStreams: ({ ids }: { ids: string[] }) => {
+    fanIn.calls.push(ids);
+    return null;
+  },
 }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 // Children with their own data hooks; none of them is what this file is about.
@@ -126,6 +133,7 @@ beforeEach(() => {
   state.upgrade = null;
   state.workspaces = [];
   state.decisions = [];
+  state.path = '/w/ws1/chat';
   hotkeys.current = [];
   went.calls = [];
   palette.commands = [];
@@ -134,7 +142,24 @@ beforeEach(() => {
   projectRequests.calls = [];
   paletteScope.scope = null;
   moreSheet.projects = [];
+  fanIn.calls = [];
   localStorage.clear();
+});
+
+describe('FanInStreams gating on global pages', () => {
+  it('is not rendered on /chats, which manages its own per-pane subscriptions (VS-199)', () => {
+    state.path = '/chats';
+    state.workspaces = [listItem({ id: 'ws1' }), listItem({ id: 'ws2', name: 'Beta' })];
+    render(<AppShell />);
+    expect(fanIn.calls).toHaveLength(0);
+  });
+
+  it('is still rendered on the other global pages', () => {
+    state.path = '/needs';
+    state.workspaces = [listItem({ id: 'ws1' }), listItem({ id: 'ws2', name: 'Beta' })];
+    render(<AppShell />);
+    expect(fanIn.calls).toEqual([['ws1', 'ws2']]);
+  });
 });
 
 describe('the rail update entry', () => {

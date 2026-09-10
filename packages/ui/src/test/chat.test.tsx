@@ -116,7 +116,7 @@ vi.mock('../components/Toast', () => ({
 }));
 vi.mock('../lib/queue', () => ({ enqueue: vi.fn(), useQueueCount: () => 0 }));
 
-const { ChatRoute } = await import('../routes/Chat');
+const { ChatRoute, ChatPage } = await import('../routes/Chat');
 
 class FakeEventSource {
   static open: FakeEventSource[] = [];
@@ -368,6 +368,32 @@ describe('ChatRoute live turn', () => {
 
     const composer = screen.getByPlaceholderText('Message the conductor…');
     expect(scrollBody!.contains(composer)).toBe(false);
+  });
+});
+
+describe('ChatPage focused prop (VS-199)', () => {
+  it('shows the working indicator but opens no run-tail stream when unfocused', () => {
+    render(<ChatPage focused={false} />);
+    emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
+
+    expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+    expect(FakeEventSource.open).toHaveLength(0);
+  });
+
+  it('shows the working indicator for a turn already running when the page loads unfocused, still with no stream', () => {
+    state.conductor.lastRun = { id: 'run_live', status: 'running' };
+    render(<ChatPage focused={false} />);
+
+    expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+    expect(FakeEventSource.open).toHaveLength(0);
+  });
+
+  it('streams normally when focused (the default)', () => {
+    render(<ChatPage />);
+    emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
+
+    expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+    expect(stream().url).toBe('/api/w/ws1/runs/run_1/events/stream');
   });
 });
 

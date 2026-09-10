@@ -92,7 +92,15 @@ export function ChatRoute(): React.ReactElement {
   return <ChatPage key={ws} />;
 }
 
-export function ChatPage(): React.ReactElement {
+export function ChatPage({
+  focused = true,
+}: {
+  /** Whether this pane's turn subscription runs (VS-199): a global Chats pane that is not the
+   *  one the human is looking at passes `false` so it never opens a run-tail stream and never
+   *  shows the live-turn block, regardless of how many other panes exist. The working indicator
+   *  still shows — that comes from the polled conductor query, not the stream. */
+  focused?: boolean;
+} = {}): React.ReactElement {
   const ws = useWs();
   const go = useGo();
   const toast = useToast();
@@ -168,7 +176,7 @@ export function ChatPage(): React.ReactElement {
   // replay for one either (VS-133 — out of scope). Cleared only on a confirmed send.
   const [attachments, setAttachments] = useState<File[]>([]);
 
-  const { events: runEvents, status: runStreamStatus, retryNow: retryRunStream } = useRunEventStream(runId, { live: live?.running ?? false });
+  const { events: runEvents, status: runStreamStatus, retryNow: retryRunStream } = useRunEventStream(runId, { live: focused && (live?.running ?? false) });
   // The reply renders as the thread message ac_human_send created; showing the call too would
   // put the same words on screen twice.
   const liveEvents = useMemo(() => runEvents.filter((e) => !isHumanReplyToolEvent(e)), [runEvents]);

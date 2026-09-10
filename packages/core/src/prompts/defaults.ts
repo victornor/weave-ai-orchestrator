@@ -88,7 +88,7 @@ export const BRIEF_TMPL = `## Brief
 {{/if}}
 {{#if ticket.openspecChange}}**OpenSpec change:** \`{{ticket.openspecChange}}\` (create it in \`work/\` with \`openspec new change\` if it does not exist; do not ask).
 {{/if}}
-**Setup.** Your worktree is \`{{worktree.path}}\` on branch \`{{worktree.branch}}\`, created from \`{{project.landingBranch}}\`. Before anything else call \`ac_worktree_status\`; if the path or branch differs from this brief, stop and report \`blocked\`. Read \`work/AGENTS.md\` once.
+**Setup.** Your worktree is \`{{worktree.path}}\` on branch \`{{worktree.branch}}\`, created from \`{{project.landingBranch}}\`. Before anything else call \`ac_worktree_status\`; if the path or branch differs from this brief, stop and report \`blocked\`. {{#if worktree.hasAgentsFile}}Read \`work/AGENTS.md\` once.{{/if}}{{#unless worktree.hasAgentsFile}}This project has no \`work/AGENTS.md\` of its own.{{/unless}}
 
 **Rules.** Stay inside this project and this ticket. Deliver per \`{{project.deliveryMode}}\`. Never push to \`{{project.landingBranch}}\` directly and never merge unless the ticket is \`merging\`.
 

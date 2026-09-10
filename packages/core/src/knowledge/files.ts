@@ -75,6 +75,24 @@ export function parseDoc(body: string): Doc {
   return doc;
 }
 
+const FILL_IN_HINT = /^\([^)]*\)\s*$/;
+
+/**
+ * True when a hub file has no section entries: after stripping HTML comments, every `##`
+ * section is empty of non-blank lines that are not parenthetical fill-in hints. Title and
+ * headings do not count. Wiki-links are the caller's problem — this looks at the body only.
+ */
+export function isHubStub(body: string): boolean {
+  const stripped = body.replace(/<!--[\s\S]*?-->/g, '');
+  for (const s of parseDoc(stripped).sections) {
+    for (const line of s.lines) {
+      const t = line.trim();
+      if (t && !FILL_IN_HINT.test(t)) return false;
+    }
+  }
+  return true;
+}
+
 export function renderDoc(doc: Doc): string {
   const parts: string[] = [];
   const pre = trimTrailingBlank(doc.preamble);

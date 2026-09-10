@@ -11,7 +11,7 @@ import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
 import {
   CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, budgetOf, countWords, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
-  isDocPath, normalize, parseDoc, parseLinks, relPathFor, renderDoc, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated,
+  isDocPath, isHubStub, normalize, parseDoc, parseLinks, relPathFor, renderDoc, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated,
 } from './files.js';
 
 interface FileRow {
@@ -592,9 +592,26 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     graph(projectId) {
       const rows = db.all<Record<string, unknown>>('SELECT * FROM knowledge_files WHERE workspace_id = ? ORDER BY path', [ws]).map((raw) => knowledgeRow(raw) as unknown as FileRow);
       const pid = projectId ? projectOf(projectId).id : null;
-      const visible = rows.filter((f) => !pid || f.projectId === pid || f.scope === 'shared');
-      const paths = new Set(visible.map((f) => f.path));
-      const nodes = visible.map((f) => ({
+      const visible = rows.filter((f) => !pid || f.projectId === pid);
+      const linkedFrom = new Set(
+        db.all<{ fromPath: string }>('SELECT DISTINCT from_path FROM knowledge_links WHERE workspace_id = ? AND to_path IS NOT NULL', [ws]).map((r) => r.fromPath),
+      );
+      const keep = (f: FileRow): boolean => {
+        if (isDocPath(f.path) || f.scope === 'project') return true;
+        if (linkedFrom.has(f.path)) return true;
+        return !isHubStub(readBody(join(ctx.paths.knowledge, f.path)));
+      };
+      let kept = visible.filter(keep);
+      if (!pid) {
+        const workspaceHub = relPathFor('workspace');
+        const paths = new Set(kept.map((f) => f.path));
+        if (!paths.has(workspaceHub) && (paths.has(relPathFor('shared')) || paths.has(relPathFor('decisions')))) {
+          const parent = visible.find((f) => f.path === workspaceHub);
+          if (parent) kept = [...kept, parent];
+        }
+      }
+      const paths = new Set(kept.map((f) => f.path));
+      const nodes = kept.map((f) => ({
         id: f.path, kind: (isDocPath(f.path) ? 'doc' : 'hub') as 'doc' | 'hub', scope: f.scope, projectId: f.projectId, projectSlug: projectSlugOf(f.projectId),
         slug: docSlugOf(f.path), title: db.get<{ title: string }>("SELECT title FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [f.path])?.title ?? f.path,
         tokens: f.tokenEstimate, updatedAt: f.updatedAt,
@@ -602,6 +619,13 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       const edges = db.all<{ fromPath: string; toPath: string | null }>('SELECT from_path, to_path FROM knowledge_links WHERE workspace_id = ? AND to_path IS NOT NULL', [ws])
         .filter((e) => paths.has(e.fromPath) && paths.has(e.toPath!))
         .map((e) => ({ from: e.fromPath, to: e.toPath! }));
+      if (!pid) {
+        const workspaceHub = relPathFor('workspace');
+        const sharedHub = relPathFor('shared');
+        const decisionsHub = relPathFor('decisions');
+        if (paths.has(workspaceHub) && paths.has(sharedHub)) edges.push({ from: workspaceHub, to: sharedHub });
+        if (paths.has(workspaceHub) && paths.has(decisionsHub)) edges.push({ from: workspaceHub, to: decisionsHub });
+      }
       return { nodes, edges };
     },
 

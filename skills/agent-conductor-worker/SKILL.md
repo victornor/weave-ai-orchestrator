@@ -106,6 +106,7 @@ Your last message is one fenced ```json block:
 | `ac_report("working")` to acknowledge a wake | Wakes the conductor for nothing | Report only material phase changes |
 | `blocked` with a prose reason | No owner, no action, no route out | `blockedBy` ids, or `{owner, action}` |
 | `in_review` with no work product | There is nothing to review | Record the PR or branch first |
+| Re-deriving the transition graph from memory after a rejected transition | A rejected `invalid_disposition` transition already lists `details.allowed` — the statuses actually reachable from the current one, for that ticket kind | Read `details.allowed` on the error and retry with one of those |
 | Ticking a task that is "basically done" | The report becomes untrue and the gate passes wrongly | Tick only fully implemented behavior |
 | Implementing during the propose phase | The plan has not been approved | Artifacts only until the ticket is `approved` |
 | Merging because CI is green | Green is not consent | Merge only when the ticket is in `merging` |

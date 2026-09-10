@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, TICKET_KINDS, TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, canTransition, type Agent, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
+import { OcError, TICKET_KINDS, TICKET_STATUSES, TRANSITIONS, NAMED_CARD_OPTION_KEYS, canTransition, type Agent, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, fakeSpecs, type TestHarness } from '../testing/context.js';
 import { createTicketsService } from './service.js';
 import type { Actor, TicketsService } from '../api.js';
@@ -216,6 +216,17 @@ describe('tickets', () => {
         context: '', optionsJson: [], allowFreeText: 1, status: 'open', createdAt: nowIso(),
       });
       expect((await tickets.transition(AGENT, t.id, { to: 'blocked' })).status).toBe('blocked');
+    });
+
+    // VS-209: the error names what IS reachable, so a worker doesn't need to have memorised the graph.
+    it('names the reachable statuses when rejecting approved -> in_review on a change ticket', async () => {
+      const t = make({ kind: 'change' });
+      h.db.update('tickets', t.id, { status: 'approved' });
+      await expect(tickets.transition(AGENT, t.id, { to: 'in_review' })).rejects.toMatchObject({
+        code: 'invalid_disposition',
+        details: { kind: 'change', from: 'approved', to: 'in_review', allowed: TRANSITIONS.change.approved },
+      });
+      expect(TRANSITIONS.change.approved).not.toContain('in_review');
     });
 
     it('rejects in_review without a work product', async () => {

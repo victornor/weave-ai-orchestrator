@@ -1090,6 +1090,7 @@ export interface ThreadHistory {
   data: T.ThreadMessage[] | undefined;
   isLoading: boolean;
   isError: boolean;
+  error: Error | null;
   refetch: () => void;
   /** True while the page before the loaded history is in flight. */
   isLoadingOlder: boolean;
@@ -1121,6 +1122,7 @@ export function useThreadMessages(id: string | null): ThreadHistory {
     data,
     isLoading: q.isLoading,
     isError: q.isError,
+    error: q.error,
     refetch: () => void refetch(),
     isLoadingOlder: isFetchingNextPage,
     hasOlder: hasNextPage,

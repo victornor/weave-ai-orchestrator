@@ -10,6 +10,7 @@ import { writeShowSilentTurns } from '../lib/chatPrefs';
 import { writeDecisionHeight } from '../lib/decisionHeight';
 import { resizeObserved } from './resizeObserver';
 import { installVisualViewport, removeVisualViewport } from './visualViewport';
+import { ApiError } from '../api/client';
 
 const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>() }));
 const state = vi.hoisted(() => ({
@@ -18,6 +19,9 @@ const state = vi.hoisted(() => ({
   runtimes: [{ id: 'claude', capabilities: { contextCompactionAt: 0.92 } }] as Array<{ id: string; capabilities: Record<string, unknown> }>,
   models: [{ id: 'claude-opus-5', contextWindowTokens: 200_000 }] as Array<{ id: string; contextWindowTokens?: number }>,
   messages: [] as ThreadMessage[],
+  threads: [{ id: 'th_1' }] as Array<{ id: string }>,
+  messageThreadIds: [] as Array<string | null>,
+  messagesError: null as Error | null,
   /** False while the history query is disabled or still fetching: `data` is undefined, not empty. */
   messagesLoaded: true,
   hasOlder: false,
@@ -73,12 +77,17 @@ vi.mock('../api/hooks', () => ({
   useRuntimeModels: () => ({ data: state.models }),
   useRunEvents: (id: string) => { if (id) state.eventRequests.push(id); return { data: id ? state.persisted : [] }; },
   useRunTraces: (p: Record<string, unknown>) => { state.traceQuery = p; return { data: state.traces }; },
-  useThreads: () => ({ data: [{ id: 'th_1' }], isSuccess: true }),
+  useThreads: () => ({ data: state.threads, isSuccess: true }),
   useCreateThread: () => ({ mutate: vi.fn(), isPending: false, data: null }),
-  useThreadMessages: () => ({
-    data: state.messagesLoaded ? state.messages : undefined, isLoading: false, isError: false, refetch: vi.fn(),
-    hasOlder: state.hasOlder, isLoadingOlder: state.isLoadingOlder, loadOlder: state.loadOlder,
-  }),
+  useThreadMessages: (id: string | null) => {
+    state.messageThreadIds.push(id);
+    const err = id ? state.messagesError : null;
+    return {
+      data: err ? undefined : (state.messagesLoaded ? state.messages : undefined),
+      isLoading: false, isError: Boolean(err), error: err, refetch: vi.fn(),
+      hasOlder: state.hasOlder, isLoadingOlder: state.isLoadingOlder, loadOlder: state.loadOlder,
+    };
+  },
   usePostThreadMessage: () => ({
     mutate: (v: Record<string, unknown>, opts?: { onError?: (e: Error) => void }) => {
       if (state.postError) opts?.onError?.(state.postError);
@@ -173,6 +182,9 @@ beforeEach(() => {
   state.runtimes = [{ id: 'claude', capabilities: { contextCompactionAt: 0.92 } }];
   state.models = [{ id: 'claude-opus-5', contextWindowTokens: 200_000 }];
   state.messages = [];
+  state.threads = [{ id: 'th_1' }];
+  state.messageThreadIds = [];
+  state.messagesError = null;
   state.messagesLoaded = true;
   state.hasOlder = false;
   state.isLoadingOlder = false;
@@ -2453,5 +2465,45 @@ describe('ChatRoute resizable decisions area', () => {
     expect(state.answer).not.toHaveBeenCalled();
     expect(state.posted).toEqual([]);
     expect(area()).toContainElement(screen.getByLabelText('Conductor asks: File this as a ticket?'));
+  });
+});
+
+describe('ChatRoute workspace switch (VS-166)', () => {
+  it('does not fetch another workspace\'s thread after a chat-to-chat switch', async () => {
+    state.ws = 'wsA';
+    state.threads = [{ id: 'th_a' }];
+    state.messages = [message({ id: 'm_a', body: 'workspace A history', threadId: 'th_a' })];
+    const view = render(<ChatRoute />);
+    await waitFor(() => expect(state.messageThreadIds).toContain('th_a'));
+    expect(screen.getByText('workspace A history')).toBeInTheDocument();
+
+    state.ws = 'wsB';
+    state.threads = [{ id: 'th_b' }];
+    state.messages = [message({ id: 'm_b', body: 'workspace B history', threadId: 'th_b' })];
+    state.messageThreadIds = [];
+    view.rerender(<ChatRoute />);
+
+    await waitFor(() => expect(screen.getByText('workspace B history')).toBeInTheDocument());
+    expect(state.messageThreadIds).not.toContain('th_a');
+    expect(state.messageThreadIds).toContain('th_b');
+    expect(screen.queryByText('workspace A history')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('recovers a foreign not_found by selecting this workspace\'s thread', async () => {
+    state.threads = [{ id: 'th_stale' }];
+    state.messagesError = new ApiError(404, { code: 'not_found', message: 'thread th_stale not found' });
+    const view = render(<ChatRoute />);
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+    expect(screen.getByText(/Could not load the thread/)).toBeInTheDocument();
+
+    state.threads = [{ id: 'th_2' }];
+    state.messagesError = null;
+    state.messages = [message({ id: 'm_2', body: 'workspace two history', threadId: 'th_2' })];
+    view.rerender(<ChatRoute />);
+
+    await waitFor(() => expect(screen.getByText('workspace two history')).toBeInTheDocument());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(state.messageThreadIds.at(-1)).toBe('th_2');
   });
 });

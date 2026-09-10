@@ -37,7 +37,7 @@ import {
 } from '../api/hooks';
 import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
-import { NetworkError } from '../api/client';
+import { ApiError, NetworkError } from '../api/client';
 import { attachmentPartsOf, attachmentToView, contextStrip, resolveModel, runtimeLimitStrip } from '@agent-conductor/render';
 import { chatEntries, chatRows } from '../lib/dispatch';
 import { useShowSilentTurns } from '../lib/chatPrefs';
@@ -89,17 +89,25 @@ function MessageBody({
 
 export function ChatRoute(): React.ReactElement {
   const ws = useWs();
+  return <ChatPage key={ws} />;
+}
+
+function ChatPage(): React.ReactElement {
+  const ws = useWs();
   const go = useGo();
   const toast = useToast();
   const conn = useConnection();
   const threads = useThreads();
   const createThread = useCreateThread();
   const [threadId, setThreadId] = useState<string | null>(null);
+  const createdId = createThread.data?.id ?? null;
+  const listed = Boolean(threadId && threads.data?.some((t) => t.id === threadId));
+  const fetchId = listed || (threadId !== null && threadId === createdId) ? threadId : null;
   // The unsent message — text, the project it is tagged with, what it answers — kept per workspace
   // and thread, so leaving the page and coming back finds it where it was left. Keyed by the
   // thread, so switching thread reads that thread's draft rather than carrying this one over.
-  const { draft, patch } = useDraft(threadId ? draftKey(ws, `thread:${threadId}`) : null);
-  const messages = useThreadMessages(threadId);
+  const { draft, patch } = useDraft(fetchId ? draftKey(ws, `thread:${fetchId}`) : null);
+  const messages = useThreadMessages(fetchId);
   const post = usePostThreadMessage();
   // Answered decisions are loaded too: an answered card stays in the conversation as the record of
   // what was decided. The limit is explicit because mixing answered rows into a `created_at DESC`
@@ -166,11 +174,19 @@ export function ChatRoute(): React.ReactElement {
   const working = sending || (live?.running ?? false);
 
   useEffect(() => {
-    if (threadId) return;
+    if (fetchId) return;
     const first = threads.data?.[0];
     if (first) setThreadId(first.id);
     else if (threads.isSuccess && !createThread.isPending && !createThread.data) createThread.mutate({}, { onSuccess: (t) => setThreadId(t.id) });
-  }, [threads.data, threads.isSuccess, threadId, createThread]);
+  }, [threads.data, threads.isSuccess, fetchId, createThread]);
+
+  useEffect(() => {
+    if (!threadId || !messages.isError) return;
+    const err = messages.error;
+    if (!(err instanceof ApiError) || err.code !== 'not_found') return;
+    if (threads.data?.some((t) => t.id === threadId)) return;
+    setThreadId(null);
+  }, [threadId, messages.isError, messages.error, threads.data]);
 
   // Resume mid-turn: a chat that loads while the conductor is working streams the run in flight.
   useEffect(() => {
@@ -526,12 +542,12 @@ export function ChatRoute(): React.ReactElement {
     tickets.data?.find((t) => t.id === d.ticketId);
 
   const send = (text: string, files?: File[], idempotencyKey?: string): void | Promise<void> => {
-    if (!threadId) return;
+    if (!fetchId) return;
     const attached = files ?? [];
     const queueThisMessage = (): void => {
       enqueue({
         kind: 'thread',
-        path: `/threads/${threadId}/messages`,
+        path: `/threads/${fetchId}/messages`,
         body: { body: text, ...(projectId ? { projectId } : {}), ...(replyToId ? { replyToMessageId: replyToId } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) },
         label: text.slice(0, 60),
       });
@@ -547,7 +563,7 @@ export function ChatRoute(): React.ReactElement {
       }
       setSending(true);
       return post
-        .mutateAsync({ threadId, body: text, projectId, files: attached, idempotencyKey, ...(replyToId ? { replyToMessageId: replyToId } : {}) })
+        .mutateAsync({ threadId: fetchId, body: text, projectId, files: attached, idempotencyKey, ...(replyToId ? { replyToMessageId: replyToId } : {}) })
         .then(() => { patch({ replyToId: null, projectId: null }); })
         .catch((e: unknown) => {
           setSending(false);
@@ -569,7 +585,7 @@ export function ChatRoute(): React.ReactElement {
     // A NetworkError is the same condition the `offline` branch queues for; the device just has
     // not noticed it yet, so it is treated as settled (queued) rather than as a retryable failure.
     return post
-      .mutateAsync({ threadId, body: text, projectId, idempotencyKey, ...(replyToId ? { replyToMessageId: replyToId } : {}) })
+        .mutateAsync({ threadId: fetchId, body: text, projectId, idempotencyKey, ...(replyToId ? { replyToMessageId: replyToId } : {}) })
       .then(() => { patch({ replyToId: null, projectId: null }); })
       .catch((e: unknown) => {
         setSending(false);
@@ -638,7 +654,7 @@ export function ChatRoute(): React.ReactElement {
                 <Skeleton className="h-16 w-4/5 rounded-r6" />
                 <Skeleton className="h-24 w-full rounded-r8" />
               </>
-            ) : messages.isError ? (
+            ) : messages.isError && fetchId ? (
               <ErrorState code="CONDUCTOR_UNREACHABLE" message="Could not load the thread; the history below is the last known state." onRetry={() => void messages.refetch()} />
             ) : rows.length === 0 ? (
               <EmptyState

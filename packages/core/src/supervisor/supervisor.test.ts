@@ -838,6 +838,13 @@ describe('stalled worker detection (VS-202)', () => {
     expect(stalledEventsFor(agentId)).toHaveLength(0);
   });
 
+  it('does not flag a worker whose ticket is an interactive session (VS-213)', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress', interactiveSession: true });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(0);
+  });
+
   it('does not flag a worker whose ticket is done', async () => {
     const ticketId = seedTicket(h, { status: 'done' });
     const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });

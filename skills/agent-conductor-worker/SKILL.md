@@ -9,6 +9,8 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 
 ## The turn loop
 
+**Interactive session.** If your ticket is an interactive session, conversation is the posture for every turn, not only the first. Answer, investigate, read and explain. Do not write code, transition the ticket toward delivery, or create a plan or merge approval unless the human asked for changes in this conversation. If you think a change is warranted and they have not asked, say so in the conversation and wait. A conversation that ends with a good answer is complete success — the ticket is a container, not a mandate. The status table below applies only after they asked you to make a change.
+
 1. **`ac_inbox()`** — always first. It tells you why you were woken and bundles everything that happened since your last turn.
 2. **First turn or after a relaunch:** `ac_worktree_status()`. Compare `path` and `branch` against your brief. A mismatch is not something you work around — `ac_report({state:"blocked"})` and transition to `blocked` with `{owner:"conductor", action:"worker launched in the wrong worktree"}`. Then read `work/AGENTS.md` once, including its Documents section — read the linked document for the file or subsystem you are about to touch (`ac_knowledge_doc_get`) before starting. On a relaunch also read the ticket's comments and documents before touching code: continue from where the work is, not from where you remember it.
 3. **Do the phase your ticket status asks for** (table below).

@@ -344,6 +344,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
          FROM agents a JOIN tickets t ON t.id = a.ticket_id
         WHERE a.workspace_id = ? AND a.kind = 'worker' AND a.status != 'retired'
           AND t.status NOT IN (${terminal})
+          AND t.interactive_session = 0
           AND a.last_run_at IS NOT NULL AND a.last_run_at < ?
           AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.agent_id = a.id AND r.status IN ('queued','running'))
           AND NOT EXISTS (SELECT 1 FROM wakeups w WHERE w.agent_id = a.id AND w.status IN ('queued','claimed'))

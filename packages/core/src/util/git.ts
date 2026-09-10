@@ -40,6 +40,44 @@ export async function branchExists(cwd: string, branch: string): Promise<boolean
   return r.ok && r.stdout.trim().length > 0;
 }
 
+/**
+ * GitHub `owner/repo` remotes as `git@github.com:owner/repo.git` so workers can push with SSH
+ * (VS-183). Non-GitHub URLs, extra path segments, and local paths are returned trimmed, unchanged.
+ */
+export function githubSshRemote(url: string): string {
+  const raw = url.trim();
+  const parsed = githubOwnerRepo(raw);
+  if (!parsed) return raw;
+  return `git@github.com:${parsed.owner}/${parsed.repo}.git`;
+}
+
+function githubOwnerRepo(raw: string): { owner: string; repo: string } | null {
+  let host: string | undefined;
+  let path: string | undefined;
+  const scp = raw.match(/^([^@/\s]+)@([^:]+):(.+)$/);
+  if (scp) {
+    host = scp[2];
+    path = scp[3];
+  } else {
+    let s = raw;
+    if (!/^[a-z+]+:\/\//i.test(s) && /^github\.com\//i.test(s)) s = `https://${s}`;
+    try {
+      const u = new URL(s);
+      host = u.hostname;
+      path = u.pathname;
+    } catch {
+      return null;
+    }
+  }
+  if (!host || host.toLowerCase() !== 'github.com') return null;
+  const segments = (path ?? '').replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '').split('/').filter(Boolean);
+  if (segments.length !== 2) return null;
+  const owner = segments[0];
+  const repo = segments[1];
+  if (!owner || !repo) return null;
+  return { owner, repo };
+}
+
 /** `<host>/<owner>/<repo>` identifier used by worktrunk's per-project config blocks. */
 export function projectKeyFromUrl(url: string): string {
   let s = url.trim();

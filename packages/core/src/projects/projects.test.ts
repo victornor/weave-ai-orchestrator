@@ -342,6 +342,23 @@ describe('projects', () => {
     expect(job.log.some((l) => l.step === 'resolve_branch' && l.text === 'default branch: main')).toBe(true);
   });
 
+  it('stores a GitHub HTTPS url as SSH on the row before clone runs (VS-183)', async () => {
+    const { project, jobId } = projects.startAdd(HUMAN, quick('https://github.com/acme/api.git', { id: 'api' }));
+    expect(project.gitUrl).toBe('git@github.com:acme/api.git');
+    await settled(jobId);
+  });
+
+  it('rewrites a stored GitHub HTTPS url to SSH when a failed add is retried (VS-183)', async () => {
+    const { project, jobId } = projects.startAdd(HUMAN, quick('/definitely/not/a/repo', { id: 'ghost' }));
+    await settled(jobId);
+    expect(projects.get(project.id).status).toBe('error');
+    h.db.update('projects', project.id, { gitUrl: 'https://github.com/acme/api.git' });
+
+    const { project: retried, jobId: retryId } = projects.retryAdd(HUMAN, project.id);
+    expect(retried.gitUrl).toBe('git@github.com:acme/api.git');
+    await settled(retryId);
+  });
+
   it('fails the job at the failing sub-step and leaves the later ones pending', async () => {
     const { project, jobId } = projects.startAdd(HUMAN, quick('/definitely/not/a/repo', { id: 'ghost' }));
     const job = await settled(jobId);

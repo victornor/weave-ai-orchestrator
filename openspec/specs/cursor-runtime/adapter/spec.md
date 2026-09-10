@@ -28,7 +28,7 @@ The system SHALL register a runtime with id `cursor` that implements the same ad
 
 ### Requirement: Turns run locally through cursor-agent print mode
 
-A turn on runtime `cursor` SHALL spawn `cursor-agent` through `launchCommand` in the agent's existing cwd (the daemon-provided home / worktree). The invocation SHALL use non-interactive print mode (`-p` / `--print`) with `--output-format stream-json`, `--trust` and `--force` (or `--yolo`). Unless live input is turned off, the prompt SHALL be the first NDJSON `user` frame on stdin, not an argv operand. File edits SHALL land in that cwd. The spawn SHALL NOT use ACP (`cursor-agent acp`) and SHALL NOT start `cursor-agent worker`.
+A turn on runtime `cursor` SHALL spawn `cursor-agent` through `launchCommand` in the agent's existing cwd (the daemon-provided home / worktree). The invocation SHALL use non-interactive print mode (`-p` / `--print`) with `--output-format stream-json`, `--trust` and `--force` (or `--yolo`). The prompt SHALL be an argv operand after `--` when it fits the argv budget, or closed plain-text stdin when oversized. The spawn SHALL NOT keep stdin open for NDJSON `user` frames. File edits SHALL land in that cwd. The spawn SHALL NOT use ACP (`cursor-agent acp`) and SHALL NOT start `cursor-agent worker`.
 
 #### Scenario: A new turn
 
@@ -37,6 +37,8 @@ A turn on runtime `cursor` SHALL spawn `cursor-agent` through `launchCommand` in
 - **AND** the args include `-p` (or `--print`) and `--output-format stream-json`
 - **AND** the args include `--trust` and `--force` or `--yolo`
 - **AND** cwd is the daemon-provided agent home
+- **AND** the prompt is an argv operand after `--` (or closed plain-text stdin when oversized)
+- **AND** stdin is not an NDJSON `user` frame
 
 #### Scenario: ACP is not the integration path
 
@@ -50,38 +52,34 @@ A turn on runtime `cursor` SHALL spawn `cursor-agent` through `launchCommand` in
 
 ### Requirement: A human's message reaches the executing turn on open stdin
 
-Where live input is on (the workspace default), a cursor turn SHALL declare `streamingInput` and SHALL keep the child's stdin open for the turn's lifetime, the same contract Claude uses (VS-99). The turn prompt SHALL be written as the first NDJSON `user` frame:
+Runtime `cursor` SHALL declare `streamingInput: false` and SHALL NOT expose `TurnHandle.send`. A cursor turn SHALL ignore workspace `defaults.liveInput` and SHALL NOT keep the child's stdin open. A human message sent while a cursor turn is executing SHALL queue for the next turn under the existing `agent-attach/live-input` contract for a runtime that does not offer a live channel.
 
-`{"type":"user","message":{"role":"user","content":"<text>"}}`
-
-A `TurnHandle.send` SHALL write another such frame while the turn has not yet emitted its terminal `result` line, and SHALL report `delivered` when the write succeeded. After the `result` line, stdin SHALL be closed so the process can exit, and a later `send` SHALL report `closed`. When `defaults.liveInput` is false, the adapter SHALL omit `send`, SHALL NOT claim a live channel, and MAY pass the prompt as an argv operand instead.
-
-The adapter SHALL NOT prefix a live-input frame with `&`. The existing `agent-attach/live-input` delivery and queued-fallback behaviour SHALL apply unchanged once `streamingInput` is true and `send` is present.
+The adapter SHALL NOT prefix the prompt with `&`.
 
 #### Scenario: The prompt is the first stdin frame
 
-- **WHEN** `buildArgs` runs with live input on
-- **THEN** the prompt is not an argv operand
-- **AND** stdin is one NDJSON `user` frame whose `message.content` is the prompt text
+- **WHEN** `buildArgs` runs for a cursor turn
+- **THEN** the prompt is an argv operand after `--` (or closed plain-text stdin when oversized)
+- **AND** stdin is not an NDJSON `user` frame
 - **AND** the args do not include `--continue`, `acp`, or `worker`
 
 #### Scenario: A mid-turn send is delivered
 
-- **WHEN** a turn is executing on runtime `cursor` with live input on, and a human sends text to that agent
-- **THEN** `TurnHandle.send` writes a second `user` frame to the open stdin
-- **AND** the outcome is mid-turn delivery, not a queued next-turn wake
+- **WHEN** a turn is executing on runtime `cursor` and a human sends text to that agent
+- **THEN** the handle has no `send`
+- **AND** the outcome is a queued next-turn wake, not mid-turn delivery
 
 #### Scenario: Stdin closes on the result line
 
-- **WHEN** the CLI emits a terminal `result` event
-- **THEN** the adapter ends stdin
-- **AND** a subsequent `send` reports `closed`
+- **WHEN** a cursor turn is launched
+- **THEN** stdin is already closed (or never opened as a live channel)
+- **AND** the handle has no `send`
 
 #### Scenario: Live input can be turned off
 
-- **WHEN** the turn is launched with `liveInput: false`
+- **WHEN** the turn is launched with `liveInput: false` or with the workspace default `liveInput: true`
 - **THEN** the handle has no `send`
-- **AND** capabilities still describe the runtime, but this turn does not open a live channel
+- **AND** the prompt is still an argv operand or closed plain-text stdin, not an NDJSON `user` frame
 
 ### Requirement: Cloud Agent handoff is never used
 
@@ -166,18 +164,31 @@ A new turn SHALL persist the `session_id` the CLI reports. A later turn on the s
 
 ### Requirement: Models are listed without spending tokens
 
-`listModels` SHALL return a static list of Cursor CLI model ids the adapter maintains (at least `auto` plus the current frontier aliases documented for the CLI). It SHALL NOT spawn `cursor-agent` to list models. `describeAccount`, if implemented, SHALL NOT spawn the CLI and SHALL NOT spend model tokens. `readCredential`, if implemented, SHALL read the credential file only and SHALL never return a token.
+`listModels` SHALL return a static list of Cursor CLI model ids the adapter maintains, matching the documented live catalog for the CLI this repo targets (including `auto` and the frontier aliases the host's `cursor-agent` picker shows: Grok 4.6, Opus 5, 5.6, Fable 5.1, plus the `--model` help examples). It SHALL NOT spawn `cursor-agent` to list models. `describeAccount`, if implemented, SHALL NOT spawn the CLI and SHALL NOT spend model tokens. `readCredential`, if implemented, SHALL read the credential file only and SHALL never return a token.
+
+`buildArgs` SHALL pass `--model <id>` only when the resolved model is a non-empty string other than `auto`. An unset model, an empty model, or `auto` SHALL omit `--model` so the CLI chooses.
 
 #### Scenario: listModels does not spawn
 
 - **WHEN** `listModels` is called
 - **THEN** it returns a non-empty static list
 - **AND** no `cursor-agent` process is started
+- **AND** the list includes `auto` and the documented live aliases (Grok 4.6, Opus 5, 5.6, Fable 5.1)
 
 #### Scenario: Credential facts carry no token
 
 - **WHEN** `readCredential` is called on a config home that holds `auth.json`
 - **THEN** the result is `{ present, expiresAt }` with no token-bearing field
+
+#### Scenario: Auto omits --model
+
+- **WHEN** `buildArgs` runs with model `auto` or with no model
+- **THEN** the args do not contain `--model`
+
+#### Scenario: A named model is forwarded
+
+- **WHEN** `buildArgs` runs with a named model id from the catalog other than `auto`
+- **THEN** the args include `--model` and that id
 
 ### Requirement: Verification never uses the owner's live Cursor login
 

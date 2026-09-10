@@ -1,5 +1,5 @@
 import { A } from './link';
-import { MORE_ITEMS, href } from './nav';
+import { GLOBAL_NAV, MORE_ITEMS, href } from './nav';
 import { NavGlyph } from './NavGlyph';
 import { PlusGlyph } from './PlusGlyph';
 import { Sheet } from '../components/Sheet';
@@ -62,6 +62,27 @@ export function MoreSheet({
             <span className="flex-none text-micro font-medium text-accent-link">Open Updates</span>
           </A>
         ) : null}
+
+        <nav aria-label="Global" className="flex flex-col gap-px">
+          {GLOBAL_NAV.map((item) => {
+            const current = isActive(item.to);
+            return (
+              <A
+                key={item.key}
+                to={item.to}
+                aria-current={current ? 'page' : undefined}
+                onClick={onClose}
+                className={cx('flex items-center gap-3 rounded-r6 px-2.5 py-2.5', current ? 'bg-bg-3' : 'hover:bg-bg-2')}
+              >
+                <NavGlyph glyph={item.glyph} active={current} />
+                <span className="min-w-0 flex-1">
+                  <span className={cx('block text-body font-medium', current ? 'text-text-1' : 'text-text-2')}>{item.label}</span>
+                  {item.hint ? <span className="block truncate text-micro text-text-3">{item.hint}</span> : null}
+                </span>
+              </A>
+            );
+          })}
+        </nav>
 
         <nav aria-label="More sections" className="flex flex-col gap-px">
           {MORE_ITEMS.map((item) => {

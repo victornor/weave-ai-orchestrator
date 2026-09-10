@@ -46,7 +46,7 @@ vi.mock('@tanstack/react-router', () => ({
     </a>
   ),
 }));
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', async () => {
   const router = await import('@tanstack/react-router');
   return { A: (router as unknown as { Link: unknown }).Link, useGo: () => state.go, useSearchParams: () => ({}) };

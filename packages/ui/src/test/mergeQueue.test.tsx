@@ -12,7 +12,7 @@ const state = vi.hoisted(() => ({
   go: vi.fn() as ReturnType<typeof vi.fn>,
 }));
 
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', () => ({ useGo: () => state.go, useSearchParams: () => state.search }));
 vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: state.projects }),

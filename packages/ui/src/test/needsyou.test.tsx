@@ -20,6 +20,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('../api/context', () => ({
   useWs: () => 'ws1',
+  useHookWs: (o?: string) => o ?? 'ws1',
   useConnection: () => ({ state: state.connection, capturedAt: null, lastSeq: 0, attempts: 0 }),
 }));
 

@@ -49,8 +49,10 @@ vi.mock('../app/link', () => ({
 }));
 vi.mock('../api/context', () => ({
   useWs: () => 'ws1',
+  useOptionalWorkspace: () => ({ ws: 'ws1', connection: { state: 'connected', capturedAt: null, lastSeq: 0, attempts: 0 }, stream: null }),
   useConnection: () => ({ state: 'connected', capturedAt: null, lastSeq: 0, attempts: 0 }),
   useWorkspaceEvents: () => undefined,
+  FanInStreams: () => null,
 }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 // Children with their own data hooks; none of them is what this file is about.

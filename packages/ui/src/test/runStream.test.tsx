@@ -4,7 +4,7 @@ import type { RunEvent } from '@agent-conductor/shared';
 
 const persisted = vi.hoisted(() => ({ data: [] as RunEvent[] }));
 
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../api/hooks', () => ({ useRunEvents: (id: string) => (id ? persisted : { data: [] }) }));
 
 const { useRunEventStream } = await import('../api/runStream');

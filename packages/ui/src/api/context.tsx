@@ -14,13 +14,13 @@ interface Ctx {
 
 const WorkspaceCtx = createContext<Ctx | null>(null);
 
-export function WorkspaceProvider({ ws, children }: { ws: string; children: ReactNode }): React.ReactElement {
+export function WorkspaceProvider({ ws, remember = true, children }: { ws: string; remember?: boolean; children: ReactNode }): React.ReactElement {
   const qc = useQueryClient();
   const [connection, setConnection] = useState<ConnectionStatus>({ state: 'connecting', capturedAt: null, lastSeq: 0, attempts: 0 });
   const [stream, setStream] = useState<EventStream | null>(null);
 
   useEffect(() => {
-    setWorkspaceId(ws);
+    if (remember) setWorkspaceId(ws);
     const s = new EventStream(ws, qc);
     const off = s.subscribe(setConnection);
     s.start();
@@ -30,10 +30,14 @@ export function WorkspaceProvider({ ws, children }: { ws: string; children: Reac
       s.stop();
       setStream(null);
     };
-  }, [ws, qc]);
+  }, [ws, qc, remember]);
 
   const value = useMemo<Ctx>(() => ({ ws, connection, stream }), [ws, connection, stream]);
   return <WorkspaceCtx.Provider value={value}>{children}</WorkspaceCtx.Provider>;
+}
+
+export function useOptionalWorkspace(): Ctx | null {
+  return useContext(WorkspaceCtx);
 }
 
 export function useWorkspace(): Ctx {
@@ -46,17 +50,41 @@ export function useWs(): string {
   return useWorkspace().ws;
 }
 
+/** Workspace id for a hook: an explicit override, else the provider, else empty (query disabled). */
+export function useHookWs(override?: string): string {
+  const ctx = useContext(WorkspaceCtx);
+  return override ?? ctx?.ws ?? '';
+}
+
 export function useConnection(): ConnectionStatus {
-  return useWorkspace().connection;
+  return useOptionalWorkspace()?.connection ?? { state: 'connected', capturedAt: null, lastSeq: 0, attempts: 0 };
 }
 
 /** Subscribe to raw workspace events (live transcripts, arrival toasts). */
 export function useWorkspaceEvents(fn: (e: WorkspaceEvent) => void): void {
-  const { stream } = useWorkspace();
+  const stream = useOptionalWorkspace()?.stream ?? null;
   const ref = useRef(fn);
   ref.current = fn;
   useEffect(() => {
     if (!stream) return;
     return stream.onEvent((e) => ref.current(e));
   }, [stream]);
+}
+
+/** Opens one EventStream per listed workspace while a global page is mounted (VS-168). */
+export function FanInStreams({ ids }: { ids: readonly string[] }): null {
+  const qc = useQueryClient();
+  const key = ids.join('\0');
+  useEffect(() => {
+    if (!ids.length) return;
+    const streams = ids.map((id) => {
+      const s = new EventStream(id, qc);
+      s.start();
+      return s;
+    });
+    return () => {
+      for (const s of streams) s.stop();
+    };
+  }, [qc, key]);
+  return null;
 }

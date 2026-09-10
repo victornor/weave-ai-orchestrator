@@ -55,6 +55,7 @@ vi.mock('../api/context', async () => {
   const { useEffect, useRef } = await import('react');
   return {
     useWs: () => state.ws,
+    useHookWs: (o?: string) => o ?? state.ws,
     useConnection: () => ({ state: state.connection, capturedAt: null, lastSeq: 0, attempts: 0 }),
     useWorkspaceEvents: (fn: (e: WorkspaceEvent) => void) => {
       const ref = useRef(fn);

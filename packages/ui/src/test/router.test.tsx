@@ -16,6 +16,14 @@ const workspaceRoutes = (): RouteNode[] => {
   return (root.children ?? []).find((r) => r.path === 'w/$ws')?.children ?? [];
 };
 
+describe('the global routes (VS-168)', () => {
+  it('registers /needs, /live and /chats as siblings of /w/$ws', () => {
+    const root = router.routeTree as unknown as RouteNode;
+    const paths = (root.children ?? []).map((r) => r.path);
+    expect(paths).toEqual(expect.arrayContaining(['needs', 'live', 'chats', 'w/$ws']));
+  });
+});
+
 describe('the workspace routes', () => {
   it('registers Live at its own address, with its own component', () => {
     const route = workspaceRoutes().find((r) => r.path === 'live');

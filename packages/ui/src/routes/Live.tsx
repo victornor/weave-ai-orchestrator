@@ -16,7 +16,7 @@ import { StatusBadge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
 import { useRuns, useTickets, useWorkers } from '../api/hooks';
 import { useRunEventStream } from '../api/runStream';
-import { useWs } from '../api/context';
+import { useHookWs, useWs } from '../api/context';
 import { A } from '../app/link';
 import { liveWorkingAgents } from '../lib/board';
 import { cx } from '../lib/cx';
@@ -113,7 +113,7 @@ export function LiveRoute(): React.ReactElement {
   );
 }
 
-function LiveCell({
+export function LiveCell({
   agent,
   ticket,
   run,
@@ -121,6 +121,8 @@ function LiveCell({
   colsMax,
   desktop,
   onSize,
+  ws: wsProp,
+  workspaceName,
 }: {
   agent: Agent;
   ticket: Ticket | undefined;
@@ -129,10 +131,12 @@ function LiveCell({
   colsMax: number;
   desktop: boolean;
   onSize: (next: CellSize) => void;
+  ws?: string;
+  workspaceName?: string;
 }): React.ReactElement {
-  const ws = useWs();
+  const ws = useHookWs(wsProp);
   const streaming = Boolean(run && isActiveRun(run.status));
-  const { events, status, retryNow } = useRunEventStream(streaming && run ? run.id : null, { live: streaming });
+  const { events, status, retryNow } = useRunEventStream(streaming && run ? run.id : null, { live: streaming, ws: wsProp });
   const identifier = ticket?.identifier ?? agent.ticketId;
   const title = ticket?.title;
   const ticketLabel = [identifier, title].filter(Boolean).join(' · ') || 'ticket';
@@ -152,6 +156,7 @@ function LiveCell({
       <header className="flex items-start gap-2.5 border-b border-line-1 px-3.5 py-2.5">
         <div className="min-w-0 flex-1">
           <div className="truncate text-ui font-medium text-text-1">{agent.name}</div>
+          {workspaceName ? <div className="truncate text-micro text-text-3">{workspaceName}</div> : null}
           {identifier ? (
             <A
               to="/w/$ws/tickets/$ticketId"

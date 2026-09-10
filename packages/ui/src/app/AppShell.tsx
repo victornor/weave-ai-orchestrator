@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { A, useGo } from './link';
 import { TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
@@ -9,7 +9,7 @@ import { BottomBar } from './BottomBar';
 import { CommandPalette } from '../components/CommandPalette';
 import type { Command } from '../components/CommandPalette';
 import { ConnectionBanner, UnreachableScreen } from '../components/ConnectionBanner';
-import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
+import { FanInStreams, useConnection, useOptionalWorkspace, useWorkspaceEvents } from '../api/context';
 import { useDaemonUpdate, useDaemonUpgrade, useDecisions, useTickets, useTransitionTicket, useWorkspaceProjects, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
 import { useToast } from '../components/Toast';
 import { useHotkeys } from '../lib/hotkeys';
@@ -19,16 +19,19 @@ import { readBarHidden, writeBarHidden } from '../lib/barVisibility';
 import { updateEntry, updateEntryLabel } from '../lib/upgrade';
 import type { QueuedWrite } from '../lib/queue';
 import type { WorkspaceListItem } from '../api/types';
-import { api, ApiError, NetworkError } from '../api/client';
+import { api, ApiError, getWorkspaceId, NetworkError } from '../api/client';
 import { cx } from '../lib/cx';
 import { workspaceYolo } from '../lib/yolo';
 
-export function AppShell(): React.ReactElement {
-  const ws = useWs();
+export function AppShell({ children }: { children?: ReactNode } = {}): React.ReactElement {
+  const ctx = useOptionalWorkspace();
+  const remembered = getWorkspaceId();
+  const ws = ctx?.ws ?? remembered ?? '';
   const go = useGo();
   const conn = useConnection();
   const toast = useToast();
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const onGlobalPage = path === '/needs' || path === '/live' || path === '/chats';
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [scopeIndex, setScopeIndex] = useState(-1);
@@ -46,19 +49,20 @@ export function AppShell(): React.ReactElement {
   const transition = useTransitionTicket();
   const queuedCount = useQueueCount();
 
-  const needsCount = decisions.data?.length ?? 0;
+  const needsCount = onGlobalPage ? 0 : (decisions.data?.length ?? 0);
   /**
    * The daemon answers `/w/:ws` with the workspace's canonical id whichever form the URL used, so
    * this — not the raw route param — is what a listed workspace is compared against.
+   * Empty on a global page: no workspace group is marked active.
    */
-  const activeWs = summary.data?.workspace.id ?? ws;
+  const activeWs = onGlobalPage ? '' : (summary.data?.workspace.id ?? ctx?.ws ?? '');
   /**
    * The workspaces whose projects are needed: the active one, always, since its rail group is always
    * open, plus every group the human has expanded (VS-128). A workspace outside this set has never
    * had its projects fetched, and `useWorkspaceProjects` keeps a previously fetched one cached even
    * once its group collapses back out of this set.
    */
-  const projectIds = useMemo(() => Array.from(new Set([activeWs, ...expanded])), [activeWs, expanded]);
+  const projectIds = useMemo(() => Array.from(new Set([...(activeWs ? [activeWs] : []), ...expanded])), [activeWs, expanded]);
   const projectsByWs = useWorkspaceProjects(projectIds);
   const activeProjects = projectsByWs[activeWs]?.projects ?? [];
   // Nothing is shown when the daemon is up to date, when checking is not configured, or when it failed.
@@ -72,8 +76,10 @@ export function AppShell(): React.ReactElement {
 
   // Queued writes (offline, or taken while the conductor was mid-turn) are
   // flushed in order as soon as the stream is back.
+  const workspaceIds = useMemo(() => (workspaces.data ?? []).map((w) => w.id), [workspaces.data]);
+
   useEffect(() => {
-    if (conn.state !== 'connected' || queuedCount === 0) return;
+    if (!ws || conn.state !== 'connected' || queuedCount === 0) return;
     void flushQueue((q: QueuedWrite) => api.ws(ws, q.path, { method: 'POST', body: q.body })).then((r) => {
       if (r.sent) toast.push({ title: `${r.sent} queued ${r.sent === 1 ? 'message' : 'messages'} sent`, status: 'done', ttl: 4000 });
     });
@@ -103,7 +109,7 @@ export function AppShell(): React.ReactElement {
    */
   const listed = useMemo<WorkspaceListItem[]>(() => {
     const data = workspaces.data ?? [];
-    if (data.some((w) => w.id === activeWs)) return data;
+    if (!activeWs || data.some((w) => w.id === activeWs)) return data;
     return [
       {
         id: activeWs,
@@ -115,8 +121,10 @@ export function AppShell(): React.ReactElement {
     ];
   }, [workspaces.data, activeWs, summary.data]);
 
+  const chromeWs = ws || listed[0]?.id || '';
   const commands = useMemo<Command[]>(() => {
     const cmds: Command[] = [];
+    if (!chromeWs) return cmds;
     for (const t of tickets.data ?? []) {
       cmds.push({
         id: `open-${t.id}`,
@@ -124,11 +132,11 @@ export function AppShell(): React.ReactElement {
         sub: `${t.identifier} ${t.title}`,
         kbd: '⏎',
         status: ticketUiStatus(t.status),
-        run: () => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: t.identifier } }),
+        run: () => go('/w/$ws/tickets/$ticketId', { params: { ws: chromeWs, ticketId: t.identifier } }),
       });
     }
     // Everything is asked for in one place, so this goes where the board's empty state goes.
-    cmds.push({ id: 'create', label: 'Create ticket', sub: scope ? `in ${scope}` : 'in the conductor chat', kbd: 'C', run: () => go('/w/$ws/chat', { params: { ws } }) });
+    cmds.push({ id: 'create', label: 'Create ticket', sub: scope ? `in ${scope}` : 'in the conductor chat', kbd: 'C', run: () => go('/w/$ws/chat', { params: { ws: chromeWs } }) });
     const first = tickets.data?.[0];
     if (first) {
       for (const s of TICKET_STATUSES) {
@@ -141,21 +149,21 @@ export function AppShell(): React.ReactElement {
         });
       }
     }
-    cmds.push({ id: 'filter', label: 'Filter board', sub: scope ? `project: ${scope}` : 'project · kind · priority', kbd: 'F', run: () => go('/w/$ws/board', { params: { ws } }) });
+    cmds.push({ id: 'filter', label: 'Filter board', sub: scope ? `project: ${scope}` : 'project · kind · priority', kbd: 'F', run: () => go('/w/$ws/board', { params: { ws: chromeWs } }) });
     for (const w of workspaces.data ?? []) {
-      if (w.id === ws) continue;
+      if (w.id === chromeWs) continue;
       cmds.push({ id: `ws-${w.id}`, label: 'Switch workspace', sub: w.name, kbd: '⌘⇧O', run: () => go('/w/$ws/needs', { params: { ws: w.id } }) });
     }
     for (const item of RAIL) {
-      cmds.push({ id: `go-${item.key}`, label: `Go to ${item.label}`, ...(item.kbd ? { kbd: item.kbd } : {}), run: () => go(href(item, ws)) });
+      cmds.push({ id: `go-${item.key}`, label: `Go to ${item.label}`, ...(item.kbd ? { kbd: item.kbd } : {}), run: () => go(href(item, chromeWs)) });
     }
     return cmds;
-  }, [tickets.data, workspaces.data, scope, ws, go, transition]);
+  }, [tickets.data, workspaces.data, scope, chromeWs, go, transition]);
 
   useHotkeys(
     [
       { key: 'k', meta: true, inFields: true, run: () => setPaletteOpen((v) => !v) },
-      ...RAIL.flatMap((item) => (item.kbd ? [{ key: item.kbd, run: () => go(href(item, ws)) }] : [])),
+      ...RAIL.flatMap((item) => (item.kbd && chromeWs ? [{ key: item.kbd, run: () => go(href(item, chromeWs)) }] : [])),
     ],
     true,
   );
@@ -163,16 +171,20 @@ export function AppShell(): React.ReactElement {
   // A remembered workspace that no longer exists (deleted, or a different daemon):
   // forget it and let `/` decide between the first workspace and onboarding.
   useEffect(() => {
+    if (onGlobalPage) return;
     if (summary.isError && summary.error instanceof ApiError && summary.error.status === 404) {
       try { localStorage.removeItem('conductor.ws'); } catch { /* ignore */ }
       go('/', { replace: true });
     }
-  }, [summary.isError, summary.error, go]);
+  }, [onGlobalPage, summary.isError, summary.error, go]);
 
   // NET_DAEMON_UNREACHABLE is full-screen at load only; mid-session it
   // degrades to the offline banner.
-  if (summary.isError && summary.error instanceof NetworkError && !summary.data) {
+  if (!onGlobalPage && summary.isError && summary.error instanceof NetworkError && !summary.data) {
     return <UnreachableScreen host={window.location.host} onRetry={() => void summary.refetch()} />;
+  }
+  if (onGlobalPage && workspaces.isError && workspaces.error instanceof NetworkError && !workspaces.data) {
+    return <UnreachableScreen host={window.location.host} onRetry={() => void workspaces.refetch()} />;
   }
 
   const isActive = (to: string): boolean => path.startsWith(to);
@@ -180,6 +192,7 @@ export function AppShell(): React.ReactElement {
   return (
     // `data-bar` is what the stylesheet reads to hand the bar's space back to the content above it.
     <div className="ac-app flex overflow-hidden bg-bg-0" data-bar={barHidden ? 'hidden' : 'shown'}>
+      {onGlobalPage ? <FanInStreams ids={workspaceIds} /> : null}
       {/* desktop rail — the only place all projects appear at once */}
       <aside className="hidden w-rail flex-none flex-col border-r border-line-1 bg-bg-input p-2.5 md:flex">
         {/* Self-contained block at the top of the rail: it is about the daemon, not any one
@@ -188,7 +201,7 @@ export function AppShell(): React.ReactElement {
         {update ? (
           <A
             to="/w/$ws/settings"
-            params={{ ws }}
+            params={{ ws: chromeWs }}
             search={{ section: 'updates' }}
             aria-label={updateEntryLabel(update)}
             className="mb-3.5 flex flex-none flex-col gap-1 rounded-r6 border border-accent-edge bg-accent-tint px-2.5 py-2"
@@ -221,7 +234,7 @@ export function AppShell(): React.ReactElement {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <ConnectionBanner state={conn.state} capturedAt={conn.capturedAt} queuedCount={queuedCount} />
-        {workspaceYolo(summary.data?.config) ? (
+        {!onGlobalPage && workspaceYolo(summary.data?.config) ? (
           <div
             role="status"
             aria-label="YOLO mode is on"
@@ -233,11 +246,11 @@ export function AppShell(): React.ReactElement {
           </div>
         ) : null}
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden ac-bar-pad md:pb-0">
-          <Outlet />
+          {children ?? <Outlet />}
         </main>
 
         <BottomBar
-          ws={ws}
+          ws={chromeWs}
           items={TABS}
           needsCount={needsCount}
           update={update}
@@ -263,7 +276,7 @@ export function AppShell(): React.ReactElement {
       <MoreSheet
         open={moreOpen}
         onClose={() => setMoreOpen(false)}
-        ws={ws}
+        ws={chromeWs}
         activeWs={activeWs}
         workspaces={listed}
         projects={activeProjects}

@@ -21,7 +21,7 @@ const state = vi.hoisted(() => ({
   addCalls: [] as Array<Record<string, unknown>>,
 }));
 
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', () => ({
   useGo: () => (to: string) => { state.went.push(to); },
   useSearchParams: () => state.search,

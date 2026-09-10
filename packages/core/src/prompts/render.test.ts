@@ -281,6 +281,7 @@ describe('prompt rendering', () => {
     // The rule adds a form, it does not replace the ordinary reply path.
     expect(conductor).toContain('Reply with `ac_human_send`');
     expect(conductor).toContain('[short label](https://url)');
+    expect(conductor).toContain('One logical reply is one `ac_human_send`');
   });
 
   it.runIf(existsSync(SHIPPED_TEMPLATES))('tells conductor and worker to use GH_TOKEN when gh auth status looks logged-out (VS-169)', () => {

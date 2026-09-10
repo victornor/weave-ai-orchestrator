@@ -443,6 +443,45 @@ describe('ChatRoute message formatting', () => {
     expect(screen.getByRole('link', { name: 'Diff' })).toBeInTheDocument();
     expect(document.body.innerHTML).not.toContain('javascript:');
   });
+
+  it('gives both directions a message container', () => {
+    state.messages = [mine('hello from me'), message({ id: 'm2', body: 'hello from conductor' })];
+    const { container } = render(<ChatRoute />);
+    expect(container.querySelectorAll('[data-chat-bubble]')).toHaveLength(2);
+  });
+
+  it('keeps a long fenced conductor reply in one bubble, and does not swallow the next message', () => {
+    const wide = 'id uuid pk ' + 'x'.repeat(80);
+    state.messages = [
+      message({ id: 'm2', body: `Here is the model.\n\n\`\`\`\n${wide}\ncol_a  col_b  col_c\nstill open` }),
+      message({ id: 'm3', body: 'next' }),
+    ];
+    const { container } = render(<ChatRoute />);
+    const bubbles = container.querySelectorAll('[data-chat-bubble]');
+    expect(bubbles).toHaveLength(2);
+    const pre = bubbles[0]!.querySelector('pre');
+    expect(pre).not.toBeNull();
+    expect(bubbles[0]!.contains(pre)).toBe(true);
+    expect(pre!.textContent).toContain('col_a');
+    expect(pre!.textContent).toContain('still open');
+    expect(bubbles[1]!.textContent).toContain('next');
+    expect(bubbles[1]!.querySelector('pre')).toBeNull();
+  });
+
+  it('renders a GFM table inside the conductor bubble', () => {
+    state.messages = [message({
+      id: 'm2',
+      body: '| col | type |\n| --- | --- |\n| id | string |',
+    })];
+    const { container } = render(<ChatRoute />);
+    const bubbles = container.querySelectorAll('[data-chat-bubble]');
+    expect(bubbles).toHaveLength(1);
+    const table = bubbles[0]!.querySelector('table');
+    expect(table).not.toBeNull();
+    expect(table!.textContent).toContain('col');
+    expect(table!.textContent).toContain('id');
+    expect(bubbles[0]!.querySelector('.ac-table')).not.toBeNull();
+  });
 });
 
 

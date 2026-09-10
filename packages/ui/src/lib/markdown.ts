@@ -17,6 +17,22 @@ function esc(s: string): string {
  */
 const CODE_MARK = '\u0000';
 
+function isTableSep(line: string): boolean {
+  if (!line.includes('|')) return false;
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+  const cells = s.split('|');
+  return cells.length > 0 && cells.every((c) => /^\s*:?-{3,}:?\s*$/.test(c));
+}
+
+function splitCells(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+  return s.split('|').map((c) => c.trim());
+}
+
 function inline(s: string): string {
   const spans: string[] = [];
   const withPlaceholders = esc(s).replace(/`([^`]+)`/g, (_m, c: string) => {
@@ -76,7 +92,8 @@ export function markdownToHtml(src: string, opts: { breaks?: boolean } = {}): st
     codeLines = [];
   };
 
-  for (const raw of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]!;
     const line = raw.replace(/\s+$/, '');
 
     if (/^```/.test(line)) {
@@ -130,6 +147,25 @@ export function markdownToHtml(src: string, opts: { breaks?: boolean } = {}): st
       const body = ul ? ul[1]! : ol![2]!;
       const task = /^\[([ xX])\]\s+(.*)$/.exec(body);
       out.push(task ? `<li data-task="${task[1]!.trim() ? 'done' : 'open'}">${inline(task[2]!)}</li>` : `<li>${inline(body)}</li>`);
+      continue;
+    }
+    const next = (lines[i + 1] ?? '').replace(/\s+$/, '');
+    if (line.includes('|') && isTableSep(next)) {
+      flushPara();
+      closeList();
+      const header = splitCells(line);
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length) {
+        const row = lines[i]!.replace(/\s+$/, '');
+        if (!row.trim() || !row.includes('|') || isTableSep(row) || /^```/.test(row) || /^(#{1,6})\s+/.test(row)) break;
+        rows.push(splitCells(row));
+        i++;
+      }
+      i--;
+      const th = header.map((c) => `<th>${inline(c)}</th>`).join('');
+      const tr = rows.map((cells) => `<tr>${cells.map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`).join('');
+      out.push(`<div class="ac-table"><table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`);
       continue;
     }
     para.push(line);

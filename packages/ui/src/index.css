@@ -477,6 +477,25 @@
     color: var(--text-2);
     margin: 0 0 var(--space-5);
   }
+  .ac-prose .ac-table {
+    overflow-x: auto;
+    margin: 0 0 var(--space-5);
+  }
+  .ac-prose .ac-table:last-child { margin-bottom: 0; }
+  .ac-prose table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+  .ac-prose th,
+  .ac-prose td {
+    border: 1px solid var(--line-1);
+    padding: var(--space-2) var(--space-4);
+    text-align: left;
+  }
+  .ac-prose th {
+    color: var(--text-strong);
+    font-weight: 600;
+  }
 }
 
 /* A utility, not a component class, so variants (focus-within:…) apply. */

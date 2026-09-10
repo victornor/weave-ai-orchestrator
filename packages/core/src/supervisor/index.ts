@@ -234,7 +234,17 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       if (running) continue;
       try {
         const r = await deps().workers.retireIfLanded({ kind: 'system', id: null }, w.id);
-        if (!r.retired) log.debug({ workerId: w.id, reason: r.reason }, 'worker kept: work has not landed');
+        if (!r.retired) {
+          log.debug({ workerId: w.id, reason: r.reason }, 'worker kept: work has not landed');
+          // VS-172: a terminal ticket's worker must not stay live even when land refuses.
+          if (w.status !== 'done') {
+            try { deps().wake.cancelForAgent(w.id, r.reason ?? 'ticket terminal, work has not landed'); }
+            catch (e) { log.warn({ workerId: w.id, err: String(e) }, 'cancelling wakes after a refused retire failed'); }
+            ctx.db.update('agents', w.id, { status: 'done', updatedAt: nowIso() });
+            ctx.db.run("UPDATE worktrees SET status = 'dirty' WHERE agent_id = ? AND status = 'active'", [w.id]);
+            ctx.events.emit('worker.status', 'agent', w.id, { status: 'done', reason: r.reason });
+          }
+        }
       } catch (e) { log.warn({ workerId: w.id, err: String(e) }, 'retire attempt failed'); }
     }
   }

@@ -240,6 +240,31 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     } catch (e) {
       log.warn({ err: e, ticketId: t.id }, 'closing open decisions for a terminal ticket failed');
     }
+    // VS-172: leave the live set in this same transition so Live cannot keep a leftover cell.
+    try { releaseWorkersForTerminal(t, actor); }
+    catch (e) { log.warn({ err: e, ticketId: t.id }, 'releasing workers for a terminal ticket failed'); }
+  }
+
+  function releaseWorkersForTerminal(t: Ticket, actor: Actor): void {
+    const workers = db.all<Agent>(
+      "SELECT * FROM agents WHERE ticket_id = ? AND kind = 'worker' AND status NOT IN ('retired','done')",
+      [t.id],
+    );
+    const reason = `${t.identifier} reached ${t.status}`;
+    for (const w of workers) {
+      try { deps().wake.cancelForAgent(w.id, reason); }
+      catch (e) { log.warn({ err: e, workerId: w.id }, 'cancelling wakes for a terminal ticket worker failed'); }
+      db.update('agents', w.id, { status: 'done', updatedAt: nowIso() });
+      db.run("UPDATE worktrees SET status = 'dirty' WHERE agent_id = ? AND status = 'active'", [w.id]);
+      ctx.events.emit('worker.status', 'agent', w.id, { status: 'done', reason });
+      const running = db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [w.id]);
+      if (running) {
+        const runId = running.id;
+        schedule(0, 'interrupt run for terminal ticket', () => deps().runs.cancel(actor, runId, 'interrupt'));
+      }
+      const workerId = w.id;
+      schedule(50, 'retire worker for terminal ticket', () => deps().workers.retireIfLanded(actor, workerId));
+    }
   }
 
   function facts(t: Ticket, input: TransitionInput): GuardFacts {

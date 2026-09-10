@@ -192,7 +192,10 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
   return (
     // `data-bar` is what the stylesheet reads to hand the bar's space back to the content above it.
     <div className="ac-app flex overflow-hidden bg-bg-0" data-bar={barHidden ? 'hidden' : 'shown'}>
-      {onGlobalPage ? <FanInStreams ids={workspaceIds} /> : null}
+      {/* Chats manages its own per-pane subscriptions (one focused pane, VS-199) — fanning in
+          every workspace here too would reopen the same one-connection-per-workspace growth
+          this page's own fix removes. */}
+      {onGlobalPage && path !== '/chats' ? <FanInStreams ids={workspaceIds} /> : null}
       {/* desktop rail — the only place all projects appear at once */}
       <aside className="hidden w-rail flex-none flex-col border-r border-line-1 bg-bg-input p-2.5 md:flex">
         {/* Self-contained block at the top of the rail: it is about the daemon, not any one

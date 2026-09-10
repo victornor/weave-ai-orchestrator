@@ -1,13 +1,16 @@
 /**
  * Serves the built web UI (`packages/ui/dist`) with an SPA fallback. Hashed assets are immutable;
- * `index.html` is never cached. When the UI has not been built, every non-API path gets a small
- * page saying so rather than a 404.
+ * `index.html` is never cached. A path under the built asset directory is content-addressed build
+ * output: a miss there 404s rather than falling back to the app shell, since that would parse as
+ * HTML where a script or stylesheet was expected. When the UI has not been built, every other path
+ * gets a small page saying so rather than a 404.
  */
 import { createReadStream, existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { join, normalize, extname, resolve } from 'node:path';
 import { Hono } from 'hono';
+import { OcError } from '@agent-conductor/shared';
 import type { AppEnv } from './types.js';
 
 const MIME: Record<string, string> = {
@@ -27,6 +30,8 @@ main{max-width:38rem;padding:2rem}code{background:#1b1f28;padding:.15em .4em;bor
 <p>The API is live at <code>/api</code>; see <a href="/api/openapi.json">/api/openapi.json</a> and <a href="/llms/api.txt">/llms/api.txt</a>.</p>
 </main></body></html>`;
 
+const ASSET_DIR = 'assets/';
+
 export function staticRoutes(uiDir: string | null | undefined): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   const root = uiDir && existsSync(uiDir) ? resolve(uiDir) : null;
@@ -34,27 +39,43 @@ export function staticRoutes(uiDir: string | null | undefined): Hono<AppEnv> {
   app.get('*', async (c) => {
     if (!root) return c.html(PLACEHOLDER, 200);
     const requested = decodeURIComponent(new URL(c.req.url).pathname);
+    const rel = relPath(root, requested);
+    if (rel !== null && rel.startsWith(ASSET_DIR)) {
+      const candidate = join(root, rel);
+      if (!(await isFile(candidate))) throw new OcError('not_found', `no built asset at /${rel}`);
+      return serveFile(candidate);
+    }
     const file = await resolveFile(root, requested);
     if (!file) return c.html(PLACEHOLDER, 200);
-    const info = await stat(file);
-    const ext = extname(file);
-    const immutable = /\/assets\//.test(file) && /[.-][0-9a-f]{8,}\./i.test(file);
-    return new Response(Readable.toWeb(createReadStream(file)) as unknown as ReadableStream, {
-      headers: {
-        'content-type': MIME[ext] ?? 'application/octet-stream',
-        'content-length': String(info.size),
-        'cache-control': ext === '.html' ? 'no-cache' : immutable ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
-      },
-    });
+    return serveFile(file);
   });
 
   return app;
 }
 
-async function resolveFile(root: string, pathname: string): Promise<string | null> {
+async function serveFile(file: string): Promise<Response> {
+  const info = await stat(file);
+  const ext = extname(file);
+  const immutable = /\/assets\//.test(file) && /[.-][0-9a-f]{8,}\./i.test(file);
+  return new Response(Readable.toWeb(createReadStream(file)) as unknown as ReadableStream, {
+    headers: {
+      'content-type': MIME[ext] ?? 'application/octet-stream',
+      'content-length': String(info.size),
+      'cache-control': ext === '.html' ? 'no-cache' : immutable ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
+    },
+  });
+}
+
+/** The requested path relative to `root`, or `null` if it would escape it. */
+function relPath(root: string, pathname: string): string | null {
   const rel = normalize(pathname).replace(/^(\.\.[/\\])+/, '').replace(/^\/+/, '');
+  return join(root, rel).startsWith(root) ? rel : null;
+}
+
+async function resolveFile(root: string, pathname: string): Promise<string | null> {
+  const rel = relPath(root, pathname);
+  if (rel === null) return null;
   const candidate = join(root, rel);
-  if (!candidate.startsWith(root)) return null;
   if (rel && (await isFile(candidate))) return candidate;
   const index = join(root, 'index.html');
   return (await isFile(index)) ? index : null;   // SPA fallback

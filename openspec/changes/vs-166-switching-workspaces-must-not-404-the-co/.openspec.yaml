@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-10
+goal: Switching workspaces must not 404 the conductor chat

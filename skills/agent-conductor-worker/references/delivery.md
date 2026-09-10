@@ -7,7 +7,7 @@ Your project has one `deliveryMode`. Your brief names it. Do not switch modes on
 1. Work on your ticket branch inside `work/`. Commit as you go, one commit per task or logical group.
 2. Run the project's tests and lint (see `work/AGENTS.md`). Green before you deliver.
 3. Push the branch: `git push -u origin <your branch>`.
-4. Open the PR: `gh pr create --base <default branch> --head <your branch> --title "<ticket id>: <title>" --body-file <file>`.
+4. Open the PR: `GH_TOKEN="$(gh auth token)" gh pr create --base <default branch> --head <your branch> --title "<ticket id>: <title>" --body-file <file>`.
    The body states what changed, how it was verified, and links the ticket: `[ACME-42](conductor://tickets/ACME-42)`.
 5. Record it: `ac_ticket_work_product(id, {type: "pull_request", url: "<PR url>", title: "<title>", state: "open"})`.
 6. `ac_ticket_transition(id, "in_review")` and `ac_report({state: "working", note: "PR open, awaiting review"})`.
@@ -34,7 +34,7 @@ While a ticket is waiting rather than merging, its turn prompt says so and gives
 4. **Resolve conflicts yourself.** Then re-run the full test and lint suite. If a resolution changes behavior the spec described, `ac_ask` before continuing, and end the turn.
 5. `git push --force-with-lease` (only ever your own ticket branch).
 6. Wait for CI when the project requires it. If CI goes red after the rebase, fix it here — that is still your job.
-7. `gh pr merge <n> --<mergeMethod>` (your brief names the method; default `squash`).
+7. `GH_TOKEN="$(gh auth token)" gh pr merge <n> --<mergeMethod>` (your brief names the method; default `squash`).
 8. `ac_ticket_merge_done(id, {mergeCommit: "<sha>", method: "<mergeMethod>"})`. The daemon verifies that the default branch carries your branch's content — a merge commit, identical trees, a squash of however many commits, or every commit picked individually all count — before accepting.
 9. Stop there. The daemon fast-forwards the primary clone, archives the OpenSpec change, removes your worktree, retires you, moves the ticket to `done` — and admits the next ticket in the project's merge queue.
 

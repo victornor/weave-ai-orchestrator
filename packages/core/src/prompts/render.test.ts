@@ -265,4 +265,18 @@ describe('prompt rendering', () => {
     expect(conductor).toContain('Reply with `ac_human_send`');
     expect(conductor).toContain('[short label](https://url)');
   });
+
+  it.runIf(existsSync(SHIPPED_TEMPLATES))('tells conductor and worker to use GH_TOKEN when gh auth status looks logged-out (VS-169)', () => {
+    h.ctx.templatesDir = SHIPPED_TEMPLATES;
+    const recipe = 'GH_TOKEN="$(gh auth token)"';
+    const conductor = renderConductorInstructions(h.ctx, h.deps);
+    expect(conductor).toContain(recipe);
+    expect(conductor).toContain('gh auth login');
+    expect(conductor).toContain('not a reason to ask Victor to authorize GitHub');
+    expect(conductor).toContain('A logged-out `gh auth status` is not a needed credential');
+    const worker0 = renderWorkerInstructions(h.ctx, h.deps, worker);
+    expect(worker0).toContain(recipe);
+    expect(worker0).toContain('gh auth login');
+    expect(worker0).toContain('Do not ask the human or the conductor to authorize GitHub');
+  });
 });

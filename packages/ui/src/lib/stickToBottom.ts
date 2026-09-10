@@ -10,6 +10,7 @@
  * one, and the viewport is held on what the human was reading while that page is inserted above.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { record } from './scrollDiagnostics';
 
 /** Within this many pixels of the bottom still counts as being at the bottom. */
 const THRESHOLD_PX = 48;
@@ -122,6 +123,7 @@ export function useStickToBottom(
         following.current = false;
         setAtBottom(false);
       }
+      record({ event: 'scroll', scrollTop: top, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, atBottom: isAtBottom(el), following: following.current, opened: opened.current });
       // The top of the loaded history. The distance from the bottom is captured before the request,
       // because by the time the page answers the heights have already changed.
       const pages = olderRef.current;
@@ -159,12 +161,14 @@ export function useStickToBottom(
     // waiting for arrives to an already-opened list — which animates in from the top instead.
     if (!ready) return;
     if (!following.current) {
+      if (el) record({ event: 'follow', scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, atBottom: isAtBottom(el), following: false, opened: opened.current });
       setUnread(true);
       return;
     }
     // Opening is a jump; everything after it is the list following content the human watched arrive.
     const opening = !opened.current;
     opened.current = true;
+    if (el) record({ event: 'follow', scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, atBottom: isAtBottom(el), following: true, opened: opened.current });
     scrollToBottom(opening);
   });
 
@@ -177,6 +181,7 @@ export function useStickToBottom(
   useEffect(() => {
     if (!el || !follow) return;
     const pin = (): void => {
+      record({ event: 'pin', scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, atBottom: isAtBottom(el), following: following.current, opened: opened.current });
       if (!opened.current || !following.current) return;
       scrollToBottom(true);
     };

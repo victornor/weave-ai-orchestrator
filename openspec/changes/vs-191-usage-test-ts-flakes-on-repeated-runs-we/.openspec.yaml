@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-10
+goal: Make packages/core/src/usage/usage.test.ts deterministic across repeated runs
+skip_specs: true

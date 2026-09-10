@@ -1,12 +1,12 @@
 import type {
   AccountDescription, AccountProbeInput, AgentHome, CredentialFacts, CredentialProbeInput,
-  InputDelivery, InstructionBundle, JsonSchema, RuntimeAdapter, RuntimeCapabilities,
+  InstructionBundle, JsonSchema, RuntimeAdapter, RuntimeCapabilities,
   RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@agent-conductor/runtime-sdk';
 import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
 import { describeCursorAccount } from './account.js';
-import { buildArgs, userFrame } from './args.js';
+import { buildArgs } from './args.js';
 import { readCredential } from './credential.js';
 import { createCursorParser } from './events.js';
 import { asCursorSession } from './session.js';
@@ -14,7 +14,7 @@ import { asCursorSession } from './session.js';
 export const capabilities: RuntimeCapabilities = {
   resumableSessions: true,
   forkSessions: false,
-  streamingInput: true,
+  streamingInput: false,
   systemPromptInjection: 'file_only',
   structuredOutput: false,
   mcp: true,
@@ -25,9 +25,12 @@ export const capabilities: RuntimeCapabilities = {
 
 const MODELS: RuntimeModel[] = [
   { id: 'auto', label: 'Auto', provider: 'cursor', source: 'static', tier: 'balanced' },
+  { id: 'grok-4-6', label: 'Grok 4.6', provider: 'xai', source: 'static', tier: 'frontier' },
+  { id: 'opus-5', label: 'Opus 5', provider: 'anthropic', source: 'static', tier: 'frontier' },
+  { id: 'composer-5-6', label: 'Composer 5.6', provider: 'cursor', source: 'static', tier: 'balanced' },
+  { id: 'fable-5-1', label: 'Fable 5.1', provider: 'anthropic', source: 'static', tier: 'frontier' },
   { id: 'gpt-5', label: 'GPT-5', provider: 'openai', source: 'static', tier: 'frontier' },
   { id: 'sonnet-4-thinking', label: 'Sonnet 4 Thinking', provider: 'anthropic', source: 'static', tier: 'frontier' },
-  { id: 'composer-2-5', label: 'Composer 2.5', provider: 'cursor', source: 'static', tier: 'balanced' },
 ];
 
 const CONFIG_SCHEMA: JsonSchema = {
@@ -79,28 +82,19 @@ export const adapter: RuntimeAdapter = {
       cwd: input.cwd,
       env: launch.env,
       stdin: built.stdin,
-      stdinMode: built.liveInput ? 'open' : 'close',
+      stdinMode: 'close',
       timeoutMs: input.limits.timeoutMs,
       onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
       onLine: (stream, line) => {
         sink.onRaw(stream, line);
         if (stream === 'stdout') {
           for (const ev of parser.handle(line)) sink.onEvent({ ...ev, seq: seq++ });
-          if (built.liveInput && parser.state.resultSeen) run.endStdin();
         }
       },
     });
     onHandle?.({
       pid: run.child.pid ?? null,
       cancel: (mode) => run.cancel(mode),
-      ...(built.liveInput
-        ? {
-          send: async (text: string): Promise<InputDelivery> => {
-            if (parser.state.resultSeen) return 'closed';
-            return run.write(userFrame(text)) ? 'delivered' : 'closed';
-          },
-        }
-        : {}),
     });
 
     const outcome = await run.done;

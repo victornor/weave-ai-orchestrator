@@ -9,14 +9,14 @@ const tmp = (p: string) => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
 describe('cursor adapter', () => {
-  it('declares cursor-agent conventions and live stdin', () => {
+  it('declares cursor-agent conventions without live stdin', () => {
     expect(adapter.id).toBe('cursor');
     expect(adapter.displayName).toBe('Cursor CLI');
     expect(adapter.skillsDir()).toBe('.cursor/skills');
     expect(adapter.instructionFiles()).toEqual(['AGENTS.md']);
     expect(adapter.forkSession).toBeUndefined();
     expect(adapter.capabilities).toMatchObject({
-      resumableSessions: true, forkSessions: false, streamingInput: true,
+      resumableSessions: true, forkSessions: false, streamingInput: false,
       systemPromptInjection: 'file_only', structuredOutput: false, mcp: true,
       usageReporting: 'none', costReporting: false,
     });
@@ -25,7 +25,9 @@ describe('cursor adapter', () => {
   it('lists static models without spawning', async () => {
     const models = await adapter.listModels();
     expect(models.every((m) => m.source === 'static')).toBe(true);
-    expect(models.map((m) => m.id)).toContain('auto');
+    expect(models.map((m) => m.id)).toEqual([
+      'auto', 'grok-4-6', 'opus-5', 'composer-5-6', 'fable-5-1', 'gpt-5', 'sonnet-4-thinking',
+    ]);
   });
 
   it('installs AGENTS.md, a CLAUDE.md pointer, and skills', async () => {

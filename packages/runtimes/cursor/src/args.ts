@@ -16,7 +16,12 @@ export interface CursorBuiltCommand extends BuiltCommand {
 
 function str(v: unknown): string | null { return typeof v === 'string' && v.length > 0 ? v : null; }
 
-/** Claude's stdin frame shape (VS-99 / ADR 0012). Live cursor turns use the same wire. */
+function namedModel(input: TurnInput): string | null {
+  const model = str(input.model) ?? str(input.options?.['model']);
+  if (!model || model.toLowerCase() === 'auto') return null;
+  return model;
+}
+
 export function userFrame(text: string): string {
   return `${JSON.stringify({ type: 'user', message: { role: 'user', content: text } })}\n`;
 }
@@ -49,7 +54,6 @@ function pushExtra(args: string[], extra: unknown): void {
 
 /** Pure: TurnInput -> the exact `cursor-agent` invocation. */
 export function buildArgs(input: TurnInput): CursorBuiltCommand {
-  const liveInput = input.options?.['liveInput'] !== false;
   const args: string[] = ['-p', '--output-format', 'stream-json', '--trust'];
 
   const prev = asCursorSession(input.session.ref);
@@ -62,7 +66,7 @@ export function buildArgs(input: TurnInput): CursorBuiltCommand {
     args.push(input.permission.mode === 'bypass' ? '--yolo' : '--force');
   }
 
-  const model = str(input.model) ?? str(input.options?.['model']);
+  const model = namedModel(input);
   if (model) args.push('--model', model);
 
   const files: Array<{ path: string; content: string }> = [];
@@ -78,9 +82,7 @@ export function buildArgs(input: TurnInput): CursorBuiltCommand {
   if (input.configHome) env['CURSOR_CONFIG_DIR'] = input.configHome;
 
   let stdin: string | null = null;
-  if (liveInput) {
-    stdin = userFrame(input.prompt);
-  } else if (input.prompt.length > MAX_ARGV_PROMPT) {
+  if (input.prompt.length > MAX_ARGV_PROMPT) {
     stdin = input.prompt;
   } else {
     args.push('--', input.prompt);
@@ -94,6 +96,6 @@ export function buildArgs(input: TurnInput): CursorBuiltCommand {
     files,
     sessionId: prev?.sessionId ?? null,
     resumed: Boolean(prev),
-    liveInput,
+    liveInput: false,
   };
 }

@@ -35,6 +35,20 @@ export interface VoxtypeProbeOptions {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+const ANSI_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\))/g;
+const DIAGNOSTIC_LINE =
+  /^(?:Loading audio file:|Audio format:|Processing\b.*\bsamples\b|(?:INFO|WARN(?:ING)?|DEBUG|ERROR|TRACE)\b|Transcription completed\b)/i;
+
+export function extractVoxtypeTranscript(raw: string): string {
+  const cleaned = raw.replace(ANSI_RE, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const kept: string[] = [];
+  for (const line of cleaned.split('\n')) {
+    if (DIAGNOSTIC_LINE.test(line.trim())) continue;
+    kept.push(line);
+  }
+  return kept.join('\n').trim();
+}
+
 export function parseVoxtypeModelsJson(raw: string): VoxtypeModel[] {
   let parsed: unknown;
   try {
@@ -95,7 +109,7 @@ export function createVoxtypeProbe(opts: VoxtypeProbeOptions = {}): VoxtypeProbe
           log.warn({ code: r.code, err: r.stderr.slice(0, 500) }, 'voxtype transcribe failed');
           throw new OcError('internal', `voxtype transcribe exited with ${r.code}`, { stderr: r.stderr.slice(0, 500) });
         }
-        return r.stdout.trim();
+        return extractVoxtypeTranscript(r.stdout);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

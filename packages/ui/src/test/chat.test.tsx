@@ -216,7 +216,18 @@ beforeEach(() => {
   try { sessionStorage.clear(); } catch { /* no store in this environment */ }
   clearHiddenCache();
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
-  window.HTMLElement.prototype.scrollIntoView = vi.fn();
+  // A real `scrollIntoView({block: 'end'})` on the bottom sentinel lands the list's scrolling
+  // ancestor at its true bottom, whatever that is *at call time* — so a stale call (issued before a
+  // late height change) leaves it short, and a later call (the geometry re-pin correcting it) lands
+  // it right. A bare `vi.fn()` here could never tell those apart: every test that only checked
+  // `scrolls()` (a call count) would pass either way. This mock actually moves the fake scroll
+  // container's position, so tests can assert where the list ends up, not just that it was asked to
+  // move (VS-197).
+  window.HTMLElement.prototype.scrollIntoView = vi.fn(function (this: HTMLElement) {
+    const list = this.closest<HTMLElement>('.ac-scroll');
+    if (!list) return;
+    list.scrollTop = list.scrollHeight - list.clientHeight;
+  });
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -1540,6 +1551,18 @@ describe('ChatRoute follow the bottom', () => {
     };
   }
 
+  // Like `scrollable`, but `scrollHeight` can grow after the fact — a message's own late layout
+  // (an image finishing its load, a code block finishing highlighting, a markdown table reflowing)
+  // or several messages landing in a burst, faster than one follow scroll settles.
+  function growable(el: HTMLElement): { setHeight: (h: number) => void } {
+    let height = HEIGHT;
+    let top = 0;
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => height });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => CLIENT });
+    Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = v; } });
+    return { setHeight: (h: number) => { height = h; } };
+  }
+
   const list = (c: HTMLElement): HTMLElement => c.querySelector('.ac-scroll') as HTMLElement;
   const scrolls = (): number =>
     (window.HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
@@ -1621,6 +1644,41 @@ describe('ChatRoute follow the bottom', () => {
     state.messages = [message({ id: 'm1', body: 'Filed it.' })];
     rerender(<ChatRoute />);
     expect(scrolls()).toBe(before + 1);
+  });
+
+  // VS-197: this investigation could not reproduce the reported bug in real headless Chromium (see
+  // design.md — Context), but these two conditions are exactly what it drove deliberately there, and
+  // they were uncovered by every prior test here since `scrollIntoView` used to be a no-op — these
+  // assert the true end position, not merely that a scroll was attempted.
+  it('corrects to the true bottom when a message grows after the follow already scrolled to it', () => {
+    const { container, rerender } = render(<ChatRoute />);
+    const { setHeight } = growable(list(container));
+
+    state.messages = [message({ id: 'm1', body: 'Filed it.' })];
+    rerender(<ChatRoute />);
+    expect(list(container).scrollTop).toBe(HEIGHT - CLIENT);
+
+    // The message's own rendered height grows after the follow already scrolled to it — an image
+    // finishing its load, a code block finishing highlighting, a markdown table reflowing.
+    setHeight(HEIGHT + 300);
+    act(() => resizeObserved());
+
+    expect(list(container).scrollTop).toBe(HEIGHT + 300 - CLIENT);
+    expect(button()).not.toBeInTheDocument();
+  });
+
+  it('ends at the true bottom after several messages land in a burst faster than one scroll settles', () => {
+    const { container, rerender } = render(<ChatRoute />);
+    const { setHeight } = growable(list(container));
+
+    for (let i = 0; i < 5; i++) {
+      state.messages = [...state.messages, message({ id: `m${i}`, body: `msg ${i}` })];
+      setHeight(HEIGHT + i * 150);
+      rerender(<ChatRoute />);
+    }
+
+    expect(list(container).scrollTop).toBe(HEIGHT + 4 * 150 - CLIENT);
+    expect(button()).not.toBeInTheDocument();
   });
 });
 
@@ -1983,8 +2041,10 @@ describe('ChatRoute reading position', () => {
   it('leaves a chat that was at its newest message to the follow', () => {
     writeChatScroll('ws1', 980, true);
     const { container } = render(<ChatRoute />);
-    // Nothing was recorded for a chat left at the bottom, so nothing is put back by hand.
-    expect(list(container).scrollTop).toBe(0);
+    // Nothing was recorded for a chat left at the bottom, so nothing is put back by hand — the
+    // list ends at its true bottom because the follow's own opening jump put it there, not because
+    // a restore did.
+    expect(list(container).scrollTop).toBe(HEIGHT - CLIENT);
     expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
   });
 
@@ -2025,9 +2085,14 @@ describe('ChatRoute reading position', () => {
   it('keeps nothing from the follow’s own scrolling', () => {
     const { container, unmount } = render(<ChatRoute />);
     const el = list(container);
-    // A frame of the opening jump or of a follow in flight: the list moved itself, downwards, and
-    // stopped short of the bottom. That is not somewhere the human chose to be.
-    el.scrollTop = 900;
+    // The opening jump already put the list at its (then) true bottom. Give it more room below
+    // that — as new, taller content would — and fire two downward frames of a later follow
+    // scroll still in flight, neither reaching the new bottom. That is the list moving itself, not
+    // something the human chose.
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => HEIGHT + 400 });
+    el.scrollTop = HEIGHT - CLIENT + 100;
+    fireEvent.scroll(el);
+    el.scrollTop = HEIGHT - CLIENT + 300;
     fireEvent.scroll(el);
     unmount();
 

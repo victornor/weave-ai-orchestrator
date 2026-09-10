@@ -342,9 +342,18 @@ export function usePatchConfig(): UseMutationResult<unknown, Error, Record<strin
 
 /* ----------------------------------------------------------------- roles */
 
-export function useRoles(project?: string): UseQueryResult<Role[]> {
-  const ws = useWs();
-  return useQuery({ queryKey: [...qk.roles(ws), project ?? ''], queryFn: () => api.ws<Role[]>(ws, `/roles${qs({ project })}`) });
+export function useRoles(project?: string, wsOverride?: string): UseQueryResult<Role[]> {
+  const ws = useHookWs(wsOverride);
+  return useQuery({ queryKey: [...qk.roles(ws), project ?? ''], queryFn: () => api.ws<Role[]>(ws, `/roles${qs({ project })}`), enabled: Boolean(ws) });
+}
+
+export function useRolesMany(ids: readonly string[]): UseQueryResult<Role[]>[] {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: [...qk.roles(id), ''],
+      queryFn: () => api.ws<Role[]>(id, '/roles'),
+    })),
+  });
 }
 
 export function useRole(id: string): UseQueryResult<T.RoleDetail> {
@@ -467,9 +476,18 @@ export function useStartSession(): UseMutationResult<Agent, Error, { ticketId: s
   });
 }
 
-export function useConductor(): UseQueryResult<T.WorkerDetail> {
-  const ws = useWs();
-  return useQuery({ queryKey: qk.conductor(ws), queryFn: () => api.ws<unknown>(ws, '/conductor').then(workerDetail) });
+export function useConductor(wsOverride?: string): UseQueryResult<T.WorkerDetail> {
+  const ws = useHookWs(wsOverride);
+  return useQuery({ queryKey: qk.conductor(ws), queryFn: () => api.ws<unknown>(ws, '/conductor').then(workerDetail), enabled: Boolean(ws) });
+}
+
+export function useConductorMany(ids: readonly string[]): UseQueryResult<T.WorkerDetail>[] {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: qk.conductor(id),
+      queryFn: () => api.ws<unknown>(id, '/conductor').then(workerDetail),
+    })),
+  });
 }
 
 /** The workspace's two model settings: the whole of model selection (VS-77). */
@@ -881,9 +899,22 @@ export function useRunTraces({ ids, agent, since }: { ids: readonly string[]; ag
 
 /* ------------------------------------------------------- knowledge/specs */
 
-export function useKnowledgeIndex(): UseQueryResult<T.KnowledgeIndex> {
-  const ws = useWs();
-  return useQuery({ queryKey: qk.knowledge(ws), queryFn: () => api.ws<unknown>(ws, '/knowledge').then((r) => (Array.isArray(r) ? { files: r as T.KnowledgeIndex['files'], warnings: [] } : (r as T.KnowledgeIndex))) });
+function knowledgeIndexOf(r: unknown): T.KnowledgeIndex {
+  return Array.isArray(r) ? { files: r as T.KnowledgeIndex['files'], warnings: [] } : (r as T.KnowledgeIndex);
+}
+
+export function useKnowledgeIndex(wsOverride?: string): UseQueryResult<T.KnowledgeIndex> {
+  const ws = useHookWs(wsOverride);
+  return useQuery({ queryKey: qk.knowledge(ws), queryFn: () => api.ws<unknown>(ws, '/knowledge').then(knowledgeIndexOf), enabled: Boolean(ws) });
+}
+
+export function useKnowledgeIndexMany(ids: readonly string[]): UseQueryResult<T.KnowledgeIndex>[] {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: qk.knowledge(id),
+      queryFn: () => api.ws<unknown>(id, '/knowledge').then(knowledgeIndexOf),
+    })),
+  });
 }
 
 export function useKnowledgeDocs(project?: string): UseQueryResult<T.KnowledgeDocSummary[]> {

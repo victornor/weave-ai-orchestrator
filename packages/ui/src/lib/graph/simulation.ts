@@ -51,9 +51,24 @@ export const WARM_ALPHA = 0.3;
 /** Ticks a synchronous settle runs. Enough for alpha to decay from 1 to d3's resting minimum. */
 export const SETTLE_TICKS = 320;
 
-/** A node's drawn size: hubs read as landmarks, and everything grows with its number of links. */
-export function nodeRadius(node: Pick<GraphNode, 'kind' | 'degree'>): number {
-  return node.kind === 'hub' ? 11 + Math.min(9, node.degree * 0.9) : 6 + Math.min(8, node.degree * 0.8);
+const CHIP_H_DOC = 24;
+const CHIP_H_HUB = 28;
+const CHIP_PAD_X = 20;
+const CHIP_CHAR_W = 6.5;
+const CHIP_ACCENT = 3;
+
+/** Labeled-chip dimensions in graph units. Width follows a truncated title; hubs are taller. */
+export function chipSize(node: Pick<GraphNode, 'kind' | 'degree' | 'title'>): { width: number; height: number } {
+  const height = node.kind === 'hub' ? CHIP_H_HUB : CHIP_H_DOC;
+  const chars = Math.min(26, Math.max(8, node.title.length));
+  const grow = Math.min(20, node.degree * 2);
+  return { width: CHIP_PAD_X + CHIP_ACCENT + chars * CHIP_CHAR_W + grow, height };
+}
+
+/** Collide radius that covers the chip, so neighbouring labels do not overlap. */
+export function nodeRadius(node: Pick<GraphNode, 'kind' | 'degree' | 'title'>): number {
+  const { width, height } = chipSize(node);
+  return Math.max(width, height) / 2;
 }
 
 /** A stable pseudo-random angle for a node, so a layout never depends on `Math.random`. */
@@ -199,13 +214,13 @@ export function createSimulation(model: GraphModel, size: Size, options: Simulat
 
   const sim: Simulation<SimNode, SimLink> = forceSimulation<SimNode, SimLink>(nodes)
     .force('link', forceLink<SimNode, SimLink>(links).id((d) => d.id).distance(linkDistance).strength(0.5))
-    .force('charge', forceManyBody<SimNode>().strength(-240).distanceMax(600))
-    .force('collide', forceCollide<SimNode>((d) => d.radius + 8).iterations(2))
+    .force('charge', forceManyBody<SimNode>().strength(-420).distanceMax(800))
+    .force('collide', forceCollide<SimNode>((d) => d.radius + 16).iterations(2))
     // A pull towards the centre rather than `forceCenter`, which recentres the whole mean each tick
     // and so drags every node whenever one of them is pinned.
     .force('x', forceX<SimNode>(centre.x).strength(0.02))
     .force('y', forceY<SimNode>(centre.y).strength(0.02))
-    .force('cluster', clusterForce(0.2))
+    .force('cluster', clusterForce(0.08))
     .on('tick', emit)
     .on('end', () => {
       running = false;
@@ -340,7 +355,7 @@ export function createSimulation(model: GraphModel, size: Size, options: Simulat
 function linkDistance(link: SimLink): number {
   const s = typeof link.source === 'object' ? link.source.radius : 8;
   const t = typeof link.target === 'object' ? link.target.radius : 8;
-  return 54 + s + t;
+  return 120 + s + t;
 }
 
 function linksFor(model: GraphModel, nodes: readonly SimNode[]): SimLink[] {

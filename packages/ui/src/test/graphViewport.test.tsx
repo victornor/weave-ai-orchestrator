@@ -3,6 +3,8 @@ import {
   boundsOf,
   centreOn,
   clampZoom,
+  DEFAULT_ZOOM,
+  defaultView,
   fitTo,
   labelDetail,
   LABEL_FULL_ZOOM,
@@ -101,6 +103,24 @@ describe('fitTo', () => {
     const t = fitTo({ minX: 5, minY: 5, maxX: 5, maxY: 5 }, SIZE, 40);
     expect(t.k).toBeLessThanOrEqual(MAX_ZOOM);
     expect(t.k).toBeGreaterThanOrEqual(MIN_ZOOM);
+  });
+});
+
+describe('defaultView', () => {
+  it('floors zoom at DEFAULT_ZOOM for a graph larger than the frame', () => {
+    const t = defaultView({ minX: 0, minY: 0, maxX: 4000, maxY: 3000 }, SIZE, 40);
+    expect(t.k).toBe(DEFAULT_ZOOM);
+    expect(2000 * t.k + t.x).toBeCloseTo(SIZE.width / 2, 8);
+    expect(1500 * t.k + t.y).toBeCloseTo(SIZE.height / 2, 8);
+  });
+
+  it('keeps the higher fitted zoom when the graph already fits', () => {
+    const bounds = { minX: 0, minY: 0, maxX: 100, maxY: 80 };
+    const fitted = fitTo(bounds, SIZE, 40);
+    const t = defaultView(bounds, SIZE, 40);
+    expect(fitted.k).toBeGreaterThan(DEFAULT_ZOOM);
+    expect(t.k).toBe(fitted.k);
+    expect(50 * t.k + t.x).toBeCloseTo(SIZE.width / 2, 8);
   });
 });
 

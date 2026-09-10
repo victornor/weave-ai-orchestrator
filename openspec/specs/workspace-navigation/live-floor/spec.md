@@ -153,9 +153,15 @@ edge or corner) that makes that cell larger or smaller. The grid SHALL reflow ar
 every remaining cell stays on screen and usable: growing one cell SHALL NOT overlay its neighbours
 and SHALL NOT leave an unusable hole the human cannot recover from.
 
-A cell that has never been resized SHALL occupy the same equal slot the Live page already uses. A
-handle that is pressed and released without moving SHALL change nothing. Resetting a cell (the
-handle's reset action) SHALL return it to that equal slot.
+The size space SHALL be fine enough that dragging reads as continuous resizing rather than snapping
+between a handful of discrete sizes. At desktop (`xl`) width the grid SHALL offer at least twelve
+distinct widths; at the intermediate (`sm`) breakpoint it SHALL offer at least eight. Height SHALL
+offer at least eight distinct sizes, not two.
+
+A cell that has never been resized SHALL occupy the same equal slot the Live page already uses,
+whatever the chosen width and height granularity. A handle that is pressed and released without
+moving SHALL change nothing. Resetting a cell (the handle's reset action) SHALL return it to that
+equal slot.
 
 The chosen size SHALL last for the rest of the tab session, including a reload of the Live page in
 the same tab. It SHALL NOT be required to survive closing the tab, switching devices, or a worker
@@ -178,6 +184,17 @@ resume, cancel or hide the worker.
 - **WHEN** a cell has been made larger than the equal slot and the human drags its handle to shrink it
 - **THEN** that cell occupies less of the grid, down to no smaller than the equal slot, and the
   neighbours reflow into the space it freed
+
+#### Scenario: Width steps read as continuous at desktop width
+
+- **WHEN** the Live page is shown at desktop (`xl`) width and the human drags a cell's handle
+  across the full width available to it
+- **THEN** the cell can land on at least twelve distinct widths on the way, not three
+
+#### Scenario: Height has a comparable range to width
+
+- **WHEN** the human drags a cell's handle across the full height available to it
+- **THEN** the cell can land on at least eight distinct heights on the way, not two
 
 #### Scenario: A press without a move changes nothing
 

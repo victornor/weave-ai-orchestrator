@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnInput } from '@agent-conductor/runtime-sdk';
-import { buildArgs, MAX_ARGV_PROMPT, userFrame } from '../src/args.js';
+import { buildArgs, MAX_ARGV_PROMPT } from '../src/args.js';
 
 function input(over: Partial<TurnInput> = {}): TurnInput {
   return {
@@ -14,23 +14,30 @@ function input(over: Partial<TurnInput> = {}): TurnInput {
 }
 const s = (a: string[]) => a.join(' ');
 
-describe('cursor buildArgs — live input (default)', () => {
-  it('builds print-mode stream-json with the prompt as the first user frame', () => {
+describe('cursor buildArgs — argv print mode', () => {
+  it('builds print-mode stream-json with the prompt after --', () => {
     const b = buildArgs(input());
     expect(b.cmd).toBe('cursor-agent');
     expect(s(b.args)).toContain('-p --output-format stream-json --trust');
     expect(s(b.args)).toContain('--force');
     expect(s(b.args)).toContain('--sandbox disabled');
-    expect(b.args).not.toContain('do the thing');
-    expect(b.stdin).toBe(userFrame('do the thing'));
-    expect(JSON.parse(b.stdin!.trimEnd())).toEqual({ type: 'user', message: { role: 'user', content: 'do the thing' } });
-    expect(b.liveInput).toBe(true);
+    expect(b.args.slice(-2)).toEqual(['--', 'do the thing']);
+    expect(b.stdin).toBeNull();
+    expect(b.liveInput).toBe(false);
     expect(b.resumed).toBe(false);
   });
 
-  it('does not prefix the frame with & and never passes acp, worker, --continue or --worktree', () => {
+  it('ignores liveInput and never writes an NDJSON user frame', () => {
+    const b = buildArgs(input({ options: { liveInput: true } }));
+    expect(b.liveInput).toBe(false);
+    expect(b.args.slice(-2)).toEqual(['--', 'do the thing']);
+    expect(b.stdin).toBeNull();
+  });
+
+  it('does not prefix the prompt with & and never passes acp, worker, --continue or --worktree', () => {
     const b = buildArgs(input());
-    expect(b.stdin!.startsWith('&')).toBe(false);
+    expect(b.args.at(-1)).toBe('do the thing');
+    expect(b.args.at(-1)!.startsWith('&')).toBe(false);
     expect(b.args).not.toContain('acp');
     expect(b.args).not.toContain('worker');
     expect(b.args).not.toContain('--continue');
@@ -91,25 +98,28 @@ describe('cursor buildArgs — live input (default)', () => {
     expect(b.args).not.toContain('worker');
   });
 
-  it('sets CURSOR_CONFIG_DIR and forwards --model', () => {
+  it('sets CURSOR_CONFIG_DIR and omits --model for auto', () => {
     const b = buildArgs(input({ model: 'auto', configHome: '/ws/.agent-conductor/runtimes/cursor' }));
-    expect(s(b.args)).toContain('--model auto');
+    expect(b.args).not.toContain('--model');
     expect(b.env['CURSOR_CONFIG_DIR']).toBe('/ws/.agent-conductor/runtimes/cursor');
   });
-});
 
-describe('cursor buildArgs — liveInput: false', () => {
-  it('puts a short prompt after -- and closes the live channel', () => {
-    const b = buildArgs(input({ options: { liveInput: false } }));
-    expect(b.liveInput).toBe(false);
-    expect(b.args.slice(-2)).toEqual(['--', 'do the thing']);
-    expect(b.stdin).toBeNull();
+  it('omits --model when unset or empty', () => {
+    expect(buildArgs(input()).args).not.toContain('--model');
+    expect(buildArgs(input({ model: '' })).args).not.toContain('--model');
+    expect(buildArgs(input({ model: 'AUTO' })).args).not.toContain('--model');
+  });
+
+  it('forwards a named model as --model', () => {
+    expect(s(buildArgs(input({ model: 'opus-5' })).args)).toContain('--model opus-5');
+    expect(s(buildArgs(input({ model: 'grok-4-6' })).args)).toContain('--model grok-4-6');
   });
 
   it('moves an oversized prompt to stdin as plain text', () => {
     const big = 'x'.repeat(MAX_ARGV_PROMPT + 1);
-    const b = buildArgs(input({ prompt: big, options: { liveInput: false } }));
+    const b = buildArgs(input({ prompt: big }));
     expect(b.stdin).toBe(big);
     expect(b.args).not.toContain(big);
+    expect(b.liveInput).toBe(false);
   });
 });

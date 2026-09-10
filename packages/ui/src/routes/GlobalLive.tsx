@@ -97,9 +97,9 @@ export function GlobalLiveRoute(): React.ReactElement {
       <PageHeader title="Live" meta={loaded ? (n === 1 ? '1 working' : `${n} working`) : undefined} />
       <PageBody className="p-4 md:p-5">
         {!workspaces.data ? (
-          <SkeletonCards count={4} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" />
+          <SkeletonCards count={4} className="grid gap-3 sm:grid-cols-8 xl:grid-cols-12" />
         ) : !loaded ? (
-          <SkeletonCards count={4} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" />
+          <SkeletonCards count={4} className="grid gap-3 sm:grid-cols-8 xl:grid-cols-12" />
         ) : n === 0 && failed.length === 0 ? (
           <EmptyState title="Nobody is working." detail="Live workers on a ticket across every workspace show up here." />
         ) : (
@@ -113,7 +113,7 @@ export function GlobalLiveRoute(): React.ReactElement {
               />
             ))}
             {n > 0 ? (
-              <div className="grid grid-flow-dense gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-flow-dense gap-3 sm:grid-cols-8 xl:grid-cols-12">
                 {cells.map((c) => (
                   <LiveCell
                     key={c.agent.id}

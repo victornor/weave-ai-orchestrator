@@ -1,6 +1,9 @@
 /**
  * VS-152: the Live page is a grid of currently-working workers, each streaming its run.
  * VS-164: cells drag-resize on desktop and expand by tap on the phone.
+ * VS-206: spans are fine `gridColumn`/`gridRow` inline style, not `col-span-N` classes; a cell's
+ * `--ac-cell-rows` custom property (its row span normalized to GRANULARITY units) drives the
+ * transcript's proportional max-height instead of a class name carrying the fraction.
  */
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -117,6 +120,18 @@ function layout(el: HTMLElement, width = 200, height = 150): void {
 
 function cellOf(name: string): HTMLElement {
   return screen.getByText(name).closest('article') as HTMLElement;
+}
+
+const DEFAULT_COLS = 4;
+const DEFAULT_ROWS = 4;
+const ROWS_MAX = 8;
+
+function colSpan(el: HTMLElement): number {
+  return Number(el.style.gridColumn.replace('span ', ''));
+}
+
+function rowSpan(el: HTMLElement): number {
+  return Number(el.style.gridRow.replace('span ', ''));
 }
 
 const stored = (): string | null => sessionStorage.getItem('conductor.live.cellSizes.ws1');
@@ -255,23 +270,26 @@ describe('Live page desktop resize', () => {
     render(<LiveRoute />);
     const cell = cellOf('Frontend Engineer #7');
     const other = cellOf('Backend Engineer #1');
+    expect(colSpan(cell)).toBe(DEFAULT_COLS);
     layout(cell);
     const handle = screen.getByLabelText('Resize Frontend Engineer #7');
     expect(handle).toHaveClass('touch-none');
 
+    // unitW = 200/4 = 50; dx=100 crosses two tracks: 4 -> 6.
     fireEvent.pointerDown(handle, { pointerId: 1, clientX: 200, clientY: 150 });
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 400, clientY: 150 });
-    expect(cell).toHaveClass('col-span-2');
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 300, clientY: 150 });
+    expect(colSpan(cell)).toBe(6);
     expect(other).toBeInTheDocument();
 
     fireEvent.pointerUp(window, { pointerId: 1 });
     expect(stored()).toContain('"a1"');
 
+    // unitW = 200/6 ≈ 33.3; dx=-67 crosses back two tracks: 6 -> 4 (the equal slot).
     layout(cell);
     fireEvent.pointerDown(handle, { pointerId: 1, clientX: 200, clientY: 150 });
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 0, clientY: 150 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 133, clientY: 150 });
     fireEvent.pointerUp(window, { pointerId: 1 });
-    expect(cell).not.toHaveClass('col-span-2');
+    expect(colSpan(cell)).toBe(DEFAULT_COLS);
   });
 
   it('writes nothing when the handle is pressed and released without moving', () => {
@@ -281,7 +299,7 @@ describe('Live page desktop resize', () => {
     const handle = screen.getByLabelText('Resize Frontend Engineer #7');
     fireEvent.pointerDown(handle, { pointerId: 1, clientX: 200, clientY: 150 });
     fireEvent.pointerUp(window, { pointerId: 1 });
-    expect(cellOf('Frontend Engineer #7')).not.toHaveClass('col-span-2');
+    expect(colSpan(cellOf('Frontend Engineer #7'))).toBe(DEFAULT_COLS);
     expect(stored()).toBeNull();
   });
 
@@ -292,19 +310,19 @@ describe('Live page desktop resize', () => {
     layout(cell);
     const handle = screen.getByLabelText('Resize Frontend Engineer #7');
     fireEvent.pointerDown(handle, { pointerId: 1, clientX: 200, clientY: 150 });
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 400, clientY: 150 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 300, clientY: 150 });
     fireEvent.pointerUp(window, { pointerId: 1 });
-    expect(cell).toHaveClass('col-span-2');
+    expect(colSpan(cell)).toBe(6);
     fireEvent.doubleClick(handle);
-    expect(cell).not.toHaveClass('col-span-2');
+    expect(colSpan(cell)).toBe(DEFAULT_COLS);
   });
 
   it('restores the chosen size after a reload in the same session', () => {
-    sessionStorage.setItem('conductor.live.cellSizes.ws1', JSON.stringify({ a1: { cols: 2, rows: 1 } }));
+    sessionStorage.setItem('conductor.live.cellSizes.ws1', JSON.stringify({ a1: { cols: 6, rows: 3 } }));
     twoWorkers();
     render(<LiveRoute />);
-    expect(cellOf('Frontend Engineer #7')).toHaveClass('col-span-2');
-    expect(cellOf('Backend Engineer #1')).not.toHaveClass('col-span-2');
+    expect(colSpan(cellOf('Frontend Engineer #7'))).toBe(6);
+    expect(colSpan(cellOf('Backend Engineer #1'))).toBe(DEFAULT_COLS);
   });
 
   it('offers no handle on empty or loading', () => {
@@ -322,18 +340,19 @@ describe('Live page phone expand', () => {
     render(<LiveRoute />);
     expect(screen.queryByLabelText(/Resize/)).not.toBeInTheDocument();
     const expand = screen.getAllByRole('button', { name: 'Expand' })[0]!;
-    const log = screen.getByLabelText('Transcript of Frontend Engineer #7');
-    expect(log.className).toContain('0.25');
+    const cell = cellOf('Frontend Engineer #7');
+    expect(rowSpan(cell)).toBe(DEFAULT_ROWS);
+    expect(cell.style.getPropertyValue('--ac-cell-rows')).toBe('1');
+    expect(screen.getByLabelText('Transcript of Frontend Engineer #7')).toHaveClass('ac-live-transcript');
 
     fireEvent.click(expand);
-    expect(cellOf('Frontend Engineer #7')).toHaveClass('row-span-2');
-    expect(screen.getByLabelText('Transcript of Frontend Engineer #7').className).not.toContain('0.25');
-    expect(screen.getByLabelText('Transcript of Frontend Engineer #7').className).toContain('0.5');
+    expect(rowSpan(cell)).toBe(ROWS_MAX);
+    expect(cell.style.getPropertyValue('--ac-cell-rows')).toBe('2');
     expect(cellOf('Backend Engineer #1')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
-    expect(cellOf('Frontend Engineer #7')).not.toHaveClass('row-span-2');
-    expect(screen.getByLabelText('Transcript of Frontend Engineer #7').className).toContain('0.25');
+    expect(rowSpan(cell)).toBe(DEFAULT_ROWS);
+    expect(cell.style.getPropertyValue('--ac-cell-rows')).toBe('1');
   });
 
   it('offers neither expand nor drag on empty or loading', () => {

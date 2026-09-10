@@ -4,6 +4,8 @@
  * board uses, listed as workers. No steer/attach/resume from a cell; the ticket is the way in.
  *
  * VS-164: desktop cells drag-resize by CSS-grid span; phone expands by tap. Sizes last the tab.
+ * VS-206: spans are fine tracks, not 1-3 slots — rendered as inline `gridColumn`/`gridRow` style
+ * rather than literal Tailwind classes, since the granularity is too fine to enumerate as classes.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { agentUiStatus, isActiveRun, type Agent, type Run, type Ticket } from '@agent-conductor/shared';
@@ -19,12 +21,13 @@ import { useRunEventStream } from '../api/runStream';
 import { useHookWs, useWs } from '../api/context';
 import { A } from '../app/link';
 import { liveWorkingAgents } from '../lib/board';
-import { cx } from '../lib/cx';
 import {
   type CellSize,
   columnCount,
   DEFAULT_SIZE,
+  GRANULARITY,
   readLiveCellSizes,
+  ROWS_MAX,
   sameSize,
   sizeOf,
   snapSize,
@@ -89,11 +92,11 @@ export function LiveRoute(): React.ReactElement {
             onRetry={() => void workers.refetch()}
           />
         ) : !loaded ? (
-          <SkeletonCards count={4} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" />
+          <SkeletonCards count={4} className="grid gap-3 sm:grid-cols-8 xl:grid-cols-12" />
         ) : n === 0 ? (
           <EmptyState title="Nobody is working." detail="Live workers on a ticket show up here. Paused and idle ones stay on Team and the board." />
         ) : (
-          <div className="grid grid-flow-dense gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-flow-dense gap-3 sm:grid-cols-8 xl:grid-cols-12">
             {live.map((w) => (
               <LiveCell
                 key={w.id}
@@ -142,16 +145,15 @@ export function LiveCell({
   const ticketLabel = [identifier, title].filter(Boolean).join(' · ') || 'ticket';
   const [drag, setDrag] = useState<CellSize | null>(null);
   const shown = drag ?? size;
-  const tall = shown.rows >= 2;
 
   return (
     <article
-      className={cx(
-        'ac-card relative flex min-h-0 flex-col overflow-hidden',
-        shown.cols === 2 && 'col-span-2',
-        shown.cols === 3 && 'col-span-3',
-        shown.rows === 2 && 'row-span-2',
-      )}
+      className="ac-card relative flex min-h-0 flex-col overflow-hidden"
+      style={{
+        gridColumn: `span ${shown.cols}`,
+        gridRow: `span ${shown.rows}`,
+        '--ac-cell-rows': shown.rows / GRANULARITY,
+      } as React.CSSProperties}
     >
       <header className="flex items-start gap-2.5 border-b border-line-1 px-3.5 py-2.5">
         <div className="min-w-0 flex-1">
@@ -173,7 +175,7 @@ export function LiveCell({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => onSize(shown.expanded ? DEFAULT_SIZE : { cols: 1, rows: 2, expanded: true })}
+            onClick={() => onSize(shown.expanded ? DEFAULT_SIZE : { cols: GRANULARITY, rows: ROWS_MAX, expanded: true })}
           >
             {shown.expanded ? 'Restore' : 'Expand'}
           </Button>
@@ -188,9 +190,7 @@ export function LiveCell({
               events={events}
               live
               label={`Transcript of ${agent.name}`}
-              className={tall
-                ? 'max-h-[calc(var(--ac-app-h)*0.5)] md:max-h-[calc(var(--ac-app-h)*0.6)]'
-                : 'max-h-[calc(var(--ac-app-h)*0.25)] md:max-h-[calc(var(--ac-app-h)*0.3)]'}
+              className="ac-live-transcript"
             />
           </>
         ) : (

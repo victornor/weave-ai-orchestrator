@@ -202,6 +202,22 @@
   display: none;
 }
 
+/* A Live cell's transcript height scales with its resized row count (VS-206) rather than jumping
+   between two fixed tiers. Unlayered for the same reason as the keyboard rules above: it overrides
+   RunTranscript's own `max-h-[calc(...)]` utility class, and the utilities layer always outranks
+   `@layer components`. `--ac-cell-rows` is the cell's row span normalized to GRANULARITY units (1
+   at the default size, 2 at the row max) — linear in that unit so 1 reproduces the pre-VS-206
+   default height (0.25 / 0.3) and 2 reproduces its old two-row max (0.5 / 0.6) exactly, with every
+   size in between reading as a smooth height rather than jumping once. */
+.ac-live-transcript {
+  max-height: calc(var(--ac-app-h) * 0.25 * var(--ac-cell-rows, 1));
+}
+@media (min-width: 48rem) {
+  .ac-live-transcript {
+    max-height: calc(var(--ac-app-h) * 0.3 * var(--ac-cell-rows, 1));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --dur-fast: 0ms;

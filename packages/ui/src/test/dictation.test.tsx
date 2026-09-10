@@ -415,6 +415,7 @@ function VoxtypeHarness(props: { backend?: 'chrome' | 'voxtype'; serverConfigure
         {d.listening ? 'Stop dictation' : 'Dictate'}
       </button>
       <span data-testid="mode">{d.mode}</span>
+      <span data-testid="transcribing">{String(d.transcribing)}</span>
       {d.error ? <span role="alert">{d.error}</span> : null}
       <textarea aria-label="out" value={text} readOnly />
     </div>
@@ -477,5 +478,210 @@ describe('dictation — voxtype upload', () => {
     await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByText('Stop dictation'));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+  });
+
+  it('sets transcribing from stop() until the response settles, on every outcome (VS-195)', async () => {
+    for (const outcome of [
+      { name: 'a landed transcript', response: { ok: true, status: 200, json: async () => ({ text: 'hi' }) } },
+      { name: 'an empty transcript', response: { ok: true, status: 200, json: async () => ({ text: '' }) } },
+      { name: 'a 501 (provider unconfigured)', response: { ok: false, status: 501, json: async () => ({}) } },
+      { name: 'a non-OK response', response: { ok: false, status: 500, json: async () => ({}) } },
+    ] as const) {
+      let settle: ((v: typeof outcome.response) => void) | null = null;
+      vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') return new Promise((resolve) => { settle = resolve; });
+        return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+      }));
+      getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+      const { unmount } = render(<VoxtypeHarness backend="voxtype" serverConfigured />);
+      fireEvent.click(screen.getByText('Dictate'));
+      await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+      fireEvent.click(screen.getByText('Stop dictation'));
+      expect(screen.getByTestId('transcribing')).toHaveTextContent('true'); // outcome.name
+
+      settle!(outcome.response);
+      await waitFor(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
+      unmount();
+      getUserMedia.mockReset();
+    }
+  });
+
+  it('a network failure also clears transcribing (VS-195)', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return Promise.reject(new Error('offline'));
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+    render(<VoxtypeHarness backend="voxtype" serverConfigured />);
+    fireEvent.click(screen.getByText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByText('Stop dictation'));
+    expect(screen.getByTestId('transcribing')).toHaveTextContent('true');
+    await waitFor(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
+    expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/);
+  });
+
+  it('never sets transcribing on the speech path', async () => {
+    w.webkitSpeechRecognition = FakeRecognition;
+    render(<VoxtypeHarness serverConfigured />);
+    expect(screen.getByTestId('mode')).toHaveTextContent('speech');
+    fireEvent.click(screen.getByText('Dictate'));
+    const rec = FakeRecognition.last!;
+    act(() => rec.onresult!(said(['one', true])));
+    fireEvent.click(screen.getByText('Stop dictation'));
+    expect(screen.getByTestId('transcribing')).toHaveTextContent('false');
+  });
+
+  it('start() is a no-op while transcribing is in flight', async () => {
+    let settle: ((v: { ok: boolean; status: number; json: () => Promise<unknown> }) => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Promise((resolve) => { settle = resolve; });
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+    render(<VoxtypeHarness backend="voxtype" serverConfigured />);
+    fireEvent.click(screen.getByText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByText('Stop dictation'));
+    expect(screen.getByTestId('transcribing')).toHaveTextContent('true');
+
+    getUserMedia.mockClear();
+    fireEvent.click(screen.getByText('Dictate')); // still transcribing: this must not start a second recording
+    expect(getUserMedia).not.toHaveBeenCalled();
+
+    settle!({ ok: true, status: 200, json: async () => ({ text: 'done' }) });
+    await waitFor(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
+  });
+});
+
+/**
+ * VS-195: Voxtype gives no live feedback — nothing appears until the human stops, and the
+ * transcript itself lands a couple of seconds after that. The composer has to say so, lock itself
+ * while either phase is in flight, and never stay locked no matter how the attempt ends.
+ */
+describe('dictation — composer lock while non-streaming (VS-195)', () => {
+  function stubHealthAndTranscribe(
+    postHandler: () => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>,
+  ): void {
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return postHandler();
+      if (typeof url === 'string' && url.includes('/api/health')) {
+        return Promise.resolve({ ok: true, json: async () => ({ transcription: { configured: true, backend: 'voxtype' } }) });
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+  }
+
+  beforeEach(() => {
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+  });
+
+  async function renderUpload(): Promise<void> {
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" allowAttachments />);
+    // The backend is resolved from an async /api/health probe; wait for it to land on upload mode
+    // before touching the mic, the way a real page load would.
+    await waitFor(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+  }
+
+  it('locks the composer the moment recording starts, and unlocks with the transcript on success', async () => {
+    stubHealthAndTranscribe(() => Promise.resolve({ ok: true, status: 200, json: async () => ({ text: 'ship it' }) }));
+    await renderUpload();
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+
+    expect(screen.getByLabelText('Message…')).toBeDisabled();
+    expect(screen.getByLabelText('Attach a file')).toBeDisabled();
+    expect(screen.getByLabelText('Send')).toBeDisabled();
+    // Both halves, in one line: capturing now, and processed once you stop.
+    expect(screen.getByText(/transcribed once you stop/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Stop dictation'));
+    // Distinct from listening: a different label, and the mic itself is now inert.
+    expect(screen.getByText('Transcribing…')).toBeInTheDocument();
+    expect(screen.queryByText(/transcribed once you stop/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Message…')).toBeDisabled();
+    expect(screen.getByLabelText('Transcribing')).toBeDisabled();
+
+    await waitFor(() => expect(screen.getByLabelText('Message…')).toHaveValue('ship it'));
+    expect(screen.getByLabelText('Message…')).not.toBeDisabled();
+    expect(screen.getByLabelText('Attach a file')).not.toBeDisabled();
+    expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Dictate')).toBeInTheDocument();
+  });
+
+  it('unlocks with nothing inserted when the transcript is empty', async () => {
+    // VS-196 (landed on main while this ticket was in the merge queue) surfaces an empty transcript
+    // as a message rather than silence; this ticket's concern is only that the composer never stays
+    // locked over it — covered here regardless of which message, if any, accompanies it.
+    stubHealthAndTranscribe(() => Promise.resolve({ ok: true, status: 200, json: async () => ({ text: '' }) }));
+    await renderUpload();
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Stop dictation'));
+
+    await waitFor(() => expect(screen.getByLabelText('Message…')).not.toBeDisabled());
+    expect(screen.getByLabelText('Message…')).toHaveValue('');
+    expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/);
+  });
+
+  it('unlocks and shows the failure when transcription fails', async () => {
+    stubHealthAndTranscribe(() => Promise.resolve({ ok: false, status: 500, json: async () => ({}) }));
+    await renderUpload();
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Stop dictation'));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+    expect(screen.getByLabelText('Message…')).not.toBeDisabled();
+    expect(screen.getByLabelText('Attach a file')).not.toBeDisabled();
+    expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
+  });
+
+  it('does nothing when the mic is clicked while transcribing', async () => {
+    let settle: ((v: { ok: boolean; status: number; json: () => Promise<unknown> }) => void) | null = null;
+    stubHealthAndTranscribe(() => new Promise((resolve) => { settle = resolve; }));
+    await renderUpload();
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Stop dictation'));
+    expect(screen.getByLabelText('Transcribing')).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText('Transcribing'));
+    expect(getUserMedia).toHaveBeenCalledTimes(1); // no second recording started
+
+    settle!({ ok: true, status: 200, json: async () => ({ text: 'done' }) });
+    await waitFor(() => expect(screen.getByLabelText('Message…')).not.toBeDisabled());
+  });
+
+  it('never hides the listening caption behind a viewport breakpoint', async () => {
+    stubHealthAndTranscribe(() => new Promise(() => { /* not reached in this test */ }));
+    await renderUpload();
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+
+    const caption = screen.getByText(/transcribed once you stop/i);
+    expect(caption.className).not.toMatch(/\bhidden\b/);
+    expect(caption.className).not.toMatch(/sm:inline/);
+  });
+
+  it('leaves streaming (speech-mode) dictation entirely unlocked', () => {
+    w.webkitSpeechRecognition = FakeRecognition;
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" allowAttachments />);
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    const rec = FakeRecognition.last!;
+    act(() => rec.onresult!(said(['ship it', true])));
+
+    expect(screen.getByLabelText('Message…')).not.toBeDisabled();
+    expect(screen.getByLabelText('Attach a file')).not.toBeDisabled();
+    expect(screen.getByLabelText('Send')).not.toBeDisabled();
+    expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
+    expect(screen.queryByText(/transcribed once you stop/i)).not.toBeInTheDocument();
   });
 });

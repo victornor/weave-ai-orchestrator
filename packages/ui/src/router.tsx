@@ -22,6 +22,7 @@ import { GlobalNeedsRoute } from './routes/GlobalNeeds';
 import { GlobalLiveRoute } from './routes/GlobalLive';
 import { GlobalChatsRoute } from './routes/GlobalChats';
 import { GlobalIncidentsRoute } from './routes/GlobalIncidents';
+import { GlobalMapRoute } from './routes/GlobalMap';
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 
@@ -62,6 +63,15 @@ const globalIncidentsRoute = createRoute({
   component: () => (
     <AppShell>
       <GlobalIncidentsRoute />
+    </AppShell>
+  ),
+});
+const globalMapRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/map',
+  component: () => (
+    <AppShell>
+      <GlobalMapRoute />
     </AppShell>
   ),
 });
@@ -129,6 +139,7 @@ const routeTree = rootRoute.addChildren([
   globalLiveRoute,
   globalChatsRoute,
   globalIncidentsRoute,
+  globalMapRoute,
   wsRoute.addChildren([
     wsIndexRoute,
     needsRoute,

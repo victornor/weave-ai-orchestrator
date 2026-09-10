@@ -31,7 +31,7 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
   const conn = useConnection();
   const toast = useToast();
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const onGlobalPage = path === '/needs' || path === '/live' || path === '/chats' || path === '/incidents';
+  const onGlobalPage = path === '/needs' || path === '/live' || path === '/chats' || path === '/incidents' || path === '/map';
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [scopeIndex, setScopeIndex] = useState(-1);

@@ -135,12 +135,13 @@ describe('liveWorkingAgents (VS-152)', () => {
     expect(liveWorkingAgents([agent({ status: 'running' })]).map((w) => w.id)).toEqual(['a1']);
   });
 
-  it('excludes paused, idle, retired, the conductor, and a live worker with no ticket', () => {
+  it('excludes paused, idle, retired, done, the conductor, and a live worker with no ticket', () => {
     expect(
       liveWorkingAgents([
         agent({ id: 'paused', status: 'paused' }),
         agent({ id: 'idle', status: 'active', ticketId: null, kind: 'worker' }),
         agent({ id: 'retired', status: 'retired' }),
+        agent({ id: 'finished', status: 'done', ticketId: 'tk_1' }),
         agent({ id: 'cond', kind: 'conductor', status: 'running', ticketId: 'tk_1' }),
         agent({ id: 'loose', status: 'running', ticketId: null }),
       ]),

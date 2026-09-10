@@ -227,6 +227,24 @@ describe('Live page streaming', () => {
     expect(screen.getByText('Backend Engineer #1')).toBeInTheDocument();
     expect(screen.getByText('1 working')).toBeInTheDocument();
   });
+
+  it('drops the last cell when its worker is done or retired, and says nobody is working (VS-172)', () => {
+    state.workers = [agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'active' })];
+    state.tickets = [ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode', status: 'done' })];
+    const { rerender } = render(<LiveRoute />);
+    expect(screen.getByText('Frontend Engineer #7')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for the next turn.')).toBeInTheDocument();
+
+    state.workers = [agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'done' })];
+    rerender(<LiveRoute />);
+    expect(screen.queryByText('Frontend Engineer #7')).not.toBeInTheDocument();
+    expect(screen.getByText('Nobody is working.')).toBeInTheDocument();
+
+    state.workers = [agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'retired' })];
+    rerender(<LiveRoute />);
+    expect(screen.queryByText('Frontend Engineer #7')).not.toBeInTheDocument();
+    expect(screen.getByText('Nobody is working.')).toBeInTheDocument();
+  });
 });
 
 describe('Live page desktop resize', () => {

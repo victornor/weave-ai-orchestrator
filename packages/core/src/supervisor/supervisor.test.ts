@@ -125,6 +125,15 @@ describe('supervisor', () => {
     expect(retireIfLanded).toHaveBeenCalledWith({ kind: 'system', id: null }, workerId);
   });
 
+  it('marks a terminal ticket\'s worker done when land refuses, not active (VS-172)', async () => {
+    retireIfLanded.mockResolvedValueOnce({ retired: false, reason: 'uncommitted changes' });
+    const ticketId = seedTicket(h, { status: 'done' });
+    const workerId = h.addWorker(ticketId);
+    await supervisor.tick();
+    expect(retireIfLanded).toHaveBeenCalledWith({ kind: 'system', id: null }, workerId);
+    expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('done');
+  });
+
   it('wakes the workers of tickets that violate the liveness rule', async () => {
     const ticketId = seedTicket(h, { status: 'in_progress' });
     const workerId = h.addWorker(ticketId);

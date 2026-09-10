@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, TICKET_KINDS, TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, canTransition, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
+import { OcError, TICKET_KINDS, TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, canTransition, type Agent, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, fakeSpecs, type TestHarness } from '../testing/context.js';
 import { createTicketsService } from './service.js';
 import type { Actor, TicketsService } from '../api.js';
@@ -32,7 +32,10 @@ describe('tickets', () => {
     // A merge schedules a spec re-index; without this the harness proxy throws inside that timer.
     h.services.specs = specs as never;
     // The merge queue brings a worker for the ticket it admits (PLAN §11.4).
-    h.services.workers = { spawnForTicket: vi.fn(async (_a: Actor, ticketId: string) => ({ id: h.addWorker(ticketId) })) } as never;
+    h.services.workers = {
+      spawnForTicket: vi.fn(async (_a: Actor, ticketId: string) => ({ id: h.addWorker(ticketId) })),
+      retireIfLanded: vi.fn(async () => ({ retired: true })),
+    } as never;
     tickets = createTicketsService(h.ctx, h.deps);
     h.services.tickets = tickets;
   });
@@ -451,6 +454,48 @@ describe('tickets', () => {
     it('is null for a ticket that never had a worker', () => {
       const t = make();
       expect(tickets.lastWorker(t.id)).toBeNull();
+    });
+  });
+
+  describe('terminal ticket releases its worker (VS-172)', () => {
+    const LIVE = new Set(['provisioning', 'active', 'running']);
+
+    it('cancel from todo takes an active worker out of the live set', () => {
+      const t = make();
+      const workerId = h.addWorker(t.id);
+      h.db.insert('worktrees', {
+        id: newId(), projectId: h.projectId, ticketId: t.id, agentId: workerId, provider: 'git',
+        path: '/tmp/wt', branch: 'ac/test', status: 'active', createdAt: nowIso(),
+      });
+      tickets.cancel(HUMAN, t.id, 'not needed');
+      const worker = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [workerId])!;
+      expect(LIVE.has(worker.status)).toBe(false);
+      expect(worker.status).toBe('done');
+      expect(h.db.get<{ status: string }>('SELECT status FROM worktrees WHERE agent_id = ?', [workerId])!.status).toBe('dirty');
+    });
+
+    it('transition to done takes an active worker out of the live set without a supervisor tick', async () => {
+      const t = make({ kind: 'task' });
+      const workerId = h.addWorker(t.id);
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      await tickets.transition(AGENT, t.id, { to: 'done' });
+      const worker = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [workerId])!;
+      expect(LIVE.has(worker.status)).toBe(false);
+      expect(worker.status).toBe('done');
+    });
+
+    it('leaves an already-retired worker retired', async () => {
+      const t = make({ kind: 'task' });
+      const workerId = h.addWorker(t.id, { status: 'retired', retiredAt: nowIso() });
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      await tickets.transition(AGENT, t.id, { to: 'done' });
+      expect(h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [workerId])!.status).toBe('retired');
+    });
+
+    it('still transitions a ticket that has no worker', async () => {
+      const t = make({ kind: 'task' });
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      expect((await tickets.transition(AGENT, t.id, { to: 'done' })).status).toBe('done');
     });
   });
 

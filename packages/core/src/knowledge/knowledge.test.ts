@@ -479,6 +479,7 @@ describe('knowledge', () => {
     const graph = knowledge.graph(h.projectId);
     expect(graph.nodes.some((n) => n.kind === 'hub' && n.scope === 'project')).toBe(true);
     expect(graph.edges).toContainEqual({ from: 'projects/api/PROJECT.md', to: 'projects/api/docs/payments-webhooks.md' });
+    expect(graph.nodes.some((n) => n.scope === 'shared' || n.scope === 'decisions' || n.scope === 'workspace')).toBe(false);
     expect(existsSync(join(h.ctx.paths.knowledge, 'projects/api/docs/payments-webhooks.md'))).toBe(true);
     // rules
     expect(() => knowledge.putDoc(WORKER, 'project', 'Bad Slug', '# x\n', h.projectId)).toThrow(/kebab-case/);
@@ -487,6 +488,40 @@ describe('knowledge', () => {
     knowledge.deleteDoc(HUMAN, 'project', 'billing-data-model', h.projectId);
     expect(knowledge.getDoc('project', 'payments-webhooks', h.projectId).linksTo[0]!.path).toBeNull();
     expect(() => knowledge.getDoc('project', 'billing-data-model', h.projectId)).toThrow(/does not exist/);
+  });
+
+  it('omits stub workspace hubs and hangs populated shared off the workspace hub', () => {
+    knowledge.get('workspace');
+    knowledge.get('decisions');
+    knowledge.note(HUMAN, 'shared', 'Conventions', 'Ask instead of guessing when a decision changes scope.', null);
+    knowledge.get('project', h.projectId);
+
+    const unscoped = knowledge.graph();
+    const ids = unscoped.nodes.map((n) => n.id);
+    expect(ids).toContain('workspace/SHARED.md');
+    expect(ids).toContain('workspace/WORKSPACE.md');
+    expect(ids).not.toContain('workspace/decisions.md');
+    expect(unscoped.edges).toContainEqual({ from: 'workspace/WORKSPACE.md', to: 'workspace/SHARED.md' });
+    expect(unscoped.edges.some((e) => e.from === 'workspace/SHARED.md' || e.to === 'projects/api/PROJECT.md')).toBe(false);
+
+    const scoped = knowledge.graph(h.projectId);
+    expect(scoped.nodes.map((n) => n.id)).toEqual(['projects/api/PROJECT.md']);
+  });
+
+  it('omits every stub workspace hub when none have entries', () => {
+    knowledge.get('workspace');
+    knowledge.get('shared');
+    knowledge.get('decisions');
+    const g = knowledge.graph();
+    expect(g.nodes.map((n) => n.id)).not.toEqual(expect.arrayContaining(['workspace/SHARED.md', 'workspace/decisions.md', 'workspace/WORKSPACE.md']));
+  });
+
+  it('keeps a stub workspace hub as parent when SHARED has notes', () => {
+    knowledge.get('workspace');
+    knowledge.note(HUMAN, 'shared', 'Conventions', 'House rules hold everywhere.', null);
+    const g = knowledge.graph();
+    expect(g.nodes.map((n) => n.id).sort()).toEqual(['workspace/SHARED.md', 'workspace/WORKSPACE.md']);
+    expect(g.edges).toEqual([{ from: 'workspace/WORKSPACE.md', to: 'workspace/SHARED.md' }]);
   });
 
   it('parseLinks ignores wiki links inside code spans and fenced blocks', () => {

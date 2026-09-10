@@ -8,13 +8,14 @@ TBD - created by archiving change vs-77-model-selection-is-exactly-two-per-works
 ### Requirement: A turn resolves its runtime and model from one setting
 
 Before a turn is launched the system SHALL resolve the runtime, the model and the effort it will
-use from exactly one source: the conductor setting for a turn of the conductor; for a turn of a
-worker, the worker option named by that worker's ticket when that option still exists in the
-catalog, otherwise the workers setting. It SHALL NOT read a runtime, a model or an effort from
-the role, the project or the agent row to make that choice, and there SHALL be no fallback chain
-behind that source other than letting the runtime choose the model when the resolved setting
-names none, and falling back to the workers setting when the ticket names an option that is no
-longer in the catalog.
+use from exactly one source: the effective conductor setting for a turn of the conductor; for a
+turn of a worker, the worker option named by that worker's ticket when that option still exists in
+the effective catalog, otherwise the effective workers setting. The effective setting or catalog
+SHALL be the daemon overlay when that overlay is filled, otherwise the workspace's stored value.
+It SHALL NOT read a runtime, a model or an effort from the role, the project or the agent row to
+make that choice, and there SHALL be no fallback chain behind that source other than letting the
+runtime choose the model when the resolved setting names none, and falling back to the effective
+workers setting when the ticket names an option that is no longer in the effective catalog.
 
 A resolved runtime that is not registered on this daemon SHALL fail the turn with the error the
 system already uses for an unreachable runtime, naming the runtime, rather than falling back to

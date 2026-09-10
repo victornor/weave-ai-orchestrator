@@ -244,3 +244,39 @@ describe('TicketRoute knowledge tab (VS-110)', () => {
     expect(screen.getByText('No documents read')).toBeInTheDocument();
   });
 });
+
+// VS-201: the header's "paused · …" chip is a short preview; the ticket's Overview tab (the default
+// tab) shows the full worker-failure decision too, the same reachable card as chat/Needs You, rather
+// than leaving the compact chip as the only place on the page to look.
+describe('TicketRoute shows the open worker-failure decision (VS-201)', () => {
+  it('shows the full decision on the Overview tab when one is open', () => {
+    const models = Array.from({ length: 60 }, (_, i) => `gpt-5.${i}-sol-high`).join(', ');
+    const longContext = `Last error: Cannot use this model: grok-4-6. Available models: auto, ${models}`;
+    state.decisions = [decision({ kind: 'retry_approval', ticketId: 'tk_1', id: 'dec_1', context: longContext })];
+    render(<TicketRoute />);
+
+    expect(screen.getByRole('button', { name: 'Show full text' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show full text' }));
+    expect(screen.getByText(/gpt-5\.59-sol-high/)).toBeInTheDocument();
+  });
+
+  it('renders no worker-failure decision when none is open', () => {
+    render(<TicketRoute />);
+    expect(screen.queryByRole('button', { name: 'Show full text' })).not.toBeInTheDocument();
+  });
+});
+
+describe('TicketRoute header chip carries the full message in its tooltip (VS-201)', () => {
+  it('the visible chip stays the capped preview; the tooltip carries the complete message', () => {
+    const models = Array.from({ length: 60 }, (_, i) => `gpt-5.${i}-sol-high`).join(', ');
+    const longMessage = `Cannot use this model: grok-4-6. Available models: auto, ${models}`;
+    state.worker = agent({
+      status: 'paused',
+      pauseDetail: { family: 'unknown', code: 'bad_model', message: longMessage, resetAt: null, runId: 'r1' },
+    });
+    render(<TicketRoute />);
+    const chip = screen.getByText(/^paused ·/);
+    expect(chip.textContent).not.toContain('gpt-5.59-sol-high');
+    expect(chip.getAttribute('title')).toContain('gpt-5.59-sol-high');
+  });
+});

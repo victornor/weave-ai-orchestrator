@@ -9,6 +9,8 @@ export interface TicketCardProps {
   workerName?: string | null;
   /** Why this ticket's worker is paused, when it is — the board says why the work stopped without opening the worker. */
   workerPausedFor?: string | null;
+  /** The complete pause message behind `workerPausedFor`'s capped preview, for the tooltip (VS-201). Falls back to `workerPausedFor` when absent. */
+  workerPausedForFull?: string | null;
   /** A worker is live on this ticket right now — the card reads as working whatever the status says. */
   working?: boolean;
   usage?: { tokens: number; costCents: number | null } | null;
@@ -38,7 +40,7 @@ export function OutcomeChip({ ticket }: { ticket: Ticket }): React.ReactElement 
   return <Badge tone={o.tone === 'accent' ? 'accent' : o.tone === 'done' ? 'added' : o.tone === 'failed' ? 'removed' : 'neutral'}>{o.label}</Badge>;
 }
 
-export function TicketCard({ ticket, workerName, workerPausedFor, working, usage, needsYou, autoApproving, stalled, onOpen, selected, className }: TicketCardProps): React.ReactElement {
+export function TicketCard({ ticket, workerName, workerPausedFor, workerPausedForFull, working, usage, needsYou, autoApproving, stalled, onOpen, selected, className }: TicketCardProps): React.ReactElement {
   const ui = ticketBoardStatus(ticket.status, { live: working, needsYou, autoApproving, stalled });
   return (
     <button
@@ -63,7 +65,7 @@ export function TicketCard({ ticket, workerName, workerPausedFor, working, usage
       </div>
       <div className="mb-2 text-ui leading-snug text-text-1">{ticket.title}</div>
       {workerPausedFor ? (
-        <div className="ac-mono ac-truncate mb-2 rounded-r4 bg-bg-2 px-2.5 py-1.5 text-nano text-text-3" title={workerPausedFor}>
+        <div className="ac-mono ac-truncate mb-2 rounded-r4 bg-bg-2 px-2.5 py-1.5 text-nano text-text-3" title={workerPausedForFull ?? workerPausedFor}>
           paused · {workerPausedFor}
         </div>
       ) : null}

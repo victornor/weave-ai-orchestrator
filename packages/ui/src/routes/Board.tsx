@@ -31,7 +31,7 @@ import { useListNav } from '../lib/hotkeys';
 import { ago, statusText } from '../lib/format';
 import { cx } from '../lib/cx';
 import { isAutoApproving } from '../lib/yolo';
-import { workerPauseReason } from '@agent-conductor/render';
+import { workerPauseDetail } from '@agent-conductor/render';
 
 type View = 'kanban' | 'table';
 
@@ -88,9 +88,10 @@ export function BoardRoute(): React.ReactElement {
   // `paused` is never in `live` (VS-137: a paused worker is, by definition, not live), so this needs
   // its own lookup rather than falling out of the same map `live` uses for column placement.
   const paused = useMemo(() => pausedWorkersByTicket(workers.data ?? []), [workers.data]);
-  const pausedFor = (ticketId: string): string | null => {
+  // The board card's preview stays capped; its tooltip carries the complete message (VS-201).
+  const pausedFor = (ticketId: string): { summary: string; full: string } | null => {
     const w = paused.get(ticketId);
-    return w ? workerPauseReason(w) : null;
+    return w ? workerPauseDetail(w) : null;
   };
   const columns = useMemo(
     () => foldBoard(filtered, live).filter((c) => finished !== 'hide' || c.key !== 'done'),
@@ -198,7 +199,7 @@ export function BoardRoute(): React.ReactElement {
             {/* phone list */}
             <div className="md:hidden">
               {filtered.map((t, i) => (
-                <TicketRow key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)} autoApproving={autoApproving.has(t.id)} selected={i === nav.index} onOpen={() => open(t)} />
+                <TicketRow key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)?.summary ?? null} autoApproving={autoApproving.has(t.id)} selected={i === nav.index} onOpen={() => open(t)} />
               ))}
             </div>
 
@@ -227,7 +228,7 @@ export function BoardRoute(): React.ReactElement {
                       </header>
                       <div className="ac-scroll flex flex-col gap-2 px-2 pb-4">
                         {c.items.map((t) => (
-                          <TicketCard key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)} autoApproving={autoApproving.has(t.id)} onOpen={() => open(t)} />
+                          <TicketCard key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)?.summary ?? null} workerPausedForFull={pausedFor(t.id)?.full ?? null} autoApproving={autoApproving.has(t.id)} onOpen={() => open(t)} />
                         ))}
                       </div>
                     </section>

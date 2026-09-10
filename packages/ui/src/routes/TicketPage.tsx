@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
 import type { Run } from '@agent-conductor/shared';
 import { isActiveRun, ticketUiStatus } from '@agent-conductor/shared';
-import { workerPauseReason } from '@agent-conductor/render';
+import { workerPauseDetail } from '@agent-conductor/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';
@@ -10,6 +10,7 @@ import { MergeQueueBadge } from '../components/MergeQueue';
 import { Skeleton, SkeletonRows } from '../components/Skeleton';
 import { ErrorState, EmptyState } from '../components/States';
 import { Markdown } from '../components/Markdown';
+import { DecisionCard } from '../components/DecisionCard';
 import { Composer } from '../components/Composer';
 import { Button } from '../components/Button';
 import { Table } from '../components/Table';
@@ -103,7 +104,8 @@ export function TicketRoute(): React.ReactElement {
   const ui = ticketUiStatus(ticket.status);
   // A parked worker is why this ticket stopped. Retrying relaunches it, and relaunching a parked
   // worker is a resume — same session, same worktree — so the button says what it does.
-  const pausedFor = worker ? workerPauseReason(worker) : null;
+  const pauseDetail = worker ? workerPauseDetail(worker) : null;
+  const pausedFor = pauseDetail?.summary ?? null;
   const canRetry = ticket.status === 'blocked' || worker?.status === 'paused' || worker?.status === 'error';
 
   return (
@@ -129,7 +131,7 @@ export function TicketRoute(): React.ReactElement {
             ) : null}
             {project ? <span className="ac-mono">{project.slug}</span> : null}
             {worker ? <span>{worker.name}</span> : null}
-            {pausedFor ? <span className="ac-mono ac-truncate max-w-[40vw] text-micro text-text-3" title={pausedFor}>paused · {pausedFor}</span> : null}
+            {pausedFor ? <span className="ac-mono ac-truncate max-w-[40vw] text-micro text-text-3" title={pauseDetail?.full ?? pausedFor}>paused · {pausedFor}</span> : null}
           </span>
         }
         actions={
@@ -188,9 +190,24 @@ export function TicketRoute(): React.ReactElement {
 function Overview({ ticketId }: { ticketId: string }): React.ReactElement {
   const detail = useTicket(ticketId);
   const d = detail.data;
+  // The ticket page's own compact "paused · …" chip in the header is a preview; a worker-failure
+  // decision open on this ticket is shown here in full, the same card and the same expand-in-place
+  // behavior as the chat's pinned decision area and Needs You (VS-201) — not a second, weaker view.
+  const decisions = useDecisions({ status: 'open', owner: 'human' });
+  const answer = useAnswerDecision();
+  const retryDecision = decisions.data?.find((dec) => dec.kind === 'retry_approval' && (dec.ticketId === ticketId || dec.ticketId === d?.ticket.identifier));
   if (!d) return <SkeletonRows rows={4} />;
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
+      {retryDecision ? (
+        <DecisionCard
+          decision={retryDecision}
+          ticketIdentifier={d.ticket.identifier}
+          projectSlug={d.project?.slug}
+          busy={answer.isPending}
+          onAnswer={(a) => answer.mutate({ id: retryDecision.id, ...a })}
+        />
+      ) : null}
       <Markdown source={d.ticket.description || '_No description._'} />
       <div className="grid gap-3 sm:grid-cols-2">
         <Facts

@@ -79,6 +79,21 @@ export function workerPauseReason(agent: Agent): string | null {
   return parts.length ? parts.join(' · ') : agent.pauseReason ?? null;
 }
 
+/**
+ * The same line as `workerPauseReason`, paired with the complete underlying message rather than its
+ * 160-char preview — for a surface that wants a compact one-line summary but can also attach the
+ * full text (a tooltip, say) instead of discarding it once the preview is built (VS-201). Null
+ * exactly when `workerPauseReason` is null.
+ */
+export function workerPauseDetail(agent: Agent): { summary: string; full: string } | null {
+  const summary = workerPauseReason(agent);
+  if (summary === null) return null;
+  const d = agent.pauseDetail;
+  if (!d || waitingOnRuntimeLogin(agent)) return { summary, full: summary };
+  const parts = [d.family, d.message ? redact(d.message) : null, d.resetAt ? `resets ${d.resetAt.slice(0, 16).replace('T', ' ')} UTC` : null].filter(Boolean);
+  return { summary, full: parts.length ? parts.join(' · ') : summary };
+}
+
 export function workerToCard(agent: Agent, ctx: WorkerCardContext = {}): WorkerCardModel {
   const a = agent ?? ({} as Agent);
   const uiStatus = agentUiStatus(a.status, { needsYou: ctx.needsYou === true, stalled: ctx.stalled === true });

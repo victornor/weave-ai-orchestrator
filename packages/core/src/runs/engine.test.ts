@@ -976,6 +976,35 @@ describe('run engine', () => {
       expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('blocked');
     });
 
+    // VS-201: a bare, unmarked slice used to cut the runtime's message to 400 chars before either
+    // the decision or the paused agent's pause detail was written — discarding exactly the tail of a
+    // structured message (a trailing comma-separated list) with no sign anything was removed.
+    it('preserves a long, structured failure message intact, tail included', async () => {
+      const models = Array.from({ length: 60 }, (_, i) => `gpt-5.${i}-sol-high`).join(', ');
+      const longMessage = `Cannot use this model: grok-4-6. Available models: ${models}`;
+      expect(longMessage.length).toBeLessThan(4000);
+      const { ticketId, workerId } = await failOnce({ error: { code: 'bad_model', family: 'unknown', message: longMessage } });
+
+      const card = openFor(ticketId)[0]!;
+      expect(card.context).toContain(longMessage);
+      expect(card.context).toContain('gpt-5.59-sol-high');
+
+      const agent = h.db.get<{ pauseDetail: { message?: string } | null }>('SELECT * FROM agents WHERE id = ?', [workerId])!;
+      expect(agent.pauseDetail?.message).toBe(longMessage);
+    });
+
+    it('marks a failure message longer than the generous limit instead of cutting it silently', async () => {
+      const longMessage = 'x'.repeat(5000);
+      const { ticketId, workerId } = await failOnce({ error: { code: 'huge', family: 'unknown', message: longMessage } });
+
+      const card = openFor(ticketId)[0]!;
+      expect(card.context).toMatch(/…\[\+\d+ chars\]/);
+      expect(card.context.length).toBeLessThan(longMessage.length);
+
+      const agent = h.db.get<{ pauseDetail: { message?: string } | null }>('SELECT * FROM agents WHERE id = ?', [workerId])!;
+      expect(agent.pauseDetail?.message).toMatch(/…\[\+\d+ chars\]$/);
+    });
+
     // The ladder is real now that the dispatcher links the attempts: four transient failures, three
     // of them retried on the documented backoff, then the card. `not_before` is cleared between
     // rounds so the test does not wait out 30 s / 2 min / 10 min — the payload, and so the link, is

@@ -15,6 +15,27 @@ function decision(over: Partial<Decision> & { kind: DecisionKind }): Decision {
 const now = new Date('2026-09-04T12:00:00.000Z');
 
 describe('decisionToCard', () => {
+  // VS-201: core no longer pre-cuts a failure message at 400 chars, so the TUI card's own cap
+  // (raised from 600 to 1200) is now the binding one — it must still end with a visible marker
+  // rather than a bare cut, and stay under the cap.
+  it('caps a long context at 1200 chars with a visible ellipsis', () => {
+    const context = `Last error: Cannot use this model: grok-4-6. Available models: ${'auto, '.repeat(300)}gpt-5.9-sol-xhigh`;
+    expect(context.length).toBeGreaterThan(1200);
+    const card = decisionToCard(decision({ kind: 'retry_approval', context, target: null }), { ticketIdentifier: 'ACME-42', now });
+    const line = card.body.find((l) => l.value.startsWith('Last error:'));
+    expect(line).toBeDefined();
+    expect(line!.value.length).toBe(1200);
+    expect(line!.value.endsWith('…')).toBe(true);
+  });
+
+  it('renders a short context in full, with no ellipsis (as the card rationale, not a duplicate body line)', () => {
+    const context = 'Last error: the CLI died.';
+    const card = decisionToCard(decision({ kind: 'retry_approval', context, target: null }), { ticketIdentifier: 'ACME-42', now });
+    expect(card.rationale).toBe(context);
+    expect(card.body.some((l) => l.value.startsWith('Last error:'))).toBe(false);
+  });
+
+
   it('renders a plan approval with Approve / Revise… / Reject and free text', () => {
     const card = decisionToCard(decision({ kind: 'plan_approval', target: { changeName: 'add-theme-tokens', taskCount: 6 } }), { ticketIdentifier: 'ACME-42', projectName: 'web', now });
     expect(card.variant).toBe('plan_approval');

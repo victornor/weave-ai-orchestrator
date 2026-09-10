@@ -110,6 +110,26 @@ describe('TicketCard — a paused worker', () => {
     render(<TicketCard ticket={ticket()} workerName="Frontend Engineer #7" />);
     expect(screen.queryByText(/paused ·/)).not.toBeInTheDocument();
   });
+
+  // VS-201: the card's own preview stays a capped one-liner, but the tooltip behind it carries
+  // whatever fuller text the caller has for it, not merely the same capped string again.
+  it('carries the complete message in the tooltip behind the capped preview', () => {
+    render(
+      <TicketCard
+        ticket={ticket()}
+        workerPausedFor="unknown · Cannot use this model: grok-4-6. Available models: auto,…"
+        workerPausedForFull="unknown · Cannot use this model: grok-4-6. Available models: auto, gpt-5.9-sol-xhigh"
+      />,
+    );
+    const preview = screen.getByText(/paused ·/);
+    expect(preview.textContent).toContain('auto,…');
+    expect(preview.getAttribute('title')).toContain('gpt-5.9-sol-xhigh');
+  });
+
+  it('falls back to the preview text as the tooltip when no fuller text is given', () => {
+    render(<TicketCard ticket={ticket()} workerPausedFor="unknown · the CLI died" />);
+    expect(screen.getByText(/paused ·/).getAttribute('title')).toBe('unknown · the CLI died');
+  });
 });
 
 describe('WorkerCard', () => {
@@ -129,6 +149,24 @@ describe('WorkerCard', () => {
     expect(screen.getByText('provider_quota · limit resets in 2 hours')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
     expect(resume).toHaveBeenCalledTimes(1);
+  });
+
+  // VS-201: the visible line stays the capped, ellipsis-marked preview; the tooltip carries the
+  // complete underlying message rather than repeating the same capped string.
+  it('carries the complete pause message in the tooltip behind the capped preview', () => {
+    const models = Array.from({ length: 60 }, (_, i) => `gpt-5.${i}-sol-high`).join(', ');
+    const longMessage = `Cannot use this model: grok-4-6. Available models: auto, ${models}`;
+    render(
+      <WorkerCard
+        agent={agent({
+          status: 'paused',
+          pauseDetail: { family: 'unknown', code: 'bad_model', message: longMessage, resetAt: null, runId: 'r1' },
+        })}
+      />,
+    );
+    const preview = screen.getByText(/^unknown ·/);
+    expect(preview.textContent).not.toContain('gpt-5.59-sol-high');
+    expect(preview.getAttribute('title')).toContain('gpt-5.59-sol-high');
   });
 
   it('renders a worker paused with only a free-text reason, and none for a running one', () => {
@@ -246,6 +284,28 @@ describe('DecisionCard', () => {
     expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Revise/ })).toBeInTheDocument();
     expect(screen.getByText('ThemeProvider + OS fallback')).toBeInTheDocument();
+  });
+
+  // VS-201: a worker-failure card used to arrive already truncated (before this test's fix) with no
+  // control and no sign that anything had been cut. This asserts the complete text is reachable, not
+  // merely that a button exists.
+  it('collapses a long context behind a control, and expanding it reveals the complete text', () => {
+    const models = Array.from({ length: 60 }, (_, i) => `gpt-5.${i}-sol-high`).join(', ');
+    const longContext = `Last error: Cannot use this model: grok-4-6. Available models: auto, ${models}`;
+    render(<DecisionCard decision={decision({ kind: 'retry_approval', context: longContext })} onAnswer={() => undefined} />);
+
+    expect(screen.getByRole('button', { name: 'Show full text' })).toBeInTheDocument();
+    expect(screen.queryByText(/gpt-5\.59-sol-high/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show full text' }));
+    expect(screen.getByText(/gpt-5\.59-sol-high/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
+  });
+
+  it('renders a short context inline with no control', () => {
+    render(<DecisionCard decision={decision({ kind: 'retry_approval', context: 'Last error: the CLI died.' })} onAnswer={() => undefined} />);
+    expect(screen.getByText('Last error: the CLI died.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show full text' })).not.toBeInTheDocument();
   });
 
   it('links a merge-approval card to a conversation with the worker that asked it (VS-106)', () => {

@@ -214,7 +214,10 @@ function body(variant: CardVariant, d: Decision, target: Record<string, unknown>
 
   if (d.context && !lines.some((l) => l.value === oneLine(redact(d.context), 140))) {
     const ctx = redact(d.context).trim();
-    if (ctx && ctx !== rationale(d)) push(null, oneLine(ctx, 600));
+    // 1200, not 600: now that core no longer pre-cuts a failure message at 400 chars (VS-201), this
+    // cap is the binding one for the TUI — raised enough that it isn't the tightest link in the
+    // chain, while staying a static, non-paging card. oneLine's own ellipsis remains the marker.
+    if (ctx && ctx !== rationale(d)) push(null, oneLine(ctx, 1200));
   }
   return lines;
 }

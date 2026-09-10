@@ -329,7 +329,12 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       env,
       options: { liveInput: ctx.config.defaults.liveInput },
       limits: { timeoutMs: turnTimeoutMs },
-      permission: { mode: permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto', allowedTools, deniedTools: permission.denied },
+      permission: {
+        // VS-171: Claude auto-mode can classify away ac_*; skip-permissions is only on for bypass.
+        mode: agent.kind === 'conductor' ? 'bypass' : (permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto'),
+        allowedTools,
+        deniedTools: permission.denied,
+      },
       model: setting.model ?? null,
       effort: setting.effort ?? null,
       configHome,

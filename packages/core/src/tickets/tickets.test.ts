@@ -653,6 +653,20 @@ describe('tickets', () => {
       });
       expect(tickets.livenessViolations().map((t) => t.id)).not.toContain(stalled.id);
     });
+
+    it('ignores an interactive session left open after conversation (VS-213)', () => {
+      const session = make({ title: 'session', interactiveSession: true });
+      h.addWorker(session.id);
+      h.db.update('tickets', session.id, { status: 'todo' });
+      expect(tickets.livenessViolations().map((t) => t.id)).not.toContain(session.id);
+      h.db.update('tickets', session.id, { status: 'in_progress' });
+      expect(tickets.livenessViolations().map((t) => t.id)).not.toContain(session.id);
+
+      const ordinary = make({ title: 'ordinary' });
+      h.addWorker(ordinary.id);
+      h.db.update('tickets', ordinary.id, { status: 'in_progress' });
+      expect(tickets.livenessViolations().map((t) => t.id)).toContain(ordinary.id);
+    });
   });
 
   describe('repairApprovals', () => {

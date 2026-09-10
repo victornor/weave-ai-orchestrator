@@ -905,6 +905,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         .map(row);
       return candidates.filter((t) => {
         if (t.assigneeHuman) return false;
+        // An interactive session that ends in conversation is complete success, not unfinished work (VS-213).
+        if (t.interactiveSession) return false;
         if (hasOpenDecision(t.id)) return false;
         if (t.monitorNextCheckAt) return false;
         // Waiting in the merge queue is an action path: the queue wakes it when a slot frees (§11.4).

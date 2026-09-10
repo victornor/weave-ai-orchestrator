@@ -214,6 +214,81 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('## What to do now');
   });
 
+  const wakeFor = (id: string) => ({ id, workspaceId: h.workspaceId, agentId: worker.id, source: 'system', reason: 'assigned', payload: {}, status: 'claimed' } as never);
+  const promptAt = async (turnCount: number) => {
+    h.db.update('agents', worker.id, { turnCount });
+    const agent = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [worker.id])!;
+    return buildTurnPrompt(h.ctx, h.deps, agent, [wakeFor(`w-t${turnCount}`)], {});
+  };
+
+  it('keeps the conversational posture on every interactive turn, not just the first (VS-213)', async () => {
+    h.db.update('tickets', ticketId, { interactiveSession: true });
+
+    const first = await promptAt(0);
+    expect(first).toContain('post exactly one `ac_ticket_comment`');
+    expect(first).toContain("wait for the human's first message");
+    expect(first).not.toContain('do the phase your ticket status asks for');
+
+    for (const n of [1, 2]) {
+      const later = await promptAt(n);
+      expect(later).toContain('conversation with the human');
+      expect(later).toContain('complete success');
+      expect(later).not.toContain('do the phase your ticket status asks for');
+      expect(later).not.toContain('post exactly one `ac_ticket_comment`');
+    }
+  });
+
+  it('keeps the delivery instruction on ordinary workers across turns (VS-213)', async () => {
+    for (const n of [0, 1, 2]) {
+      const prompt = await promptAt(n);
+      expect(prompt).toContain('do the phase your ticket status asks for');
+      expect(prompt).not.toContain('This is an interactive session');
+    }
+  });
+
+  describe('interactive session contract in the brief and worker AGENTS.md (VS-213)', () => {
+    it('with the built-in fallback templates: conversation-only done when the ticket is interactive', () => {
+      h.db.update('tickets', ticketId, { interactiveSession: true });
+      const brief = renderBrief(h.ctx, h.deps, worker);
+      expect(brief).toContain('a good answer with nothing delivered is complete success');
+      expect(brief).toContain('A conversation that ends with a good answer is done');
+      expect(brief).not.toContain('planning artifacts complete');
+      expect(brief).not.toMatch(/\{\{|\}\}/);
+    });
+
+    it('with the built-in fallback templates: ordinary tickets keep the delivery definition of done', () => {
+      const brief = renderBrief(h.ctx, h.deps, worker);
+      expect(brief).toContain('planning artifacts complete');
+      expect(brief).not.toContain('a good answer with nothing delivered is complete success');
+    });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('with the shipped templates: interactive tickets drop the phase table and the delivery definition of done', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      h.db.update('tickets', ticketId, { interactiveSession: true });
+      const brief = renderBrief(h.ctx, h.deps, worker);
+      expect(brief).toContain('a good answer with nothing delivered is complete success');
+      expect(brief).toContain('A conversation that ends with a good answer is done');
+      expect(brief).not.toContain('Plan approval and merge approval are the human\'s');
+      expect(brief).not.toContain('planning artifacts complete and validated');
+      const instructions = renderWorkerInstructions(h.ctx, h.deps, worker);
+      expect(instructions).toContain('Conversation is the posture for every turn');
+      expect(instructions).not.toContain('Do the phase your ticket status asks for');
+      expect(brief).not.toMatch(/\{\{|\}\}/);
+      expect(instructions).not.toMatch(/\{\{[#/]?[a-z]/i);
+    });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('with the shipped templates: ordinary tickets keep the phase table and definition of done', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const brief = renderBrief(h.ctx, h.deps, worker);
+      expect(brief).toContain('Plan approval and merge approval are the human\'s');
+      expect(brief).toContain('planning artifacts complete and validated');
+      expect(brief).not.toContain('a good answer with nothing delivered is complete success');
+      const instructions = renderWorkerInstructions(h.ctx, h.deps, worker);
+      expect(instructions).toContain('Do the phase your ticket status asks for');
+      expect(instructions).not.toContain('Conversation is the posture for every turn');
+    });
+  });
+
   it('records worker bootstrap without pasting it into the first-turn prompt (VS-161)', async () => {
     const recorded: unknown[][] = [];
     h.services.knowledgeUsage = {

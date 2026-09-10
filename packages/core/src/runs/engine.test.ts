@@ -370,6 +370,54 @@ describe('run engine', () => {
     });
   });
 
+  describe('conductor permission bypass (VS-171)', () => {
+    it('a conductor turn is bypass even when workspace default is auto', async () => {
+      expect(h.ctx.config.defaults.permissionMode).toBe('auto');
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'hello' });
+      runtime.queue.push({ structured: { state: 'idle', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+      expect(runtime.inputs[0]!.permission.mode).toBe('bypass');
+    });
+
+    it('a conductor role set to auto is still bypass', async () => {
+      h.db.update('roles', h.roleId, { permissionJson: { mode: 'auto' } });
+      h.db.update('agents', h.conductorId, { roleId: h.roleId });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'hello' });
+      runtime.queue.push({ structured: { state: 'idle', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+      expect(runtime.inputs[0]!.permission.mode).toBe('bypass');
+    });
+
+    it('a worker with workspace default auto and no role mode stays auto', async () => {
+      const ticketId = seedTicket(h);
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      runtime.queue.push({ structured: { state: 'working', summary: 'started', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+      expect(runtime.inputs[0]!.permission.mode).toBe('auto');
+    });
+
+    it('a worker role bypass still applies', async () => {
+      h.db.update('roles', h.roleId, { permissionJson: { mode: 'bypass' } });
+      const ticketId = seedTicket(h);
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      runtime.queue.push({ structured: { state: 'working', summary: 'started', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+      expect(runtime.inputs[0]!.permission.mode).toBe('bypass');
+    });
+
+    it('a worker role restricted still applies', async () => {
+      h.db.update('roles', h.roleId, { permissionJson: { mode: 'restricted' } });
+      const ticketId = seedTicket(h);
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      runtime.queue.push({ structured: { state: 'working', summary: 'started', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+      expect(runtime.inputs[0]!.permission.mode).toBe('restricted');
+    });
+  });
+
   it('carries the runtime’s live-input handle onto the active run, and clears it at finalize (VS-99)', async () => {
     runtime.streamingInput = true;
     runtime.delayMs = 30;

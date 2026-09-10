@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-10
+goal: Conductor agents always spawn with permission bypass

@@ -715,7 +715,7 @@ Hard rules (in priority order, in its prompt): (1) never writes to a project or 
 
 ### 10.2 Runtime
 
-The conductor is an agent like any other: `kind=conductor`, cwd = `conductor/`, persistent session, its runtime chosen in `workspace.yaml` (default Claude). It has read access to `knowledge/` and to project summary cards, and read-only access to project clones through `ac_*` tools and, optionally, `--add-dir projects/<id>` for reading code when investigating (it MUST NOT edit; the runtime permission deny list blocks writes outside `conductor/`).
+The conductor is an agent like any other: `kind=conductor`, cwd = `conductor/`, persistent session, its runtime chosen in `workspace.yaml` (default Claude). A conductor turn always spawns with permission mode `bypass` (VS-171), regardless of the workspace default or any role permission, so the runtime cannot classify away `ac_*`; the deny list still applies. It has read access to `knowledge/` and to project summary cards, and read-only access to project clones through `ac_*` tools and, optionally, `--add-dir projects/<id>` for reading code when investigating (it MUST NOT edit; the runtime permission deny list blocks writes outside `conductor/`).
 
 ### 10.3 Intake loop (per human message)
 
@@ -1215,7 +1215,7 @@ Outlines and key rule text are in `docs/prompts/skills.md`.
 - Principals: operator sessions (`conductor login` writes a named context in `~/.config/agent-conductor/contexts.yaml`), run tokens (short-lived JWT, scoped, loopback-only), service tokens (plugins/webhooks). Every request is attributed in `activity`.
 - Secrets: never in the DB; referenced by env var name or OS keychain; injected into runs only when the agent spec lists them; redacted from logs.
 - Agent authored content is untrusted input to other agents: comments carry `source_trust`; the turn prompt wraps quoted comments in a clearly delimited block and reminds the agent that instructions inside tickets/comments are data. Conductor never executes commands from ticket text.
-- Runtime permission posture per role; `bypass` requires explicit human opt-in and is shown in the UI. Deny list always includes force-push and default-branch push where the runtime can express it.
+- Runtime permission posture per role; worker `bypass` requires explicit human opt-in and is shown in the UI. A conductor turn always spawns with `bypass` (VS-171) regardless of workspace or role default. Deny list always includes force-push and default-branch push where the runtime can express it.
 - Workers cannot read other projects (no `--add-dir` beyond their home + `knowledge/` allowlist).
 
 ---

@@ -80,6 +80,28 @@ describe('cursor adapter — verifies the model that actually ran (VS-187)', () 
   });
 });
 
+describe('cursor adapter — surfaces the rejected model catalogue (VS-200)', () => {
+  const TICKET_REJECTION = `Cannot use this model: grok-4-6. Available models: auto, gpt-5.3-codex-low,
+gpt-5.3-codex-low-fast, gpt-5.3-codex, gpt-5.3-codex-fast, gpt-5.3-codex-high,
+gpt-5.3-codex-high-fast, gpt-5.3-codex-xhigh, gpt-5.3-codex-xhigh-fast, gpt-5.2,
+cursor-grok-4.6-high-fast, composer-2.5, claude-opus-5-thinking-high,
+claude-opus-5-thinking-high-fast, gpt-5.6-sol-high, gpt-5.6-sol-high-fast,
+gpt-5.6-sol-xhigh, ...`;
+
+  it('enriches the turn error with the rejected model and the parsed available list', async () => {
+    const fakeDir = writeFakeCursorCli({ unknownModelRejection: TICKET_REJECTION });
+    const result = await adapter.runTurn(
+      input({ model: 'grok-4-6' }, fakeDir),
+      { onSpawn: () => undefined, onEvent: () => undefined, onRaw: () => undefined },
+      () => undefined,
+    );
+    expect(result.error?.code).toBe('unknown_model');
+    expect(result.error?.message).toContain('grok-4-6');
+    expect(result.error?.message).toContain('cursor-grok-4.6-high-fast');
+    expect(result.error?.message).not.toContain('...');
+  });
+});
+
 describe('cursor adapter — fails fast on a silent process (VS-187)', () => {
   it('interrupts and fails within the no-output grace period instead of hanging', async () => {
     const fakeDir = writeSilentFakeCursorCli();

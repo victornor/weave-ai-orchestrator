@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { adapter } from '../src/adapter.js';
+import { _resetModelsCacheForTests, FALLBACK_MODELS, listModels } from '../src/models.js';
 
 const dirs: string[] = [];
 const tmp = (p: string) => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push(d); return d; };
-afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); _resetModelsCacheForTests(); });
 
 describe('cursor adapter', () => {
   it('declares cursor-agent conventions without live stdin', () => {
@@ -22,12 +23,12 @@ describe('cursor adapter', () => {
     });
   });
 
-  it('lists static models without spawning', async () => {
+  it('lists the real fallback catalogue, via a cache primed with no binary (never the real installed CLI)', async () => {
+    await listModels({ binaryPath: null });
     const models = await adapter.listModels();
     expect(models.every((m) => m.source === 'static')).toBe(true);
-    expect(models.map((m) => m.id)).toEqual([
-      'auto', 'grok-4-6', 'opus-5', 'composer-5-6', 'fable-5-1', 'gpt-5', 'sonnet-4-thinking',
-    ]);
+    expect(models.map((m) => m.id)).toEqual(FALLBACK_MODELS.map((m) => m.id));
+    expect(models.map((m) => m.id)).not.toContain('grok-4-6');
   });
 
   it('installs AGENTS.md, a CLAUDE.md pointer, and skills', async () => {

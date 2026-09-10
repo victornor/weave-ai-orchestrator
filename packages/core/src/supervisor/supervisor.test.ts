@@ -471,6 +471,36 @@ describe('supervisor scheduled passes', () => {
       expect(archiveAfterMerge).toHaveBeenCalledWith(ticketId);
     });
 
+    it('archives a task-kind ticket\'s tracker change too, not only a change-kind ticket\'s', async () => {
+      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+      const archiveAfterMerge = vi.fn(async () => ({ archivedAs: '2026-09-05-max-workers', skipped: null }));
+      h.services.openspec = { archiveAfterMerge } as never;
+      // seedTicket's default kind is 'task' — the VS-30 shape (a task ticket's OpenSpec tracker change).
+      const ticketId = seedTicket(h, { status: 'done', openspecChangeName: 'max-workers' });
+      const clone = join(h.ctx.paths.projects, h.projectSlug);
+      mkdirSync(join(clone, 'openspec', 'changes', 'max-workers'), { recursive: true });
+      await supervisor.tick();
+      expect(archiveAfterMerge).toHaveBeenCalledWith(ticketId);
+    });
+
+    it('records a comment and wakes the conductor when a left-behind change fails to archive', async () => {
+      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+      h.services.openspec = { archiveAfterMerge: vi.fn(async () => { throw new Error('omits scenario(s) the current spec still has: "A scenario"'); }) } as never;
+      const comment = vi.fn();
+      h.services.tickets = { livenessViolations: () => [], comment } as never;
+      const ticketId = seedTicket(h, { status: 'done', kind: 'change', openspecChangeName: 'add-dark-mode' });
+      const clone = join(h.ctx.paths.projects, h.projectSlug);
+      mkdirSync(join(clone, 'openspec', 'changes', 'add-dark-mode'), { recursive: true });
+
+      await supervisor.tick();
+      await Promise.resolve(); // the archive attempt's rejection is handled in a detached .catch
+
+      expect(comment).toHaveBeenCalledWith({ kind: 'system', id: null }, ticketId, expect.stringContaining('A scenario'), 'status');
+      const woken = wake.calls.find((c) => (c.input as { idempotencyKey?: string }).idempotencyKey === `reconcile-archive-failed:${ticketId}`);
+      expect(woken).toBeDefined();
+      expect(String((woken!.input as { reason: string }).reason)).toContain('A scenario');
+    });
+
     it('leaves an already-archived change alone', async () => {
       h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
       const archiveAfterMerge = vi.fn(async () => ({ archivedAs: null, skipped: null }));

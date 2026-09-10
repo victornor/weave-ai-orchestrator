@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-11
+goal: Parallel changes to one requirement collide silently until archive fails

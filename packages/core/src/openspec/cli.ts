@@ -239,9 +239,22 @@ export async function validate(o: OpenSpecCtx, changeName: string): Promise<Vali
   return { ok: r.ok && !issues.some((i) => i.level === 'error'), issues };
 }
 
-/** `openspec archive <name> --yes --json` — the deterministic structural merge; never the skill form. */
+/**
+ * `openspec archive <name> --yes --json` — the deterministic structural merge; never the skill form.
+ *
+ * A rejected archive (e.g. a MODIFIED requirement that would drop a scenario another change already
+ * landed) exits non-zero with the real reason on stdout's `status` array and nothing on stderr, so
+ * this reads `allowFailure` and extracts the reason from there — `run()`'s default `failed()` would
+ * otherwise report an empty message.
+ */
 export async function archive(o: OpenSpecCtx, changeName: string): Promise<ArchiveResult> {
-  const r = await run(o.cwd, ['archive', changeName, '--yes'], runOpts(o));
+  const r = await run(o.cwd, ['archive', changeName, '--yes'], runOpts(o, { allowFailure: true }));
+  if (!r.ok) {
+    const items = firstArray(r.json, ['status', 'issues', 'items', 'results']);
+    const messages = items.map((i) => str(get(i, 'message'))).filter((m): m is string => m !== null && m.length > 0);
+    const detail = messages.length ? messages.join('; ') : (r.stderr.trim().slice(0, 300) || `exited ${r.exitCode ?? '?'}`);
+    throw new OcError('internal', `openspec archive ${changeName} failed: ${detail}`, { changeName, exitCode: r.exitCode, stderr: r.stderr.slice(0, 300), issues: items });
+  }
   const a = pick(r.json, 'archive') ?? r.json;
   return {
     archivedAs: str(get(a, 'archivedAs')),

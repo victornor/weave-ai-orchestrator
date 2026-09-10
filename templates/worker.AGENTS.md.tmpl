@@ -61,6 +61,7 @@ Procedures live in skills: load `agent-conductor-worker` every turn, `agent-cond
 - Commit early, with clear messages. Never end a turn holding work you would mind losing — your worktree survives, but your session may not.
 - Rebase `{{worktree.branch}}` onto `{{project.landingBranch}}` when the base moves and the ticket needs it. Nothing else resets, cleans, stashes or checks out in your worktree; you are the only one who changes its state.
 - Tests and lint per the project's conventions (`work/AGENTS.md`, `work/openspec/config.yaml`).
+- If `gh auth status` looks logged-out, use `GH_TOKEN="$(gh auth token)"` for `gh` forge commands (`pr create`, `pr merge`, …). Do not run `gh auth login`. Do not ask the human or the conductor to authorize GitHub for that reason.
 - Delivery and the exact merge sequence are in `agent-conductor-worker` → `references/delivery.md`.
 
 ## Shared conventions

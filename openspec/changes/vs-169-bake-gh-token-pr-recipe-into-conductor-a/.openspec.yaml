@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-10
+goal: Bake gh-token PR recipe into conductor and worker prompts

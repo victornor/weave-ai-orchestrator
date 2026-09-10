@@ -21,11 +21,12 @@ import { useKnowledgeGraph } from '../api/hooks';
 import { cx } from '../lib/cx';
 import { buildModel, type GraphModel, type GraphNode } from '../lib/graph/model';
 import { edgeDimmed, highlighted, matchingIds, nodeDimmed, visible } from '../lib/graph/filters';
-import { createSimulation, nodeRadius, type GraphSimulation, type SimLink, type SimNode } from '../lib/graph/simulation';
+import { chipSize, createSimulation, type GraphSimulation, type SimLink, type SimNode } from '../lib/graph/simulation';
 import { hullPath, type Point } from '../lib/graph/hull';
 import {
   boundsOf,
   centreOn,
+  defaultView,
   fitTo,
   IDENTITY,
   labelDetail,
@@ -35,6 +36,7 @@ import {
   pinchScale,
   midpoint,
   zoomAround,
+  ZOOM_STEP,
   type LabelDetail,
   type Size,
   type ViewportTransform,
@@ -47,7 +49,7 @@ const FALLBACK_SIZE: Size = { width: 900, height: 520 };
 /** A pointer that moved less than this between down and up was a click, not a drag. */
 const CLICK_SLOP_PX = 4;
 /** How far a cluster region is drawn outside the nodes it encloses, in graph units. */
-const HULL_PAD = 30;
+const HULL_PAD = 40;
 const VIEW_TWEEN_MS = 260;
 
 /** A media query as a boolean that follows changes. */
@@ -87,15 +89,12 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
   const svgRef = useRef<SVGSVGElement>(null);
   const sceneRef = useRef<SVGGElement>(null);
   const nodeRefs = useRef(new Map<string, SVGGElement>());
-  const labelRefs = useRef(new Map<string, SVGGElement>());
   const edgeRefs = useRef(new Map<string, SVGPathElement>());
   const hullRefs = useRef(new Map<string, SVGPathElement>());
   const simRef = useRef<GraphSimulation | null>(null);
   const viewRef = useRef<ViewportTransform>(IDENTITY);
   const sizeRef = useRef<Size>(FALLBACK_SIZE);
   const autoFitRef = useRef(true);
-  /** Set when nodes have come or gone: their labels have no counter-scale written yet. */
-  const labelsDirtyRef = useRef(true);
   const tweenRef = useRef<number | null>(null);
 
   const measure = useCallback((): Size => {
@@ -106,18 +105,11 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
     return sizeRef.current;
   }, []);
 
-  /**
-   * Write the viewport out. Labels are counter-scaled so they stay the same size on screen at any
-   * zoom, which only needs doing when the zoom itself moved — panning and the settling layout leave
-   * every label where it was relative to its node.
-   */
   const applyView = useCallback((next: ViewportTransform): void => {
     const zoomed = viewRef.current.k !== next.k;
     viewRef.current = next;
     sceneRef.current?.setAttribute('transform', toSvg(next));
     if (zoomed) {
-      writeLabels(labelRefs.current, next.k);
-      labelsDirtyRef.current = false;
       setDetail((was) => {
         const now = labelDetail(next.k);
         return now === was ? was : now;
@@ -150,11 +142,6 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
     if (!sim) return;
     const nodes = sim.nodes();
 
-    if (labelsDirtyRef.current) {
-      writeLabels(labelRefs.current, viewRef.current.k);
-      labelsDirtyRef.current = false;
-    }
-
     for (const n of nodes) nodeRefs.current.get(n.id)?.setAttribute('transform', `translate(${n.x} ${n.y})`);
 
     for (const link of sim.links()) {
@@ -177,7 +164,7 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
 
     if (autoFitRef.current) {
       const bounds = boundsOf(nodes.map((n) => ({ x: n.x, y: n.y })));
-      if (bounds) applyView(fitTo(bounds, sizeRef.current));
+      if (bounds) applyView(defaultView(bounds, sizeRef.current));
     }
   }, [applyView]);
 
@@ -200,7 +187,6 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
     } else {
       sim.update(shown, size);
     }
-    labelsDirtyRef.current = true;
     draw();
     setPins(new Set(sim.pinned()));
   }, [shown, animated, draw, measure]);
@@ -244,9 +230,17 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
   }, [measure, moveView]);
 
   const resetView = useCallback((): void => {
+    const nodes = simRef.current?.nodes() ?? [];
+    const bounds = boundsOf(nodes.map((n) => ({ x: n.x, y: n.y })));
     autoFitRef.current = false;
-    moveView(IDENTITY);
-  }, [moveView]);
+    if (bounds) moveView(defaultView(bounds, measure()));
+  }, [measure, moveView]);
+
+  const zoomBy = useCallback((factor: number): void => {
+    autoFitRef.current = false;
+    const size = measure();
+    applyView(zoomAround(viewRef.current, { x: size.width / 2, y: size.height / 2 }, factor));
+  }, [applyView, measure]);
 
   const togglePin = useCallback((id: string): void => {
     const sim = simRef.current;
@@ -364,6 +358,8 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
         />
         {!asList ? (
           <>
+            <Button size="sm" onClick={() => zoomBy(ZOOM_STEP)}>Zoom in</Button>
+            <Button size="sm" onClick={() => zoomBy(1 / ZOOM_STEP)}>Zoom out</Button>
             <Button size="sm" onClick={fitView}>Fit</Button>
             <Button size="sm" onClick={resetView}>Reset</Button>
           </>
@@ -461,7 +457,6 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
                     pinned={pins.has(n.id)}
                     label={labelFor(n, detail, selected === n.id || hover === n.id)}
                     nodeRef={(el) => { if (el) nodeRefs.current.set(n.id, el); else nodeRefs.current.delete(n.id); }}
-                    labelRef={(el) => { if (el) labelRefs.current.set(n.id, el); else labelRefs.current.delete(n.id); }}
                     onEnter={() => setHover(n.id)}
                     onLeave={() => setHover((was) => (was === n.id ? null : was))}
                     onSelect={() => selectNode(n.id)}
@@ -516,16 +511,8 @@ function round(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
-/** Hold every label at the same on-screen size, whatever the zoom, just below its node. */
-function writeLabels(labels: ReadonlyMap<string, SVGGElement>, k: number): void {
-  const inverse = 1 / k;
-  for (const el of labels.values()) {
-    el.setAttribute('transform', `translate(0 ${Number(el.dataset['r'] ?? 8)}) scale(${inverse})`);
-  }
-}
-
 function GraphNodeShape({
-  node, colour, dimmed, selected, pinned, label, nodeRef, labelRef, onEnter, onLeave, onSelect, onOpen,
+  node, colour, dimmed, selected, pinned, label, nodeRef, onEnter, onLeave, onSelect, onOpen,
 }: {
   node: GraphNode;
   colour: string;
@@ -534,17 +521,20 @@ function GraphNodeShape({
   pinned: boolean;
   label: string | null;
   nodeRef: (el: SVGGElement | null) => void;
-  labelRef: (el: SVGGElement | null) => void;
   onEnter: () => void;
   onLeave: () => void;
   onSelect: () => void;
   onOpen: () => void;
 }): React.ReactElement {
-  const r = nodeRadius(node);
+  const { width, height } = chipSize(node);
+  const hw = width / 2;
+  const hh = height / 2;
   return (
     <g
       ref={nodeRef}
       data-node={node.id}
+      data-chip=""
+      data-kind={node.kind}
       data-dimmed={dimmed ? 'true' : undefined}
       data-pinned={pinned ? 'true' : undefined}
       role="button"
@@ -563,19 +553,31 @@ function GraphNodeShape({
         if (e.key === ' ') { e.preventDefault(); onOpen(); }
       }}
     >
-      {node.kind === 'hub' ? (
-        <rect x={-r} y={-r} width={r * 2} height={r * 2} rx={3} transform="rotate(45)" fill={colour} fillOpacity={0.9} stroke={selected ? 'var(--text-1)' : 'var(--bg-0)'} strokeWidth={selected ? 2.5 : 1.5} />
-      ) : (
-        <circle r={r} fill={colour} fillOpacity={0.85} stroke={selected ? 'var(--text-1)' : 'var(--bg-0)'} strokeWidth={selected ? 2.5 : 1.5} />
-      )}
-      {pinned ? <circle cx={r * 0.72} cy={-r * 0.72} r={3} fill="var(--text-1)" stroke="var(--bg-0)" strokeWidth={1} /> : null}
-      <g ref={labelRef} data-r={node.kind === 'hub' ? r * 1.45 : r} aria-hidden="true">
-        {label ? (
-          <text y={11} textAnchor="middle" fontSize={11} fill="var(--text-2)" className={cx('pointer-events-none', node.kind === 'hub' && 'font-semibold')}>
-            {label}
-          </text>
-        ) : null}
-      </g>
+      <rect
+        x={-hw}
+        y={-hh}
+        width={width}
+        height={height}
+        rx={4}
+        fill="var(--bg-1)"
+        stroke={selected ? 'var(--text-1)' : 'var(--line-2)'}
+        strokeWidth={selected ? 2 : 1}
+      />
+      <rect x={-hw} y={-hh} width={3} height={height} rx={1} fill={colour} />
+      {label ? (
+        <text
+          x={1.5}
+          y={0}
+          dominantBaseline="central"
+          textAnchor="middle"
+          fontSize="var(--fs-micro)"
+          fill="var(--text-1)"
+          className={cx('pointer-events-none', node.kind === 'hub' && 'font-semibold')}
+        >
+          {label}
+        </text>
+      ) : null}
+      {pinned ? <circle cx={hw - 5} cy={-hh + 5} r={3} fill="var(--text-1)" stroke="var(--bg-0)" strokeWidth={1} /> : null}
     </g>
   );
 }

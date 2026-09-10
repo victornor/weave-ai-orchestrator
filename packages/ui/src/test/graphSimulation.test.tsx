@@ -80,6 +80,20 @@ describe('the simulation', () => {
     sim.destroy();
   });
 
+  it('keeps neighbouring chips from overlapping after settle', () => {
+    const sim = createSimulation(buildModel(CLUSTERED), SIZE, { animated: false });
+    sim.settle();
+    const nodes = sim.nodes();
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i]!;
+        const b = nodes[j]!;
+        expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThan(a.radius + b.radius);
+      }
+    }
+    sim.destroy();
+  });
+
   it('forgets the pin of a node that has left the graph', () => {
     const sim = createSimulation(buildModel(CLUSTERED), SIZE, { animated: false });
     sim.settle();

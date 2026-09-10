@@ -36,7 +36,9 @@ export interface Bounds {
 
 export const MIN_ZOOM = 0.15;
 export const MAX_ZOOM = 6;
-export const IDENTITY: ViewportTransform = { k: 1, x: 0, y: 0 };
+export const DEFAULT_ZOOM = 1;
+export const ZOOM_STEP = 1.25;
+export const IDENTITY: ViewportTransform = { k: DEFAULT_ZOOM, x: 0, y: 0 };
 
 /** How much of a label to draw. Below `none` only hubs and the focused node are labelled. */
 export type LabelDetail = 'none' | 'truncated' | 'full';
@@ -111,6 +113,18 @@ export function fitTo(bounds: Bounds, size: Size, margin = 48): ViewportTransfor
   const usableW = Math.max(1, size.width - margin * 2);
   const usableH = Math.max(1, size.height - margin * 2);
   const k = clampZoom(Math.min(usableW / width, usableH / height));
+  const cx = (bounds.minX + bounds.maxX) / 2;
+  const cy = (bounds.minY + bounds.maxY) / 2;
+  return { k, x: size.width / 2 - cx * k, y: size.height / 2 - cy * k };
+}
+
+/**
+ * Opening / reset: never zoom out past `DEFAULT_ZOOM`, so titles stay visible. A graph that
+ * already fits at a higher scale still uses that fitted scale.
+ */
+export function defaultView(bounds: Bounds, size: Size, margin = 48): ViewportTransform {
+  const fitted = fitTo(bounds, size, margin);
+  const k = Math.max(fitted.k, DEFAULT_ZOOM);
   const cx = (bounds.minX + bounds.maxX) / 2;
   const cy = (bounds.minY + bounds.maxY) / 2;
   return { k, x: size.width / 2 - cx * k, y: size.height / 2 - cy * k };

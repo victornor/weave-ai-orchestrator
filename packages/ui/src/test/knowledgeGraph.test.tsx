@@ -173,29 +173,45 @@ describe('dragging and panning', () => {
     expect(labelled()).toContain('Billing runbook');
   });
 
-  it('keeps a label the same size on screen whatever the zoom', () => {
+  it('draws labeled chips rather than unmarked filled circles', () => {
     const { container } = draw();
-    const svg = container.querySelector('svg')!;
-    const label = (): string => container.querySelector('[data-node="SHARED.md"] [data-r]')!.getAttribute('transform') ?? '';
+    const chips = container.querySelectorAll('[data-chip]');
+    expect(chips).toHaveLength(5);
+    expect(container.querySelectorAll('[data-node] circle')).toHaveLength(0);
+    expect(container.querySelector('[data-kind="hub"] text')?.getAttribute('class')).toContain('font-semibold');
+    expect(container.querySelector('[data-kind="doc"] text')?.getAttribute('class')).not.toContain('font-semibold');
+  });
 
-    fireEvent.wheel(svg, { deltaY: -600, clientX: 200, clientY: 200 });
-    const k = scaleOf(sceneTransform(container));
+  it('opens at a readable zoom, not fitted past the default floor', () => {
+    const { container } = draw();
+    expect(scaleOf(sceneTransform(container))).toBeGreaterThanOrEqual(1);
+    expect(container.querySelector('[data-node="projects/api/docs/billing.md"] text')?.textContent).toBe('Billing runbook');
+  });
 
-    expect(label()).toContain(`scale(${1 / k})`);
+  it('zooms in and out from the buttons about the frame centre', () => {
+    const { container } = draw();
+    const opened = scaleOf(sceneTransform(container));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    const zoomedIn = scaleOf(sceneTransform(container));
+    expect(zoomedIn).toBeGreaterThan(opened);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
+    expect(scaleOf(sceneTransform(container))).toBeLessThan(zoomedIn);
   });
 
   it('eases the viewport back to its default on Reset', () => {
     const { container } = draw();
+    const opened = sceneTransform(container);
     fireEvent.wheel(container.querySelector('svg')!, { deltaY: -600, clientX: 200, clientY: 200 });
-    expect(scaleOf(sceneTransform(container))).not.toBe(1);
+    expect(sceneTransform(container)).not.toBe(opened);
 
-    // The reset is a tween: with reduced motion off it needs frames to land.
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
     vi.advanceTimersByTime(VIEW_TWEEN_MS * 3);
     vi.useRealTimers();
 
-    expect(sceneTransform(container)).toBe('translate(0 0) scale(1)');
+    expect(sceneTransform(container)).toBe(opened);
   });
 
   it('frames every page on Fit', () => {

@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-10
+goal: Make the Cursor adapter verify it ran the selected model and fail within seconds when cursor-agent prints nothing

@@ -6,7 +6,7 @@ import type {
 import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
 import { describeCursorAccount } from './account.js';
-import { buildArgs } from './args.js';
+import { buildArgs, namedModel } from './args.js';
 import { readCredential } from './credential.js';
 import { createCursorParser } from './events.js';
 import { asCursorSession } from './session.js';
@@ -32,6 +32,27 @@ const MODELS: RuntimeModel[] = [
   { id: 'gpt-5', label: 'GPT-5', provider: 'openai', source: 'static', tier: 'frontier' },
   { id: 'sonnet-4-thinking', label: 'Sonnet 4 Thinking', provider: 'anthropic', source: 'static', tier: 'frontier' },
 ];
+
+/**
+ * VS-167: `cursor-agent` has spawned and written nothing at all — not even `system.init` — within
+ * this long. Well under the daemon watchdog's `silenceTimeoutSec` floor (60s, 600s default), so a
+ * completely dead process fails in seconds rather than waiting for that generic backstop.
+ */
+const NO_OUTPUT_GRACE_MS = 20_000;
+
+/**
+ * `cursor-agent`'s `system.init.model` is a free-form display string this adapter does not pin
+ * (no live CLI to verify one against). Match on the requested id's first alphabetic run so a
+ * same-family run (whatever tier/variant Cursor actually picked) isn't flagged, but a different
+ * model family being silently substituted (VS-187: Grok requested, Opus billed) is.
+ */
+function familyWord(modelId: string): string {
+  return (modelId.match(/[a-z]+/i)?.[0] ?? modelId).toLowerCase();
+}
+
+function modelFamilyMismatch(requested: string, reported: string | null): boolean {
+  return reported != null && !reported.toLowerCase().includes(familyWord(requested));
+}
 
 const CONFIG_SCHEMA: JsonSchema = {
   type: 'object',
@@ -73,8 +94,16 @@ export const adapter: RuntimeAdapter = {
     const built = buildArgs(input);
     writeFiles(built.files);
 
+    const requestedModel = namedModel(input);
     const parser = createCursorParser({ resumed: built.resumed });
     let seq = 0;
+    let sawOutput = false;
+    let noOutputTimedOut = false;
+    let mismatchedModel: string | null = null;
+    const graceMs = Math.min(
+      typeof input.options?.['noOutputGraceMs'] === 'number' ? (input.options['noOutputGraceMs'] as number) : NO_OUTPUT_GRACE_MS,
+      input.limits.timeoutMs,
+    );
     const launch = launchCommand(built.cmd, built.env);
     const run = spawnLines({
       cmd: launch.cmd,
@@ -86,9 +115,16 @@ export const adapter: RuntimeAdapter = {
       timeoutMs: input.limits.timeoutMs,
       onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
       onLine: (stream, line) => {
+        sawOutput = true;
         sink.onRaw(stream, line);
         if (stream === 'stdout') {
-          for (const ev of parser.handle(line)) sink.onEvent({ ...ev, seq: seq++ });
+          for (const ev of parser.handle(line)) {
+            sink.onEvent({ ...ev, seq: seq++ });
+            if (requestedModel && !mismatchedModel && (ev.type === 'session.started' || ev.type === 'session.resumed')) {
+              const reported = (ev.payload as { model?: string | null }).model ?? null;
+              if (modelFamilyMismatch(requestedModel, reported)) { mismatchedModel = reported; void run.cancel('interrupt'); }
+            }
+          }
         }
       },
     });
@@ -97,16 +133,30 @@ export const adapter: RuntimeAdapter = {
       cancel: (mode) => run.cancel(mode),
     });
 
+    const noOutputTimer = setTimeout(() => {
+      if (!sawOutput) { noOutputTimedOut = true; void run.cancel('interrupt'); }
+    }, graceMs);
+    if (typeof noOutputTimer.unref === 'function') noOutputTimer.unref();
+
     const outcome = await run.done;
+    clearTimeout(noOutputTimer);
     parser.finish();
 
     const st = parser.state;
     const structured = extractReport(st.finalText) ?? undefined;
-    const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError;
+    // A mismatch or dead process is caught here, ahead of the ordinary exitCode/isError check, so
+    // the specific code below survives — `timedOut` is deliberately left untouched (whatever
+    // `spawnLines` naturally returns for our own interrupt) because a true `timedOut` makes
+    // `finalize()` overwrite `error` with a generic `timeout`/`tooling` pair.
+    const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError || noOutputTimedOut || Boolean(mismatchedModel);
     const error = failed
-      ? classifyError(outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) ?? {
-        code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'cursor turn failed',
-      }
+      ? (noOutputTimedOut
+        ? { code: 'no_output', family: 'tooling' as const, message: `cursor-agent produced no output within ${graceMs}ms of starting; interrupted rather than waiting out the daemon's silence window` }
+        : mismatchedModel
+          ? { code: 'model_mismatch', family: 'tooling' as const, message: `requested model "${requestedModel}" but cursor-agent ran "${mismatchedModel}"` }
+          : classifyError(outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) ?? {
+            code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'cursor turn failed',
+          })
       : undefined;
 
     return {

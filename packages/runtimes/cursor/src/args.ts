@@ -16,7 +16,7 @@ export interface CursorBuiltCommand extends BuiltCommand {
 
 function str(v: unknown): string | null { return typeof v === 'string' && v.length > 0 ? v : null; }
 
-function namedModel(input: TurnInput): string | null {
+export function namedModel(input: TurnInput): string | null {
   const model = str(input.model) ?? str(input.options?.['model']);
   if (!model || model.toLowerCase() === 'auto') return null;
   return model;

@@ -38,7 +38,7 @@ export function ticket(over: Partial<Ticket> = {}): Ticket {
   return {
     id: 'tk_1', workspaceId: 'ws1', projectId: 'proj1', number: 42, identifier: 'ACME-42', kind: 'change',
     title: 'Add dark mode', description: '', summary: null, status: 'in_progress', priority: 'medium', autoMerge: false,
-    assigneeRoleId: null, workerId: null, assigneeHuman: false, interactiveSession: false, landingBranch: null, parentId: null, createdByKind: 'human', createdById: null,
+    assigneeRoleId: null, workerId: null, assigneeHuman: false, interactiveSession: false, landingBranch: null, workerModelId: null, parentId: null, createdByKind: 'human', createdById: null,
     originKind: null, originFingerprint: null, checkoutRunId: null, executionRunId: null, openspecChangeName: null,
     openspecState: null, delivery: null, unblock: null, blockedFromStatus: null, monitorNextCheckAt: null, blockedTransitionAt: null,
     mergeQueuedAt: null, mergeStartedAt: null,

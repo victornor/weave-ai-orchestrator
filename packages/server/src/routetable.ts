@@ -52,8 +52,8 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: `${W}/briefing`, tag: 'workspace', summary: 'Deterministic briefing snapshot', auth: 'session' },
   { method: 'POST', path: `${W}/transcribe`, tag: 'workspace', summary: 'Audio to text for this workspace', auth: 'session', mutating: true },
 
-  { method: 'GET', path: `${W}/models`, tag: 'workspace', summary: 'The two model settings: conductor and workers', auth: 'session' },
-  { method: 'PUT', path: `${W}/models`, tag: 'workspace', summary: 'Replace both model settings', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/models`, tag: 'workspace', summary: 'The two model settings plus the worker-options catalog', auth: 'session' },
+  { method: 'PUT', path: `${W}/models`, tag: 'workspace', summary: 'Replace both model settings; omitted workerOptions keeps the catalog', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/projects`, tag: 'projects', summary: 'List projects', auth: 'session' },
   { method: 'POST', path: `${W}/projects`, tag: 'projects', summary: 'Add a project — 202 with the cloning row and the job doing the work', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/projects/{id}`, tag: 'projects', summary: 'One project', auth: 'session' },

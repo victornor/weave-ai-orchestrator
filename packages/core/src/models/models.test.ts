@@ -18,12 +18,29 @@ describe('modelSettingFor', () => {
     models: {
       conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
       workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' },
+      workerOptions: [],
     },
   };
 
   it('gives the conductor its own setting and every worker the other', () => {
     expect(modelSettingFor(config, 'conductor')).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
     expect(modelSettingFor(config, 'worker')).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
+  });
+
+  it('uses a ticket\'s catalog option when it still exists (VS-162)', () => {
+    const withOpts = {
+      models: {
+        conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+        workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' },
+        workerOptions: [
+          { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },
+        ],
+      },
+    };
+    expect(modelSettingFor(withOpts, 'worker', { workerModelId: 'cheap' })).toEqual({ runtime: 'opencode', model: 'glm-4.6' });
+    expect(modelSettingFor(withOpts, 'worker', { workerModelId: 'gone' })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
+    expect(modelSettingFor(withOpts, 'worker', { workerModelId: null })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
+    expect(modelSettingFor(withOpts, 'conductor', { workerModelId: 'cheap' })).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
   });
 });
 
@@ -89,7 +106,7 @@ describe('deriveModelSettings', () => {
 
   it('lands on the schema defaults for an empty document', () => {
     const m = deriveModelSettings({}, []);
-    expect(m.models).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } });
+    expect(m.models).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
   });
 
   it('explains itself in one line', () => {
@@ -120,10 +137,20 @@ describe('the models service', () => {
   const open = (): Decision[] => h.deps().decisions.list({ status: ['open'] });
 
   it('reads and replaces both settings', async () => {
-    expect(models.get()).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } });
+    expect(models.get()).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
     const next = await models.set(HUMAN, { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' } });
     expect(next.workers).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
+    expect(next.workerOptions).toEqual([]);
     expect(models.get()).toEqual(next);
+  });
+
+  it('keeps workerOptions when PUT omits them and replaces when they are sent (VS-162)', async () => {
+    const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
+    await models.set(HUMAN, { conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [cheap] });
+    const kept = await models.set(HUMAN, { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } });
+    expect(kept.workerOptions).toEqual([cheap]);
+    const cleared = await models.set(HUMAN, { conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
+    expect(cleared.workerOptions).toEqual([]);
   });
 
   it('refuses a setting with no runtime rather than storing it', async () => {

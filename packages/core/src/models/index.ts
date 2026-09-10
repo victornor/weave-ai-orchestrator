@@ -2,7 +2,7 @@
  * The workspace's two model settings as a service (VS-77, ADR 0011): read them, change one, and
  * settle the question a mixed-runtime migration left open.
  */
-import { OcError, WorkspaceModelsSchema, type WorkspaceModels } from '@agent-conductor/shared';
+import { OcError, WorkspaceModelsSchema, type WorkspaceModels, type WorkspaceModelsPut } from '@agent-conductor/shared';
 import type { Db } from '@agent-conductor/db';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, ModelsService } from '../api.js';
@@ -10,7 +10,7 @@ import { recordActivity } from '../events.js';
 import { releaseLoginPausesForAbandonedRuntimes } from '../runs/authgate.js';
 import { migrationSummary, type ModelMigration } from './migrate.js';
 
-export { modelSettingFor } from './resolve.js';
+export { modelSettingFor, workerOptionRuntimes } from './resolve.js';
 export { deriveModelSettings, hasModelSettings, migrationSummary, type ModelMigration, type RoleRuntimeRow, type WorkersRule } from './migrate.js';
 
 /** The `meta` row migration 0012 leaves behind: what the roles were running on before it dropped the columns. */
@@ -54,8 +54,11 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
       return ctx.config.models;
     },
 
-    async set(actor: Actor, next: WorkspaceModels): Promise<WorkspaceModels> {
-      const parsed = WorkspaceModelsSchema.safeParse(next);
+    async set(actor: Actor, next: WorkspaceModelsPut | WorkspaceModels): Promise<WorkspaceModels> {
+      const workerOptions = 'workerOptions' in next && next.workerOptions !== undefined
+        ? next.workerOptions
+        : (ctx.config.models.workerOptions ?? []);
+      const parsed = WorkspaceModelsSchema.safeParse({ ...next, workerOptions });
       if (!parsed.success) {
         throw new OcError('validation', `invalid model settings: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
       }

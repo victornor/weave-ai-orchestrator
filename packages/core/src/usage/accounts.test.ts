@@ -105,6 +105,16 @@ describe('accounts service', () => {
     expect(accounts.list().map((a) => a.runtimeId)).toEqual(['claude', 'codex']);
   });
 
+  it('probes a runtime named only by a worker option (VS-162)', async () => {
+    const gemini = new AccountRuntime(subscription);
+    h.ctx.registries.runtimes.set('gemini', gemini);
+    h.ctx.config.models.workerOptions = [
+      { id: 'cheap', description: 'Scouts.', runtime: 'gemini', model: null },
+    ];
+    await accounts.refresh();
+    expect(gemini.calls).toBe(1);
+  });
+
   it('does not probe a runtime only a retired worker used', async () => {
     const gemini = new AccountRuntime(subscription);
     h.ctx.registries.runtimes.set('gemini', gemini);

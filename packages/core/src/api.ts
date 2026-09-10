@@ -10,7 +10,7 @@ export interface Actor { kind: 'human' | 'agent' | 'system'; id: string | null; 
 export interface Page<T> { items: T[]; total: number }
 
 // ---------- tickets ----------
-export interface TicketCreateInput { projectId?: string | null; kind: S.TicketKind; title: string; description?: string; /** One-line why (VS-146); shown on plan-approval cards. */ summary?: string | null; priority?: S.TicketPriority; parentId?: string | null; blockedBy?: string[]; assigneeRoleId?: string | null; autoMerge?: boolean; originKind?: string; originFingerprint?: string; /** VS-101: marks the ticket as an interactive session from the moment it is created. */ interactiveSession?: boolean; /** Overrides the project's landing branch for this ticket alone (VS-119); set only at creation. */ landingBranch?: string | null }
+export interface TicketCreateInput { projectId?: string | null; kind: S.TicketKind; title: string; description?: string; /** One-line why (VS-146); shown on plan-approval cards. */ summary?: string | null; priority?: S.TicketPriority; parentId?: string | null; blockedBy?: string[]; assigneeRoleId?: string | null; autoMerge?: boolean; originKind?: string; originFingerprint?: string; /** VS-101: marks the ticket as an interactive session from the moment it is created. */ interactiveSession?: boolean; /** Overrides the project's landing branch for this ticket alone (VS-119); set only at creation. */ landingBranch?: string | null; /** Workspace catalog option this ticket's worker runs on (VS-162); omit for `models.workers`. */ workerModelId?: string | null }
 /** `sort: 'finished'` orders by when a ticket reached done or cancelled, so a page of terminal tickets is the most recently finished ones rather than the most recently created. */
 export interface TicketFilter { projectId?: string; status?: S.TicketStatus[]; kind?: S.TicketKind[]; roleId?: string; workerId?: string; search?: string; limit?: number; offset?: number; includeTerminal?: boolean; sort?: 'number' | 'finished' }
 export interface TransitionInput { to: S.TicketStatus; note?: string; unblock?: { owner: 'conductor' | 'human'; action: string }; blockedBy?: string[] }
@@ -19,7 +19,7 @@ export interface TicketsService {
   get(id: string): S.Ticket;                      // id or identifier
   list(filter?: TicketFilter): Page<S.Ticket>;
   update(actor: Actor, id: string, patch: Partial<Pick<S.Ticket, 'title' | 'description' | 'summary' | 'priority' | 'autoMerge' | 'parentId' | 'projectId'>>): S.Ticket;
-  assign(actor: Actor, id: string, roleId: string | null): S.Ticket;
+  assign(actor: Actor, id: string, roleId: string | null, workerModelId?: string | null): S.Ticket;
   setBlockers(actor: Actor, id: string, blockedBy: string[]): S.Ticket;
   blockers(id: string): S.Ticket[];
   children(id: string): S.Ticket[];
@@ -362,7 +362,8 @@ export interface UsageService {
  */
 export interface ModelsService {
   get(): S.WorkspaceModels;
-  set(actor: Actor, next: S.WorkspaceModels): Promise<S.WorkspaceModels>;
+  /** `workerOptions` omitted keeps the existing catalog; an explicit array (including `[]`) replaces it (VS-162). */
+  set(actor: Actor, next: S.WorkspaceModelsPut | S.WorkspaceModels): Promise<S.WorkspaceModels>;
   reconcile(): void;
   /** Answer the migration's question: write the workers runtime and close the matter for good. */
   settleWorkersRuntime(actor: Actor, runtime: string): Promise<S.WorkspaceModels>;

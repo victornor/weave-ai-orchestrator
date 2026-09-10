@@ -42,7 +42,7 @@ describe('run engine', () => {
     runtime = new FakeRuntime();
     h.ctx.registries.runtimes.set('fake', runtime);
     // Both settings, because a suite here runs conductor turns and worker turns (VS-77).
-    h.ctx.config.models = { conductor: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null } };
+    h.ctx.config.models = { conductor: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null }, workerOptions: [] };
     h.services.wake = createWakeService(h.ctx, h.deps);
     h.services.runs = createRunsService(h.ctx, h.deps);
     dispatcher = createDispatcher(h.ctx, h.deps);
@@ -425,10 +425,24 @@ describe('run engine', () => {
       expect(runtime.inputs.at(-1)).toMatchObject({ model: 'claude-opus-5', effort: 'high' });
     });
 
+    it('launches a worker on its ticket\'s catalog option (VS-162)', async () => {
+      h.ctx.config.models.workers = { runtime: 'fake', model: 'the-default' };
+      h.ctx.config.models.workerOptions = [
+        { id: 'cheap', description: 'Scouts.', runtime: 'other', model: 'the-option-model' },
+      ];
+      const ticketId = seedTicket(h, { workerModelId: 'cheap' });
+      const workerId = h.addWorker(ticketId, { worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      await runOnce();
+      expect(runtime.inputs).toHaveLength(0);
+      expect(other.inputs.at(-1)).toMatchObject({ model: 'the-option-model' });
+    });
+
     it('sends the two kinds to their own settings in the same workspace', async () => {
       h.ctx.config.models = {
         conductor: { runtime: 'fake', model: 'the-conductor-model' },
         workers: { runtime: 'other', model: 'the-worker-model' },
+        workerOptions: [],
       };
       const ticketId = seedTicket(h);
       const workerId = h.addWorker(ticketId, { worktreePath: null });

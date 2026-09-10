@@ -38,6 +38,7 @@ describe('MCP endpoint', () => {
     expect(names).not.toContain('ac_human_send');
     expect(names).not.toContain('ac_run_inspect');      // no worker reads another worker's transcript
     expect(names).not.toContain('ac_run_list');
+    expect(names).not.toContain('ac_worker_models');
     expect(tools.find((t) => t.name === 'ac_ask')?.description).toContain('gate_finding');
     await client.close();
   });
@@ -48,6 +49,7 @@ describe('MCP endpoint', () => {
     expect(names).toContain('ac_role_hire');
     expect(names).toContain('ac_human_send');
     expect(names).toContain('ac_briefing');
+    expect(names).toContain('ac_worker_models');
     expect(names).toContain('ac_run_inspect');
     expect(names).toContain('ac_run_list');
     await client.close();

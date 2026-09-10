@@ -70,7 +70,11 @@ export function createAccountsService(ctx: WorkspaceContext): AccountsService {
       'SELECT DISTINCT runtime_id AS runtime_id FROM agents WHERE workspace_id = ? AND retired_at IS NULL',
       [ctx.workspaceId],
     );
-    const ids = new Set<string>([ctx.config.models.conductor.runtime, ctx.config.models.workers.runtime]);
+    const ids = new Set<string>([
+      ctx.config.models.conductor.runtime,
+      ctx.config.models.workers.runtime,
+      ...(ctx.config.models.workerOptions ?? []).map((o) => o.runtime),
+    ]);
     for (const r of rows) if (r.runtimeId) ids.add(r.runtimeId);
     return [...ids].filter(Boolean).sort();
   };

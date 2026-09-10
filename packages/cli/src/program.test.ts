@@ -57,7 +57,7 @@ describe('command tree', () => {
     ['presentation', ['set', 'open', 'reconcile', 'status']],
     ['conductor', ['show', 'reset-session']],
     // Model selection, whole and entire (VS-77).
-    ['models', ['show', 'set']],
+    ['models', ['show', 'set', 'options']],
     ['workspace', ['list', 'use', 'register', 'unregister', 'set-default', 'pause', 'resume', 'export', 'import']],
     ['runs', ['list', 'show', 'tail', 'cancel']],
     ['knowledge', ['show', 'edit', 'note', 'lint', 'curate', 'revert']],
@@ -127,6 +127,13 @@ describe('command tree', () => {
   it('exposes --summary on ticket create and ticket set (VS-146)', () => {
     expect(find(program, ['ticket', 'create'])!.options.map((o) => o.long)).toContain('--summary');
     expect(find(program, ['ticket', 'set'])!.options.map((o) => o.long)).toContain('--summary');
+  });
+
+  it('exposes --worker-model on ticket create and models options add|set|remove (VS-162)', () => {
+    expect(find(program, ['ticket', 'create'])!.options.map((o) => o.long)).toContain('--worker-model');
+    expect(find(program, ['models', 'options', 'add'])?.name()).toBe('add');
+    expect(find(program, ['models', 'options', 'set'])?.name()).toBe('set');
+    expect(find(program, ['models', 'options', 'remove'])?.name()).toBe('remove');
   });
 
   it('exposes the usage scope/window/grain flags', () => {
@@ -365,6 +372,34 @@ describe('running commands against a stubbed daemon', () => {
       conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
       workers: { runtime: 'codex', model: 'gpt-5' },
     });
+  });
+
+  it('adds a worker option by GET-then-PUT of the whole block (VS-162)', async () => {
+    const models = { conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] as unknown[] };
+    let put: unknown = null;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') { put = JSON.parse(String(init?.body)); return new Response(JSON.stringify(put), { status: 200 }); }
+      return new Response(JSON.stringify(models), { status: 200 });
+    }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'models', 'options', 'add', '--id', 'cheap', '--description', 'Scouts.', '--runtime', 'opencode', '--model', 'glm-4.6']);
+    expect(put).toEqual({
+      conductor: { runtime: 'claude', model: null },
+      workers: { runtime: 'claude', model: null },
+      workerOptions: [{ id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' }],
+    });
+  });
+
+  it('passes --worker-model on ticket create (VS-162)', async () => {
+    let body: Record<string, unknown> | null = null;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'POST') {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(JSON.stringify({ identifier: 'ACME-1', title: 'Add dark mode' }), { status: 201 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'ticket', 'create', 'Add dark mode', '--worker-model', 'cheap']);
+    expect(body).toMatchObject({ workerModelId: 'cheap' });
   });
 
   it('clears a model back to the runtime default', async () => {

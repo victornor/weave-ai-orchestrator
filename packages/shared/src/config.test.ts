@@ -113,6 +113,7 @@ describe('model selection: the two workspace settings', () => {
     const cfg = WorkspaceConfigSchema.parse(base);
     expect(cfg.models.conductor).toEqual({ runtime: 'claude', model: null });
     expect(cfg.models.workers).toEqual({ runtime: 'claude', model: null });
+    expect(cfg.models.workerOptions).toEqual([]);
   });
 
   it('keeps effort, which is the only place it can still be set', () => {
@@ -142,7 +143,31 @@ describe('model selection: the two workspace settings', () => {
     expect(cfg.projects[0]).not.toHaveProperty('runtime');
     expect(cfg.projects[0]).not.toHaveProperty('model');
     // Nothing layered survives: the two settings are what a fresh parse produces.
-    expect(cfg.models).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } });
+    expect(cfg.models).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
+  });
+
+  it('parses a worker-options catalog and rejects a duplicate id (VS-162)', () => {
+    const cfg = WorkspaceConfigSchema.parse({
+      ...base,
+      models: {
+        workers: { runtime: 'claude', model: 'claude-opus-5' },
+        workerOptions: [
+          { id: 'cheap', description: 'Scouts and low complexity.', runtime: 'opencode', model: 'glm-4.6' },
+          { id: 'strong', description: 'Backend-heavy changes.', runtime: 'claude', model: 'claude-opus-5', effort: 'high' },
+        ],
+      },
+    });
+    expect(cfg.models.workerOptions).toHaveLength(2);
+    expect(cfg.models.workerOptions[0]).toMatchObject({ id: 'cheap', description: 'Scouts and low complexity.', runtime: 'opencode', model: 'glm-4.6' });
+    expect(WorkspaceConfigSchema.safeParse({
+      ...base,
+      models: {
+        workerOptions: [
+          { id: 'cheap', description: 'a', runtime: 'claude', model: null },
+          { id: 'cheap', description: 'b', runtime: 'codex', model: null },
+        ],
+      },
+    }).success).toBe(false);
   });
 });
 

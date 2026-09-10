@@ -77,7 +77,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
 
     ctx.db.insert('agents', {
       id, workspaceId: ctx.workspaceId, kind: 'worker', projectId: project.id, roleId: role.id, roleRevision: role.specRevision,
-      ticketId: ticket.id, name: `${role.name} #${n}`, runtimeId: modelSettingFor(ctx.config, 'worker').runtime,
+      ticketId: ticket.id, name: `${role.name} #${n}`, runtimeId: modelSettingFor(ctx.config, 'worker', ticket).runtime,
       status: 'provisioning', homePath: home, worktreePath: null, branch: opts.noWorktree ? null : branch,
       turnEpoch: 0, turnCount: 0, spawnedBy, spawnReason: opts.spawnReason ?? `ticket ${ticket.identifier}`,
       briefRevision: 1, createdAt: now, updatedAt: now,
@@ -115,7 +115,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const agent = get(id);
       await renderHome(ctx, deps, agent);
       ctx.db.update('agents', id, { status: 'active', updatedAt: nowIso() });
-      sessions.forTurn({ id, kind: 'worker', runtimeId: modelSettingFor(ctx.config, 'worker').runtime }, role.sessionPolicy);
+      sessions.forTurn({ id, kind: 'worker', runtimeId: modelSettingFor(ctx.config, 'worker', ticket).runtime }, role.sessionPolicy);
       deps().wake.enqueue(id, { source: 'ticket_assigned', reason: `${ticket.identifier}: ${ticket.title}`, payload: { ticketId: ticket.id }, requestedBy: actor });
     } catch (e) {
       // Roll back the row, the home and the worktree; nothing half-created is left behind.
@@ -353,7 +353,8 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       // dead one. It resumes by itself when the login is restored (VS-75). The runtime that decides
       // is the one its next turn would run on — the workspace's setting, not the row the gate
       // stamped, which VS-77 may have left pointing at a runtime nothing runs on anymore.
-      const runtimeId = modelSettingFor(ctx.config, agent.kind).runtime;
+      const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;
+      const runtimeId = modelSettingFor(ctx.config, agent.kind, ticket).runtime;
       if (waitingOnRuntimeLogin(agent) && gatedRuntime(runtimeId)) {
         throw new OcError('conflict', `${agent.name} is waiting on the ${runtimeId} login, not on you. Log that CLI in again and it resumes on its own.`, { runtimeId }, true);
       }
@@ -371,7 +372,6 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         });
       } catch (e) { log.error({ workerId: id, err: String(e) }, 'resuming the worker could not queue its turn'); }
 
-      const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;
       if (ticket?.status === 'blocked') {
         void deps().tickets.transition(actor, ticket.id, {
           to: (ticket.blockedFromStatus ?? 'todo') as TicketStatus,

@@ -106,7 +106,8 @@ export interface RuntimeModel { id: string; label: string; provider?: string; so
 
 /** One of the two model settings a workspace holds (VS-77): `GET`/`PUT /models`. */
 export interface ModelSetting { runtime: string; model: string | null; effort?: string }
-export interface WorkspaceModels { conductor: ModelSetting; workers: ModelSetting }
+export interface WorkerModelOption extends ModelSetting { id: string; description: string }
+export interface WorkspaceModels { conductor: ModelSetting; workers: ModelSetting; workerOptions?: WorkerModelOption[] }
 
 export interface LoginResponse {
   token?: string;

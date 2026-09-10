@@ -480,14 +480,15 @@ export const TOOLS: ToolDef[] = [
       priority: z.enum(TICKET_PRIORITIES).default('medium'), parentId: z.string().nullish(), blockedBy: z.array(z.string()).optional(),
       assigneeRoleId: z.string().nullish(), autoMerge: z.boolean().optional(), originKind: z.string().optional(), originFingerprint: z.string().optional(),
       landingBranch: z.string().nullish(),
+      workerModelId: z.string().nullish(),
     }),
-    description: "Create a ticket. Set autoMerge only when the human asked for it in the same request. Set landingBranch only when the human asked this ticket's work to land somewhere other than its project's own landing branch (VS-119) — never inferred from a PR base. Set summary to a one-line why (VS-146) shown on plan-approval cards. Workers may only create tickets in their own project.",
+    description: "Create a ticket. Set autoMerge only when the human asked for it in the same request. Set landingBranch only when the human asked this ticket's work to land somewhere other than its project's own landing branch (VS-119) — never inferred from a PR base. Set summary to a one-line why (VS-146) shown on plan-approval cards. Set workerModelId to a catalog option from ac_worker_models (VS-162); omit it to use the workspace workers default. Workers may only create tickets in their own project.",
     handler: (ctx, i) => svc(ctx).tickets.create(ctx.actor, { ...i, projectId: isConductor(ctx) ? (i.projectId ?? null) : ctx.claims.projectId }),
   },
   {
-    name: 'ac_ticket_assign', scope: 'conductor', input: z.object({ id: ticketId, roleId: z.string().nullable() }),
-    description: 'Assign a ticket to a role. The daemon spawns a worker as soon as the role has a free slot.',
-    handler: (ctx, i) => svc(ctx).tickets.assign(ctx.actor, i.id, i.roleId),
+    name: 'ac_ticket_assign', scope: 'conductor', input: z.object({ id: ticketId, roleId: z.string().nullable(), workerModelId: z.string().nullish() }),
+    description: 'Assign a ticket to a role. The daemon spawns a worker as soon as the role has a free slot. workerModelId (VS-162) may be set only while the ticket has no worker.',
+    handler: (ctx, i) => svc(ctx).tickets.assign(ctx.actor, i.id, i.roleId, i.workerModelId),
   },
   {
     name: 'ac_ticket_set_priority', scope: 'conductor', input: z.object({ id: ticketId, priority: z.enum(TICKET_PRIORITIES) }),
@@ -631,6 +632,14 @@ export const TOOLS: ToolDef[] = [
         transcript,
         cursor,
       };
+    },
+  },
+  {
+    name: 'ac_worker_models', scope: 'conductor', input: z.object({}),
+    description: 'The workspace workers default and the named worker-model options (id + description + runtime/model). Call this before filing a ticket that should not use the default.',
+    handler: (ctx) => {
+      const models = svc(ctx).models.get();
+      return { default: models.workers, options: models.workerOptions ?? [] };
     },
   },
   {

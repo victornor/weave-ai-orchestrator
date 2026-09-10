@@ -73,6 +73,34 @@ describe('runEventsToTranscript', () => {
     expect(denied).toMatchObject({ error: true, denied: true, diff: 'not permitted' });
   });
 
+  // VS-205: Claude (and Gemini, Cursor) send `command.executed` on top of tool.call/tool.result
+  // for every shell call, without the command text — rendered on its own it used to be a bare "$"
+  // row (Transcript.tsx renders `type: 'command'` as "$" + `block.command`, which was always
+  // empty for these). The payloads below are the exact shapes
+  // `packages/runtimes/claude/test/events.test.ts` pins for the real recorded
+  // `packages/runtimes/claude/fixtures/turn-tool-structured.jsonl` (its `Bash` "echo pong" call,
+  // lines 6-7) — see that test for the stream-json round trip.
+  it('folds a real Claude command.executed into its tool.call/tool.result row instead of a bare "$" row (VS-205)', () => {
+    const blocks = runEventsToTranscript([
+      ev({ id: 'e1', type: 'tool.call', payload: { id: 'toolu_01CDEhHFYnKmzdtoUb7kxquE', name: 'Bash', input: { command: 'echo pong', description: 'Run echo pong command' } } }),
+      ev({ id: 'e2', type: 'tool.result', payload: { id: 'toolu_01CDEhHFYnKmzdtoUb7kxquE', name: 'Bash', isError: false, content: 'pong' } }),
+      ev({ id: 'e3', type: 'command.executed', payload: { toolUseId: 'toolu_01CDEhHFYnKmzdtoUb7kxquE', tool: 'Bash', stdout: 'pong', stderr: '', isError: false } }),
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: 'tool', tool: 'Bash', target: 'echo pong', diff: 'pong', error: false });
+  });
+
+  it('drops an orphan command.executed with no command or output as genuinely contentless (VS-205)', () => {
+    const blocks = runEventsToTranscript([ev({ id: 'e1', type: 'command.executed', payload: { toolUseId: 'unseen', tool: 'Bash', isError: false } })]);
+    expect(blocks).toHaveLength(0);
+  });
+
+  it('still renders an orphan command.executed that carries a command or output', () => {
+    const blocks = runEventsToTranscript([ev({ id: 'e1', type: 'command.executed', payload: { command: 'pnpm vitest', exitCode: 1, stdout: '38/41 passed' } })]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: 'command', command: 'pnpm vitest', exitCode: 1, output: '38/41 passed' });
+  });
+
   it('still shows a result whose call is absent', () => {
     const blocks = runEventsToTranscript([
       ev({ id: 'e1', type: 'tool.result', payload: { id: 'orphan', name: 'Grep', content: '3 matches' } }),

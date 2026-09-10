@@ -273,7 +273,7 @@ version: 1
 id: acme                      # slug
 name: Acme Labs
 ticketPrefix: ACME
-models:                       # all of model selection, per workspace (VS-77, ADR 0011; VS-162, ADR 0012)
+models:                       # all of model selection, per workspace (VS-77, ADR 0011; VS-162, ADR 0012; VS-185, ADR 0013)
   conductor:
     runtime: claude
     model: claude-fable-5-1   # chosen from the runtime's listModels(); null = runtime default
@@ -317,7 +317,7 @@ plugins:
   - ./plugins/jira-sync
 ```
 
-Daemon-level settings (listen addresses, TLS, auth, ACME, trusted proxy, transcription provider) live in `~/.config/agent-conductor/daemon.yaml`, not in any workspace; secrets there are also env references.
+Daemon-level settings (listen addresses, TLS, auth, ACME, trusted proxy, transcription provider, optional model overlays) live in `~/.config/agent-conductor/daemon.yaml`, not in any workspace; secrets there are also env references. `models.conductor` / `models.workers` / `models.workerOptions` are optional overlays (VS-185, ADR 0013): filled, they govern every workspace and lock the matching workspace Settings fields; empty, each workspace uses its own `models` block.
 
 Roles are NOT normally listed in `workspace.yaml`; they are hired at runtime and live in `roles/<id>/role.yaml` (which the daemon writes). Workers are pure runtime state. A workspace can be exported/imported as a directory (§20).
 
@@ -1252,7 +1252,9 @@ conductor conductor show|reset-session                 the conductor agent
 conductor models [show]|set conductor|workers --runtime <id> --model <id|default> [--effort <e>]
 conductor models options add --id <id> --description <text> --runtime <id> [--model <id|default>] [--effort <e>]
 conductor models options set <id> … | options remove <id>
-                                                       all of model selection (ADR 0011)
+                                                       workspace model selection (ADR 0011); locked controls error
+conductor daemon models [show]|set conductor|workers --runtime <id> --model <id|default> [--effort <e>] [--clear]
+conductor daemon models options add|remove …           daemon overlays for every workspace (VS-185, ADR 0013)
 conductor workspace list|use|register|unregister|pause|resume   multi-workspace registry
 conductor workspace set-default <key=value...>         workspace defaults, e.g. knowledgeBudgetTokens.project=20000
 conductor runs list|show|tail <runId>|cancel

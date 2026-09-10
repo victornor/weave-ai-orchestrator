@@ -20,6 +20,8 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `ac_session` httpOn
 - `POST /api/transcribe` (multipart audio, 16 kHz mono WAV when using Voxtype) → `{ text }` or 501 when no host backend will run
 - `GET /api/daemon/transcription` → `{ backend: 'chrome'|'voxtype', model, voxtype: { installed, models: [{ id, engine, installed }], error? } }` — daemon dictation setting plus the host Voxtype probe. Session auth.
 - `PUT /api/daemon/transcription` `{ backend, model? }` → same shape as GET. Persists to `daemon.yaml` and takes effect without a restart. `voxtype` backend requires the binary; `model` must be an installed id. 400 `validation` otherwise.
+- `GET /api/daemon/models` → `{ conductor: ModelSetting | null, workers: ModelSetting | null, workerOptions: WorkerModelOption[] | null }` — optional overlays (VS-185, ADR 0013). Null (and an empty catalog) means no overlay for that control. Session auth.
+- `PUT /api/daemon/models` `{ conductor?, workers?, workerOptions? }` — omitted key leaves that overlay; `null` or `workerOptions: []` clears; a value sets. Persists to `daemon.yaml` and takes effect without a restart. Duplicate option ids are `validation` 400.
 - `GET /llms/api.txt` (agent-readable summary) · `GET /api/openapi.json`
 
 ## Workspace
@@ -29,8 +31,8 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `ac_session` httpOn
 - `GET /api/w/:ws/briefing`
 
 ### Models
-`GET /models` → `{ conductor: { runtime, model, effort? }, workers: { runtime, model, effort? }, workerOptions: [{ id, description, runtime, model, effort? }] }` — the two default settings (ADR 0011) plus the named worker-options catalog (VS-162, ADR 0012). The conductor runs on the first; a worker runs on the option its ticket names, or on `workers` when it names none. Roles, projects and agent rows still cannot choose a runtime or a model.
-`PUT /models` takes the two settings whole. `workerOptions` omitted keeps the existing catalog; an explicit array (including `[]`) replaces it. `model: null` means the runtime chooses; `effort` is optional and is the only place it can be set. An empty `runtime` is a `validation` 400. Changing a runtime retires that agent's session, so its next turn starts a new one. Duplicate option ids and more than 16 options are a `validation` 400.
+`GET /models` → `{ conductor: { runtime, model, effort? }, workers: { runtime, model, effort? }, workerOptions: [{ id, description, runtime, model, effort? }], locked: { conductor, workers, workerOptions } }` — effective values after a daemon overlay (VS-185, ADR 0013), plus which controls are locked. The conductor runs on the first; a worker runs on the option its ticket names, or on `workers` when it names none. Roles, projects and agent rows still cannot choose a runtime or a model.
+`PUT /models` takes the two settings whole. `workerOptions` omitted keeps the existing catalog; an explicit array (including `[]`) replaces it. Locked controls are not written to workspace yaml. `model: null` means the runtime chooses; `effort` is optional and is the only place it can be set. An empty `runtime` is a `validation` 400. Changing a runtime retires that agent's session, so its next turn starts a new one. Duplicate option ids and more than 16 options are a `validation` 400.
 
 ### Channels
 `GET /channels/telegram/token` → `{ configured, source: 'secret' | 'env' | null, botUsername: string | null }` — never a token value. `source` is which precedence branch is in effect (VS-125): `secret` when the workspace secret store holds it (set from Settings), `env` when it comes from an `${ENV_VAR}` reference already resolved in `workspace.yaml`, `null` when nothing resolves.

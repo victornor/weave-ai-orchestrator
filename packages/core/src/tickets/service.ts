@@ -12,6 +12,7 @@ import { tx } from './tx.js';
 import { landDelivery, type LandResult } from './land.js';
 import { createMergeQueue } from './merge-queue.js';
 import { createSerializer } from '../util/serialize.js';
+import { effectiveModels } from '../models/resolve.js';
 import { existsSync } from 'node:fs';
 
 function ticketBranchFor(t: { identifier: string; title: string }): string {
@@ -33,7 +34,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
 
   function resolveWorkerModelId(id: string | null | undefined): string | null {
     if (id == null || id === '') return null;
-    const opts = ctx.config.models.workerOptions ?? [];
+    const opts = effectiveModels(ctx.daemon, ctx.config).workerOptions ?? [];
     if (!opts.some((o) => o.id === id)) throw new OcError('validation', `unknown worker model option '${id}'`);
     return id;
   }

@@ -2,7 +2,7 @@ import { newId, nowIso } from '@agent-conductor/db';
 import type { AgentKind, SessionPolicy } from '@agent-conductor/shared';
 import type { SessionRef } from '@agent-conductor/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
-import { modelSettingFor } from '../models/resolve.js';
+import { modelSettingFor, modelsFor } from '../models/resolve.js';
 
 export interface SessionRow {
   id: string; agentId: string; runtimeId: string; sessionRef: SessionRef | null; displayId: string | null;
@@ -94,7 +94,7 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
       if (cur) ctx.db.update('agent_sessions', cur.id, { status: 'closed', lastError: reason, updatedAt: nowIso() });
       const agent = ctx.db.get<{ kind: AgentKind; runtimeId: string }>('SELECT kind, runtime_id FROM agents WHERE id = ?', [agentId]);
       log.info({ agentId, reason }, 'session reset');
-      return create(agentId, agent?.runtimeId ?? modelSettingFor(ctx.config, agent?.kind ?? 'worker').runtime);
+      return create(agentId, agent?.runtimeId ?? modelSettingFor(modelsFor(ctx), agent?.kind ?? 'worker').runtime);
     },
 
     close(agentId) {

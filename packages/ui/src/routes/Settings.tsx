@@ -19,6 +19,8 @@ import {
   useCancelUpgrade,
   useClearTelegramToken,
   useSetTranscription,
+  useDaemonModels,
+  useSetDaemonModels,
   useTranscription,
   useDaemonUpdate,
   useDaemonUpgrade,
@@ -125,6 +127,7 @@ export function SettingsRoute(): React.ReactElement {
           {section === 'workspace' ? <WorkspaceSection /> : null}
           {section === 'projects' ? <ProjectsSection /> : null}
           {section === 'models' ? <ModelsSection /> : null}
+          {section === 'daemon-models' ? <DaemonModelsSection /> : null}
           {section === 'channels' ? <ChannelsSection /> : null}
           {section === 'presentation' ? <PresentationSection /> : null}
           {section === 'security' ? <SecuritySection /> : null}
@@ -510,30 +513,35 @@ function ModelsSection(): React.ReactElement {
   if (!models.data) return <ErrorState code="MODELS_UNREACHABLE" message="The workspace's model settings could not be read." />;
 
   const current = models.data;
+  const locked = current.locked ?? { conductor: false, workers: false, workerOptions: false };
   const set = (kind: 'conductor' | 'workers', next: T.ModelSetting): void => save.mutate({ ...current, [kind]: next });
   const commit = (kind: 'conductor' | 'workers', next: T.ModelSetting): Promise<void> => save.mutateAsync({ ...current, [kind]: next }).then(() => undefined);
+  const lockedHint = 'Set in This daemon → Models';
 
   return (
     <div className="flex flex-col gap-5">
       <ModelSettingFields
         label="Conductor"
-        hint="The agent you talk to. One per workspace."
+        hint={locked.conductor ? lockedHint : 'The agent you talk to. One per workspace.'}
         setting={current.conductor}
         runtimes={runtimes.data ?? []}
+        disabled={locked.conductor}
         onChange={(next) => set('conductor', next)}
         onCommit={(next) => commit('conductor', next)}
       />
       <ModelSettingFields
         label="Workers"
-        hint="Every worker in this workspace whose ticket names no catalog option."
+        hint={locked.workers ? lockedHint : 'Every worker in this workspace whose ticket names no catalog option.'}
         setting={current.workers}
         runtimes={runtimes.data ?? []}
+        disabled={locked.workers}
         onChange={(next) => set('workers', next)}
         onCommit={(next) => commit('workers', next)}
       />
       <WorkerOptionsEditor
         current={current}
         runtimes={runtimes.data ?? []}
+        disabled={locked.workerOptions}
         onSave={(next) => save.mutate(next)}
       />
       {save.error ? <ErrorState code="MODELS_NOT_SAVED" message={save.error.message} /> : null}
@@ -545,11 +553,12 @@ function ModelsSection(): React.ReactElement {
   );
 }
 
-function ModelSettingFields({ label, hint, setting, runtimes, onChange, onCommit }: {
+function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange, onCommit }: {
   label: string;
   hint: string;
   setting: T.ModelSetting;
   runtimes: T.RuntimeInfo[];
+  disabled?: boolean;
   onChange: (next: T.ModelSetting) => void;
   onCommit: (next: T.ModelSetting) => Promise<void>;
 }): React.ReactElement {
@@ -576,6 +585,7 @@ function ModelSettingFields({ label, hint, setting, runtimes, onChange, onCommit
           className={cx(inputCx, 'ac-mono')}
           aria-label={`${label} runtime`}
           value={setting.runtime}
+          disabled={disabled}
           onChange={(e) => onChange({ ...setting, runtime: e.target.value })}
         >
           {runtimes.map((r) => (
@@ -592,6 +602,7 @@ function ModelSettingFields({ label, hint, setting, runtimes, onChange, onCommit
           className={cx(inputCx, 'ac-mono')}
           aria-label={`${label} model`}
           value={custom ? '__other' : setting.model ?? ''}
+          disabled={disabled}
           onChange={(e) => {
             if (e.target.value === '__other') { setFreeText(true); return; }
             setFreeText(false);
@@ -626,9 +637,10 @@ function ModelSettingFields({ label, hint, setting, runtimes, onChange, onCommit
   );
 }
 
-function WorkerOptionsEditor({ current, runtimes, onSave }: {
+function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
   current: T.WorkspaceModels;
   runtimes: T.RuntimeInfo[];
+  disabled?: boolean;
   onSave: (next: T.WorkspaceModels) => void;
 }): React.ReactElement {
   const options = current.workerOptions ?? [];
@@ -653,13 +665,14 @@ function WorkerOptionsEditor({ current, runtimes, onSave }: {
   return (
     <div className="flex flex-col gap-2">
       <h3 className="ac-label text-text-1">Worker options</h3>
-      <p className="text-micro text-text-3">Named models the conductor can pick per ticket. The workers setting above is the default when a ticket names none.</p>
+      <p className="text-micro text-text-3">{disabled ? 'Set in This daemon → Models' : 'Named models the conductor can pick per ticket. The workers setting above is the default when a ticket names none.'}</p>
       {options.length === 0 ? <p className="text-micro text-text-3">None yet.</p> : null}
       {options.map((o) => (
         <div key={o.id} className="flex items-center gap-2">
           <span className="ac-mono min-w-0 flex-1 text-meta text-text-1">{o.id} — {o.description} ({o.runtime} · {o.model ?? 'default'})</span>
           <Button
             aria-label={`Remove worker option ${o.id}`}
+            disabled={disabled}
             onClick={() => onSave({ ...current, workerOptions: options.filter((x) => x.id !== o.id) })}
           >
             Remove
@@ -685,8 +698,98 @@ function WorkerOptionsEditor({ current, runtimes, onSave }: {
       <Field label="Model" hint="Empty means the runtime chooses.">
         <input className={cx(inputCx, 'ac-mono')} aria-label="New worker option model" value={model} onChange={(e) => setModel(e.target.value)} />
       </Field>
-      <Button onClick={add}>Add worker option</Button>
+      <Button onClick={add} disabled={disabled}>Add worker option</Button>
     </div>
+  );
+}
+
+function emptySetting(runtimes: T.RuntimeInfo[]): T.ModelSetting {
+  return { runtime: runtimes[0]?.id ?? 'claude', model: null };
+}
+
+function DaemonModelsSection(): React.ReactElement {
+  const overlays = useDaemonModels();
+  const save = useSetDaemonModels();
+  const runtimes = useRuntimes();
+  const list = runtimes.data ?? [];
+
+  if (overlays.isLoading) return <SkeletonRows rows={4} />;
+  if (!overlays.data) return <ErrorState code="MODELS_UNREACHABLE" message="The daemon model overlays could not be read." />;
+
+  const current = overlays.data;
+  const fallback = emptySetting(list);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <p className="text-micro leading-relaxed text-text-3">
+        Filled overlays apply to every workspace and disable the matching This workspace → Models fields. Empty means each workspace uses its own settings.
+      </p>
+      <OverlaySetting
+        label="Conductor"
+        setting={current.conductor}
+        fallback={fallback}
+        runtimes={list}
+        onFill={(next) => save.mutate({ conductor: next })}
+        onClear={() => save.mutate({ conductor: null })}
+      />
+      <OverlaySetting
+        label="Workers"
+        setting={current.workers}
+        fallback={fallback}
+        runtimes={list}
+        onFill={(next) => save.mutate({ workers: next })}
+        onClear={() => save.mutate({ workers: null })}
+      />
+      <DaemonWorkerOptions
+        options={current.workerOptions}
+        runtimes={list}
+        fallback={fallback}
+        onSave={(next) => save.mutate({ workerOptions: next })}
+      />
+      {save.error ? <ErrorState code="MODELS_NOT_SAVED" message={save.error.message} /> : null}
+    </div>
+  );
+}
+
+function OverlaySetting({ label, setting, fallback, runtimes, onFill, onClear }: {
+  label: string;
+  setting: T.ModelSetting | null;
+  fallback: T.ModelSetting;
+  runtimes: T.RuntimeInfo[];
+  onFill: (next: T.ModelSetting) => void;
+  onClear: () => void;
+}): React.ReactElement {
+  const filled = setting != null;
+  return (
+    <div className="flex flex-col gap-1">
+      <ModelSettingFields
+        label={label}
+        hint={filled ? 'Overrides every workspace.' : 'Per workspace until you pick a runtime.'}
+        setting={setting ?? fallback}
+        runtimes={runtimes}
+        onChange={onFill}
+        onCommit={async (next) => { onFill(next); }}
+      />
+      {filled ? (
+        <Button aria-label={`Clear ${label} overlay`} onClick={onClear}>Use per-workspace settings</Button>
+      ) : null}
+    </div>
+  );
+}
+
+function DaemonWorkerOptions({ options, runtimes, fallback, onSave }: {
+  options: T.WorkerModelOption[] | null;
+  runtimes: T.RuntimeInfo[];
+  fallback: T.ModelSetting;
+  onSave: (next: T.WorkerModelOption[] | null) => void;
+}): React.ReactElement {
+  const list = options ?? [];
+  return (
+    <WorkerOptionsEditor
+      current={{ conductor: fallback, workers: fallback, workerOptions: list }}
+      runtimes={runtimes}
+      onSave={(next) => onSave(next.workerOptions && next.workerOptions.length > 0 ? next.workerOptions : null)}
+    />
   );
 }
 

@@ -119,6 +119,7 @@ export interface HarnessOptions {
 
 export function makeHarness(options: HarnessOptions = {}): Harness {
   const workspaceId = options.workspaceId ?? 'ws1';
+  const daemonCfg = DaemonConfigSchema.parse(options.daemon ?? {});
   const calls: Call[] = [];
   /** Which runtimes this harness has already synced on demand, so a second sync is throttled. */
   const syncedRuntimes = new Set<string>();
@@ -306,7 +307,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   const ctx = {
     workspaceId,
     config: WorkspaceConfigSchema.parse({ version: 1, id: workspaceId, name: 'Test workspace', ticketPrefix: 'ACME' }),
-    daemon: DaemonConfigSchema.parse({}),
+    daemon: daemonCfg,
     paths: { root: '/tmp/ws', state: '/tmp/ws/.agent-conductor', db: ':memory:', runs: '', conductor: '', roles: '', workers: '', archive: '', projects: '', knowledge: '', runtimesHome: '', wtConfig: '', secretsFile: '', secretsKey: '' },
     db, events: bus, registries: createRegistries(),
     log: (domain: Parameters<typeof getLogger>[0]) => getLogger(domain),
@@ -343,7 +344,6 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     logout: () => undefined,
   });
 
-  const daemonCfg = DaemonConfigSchema.parse(options.daemon ?? {});
   const releaseRoot = options.releaseRoot ?? '/tmp/release/20260101-120000-aaaaaaaaaa';
   const version = options.version ?? '0.1.0-test';
   const updates = createUpdateChecker({

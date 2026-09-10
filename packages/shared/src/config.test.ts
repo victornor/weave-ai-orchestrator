@@ -102,6 +102,36 @@ describe('daemon config: transcription', () => {
   });
 });
 
+describe('daemon config: models overlays (VS-185)', () => {
+  it('defaults to no filled overlays', () => {
+    const cfg = DaemonConfigSchema.parse({});
+    expect(cfg.models.conductor).toBeUndefined();
+    expect(cfg.models.workers).toBeUndefined();
+    expect(cfg.models.workerOptions).toBeUndefined();
+  });
+
+  it('fills conductor independently', () => {
+    const cfg = DaemonConfigSchema.parse({
+      models: { conductor: { runtime: 'claude', model: 'claude-fable-5-1' } },
+    });
+    expect(cfg.models.conductor).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
+    expect(cfg.models.workers).toBeUndefined();
+    expect(cfg.models.workerOptions).toBeUndefined();
+  });
+
+  it('parses an empty workerOptions list and rejects a duplicate id', () => {
+    expect(DaemonConfigSchema.parse({ models: { workerOptions: [] } }).models.workerOptions).toEqual([]);
+    expect(DaemonConfigSchema.safeParse({
+      models: {
+        workerOptions: [
+          { id: 'cheap', description: 'a', runtime: 'claude', model: null },
+          { id: 'cheap', description: 'b', runtime: 'codex', model: null },
+        ],
+      },
+    }).success).toBe(false);
+  });
+});
+
 describe('daemon config: upgrade', () => {
   it('defaults the deferred upgrade timings when daemon.yaml says nothing', () => {
     const cfg = DaemonConfigSchema.parse({});

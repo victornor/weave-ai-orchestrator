@@ -115,6 +115,15 @@ describe('accounts service', () => {
     expect(gemini.calls).toBe(1);
   });
 
+  it('probes a runtime named only by a daemon overlay (VS-185)', async () => {
+    const gemini = new AccountRuntime(subscription);
+    h.ctx.registries.runtimes.set('gemini', gemini);
+    h.ctx.daemon.models = { workers: { runtime: 'gemini', model: null } };
+    await accounts.refresh();
+    expect(gemini.calls).toBe(1);
+    h.ctx.daemon.models = {};
+  });
+
   it('does not probe a runtime only a retired worker used', async () => {
     const gemini = new AccountRuntime(subscription);
     h.ctx.registries.runtimes.set('gemini', gemini);

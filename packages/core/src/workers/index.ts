@@ -12,7 +12,7 @@ import { recordHumanInputEvent, runState } from '../runs/active.js';
 import { renderHome } from './home.js';
 import { renderBrief } from '../prompts/index.js';
 import { createSessions } from '../sessions/index.js';
-import { modelSettingFor } from '../models/resolve.js';
+import { modelSettingFor, modelsFor } from '../models/resolve.js';
 import { landedWorkTest } from '../worktrees/landed.js';
 import { git, worktreeState } from '../util/git.js';
 
@@ -77,7 +77,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
 
     ctx.db.insert('agents', {
       id, workspaceId: ctx.workspaceId, kind: 'worker', projectId: project.id, roleId: role.id, roleRevision: role.specRevision,
-      ticketId: ticket.id, name: `${role.name} #${n}`, runtimeId: modelSettingFor(ctx.config, 'worker', ticket).runtime,
+      ticketId: ticket.id, name: `${role.name} #${n}`, runtimeId: modelSettingFor(modelsFor(ctx), 'worker', ticket).runtime,
       status: 'provisioning', homePath: home, worktreePath: null, branch: opts.noWorktree ? null : branch,
       turnEpoch: 0, turnCount: 0, spawnedBy, spawnReason: opts.spawnReason ?? `ticket ${ticket.identifier}`,
       briefRevision: 1, createdAt: now, updatedAt: now,
@@ -115,7 +115,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const agent = get(id);
       await renderHome(ctx, deps, agent);
       ctx.db.update('agents', id, { status: 'active', updatedAt: nowIso() });
-      sessions.forTurn({ id, kind: 'worker', runtimeId: modelSettingFor(ctx.config, 'worker', ticket).runtime }, role.sessionPolicy);
+      sessions.forTurn({ id, kind: 'worker', runtimeId: modelSettingFor(modelsFor(ctx), 'worker', ticket).runtime }, role.sessionPolicy);
       deps().wake.enqueue(id, { source: 'ticket_assigned', reason: `${ticket.identifier}: ${ticket.title}`, payload: { ticketId: ticket.id }, requestedBy: actor });
     } catch (e) {
       // Roll back the row, the home and the worktree; nothing half-created is left behind.
@@ -187,7 +187,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
 
     async ensureConductor(): Promise<Agent> {
       let a = ctx.db.get<Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'conductor'", [ctx.workspaceId]);
-      const setting = modelSettingFor(ctx.config, 'conductor');
+      const setting = modelSettingFor(modelsFor(ctx), 'conductor');
       if (!a) {
         const id = newId();
         const now = nowIso();
@@ -354,7 +354,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       // is the one its next turn would run on — the workspace's setting, not the row the gate
       // stamped, which VS-77 may have left pointing at a runtime nothing runs on anymore.
       const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;
-      const runtimeId = modelSettingFor(ctx.config, agent.kind, ticket).runtime;
+      const runtimeId = modelSettingFor(modelsFor(ctx), agent.kind, ticket).runtime;
       if (waitingOnRuntimeLogin(agent) && gatedRuntime(runtimeId)) {
         throw new OcError('conflict', `${agent.name} is waiting on the ${runtimeId} login, not on you. Log that CLI in again and it resumes on its own.`, { runtimeId }, true);
       }

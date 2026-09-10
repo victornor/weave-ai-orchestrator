@@ -341,8 +341,9 @@ describe('real core services over HTTP', () => {
     const app = createApp(deps);
     const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
 
+    const unlocked = { conductor: false, workers: false, workerOptions: false };
     const before = await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json();
-    expect(before).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
+    expect(before).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [], locked: unlocked });
 
     const next = {
       conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
@@ -350,8 +351,8 @@ describe('real core services over HTTP', () => {
     };
     const put = await app.fetch(new Request(`${base}/models`, { method: 'PUT', headers: H, body: JSON.stringify(next) }));
     expect(put.status).toBe(200);
-    expect(await put.json()).toEqual({ ...next, workerOptions: [] });
-    expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json()).toEqual({ ...next, workerOptions: [] });
+    expect(await put.json()).toEqual({ ...next, workerOptions: [], locked: unlocked });
+    expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json()).toEqual({ ...next, workerOptions: [], locked: unlocked });
   });
 
   it('keeps workerOptions when PUT omits them and replaces when they are sent (VS-162)', async () => {

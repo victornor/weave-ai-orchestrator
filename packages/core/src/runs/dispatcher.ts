@@ -4,7 +4,7 @@ import type { WorkspaceContext } from '../context.js';
 import type { CoreServices, Dispatcher } from '../api.js';
 import { executeRun } from './engine.js';
 import { runState } from './active.js';
-import { modelSettingFor } from '../models/resolve.js';
+import { modelSettingFor, modelsFor } from '../models/resolve.js';
 import { flattenWakes } from '../prompts/index.js';
 
 export interface CoreDispatcher extends Dispatcher {
@@ -96,7 +96,7 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
       const ticket = agent.ticketId
         ? ctx.db.get<{ workerModelId: string | null }>('SELECT worker_model_id FROM tickets WHERE id = ?', [agent.ticketId])
         : null;
-      const setting = modelSettingFor(ctx.config, agent.kind, ticket);
+      const setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket);
       ctx.db.insert('runs', {
         id: runId, workspaceId: ctx.workspaceId, agentId: agent.id, ticketId: agent.ticketId,
         wakeupIdsJson: ids, runtimeId: setting.runtime, model: setting.model, status: 'queued',

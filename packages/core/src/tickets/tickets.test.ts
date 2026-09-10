@@ -78,6 +78,18 @@ describe('tickets', () => {
     try { make({ workerModelId: 'nope' }); } catch (e) { expect((e as OcError).code).toBe('validation'); }
   });
 
+  it('validates workerModelId against a filled daemon catalog (VS-185)', () => {
+    h.ctx.config.models.workerOptions = [
+      { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },
+    ];
+    h.ctx.daemon.models = {
+      workerOptions: [{ id: 'strong', description: 'Heavy.', runtime: 'claude', model: 'opus' }],
+    };
+    expect(make({ workerModelId: 'strong' }).workerModelId).toBe('strong');
+    expect(() => make({ workerModelId: 'cheap' })).toThrow(OcError);
+    h.ctx.daemon.models = {};
+  });
+
   it('lets assign set workerModelId before spawn and refuses after (VS-162)', () => {
     h.ctx.config.models.workerOptions = [
       { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },

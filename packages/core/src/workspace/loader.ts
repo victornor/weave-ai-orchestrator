@@ -15,7 +15,7 @@ import { getLogger } from '../logger.js';
 import { registerBuiltinWorktreeProviders, writeWtConfig } from '../worktrees/index.js';
 import { registerBuiltinForges } from '../forge/index.js';
 import {
-  ROLE_RUNTIMES_META_KEY, deriveModelSettings, hasModelSettings, migrationLogFields, migrationSummary,
+  ROLE_RUNTIMES_META_KEY, deriveModelSettings, effectiveModels, hasModelSettings, migrationLogFields, migrationSummary,
   recordPendingMigration, type RoleRuntimeRow,
 } from '../models/index.js';
 import { createSecretStore } from '../secrets/store.js';
@@ -267,11 +267,12 @@ class Loader implements WorkspaceLoader {
     }
 
     // Per-workspace runtime config homes (CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_CONFIG_HOME …).
+    const models = effectiveModels(opts.daemon, config);
     const runtimeIds = new Set<string>([
       ...opts.registries.runtimes.keys(),
-      config.models.conductor.runtime,
-      config.models.workers.runtime,
-      ...(config.models.workerOptions ?? []).map((o) => o.runtime),
+      models.conductor.runtime,
+      models.workers.runtime,
+      ...models.workerOptions.map((o) => o.runtime),
     ]);
     for (const id of runtimeIds) {
       if (!id) continue;

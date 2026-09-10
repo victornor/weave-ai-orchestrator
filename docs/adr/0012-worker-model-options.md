@@ -1,6 +1,6 @@
 # ADR 0012 — Named worker model options, picked per ticket
 
-**Status:** accepted · 2026-09-09 · amends ADR 0011 (the two settings remain; a ticket may name a catalog id)
+**Status:** accepted · 2026-09-09 · amends ADR 0011 (the two settings remain; a ticket may name a catalog id) · amended by ADR 0013 (the catalog a ticket names is the effective catalog after a daemon overlay)
 
 ## Context
 

@@ -237,6 +237,25 @@ export function useTranscription(): UseQueryResult<T.TranscriptionStatus> {
   });
 }
 
+export function useDaemonModels(): UseQueryResult<T.DaemonModels> {
+  return useQuery({
+    queryKey: qk.daemonModels(),
+    queryFn: () => api.root<T.DaemonModels>('/daemon/models'),
+    retry: false,
+  });
+}
+
+export function useSetDaemonModels(): UseMutationResult<T.DaemonModels, Error, Partial<T.DaemonModels>> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => api.root<T.DaemonModels>('/daemon/models', { method: 'PUT', body }),
+    onSuccess: (data) => {
+      qc.setQueryData(qk.daemonModels(), data);
+      void qc.invalidateQueries({ queryKey: ['w'] });
+    },
+  });
+}
+
 export function useSetTranscription(): UseMutationResult<T.TranscriptionStatus, Error, { backend: 'chrome' | 'voxtype'; model?: string }> {
   const qc = useQueryClient();
   return useMutation({

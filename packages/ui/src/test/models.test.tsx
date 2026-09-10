@@ -11,10 +11,17 @@ const state = vi.hoisted(() => ({
   saved: [] as WorkspaceModels[],
   saveError: null as Error | null,
   runtimeModels: [] as Array<{ id: string; label: string }>,
+  daemonModels: { conductor: null, workers: null, workerOptions: null } as {
+    conductor: WorkspaceModels['conductor'] | null;
+    workers: WorkspaceModels['workers'] | null;
+    workerOptions: NonNullable<WorkspaceModels['workerOptions']> | null;
+  },
+  daemonSaved: [] as unknown[],
+  search: { section: 'models' } as Record<string, string | undefined>,
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
-vi.mock('../app/link', () => ({ useGo: () => vi.fn(), useSearchParams: () => ({ section: 'models' }) }));
+vi.mock('../app/link', () => ({ useGo: () => vi.fn(), useSearchParams: () => state.search }));
 vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
@@ -44,6 +51,12 @@ vi.mock('../api/hooks', () => ({
   useDaemonUpgrade: () => ({ data: undefined, isError: false }),
   useTranscription: () => ({ data: { backend: 'chrome', model: null, voxtype: { installed: false, models: [] } }, isLoading: false }),
   useSetTranscription: () => ({ mutate: vi.fn(), isPending: false }),
+  useDaemonModels: () => ({ data: state.daemonModels, isLoading: false }),
+  useSetDaemonModels: () => ({
+    mutate: (v: Partial<typeof state.daemonModels>) => { state.daemonSaved.push(v); state.daemonModels = { ...state.daemonModels, ...v }; },
+    isPending: false,
+    error: null,
+  }),
 }));
 
 const { SettingsRoute } = await import('../routes/Settings');
@@ -53,6 +66,9 @@ beforeEach(() => {
   state.saved = [];
   state.saveError = null;
   state.runtimeModels = [{ id: 'claude-fable-5-1', label: 'Fable 5.1' }, { id: 'claude-opus-5', label: 'Opus 5' }];
+  state.daemonModels = { conductor: null, workers: null, workerOptions: null };
+  state.daemonSaved = [];
+  state.search = { section: 'models' };
 });
 
 function openModels(): void {
@@ -147,6 +163,25 @@ describe('Settings — the two model settings', () => {
     state.models = { ...state.models, workerOptions: [cheap] };
     fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: 'claude-opus-5' } });
     expect(state.saved.at(-1)!.workerOptions).toEqual([cheap]);
+  });
+
+  it('disables a locked conductor control (VS-185)', () => {
+    state.models = {
+      ...state.models,
+      locked: { conductor: true, workers: false, workerOptions: false },
+    };
+    openModels();
+    expect(screen.getByLabelText('Conductor runtime')).toBeDisabled();
+    expect(screen.getByLabelText('Workers runtime')).not.toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Workers runtime'), { target: { value: 'codex' } });
+    expect(state.saved.at(-1)?.workers.runtime).toBe('codex');
+  });
+
+  it('opens daemon Models from This daemon and PUTs an overlay (VS-185)', () => {
+    state.search = { section: 'daemon-models' };
+    render(<SettingsRoute />);
+    fireEvent.change(screen.getByLabelText('Conductor runtime'), { target: { value: 'codex' } });
+    expect(state.daemonSaved.at(-1)).toMatchObject({ conductor: { runtime: 'codex' } });
   });
 
   it('is the only place Settings offers a runtime or a model', () => {

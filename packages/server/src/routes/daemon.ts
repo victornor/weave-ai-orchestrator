@@ -3,7 +3,7 @@ import { homedir, hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { DaemonConfigSchema, INCIDENT_REPORTER_KINDS, OcError } from '@agent-conductor/shared';
+import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@agent-conductor/shared';
 import { detectHostToolsCached, getLogger, workspaceLoader } from '@agent-conductor/core';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { body } from '../http.js';
@@ -112,6 +112,8 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
 
   app.get('/daemon/transcription', (c) => transcriptionGet(c, deps));
   app.put('/daemon/transcription', (c) => transcriptionPut(c, deps));
+  app.get('/daemon/models', (c) => modelsGet(c, deps));
+  app.put('/daemon/models', (c) => modelsPut(c, deps));
 
   app.get('/incidents', (c) => {
     const reporter = c.req.query('reporter');
@@ -196,6 +198,62 @@ async function transcriptionHealth(deps: AppDeps): Promise<{ configured: boolean
     backend: cfg.backend,
     configured: cfg.provider === 'command' && Boolean(cfg.command),
   };
+}
+
+function daemonModelsView(models: DaemonModels | undefined): {
+  conductor: ModelSetting | null;
+  workers: ModelSetting | null;
+  workerOptions: WorkerModelOption[] | null;
+} {
+  const m = models ?? {};
+  return {
+    conductor: m.conductor ?? null,
+    workers: m.workers ?? null,
+    workerOptions: m.workerOptions && m.workerOptions.length > 0 ? [...m.workerOptions] : null,
+  };
+}
+
+function persistDaemonModels(deps: AppDeps, next: DaemonModels): void {
+  const target = deps.daemon.models ?? (deps.daemon.models = {});
+  if (next.conductor) target.conductor = next.conductor;
+  else delete target.conductor;
+  if (next.workers) target.workers = next.workers;
+  else delete target.workers;
+  if (next.workerOptions && next.workerOptions.length > 0) target.workerOptions = next.workerOptions;
+  else delete target.workerOptions;
+  if (deps.daemonConfigDir) {
+    const current = workspaceLoader.readDaemonConfig(deps.daemonConfigDir);
+    workspaceLoader.writeDaemonConfig(DaemonConfigSchema.parse({
+      ...current,
+      models: target,
+    }), deps.daemonConfigDir);
+  }
+}
+
+function modelsGet(
+  c: { json: (v: unknown, s?: number) => Response },
+  deps: AppDeps,
+): Response {
+  return c.json(daemonModelsView(deps.daemon.models));
+}
+
+async function modelsPut(
+  c: { req: { raw: Request }; json: (v: unknown, s?: number) => Response },
+  deps: AppDeps,
+): Promise<Response> {
+  const input = await body(c as never, DaemonModelsPutSchema);
+  const current = daemonModelsView(deps.daemon.models);
+  if (input.conductor !== undefined) current.conductor = input.conductor;
+  if (input.workers !== undefined) current.workers = input.workers;
+  if (input.workerOptions !== undefined) {
+    current.workerOptions = input.workerOptions && input.workerOptions.length > 0 ? input.workerOptions : null;
+  }
+  persistDaemonModels(deps, {
+    conductor: current.conductor ?? undefined,
+    workers: current.workers ?? undefined,
+    workerOptions: current.workerOptions ?? undefined,
+  });
+  return c.json(daemonModelsView(deps.daemon.models));
 }
 
 async function transcriptionGet(

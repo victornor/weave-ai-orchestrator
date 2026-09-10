@@ -1,4 +1,5 @@
 import { createRootRoute, createRoute, createRouter, Outlet, redirect } from '@tanstack/react-router';
+import { RouteError } from './components/RouteError';
 import { AppShell } from './app/AppShell';
 import { WorkspaceProvider } from './api/context';
 import { getWorkspaceId } from './api/client';
@@ -159,7 +160,7 @@ const routeTree = rootRoute.addChildren([
   ]),
 ]);
 
-export const router = createRouter({ routeTree, defaultPreload: 'intent' });
+export const router = createRouter({ routeTree, defaultPreload: 'intent', defaultErrorComponent: RouteError });
 
 declare module '@tanstack/react-router' {
   interface Register {

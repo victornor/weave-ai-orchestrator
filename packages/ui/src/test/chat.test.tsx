@@ -171,7 +171,7 @@ function runTrace(over: Partial<RunTrace> & Pick<RunTrace, 'runId'>): RunTrace {
   return {
     status: 'succeeded', agentId: 'ag_conductor', createdAt: '2026-09-01T09:00:00.000Z',
     startedAt: '2026-09-01T09:00:00.000Z', finishedAt: '2026-09-01T09:00:12.000Z', durationMs: 12000,
-    toolCalls: 3, files: 1, errors: 0, texts: 2, events: 9, summary: null, ...over,
+    toolCalls: 3, files: 1, errors: 0, texts: 2, events: 9, summary: null, model: null, usage: null, ...over,
   };
 }
 
@@ -2224,6 +2224,93 @@ describe('ChatRoute turn work trace', () => {
     render(<ChatRoute />);
 
     expect(state.traceQuery).toEqual({ ids: ['run_1', 'run_2'], agent: 'ag_conductor', since: '2026-09-01T09:00:00.000Z' });
+  });
+});
+
+/**
+ * VS-204: the work-trace line and each message's timestamp also carry the turn's tokens spent, and
+ * the trace line carries context-window usage when a genuine figure is obtainable. A runtime that
+ * reported no usage (Cursor today) renders exactly as it does without this capability.
+ */
+describe('ChatRoute turn tokens', () => {
+  const usage = { inputTokens: 8_000, outputTokens: 200, cachedInputTokens: 0, contextTokens: 8_200, basis: 'per_turn' };
+
+  it('shows the turn’s tokens spent in the collapsed line', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed VS-9.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1', usage })];
+
+    render(<ChatRoute />);
+
+    expect(screen.getByRole('button', { name: 'What I did' })).toHaveTextContent('8.2k tok');
+  });
+
+  it('shows the context window fraction when the turn’s model and window are both known', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed VS-9.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1', usage, model: 'claude-opus-5' })];
+
+    render(<ChatRoute />);
+
+    // state.models already carries claude-opus-5 at a 200k window (see beforeEach).
+    expect(screen.getByRole('button', { name: 'What I did' })).toHaveTextContent('8.2k/200k ctx');
+  });
+
+  it('shows tokens with no context fraction when the turn’s model is not in the runtime’s list', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed VS-9.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1', usage, model: 'some-unlisted-model' })];
+
+    render(<ChatRoute />);
+
+    const trace = screen.getByRole('button', { name: 'What I did' });
+    expect(trace).toHaveTextContent('8.2k tok');
+    expect(trace).not.toHaveTextContent('ctx');
+  });
+
+  it('shows no tokens and no dangling separator for a turn whose runtime reported no usage', () => {
+    state.messages = [message({ id: 'm1', body: 'Filed VS-9.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1', toolCalls: 3, files: 2, durationMs: 12000, usage: null })];
+
+    render(<ChatRoute />);
+
+    const trace = screen.getByRole('button', { name: 'What I did' });
+    expect(trace).toHaveTextContent('3 tool calls · 2 files · 12s');
+    expect(trace).not.toHaveTextContent('tok');
+    expect(trace).not.toHaveTextContent('ctx');
+  });
+
+  it('shows a conductor message’s tokens next to its timestamp', () => {
+    state.messages = [message({ id: 'm1', body: 'One moment.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1', usage })];
+
+    render(<ChatRoute />);
+
+    expect(messageAround('One moment.')).toHaveTextContent('8.2k tok');
+  });
+
+  it('shows no token count next to a message whose turn reported no usage', () => {
+    state.messages = [message({ id: 'm1', body: 'One moment.', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1', usage: null })];
+
+    render(<ChatRoute />);
+
+    expect(messageAround('One moment.')).not.toHaveTextContent('tok');
+  });
+
+  it('shows no token count next to a message that cannot be attributed to a run', () => {
+    state.messages = [message({ id: 'm1', body: 'From elsewhere.', runId: null })];
+    state.traces = [];
+
+    render(<ChatRoute />);
+
+    expect(messageAround('From elsewhere.')).not.toHaveTextContent('tok');
+  });
+
+  it('never shows a token count on a human’s own message', () => {
+    state.messages = [message({ id: 'm1', body: 'Do the thing.', direction: 'inbound', runId: 'run_1' })];
+    state.traces = [runTrace({ runId: 'run_1', usage })];
+
+    render(<ChatRoute />);
+
+    expect(messageAround('Do the thing.')).not.toHaveTextContent('tok');
   });
 });
 

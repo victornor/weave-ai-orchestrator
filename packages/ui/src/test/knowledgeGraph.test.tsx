@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KnowledgeGraph } from '../api/types';
+import { resizeObserved } from './resizeObserver';
 
 /**
  * The graph the tests draw: an api project of four pages around a hub, a shared hub linking into
@@ -60,6 +61,8 @@ const detailPanel = (c: HTMLElement): HTMLElement => c.querySelector<HTMLElement
 const nodeFor = (c: HTMLElement, id: string): HTMLElement => c.querySelector<HTMLElement>(`[data-node="${id}"]`)!;
 const positionOf = (el: Element): string => el.getAttribute('transform') ?? '';
 const sceneTransform = (c: HTMLElement): string => c.querySelector('svg > g')!.getAttribute('transform') ?? '';
+const nums = (transform: string): number[] => [...transform.matchAll(/-?[\d.]+/g)].map((m) => Number(m[0]));
+const chipOpacity = (el: Element): string => (el as HTMLElement).style.opacity ?? '';
 
 describe('the graph canvas', () => {
   it('draws one element per node and one per drawable edge, with the mutual pair collapsed', () => {
@@ -120,6 +123,32 @@ describe('dragging and panning', () => {
 
     expect(sceneTransform(container)).not.toBe(scene);
     expect(positionOf(node)).toBe(before);
+  });
+
+  it('fades the whole suppressed chip, not just its label, when a drag forces two chips together', () => {
+    const { container } = draw();
+    const svg = container.querySelector('svg')!;
+    const a = nodeFor(container, 'projects/api/docs/billing.md');
+    const b = nodeFor(container, 'projects/api/docs/payments.md');
+    expect(chipOpacity(a)).toBe('');
+    expect(chipOpacity(b)).toBe('');
+
+    const [tx, ty, k] = nums(sceneTransform(container));
+    const [bx, by] = nums(positionOf(b));
+    const clientX = bx! * k! + tx!;
+    const clientY = by! * k! + ty!;
+
+    fireEvent.pointerDown(a, { pointerId: 5, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(svg, { pointerId: 5, clientX, clientY });
+    fireEvent.pointerUp(svg, { pointerId: 5, clientX, clientY });
+
+    // Exactly one of the two overlapping chips stays at full strength; the other — rect, accent
+    // stripe and label together — fades, rather than leaving an empty rect with a full-strength
+    // stripe and no text (pixel-for-pixel the bug this backstop exists to cover for).
+    const opacities = [chipOpacity(a), chipOpacity(b)].sort();
+    expect(opacities).toEqual(['', '0.22']);
+    const suppressed = chipOpacity(a) === '0.22' ? a : b;
+    expect(suppressed.querySelector('rect')).not.toBeNull();
   });
 
   it('zooms the scene on the wheel', () => {
@@ -211,7 +240,16 @@ describe('dragging and panning', () => {
     vi.advanceTimersByTime(VIEW_TWEEN_MS * 3);
     vi.useRealTimers();
 
-    expect(sceneTransform(container)).toBe(opened);
+    // Numeric comparison, not string equality: `defaultView` is recomputed from the model's
+    // current node positions both times, and floating-point arithmetic is not guaranteed to
+    // land on the exact same bit pattern run to run for an unrelated reason (e.g. VS-193
+    // changed the unrelated seed-ring formula, shifting the last bit of an intermediate sum).
+    const [ox, oy, ok] = [...opened.matchAll(/-?[\d.]+/g)].map((m) => Number(m[0]));
+    const after = sceneTransform(container);
+    const [ax, ay, ak] = [...after.matchAll(/-?[\d.]+/g)].map((m) => Number(m[0]));
+    expect(ax).toBeCloseTo(ox!, 6);
+    expect(ay).toBeCloseTo(oy!, 6);
+    expect(ak).toBeCloseTo(ok!, 6);
   });
 
   it('frames every page on Fit', () => {
@@ -383,6 +421,22 @@ describe('the phone', () => {
 
     expect(container.querySelector('svg')).not.toBeNull();
     expect(nodes(container)).toHaveLength(5);
+  });
+
+  it('re-measures the canvas frame once it exists, instead of keeping the fallback size', () => {
+    state.phone = true;
+    const { container } = draw();
+    fireEvent.click(screen.getByRole('button', { name: 'Canvas' }));
+    const before = sceneTransform(container);
+
+    // The canvas frame did not exist while the phone list was showing, so its first real size —
+    // narrower than FALLBACK_SIZE, as any phone frame is — only arrives now.
+    const frame = container.querySelector('.ac-card') as HTMLElement;
+    Object.defineProperty(frame, 'clientWidth', { configurable: true, get: () => 360 });
+    Object.defineProperty(frame, 'clientHeight', { configurable: true, get: () => 640 });
+    act(() => resizeObserved());
+
+    expect(sceneTransform(container)).not.toBe(before);
   });
 });
 

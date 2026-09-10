@@ -256,6 +256,23 @@ describe('prompt rendering', () => {
     expect(charter).not.toMatch(/\{\{[#/]?[a-z]/i);
   });
 
+  it.runIf(existsSync(SHIPPED_TEMPLATES))('tells agents not to pin Node via mise in a way that hides openspec (VS-170)', () => {
+    h.ctx.templatesDir = SHIPPED_TEMPLATES;
+    for (const name of ['conductor.AGENTS.md.tmpl', 'worker.AGENTS.md.tmpl'] as const) {
+      const src = readFileSync(join(SHIPPED_TEMPLATES, name), 'utf8');
+      expect(src).toContain('mise.toml');
+      expect(src).toContain('openspec');
+      expect(src).toMatch(/reinstall/i);
+    }
+    const worker0 = renderWorkerInstructions(h.ctx, h.deps, worker);
+    const conductor = renderConductorInstructions(h.ctx, h.deps);
+    for (const out of [worker0, conductor]) {
+      expect(out).toContain('mise.toml');
+      expect(out).toContain('openspec');
+      expect(out).toMatch(/reinstall/i);
+    }
+  });
+
   it.runIf(existsSync(SHIPPED_TEMPLATES))('tells the conductor to ask with options when the answer is a closed set', () => {
     h.ctx.templatesDir = SHIPPED_TEMPLATES;
     const conductor = renderConductorInstructions(h.ctx, h.deps);

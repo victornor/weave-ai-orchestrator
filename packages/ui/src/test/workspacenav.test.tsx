@@ -296,3 +296,22 @@ describe('the Needs-you count', () => {
     expect(screen.queryByLabelText(/waiting for you/)).not.toBeInTheDocument();
   });
 });
+
+describe('the global section', () => {
+  it('sits above the workspace list with Needs you, Live and Chats', () => {
+    render(nav());
+    const global = screen.getByRole('navigation', { name: 'Global' });
+    const labels = within(global).getAllByRole('link').map((a) => a.textContent);
+    expect(labels).toEqual(['Needs you', 'Live', 'Chats']);
+    expect(within(global).getByText('Live').closest('a')).toHaveAttribute('href', '/live');
+    expect(within(global).getByText('Chats').closest('a')).toHaveAttribute('href', '/chats');
+    expect(within(global).getByText('Needs you').closest('a')).toHaveAttribute('href', '/needs');
+  });
+
+  it('marks the global Live link current and no workspace group active', () => {
+    render(nav({ activeWs: '', activePath: '/live' }));
+    const global = screen.getByRole('navigation', { name: 'Global' });
+    expect(within(global).getByText('Live').closest('a')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByText('Alpha').closest('button')).not.toBeNull();
+  });
+});

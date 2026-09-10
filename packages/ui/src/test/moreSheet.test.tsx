@@ -98,6 +98,14 @@ describe('what the More menu lists', () => {
     expect(within(nav).getAllByRole('link')).toHaveLength(MORE_ITEMS.length);
   });
 
+  it('lists Global Needs you, Live and Chats above the per-workspace leftovers', () => {
+    open();
+    const global = within(sheet()).getByRole('navigation', { name: 'Global' });
+    expect(within(global).getByRole('link', { name: /Needs you/ })).toHaveAttribute('href', '/needs');
+    expect(within(global).getByRole('link', { name: /^Live/ })).toHaveAttribute('href', '/live');
+    expect(within(global).getByRole('link', { name: /Chats/ })).toHaveAttribute('href', '/chats');
+  });
+
   it('marks the destination the app is already showing', () => {
     open({ isActive: (to) => to === '/w/ws1/runs' });
     const nav = within(sheet()).getByRole('navigation', { name: 'More sections' });

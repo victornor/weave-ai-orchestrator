@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({ useParams: () => ({}) }));
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', () => ({
   A: ({ to, params, children, ...rest }: { to: string; params?: Record<string, string>; children?: React.ReactNode }) => (
     <a href={Object.entries(params ?? {}).reduce((acc, [k, v]) => acc.replace(`$${k}`, v), to)} {...rest}>{children}</a>

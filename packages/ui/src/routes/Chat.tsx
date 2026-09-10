@@ -92,7 +92,7 @@ export function ChatRoute(): React.ReactElement {
   return <ChatPage key={ws} />;
 }
 
-function ChatPage(): React.ReactElement {
+export function ChatPage(): React.ReactElement {
   const ws = useWs();
   const go = useGo();
   const toast = useToast();

@@ -5,7 +5,7 @@ import type { RuntimeInfo } from '../api/types';
 
 const state = vi.hoisted(() => ({ runtimes: [] as unknown[] }));
 
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', () => ({ useGo: () => vi.fn(), useSearchParams: () => ({}) }));
 vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));

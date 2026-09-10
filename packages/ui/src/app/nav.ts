@@ -55,3 +55,10 @@ export const MORE_ITEMS: NavItem[] = [
 export function href(item: NavItem, ws: string): string {
   return item.to.replace('$ws', encodeURIComponent(ws));
 }
+
+/** Daemon-wide pages above the workspace list (VS-168). Paths have no `$ws`. */
+export const GLOBAL_NAV: NavItem[] = [
+  { key: 'global-needs', label: 'Needs you', to: '/needs', glyph: 'needs-you', hint: 'Everything waiting across every workspace' },
+  { key: 'global-live', label: 'Live', to: '/live', glyph: 'working', hint: 'Who is working, in every workspace' },
+  { key: 'global-chats', label: 'Chats', to: '/chats', glyph: 'chat', hint: 'Every workspace\'s conductor chat, side by side' },
+];

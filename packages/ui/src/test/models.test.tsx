@@ -13,7 +13,7 @@ const state = vi.hoisted(() => ({
   runtimeModels: [] as Array<{ id: string; label: string }>,
 }));
 
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', () => ({ useGo: () => vi.fn(), useSearchParams: () => ({ section: 'models' }) }));
 vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));

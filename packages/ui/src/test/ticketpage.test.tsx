@@ -21,7 +21,7 @@ const empty = { data: undefined, isLoading: false, isError: false };
 const list = <T,>(data: T[]) => ({ data, isLoading: false, isError: false });
 
 vi.mock('@tanstack/react-router', () => ({ useParams: () => ({ ticketId: 'tk_1' }) }));
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', () => ({ useGo: () => vi.fn(), useSearchParams: () => state.search }));
 
 vi.mock('../api/hooks', () => ({

@@ -19,7 +19,7 @@ const state = vi.hoisted(() => ({
   went: [] as Array<{ to: string; opts?: Record<string, unknown> }>,
 }));
 
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', () => ({
   useGo: () => (to: string, opts?: Record<string, unknown>) => { state.went.push({ to, opts }); },
   useSearchParams: () => state.search,

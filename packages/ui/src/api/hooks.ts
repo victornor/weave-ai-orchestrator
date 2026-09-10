@@ -5,7 +5,7 @@ import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswe
 import { dayKey } from '@agent-conductor/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
-import { useWs } from './context';
+import { useHookWs, useWs } from './context';
 import type * as T from './types';
 import { upgradePollInterval } from '../lib/upgrade';
 
@@ -237,9 +237,9 @@ export function useAuthSessions(): UseQueryResult<T.AuthSession[]> {
 
 /* ------------------------------------------------------------- workspace */
 
-export function useWorkspaceSummary(): UseQueryResult<T.WorkspaceSummary> {
-  const ws = useWs();
-  return useQuery({ queryKey: qk.workspace(ws), queryFn: () => api.ws<unknown>(ws, '').then(summary) });
+export function useWorkspaceSummary(wsOverride?: string): UseQueryResult<T.WorkspaceSummary> {
+  const ws = useHookWs(wsOverride);
+  return useQuery({ queryKey: qk.workspace(ws), queryFn: () => api.ws<unknown>(ws, '').then(summary), enabled: Boolean(ws) });
 }
 
 export function useBriefing(): UseQueryResult<T.Briefing> {
@@ -247,9 +247,9 @@ export function useBriefing(): UseQueryResult<T.Briefing> {
   return useQuery({ queryKey: qk.briefing(ws), queryFn: () => api.ws<T.Briefing>(ws, '/briefing') });
 }
 
-export function useProjects(): UseQueryResult<Project[]> {
-  const ws = useWs();
-  return useQuery({ queryKey: qk.projects(ws), queryFn: () => api.ws<Project[]>(ws, '/projects') });
+export function useProjects(wsOverride?: string): UseQueryResult<Project[]> {
+  const ws = useHookWs(wsOverride);
+  return useQuery({ queryKey: qk.projects(ws), queryFn: () => api.ws<Project[]>(ws, '/projects'), enabled: Boolean(ws) });
 }
 
 export interface WorkspaceProjectsState {
@@ -391,9 +391,18 @@ export function useRollbackCharter(): UseMutationResult<unknown, Error, { id: st
 /** `GET /workers` marks which ticket is an interactive session (VS-101) — joined server-side, not part of `Agent` itself. */
 export type WorkerListItem = Agent & { interactiveSession: boolean };
 
-export function useWorkers(params: { status?: string; project?: string; role?: string; includeRetired?: boolean } = {}): UseQueryResult<WorkerListItem[]> {
-  const ws = useWs();
-  return useQuery({ queryKey: [...qk.workers(ws), params], queryFn: () => api.ws<WorkerListItem[]>(ws, `/workers${qs(params)}`) });
+export function useWorkers(params: { status?: string; project?: string; role?: string; includeRetired?: boolean } = {}, wsOverride?: string): UseQueryResult<WorkerListItem[]> {
+  const ws = useHookWs(wsOverride);
+  return useQuery({ queryKey: [...qk.workers(ws), params], queryFn: () => api.ws<WorkerListItem[]>(ws, `/workers${qs(params)}`), enabled: Boolean(ws) });
+}
+
+export function useWorkersMany(ids: readonly string[]): UseQueryResult<WorkerListItem[]>[] {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: [...qk.workers(id), {}],
+      queryFn: () => api.ws<WorkerListItem[]>(id, '/workers'),
+    })),
+  });
 }
 
 export function useWorker(id: string): UseQueryResult<T.WorkerDetail> {
@@ -492,12 +501,21 @@ export interface TicketQuery extends Record<string, string | number | boolean | 
   sort?: 'number' | 'finished';
 }
 
-export function useTickets(params: TicketQuery = {}, opts: { enabled?: boolean } = {}): UseQueryResult<Ticket[]> {
-  const ws = useWs();
+export function useTickets(params: TicketQuery = {}, opts: { enabled?: boolean; ws?: string } = {}): UseQueryResult<Ticket[]> {
+  const ws = useHookWs(opts.ws);
   return useQuery({
     queryKey: [...qk.tickets(ws), params],
     queryFn: () => api.ws<Ticket[] | { tickets: Ticket[] }>(ws, `/tickets${qs(params)}`).then((r) => listOf(r, 'tickets')),
-    enabled: opts.enabled ?? true,
+    enabled: (opts.enabled ?? true) && Boolean(ws),
+  });
+}
+
+export function useTicketsMany(ids: readonly string[], params: TicketQuery = {}): UseQueryResult<Ticket[]>[] {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: [...qk.tickets(id), params],
+      queryFn: () => api.ws<Ticket[] | { tickets: Ticket[] }>(id, `/tickets${qs(params)}`).then((r) => listOf(r, 'tickets')),
+    })),
   });
 }
 
@@ -748,26 +766,47 @@ export function useTicketKnowledgeUsage(id: string): UseQueryResult<T.KnowledgeC
 
 export function useDecisions(
   params: { status?: string | string[]; owner?: string; limit?: number } = { status: 'open', owner: 'human' },
+  wsOverride?: string,
 ): UseQueryResult<Decision[]> {
-  const ws = useWs();
+  const ws = useHookWs(wsOverride);
   // The route reads `status` as a comma-separated list, so several statuses cost no route work.
   const status = Array.isArray(params.status) ? params.status.join(',') : params.status;
   return useQuery({
     queryKey: [...qk.decisions(ws), params],
     queryFn: () =>
       api.ws<Decision[] | { decisions: Decision[] }>(ws, `/decisions${qs({ ...params, status })}`).then((r) => listOf(r, 'decisions')),
+    enabled: Boolean(ws),
   });
 }
 
-export function useAnswerDecision(): UseMutationResult<unknown, Error, { id: string; key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }> {
-  const ws = useWs();
+export function useDecisionsMany(
+  ids: readonly string[],
+  params: { status?: string | string[]; owner?: string; limit?: number } = { status: 'open', owner: 'human' },
+): UseQueryResult<Decision[]>[] {
+  const status = Array.isArray(params.status) ? params.status.join(',') : params.status;
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: [...qk.decisions(id), params],
+      queryFn: () =>
+        api.ws<Decision[] | { decisions: Decision[] }>(id, `/decisions${qs({ ...params, status })}`).then((r) => listOf(r, 'decisions')),
+    })),
+  });
+}
+
+export function useAnswerDecision(): UseMutationResult<unknown, Error, { id: string; ws?: string; key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }> {
+  const ctxWs = useHookWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }) => api.ws(ws, `/decisions/${id}/answer`, { method: 'POST', body }),
-    onMutate: async () => {
+    mutationFn: ({ id, ws: wsArg, ...body }) => {
+      const ws = wsArg ?? ctxWs;
+      return api.ws(ws, `/decisions/${id}/answer`, { method: 'POST', body });
+    },
+    onMutate: async (v) => {
+      const ws = v.ws ?? ctxWs;
       await qc.cancelQueries({ queryKey: qk.decisions(ws) });
     },
-    onSettled: () => {
+    onSettled: (_d, _e, v) => {
+      const ws = v.ws ?? ctxWs;
       void qc.invalidateQueries({ queryKey: qk.decisions(ws) });
       void qc.invalidateQueries({ queryKey: qk.briefing(ws) });
     },
@@ -776,11 +815,24 @@ export function useAnswerDecision(): UseMutationResult<unknown, Error, { id: str
 
 /* ------------------------------------------------------------------ runs */
 
-export function useRuns(params: { agent?: string; ticket?: string; status?: string; limit?: number; offset?: number } = {}): UseQueryResult<Run[]> {
-  const ws = useWs();
+export function useRuns(params: { agent?: string; ticket?: string; status?: string; limit?: number; offset?: number } = {}, wsOverride?: string): UseQueryResult<Run[]> {
+  const ws = useHookWs(wsOverride);
   return useQuery({
     queryKey: [...qk.runs(ws), params],
     queryFn: () => api.ws<Run[] | { runs: Run[] }>(ws, `/runs${qs(params)}`).then((r) => listOf(r, 'runs')),
+    enabled: Boolean(ws),
+  });
+}
+
+export function useRunsMany(
+  ids: readonly string[],
+  params: { agent?: string; ticket?: string; status?: string; limit?: number; offset?: number } = {},
+): UseQueryResult<Run[]>[] {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: [...qk.runs(id), params],
+      queryFn: () => api.ws<Run[] | { runs: Run[] }>(id, `/runs${qs(params)}`).then((r) => listOf(r, 'runs')),
+    })),
   });
 }
 
@@ -789,12 +841,12 @@ export function useRun(id: string): UseQueryResult<T.RunDetail> {
   return useQuery({ queryKey: qk.run(ws, id), queryFn: () => api.ws<unknown>(ws, `/runs/${id}`).then(runDetail), enabled: Boolean(id) });
 }
 
-export function useRunEvents(id: string, after = 0): UseQueryResult<RunEvent[]> {
-  const ws = useWs();
+export function useRunEvents(id: string, after = 0, wsOverride?: string): UseQueryResult<RunEvent[]> {
+  const ws = useHookWs(wsOverride);
   return useQuery({
     queryKey: [...qk.runEvents(ws, id), after],
     queryFn: () => api.ws<RunEvent[] | { events: RunEvent[] }>(ws, `/runs/${id}/events${qs({ after, limit: 500 })}`).then((r) => listOf(r, 'events')),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && Boolean(ws),
   });
 }
 

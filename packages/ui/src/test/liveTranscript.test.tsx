@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({ useParams: () => state.params }));
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', () => ({ useGo: () => vi.fn(), useSearchParams: () => ({}) }));
 
 vi.mock('../api/hooks', () => ({

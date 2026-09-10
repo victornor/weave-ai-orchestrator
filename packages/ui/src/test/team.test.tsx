@@ -10,7 +10,7 @@ const state = vi.hoisted(() => ({
   startSession: vi.fn(),
 }));
 
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
 vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: [{ id: 'p1', slug: 'api' }] }),

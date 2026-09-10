@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
   navigations: [] as Array<{ to: string; opts?: Record<string, unknown> }>,
 }));
 
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', () => ({
   useGo: () => (to: string, opts?: Record<string, unknown>) => { state.navigations.push({ to, ...(opts ? { opts } : {}) }); },
   useSearchParams: () => state.search,

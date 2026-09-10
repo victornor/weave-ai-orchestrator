@@ -18,11 +18,42 @@ import { UsageRoute } from './routes/Usage';
 import { KnowledgeRoute } from './routes/Knowledge';
 import { ProjectOverviewRoute } from './routes/project/ProjectOverview';
 import { SettingsRoute } from './routes/Settings';
+import { GlobalNeedsRoute } from './routes/GlobalNeeds';
+import { GlobalLiveRoute } from './routes/GlobalLive';
+import { GlobalChatsRoute } from './routes/GlobalChats';
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 
 const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: '/login', component: LoginRoute });
 const onboardingRoute = createRoute({ getParentRoute: () => rootRoute, path: '/onboarding', component: OnboardingRoute });
+
+const globalNeedsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/needs',
+  component: () => (
+    <AppShell>
+      <GlobalNeedsRoute />
+    </AppShell>
+  ),
+});
+const globalLiveRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/live',
+  component: () => (
+    <AppShell>
+      <GlobalLiveRoute />
+    </AppShell>
+  ),
+});
+const globalChatsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/chats',
+  component: () => (
+    <AppShell>
+      <GlobalChatsRoute />
+    </AppShell>
+  ),
+});
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -83,6 +114,9 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
   onboardingRoute,
+  globalNeedsRoute,
+  globalLiveRoute,
+  globalChatsRoute,
   wsRoute.addChildren([
     wsIndexRoute,
     needsRoute,

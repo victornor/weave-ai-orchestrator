@@ -1,5 +1,5 @@
 import { A } from './link';
-import { RAIL, href } from './nav';
+import { GLOBAL_NAV, RAIL, href } from './nav';
 import { PlusGlyph } from './PlusGlyph';
 import { Skeleton } from '../components/Skeleton';
 import type { WorkspaceListItem } from '../api/types';
@@ -9,7 +9,7 @@ import { projectColorVar } from '../lib/projectColor';
 
 export interface WorkspaceNavProps {
   workspaces: WorkspaceListItem[];
-  /** The workspace the app is showing, in the daemon's canonical id — never the raw URL param. */
+  /** The workspace the app is showing, in the daemon's canonical id — empty on a global page. */
   activeWs: string;
   activePath: string;
   expanded: readonly string[];
@@ -55,6 +55,22 @@ export function WorkspaceNav({
 }: WorkspaceNavProps): React.ReactElement {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <nav className="mb-3 flex flex-col gap-px" aria-label="Global">
+        {GLOBAL_NAV.map((item) => {
+          const current = activePath === item.to || activePath.startsWith(`${item.to}/`);
+          return (
+            <A
+              key={item.key}
+              to={item.to}
+              aria-current={current ? 'page' : undefined}
+              className={cx('flex h-7 items-center gap-2.5 rounded-r4 px-2.5', current ? 'bg-bg-3 text-text-1' : 'text-text-3 hover:bg-bg-2')}
+            >
+              <span className={cx('size-1.5 rounded-r4', current ? 'bg-needs-you' : 'bg-line-3')} aria-hidden />
+              <span className="flex-1 text-meta">{item.label}</span>
+            </A>
+          );
+        })}
+      </nav>
       <div className="ac-label mb-2 px-2.5">Workspaces</div>
       <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
         {workspaces.map((w) => {

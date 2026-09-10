@@ -55,6 +55,18 @@ describe('changing the workspace', () => {
     expect(localStorage.getItem('conductor.ws')).toBe('beta');
   });
 
+  it('does not write conductor.ws when remember is false', () => {
+    localStorage.setItem('conductor.ws', 'kept');
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkspaceProvider ws="alpha" remember={false}>
+          <div>body</div>
+        </WorkspaceProvider>
+      </QueryClientProvider>,
+    );
+    expect(localStorage.getItem('conductor.ws')).toBe('kept');
+  });
+
   it('keeps the children mounted across the switch', () => {
     const view = render(shell('alpha'));
     const body = view.getByText('body');

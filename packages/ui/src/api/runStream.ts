@@ -15,7 +15,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RUN_EVENT_TYPES, type RunEvent } from '@agent-conductor/shared';
-import { useWs } from './context';
+import { useHookWs } from './context';
 import { useRunEvents } from './hooks';
 import { useLiveStream } from './sseStream';
 import type { ConnectionStatus } from './sseStream';
@@ -26,9 +26,9 @@ export interface RunEventStream {
   retryNow: () => void;
 }
 
-export function useRunEventStream(runId: string | null, { live = true }: { live?: boolean } = {}): RunEventStream {
-  const ws = useWs();
-  const persisted = useRunEvents(runId ?? '');
+export function useRunEventStream(runId: string | null, { live = true, ws: wsOverride }: { live?: boolean; ws?: string } = {}): RunEventStream {
+  const ws = useHookWs(wsOverride);
+  const persisted = useRunEvents(runId ?? '', 0, wsOverride);
   const [tail, setTail] = useState<RunEvent[]>([]);
   /** Highest seq rendered, so a reconnect asks for `?after=` it rather than replaying the turn. */
   const seq = useRef(0);

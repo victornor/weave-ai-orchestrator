@@ -7,8 +7,9 @@ one, and within it SHALL mark the section link matching the current location. Ex
 SHALL be marked active at a time, and a section link in a non-active workspace's group SHALL NOT be
 marked active even when its section matches the current one.
 
-When the app is showing a global Needs you, Live, Chats or Map page, no workspace group SHALL be
-marked active, and the matching link in the global section SHALL be marked as the current one.
+When the app is showing a global Needs you, Live, Chats, Incidents or Map page, no workspace group
+SHALL be marked active, and the matching link in the global section SHALL be marked as the current
+one.
 
 #### Scenario: Showing a board
 
@@ -34,6 +35,12 @@ marked active, and the matching link in the global section SHALL be marked as th
 - **THEN** no workspace group is marked active, and the global section's Chats link is marked as the
   current one
 
+#### Scenario: Showing global Incidents
+
+- **WHEN** the app is showing the global Incidents page
+- **THEN** no workspace group is marked active, and the global section's Incidents link is marked as
+  the current one
+
 #### Scenario: Showing global Map
 
 - **WHEN** the app is showing the global Map page
@@ -48,8 +55,8 @@ active workspace when a workspace page is showing, and SHALL NOT grow a workspac
 The last of those tabs SHALL NOT navigate. It SHALL open a menu, presented over the application as a
 dismissible dialog, containing:
 
-- Global Needs you, Global Live, Global Chats and Global Map, each named, addressing the daemon-wide
-  pages rather than a workspace, listed above the per-workspace leftovers;
+- Global Needs you, Global Live, Global Chats, Global Incidents and Global Map, each named,
+  addressing the daemon-wide pages rather than a workspace, listed above the per-workspace leftovers;
 - a link to every destination the application has that the bar's tabs do not carry, including the
   merge queue and Live, each named and addressing the active workspace;
 - the active workspace's projects, each named by its slug and opening that project's overview, and
@@ -136,6 +143,11 @@ other route still reaches the other workspaces.
 - **WHEN** the human opens More on a phone and chooses Global Chats
 - **THEN** the app shows the global Chats page and the menu is dismissed
 
+#### Scenario: Reaching global Incidents from More
+
+- **WHEN** the human opens More on a phone and chooses Global Incidents
+- **THEN** the app shows the global Incidents page and the menu is dismissed
+
 #### Scenario: Reaching global Map from More
 
 - **WHEN** the human opens More on a phone and chooses Global Map
@@ -144,17 +156,17 @@ other route still reaches the other workspaces.
 ### Requirement: A global section sits above the workspace list
 
 On a desktop viewport the sidebar SHALL show a global section above the workspace list, containing
-a link named Needs you, a link named Live, a link named Chats and a link named Map, in that order.
-Those links SHALL address the daemon-wide pages, not a workspace. The section SHALL be present
-whether or not a workspace is currently being shown, and whether or not the workspace list has
-loaded.
+a link named Needs you, a link named Live, a link named Chats, a link named Incidents and a link
+named Map, in that order. Those links SHALL address the daemon-wide pages, not a workspace. The
+section SHALL be present whether or not a workspace is currently being shown, and whether or not the
+workspace list has loaded.
 
 The global section SHALL NOT replace any workspace group's own Needs you, Live or Chat links.
 
 #### Scenario: The global section is above the workspaces
 
 - **WHEN** the sidebar is shown on a desktop viewport
-- **THEN** Needs you, Live, Chats and Map links appear above the workspace list
+- **THEN** Needs you, Live, Chats, Incidents and Map links appear above the workspace list
 
 #### Scenario: Needs you in the global section opens global Needs you
 
@@ -171,6 +183,11 @@ The global section SHALL NOT replace any workspace group's own Needs you, Live o
 - **WHEN** the human activates Chats in the sidebar's global section
 - **THEN** the app shows the global Chats page without a document reload
 
+#### Scenario: Incidents in the global section opens global Incidents
+
+- **WHEN** the human activates Incidents in the sidebar's global section
+- **THEN** the app shows the global Incidents page without a document reload
+
 #### Scenario: Map in the global section opens global Map
 
 - **WHEN** the human activates Map in the sidebar's global section
@@ -179,13 +196,13 @@ The global section SHALL NOT replace any workspace group's own Needs you, Live o
 #### Scenario: The section is there before workspaces load
 
 - **WHEN** the sidebar renders before the workspace list has loaded
-- **THEN** the global Needs you, Live, Chats and Map links are already shown
+- **THEN** the global Needs you, Live, Chats, Incidents and Map links are already shown
 
 ### Requirement: Opening a global page does not switch workspace context
 
-Following a global Needs you, Live, Chats or Map link SHALL navigate within the running application
-without a document reload, SHALL NOT mark any workspace group as the active one, and SHALL NOT
-change the workspace remembered for the next time the app is started.
+Following a global Needs you, Live, Chats, Incidents or Map link SHALL navigate within the running
+application without a document reload, SHALL NOT mark any workspace group as the active one, and
+SHALL NOT change the workspace remembered for the next time the app is started.
 
 When no workspace page is being shown, the keyboard shortcuts for the sections SHALL navigate to
 that section of the workspace remembered for the next launch, if one is remembered; if none is
@@ -207,3 +224,9 @@ remembered they SHALL do nothing.
 - **WHEN** the human is on the global Live page, workspace A is the remembered workspace, and the
   human presses the Board shortcut
 - **THEN** the app goes to A's board
+
+#### Scenario: Jumping to global Incidents does not switch workspace
+
+- **WHEN** the human is viewing workspace A's board and activates Incidents in the global section
+- **THEN** the app shows the global Incidents page, A's group is no longer marked active, and the
+  workspace remembered for the next launch is still A

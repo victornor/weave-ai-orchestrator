@@ -1,12 +1,22 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { adapter } from '../src/adapter.js';
 
 const dirs: string[] = [];
 const tmp = (p: string) => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push(d); return d; };
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+
+/** `skills/manifest.json`'s `runtimes.<id>.path` is `<skillsDir>/<name>/SKILL.md`; strip the suffix. */
+const skillsDirFromManifest = (runtimeId: string): string => {
+  const manifestPath = fileURLToPath(new URL('../../../../skills/manifest.json', import.meta.url));
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { runtimes: Record<string, { path: string }> };
+  const path = manifest.runtimes[runtimeId]?.path;
+  if (!path) throw new Error(`skills/manifest.json has no runtimes.${runtimeId} entry`);
+  return path.replace(/\/<name>\/SKILL\.md$/, '');
+};
 
 describe('claude adapter', () => {
   it('declares its identity, capabilities and per-CLI conventions', () => {
@@ -48,6 +58,15 @@ describe('claude adapter', () => {
     expect(readFileSync(join(home, 'AGENTS.md'), 'utf8')).toBe('# Charter\n');
     expect(readFileSync(join(home, '.claude/skills/demo/SKILL.md'), 'utf8')).toContain('demo skill');
     expect(JSON.parse(readFileSync(join(home, '.claude/settings.json'), 'utf8')).permissions.deny).toContain('Bash(git push --force:*)');
+  });
+
+  it('installs skills at the path skills/manifest.json declares for claude (VS-189)', async () => {
+    expect(adapter.skillsDir()).toBe(skillsDirFromManifest('claude'));
+    const home = tmp('ac-home-');
+    const skill = tmp('ac-skill-');
+    writeFileSync(join(skill, 'SKILL.md'), '# demo skill\n');
+    await adapter.installInstructions({ path: home, kind: 'worker' }, { instructions: '# Charter\n', skills: [{ name: 'demo', dir: skill }] });
+    expect(readFileSync(join(home, skillsDirFromManifest('claude'), 'demo', 'SKILL.md'), 'utf8')).toContain('demo skill');
   });
 
   it('forks lazily and describes sessions', async () => {

@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-10
+goal: Worker skills install under the wrong runtime, so no worker can load any skill

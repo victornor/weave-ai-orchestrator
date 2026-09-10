@@ -20,7 +20,7 @@ export function skillsFor(ctx: WorkspaceContext, kind: 'conductor' | 'worker'): 
   return entries.filter((n) => wanted.includes(n)).map((n) => ({ name: n, dir: join(ctx.skillsDir, n) }));
 }
 
-interface Marker { briefRevision: number; specRevision: number; roleRevision: number | null; renderedAt: string }
+interface Marker { briefRevision: number; specRevision: number; roleRevision: number | null; runtimeId?: string; renderedAt: string }
 
 function readMarker(home: string): Marker | null {
   try { return JSON.parse(readFileSync(join(home, MARKER), 'utf8')) as Marker; } catch { return null; }
@@ -28,7 +28,7 @@ function readMarker(home: string): Marker | null {
 
 function currentRevisions(ctx: WorkspaceContext, agent: Agent): Omit<Marker, 'renderedAt'> {
   const role = agent.roleId ? ctx.db.get<Role>('SELECT * FROM roles WHERE id = ?', [agent.roleId]) : null;
-  return { briefRevision: agent.briefRevision, specRevision: role?.specRevision ?? 0, roleRevision: agent.roleRevision ?? null };
+  return { briefRevision: agent.briefRevision, specRevision: role?.specRevision ?? 0, roleRevision: agent.roleRevision ?? null, runtimeId: agent.runtimeId };
 }
 
 /** Render AGENTS.md (+ brief.md, notes.md for workers) and install skills for the agent's runtime. */
@@ -56,14 +56,18 @@ export async function renderHome(ctx: WorkspaceContext, deps: () => CoreServices
   writeFileSync(join(home, MARKER), JSON.stringify(marker), 'utf8');
 }
 
-/** Re-render only when the brief or the role spec moved since the last render (PLAN §7.3 step 1). */
+/** Re-render when the brief or the role spec moved since the last render (PLAN §7.3 step 1), or when
+ * the agent's resolved runtime no longer matches the runtime skills were last installed for (VS-189) —
+ * a marker written before this field existed has no `runtimeId` and always counts as a mismatch, which
+ * self-heals any home rendered before this fix on its very next turn. */
 export async function ensureHomeCurrent(ctx: WorkspaceContext, deps: () => CoreServices, agent: Agent): Promise<{ rerendered: boolean; briefUpdated: boolean; charterChanged: boolean }> {
   const marker = readMarker(agent.homePath);
   const cur = currentRevisions(ctx, agent);
   const missing = !existsSync(join(agent.homePath, 'AGENTS.md'));
   const briefUpdated = !!marker && marker.briefRevision !== cur.briefRevision;
   const charterChanged = !!marker && marker.specRevision !== cur.specRevision;
-  if (!missing && marker && !briefUpdated && !charterChanged) return { rerendered: false, briefUpdated: false, charterChanged: false };
+  const runtimeChanged = !!marker && marker.runtimeId !== cur.runtimeId;
+  if (!missing && marker && !briefUpdated && !charterChanged && !runtimeChanged) return { rerendered: false, briefUpdated: false, charterChanged: false };
   await renderHome(ctx, deps, agent);
   return { rerendered: true, briefUpdated, charterChanged };
 }

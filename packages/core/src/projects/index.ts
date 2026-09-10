@@ -6,7 +6,7 @@ import type { WorkspaceContext } from '../context.js';
 import type { Actor, CommitDetail, CoreServices, HistoryPage, HistoryQuery, ProjectsService } from '../api.js';
 import { recordActivity } from '../events.js';
 import { binaryExists, type OnLine } from '../util/exec.js';
-import { git } from '../util/git.js';
+import { git, githubSshRemote } from '../util/git.js';
 import { projectKnowledgeSkeleton } from '../workspace/loader.js';
 import { modelSettingFor } from '../models/resolve.js';
 import { createHistoryReader } from './history.js';
@@ -133,21 +133,21 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
   /** The declared config of a project, or one rebuilt from its row when the add failed before declaring it. */
   function configFor(project: Project): ProjectConfig {
     const declared = ctx.config.projects.find((p) => p.id === project.slug);
-    if (declared) return declared;
-    return ProjectConfigSchema.parse({
+    const base = declared ?? ProjectConfigSchema.parse({
       id: project.slug, url: project.gitUrl, name: project.name, defaultBranch: project.defaultBranch,
       maxWorkers: project.maxWorkers,
       ...(project.setupCommand ? { setupCommand: project.setupCommand } : {}),
       ...(project.landingBranch ? { landingBranch: project.landingBranch } : {}),
-      worktrees: project.worktreeProvider, openspec: { enabled: project.openspecEnabled }, policies: project.policies,
+      worktrees: project.worktreeProvider, openspec: { enabled: Boolean(project.openspecEnabled) }, policies: project.policies,
     });
+    return { ...base, url: githubSshRemote(base.url) };
   }
 
   /** Validate, refuse a duplicate, insert the row in `cloning` and open the job that will report it. */
   function createRow(actor: Actor, rawCfg: ProjectConfig): { project: Project; cfg: ProjectConfig; jobId: string } {
     const parsed = ProjectConfigSchema.safeParse(rawCfg);
     if (!parsed.success) throw new OcError('validation', `invalid project config: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
-    const cfg = parsed.data;
+    const cfg = { ...parsed.data, url: githubSshRemote(parsed.data.url) };
     if (ctx.db.get<{ id: string }>('SELECT id FROM projects WHERE workspace_id = ? AND slug = ?', [ctx.workspaceId, cfg.id])) {
       throw new OcError('conflict', `project ${cfg.id} already exists`);
     }
@@ -285,7 +285,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       if (project.status !== 'error') throw new OcError('conflict', `project ${project.slug} is ${project.status}, not error — there is nothing to retry`);
       if (deps().jobs.running(project.id)) throw new OcError('conflict', `project ${project.slug} already has a job running`);
       const cfg = configFor(project);
-      ctx.db.update('projects', project.id, { status: 'cloning', errorText: null, updatedAt: nowIso() });
+      ctx.db.update('projects', project.id, { status: 'cloning', errorText: null, gitUrl: cfg.url, updatedAt: nowIso() });
       const job = deps().jobs.start('project_add', { type: 'project', id: project.id }, actor);
       detach(cfg.id, runAdd(project.id, cfg, job.id, actor));
       return { project: get(project.id), jobId: job.id };

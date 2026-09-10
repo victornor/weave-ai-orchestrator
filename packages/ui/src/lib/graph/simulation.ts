@@ -71,6 +71,64 @@ export function nodeRadius(node: Pick<GraphNode, 'kind' | 'degree' | 'title'>): 
   return Math.max(width, height) / 2;
 }
 
+/** Whether two chips' drawn rectangles overlap — the standard axis-aligned-box test. */
+export function chipsOverlap(a: SimNode, b: SimNode): boolean {
+  const wa = chipSize(a);
+  const wb = chipSize(b);
+  return Math.abs(a.x - b.x) < (wa.width + wb.width) / 2 && Math.abs(a.y - b.y) < (wa.height + wb.height) / 2;
+}
+
+/**
+ * Which of two overlapping chips a reader would rather see: a hub outranks a document by more
+ * than any degree difference could close, so a hub is never the one suppressed by a document
+ * sharing its position; a node the reader is pointing at or has selected outranks any degree;
+ * otherwise the better-linked node wins. Ties (equal on every count) fall back to `id` so the
+ * choice is stable from tick to tick rather than flickering.
+ */
+function labelScore(n: Pick<SimNode, 'id' | 'kind' | 'degree'>, keep: ReadonlySet<string>): number {
+  return (n.kind === 'hub' ? 1e9 : 0) + (keep.has(n.id) ? 1e6 : 0) + n.degree;
+}
+
+/**
+ * Chips whose label should not be drawn this tick because a higher-priority chip overlaps them
+ * — the backstop for whatever crowding the layout itself does not resolve (VS-193's "labels
+ * never overlap" requirement). `keep` is the hovered/selected node, if any: never suppressed by
+ * a lower-degree neighbour regardless of layout.
+ */
+export function suppressedLabels(nodes: readonly SimNode[], keep: ReadonlySet<string> = new Set()): ReadonlySet<string> {
+  const suppressed = new Set<string>();
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i]!;
+      const b = nodes[j]!;
+      if (!chipsOverlap(a, b)) continue;
+      const sa = labelScore(a, keep);
+      const sb = labelScore(b, keep);
+      const loser = sa !== sb ? (sa > sb ? b : a) : (a.id < b.id ? b : a);
+      suppressed.add(loser.id);
+    }
+  }
+  return suppressed;
+}
+
+/**
+ * A ring wide enough that a full graph of brand-new nodes — the case on every first load,
+ * since nothing is in `previous` yet — does not start seeded on top of itself. A flat
+ * `40 + n*1.6` (its predecessor) put 30+ real chips inside a ~95-unit-radius ring barely wider
+ * than one of them: fixed at VS-193 after finding ~18% of chip pairs already overlapping at
+ * seed time, before the layout had ticked once, on a graph this project's own knowledge base
+ * shape. Sized from the chips' own footprint instead, so the ring scales with what is actually
+ * being placed on it rather than a constant tuned for some other graph.
+ */
+function seedRing(nodes: readonly Pick<GraphNode, 'kind' | 'degree' | 'title'>[]): number {
+  if (nodes.length === 0) return 40;
+  const totalDiameter = nodes.reduce((sum, n) => sum + nodeRadius(n) * 2, 0);
+  // Circumference for every chip side by side around the ring, plus a third again for breathing
+  // room — forces pull the layout in from here, so a generous seed shortens the visible unscramble
+  // rather than growing the settled graph.
+  return Math.max(60, (totalDiameter * 1.3) / (2 * Math.PI));
+}
+
 /** A stable pseudo-random angle for a node, so a layout never depends on `Math.random`. */
 function angleOf(id: string): number {
   let h = 2166136261;
@@ -95,7 +153,7 @@ export function reconcileNodes(previous: readonly SimNode[], model: GraphModel, 
   const placed = new Map<string, Point>();
   for (const n of previous) placed.set(n.id, { x: n.x, y: n.y });
 
-  const ring = 40 + model.nodes.length * 1.6;
+  const ring = seedRing(model.nodes);
   model.nodes.forEach((node, i) => {
     const before = kept.get(node.id);
     if (before) {
@@ -146,6 +204,13 @@ export function reconcileNodes(previous: readonly SimNode[], model: GraphModel, 
  * cluster the hull can be thrown around. It has to be a custom force rather than `forceX`/`forceY`
  * with an accessor, because d3 evaluates those once at initialisation and the centroid moves every
  * tick.
+ *
+ * The pull eases as a group grows (divided by the square root of its size): held at a flat
+ * `strength` regardless of size, a group with many siblings — pages that share only a hub, with no
+ * edge holding them apart from each other — gets pulled toward one centroid harder than two
+ * `forceCollide` iterations a tick can resolve, and the group collapses into an overlapping clump
+ * whose opaque chips paint over one another (see `design.md` for VS-193). A small group still
+ * clusters tightly; a large one clusters loosely enough that collision keeps up.
  */
 function clusterForce(strength: number): Force<SimNode, undefined> {
   let nodes: SimNode[] = [];
@@ -158,9 +223,9 @@ function clusterForce(strength: number): Force<SimNode, undefined> {
       s.n += 1;
       sums.set(n.group, s);
     }
-    const k = strength * alpha;
     for (const n of nodes) {
       const s = sums.get(n.group)!;
+      const k = (strength / Math.sqrt(s.n)) * alpha;
       n.vx = (n.vx ?? 0) + (s.x / s.n - n.x) * k;
       n.vy = (n.vy ?? 0) + (s.y / s.n - n.y) * k;
     }
@@ -215,7 +280,10 @@ export function createSimulation(model: GraphModel, size: Size, options: Simulat
   const sim: Simulation<SimNode, SimLink> = forceSimulation<SimNode, SimLink>(nodes)
     .force('link', forceLink<SimNode, SimLink>(links).id((d) => d.id).distance(linkDistance).strength(0.5))
     .force('charge', forceManyBody<SimNode>().strength(-420).distanceMax(800))
-    .force('collide', forceCollide<SimNode>((d) => d.radius + 16).iterations(2))
+    // More margin and more relaxation passes than d3's defaults: with many same-group siblings
+    // converging on one centroid at once (see `clusterForce`), two iterations were not enough
+    // to keep their chips apart before the layout settled.
+    .force('collide', forceCollide<SimNode>((d) => d.radius + 20).iterations(4))
     // A pull towards the centre rather than `forceCenter`, which recentres the whole mean each tick
     // and so drags every node whenever one of them is pinned.
     .force('x', forceX<SimNode>(centre.x).strength(0.02))

@@ -21,7 +21,7 @@ import { useKnowledgeGraph } from '../api/hooks';
 import { cx } from '../lib/cx';
 import { buildModel, type GraphModel, type GraphNode } from '../lib/graph/model';
 import { edgeDimmed, highlighted, matchingIds, nodeDimmed, visible } from '../lib/graph/filters';
-import { chipSize, createSimulation, type GraphSimulation, type SimLink, type SimNode } from '../lib/graph/simulation';
+import { chipSize, createSimulation, suppressedLabels, type GraphSimulation, type SimLink, type SimNode } from '../lib/graph/simulation';
 import { hullPath, type Point } from '../lib/graph/hull';
 import {
   boundsOf,
@@ -85,7 +85,8 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
   const lit = useMemo(() => (shown ? highlighted(shown, hover ?? selected) : null), [shown, hover, selected]);
   const colourOf = useCallback((group: string): string => PALETTE[Math.max(0, model?.groups.indexOf(group) ?? 0) % PALETTE.length]!, [model]);
 
-  const frameRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const frameObserverRef = useRef<ResizeObserver | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const sceneRef = useRef<SVGGElement>(null);
   const nodeRefs = useRef(new Map<string, SVGGElement>());
@@ -96,6 +97,11 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
   const sizeRef = useRef<Size>(FALLBACK_SIZE);
   const autoFitRef = useRef(true);
   const tweenRef = useRef<number | null>(null);
+  // `draw` is bound to the simulation's tick event once, at creation, so it must read hover and
+  // selection through refs — a state closure captured at that moment would go stale the instant
+  // the reader hovers or selects something without the simulation itself being recreated.
+  const hoverRef = useRef<string | null>(null);
+  const selectedRef = useRef<string | null>(null);
 
   const measure = useCallback((): Size => {
     const el = frameRef.current;
@@ -143,6 +149,25 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
     const nodes = sim.nodes();
 
     for (const n of nodes) nodeRefs.current.get(n.id)?.setAttribute('transform', `translate(${n.x} ${n.y})`);
+
+    // The backstop: whatever the layout itself does not keep apart, at most one overlapping
+    // chip's label is drawn. O(n²) over the chip count, same order as `forceCollide` already
+    // pays every tick at the graph's supported scale (200 nodes, ~40k pairs — negligible next
+    // to a frame budget), so it runs on every tick rather than being throttled: a drag needs the
+    // verdict to update immediately, not on whatever cadence a separate timer allowed.
+    const keep = new Set<string>();
+    if (hoverRef.current) keep.add(hoverRef.current);
+    if (selectedRef.current) keep.add(selectedRef.current);
+    const suppressed = suppressedLabels(nodes, keep);
+    for (const n of nodes) {
+      const el = nodeRefs.current.get(n.id);
+      if (!el) continue;
+      // Fade the *whole* chip — rect, accent stripe and label together, at the same opacity
+      // `dimmed` already uses elsewhere on this canvas — not just the text. An empty rect with
+      // a full-strength stripe and no label is pixel-for-pixel the bug this backstop exists to
+      // cover for; a reader must be able to tell "deliberately quiet" from "broken" at a glance.
+      el.style.opacity = suppressed.has(n.id) ? '0.22' : '';
+    }
 
     for (const link of sim.links()) {
       const el = edgeRefs.current.get(link.id);
@@ -206,7 +231,33 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
     return () => window.removeEventListener('resize', onResize);
   }, [draw, measure]);
 
+  /**
+   * The frame is conditionally mounted — on phone it does not exist until the reader switches
+   * from the default neighbour list to the canvas — so a `resize` listener alone never fires
+   * for that transition and `sizeRef` is left holding `FALLBACK_SIZE` forever. A callback ref
+   * measures the frame the moment it exists, and a `ResizeObserver` keeps that measurement
+   * correct afterwards, without depending on the window ever resizing.
+   */
+  const attachFrame = useCallback((el: HTMLDivElement | null): void => {
+    frameRef.current = el;
+    frameObserverRef.current?.disconnect();
+    frameObserverRef.current = null;
+    if (!el) return;
+    measure();
+    if (autoFitRef.current) draw();
+    const observer = new ResizeObserver(() => {
+      measure();
+      if (autoFitRef.current) draw();
+    });
+    observer.observe(el);
+    frameObserverRef.current = observer;
+  }, [draw, measure]);
+
+  useEffect(() => () => frameObserverRef.current?.disconnect(), []);
+
   useEffect(() => { setSelected(null); }, [project]);
+  useEffect(() => { hoverRef.current = hover; }, [hover]);
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
 
   const focusNode = useCallback((id: string): void => {
     const n = simRef.current?.node(id);
@@ -400,7 +451,7 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
       ) : asList ? (
         <GraphNeighbourList model={shown} selected={selected} onSelect={setSelected} onOpen={onOpen} colourOf={colourOf} />
       ) : (
-        <div ref={frameRef} className="ac-card relative overflow-hidden p-0">
+        <div ref={attachFrame} className="ac-card relative overflow-hidden p-0">
           <svg
             ref={svgRef}
             className="h-[32rem] w-full touch-none select-none"

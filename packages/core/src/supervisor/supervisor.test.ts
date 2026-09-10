@@ -720,3 +720,139 @@ describe('supervisor idle interactive sessions (VS-101)', () => {
     expect(cancel).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * VS-202: the watchdog above only ever inspects `runs` with `status = 'running'`, so a worker whose
+ * turn ended cleanly and was simply never re-woken (the VS-199 incident shape) is invisible to it.
+ * `stalledWorkerScan` is a fully independent detection pass reading `agents`/`tickets`/`decisions`/
+ * `wakeups`, gated on the same `LIVENESS_EVERY_MS` cadence as `livenessScan`/`approvalIntegrityScan`.
+ */
+describe('stalled worker detection (VS-202)', () => {
+  let h: TestHarness;
+  let supervisor: Supervisor;
+  let wake: ReturnType<typeof fakeWake>;
+
+  beforeEach(() => {
+    h = makeHarness();
+    wake = fakeWake();
+    h.services.wake = wake as never;
+    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.tickets = { livenessViolations: () => [] } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
+    h.ctx.config.defaults.stalledWorkerTimeoutSec = 60;
+    supervisor = createSupervisor(h.ctx, h.deps);
+  });
+  afterEach(() => { vi.useRealTimers(); supervisor.stop(); h.cleanup(); });
+
+  const stalledEventsFor = (agentId: string) => h.events.filter((e) => e.type === 'worker.stalled' && e.entityId === agentId);
+  const oldTimestamp = () => new Date(Date.now() - 120_000).toISOString(); // past the 60s test threshold
+
+  it('flags a worker whose last run ended succeeded, no wakeup was ever queued, and its ticket is still open (the VS-199 shape)', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const old = oldTimestamp();
+    const agentId = h.addWorker(ticketId, { lastRunAt: old });
+    h.db.insert('runs', {
+      id: newId(), workspaceId: h.workspaceId, agentId, ticketId, wakeupIdsJson: [], runtimeId: 'claude',
+      status: 'succeeded', turnEpoch: 1, cwd: h.ctx.paths.workers, startedAt: old, finishedAt: old, createdAt: old,
+    });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(1);
+  });
+
+  it('reaches the conductor through the existing digest path with no additional wiring', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    await supervisor.tick();
+    const digest = wake.calls.find((c) => (c.input as { reason: string }).reason === 'digest');
+    expect(digest).toBeDefined();
+    const events = (digest!.input as { payload: { events: Array<{ type: string; entityId: string }> } }).payload.events;
+    expect(events.some((e) => e.type === 'worker.stalled' && e.entityId === agentId)).toBe(true);
+  });
+
+  it('does not flag a worker with a run still queued or running, whatever its last_run_at', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    const runId = newId();
+    h.db.insert('runs', {
+      id: runId, workspaceId: h.workspaceId, agentId, ticketId, wakeupIdsJson: [], runtimeId: 'claude',
+      status: 'running', turnEpoch: 1, cwd: h.ctx.paths.workers, startedAt: nowIso(), createdAt: nowIso(),
+    });
+    // Present in this process's own active-run map, so boot recovery (which runs first on the same
+    // tick) treats it as genuinely in-flight rather than an orphan left by a previous daemon.
+    runState(h.ctx).active.set(runId, { runId, agentId, startedAt: Date.now(), pid: null, cancel: async () => undefined });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(0);
+  });
+
+  it('does not flag a worker whose ticket has an open decision awaiting a human', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    h.db.insert('decisions', {
+      id: newId(), workspaceId: h.workspaceId, ticketId, kind: 'question', owner: 'human', title: 'Which approach?',
+      context: '', optionsJson: [], allowFreeText: 1, status: 'open', createdAt: nowIso(),
+    });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(0);
+  });
+
+  it('does not flag a worker with a wakeup already queued', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    h.db.insert('wakeups', {
+      id: newId(), workspaceId: h.workspaceId, agentId, source: 'system', reason: 'x', payloadJson: {},
+      status: 'queued', createdAt: nowIso(),
+    });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(0);
+  });
+
+  it('does not flag a worker whose ticket is done', async () => {
+    const ticketId = seedTicket(h, { status: 'done' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(0);
+  });
+
+  it('does not flag a worker whose last run finished less than the threshold ago', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: nowIso() });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(0);
+  });
+
+  it('never flags the conductor: its ticket_id is always null, which excludes it from the join', async () => {
+    h.db.update('agents', h.conductorId, { lastRunAt: oldTimestamp() });
+    await supervisor.tick();
+    expect(h.events.filter((e) => e.type === 'worker.stalled')).toHaveLength(0);
+  });
+
+  it('does not re-emit for a worker that is still stalled, but does once it gets a new run and stalls again', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(1);
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(Date.now() + 61_000)); // past LIVENESS_EVERY_MS, so the sweep runs again
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(1); // same stall, not re-notified
+
+    h.db.update('agents', agentId, { lastRunAt: oldTimestamp() }); // a new run happened, then it stalled again
+    vi.setSystemTime(new Date(Date.now() + 61_000));
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(2);
+  });
+
+  it('does not fail the tick when the scan itself throws', async () => {
+    const originalAll = h.db.all.bind(h.db);
+    h.db.all = ((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM agents a JOIN tickets t')) throw new Error('db unavailable');
+      return originalAll(sql as never, params as never);
+    }) as typeof h.db.all;
+    seedTicket(h, { status: 'in_progress' });
+    await expect(supervisor.tick()).resolves.toBeUndefined();
+  });
+});

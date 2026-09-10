@@ -9,7 +9,7 @@ TBD - created by archiving change vs-74-conductor-chat-keeps-each-turn-s-work-tr
 
 The conductor chat SHALL keep, for every conductor turn it can identify in the loaded history, a section carrying that turn's work — the assistant text, the tool calls with their results, the phase markers and the errors the turn produced — reachable from the conversation itself rather than only from the run's own page.
 
-The section SHALL be collapsed by default and SHALL be expandable in place. Collapsed, it SHALL be one line that says what the turn did without expanding it: how many tool calls it made, how many files it touched, how long it took, and how many tokens it spent. When the turn's own model and its context window are both known, the line SHALL also show how much of that window the turn's last request used, as a size over the window (for example `82k/200k ctx`), matching the form the chat's own context meter already uses. Expanded, it SHALL render the turn with the same transcript presentation the live view and the run page use, so that a tool call reads the same way whether it is watched live or read back.
+The section SHALL be collapsed by default and SHALL be expandable in place. Collapsed, it SHALL be one line that says what the turn did without expanding it: how many tool calls it made, how many files it touched, how long it took, and how many tokens it spent. When the turn's own model and its context window are both known, the line SHALL also show how much of that window the turn's last request used, as a size over the window (for example `82k/200k ctx`), matching the form the chat's own context meter already uses. Expanded, it SHALL render the turn with the same transcript presentation the live view and the run page use, so that a tool call reads the same way whether it is watched live or read back — one row per tool call, never a further row for a companion event a runtime adapter recorded for the same call and that carries nothing beyond what that row already shows.
 
 A turn produced by a runtime that reported no usage for it SHALL show the line exactly as it would without this requirement — no token count, no context fraction, no zero, no placeholder, and no dangling separator where the figure would have gone.
 
@@ -56,6 +56,13 @@ A turn that produced a reply SHALL carry its section with that reply. A turn who
 
 - **WHEN** one conductor turn sent more than one message to the same thread
 - **THEN** the trace section appears once, on the last of those messages
+
+#### Scenario: A tool call with a duplicate companion event
+
+- **WHEN** an expanded turn's events include a tool call, its result, and a further event a runtime
+  adapter recorded for the same call carrying no information beyond what that call's row already
+  shows
+- **THEN** the expanded trace still shows one row for that call, not a second, near-empty one
 
 ### Requirement: The trace is fetched only when it is expanded
 

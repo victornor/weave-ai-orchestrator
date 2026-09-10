@@ -143,13 +143,37 @@ describe('Settings — the two model settings', () => {
     fireEvent.change(screen.getByLabelText('New worker option id'), { target: { value: 'cheap' } });
     fireEvent.change(screen.getByLabelText('New worker option description'), { target: { value: 'Scouts and low complexity.' } });
     fireEvent.change(screen.getByLabelText('New worker option runtime'), { target: { value: 'codex' } });
-    fireEvent.change(screen.getByLabelText('New worker option model'), { target: { value: 'gpt-5' } });
+    // 'gpt-5' is not in the mocked catalog for any runtime here, so it goes through the escape hatch.
+    fireEvent.change(screen.getByLabelText('New worker option model'), { target: { value: '__other' } });
+    fireEvent.change(screen.getByLabelText('New worker option model id'), { target: { value: 'gpt-5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add worker option' }));
     expect(state.saved.at(-1)).toEqual({
       conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
       workers: { runtime: 'claude', model: null },
       workerOptions: [{ id: 'cheap', description: 'Scouts and low complexity.', runtime: 'codex', model: 'gpt-5' }],
     });
+  });
+
+  it('the new worker option model field is a picker over the catalog, with an explicit runtime-default entry (VS-207)', () => {
+    openModels();
+    const select = screen.getByLabelText('New worker option model');
+    expect(within(select).getByRole('option', { name: 'runtime default' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'Fable 5.1' })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: 'claude-opus-5' } });
+    fireEvent.change(screen.getByLabelText('New worker option id'), { target: { value: 'strong' } });
+    fireEvent.change(screen.getByLabelText('New worker option description'), { target: { value: 'Hard tickets.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add worker option' }));
+    expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'strong', description: 'Hard tickets.', runtime: 'claude', model: 'claude-opus-5' },
+    ]);
+  });
+
+  it('leaving the new worker option model at runtime default stores null (VS-207)', () => {
+    openModels();
+    fireEvent.change(screen.getByLabelText('New worker option id'), { target: { value: 'cheap' } });
+    fireEvent.change(screen.getByLabelText('New worker option description'), { target: { value: 'Scouts.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add worker option' }));
+    expect(state.saved.at(-1)!.workerOptions).toEqual([{ id: 'cheap', description: 'Scouts.', runtime: 'claude', model: null }]);
   });
 
   it('removes a worker option and preserves the catalog when the conductor setting changes (VS-162)', () => {
@@ -177,11 +201,48 @@ describe('Settings — the two model settings', () => {
     expect(state.saved.at(-1)?.workers.runtime).toBe('codex');
   });
 
-  it('opens daemon Models from This daemon and PUTs an overlay (VS-185)', () => {
+  it('opens daemon Models from This daemon inheriting by default, stating the workspace value inherited (VS-207)', () => {
+    state.search = { section: 'daemon-models' };
+    render(<SettingsRoute />);
+    const scope = screen.getByLabelText('Conductor scope');
+    expect(scope).toHaveValue('inherit');
+    expect(within(scope).getByRole('option', { name: 'Inherit — claude · claude-fable-5-1' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Conductor runtime')).toBeDisabled();
+    expect(screen.getByLabelText('Conductor runtime')).toHaveValue('claude');
+  });
+
+  it('opening or changing an inheriting daemon row writes nothing (VS-207)', () => {
     state.search = { section: 'daemon-models' };
     render(<SettingsRoute />);
     fireEvent.change(screen.getByLabelText('Conductor runtime'), { target: { value: 'codex' } });
-    expect(state.daemonSaved.at(-1)).toMatchObject({ conductor: { runtime: 'codex' } });
+    fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: 'claude-opus-5' } });
+    expect(state.daemonSaved).toEqual([]);
+  });
+
+  it('choosing Override is the deliberate act that creates the daemon overlay, seeded from the inherited value (VS-207)', () => {
+    state.search = { section: 'daemon-models' };
+    render(<SettingsRoute />);
+    fireEvent.change(screen.getByLabelText('Conductor scope'), { target: { value: 'override' } });
+    expect(state.daemonSaved.at(-1)).toEqual({ conductor: { runtime: 'claude', model: 'claude-fable-5-1' } });
+  });
+
+  it('once overridden, the row is editable and edits write the overlay directly (VS-185)', () => {
+    state.search = { section: 'daemon-models' };
+    state.daemonModels = { ...state.daemonModels, conductor: { runtime: 'codex', model: null } };
+    render(<SettingsRoute />);
+    expect(screen.getByLabelText('Conductor scope')).toHaveValue('override');
+    expect(screen.getByLabelText('Conductor runtime')).not.toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Conductor runtime'), { target: { value: 'claude' } });
+    expect(state.daemonSaved.at(-1)).toMatchObject({ conductor: { runtime: 'claude' } });
+  });
+
+  it('choosing Inherit clears an overridden overlay through the scope select, with no separate button (VS-207)', () => {
+    state.search = { section: 'daemon-models' };
+    state.daemonModels = { ...state.daemonModels, conductor: { runtime: 'codex', model: 'gpt-5' } };
+    render(<SettingsRoute />);
+    expect(screen.queryByRole('button', { name: 'Clear Conductor overlay' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Conductor scope'), { target: { value: 'inherit' } });
+    expect(state.daemonSaved.at(-1)).toEqual({ conductor: null });
   });
 
   it('is the only place Settings offers a runtime or a model', () => {

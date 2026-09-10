@@ -10,6 +10,41 @@ export type TranscriptBlock =
   | { id: string; type: 'human'; text: string; delivery: 'mid_turn' | 'queued' }
   | { id: string; type: 'report'; report: RunReport; text: string };
 
+export type ToolBlock = Extract<TranscriptBlock, { type: 'tool' }>;
+
+/** A display row: one block, or a run of consecutive same-name tool calls (N ≥ 2). */
+export type TranscriptRow =
+  | { type: 'single'; block: TranscriptBlock }
+  | { type: 'tools'; id: string; tool: string; calls: ToolBlock[] };
+
+/**
+ * Fold adjacent `type: 'tool'` blocks with the same `tool` name into groups of size ≥ 2.
+ * Any other block type, or a different name, starts a new row. Exact string match.
+ */
+export function groupConsecutiveTools(blocks: readonly TranscriptBlock[]): TranscriptRow[] {
+  const out: TranscriptRow[] = [];
+  let i = 0;
+  while (i < blocks.length) {
+    const block = blocks[i];
+    if (!block) break;
+    if (block.type !== 'tool') {
+      out.push({ type: 'single', block });
+      i += 1;
+      continue;
+    }
+    const calls: ToolBlock[] = [block];
+    while (i + calls.length < blocks.length) {
+      const next = blocks[i + calls.length];
+      if (!next || next.type !== 'tool' || next.tool !== block.tool) break;
+      calls.push(next);
+    }
+    if (calls.length >= 2) out.push({ type: 'tools', id: block.id, tool: block.tool, calls });
+    else out.push({ type: 'single', block });
+    i += calls.length;
+  }
+  return out;
+}
+
 export function reportUiStatus(state: ReportState): UiStatus {
   if (state === 'needs_decision') return 'needs-you';
   if (state === 'paused') return 'stalled';

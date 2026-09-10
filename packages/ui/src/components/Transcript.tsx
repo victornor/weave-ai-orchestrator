@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { RunEvent } from '@agent-conductor/shared';
-import { reportUiStatus, runEventsToTranscript } from '../lib/transcript';
-import type { TranscriptBlock } from '../lib/transcript';
+import { groupConsecutiveTools, reportUiStatus, runEventsToTranscript } from '../lib/transcript';
+import type { ToolBlock, TranscriptBlock } from '../lib/transcript';
 import { StatusGlyph } from './StatusGlyph';
 import { duration, tokens as fmtTokens } from '../lib/format';
 import { cx } from '../lib/cx';
@@ -24,15 +24,18 @@ export function Transcript({
   className?: string;
   window?: number;
 }): React.ReactElement {
-  const blocks = useMemo(() => runEventsToTranscript(events), [events]);
+  const rows = useMemo(
+    () => groupConsecutiveTools(runEventsToTranscript(events)),
+    [events],
+  );
   // Where the window starts, once the human has asked for more. An absolute index rather than a
-  // count from the end, because blocks only ever arrive at the end: a count would let the next
+  // count from the end, because rows only ever arrive at the end: a count would let the next
   // event push back out of view exactly what they just revealed.
   const [from, setFrom] = useState<number | null>(null);
-  const capped = Math.max(0, blocks.length - windowSize);
+  const capped = Math.max(0, rows.length - windowSize);
   const hidden = Math.min(from ?? capped, capped);
 
-  if (!blocks.length) {
+  if (!rows.length) {
     return <p className="px-4 py-6 text-center text-meta text-text-3">Nothing on the wire yet.</p>;
   }
   return (
@@ -46,9 +49,43 @@ export function Transcript({
           Show earlier ({hidden})
         </button>
       ) : null}
-      {blocks.slice(hidden).map((b) => (
-        <TranscriptLine key={b.id} block={b} />
-      ))}
+      {rows.slice(hidden).map((row) =>
+        row.type === 'tools' ? (
+          <ToolGroup key={row.id} tool={row.tool} calls={row.calls} />
+        ) : (
+          <TranscriptLine key={row.block.id} block={row.block} />
+        ),
+      )}
+    </div>
+  );
+}
+
+function ToolGroup({ tool, calls }: { tool: string; calls: ToolBlock[] }): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const n = calls.length;
+  return (
+    <div className="overflow-hidden rounded-r4 border border-line-1">
+      <button
+        type="button"
+        className="w-full text-left"
+        aria-expanded={open}
+        aria-label={`${tool}, ${n} calls`}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <div className="flex items-center gap-2.5 bg-bg-2 px-2.5 py-1.5">
+          <span className="ac-mono text-nano text-text-3">{open ? '▾' : '▸'}</span>
+          <span className="ac-mono text-micro text-text-2">
+            {tool} ×{n}
+          </span>
+        </div>
+      </button>
+      {open ? (
+        <div className="flex flex-col gap-2 border-t border-line-1 p-2">
+          {calls.map((b) => (
+            <TranscriptLine key={b.id} block={b} />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

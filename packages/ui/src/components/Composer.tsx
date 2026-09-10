@@ -239,6 +239,10 @@ export function Composer({
   }, [allowAttachments, addFiles]);
 
   const dictating = dictation.listening;
+  // Only the non-streaming (upload/Voxtype) backend has anything to lock for: Chrome hands words
+  // back live, so there is nothing stale on screen to protect (VS-195).
+  const transcribing = dictation.mode === 'upload' && dictation.transcribing;
+  const locked = dictation.mode === 'upload' && (dictating || transcribing);
 
   return (
     <div className={cx('flex flex-col gap-1.5', className)}>
@@ -255,8 +259,10 @@ export function Composer({
         className={cx(
           'rounded-r8 border bg-bg-1 transition-colors duration-(--dur-fast) ease-ac',
           queuedReason && 'rounded-t-none',
-          // No focus ring: the caret says it all. The border only changes while the mic is open.
-          dictating ? 'border-accent' : 'border-line-2',
+          // No focus ring: the caret says it all. The border only changes while the mic is open —
+          // and, for a non-streaming backend, while its transcript is still in flight, so the
+          // locked state reads as one continuous state rather than flickering back mid-attempt.
+          dictating || transcribing ? 'border-accent' : 'border-line-2',
         )}
       >
         {allowAttachments && files.length > 0 ? (
@@ -282,7 +288,7 @@ export function Composer({
             ref={ta}
             rows={rows}
             value={text}
-            disabled={disabled || submitting}
+            disabled={disabled || submitting || locked}
             placeholder={placeholder}
             aria-label={placeholder}
             onChange={(e) => set(e.target.value)}
@@ -316,7 +322,7 @@ export function Composer({
               <button
                 type="button"
                 aria-label="Attach a file"
-                disabled={disabled || submitting}
+                disabled={disabled || submitting || locked}
                 onClick={() => fileInput.current?.click()}
                 className="inline-flex size-8 flex-none items-center justify-center rounded-r6 border border-line-2 text-text-2 transition-colors duration-(--dur-fast) ease-ac hover:bg-bg-3 hover:text-text-1"
               >
@@ -326,16 +332,22 @@ export function Composer({
           ) : null}
           <button
             type="button"
-            aria-label={dictation.mode === 'unavailable' ? 'Dictation unavailable' : dictating ? 'Stop dictation' : 'Dictate'}
+            aria-label={dictation.mode === 'unavailable' ? 'Dictation unavailable' : dictating ? 'Stop dictation' : transcribing ? 'Transcribing' : 'Dictate'}
             aria-pressed={dictating}
+            // Stopping stays available throughout recording; once stopped, there is nothing left
+            // to stop, and starting a second recording before this one's transcript lands is not a
+            // state the hook holds concurrently (VS-195).
+            disabled={transcribing}
             onClick={() => { startedByKey.current = false; dictating ? dictation.stop() : startMic(); }}
             className={cx(
               'inline-flex size-8 flex-none items-center justify-center rounded-r6 border transition-colors duration-(--dur-fast) ease-ac',
               dictating
                 ? 'border-accent bg-accent-tint-strong text-accent-link'
-                : dictation.mode === 'unavailable'
-                  ? 'border-line-2 text-text-4'
-                  : 'border-line-2 text-text-2 hover:bg-bg-3 hover:text-text-1',
+                : transcribing
+                  ? 'border-accent text-accent-link opacity-60'
+                  : dictation.mode === 'unavailable'
+                    ? 'border-line-2 text-text-4'
+                    : 'border-line-2 text-text-2 hover:bg-bg-3 hover:text-text-1',
             )}
           >
             <MicIcon slashed={dictation.mode === 'unavailable'} />
@@ -343,11 +355,11 @@ export function Composer({
           <button
             type="button"
             aria-label={submitLabel}
-            disabled={!text.trim() || disabled || submitting}
+            disabled={!text.trim() || disabled || submitting || locked}
             onClick={send}
             className={cx(
               'inline-flex size-8 flex-none items-center justify-center rounded-r6 transition-colors duration-(--dur-fast) ease-ac',
-              text.trim() && !disabled && !submitting ? 'bg-accent text-accent-on' : 'bg-bg-3 text-text-4',
+              text.trim() && !disabled && !submitting && !locked ? 'bg-accent text-accent-on' : 'bg-bg-3 text-text-4',
             )}
           >
             <SendIcon />
@@ -373,6 +385,23 @@ export function Composer({
             </span>
             <span className="hidden text-micro text-text-4 sm:inline">{isTouch ? 'tap the mic to stop' : startedByKey.current ? 'release ⌘⇧M to stop' : 'click the mic to stop'}</span>
           </div>
+        ) : transcribing ? (
+          // Distinct from the listening row above: the mic is closed, nothing is being captured
+          // any more, and there is nothing left to stop — only a spinner until the transcript
+          // lands or the attempt fails (VS-195).
+          <div className="flex h-12 items-center gap-3 border-t border-line-1 px-3.5">
+            <span className="flex h-8 min-w-0 flex-1 items-center gap-2 text-micro text-text-3">
+              <span className="size-2.5 flex-none animate-spin rounded-pill border border-current border-t-transparent text-accent-link" aria-hidden />
+              Transcribing…
+            </span>
+          </div>
+        ) : null}
+        {dictating && dictation.mode === 'upload' ? (
+          // Not hidden below a breakpoint like the hint above: a non-streaming backend's "silence
+          // on screen doesn't mean it failed" message matters most on a phone.
+          <p className="border-t border-line-1 px-3.5 py-1.5 text-micro text-text-3">
+            Recording — this is transcribed once you stop; the composer stays locked until then.
+          </p>
         ) : null}
       </div>
 

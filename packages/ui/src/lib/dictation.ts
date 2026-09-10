@@ -60,6 +60,12 @@ export type DictationMode = 'speech' | 'upload' | 'unavailable';
 export interface Dictation {
   mode: DictationMode;
   listening: boolean;
+  /**
+   * Upload mode only: true from the moment recording stops until the daemon's transcription
+   * response has been handled — success, empty text, or error. Always `false` on the speech path,
+   * which has no such gap (VS-195).
+   */
+  transcribing: boolean;
   /** seconds since the mic opened, for the 0:06 timer. */
   elapsed: number;
   /** Live analyser for the voice meter while the mic is open; read it from a rAF loop, never from render. */
@@ -135,6 +141,12 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
   backend?: 'chrome' | 'voxtype';
 } = {}): Dictation {
   const [listening, setListening] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const transcribingRef = useRef(false);
+  const setTranscribingState = useCallback((v: boolean) => {
+    transcribingRef.current = v;
+    setTranscribing(v);
+  }, []);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<DictationMode>(() => pickMode({ backend: opts.backend, hostReady: Boolean(opts.serverConfigured) }));
@@ -229,7 +241,10 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
   }, []);
 
   const postWav = useCallback((blob: Blob) => {
-    if (!blob.size) return;
+    if (!blob.size) {
+      setTranscribingState(false);
+      return;
+    }
     const fd = new FormData();
     fd.append('audio', blob, 'dictation.wav');
     void fetch(transcribeUrlRef.current ?? '/api/transcribe', { method: 'POST', credentials: 'include', body: fd })
@@ -247,8 +262,11 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
           setError(NO_TRANSCRIPT_UPLOAD);
         }
       })
-      .catch(() => setError('Transcription failed on the daemon. Type instead, or retry.'));
-  }, []);
+      .catch(() => setError('Transcription failed on the daemon. Type instead, or retry.'))
+      // The one place `transcribing` clears, on every branch above: a landed transcript, an empty
+      // one, a 501, any other non-OK response, or a network failure (VS-195).
+      .finally(() => setTranscribingState(false));
+  }, [setTranscribingState]);
 
   const stop = useCallback(() => {
     const uploading = uploadLive.current;
@@ -273,10 +291,14 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       wav = encodePcm16MonoWav(downsampleTo16k(samples, pcmRate.current), 16000);
     }
     stopMeters();
-    if (wav) postWav(wav);
-  }, [stopMeters, postWav]);
+    if (wav) {
+      setTranscribingState(true);
+      postWav(wav);
+    }
+  }, [stopMeters, postWav, setTranscribingState]);
 
   const start = useCallback(() => {
+    if (transcribingRef.current) return; // nothing left to stop mid-flight; wait for it to land
     setError(null);
     if (mode === 'unavailable') {
       setError(UNAVAILABLE);
@@ -425,6 +447,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
   return {
     mode,
     listening,
+    transcribing,
     elapsed,
     analyser: analyserNode,
     metered,

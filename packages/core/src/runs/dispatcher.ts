@@ -93,7 +93,10 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
       const runId = newId();
       // Queued with what the setting says now; the engine re-reads it at launch and corrects the row
       // if the setting moved between queueing and spawning (VS-77).
-      const setting = modelSettingFor(ctx.config, agent.kind);
+      const ticket = agent.ticketId
+        ? ctx.db.get<{ workerModelId: string | null }>('SELECT worker_model_id FROM tickets WHERE id = ?', [agent.ticketId])
+        : null;
+      const setting = modelSettingFor(ctx.config, agent.kind, ticket);
       ctx.db.insert('runs', {
         id: runId, workspaceId: ctx.workspaceId, agentId: agent.id, ticketId: agent.ticketId,
         wakeupIdsJson: ids, runtimeId: setting.runtime, model: setting.model, status: 'queued',

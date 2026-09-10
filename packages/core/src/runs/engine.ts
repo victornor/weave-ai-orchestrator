@@ -225,7 +225,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   // The one place a turn's runtime, model and effort come from (VS-77). The agent row records the
   // runtime it is on so the worker pages and the account probe can read it; it is corrected here
   // rather than consulted, so a stale row can never decide what this turn launches.
-  const setting = modelSettingFor(ctx.config, agent.kind);
+  const setting = modelSettingFor(ctx.config, agent.kind, ticket);
 
   ctx.db.update('runs', runId, { status: 'running', startedAt: nowIso(), runtimeId: setting.runtime, model: setting.model ?? null });
   ctx.db.update('agents', agent.id, { status: 'running', runtimeId: setting.runtime, updatedAt: nowIso() });

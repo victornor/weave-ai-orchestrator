@@ -19,6 +19,7 @@ export function ticket(over: Partial<Ticket> = {}): Ticket {
     assigneeHuman: false,
     interactiveSession: false,
     landingBranch: null,
+    workerModelId: null,
     parentId: null,
     createdByKind: 'agent',
     createdById: null,

@@ -27,7 +27,9 @@ Your `AGENTS.md` is the contract. This is the procedure.
 
 ## The ticket template
 
-`ac_ticket_create({projectId, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?})`
+`ac_ticket_create({projectId, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?, workerModelId?})`
+
+Call `ac_worker_models` first when any named worker options exist, and pass the fitting `workerModelId`; omit it to use the workspace workers default.
 
 - **title** — imperative, ≤ 70 characters, no ticket id, no project name. "Add dark mode to the dashboard", not "Dark mode".
 - **kind** — `change` when code changes are implied (the default for real work); `task` for a chore with no spec consequence; `scout` when the request is diagnostic or the answer would change what to build; `question` when someone must answer but nothing changes.

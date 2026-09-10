@@ -102,12 +102,46 @@ export const ModelSettingSchema = z.object({
 });
 export type ModelSetting = z.infer<typeof ModelSettingSchema>;
 
-/** The whole of model selection for a workspace: one setting for the conductor, one for its workers. */
+/**
+ * One named worker model a ticket may point at (VS-162, ADR 0012). `id` is the kebab slug the
+ * conductor passes as `workerModelId`; `description` is the when-to-use note.
+ */
+export const WorkerModelOptionSchema = ModelSettingSchema.extend({
+  id: slug,
+  description: z.string().min(1).max(200),
+});
+export type WorkerModelOption = z.infer<typeof WorkerModelOptionSchema>;
+
+const WorkerOptionsArraySchema = z.array(WorkerModelOptionSchema).max(16).superRefine((opts, ctx) => {
+  const seen = new Set<string>();
+  for (let i = 0; i < opts.length; i++) {
+    const id = opts[i]?.id;
+    if (!id) continue;
+    if (seen.has(id)) {
+      ctx.addIssue({ code: 'custom', message: `duplicate worker option id '${id}'`, path: [i, 'id'] });
+    }
+    seen.add(id);
+  }
+});
+
+/** The whole of model selection for a workspace: two defaults, plus an optional worker-options catalog. */
 export const WorkspaceModelsSchema = z.object({
   conductor: ModelSettingSchema.default({}),
   workers: ModelSettingSchema.default({}),
+  workerOptions: WorkerOptionsArraySchema.default([]),
 });
 export type WorkspaceModels = z.infer<typeof WorkspaceModelsSchema>;
+
+/**
+ * `PUT /models` body: `workerOptions` omitted means keep the existing catalog; an explicit array
+ * (including `[]`) replaces it. Conductor and workers are still required, matching the two-setting PUT.
+ */
+export const WorkspaceModelsPutSchema = z.object({
+  conductor: ModelSettingSchema,
+  workers: ModelSettingSchema,
+  workerOptions: WorkerOptionsArraySchema.optional(),
+});
+export type WorkspaceModelsPut = z.infer<typeof WorkspaceModelsPutSchema>;
 
 /** The two settings in force when no workspace config is in play (seeds, fallbacks, tests). */
 export const DEFAULT_WORKSPACE_MODELS: WorkspaceModels = WorkspaceModelsSchema.parse({});

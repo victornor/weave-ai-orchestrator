@@ -354,7 +354,7 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | `conductor specs list \| show <capability> \| changes [name] \| search <q> \| explore [project]` | the spec index |
 | `conductor worktree list \| verify <id> \| discard <id> [--force]` | worktrees and landed-work verdicts |
 | `conductor conductor show \| reset-session` | the conductor agent |
-| `conductor models` · `conductor models set conductor\|workers --runtime <id> --model <id\|default> [--effort <e>]` | the workspace's two model settings — all of model selection |
+| `conductor models` · `conductor models set conductor\|workers --runtime <id> --model <id\|default> [--effort <e>]` · `conductor models options add\|set\|remove` | the workspace's two model settings and the worker-options catalog |
 | `conductor presentation status \| set <path> <value> \| reconcile \| open` | where agents are shown |
 | `conductor presenter [--surface tmux\|hyprland\|herdr\|headless] [--once]` | run this on the machine you look at |
 

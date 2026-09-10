@@ -65,6 +65,27 @@ describe('tickets', () => {
     expect(make({ landingBranch: 'main' }).landingBranch).toBe('main');
   });
 
+  it('stores workerModelId from the catalog, defaulting null, and rejects an unknown id (VS-162)', () => {
+    expect(make().workerModelId).toBeNull();
+    h.ctx.config.models.workerOptions = [
+      { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },
+    ];
+    expect(make({ workerModelId: 'cheap' }).workerModelId).toBe('cheap');
+    expect(() => make({ workerModelId: 'nope' })).toThrow(OcError);
+    try { make({ workerModelId: 'nope' }); } catch (e) { expect((e as OcError).code).toBe('validation'); }
+  });
+
+  it('lets assign set workerModelId before spawn and refuses after (VS-162)', () => {
+    h.ctx.config.models.workerOptions = [
+      { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },
+    ];
+    const t = make({ assigneeRoleId: null });
+    expect(tickets.assign(HUMAN, t.id, h.roleId, 'cheap').workerModelId).toBe('cheap');
+    h.db.update('tickets', t.id, { workerId: 'ag_already' });
+    expect(() => tickets.assign(HUMAN, t.id, h.roleId, 'cheap')).toThrow(OcError);
+    expect(tickets.get(t.id).workerModelId).toBe('cheap');
+  });
+
   it('stores summary from the input, defaulting null, and accepts a later patch (VS-146)', () => {
     expect(make().summary).toBeNull();
     expect(make({ summary: 'Remind captain why this ticket exists.' }).summary).toBe('Remind captain why this ticket exists.');

@@ -120,6 +120,33 @@ describe('Settings — the two model settings', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('runtime: kebab-case slug');
   });
 
+  it('shows worker options and adding one PUTs the full block (VS-162)', () => {
+    openModels();
+    fireEvent.change(screen.getByLabelText('New worker option id'), { target: { value: 'cheap' } });
+    fireEvent.change(screen.getByLabelText('New worker option description'), { target: { value: 'Scouts and low complexity.' } });
+    fireEvent.change(screen.getByLabelText('New worker option runtime'), { target: { value: 'codex' } });
+    fireEvent.change(screen.getByLabelText('New worker option model'), { target: { value: 'gpt-5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add worker option' }));
+    expect(state.saved.at(-1)).toEqual({
+      conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+      workers: { runtime: 'claude', model: null },
+      workerOptions: [{ id: 'cheap', description: 'Scouts and low complexity.', runtime: 'codex', model: 'gpt-5' }],
+    });
+  });
+
+  it('removes a worker option and preserves the catalog when the conductor setting changes (VS-162)', () => {
+    const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
+    state.models = { ...state.models, workerOptions: [cheap] };
+    openModels();
+    expect(screen.getByText(/cheap — Scouts/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove worker option cheap' }));
+    expect(state.saved.at(-1)!.workerOptions).toEqual([]);
+    state.saved = [];
+    state.models = { ...state.models, workerOptions: [cheap] };
+    fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: 'claude-opus-5' } });
+    expect(state.saved.at(-1)!.workerOptions).toEqual([cheap]);
+  });
+
   it('is the only place Settings offers a runtime or a model', () => {
     render(<SettingsRoute />);
     // The conductor section is gone: its only settings were these two.

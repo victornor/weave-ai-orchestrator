@@ -342,7 +342,7 @@ describe('real core services over HTTP', () => {
     const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
 
     const before = await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json();
-    expect(before).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } });
+    expect(before).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
 
     const next = {
       conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
@@ -350,8 +350,48 @@ describe('real core services over HTTP', () => {
     };
     const put = await app.fetch(new Request(`${base}/models`, { method: 'PUT', headers: H, body: JSON.stringify(next) }));
     expect(put.status).toBe(200);
-    expect(await put.json()).toEqual(next);
-    expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json()).toEqual(next);
+    expect(await put.json()).toEqual({ ...next, workerOptions: [] });
+    expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json()).toEqual({ ...next, workerOptions: [] });
+  });
+
+  it('keeps workerOptions when PUT omits them and replaces when they are sent (VS-162)', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+    const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
+    const withOpt = {
+      conductor: { runtime: 'claude', model: null },
+      workers: { runtime: 'claude', model: null },
+      workerOptions: [cheap],
+    };
+    expect((await app.fetch(new Request(`${base}/models`, { method: 'PUT', headers: H, body: JSON.stringify(withOpt) }))).status).toBe(200);
+    const omitted = await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H,
+      body: JSON.stringify({ conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } }),
+    }));
+    expect(omitted.status).toBe(200);
+    expect(await omitted.json()).toMatchObject({ workerOptions: [cheap] });
+    const cleared = await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H,
+      body: JSON.stringify({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] }),
+    }));
+    expect(await cleared.json()).toMatchObject({ workerOptions: [] });
+  });
+
+  it('refuses a duplicate worker option id (VS-162)', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+    const dup = { id: 'cheap', description: 'a', runtime: 'claude', model: null };
+    const res = await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H,
+      body: JSON.stringify({
+        conductor: { runtime: 'claude', model: null },
+        workers: { runtime: 'claude', model: null },
+        workerOptions: [dup, { ...dup, description: 'b' }],
+      }),
+    }));
+    expect(res.status).toBe(400);
   });
 
   it('refuses a model setting with no runtime rather than storing it', async () => {

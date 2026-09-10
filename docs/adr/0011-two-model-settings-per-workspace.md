@@ -1,6 +1,6 @@
 # ADR 0011 — Model selection is two per-workspace settings
 
-**Status:** accepted · 2026-09-07 · supersedes the runtime and model fields of PLAN §5, §6 and §8
+**Status:** accepted · 2026-09-07 · supersedes the runtime and model fields of PLAN §5, §6 and §8 · amended by ADR 0012 (a ticket may name a catalog option; the two settings remain the defaults)
 
 ## Context
 

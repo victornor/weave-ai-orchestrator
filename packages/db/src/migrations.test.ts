@@ -65,6 +65,14 @@ describe('migrations', () => {
     db.close();
   });
 
+  it('adds tickets.worker_model_id without a default (VS-162)', () => {
+    const db = openDb(join(dir, 'worker-model.sqlite'));
+    expect(columns(db)).toContain('worker_model_id');
+    seedTicket(db, { workspace: 'ws1', ticket: 't1' });
+    expect(db.get<{ workerModelId: string | null }>('SELECT worker_model_id FROM tickets WHERE id = ?', ['t1'])!.workerModelId).toBeNull();
+    db.close();
+  });
+
   // VS-56: why a paused worker stopped, structured. Additive and backfill-free — every worker that
   // predates it keeps its free-text `pause_reason` and gains a null detail.
   describe('the agent pause detail', () => {

@@ -101,7 +101,7 @@ export function deriveModelSettings(raw: Record<string, unknown>, roles: RoleRun
     rule = 'conductor';
   }
 
-  return { models: { conductor, workers }, counts, rule, ambiguous: rule === 'roles_mixed' };
+  return { models: { conductor, workers, workerOptions: [] }, counts, rule, ambiguous: rule === 'roles_mixed' };
 }
 
 /** Whether this document has already been migrated. A `models` block is the marker. */

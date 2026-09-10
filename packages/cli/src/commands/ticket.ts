@@ -31,9 +31,10 @@ export function register(program: Command): void {
     .option('--blocked-by <ids>', 'comma-separated blocking ticket ids')
     .option('--assign <roleId>', 'assign to a role immediately')
     .option('--auto-merge', 'merge without a merge decision when checks pass')
-    .option('--landing-branch <branch>', "override this ticket's landing branch, set only at creation (VS-119)")
-    .option('--summary <text>', 'one-line why, shown on plan-approval cards (VS-146)')
-    .action(async (title: string[], opts: Record<string, string | boolean>, command: Command) => run(async () => {
+      .option('--landing-branch <branch>', "override this ticket's landing branch, set only at creation (VS-119)")
+      .option('--summary <text>', 'one-line why, shown on plan-approval cards (VS-146)')
+      .option('--worker-model <id>', "catalog option this ticket's worker runs on (VS-162); omit for the workers default")
+      .action(async (title: string[], opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const { client } = await session(command);
       const input: Record<string, unknown> = {
         title: title.join(' '),
@@ -48,6 +49,7 @@ export function register(program: Command): void {
       if (opts['autoMerge'] === true) input['autoMerge'] = true;
       if (opts['landingBranch']) input['landingBranch'] = String(opts['landingBranch']);
       if (opts['summary']) input['summary'] = String(opts['summary']);
+      if (opts['workerModel']) input['workerModelId'] = String(opts['workerModel']);
 
       const created = await client.write<Ticket>({
         tool: 'ac_ticket_create', input,

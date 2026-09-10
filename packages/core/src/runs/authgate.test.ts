@@ -312,6 +312,7 @@ describe('a login pause outliving a runtime the workspace abandoned', () => {
     await h.ctx.saveConfig({
       ...h.ctx.config,
       models: {
+        ...h.ctx.config.models,
         conductor: { ...h.ctx.config.models.conductor, runtime },
         workers: { ...h.ctx.config.models.workers, runtime },
       },

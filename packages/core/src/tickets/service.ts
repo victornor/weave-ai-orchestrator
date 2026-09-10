@@ -31,6 +31,13 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   /** One delivery landing at a time per project: it mutates the clone every ticket shares (§11.4). */
   const serialize = createSerializer();
 
+  function resolveWorkerModelId(id: string | null | undefined): string | null {
+    if (id == null || id === '') return null;
+    const opts = ctx.config.models.workerOptions ?? [];
+    if (!opts.some((o) => o.id === id)) throw new OcError('validation', `unknown worker model option '${id}'`);
+    return id;
+  }
+
   // Follow-up work a transition schedules but does not wait for. Every timer is tracked so `stop()`
   // can cancel what has not fired and await what has, and the callback runs inside a try/catch: a
   // synchronous throw (an unavailable service, say) would otherwise escape the timer as an uncaught
@@ -468,6 +475,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       if (input.assigneeRoleId && !db.get('SELECT id FROM roles WHERE id = ?', [input.assigneeRoleId])) {
         throw new OcError('not_found', `role ${input.assigneeRoleId} not found`);
       }
+      const workerModelId = resolveWorkerModelId(input.workerModelId);
       return tx(db, () => {
         const number = allocateNumber();
         const identifier = `${prefix()}-${number}`;
@@ -479,7 +487,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           db.insert('tickets', {
             id, workspaceId: ws, projectId: input.projectId ?? null, number, identifier, kind: input.kind, title: input.title,
             description: input.description ?? '', summary: input.summary ?? null, status, priority: input.priority ?? 'medium', autoMerge: input.autoMerge ?? false,
-            assigneeRoleId: input.assigneeRoleId ?? null, assigneeHuman: false, interactiveSession: input.interactiveSession ?? false, landingBranch: input.landingBranch ?? null, parentId: input.parentId ?? null,
+            assigneeRoleId: input.assigneeRoleId ?? null, assigneeHuman: false, interactiveSession: input.interactiveSession ?? false, landingBranch: input.landingBranch ?? null, workerModelId, parentId: input.parentId ?? null,
             createdByKind: actor.kind, createdById: actor.id, createdRunId: actor.runId ?? null, originKind: input.originKind ?? null,
             originFingerprint: input.originFingerprint ?? null, blockedTransitionAt: openBlockers.length ? now : null,
             createdAt: now, updatedAt: now,
@@ -544,7 +552,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       });
     },
 
-    assign(actor, id, roleId) {
+    assign(actor, id, roleId, workerModelId) {
       const t = get(id);
       if (roleId) {
         const role = db.get<{ id: string; projectId: string; status: string }>('SELECT id, project_id, status FROM roles WHERE id = ?', [roleId]);
@@ -552,10 +560,15 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         if (role.status === 'retired') throw new OcError('validation', 'cannot assign a retired role');
         if (t.projectId && role.projectId !== t.projectId) throw new OcError('validation', 'role belongs to a different project', { roleId, projectId: t.projectId });
       }
+      if (workerModelId !== undefined && t.workerId) {
+        throw new OcError('validation', 'cannot change a ticket\'s worker model after its worker has spawned');
+      }
+      const resolvedModelId = workerModelId === undefined ? undefined : resolveWorkerModelId(workerModelId);
       return tx(db, () => {
         const patch: Record<string, unknown> = { assigneeRoleId: roleId, assigneeHuman: false };
         if (roleId && t.status === 'backlog') patch.status = 'todo';
         if (!roleId) patch.workerId = null;
+        if (resolvedModelId !== undefined) patch.workerModelId = resolvedModelId;
         const next = touch(t.id, patch);
         if (roleId) bindOpenspec(next);
         const out = get(t.id);

@@ -172,6 +172,7 @@ describe('workspace loader', () => {
       expect(ctx.config.models).toEqual({
         conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
         workers: { runtime: 'codex', model: 'gpt-5' },
+        workerOptions: [],
       });
 
       // Written back, and the layered keys are gone from the file for good.
@@ -205,7 +206,7 @@ describe('workspace loader', () => {
       writeFileSync(file, YAML.stringify({ ...raw, defaults: { ...(raw['defaults'] as object), runtime: 'codex' }, models: { conductor: { runtime: 'opencode', model: 'grok' }, workers: { runtime: 'gemini', model: null } } }), 'utf8');
 
       const ctx = await load();
-      expect(ctx.config.models).toEqual({ conductor: { runtime: 'opencode', model: 'grok' }, workers: { runtime: 'gemini', model: null } });
+      expect(ctx.config.models).toEqual({ conductor: { runtime: 'opencode', model: 'grok' }, workers: { runtime: 'gemini', model: null }, workerOptions: [] });
     });
 
     it('writes the most used runtime and leaves the question open when the roles disagreed', async () => {

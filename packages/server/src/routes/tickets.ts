@@ -11,6 +11,7 @@ const CreateSchema = z.object({
   assigneeRoleId: z.string().nullish(), autoMerge: z.boolean().optional(), originKind: z.string().optional(), originFingerprint: z.string().optional(),
   // Set only at creation (VS-119); never inferred from a PR base, and not on PatchSchema below.
   landingBranch: z.string().nullish(),
+  workerModelId: z.string().nullish(),
 });
 const PatchSchema = z.object({
   title: z.string().min(1).optional(), description: z.string().optional(), summary: z.string().max(200).nullish(),
@@ -64,8 +65,8 @@ export function ticketRoutes(): Hono<AppEnv> {
   app.patch('/:id', async (c) => c.json(c.get('ws').services.tickets.update(c.get('actor'), c.req.param('id'), await body(c, PatchSchema))));
 
   app.post('/:id/assign', async (c) => {
-    const { roleId } = await body(c, z.object({ roleId: z.string().nullable() }));
-    return c.json(c.get('ws').services.tickets.assign(c.get('actor'), c.req.param('id'), roleId));
+    const { roleId, workerModelId } = await body(c, z.object({ roleId: z.string().nullable(), workerModelId: z.string().nullish() }));
+    return c.json(c.get('ws').services.tickets.assign(c.get('actor'), c.req.param('id'), roleId, workerModelId));
   });
 
   app.post('/:id/transition', async (c) => c.json(await c.get('ws').services.tickets.transition(c.get('actor'), c.req.param('id'), await body(c, TransitionSchema))));

@@ -273,14 +273,19 @@ version: 1
 id: acme                      # slug
 name: Acme Labs
 ticketPrefix: ACME
-models:                       # all of model selection, per workspace (VS-77, ADR 0011)
+models:                       # all of model selection, per workspace (VS-77, ADR 0011; VS-162, ADR 0012)
   conductor:
     runtime: claude
     model: claude-fable-5-1   # chosen from the runtime's listModels(); null = runtime default
   workers:
-    runtime: claude           # every worker in the workspace, whatever its role or project
+    runtime: claude           # default for every worker whose ticket names no catalog option
     model: claude-opus-5
     effort: high              # optional; the only place effort can be set
+  workerOptions:              # named options a ticket may pick (VS-162); empty is valid
+    - id: cheap
+      description: Frontend, low complexity, scouts and retrieval.
+      runtime: opencode
+      model: glm-4.6
 defaults:
   proposalApproval: human     # human | conductor | none  (who approves OpenSpec proposals)
   autoMerge: false            # default for new tickets; per-ticket flag; the conductor may create tickets with it on when told to
@@ -338,7 +343,7 @@ All tables carry `workspace_id`. Timestamps are ISO-8601 UTC text. Ids are ULIDs
 
 **worktrees** — `id, project_id, ticket_id, agent_id, provider, path, branch, status (active|dirty|landed|removed|orphaned), created_at, last_verified_at, removed_at, landed_evidence_json`. Mirror of the provider's state (`wt list --json` / `git worktree list --porcelain`) plus our landed-work verdict.
 
-**tickets** — `id, workspace_id, project_id (nullable: workspace-level tickets belong to the conductor), number, identifier (PREFIX-n), kind (change|task|scout|question), title, description (markdown), summary (nullable one-line why, VS-146, max 200 at the API), status (see 6.2), priority (critical|high|medium|low), auto_merge (bool, default false), assignee_role_id, worker_id (the live worker; null until spawned or after retirement), assignee_human (bool), parent_id (structure only), created_by_kind (human|conductor|agent|system|routine), created_by_id, origin_kind, origin_fingerprint, checkout_run_id, execution_run_id, execution_locked_at, openspec_change_name (nullable), openspec_state_json (last observed: planningComplete, tasks {total, complete}, archived), delivery_json {branch, prUrl, prState}, unblock_json {owner, action} (nullable), monitor_next_check_at, blocked_transition_at, started_at, completed_at, cancelled_at, created_at, updated_at`.
+**tickets** — `id, workspace_id, project_id (nullable: workspace-level tickets belong to the conductor), number, identifier (PREFIX-n), kind (change|task|scout|question), title, description (markdown), summary (nullable one-line why, VS-146, max 200 at the API), status (see 6.2), priority (critical|high|medium|low), auto_merge (bool, default false), assignee_role_id, worker_id (the live worker; null until spawned or after retirement), assignee_human (bool), parent_id (structure only), worker_model_id (nullable catalog option this ticket's worker runs on, VS-162; null means `models.workers`), created_by_kind (human|conductor|agent|system|routine), created_by_id, origin_kind, origin_fingerprint, checkout_run_id, execution_run_id, execution_locked_at, openspec_change_name (nullable), openspec_state_json (last observed: planningComplete, tasks {total, complete}, archived), delivery_json {branch, prUrl, prState}, unblock_json {owner, action} (nullable), monitor_next_check_at, blocked_transition_at, started_at, completed_at, cancelled_at, created_at, updated_at`.
 Constraints: assignee is role XOR human XOR null; `worker_id` implies `assignee_role_id`. Unique `(workspace_id, number)`. Partial unique on `(workspace_id, origin_kind, origin_fingerprint)` while status not terminal (routine dedupe).
 
 **ticket_relations** — `ticket_id, related_ticket_id, kind (blocks)`; cycles rejected; cancelled blockers do not satisfy dependencies.
@@ -1244,6 +1249,8 @@ conductor top                                           fleet view
 conductor presentation set|open|reconcile|status       surfaces (§14b)
 conductor conductor show|reset-session                 the conductor agent
 conductor models [show]|set conductor|workers --runtime <id> --model <id|default> [--effort <e>]
+conductor models options add --id <id> --description <text> --runtime <id> [--model <id|default>] [--effort <e>]
+conductor models options set <id> … | options remove <id>
                                                        all of model selection (ADR 0011)
 conductor workspace list|use|register|unregister|pause|resume   multi-workspace registry
 conductor workspace set-default <key=value...>         workspace defaults, e.g. knowledgeBudgetTokens.project=20000

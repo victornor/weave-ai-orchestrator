@@ -267,7 +267,12 @@ class Loader implements WorkspaceLoader {
     }
 
     // Per-workspace runtime config homes (CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_CONFIG_HOME …).
-    const runtimeIds = new Set<string>([...opts.registries.runtimes.keys(), config.models.conductor.runtime, config.models.workers.runtime]);
+    const runtimeIds = new Set<string>([
+      ...opts.registries.runtimes.keys(),
+      config.models.conductor.runtime,
+      config.models.workers.runtime,
+      ...(config.models.workerOptions ?? []).map((o) => o.runtime),
+    ]);
     for (const id of runtimeIds) {
       if (!id) continue;
       mkdirSync(join(paths.runtimesHome, id), { recursive: true });

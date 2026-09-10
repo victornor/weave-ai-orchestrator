@@ -522,11 +522,16 @@ function ModelsSection(): React.ReactElement {
       />
       <ModelSettingFields
         label="Workers"
-        hint="Every worker in this workspace, whatever its role or project."
+        hint="Every worker in this workspace whose ticket names no catalog option."
         setting={current.workers}
         runtimes={runtimes.data ?? []}
         onChange={(next) => set('workers', next)}
         onCommit={(next) => commit('workers', next)}
+      />
+      <WorkerOptionsEditor
+        current={current}
+        runtimes={runtimes.data ?? []}
+        onSave={(next) => save.mutate(next)}
       />
       {save.error ? <ErrorState code="MODELS_NOT_SAVED" message={save.error.message} /> : null}
       <p className="text-micro leading-relaxed text-text-3">
@@ -614,6 +619,70 @@ function ModelSettingFields({ label, hint, setting, runtimes, onChange, onCommit
           </div>
         </Field>
       ) : null}
+    </div>
+  );
+}
+
+function WorkerOptionsEditor({ current, runtimes, onSave }: {
+  current: T.WorkspaceModels;
+  runtimes: T.RuntimeInfo[];
+  onSave: (next: T.WorkspaceModels) => void;
+}): React.ReactElement {
+  const options = current.workerOptions ?? [];
+  const [id, setId] = useState('');
+  const [description, setDescription] = useState('');
+  const [runtime, setRuntime] = useState(current.workers.runtime);
+  const [model, setModel] = useState('');
+
+  const add = (): void => {
+    const trimmedId = id.trim();
+    const trimmedDesc = description.trim();
+    if (!trimmedId || !trimmedDesc) return;
+    onSave({
+      ...current,
+      workerOptions: [...options, { id: trimmedId, description: trimmedDesc, runtime, model: model.trim() === '' ? null : model.trim() }],
+    });
+    setId('');
+    setDescription('');
+    setModel('');
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="ac-label text-text-1">Worker options</h3>
+      <p className="text-micro text-text-3">Named models the conductor can pick per ticket. The workers setting above is the default when a ticket names none.</p>
+      {options.length === 0 ? <p className="text-micro text-text-3">None yet.</p> : null}
+      {options.map((o) => (
+        <div key={o.id} className="flex items-center gap-2">
+          <span className="ac-mono min-w-0 flex-1 text-meta text-text-1">{o.id} — {o.description} ({o.runtime} · {o.model ?? 'default'})</span>
+          <Button
+            aria-label={`Remove worker option ${o.id}`}
+            onClick={() => onSave({ ...current, workerOptions: options.filter((x) => x.id !== o.id) })}
+          >
+            Remove
+          </Button>
+        </div>
+      ))}
+      <Field label="New option id">
+        <input className={cx(inputCx, 'ac-mono')} aria-label="New worker option id" value={id} onChange={(e) => setId(e.target.value)} />
+      </Field>
+      <Field label="When to use">
+        <input className={inputCx} aria-label="New worker option description" value={description} onChange={(e) => setDescription(e.target.value)} />
+      </Field>
+      <Field label="Runtime">
+        <select className={cx(inputCx, 'ac-mono')} aria-label="New worker option runtime" value={runtime} onChange={(e) => setRuntime(e.target.value)}>
+          {runtimes.map((r) => (
+            <option key={r.id} value={r.id} disabled={!isRuntimeAvailable(r)}>
+              {r.displayName}
+              {isRuntimeAvailable(r) ? '' : ` (${runtimeStatusLabel(r)})`}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Model" hint="Empty means the runtime chooses.">
+        <input className={cx(inputCx, 'ac-mono')} aria-label="New worker option model" value={model} onChange={(e) => setModel(e.target.value)} />
+      </Field>
+      <Button onClick={add}>Add worker option</Button>
     </div>
   );
 }

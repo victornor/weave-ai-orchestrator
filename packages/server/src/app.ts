@@ -80,7 +80,7 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   ws.route('/presentation', presentationRoutes(deps));
   ws.route('/presenter', presenterRoutes(deps));
   ws.route(PUSH_BASE, pushRoutes(deps));
-  ws.route('/agent', agentRoutes());
+  ws.route('/agent', agentRoutes(deps));
   ws.route('/channels', channelRoutes());
   app.route('/api/w/:ws', ws);
 

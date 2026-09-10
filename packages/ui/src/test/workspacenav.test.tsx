@@ -298,20 +298,28 @@ describe('the Needs-you count', () => {
 });
 
 describe('the global section', () => {
-  it('sits above the workspace list with Needs you, Live and Chats', () => {
+  it('sits above the workspace list with Needs you, Live, Chats and Incidents', () => {
     render(nav());
     const global = screen.getByRole('navigation', { name: 'Global' });
     const labels = within(global).getAllByRole('link').map((a) => a.textContent);
-    expect(labels).toEqual(['Needs you', 'Live', 'Chats']);
+    expect(labels).toEqual(['Needs you', 'Live', 'Chats', 'Incidents']);
     expect(within(global).getByText('Live').closest('a')).toHaveAttribute('href', '/live');
     expect(within(global).getByText('Chats').closest('a')).toHaveAttribute('href', '/chats');
     expect(within(global).getByText('Needs you').closest('a')).toHaveAttribute('href', '/needs');
+    expect(within(global).getByText('Incidents').closest('a')).toHaveAttribute('href', '/incidents');
   });
 
   it('marks the global Live link current and no workspace group active', () => {
     render(nav({ activeWs: '', activePath: '/live' }));
     const global = screen.getByRole('navigation', { name: 'Global' });
     expect(within(global).getByText('Live').closest('a')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByText('Alpha').closest('button')).not.toBeNull();
+  });
+
+  it('marks the global Incidents link current and no workspace group active', () => {
+    render(nav({ activeWs: '', activePath: '/incidents' }));
+    const global = screen.getByRole('navigation', { name: 'Global' });
+    expect(within(global).getByText('Incidents').closest('a')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByText('Alpha').closest('button')).not.toBeNull();
   });
 });

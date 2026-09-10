@@ -33,6 +33,8 @@ export const ROUTES: RouteRow[] = [
   { method: 'POST', path: '/api/workspaces', tag: 'daemon', summary: 'Register an existing workspace directory', auth: 'session', mutating: true },
   { method: 'POST', path: '/api/workspaces/init', tag: 'daemon', summary: 'Scaffold and register a new workspace', auth: 'session', mutating: true },
   { method: 'POST', path: '/api/workspaces/import', tag: 'daemon', summary: 'Import a portable export into a workspace directory and register it', auth: 'session', mutating: true },
+  { method: 'GET', path: '/api/incidents', tag: 'daemon', summary: 'System incidents agents filed, newest first; ?reporter=conductor|worker', auth: 'session' },
+  { method: 'GET', path: '/api/incidents/{id}', tag: 'daemon', summary: 'One system incident', auth: 'session' },
   { method: 'GET', path: '/api/runtimes', tag: 'daemon', summary: 'Registered runtimes with detection and capabilities', auth: 'session' },
   { method: 'GET', path: '/api/runtimes/{id}/models', tag: 'daemon', summary: 'Models a runtime reports', auth: 'session' },
   { method: 'POST', path: '/api/transcribe', tag: 'daemon', summary: 'Audio to text (501 unless a provider is configured)', auth: 'session', mutating: true },

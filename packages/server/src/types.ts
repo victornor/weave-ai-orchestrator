@@ -1,4 +1,4 @@
-import type { CoreServices, WorkspaceContext, AuthService, Actor, Registries } from '@agent-conductor/core';
+import type { CoreServices, WorkspaceContext, AuthService, Actor, Registries, IncidentsService } from '@agent-conductor/core';
 import type { DaemonConfig } from '@agent-conductor/shared';
 import type { RunTokenClaims } from './runtoken.js';
 import type { UpdateChecker } from './release-info.js';
@@ -32,6 +32,8 @@ export interface AppDeps {
   updates: UpdateChecker;
   /** The deferred upgrade: request one, watch it, cancel it (PLAN §20). */
   upgrades: UpgradeService;
+  /** Daemon-level system incidents agents file through `ac_incident` (VS-174). */
+  incidents: IncidentsService;
   /** Directory holding the built web UI (packages/ui/dist). */
   uiDir?: string | null;
   /** Called on daemon shutdown / used by tests to freeze time. */

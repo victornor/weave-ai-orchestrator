@@ -21,6 +21,7 @@ The `conductor` CLI mirrors every tool (`conductor ticket get`, `conductor ask`,
 | `ac_ticket_work_product` | `id`, `{type, url, title, state}` — type is `pull_request` \| `branch` \| `commit` \| `artifact` \| `preview_url` \| `report` | the recorded work product |
 | `ac_ask` | `ticketId?`, `{title, context, kind: 'question' \| 'concern' \| 'gate_finding', options: [{key, label, detail}], recommendation, allowFreeText, correlationKey}` | the created decision, owned by the conductor whichever `kind` you name; **end the turn after asking** |
 | `ac_report` | `{state, key?, note}` — state is `working` \| `needs_decision` \| `blocked` \| `paused` \| `done` \| `failed` | a `status` comment and updated liveness |
+| `ac_incident` | `{title, whatFailed, tryingToDo, evidence?}` | a system incident (`id`, `createdAt`, `reporterKind`). File when AgentConductor itself fails; not a ticket. Never put secrets in evidence |
 | `ac_knowledge_get` | `scope`: `shared` \| `project` \| `workspace` (conductor) \| `decisions` (conductor); conductor may pass a project id | the file's current body |
 | `ac_knowledge_note` | `scope`, `section`, `text` (≤ 60 words), `doc?` (slug) | remaining budget, or a rejection: duplicate, too long, over budget, or `not_found` if `doc` names a document that does not exist yet; `doc` appends into that linked document's section instead of the hub |
 | `ac_knowledge_replace` | `scope`, `body` | the new revision — **only inside a curation run** |

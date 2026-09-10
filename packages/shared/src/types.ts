@@ -94,6 +94,26 @@ export interface Attachment { id: string; threadId: string; messageId: string; f
 export interface AttachmentPart { type: 'attachment'; id: string; filename: string; mediaType: string; byteSize: number }
 export interface Briefing { needsYou: Array<{ decisionId: string; ticketId: string | null; title: string; kind: string; recommendation: string | null; createdAt: string }>; landed: Array<{ ticketId: string; identifier: string; title: string; completedAt: string; prUrl?: string }>; underway: Array<{ workerId: string; workerName: string; workerStatus: string; workerPauseReason: string | null; ticketId: string; identifier: string; title: string; status: string; lastStatus: string | null }>; queued: Array<{ ticketId: string; identifier: string; title: string; reason: string }>; warnings: string[]; generatedAt: string }
 /**
+ * A system incident an agent filed (VS-174). Daemon-level: it lives in `daemon.sqlite`, not in a
+ * workspace. `reporterKind` is the filing run's agent kind, never a caller-supplied field.
+ */
+export interface Incident {
+  id: string;
+  reporterKind: E.IncidentReporterKind;
+  title: string;
+  whatFailed: string;
+  tryingToDo: string;
+  evidence: string | null;
+  workspaceId: string | null;
+  projectId: string | null;
+  ticketId: string | null;
+  agentId: string;
+  runId: string;
+  roleId: string | null;
+  createdAt: string;
+}
+
+/**
  * A deferred daemon upgrade (PLAN §20). Daemon-level: it lives in `daemon.sqlite`, not in a workspace.
  * `drainedRuns` is what was still executing when the upgrade began holding dispatch, counted then
  * because nothing can count it afterwards; `interruptedRuns` is how many of those were still executing

@@ -3,7 +3,7 @@ import { homedir, hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { OcError } from '@agent-conductor/shared';
+import { INCIDENT_REPORTER_KINDS, OcError } from '@agent-conductor/shared';
 import { detectHostToolsCached, getLogger } from '@agent-conductor/core';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { body } from '../http.js';
@@ -108,6 +108,24 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   });
 
   app.post('/transcribe', (c) => transcribe(c, deps));
+
+  app.get('/incidents', (c) => {
+    const reporter = c.req.query('reporter');
+    const limitRaw = c.req.query('limit');
+    const limit = limitRaw === undefined ? undefined : Number(limitRaw);
+    if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+      throw new OcError('validation', 'limit must be a positive integer', { limit: limitRaw });
+    }
+    if (reporter && !(INCIDENT_REPORTER_KINDS as readonly string[]).includes(reporter)) {
+      throw new OcError('validation', `unknown reporter kind "${reporter}"`);
+    }
+    return c.json(deps.incidents.list({
+      reporterKind: reporter as (typeof INCIDENT_REPORTER_KINDS)[number] | undefined,
+      limit,
+    }));
+  });
+
+  app.get('/incidents/:id', (c) => c.json(deps.incidents.get(c.req.param('id'))));
 
   /**
    * PLAN §20: is the configured release source ahead of the release this daemon runs from? `?refresh=1`

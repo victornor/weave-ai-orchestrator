@@ -32,6 +32,7 @@ describe('MCP endpoint', () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
     expect(names).toContain('ac_inbox');
+    expect(names).toContain('ac_incident');
     expect(names).toContain('ac_ticket_transition');
     expect(names).toContain('ac_ticket_create');       // WORKER_ONLY_TOOLS
     expect(names).not.toContain('ac_role_hire');        // conductor only

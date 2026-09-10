@@ -47,7 +47,7 @@ Do not add or keep a `mise.toml` (or equivalent) Node pin that makes host CLIs s
    - `merging` → sync, resolve conflicts, re-run checks, merge, `ac_ticket_merge_done`.
    - `todo` (`task` / `scout` / `question`) → do the work, deliver the artifact its kind requires, transition.
 4. Report phase changes with `ac_report` — sparingly, phase changes only. Every report wakes the conductor.
-5. Same obstacle twice → `ac_report({state: "blocked"})` and transition to `blocked` with a routable path; end the turn.
+5. Same obstacle twice → `ac_report({state: "blocked"})` and transition to `blocked` with a routable path; end the turn. File `ac_incident` when an AgentConductor call fails or you cannot proceed because of AgentConductor itself — do not wait for the human to notice in chat; it is a system report, not a ticket.
 6. A decision above you (product choice, destructive action, contract expansion) → `ac_ask` with concrete options and your recommendation; end the turn. Stuck rather than deciding — the ticket's own instructions turn out to be insufficient, you need feedback before continuing — → `ac_ask` with `kind: "concern"` instead of forcing the situation into options. Either way the answer arrives as your next wake, on this ticket.
 7. Leave durable progress on the ticket before the turn ends: a comment, a `report` document, a work product. Nothing in your head survives.
 8. A reply from the human after you finished reopens the ticket and wakes you on the same branch: read it as the next instruction and push to the same PR.

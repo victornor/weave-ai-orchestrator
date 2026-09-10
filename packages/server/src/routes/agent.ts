@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { OcError } from '@agent-conductor/shared';
-import type { AppEnv } from '../types.js';
+import type { AppDeps, AppEnv } from '../types.js';
 import { body } from '../http.js';
 import { runTool, toolNamesFor, toolsFor, jsonSchemaFor, type ToolCtx } from '../tools.js';
 
@@ -9,7 +9,7 @@ import { runTool, toolNamesFor, toolsFor, jsonSchemaFor, type ToolCtx } from '..
  * The MCP tools mirrored over REST for the `conductor` CLI (PLAN §9.5). Loopback listener + run token only;
  * the auth middleware enforces that, this router only checks the token matches the workspace.
  */
-export function agentRoutes(): Hono<AppEnv> {
+export function agentRoutes(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   const toolCtx = (c: { get: (k: 'principal' | 'ws' | 'actor') => never }): ToolCtx => {
@@ -17,7 +17,7 @@ export function agentRoutes(): Hono<AppEnv> {
     if (principal.kind !== 'run' || !principal.claims) throw new OcError('unauthorized', 'agent endpoints require a run token');
     const ws = c.get('ws') as unknown as ToolCtx['ws'];
     if (principal.claims.workspaceId !== ws.id) throw new OcError('forbidden', 'run token belongs to another workspace');
-    return { ws, claims: principal.claims, actor: c.get('actor') as unknown as ToolCtx['actor'] };
+    return { ws, claims: principal.claims, actor: c.get('actor') as unknown as ToolCtx['actor'], incidents: deps.incidents };
   };
 
   app.get('/inbox', async (c) => c.json(await runTool('ac_inbox', toolCtx(c as never), {})));

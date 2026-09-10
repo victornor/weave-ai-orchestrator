@@ -7,6 +7,10 @@ function makeEnum<const T extends readonly string[]>(values: T) {
 export const AGENT_KINDS = ['conductor', 'worker'] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
+/** Who filed a system incident (VS-174). Same values as AgentKind; a separate name so a call site cannot mix them up with an agent's live kind. */
+export const INCIDENT_REPORTER_KINDS = ['conductor', 'worker'] as const;
+export type IncidentReporterKind = (typeof INCIDENT_REPORTER_KINDS)[number];
+
 export const AGENT_STATUSES = ['provisioning', 'active', 'running', 'paused', 'error', 'done', 'retired'] as const;
 export type AgentStatus = (typeof AGENT_STATUSES)[number];
 

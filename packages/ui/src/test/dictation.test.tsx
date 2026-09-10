@@ -4,8 +4,10 @@
  * recognizer — bars moving, nothing transcribed, then "No speech was detected".
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState, type ReactElement } from 'react';
 import { Composer } from '../components/Composer';
+import { useDictation } from '../lib/dictation';
 
 interface ResultLike { isFinal: boolean; length: number; 0: { transcript: string } }
 
@@ -401,5 +403,65 @@ describe('dictation diagnostics', () => {
     fireEvent.click(copyButton()!);
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(screen.getByText('Copied')).toBeInTheDocument();
+  });
+});
+
+function VoxtypeHarness(props: { backend?: 'chrome' | 'voxtype'; serverConfigured?: boolean }): ReactElement {
+  const [text, setText] = useState('');
+  const d = useDictation((t) => setText(t), { backend: props.backend, serverConfigured: props.serverConfigured });
+  return (
+    <div>
+      <button type="button" onClick={() => (d.listening ? d.stop() : d.start())}>
+        {d.listening ? 'Stop dictation' : 'Dictate'}
+      </button>
+      <span data-testid="mode">{d.mode}</span>
+      {d.error ? <span role="alert">{d.error}</span> : null}
+      <textarea aria-label="out" value={text} readOnly />
+    </div>
+  );
+}
+
+describe('dictation — voxtype upload', () => {
+  it('stays on Chrome speech when only a leftover command provider would have been configured', () => {
+    w.webkitSpeechRecognition = FakeRecognition;
+    render(<VoxtypeHarness serverConfigured />);
+    expect(screen.getByTestId('mode')).toHaveTextContent('speech');
+    fireEvent.click(screen.getByText('Dictate'));
+    expect(FakeRecognition.last?.start).toHaveBeenCalled();
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it('posts a 16 kHz wav when Voxtype is selected and ready', async () => {
+    const posts: FormData[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push(init.body as FormData);
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ text: 'hello host' }) });
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+    render(<VoxtypeHarness backend="voxtype" serverConfigured />);
+    expect(screen.getByTestId('mode')).toHaveTextContent('upload');
+    fireEvent.click(screen.getByText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByText('Stop dictation'));
+    await waitFor(() => expect(posts.length).toBe(1));
+    const file = posts[0]!.get('audio') as File;
+    expect(file.name).toBe('dictation.wav');
+    await waitFor(() => expect(screen.getByLabelText('out')).toHaveValue('hello host'));
+  });
+
+  it('surfaces a failed host transcribe', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+    render(<VoxtypeHarness backend="voxtype" serverConfigured />);
+    fireEvent.click(screen.getByText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByText('Stop dictation'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
   });
 });

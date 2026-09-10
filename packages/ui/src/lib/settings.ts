@@ -25,6 +25,7 @@ export const SETTINGS_SECTIONS = [
   { key: 'channels', label: 'Channels', area: 'workspace' },
   { key: 'presentation', label: 'Presentation', area: 'workspace' },
   { key: 'updates', label: 'Updates', area: 'daemon' },
+  { key: 'dictation', label: 'Dictation', area: 'daemon' },
   { key: 'security', label: 'Security & Devices', area: 'daemon' },
   { key: 'device', label: 'This device', area: 'daemon' },
 ] as const satisfies ReadonlyArray<{ key: string; label: string; area: SettingsAreaKey }>;

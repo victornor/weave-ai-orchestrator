@@ -319,6 +319,14 @@ describe('routes', () => {
     expect(res.status).toBe(501);
   });
 
+  it('reports chrome dictation and not-configured on a default daemon', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/health');
+    expect(res.status).toBe(200);
+    const body = await res.json() as { transcription: { backend: string; configured: boolean } };
+    expect(body.transcription).toEqual({ backend: 'chrome', configured: false });
+  });
+
   // The chat finds the run to stream from this one request, so the envelope is part of the contract.
   it('serves the conductor as a detail envelope carrying its latest run', async () => {
     const { h, fetch } = app();
@@ -842,5 +850,100 @@ describe("a project's sync state (VS-131)", () => {
     expect(res.status).toBe(200);
     expect(called).toBe(true);
     await expect(res.json()).resolves.toEqual({ head: 'abc123', fastForwarded: true });
+  });
+});
+
+describe('daemon transcription (VS-179)', () => {
+  const installed = {
+    installed: true,
+    models: [
+      { id: 'tiny.en', engine: 'whisper', installed: true },
+      { id: 'base.en', engine: 'whisper', installed: true },
+    ],
+  };
+  const probe = (over: { installed?: boolean; text?: string; error?: string } = {}) => ({
+    status: async () => ({
+      installed: over.installed ?? true,
+      models: over.installed === false ? [] : installed.models,
+      error: over.error,
+    }),
+    transcribe: async (_audio: Buffer, model: string | undefined) => over.text ?? `said:${model ?? ''}`,
+  });
+
+  it('GETs chrome by default', async () => {
+    const { fetch } = app({ voxtype: probe({ installed: false }) });
+    const res = await fetch('/api/daemon/transcription', { headers: authed() });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ backend: 'chrome', model: null, voxtype: { installed: false } });
+  });
+
+  it('PUTs voxtype + model, persists, and transcribe uses it without rebuilding deps', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ac-tx-'));
+    writeFileSync(join(dir, 'daemon.yaml'), 'version: 1\n');
+    const { h, fetch } = app({ voxtype: probe({ text: 'hello host' }), daemonConfigDir: dir });
+    const put = await fetch('/api/daemon/transcription', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ backend: 'voxtype', model: 'base.en' }),
+    });
+    expect(put.status).toBe(200);
+    await expect(put.json()).resolves.toMatchObject({ backend: 'voxtype', model: 'base.en' });
+    expect(h.deps.daemon.transcription.backend).toBe('voxtype');
+
+    const got = await fetch('/api/daemon/transcription', { headers: authed() });
+    await expect(got.json()).resolves.toMatchObject({ backend: 'voxtype', model: 'base.en' });
+
+    const tx = await fetch('/api/transcribe', { method: 'POST', headers: authed(), body: 'RIFF' });
+    expect(tx.status).toBe(200);
+    await expect(tx.json()).resolves.toEqual({ text: 'hello host' });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('rejects PUT voxtype when the binary is missing', async () => {
+    const { fetch } = app({ voxtype: probe({ installed: false, error: 'voxtype is not installed' }) });
+    const res = await fetch('/api/daemon/transcription', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ backend: 'voxtype' }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('validation');
+  });
+
+  it('rejects an uninstalled model', async () => {
+    const { fetch } = app({ voxtype: probe() });
+    const res = await fetch('/api/daemon/transcription', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ backend: 'voxtype', model: 'large-v3' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('allows PUT chrome when Voxtype is missing', async () => {
+    const { fetch } = app({ voxtype: probe({ installed: false }) });
+    const res = await fetch('/api/daemon/transcription', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ backend: 'chrome' }),
+    });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ backend: 'chrome' });
+  });
+
+  it('errors when Voxtype transcription throws', async () => {
+    const { fetch } = app({
+      daemon: { transcription: { backend: 'voxtype' } },
+      voxtype: {
+        status: async () => ({ installed: true, models: [{ id: 'base.en', engine: 'whisper', installed: true }] }),
+        transcribe: async () => { throw new OcError('internal', 'voxtype timed out after 200ms'); },
+      },
+    });
+    const res = await fetch('/api/transcribe', { method: 'POST', headers: authed(), body: 'RIFF' });
+    expect(res.status).toBe(500);
+    expect((await res.json()).error.message).toMatch(/timed out/);
+  });
+
+  it('still transcribes through the yaml command provider', async () => {
+    const { fetch } = app({ daemon: { transcription: { provider: 'command', command: 'printf transcribed' } } });
+    const res = await fetch('/api/transcribe', { method: 'POST', headers: authed(), body: 'audio' });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ text: 'transcribed' });
   });
 });

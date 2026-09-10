@@ -5,6 +5,7 @@ import type { UpdateChecker } from './release-info.js';
 import type { UpgradeService } from './upgrade.js';
 import type { ChannelManager } from './channels.js';
 import type { WebhookDispatcher } from './webhooks.js';
+import type { VoxtypeProbe } from './voxtype.js';
 
 /** One loaded workspace: its context (db, config, events) plus the assembled core services. */
 export interface WorkspaceRuntime {
@@ -34,6 +35,10 @@ export interface AppDeps {
   upgrades: UpgradeService;
   /** Daemon-level system incidents agents file through `ac_incident` (VS-174). */
   incidents: IncidentsService;
+  /** Directory holding daemon.yaml; PUT /api/daemon/transcription writes here. */
+  daemonConfigDir?: string;
+  /** Voxtype probe/transcribe. Tests inject a fake; production uses PATH `voxtype`. */
+  voxtype?: VoxtypeProbe;
   /** Directory holding the built web UI (packages/ui/dist). */
   uiDir?: string | null;
   /** Called on daemon shutdown / used by tests to freeze time. */

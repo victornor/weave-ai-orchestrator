@@ -26,6 +26,8 @@ vi.mock('../api/hooks', () => ({
   usePatchConfig: () => ({ mutate: vi.fn(), isPending: false }),
   useDaemonUpdate: () => ({ data: undefined, isLoading: false, isError: false, refetch: vi.fn() }),
   useDaemonUpgrade: () => ({ data: undefined, isError: false }),
+  useTranscription: () => ({ data: { backend: 'chrome', model: null, voxtype: { installed: false, models: [] } }, isLoading: false }),
+  useSetTranscription: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 const { SettingsRoute } = await import('../routes/Settings');

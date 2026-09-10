@@ -239,7 +239,14 @@ export const DaemonConfigSchema = z.object({
     lockoutAttempts: z.number().int().default(5),
     lockoutMinutes: z.number().int().default(15),
   }).default({}),
-  transcription: z.object({ provider: z.enum(['none', 'command']).default('none'), command: z.string().optional() }).default({}),
+  transcription: z.object({
+    provider: z.enum(['none', 'command']).default('none'),
+    command: z.string().optional(),
+    /** Web composer dictation: Chrome / Web Speech (default) or Voxtype on the daemon host (VS-179). */
+    backend: z.enum(['chrome', 'voxtype']).default('chrome'),
+    /** Voxtype model id from `voxtype info models`. Ignored when backend is chrome. */
+    model: z.string().optional(),
+  }).default({}),
   /**
    * Web push. The browser cannot subscribe without the VAPID public key, so with no key configured
    * the web app says push is not configured on the daemon instead of failing with a DOMException.

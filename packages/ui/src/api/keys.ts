@@ -7,6 +7,7 @@ export const qk = {
   runtimes: () => ['runtimes'] as const,
   daemonUpdate: () => ['daemon', 'update'] as const,
   daemonUpgrade: () => ['daemon', 'upgrade'] as const,
+  daemonTranscription: () => ['daemon', 'transcription'] as const,
   incidents: (reporter?: string) => ['incidents', reporter ?? 'all'] as const,
   runtimeModels: (id: string) => ['runtimes', id, 'models'] as const,
 

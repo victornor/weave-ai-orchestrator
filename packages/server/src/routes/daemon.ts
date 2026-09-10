@@ -3,10 +3,11 @@ import { homedir, hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { INCIDENT_REPORTER_KINDS, OcError } from '@agent-conductor/shared';
-import { detectHostToolsCached, getLogger } from '@agent-conductor/core';
+import { DaemonConfigSchema, INCIDENT_REPORTER_KINDS, OcError } from '@agent-conductor/shared';
+import { detectHostToolsCached, getLogger, workspaceLoader } from '@agent-conductor/core';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { body } from '../http.js';
+import { createVoxtypeProbe, resolveVoxtypeModel, type VoxtypeProbe } from '../voxtype.js';
 
 const log = getLogger('http', { component: 'daemon-routes' });
 
@@ -53,7 +54,7 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
     operatorConfigured: deps.auth.hasOperator(),
     tlsMode: deps.daemon.http.tls.mode,
     publicUrl: deps.publicUrl,
-    transcription: { configured: deps.daemon.transcription.provider === 'command' && Boolean(deps.daemon.transcription.command) },
+    transcription: await transcriptionHealth(deps),
     host: { platform: process.platform, hostname: hostname(), home: homedir(), defaultWorkspaceRoot: join(homedir(), 'agent-conductor'), tools: await detectHostToolsCached() },
   }));
 
@@ -108,6 +109,9 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   });
 
   app.post('/transcribe', (c) => transcribe(c, deps));
+
+  app.get('/daemon/transcription', (c) => transcriptionGet(c, deps));
+  app.put('/daemon/transcription', (c) => transcriptionPut(c, deps));
 
   app.get('/incidents', (c) => {
     const reporter = c.req.query('reporter');
@@ -178,17 +182,84 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   return app;
 }
 
+function voxtypeOf(deps: AppDeps): VoxtypeProbe {
+  return deps.voxtype ?? createVoxtypeProbe();
+}
+
+async function transcriptionHealth(deps: AppDeps): Promise<{ configured: boolean; backend: 'chrome' | 'voxtype' }> {
+  const cfg = deps.daemon.transcription;
+  if (cfg.backend === 'voxtype') {
+    const st = await voxtypeOf(deps).status();
+    return { backend: 'voxtype', configured: st.installed };
+  }
+  return {
+    backend: cfg.backend,
+    configured: cfg.provider === 'command' && Boolean(cfg.command),
+  };
+}
+
+async function transcriptionGet(
+  c: { json: (v: unknown, s?: number) => Response },
+  deps: AppDeps,
+): Promise<Response> {
+  const cfg = deps.daemon.transcription;
+  const voxtype = await voxtypeOf(deps).status();
+  return c.json({ backend: cfg.backend, model: cfg.model ?? null, voxtype });
+}
+
+async function transcriptionPut(
+  c: { req: { raw: Request }; json: (v: unknown, s?: number) => Response },
+  deps: AppDeps,
+): Promise<Response> {
+  const input = await body(c as never, z.object({
+    backend: z.enum(['chrome', 'voxtype']),
+    model: z.string().min(1).optional(),
+  }));
+  const probe = voxtypeOf(deps);
+  const voxtype = await probe.status();
+  if (input.backend === 'voxtype' && !voxtype.installed) {
+    throw new OcError('validation', voxtype.error ?? 'voxtype is not installed on the daemon host');
+  }
+  let model = input.model;
+  if (input.backend === 'voxtype') {
+    if (model && !voxtype.models.some((m) => m.installed && m.id === model)) {
+      throw new OcError('validation', `voxtype model "${model}" is not installed`);
+    }
+    model = resolveVoxtypeModel(model, voxtype);
+  } else {
+    model = undefined;
+  }
+  deps.daemon.transcription.backend = input.backend;
+  deps.daemon.transcription.model = model;
+  if (deps.daemonConfigDir) {
+    const current = workspaceLoader.readDaemonConfig(deps.daemonConfigDir);
+    workspaceLoader.writeDaemonConfig(DaemonConfigSchema.parse({
+      ...current,
+      transcription: deps.daemon.transcription,
+    }), deps.daemonConfigDir);
+  }
+  return c.json({ backend: deps.daemon.transcription.backend, model: deps.daemon.transcription.model ?? null, voxtype });
+}
+
 /**
- * Audio → text. 501 unless `daemon.transcription.provider === 'command'`, in which case the raw
- * audio bytes are piped to the configured command's stdin and its stdout is the transcript.
+ * Audio → text. Voxtype when `backend === 'voxtype'`; else the yaml `command` provider's stdin
+ * path; else 501.
  */
 export async function transcribe(c: { req: { raw: Request }; json: (v: unknown, s?: number) => Response }, deps: AppDeps): Promise<Response> {
   const cfg = deps.daemon.transcription;
+  const audio = await readAudio(c.req.raw);
+  if (!audio.byteLength) throw new OcError('validation', 'no audio in the request body');
+  if (cfg.backend === 'voxtype') {
+    const probe = voxtypeOf(deps);
+    const st = await probe.status();
+    if (!st.installed) throw new OcError('internal', st.error ?? 'voxtype is not installed on the daemon host');
+    const model = resolveVoxtypeModel(cfg.model, st);
+    const text = await probe.transcribe(audio, model);
+    return c.json({ text });
+  }
   if (cfg.provider !== 'command' || !cfg.command) {
     return c.json({ error: { code: 'internal', message: 'no transcription provider is configured on the daemon host', retryable: false } }, 501);
   }
-  const audio = await readAudio(c.req.raw);
-  if (!audio.byteLength) throw new OcError('validation', 'no audio in the request body');
   const text = await runCommand(cfg.command, audio);
   return c.json({ text });
 }

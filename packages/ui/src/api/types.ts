@@ -43,7 +43,7 @@ export interface Health {
   operatorConfigured: boolean;
   tlsMode: string;
   publicUrl?: string;
-  transcription?: { configured: boolean };
+  transcription?: { configured: boolean; backend?: 'chrome' | 'voxtype' };
   host?: {
     platform: string;
     hostname: string;
@@ -51,6 +51,12 @@ export interface Health {
     defaultWorkspaceRoot: string;
     tools: Record<string, { id: string; available: boolean; version: string | null; need: 'required' | 'recommended'; purpose: string }>;
   };
+}
+
+export interface TranscriptionStatus {
+  backend: 'chrome' | 'voxtype';
+  model: string | null;
+  voxtype: { installed: boolean; models: Array<{ id: string; engine: string; installed: boolean }>; error?: string };
 }
 
 /* ---- daemon updates and the deferred upgrade (PLAN §20) ---- */

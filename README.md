@@ -399,7 +399,9 @@ auth:
   lockoutAttempts: 5
   lockoutMinutes: 15
 transcription:
-  provider: none              # none | command
+  backend: chrome             # chrome (Web Speech, default) | voxtype
+  model: ""                   # Voxtype model id when backend is voxtype
+  provider: none              # none | command (yaml-only stdin transcribe)
   command: ""                 # reads audio on stdin, prints the transcript
 logLevel: info
 otlpEndpoint: ""              # unset = no export; there is no phone-home

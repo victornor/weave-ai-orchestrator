@@ -109,6 +109,10 @@ export interface HarnessOptions {
   accounts?: RuntimeAccount[];
   /** Runtime credential state served by `GET /usage/credentials` (VS-75). */
   credentials?: RuntimeCredential[];
+  /** Injected Voxtype probe so tests never spawn the host binary. */
+  voxtype?: import('../src/voxtype.js').VoxtypeProbe;
+  /** Where PUT /api/daemon/transcription writes daemon.yaml. */
+  daemonConfigDir?: string;
   /** Runtimes an on-demand sync reports as failed (VS-84). */
   syncFailed?: AccountSyncFailure[];
 }
@@ -359,6 +363,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     registries: createRegistries(), listener: options.listener ?? 'public',
     publicUrl: 'http://127.0.0.1:7433', version, uiDir: null,
     updates, upgrades, incidents: createIncidentsService(db),
+    voxtype: options.voxtype, daemonConfigDir: options.daemonConfigDir,
   };
 
   return { runtime, deps, db, bus, calls, tickets, mergeOutcomes, comments, documents, tokens, impls, decisionInputs, roleSecrets, close: async () => { await runtime.services.jobs.stop(); db.close(); } };

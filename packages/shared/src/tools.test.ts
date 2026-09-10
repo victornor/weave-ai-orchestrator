@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { HUMAN_REPLY_TOOL, isHumanReplyToolEvent } from './tools.js';
+import { COMMON_TOOLS, HUMAN_REPLY_TOOL, isHumanReplyToolEvent } from './tools.js';
 
 const event = (type: string, payload: Record<string, unknown> | null) => ({ type, payload });
+
+describe('COMMON_TOOLS (VS-174)', () => {
+  it('includes ac_incident for every agent', () => {
+    expect(COMMON_TOOLS).toContain('ac_incident');
+  });
+});
 
 describe('isHumanReplyToolEvent', () => {
   it('matches the call, the result and a denial for the reply tool', () => {

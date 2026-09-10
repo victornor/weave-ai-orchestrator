@@ -4,7 +4,7 @@
  */
 import { tmpdir } from 'node:os';
 import { Db } from '@agent-conductor/db';
-import { EventBus, createChangelogService, createHistoryReader, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, getLogger, initLogger } from '@agent-conductor/core';
+import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, getLogger, initLogger } from '@agent-conductor/core';
 import type { Actor, CoreServices, HistoryQuery, WorkspaceContext } from '@agent-conductor/core';
 import type { AuthService } from '@agent-conductor/core';
 import {
@@ -358,7 +358,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     auth, daemon: daemonCfg, workspaces: workspaceMap,
     registries: createRegistries(), listener: options.listener ?? 'public',
     publicUrl: 'http://127.0.0.1:7433', version, uiDir: null,
-    updates, upgrades,
+    updates, upgrades, incidents: createIncidentsService(db),
   };
 
   return { runtime, deps, db, bus, calls, tickets, mergeOutcomes, comments, documents, tokens, impls, decisionInputs, roleSecrets, close: async () => { await runtime.services.jobs.stop(); db.close(); } };

@@ -567,4 +567,32 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0022_incidents', () => {
+    it('creates the daemon-level incidents table with no foreign keys', () => {
+      const db = openDb(join(dir, 'incidents.sqlite'));
+      const cols = db.all<{ name: string }>('PRAGMA table_info(incidents)').map((c) => c.name);
+      expect(cols).toEqual([
+        'id', 'reporter_kind', 'title', 'what_failed', 'trying_to_do', 'evidence',
+        'workspace_id', 'project_id', 'ticket_id', 'agent_id', 'run_id', 'role_id', 'created_at',
+      ]);
+      expect(db.all<{ table: string }>('PRAGMA foreign_key_list(incidents)')).toHaveLength(0);
+      expect(db.all<{ name: string }>('PRAGMA index_list(incidents)').map((i) => i.name)).toEqual(
+        expect.arrayContaining(['incidents_created_at', 'incidents_reporter_kind']),
+      );
+      db.close();
+    });
+
+    it('round-trips an incident row', () => {
+      const db = openDb(join(dir, 'incidents-row.sqlite'));
+      db.insert('incidents', {
+        id: 'i1', reporterKind: 'worker', title: 'MCP failed', whatFailed: 'ac_ticket_get',
+        tryingToDo: 'read the ticket', evidence: 'not_found', workspaceId: 'ws1',
+        agentId: 'ag1', runId: 'run1', createdAt: '2026-09-10T00:00:00.000Z',
+      });
+      const row = db.get<{ title: string; reporterKind: string; whatFailed: string }>('SELECT * FROM incidents WHERE id = ?', ['i1']);
+      expect(row).toMatchObject({ title: 'MCP failed', reporterKind: 'worker', whatFailed: 'ac_ticket_get' });
+      db.close();
+    });
+  });
 });

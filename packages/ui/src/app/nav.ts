@@ -61,4 +61,5 @@ export const GLOBAL_NAV: NavItem[] = [
   { key: 'global-needs', label: 'Needs you', to: '/needs', glyph: 'needs-you', hint: 'Everything waiting across every workspace' },
   { key: 'global-live', label: 'Live', to: '/live', glyph: 'working', hint: 'Who is working, in every workspace' },
   { key: 'global-chats', label: 'Chats', to: '/chats', glyph: 'chat', hint: 'Every workspace\'s conductor chat, side by side' },
+  { key: 'global-incidents', label: 'Incidents', to: '/incidents', glyph: 'failed', hint: 'System failures agents filed' },
 ];

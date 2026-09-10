@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   CANCELLABLE_UPGRADE_STATES, CHANGELOG_KINDS, CHANGELOG_MEASURE_KIND, CHANGELOG_SOURCES,
-  RUN_EVENT_TYPES, TERMINAL_UPGRADE_STATES, UPGRADE_FAILURE_REASONS, UPGRADE_STATES,
-  isCancellableUpgrade, isTerminalUpgrade, type RunEventType, type UpgradeState,
+  INCIDENT_REPORTER_KINDS, RUN_EVENT_TYPES, TERMINAL_UPGRADE_STATES, UPGRADE_FAILURE_REASONS, UPGRADE_STATES,
+  isCancellableUpgrade, isTerminalUpgrade, type IncidentReporterKind, type RunEventType, type UpgradeState,
 } from './enums.js';
 
 describe('run event types (VS-99)', () => {
@@ -11,6 +11,14 @@ describe('run event types (VS-99)', () => {
     expect(RUN_EVENT_TYPES).toContain('user_input.requested');
     const t: RunEventType = 'human.input';
     expect(RUN_EVENT_TYPES).toContain(t);
+  });
+});
+
+describe('incident reporter kinds (VS-174)', () => {
+  it('is conductor or worker', () => {
+    expect(INCIDENT_REPORTER_KINDS).toEqual(['conductor', 'worker']);
+    const ok: IncidentReporterKind = 'worker';
+    expect(INCIDENT_REPORTER_KINDS).toContain(ok);
   });
 });
 

@@ -71,7 +71,7 @@ export function mcpRoutes(deps: AppDeps): Hono<AppEnv> {
     const ws = deps.workspaces.get(claims.workspaceId);
     if (!ws) throw new OcError('not_found', `workspace ${claims.workspaceId} is not loaded`);
 
-    const toolCtx: ToolCtx = { ws, claims, actor: c.get('actor') };
+    const toolCtx: ToolCtx = { ws, claims, actor: c.get('actor'), incidents: deps.incidents };
     const server = createMcpServer(toolCtx, deps.version);
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     try {

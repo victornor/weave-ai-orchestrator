@@ -15,7 +15,7 @@ import type { ServerType } from '@hono/node-server';
 import { openDb } from '@agent-conductor/db';
 import type { Db } from '@agent-conductor/db';
 import {
-  createRegistries, createCore, createAuthService, getLogger, initLogger, workspaceLoader,
+  createRegistries, createCore, createAuthService, createIncidentsService, getLogger, initLogger, workspaceLoader,
   stageWorkspaceImport, importTickets,
   type Registries, type WorkspaceContext,
 } from '@agent-conductor/core';
@@ -99,10 +99,11 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     db: daemonDb, daemon: daemonCfg, configDir, workspaces, updates, version: VERSION, releaseRoot: runningReleaseRoot(),
     runtimes: () => [...registries.runtimes.keys()],
   });
+  const incidents = createIncidentsService(daemonDb);
   const deps: AppDeps = {
     auth, daemon: daemonCfg, workspaces, registries, listener: 'public',
     publicUrl, version: VERSION, uiDir: opts.uiDir ?? defaultUiDir(),
-    updates, upgrades,
+    updates, upgrades, incidents,
     onOperatorConfigured: () => onOperatorConfigured?.(),
   };
   loopback.setDeps({ ...deps, listener: 'loopback' });

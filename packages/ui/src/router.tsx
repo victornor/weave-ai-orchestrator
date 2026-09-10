@@ -21,6 +21,7 @@ import { SettingsRoute } from './routes/Settings';
 import { GlobalNeedsRoute } from './routes/GlobalNeeds';
 import { GlobalLiveRoute } from './routes/GlobalLive';
 import { GlobalChatsRoute } from './routes/GlobalChats';
+import { GlobalIncidentsRoute } from './routes/GlobalIncidents';
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 
@@ -51,6 +52,16 @@ const globalChatsRoute = createRoute({
   component: () => (
     <AppShell>
       <GlobalChatsRoute />
+    </AppShell>
+  ),
+});
+const globalIncidentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/incidents',
+  validateSearch: (s: Record<string, unknown>) => s,
+  component: () => (
+    <AppShell>
+      <GlobalIncidentsRoute />
     </AppShell>
   ),
 });
@@ -117,6 +128,7 @@ const routeTree = rootRoute.addChildren([
   globalNeedsRoute,
   globalLiveRoute,
   globalChatsRoute,
+  globalIncidentsRoute,
   wsRoute.addChildren([
     wsIndexRoute,
     needsRoute,

@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace } from '@agent-conductor/shared';
+import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind } from '@agent-conductor/shared';
 import { dayKey } from '@agent-conductor/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -143,6 +143,14 @@ export function useMe(enabled = true): UseQueryResult<T.AuthMe> {
  */
 export function useWorkspaces(): UseQueryResult<T.WorkspaceListItem[]> {
   return useQuery({ queryKey: qk.workspaces(), queryFn: () => api.root<T.WorkspaceListItem[]>('/workspaces'), refetchInterval: 60_000 });
+}
+
+export function useIncidents(reporter?: IncidentReporterKind): UseQueryResult<{ items: Incident[]; total: number }> {
+  return useQuery({
+    queryKey: qk.incidents(reporter),
+    queryFn: () => api.root<{ items: Incident[]; total: number }>(`/incidents${qs({ reporter })}`),
+    refetchOnWindowFocus: true,
+  });
 }
 
 export function useRuntimes(): UseQueryResult<T.RuntimeInfo[]> {

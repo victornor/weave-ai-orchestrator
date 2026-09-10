@@ -17,10 +17,10 @@ const workspaceRoutes = (): RouteNode[] => {
 };
 
 describe('the global routes (VS-168)', () => {
-  it('registers /needs, /live and /chats as siblings of /w/$ws', () => {
+  it('registers /needs, /live, /chats and /incidents as siblings of /w/$ws', () => {
     const root = router.routeTree as unknown as RouteNode;
     const paths = (root.children ?? []).map((r) => r.path);
-    expect(paths).toEqual(expect.arrayContaining(['needs', 'live', 'chats', 'w/$ws']));
+    expect(paths).toEqual(expect.arrayContaining(['needs', 'live', 'chats', 'incidents', 'w/$ws']));
   });
 });
 

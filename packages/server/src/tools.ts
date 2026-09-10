@@ -14,7 +14,7 @@ import {
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock,
 } from '@agent-conductor/shared';
-import { flattenWakes, type Actor, type CoreServices } from '@agent-conductor/core';
+import { flattenWakes, type Actor, type CoreServices, type IncidentsService } from '@agent-conductor/core';
 import type { RunTokenClaims } from './runtoken.js';
 import type { WorkspaceRuntime } from './types.js';
 import { toOcError } from './http.js';
@@ -29,6 +29,7 @@ export interface ToolCtx {
   ws: WorkspaceRuntime;
   claims: RunTokenClaims;
   actor: Actor;
+  incidents: IncidentsService;
 }
 export interface ToolDef<I extends ZodTypeAny = ZodTypeAny> {
   name: string;
@@ -380,6 +381,34 @@ export const TOOLS: ToolDef[] = [
         } catch { /* leave it to the worker */ }
       }
       return { recorded: true, state: i.state, comment, closed };
+    },
+  },
+  {
+    name: 'ac_incident', scope: 'all', input: z.object({
+      title: z.string().min(1).max(200),
+      whatFailed: z.string().min(1).max(2000),
+      tryingToDo: z.string().min(1).max(2000),
+      evidence: z.string().max(8000).optional(),
+    }),
+    description:
+      'File a system incident when an AgentConductor call fails or you cannot proceed because of AgentConductor itself '
+      + '(failed MCP tool, missing capability, launcher/runtime error). Do not wait for the human to notice in chat. '
+      + 'This is a system report, not a ticket and not a decision. Never put secrets, tokens or credentials in evidence.',
+    handler: (ctx, i) => {
+      const row = ctx.incidents.create({
+        reporterKind: ctx.claims.agentKind,
+        title: i.title,
+        whatFailed: i.whatFailed,
+        tryingToDo: i.tryingToDo,
+        evidence: i.evidence ?? null,
+        workspaceId: ctx.claims.workspaceId,
+        projectId: ctx.claims.projectId ?? null,
+        ticketId: ctx.claims.ticketId ?? null,
+        agentId: ctx.claims.agentId,
+        runId: ctx.claims.runId,
+        roleId: ctx.claims.roleId ?? null,
+      });
+      return { id: row.id, createdAt: row.createdAt, reporterKind: row.reporterKind };
     },
   },
   {

@@ -70,6 +70,7 @@ describe('what the More menu lists', () => {
     expect(missing.map((r) => r.key)).toEqual([]);
     expect(MORE_ITEMS.map((m) => m.key)).toContain('merge-queue');
     expect(MORE_ITEMS.map((m) => m.key)).toContain('live');
+    expect(TABS).toHaveLength(5);
   });
 
   it('shows nothing while it is closed', () => {
@@ -98,12 +99,13 @@ describe('what the More menu lists', () => {
     expect(within(nav).getAllByRole('link')).toHaveLength(MORE_ITEMS.length);
   });
 
-  it('lists Global Needs you, Live and Chats above the per-workspace leftovers', () => {
+  it('lists Global Needs you, Live, Chats and Incidents above the per-workspace leftovers', () => {
     open();
     const global = within(sheet()).getByRole('navigation', { name: 'Global' });
     expect(within(global).getByRole('link', { name: /Needs you/ })).toHaveAttribute('href', '/needs');
     expect(within(global).getByRole('link', { name: /^Live/ })).toHaveAttribute('href', '/live');
     expect(within(global).getByRole('link', { name: /Chats/ })).toHaveAttribute('href', '/chats');
+    expect(within(global).getByRole('link', { name: /Incidents/ })).toHaveAttribute('href', '/incidents');
   });
 
   it('marks the destination the app is already showing', () => {

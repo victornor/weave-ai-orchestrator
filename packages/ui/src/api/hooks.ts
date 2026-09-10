@@ -722,11 +722,15 @@ export function usePatchTicket(): UseMutationResult<Ticket, Error, { id: string;
 }
 
 export function useTransitionTicket(): UseMutationResult<Ticket, Error, { id: string; to: string; note?: string }> {
-  const ws = useWs();
+  const ws = useHookWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, to, note }) => api.ws<Ticket>(ws, `/tickets/${id}/transition`, { method: 'POST', body: { to, note } }),
+    mutationFn: ({ id, to, note }) => {
+      if (!ws) return Promise.reject(new Error('no workspace'));
+      return api.ws<Ticket>(ws, `/tickets/${id}/transition`, { method: 'POST', body: { to, note } });
+    },
     onSuccess: (_d, v) => {
+      if (!ws) return;
       void qc.invalidateQueries({ queryKey: qk.ticket(ws, v.id) });
       void qc.invalidateQueries({ queryKey: qk.tickets(ws) });
     },

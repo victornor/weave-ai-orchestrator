@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Decision, DecisionAnswerInputs, Project, ThreadMessage, Ticket } from '@agent-conductor/shared';
+import type { Decision, DecisionAnswerInputs, Project, RunTrace, ThreadMessage, Ticket } from '@agent-conductor/shared';
 import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Composer } from '../components/Composer';
@@ -53,7 +53,7 @@ import { decisionCarriesSecret } from '../lib/decisionSecrets';
 import { staleAnswerCopy } from '../lib/decisionStaleness';
 import { useToast } from '../components/Toast';
 import { useGo } from '../app/link';
-import { clock } from '../lib/format';
+import { clock, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
 import { projectColorVar } from '../lib/projectColor';
 
@@ -153,12 +153,15 @@ export function ChatPage({
   const lastRun = conductor.data?.lastRun ?? null;
   /** Only for the divider between the two meters: whether the plan meter renders anything at all. */
   const hasPlanMeter = runtimeLimitStrip(accounts.data, conductorRuntime) !== null;
+  // The conductor's one runtime, so every turn's trace resolves its own model against the same
+  // compaction point the header meter uses (VS-204).
+  const compactionAt = (runtimes.data ?? []).find((r) => r.id === conductorRuntime)?.capabilities['contextCompactionAt'] as number | undefined;
   const context = useMemo(() => contextStrip({
     usage: lastRun?.usage,
     contextWindowTokens: resolveModel(conductorModels.data, lastRun?.model)?.contextWindowTokens,
-    compactionAt: (runtimes.data ?? []).find((r) => r.id === conductorRuntime)?.capabilities['contextCompactionAt'] as number | undefined,
+    compactionAt,
     hasRun: Boolean(lastRun?.finishedAt),
-  }), [lastRun, conductorModels.data, runtimes.data, conductorRuntime]);
+  }), [lastRun, conductorModels.data, compactionAt]);
   /**
    * The conductor run on screen, and whether it is still going.
    *
@@ -685,7 +688,14 @@ export function ChatPage({
                 row.kind === 'trace' ? (
                   /* A turn that said nothing. Secondary to the conversation, and collapsed until asked. */
                   <div key={row.key} className="opacity-80">
-                    <TurnTrace trace={row.trace} standalone open={expanded.includes(row.trace.runId)} onToggle={() => toggleTrace(row.trace.runId)} />
+                    <TurnTrace
+                      trace={row.trace}
+                      standalone
+                      open={expanded.includes(row.trace.runId)}
+                      onToggle={() => toggleTrace(row.trace.runId)}
+                      contextWindowTokens={resolveModel(conductorModels.data, row.trace.model)?.contextWindowTokens}
+                      compactionAt={compactionAt}
+                    />
                   </div>
                 ) : (
                   <div key={row.key} className="flex flex-col gap-2">
@@ -696,10 +706,17 @@ export function ChatPage({
                       ticketStatus={ticketStatus}
                       projectName={projectName}
                       onReply={row.entry.message.direction === 'outbound' ? () => patch({ replyToId: row.entry.message.id }) : undefined}
+                      usage={row.trace?.usage ?? null}
                     />
                     {/* Under the reply, above the work it filed: what the turn did, then what it left. */}
                     {row.trace ? (
-                      <TurnTrace trace={row.trace} open={expanded.includes(row.trace.runId)} onToggle={() => toggleTrace(row.trace!.runId)} />
+                      <TurnTrace
+                        trace={row.trace}
+                        open={expanded.includes(row.trace.runId)}
+                        onToggle={() => toggleTrace(row.trace!.runId)}
+                        contextWindowTokens={resolveModel(conductorModels.data, row.trace.model)?.contextWindowTokens}
+                        compactionAt={compactionAt}
+                      />
                     ) : null}
                     {row.entry.dispatches.map((d) => (
                       <DispatchLabel
@@ -975,6 +992,7 @@ function ChatMessage({
   ticketStatus,
   projectName,
   onReply,
+  usage,
 }: {
   message: ThreadMessage;
   ws: string;
@@ -982,8 +1000,13 @@ function ChatMessage({
   ticketStatus: (id: string) => ReturnType<typeof ticketUiStatus> | null;
   projectName: (id: string) => string;
   onReply?: () => void;
+  /** The message's own turn's token usage, or null when it has none (VS-204). */
+  usage?: RunTrace['usage'];
 }): React.ReactElement {
   const mine = message.direction === 'inbound';
+  // No turn produced a human's own message, so it never carries a token count even if a run happened
+  // to share its id (VS-204).
+  const spent = !mine && usage ? usage.inputTokens + usage.outputTokens : null;
   return (
     <div className={cx('group flex flex-col gap-1', mine && 'items-end')}>
       {/* The quote comes off the message itself, so it survives a reload and does not need the
@@ -1010,6 +1033,7 @@ function ChatMessage({
           <span className="rounded-r4 border border-line-2 bg-bg-2 px-1.5 py-0.5 text-nano text-text-3">{projectName(message.projectId)}</span>
         ) : null}
         <span className="ac-mono text-nano text-text-4">{clock(message.createdAt)}</span>
+        {spent != null ? <span className="ac-mono text-nano text-text-4">· {tokens(spent)} tok</span> : null}
         {onReply ? (
           <button
             type="button"

@@ -91,6 +91,27 @@ describe('RunsService.traces', () => {
     expect(runs.traces({})).toEqual([]);
   });
 
+  it('carries the run’s model and token usage (VS-204)', () => {
+    h = makeHarness();
+    const runs = createRunsService(h.ctx, () => h!.deps());
+    const usage = { inputTokens: 12_000, outputTokens: 400, cachedInputTokens: 0, contextTokens: 8_200, basis: 'per_turn' };
+    const runId = seedRun(h, [{ type: 'tool.call' }], { model: 'claude-opus-5', usageJson: usage });
+
+    const [trace] = runs.traces({ ids: [runId] });
+
+    expect(trace).toMatchObject({ model: 'claude-opus-5', usage });
+  });
+
+  it('carries no usage for a run whose runtime reported none (VS-204)', () => {
+    h = makeHarness();
+    const runs = createRunsService(h.ctx, () => h!.deps());
+    const runId = seedRun(h, [{ type: 'tool.call' }]);
+
+    const [trace] = runs.traces({ ids: [runId] });
+
+    expect(trace).toMatchObject({ model: null, usage: null });
+  });
+
   it('adds every run an agent took since a time, so a turn nothing else names is still described', () => {
     h = makeHarness();
     const runs = createRunsService(h.ctx, () => h!.deps());

@@ -84,8 +84,8 @@ export function createRunsService(ctx: WorkspaceContext, _deps: () => CoreServic
       const params: unknown[] = [ctx.workspaceId];
       if (ids.length) { or.push(`id IN (${ids.map(() => '?').join(',')})`); params.push(...ids); }
       if (window) { or.push('(agent_id = ? AND created_at >= ?)'); params.push(...window); }
-      const runs = ctx.db.all<Pick<Run, 'id' | 'status' | 'agentId' | 'createdAt' | 'startedAt' | 'finishedAt' | 'summary'>>(
-        `SELECT id, status, agent_id, created_at, started_at, finished_at, summary FROM runs
+      const runs = ctx.db.all<Pick<Run, 'id' | 'status' | 'agentId' | 'createdAt' | 'startedAt' | 'finishedAt' | 'summary' | 'model' | 'usage'>>(
+        `SELECT id, status, agent_id, created_at, started_at, finished_at, summary, model, usage_json FROM runs
           WHERE workspace_id = ? AND (${or.join(' OR ')}) ORDER BY created_at DESC, id DESC LIMIT ?`,
         [...params, filter.limit ?? 200] as never[],
       );
@@ -121,6 +121,8 @@ export function createRunsService(ctx: WorkspaceContext, _deps: () => CoreServic
           texts: c?.texts ?? 0,
           events: c?.events ?? 0,
           summary: run.summary,
+          model: run.model,
+          usage: run.usage,
         };
       });
     },

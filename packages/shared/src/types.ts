@@ -58,9 +58,10 @@ export interface RunEvent { id: string; runId: string; seq: number; ts: string; 
  * at once, and enough to say what a turn was without loading its transcript. `files` counts distinct
  * paths, so a file edited four times is one; `texts` counts the assistant text and thinking blocks,
  * so `toolCalls + files + errors + texts` being zero is how a surface knows there is no transcript
- * worth offering, whatever bookkeeping events the run also recorded.
+ * worth offering, whatever bookkeeping events the run also recorded. `model` and `usage` are the
+ * run's own (VS-204) — `usage` is `null` for a runtime that reported none, never a zeroed object.
  */
-export interface RunTrace { runId: string; status: E.RunStatus; agentId: string; createdAt: string; startedAt: string | null; finishedAt: string | null; durationMs: number | null; toolCalls: number; files: number; errors: number; texts: number; events: number; summary: string | null }
+export interface RunTrace { runId: string; status: E.RunStatus; agentId: string; createdAt: string; startedAt: string | null; finishedAt: string | null; durationMs: number | null; toolCalls: number; files: number; errors: number; texts: number; events: number; summary: string | null; model: string | null; usage: Run['usage'] }
 export interface UsageEvent { id: string; workspaceId: string; projectId: string | null; roleId: string | null; agentId: string; ticketId: string | null; runId: string; runtimeId: string; provider: string | null; model: string | null; billingType: E.BillingType; inputTokens: number; cachedInputTokens: number; outputTokens: number; costCents: number | null; costStatus: E.CostStatus; durationMs: number; occurredAt: string }
 /** One plan limit window as a runtime reports it. `utilization` is a percentage 0..100; a window the runtime does not quantify is omitted, never reported as zero. */
 export interface AccountLimitWindow { kind: E.AccountLimitKind; label: string; utilization: number; resetsAt: string | null; scopeLabel: string | null }

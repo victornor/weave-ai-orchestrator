@@ -1,6 +1,6 @@
 import type { Agent } from '@agent-conductor/shared';
 import { agentUiStatus, waitingOnRuntimeLogin } from '@agent-conductor/shared';
-import { workerPauseReason } from '@agent-conductor/render';
+import { workerPauseDetail } from '@agent-conductor/render';
 import { StatusGlyph, StatusBadge, Badge } from './StatusGlyph';
 import { Button } from './Button';
 import { cents, initials, tokens } from '../lib/format';
@@ -41,8 +41,10 @@ export function WorkerCard({
 }: WorkerCardProps): React.ReactElement {
   const ui = agentUiStatus(agent.status, { needsYou, stalled });
   // Why it stopped, worded once in @agent-conductor/render so the web app and `conductor worker`
-  // say the same thing. Null unless the worker is paused.
-  const pausedFor = workerPauseReason(agent);
+  // say the same thing. Null unless the worker is paused. The tooltip carries the complete message
+  // (VS-201) — the visible line stays the capped, ellipsis-marked preview.
+  const pauseDetail = workerPauseDetail(agent);
+  const pausedFor = pauseDetail?.summary ?? null;
   return (
     <div className={cx('ac-card', className)}>
     <button type="button" onClick={onOpen} className="w-full p-3 text-left transition-colors duration-(--dur-fast) ease-ac hover:bg-bg-2">
@@ -82,7 +84,7 @@ export function WorkerCard({
     </button>
       {pausedFor ? (
         <div className="flex items-center gap-2 border-t border-line-1 px-3 py-2">
-          <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3" title={pausedFor}>
+          <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3" title={pauseDetail?.full ?? pausedFor}>
             {pausedFor}
           </span>
           {/* A worker waiting on its runtime's login resumes by itself; offering Resume here would
@@ -100,7 +102,7 @@ export function WorkerCard({
 
 export function WorkerRow({ agent, projectSlug, ticketIdentifier, lastLine, needsYou, stalled, interactive, onOpen }: WorkerCardProps): React.ReactElement {
   const ui = agentUiStatus(agent.status, { needsYou, stalled });
-  const pausedFor = workerPauseReason(agent);
+  const pausedFor = workerPauseDetail(agent)?.summary ?? null;
   return (
     <button
       type="button"

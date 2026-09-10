@@ -172,6 +172,9 @@ function answerLine(decision: Decision): string | null {
   return chosen ?? text;
 }
 
+/** Above this, a decision's context collapses behind a "Show full text" control (VS-201). */
+const CONTEXT_PREVIEW_CHARS = 500;
+
 /**
  * One decision per card. Header says what it is, the body is per variant, the
  * primary action sits bottom-left inside a 44 px thumb band. A decision that has
@@ -183,6 +186,9 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
   const [freeText, setFreeText] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [values, setValues] = useState<DecisionAnswerInputs>({});
+  // A long context (a failure's full runtime message, say) stays bounded until asked for in full
+  // (VS-201) — never clipped by CSS, which can cut mid-word with no way to tell from outside.
+  const [contextExpanded, setContextExpanded] = useState(false);
   const target = (decision.target ?? {}) as Target;
   const inputs = decision.inputs ?? [];
   const destructive = decision.kind === 'discard_approval';
@@ -252,7 +258,24 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
       <div className={compact ? 'p-3' : 'p-3.5'}>
         <h3 className={cx(compact ? 'mb-1' : 'mb-1.5', 'text-head font-semibold leading-snug tracking-head text-text-strong')}>{decision.title}</h3>
         {why ? <p className={cx(section, 'text-meta leading-snug text-text-2')}>{why}</p> : null}
-        {decision.context ? <Markdown source={decision.context} className={cx(section, 'text-meta leading-relaxed text-text-2')} /> : null}
+        {decision.context && decision.context.length > CONTEXT_PREVIEW_CHARS ? (
+          <div className={section}>
+            <Markdown
+              source={contextExpanded ? decision.context : `${decision.context.slice(0, CONTEXT_PREVIEW_CHARS)}…`}
+              className="text-meta leading-relaxed text-text-2"
+            />
+            <button
+              type="button"
+              aria-expanded={contextExpanded}
+              onClick={() => setContextExpanded((v) => !v)}
+              className="ac-mono mt-1.5 text-micro text-accent-link"
+            >
+              {contextExpanded ? 'Show less' : 'Show full text'}
+            </button>
+          </div>
+        ) : decision.context ? (
+          <Markdown source={decision.context} className={cx(section, 'text-meta leading-relaxed text-text-2')} />
+        ) : null}
 
         {/* plan approval — the proposal's task list */}
         {target.tasks?.length ? (

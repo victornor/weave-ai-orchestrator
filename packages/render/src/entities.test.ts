@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Agent, Ticket } from '@agent-conductor/shared';
-import { ticketToSummary, workerToCard } from './entities.js';
+import { ticketToSummary, workerPauseDetail, workerToCard } from './entities.js';
 
 const now = new Date('2026-09-04T12:00:00.000Z');
 
@@ -119,5 +119,28 @@ describe('workerToCard', () => {
     expect(c.name).toBe('Worker');
     expect(c.runtime).toBe('unknown');
     expect(c.turn).toBe(0);
+  });
+});
+
+// VS-201: a compact one-line preview of a pause reason still needs the complete message somewhere —
+// a tooltip, say — rather than discarding it once the 160-char preview is built.
+describe('workerPauseDetail', () => {
+  it('pairs the capped one-line summary with the complete underlying message', () => {
+    const longMessage = `Cannot use this model: grok-4-6. Available models: ${'auto, '.repeat(60)}gpt-5.9-sol-xhigh`;
+    const d = workerPauseDetail(agent({ status: 'paused', pauseDetail: { family: 'unknown', code: 'bad_model', message: longMessage, resetAt: null, runId: null } }));
+    expect(d).not.toBeNull();
+    expect(d!.summary.length).toBeLessThan(longMessage.length);
+    expect(d!.summary).not.toContain('gpt-5.9-sol-xhigh');
+    expect(d!.full).toContain('gpt-5.9-sol-xhigh');
+    expect(d!.full).toContain(longMessage);
+  });
+
+  it('is null exactly when workerPauseReason is null', () => {
+    expect(workerPauseDetail(agent({ status: 'active' }))).toBeNull();
+  });
+
+  it('matches the summary when the message is short', () => {
+    const d = workerPauseDetail(agent({ status: 'paused', pauseDetail: { family: 'unknown', code: 'boom', message: 'the CLI died', resetAt: null, runId: null } }));
+    expect(d!.summary).toBe(d!.full);
   });
 });

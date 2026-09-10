@@ -9,6 +9,7 @@ import {
   type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
 } from '@agent-conductor/shared';
 import type { McpServerConfig, RuntimeEvent, TurnHandle, TurnInput, TurnResult } from '@agent-conductor/runtime-sdk';
+import { truncate } from '@agent-conductor/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { createSessions, type SessionsService } from '../sessions/index.js';
@@ -372,7 +373,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     });
   } catch (e) {
     const err = e as Error & { ocFamily?: RunErrorFamily; ocCode?: string };
-    failure = { code: err.ocCode ?? 'engine_error', family: err.ocFamily ?? 'tooling', message: err.message.slice(0, 500) };
+    failure = { code: err.ocCode ?? 'engine_error', family: err.ocFamily ?? 'tooling', message: truncate(err.message, 4000) };
     log.error({ err: err.message }, 'run failed in the engine');
     record('error', { message: failure.message, code: failure.code }, 'system', 'error');
   }
@@ -635,6 +636,9 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
   const ticketId = f.agent.ticketId;
   const quota = family === 'provider_quota';
   const resetAt = quota ? parseResetTime(message ?? '') : null;
+  // Bounded once and reused everywhere below, so the pause detail and the decision's context always
+  // agree on the same text rather than two call sites each picking their own cap (VS-201).
+  const boundedMessage = message ? truncate(message, 4000) : null;
   // Each step is guarded on its own: parking is the last thing that happens before a human has to
   // notice by hand, so one step failing must not take the others with it, and none of it may fail
   // quietly. VS-49: the decision could not be stored at all, and the single try that used to wrap
@@ -651,7 +655,7 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
       // runtime's own words without joining runs or a decision that may not exist.
       pauseDetailJson: {
         family: family ?? null, code: code ?? null,
-        message: message ? message.slice(0, 400) : null,
+        message: boundedMessage,
         resetAt: resetAt ? resetAt.toISOString() : null, runId: f.run.id,
       },
       updatedAt: nowIso(),
@@ -677,7 +681,7 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
         : `${f.agent.name} failed${identifier ? ` on ${identifier.identifier}` : ''}: ${code ?? family ?? 'unknown error'}`,
       context: [
         `Failure: ${family ?? 'unknown'}${code ? ` (${code})` : ''}`,
-        message ? `Last error: ${message.slice(0, 400)}` : null,
+        boundedMessage ? `Last error: ${boundedMessage}` : null,
         quota
           ? `${resetAt ? `The runtime says the limit resets at ${fmtUtc(resetAt)} UTC. ` : ''}A usage limit is not retried automatically, so nothing will run until you answer: retry now, ${resetAt ? 'retry when it resets' : 'retry in an hour'}, or cancel.`
           : 'Automatic retries are spent. Retry or cancel the ticket.',

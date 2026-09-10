@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { spawnLines } from './process.js';
+import { classifyError, spawnLines } from './process.js';
 
 const ECHO_SCRIPT = "process.stdin.setEncoding('utf8'); process.stdin.on('data', c => process.stdout.write(c.split('\\n').filter(Boolean).map(l => 'echo:' + l + '\\n').join(''))); process.stdin.on('end', () => process.exit(0));";
 
@@ -39,5 +39,23 @@ describe('spawnLines stdin modes', () => {
     await run.done;
     expect(() => run.write('too late\n')).not.toThrow();
     expect(run.write('too late\n')).toBe(false);
+  });
+});
+
+describe('classifyError', () => {
+  it('preserves a realistically long, structured message intact (VS-201)', () => {
+    const models = Array.from({ length: 60 }, (_, i) => `gpt-5.${i}-sol-high`).join(', ');
+    const stderr = `Cannot use this model: grok-4-6. Available models: ${models}`;
+    expect(stderr.length).toBeLessThan(4000);
+    const err = classifyError(1, stderr);
+    expect(err?.message).toBe(stderr);
+    expect(err?.message).toContain(`gpt-5.59-sol-high`);
+  });
+
+  it('marks a message longer than the generous limit instead of cutting it silently', () => {
+    const stderr = `x`.repeat(5000);
+    const err = classifyError(1, stderr);
+    expect(err?.message.length).toBeLessThan(5000);
+    expect(err?.message).toMatch(/…\[\+\d+ chars\]$/);
   });
 });

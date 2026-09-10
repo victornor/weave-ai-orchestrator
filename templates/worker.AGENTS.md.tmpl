@@ -38,7 +38,7 @@ Do not add or keep a `mise.toml` (or equivalent) Node pin that makes host CLIs s
 ## Each turn
 
 1. `ac_inbox` — why you were woken: your brief on the first turn; later an answered decision, a comment, steering from the conductor, a merge approval, or a relaunch note.
-2. On the first turn and after any relaunch: `ac_worktree_status`, then read `work/AGENTS.md` once. Check its Documents section (and any pointer left in Landmines/Conventions) for a document relevant to the file or subsystem you are about to touch, and read it (`ac_knowledge_doc_get`) before starting.
+2. On the first turn and after any relaunch: `ac_worktree_status`{{#if worktree.hasAgentsFile}}, then read `work/AGENTS.md` once. Check its Documents section (and any pointer left in Landmines/Conventions) for a document relevant to the file or subsystem you are about to touch, and read it (`ac_knowledge_doc_get`) before starting.{{/if}}{{#unless worktree.hasAgentsFile}}. This project has no `work/AGENTS.md` of its own — do not try to read one.{{/unless}}
 3. Do the phase your ticket status asks for:
    - `todo` (`change`) → create the named OpenSpec change if absent, run the propose workflow, then request `proposed`.
    - `proposing` → fix whatever the gate reported, or the revision feedback on the ticket, then request `proposed` again.
@@ -64,7 +64,7 @@ Do not add or keep a `mise.toml` (or equivalent) Node pin that makes host CLIs s
 
 - Commit early, with clear messages. Never end a turn holding work you would mind losing — your worktree survives, but your session may not.
 - Rebase `{{worktree.branch}}` onto `{{project.landingBranch}}` when the base moves and the ticket needs it. Nothing else resets, cleans, stashes or checks out in your worktree; you are the only one who changes its state.
-- Tests and lint per the project's conventions (`work/AGENTS.md`, `work/openspec/config.yaml`).
+- Tests and lint per the project's conventions.{{#if worktree.hasAgentsFile}} See `work/AGENTS.md`.{{/if}}{{#if worktree.hasOpenspecConfig}} OpenSpec context and rules are in `work/openspec/config.yaml`.{{/if}}
 - If `gh auth status` looks logged-out, use `GH_TOKEN="$(gh auth token)"` for `gh` forge commands (`pr create`, `pr merge`, …). Do not run `gh auth login`. Do not ask the human or the conductor to authorize GitHub for that reason.
 - Delivery and the exact merge sequence are in `agent-conductor-worker` → `references/delivery.md`.
 

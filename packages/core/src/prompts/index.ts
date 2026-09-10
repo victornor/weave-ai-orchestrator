@@ -78,7 +78,7 @@ export interface WorkerTemplateData extends Record<string, unknown> {
   role: Record<string, unknown>;
   project: Record<string, unknown>;
   ticket: Record<string, unknown>;
-  worktree: { path: string; branch: string };
+  worktree: { path: string; branch: string; hasAgentsFile: boolean; hasOpenspecConfig: boolean };
   brief: { definitionOfDone: string; relaunchNote: string | null };
   knowledge: { shared: string; project: string };
 }
@@ -108,7 +108,13 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
       priority: t?.priority ?? 'medium', status: t?.status ?? 'todo', acceptance: t ? parseAcceptance(t.description) : [],
       openspecChange: t?.openspecChangeName ?? null, links: t?.parentId ? `parent ${t.parentId}` : '',
     },
-    worktree: { path: agent.worktreePath ?? 'work/', branch: agent.branch ?? '' },
+    worktree: {
+      path: agent.worktreePath ?? 'work/', branch: agent.branch ?? '',
+      // The brief must never claim a project-repo file exists that the daemon has not actually
+      // checked for (VS-211) — many projects have no AGENTS.md or OpenSpec config of their own.
+      hasAgentsFile: Boolean(agent.worktreePath && existsSync(join(agent.worktreePath, 'AGENTS.md'))),
+      hasOpenspecConfig: Boolean(agent.worktreePath && existsSync(join(agent.worktreePath, 'openspec', 'config.yaml'))),
+    },
     brief: { definitionOfDone: definitionOfDone((t?.kind ?? 'task') as S.TicketKind, deliveryMode), relaunchNote: opts.relaunchNote ?? null },
     knowledge: { shared: knowledgeText(deps, 'shared'), project: agent.projectId ? knowledgeText(deps, 'project', agent.projectId) : '' },
   };

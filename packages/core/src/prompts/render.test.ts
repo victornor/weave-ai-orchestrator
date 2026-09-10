@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -58,6 +59,78 @@ describe('prompt rendering', () => {
 
   it('includes the relaunch note in the brief when one is given', () => {
     expect(renderBrief(h.ctx, h.deps, worker, { relaunchNote: 'you stopped responding' })).toContain('you stopped responding');
+  });
+
+  describe('mentions work/AGENTS.md and work/openspec/config.yaml only when the worktree has them (VS-211)', () => {
+    const dirs: string[] = [];
+    afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+
+    const withWorktree = (contents: { agentsMd?: boolean; openspecConfig?: boolean } = {}): Agent => {
+      const dir = mkdtempSync(join(tmpdir(), 'ac-worktree-'));
+      dirs.push(dir);
+      if (contents.agentsMd) writeFileSync(join(dir, 'AGENTS.md'), '# project agents\n', 'utf8');
+      if (contents.openspecConfig) {
+        mkdirSync(join(dir, 'openspec'), { recursive: true });
+        writeFileSync(join(dir, 'openspec', 'config.yaml'), 'schema: spec-driven\n', 'utf8');
+      }
+      // A fresh ticket per call: `agents.ticket_id` is unique, and the outer `beforeEach` already
+      // bound one worker to `ticketId`.
+      const otherTicketId = newId();
+      const now = nowIso();
+      h.db.insert('tickets', {
+        id: otherTicketId, workspaceId: h.workspaceId, projectId: h.projectId, number: 900 + dirs.length, identifier: `TST-${900 + dirs.length}`,
+        kind: 'task', title: 'Worktree fixture', description: '', status: 'in_progress', priority: 'medium',
+        assigneeRoleId: h.roleId, createdByKind: 'agent', createdAt: now, updatedAt: now,
+      });
+      const id = h.addWorker(otherTicketId, { branch: 'ac/worktree-fixture', worktreePath: dir });
+      return h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [id])!;
+    };
+
+    it('with the built-in fallback templates: reads it when present', () => {
+      const w = withWorktree({ agentsMd: true });
+      expect(renderBrief(h.ctx, h.deps, w)).toContain('Read `work/AGENTS.md` once.');
+      expect(renderBrief(h.ctx, h.deps, w)).not.toContain('has no `work/AGENTS.md`');
+    });
+
+    it('with the built-in fallback templates: says plainly there is none, and does not tell the worker to read it', () => {
+      const w = withWorktree({});
+      const brief = renderBrief(h.ctx, h.deps, w);
+      expect(brief).not.toContain('Read `work/AGENTS.md` once.');
+      expect(brief).toContain('This project has no `work/AGENTS.md` of its own.');
+      expect(brief).not.toMatch(/\{\{|\}\}/);
+    });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('with the shipped templates: names both files when present, in the brief and in the worker AGENTS.md', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const w = withWorktree({ agentsMd: true, openspecConfig: true });
+      const brief = renderBrief(h.ctx, h.deps, w);
+      expect(brief).toContain('Then read `work/AGENTS.md`');
+      expect(brief).toContain('- `work/AGENTS.md` — the project\'s own contributor instructions.');
+      expect(brief).toContain('- `work/openspec/config.yaml` — the project\'s OpenSpec context and rules.');
+      const instructions = renderWorkerInstructions(h.ctx, h.deps, w);
+      expect(instructions).toContain('read `work/AGENTS.md` once');
+      expect(instructions).toContain('See `work/AGENTS.md`.');
+      expect(instructions).toContain('OpenSpec context and rules are in `work/openspec/config.yaml`.');
+      expect(brief).not.toMatch(/\{\{|\}\}/);
+      expect(instructions).not.toMatch(/\{\{[#/]?[a-z]/i);
+    });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('with the shipped templates: names neither file, and no failed-read instruction survives, when the worktree has none', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const w = withWorktree({});
+      const brief = renderBrief(h.ctx, h.deps, w);
+      expect(brief).not.toContain('read `work/AGENTS.md`');
+      expect(brief).not.toContain('- `work/AGENTS.md` —');
+      expect(brief).not.toContain('- `work/openspec/config.yaml` —');
+      expect(brief).toContain('This project has no `work/AGENTS.md` of its own');
+      const instructions = renderWorkerInstructions(h.ctx, h.deps, w);
+      expect(instructions).not.toContain('read `work/AGENTS.md`');
+      expect(instructions).not.toContain('See `work/AGENTS.md`.');
+      expect(instructions).not.toContain('OpenSpec context and rules are in `work/openspec/config.yaml`.');
+      expect(instructions).toContain('This project has no `work/AGENTS.md` of its own');
+      expect(brief).not.toMatch(/\{\{|\}\}/);
+      expect(instructions).not.toMatch(/\{\{[#/]?[a-z]/i);
+    });
   });
 
   it('renders the conductor instructions with the live portfolio', () => {

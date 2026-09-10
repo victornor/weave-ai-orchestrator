@@ -55,12 +55,12 @@ export function ProjectTag({
       className={cx(
         'inline-flex max-w-full shrink-0 items-center gap-1.5 rounded-r4 border px-2 py-1 text-micro',
         'transition-colors duration-(--dur-fast) ease-ac',
-        active ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 bg-bg-2 text-text-3 hover:bg-bg-3',
+        active ? 'border-accent-edge bg-accent-tint' : 'border-line-2 bg-bg-2 hover:bg-bg-3',
+        colorVar ? undefined : active ? 'text-accent-link' : 'text-text-3',
         className,
       )}
     >
-      {colorVar ? <span className="size-1.5 rounded-full" style={{ background: colorVar }} data-project-color aria-hidden /> : null}
-      <span className="ac-truncate max-w-32">{label}</span>
+      <span className="ac-truncate max-w-32" {...(colorVar ? { style: { color: colorVar }, 'data-project-color': '' } : {})}>{label}</span>
     </button>
   );
 }
@@ -91,8 +91,7 @@ export function WorkerChip({
       )}
     >
       <StatusGlyph status={status} size="xs" pulse={status === 'working'} />
-      {projectColorVar ? <span className="size-1.5 rounded-full" style={{ background: projectColorVar }} data-project-color aria-hidden /> : null}
-      <span className="text-micro text-text-soft">{name}</span>
+      <span className={cx('text-micro', projectColorVar ? undefined : 'text-text-soft')} {...(projectColorVar ? { style: { color: projectColorVar }, 'data-project-color': '' } : {})}>{name}</span>
       {note ? <span className="ac-mono ac-truncate text-micro text-text-3">{note}</span> : null}
     </button>
   );

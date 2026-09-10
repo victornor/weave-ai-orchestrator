@@ -553,7 +553,15 @@ function ModelsSection(): React.ReactElement {
   );
 }
 
-function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange, onCommit }: {
+/** A model the adapter does not list is still valid — several runtimes list nothing useful — so a
+ * value outside the known list is "custom" rather than invalid, and the picker offers a
+ * free-text escape hatch instead of losing it. An empty known list means there is nothing to
+ * check against, so nothing counts as custom yet. */
+function isCustomModel(model: string | null, known: T.RuntimeModel[]): boolean {
+  return model !== null && known.length > 0 && !known.some((m) => m.id === model);
+}
+
+function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange, onCommit, scopeControl }: {
   label: string;
   hint: string;
   setting: T.ModelSetting;
@@ -561,13 +569,13 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
   disabled?: boolean;
   onChange: (next: T.ModelSetting) => void;
   onCommit: (next: T.ModelSetting) => Promise<void>;
+  /** An inherit-vs-override control rendered under the hint, above the runtime/model fields it governs (VS-207). */
+  scopeControl?: React.ReactNode;
 }): React.ReactElement {
   const models = useRuntimeModels(setting.runtime);
   const known = models.data ?? [];
-  // A model the adapter does not list is still valid — several runtimes list nothing useful — so the
-  // picker carries a "something else" entry that reveals a text box rather than losing the value.
   const [freeText, setFreeText] = useState(false);
-  const custom = freeText || (setting.model !== null && known.length > 0 && !known.some((m) => m.id === setting.model));
+  const custom = freeText || isCustomModel(setting.model, known);
   const modelId = useCommittableField({
     value: setting.model ?? '',
     onCommit: async (raw) => {
@@ -580,13 +588,17 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
     <div className="flex flex-col gap-1">
       <h3 className="ac-label text-text-1">{label}</h3>
       <p className="text-micro text-text-3">{hint}</p>
+      {scopeControl}
       <Field label="Runtime">
         <select
           className={cx(inputCx, 'ac-mono')}
           aria-label={`${label} runtime`}
           value={setting.runtime}
           disabled={disabled}
-          onChange={(e) => onChange({ ...setting, runtime: e.target.value })}
+          onChange={(e) => {
+            if (disabled) return;
+            onChange({ ...setting, runtime: e.target.value });
+          }}
         >
           {runtimes.map((r) => (
             <option key={r.id} value={r.id} disabled={!isRuntimeAvailable(r)}>
@@ -604,6 +616,7 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
           value={custom ? '__other' : setting.model ?? ''}
           disabled={disabled}
           onChange={(e) => {
+            if (disabled) return;
             if (e.target.value === '__other') { setFreeText(true); return; }
             setFreeText(false);
             onChange({ ...setting, model: e.target.value === '' ? null : e.target.value });
@@ -625,11 +638,15 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
               className={cx(inputCx, 'ac-mono')}
               aria-label={`${label} model id`}
               value={modelId.draft}
-              onChange={(e) => modelId.onChange(e.target.value)}
+              disabled={disabled}
+              onChange={(e) => {
+                if (disabled) return;
+                modelId.onChange(e.target.value);
+              }}
               onBlur={modelId.onBlur}
               onKeyDown={modelId.onKeyDown}
             />
-            <CommitStatus status={modelId.status} error={modelId.error} onSave={modelId.commitNow} />
+            {disabled ? null : <CommitStatus status={modelId.status} error={modelId.error} onSave={modelId.commitNow} />}
           </div>
         </Field>
       ) : null}
@@ -647,19 +664,25 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
   const [id, setId] = useState('');
   const [description, setDescription] = useState('');
   const [runtime, setRuntime] = useState(current.workers.runtime);
-  const [model, setModel] = useState('');
+  const [model, setModel] = useState<string | null>(null);
+  const [freeText, setFreeText] = useState(false);
+  const optionModels = useRuntimeModels(runtime);
+  const knownOptionModels = optionModels.data ?? [];
+  const customModel = freeText || isCustomModel(model, knownOptionModels);
 
   const add = (): void => {
     const trimmedId = id.trim();
     const trimmedDesc = description.trim();
     if (!trimmedId || !trimmedDesc) return;
+    const trimmedModel = model?.trim();
     onSave({
       ...current,
-      workerOptions: [...options, { id: trimmedId, description: trimmedDesc, runtime, model: model.trim() === '' ? null : model.trim() }],
+      workerOptions: [...options, { id: trimmedId, description: trimmedDesc, runtime, model: trimmedModel ? trimmedModel : null }],
     });
     setId('');
     setDescription('');
-    setModel('');
+    setModel(null);
+    setFreeText(false);
   };
 
   return (
@@ -695,9 +718,36 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
           ))}
         </select>
       </Field>
-      <Field label="Model" hint="Empty means the runtime chooses.">
-        <input className={cx(inputCx, 'ac-mono')} aria-label="New worker option model" value={model} onChange={(e) => setModel(e.target.value)} />
+      <Field label="Model">
+        <select
+          className={cx(inputCx, 'ac-mono')}
+          aria-label="New worker option model"
+          value={customModel ? '__other' : model ?? ''}
+          onChange={(e) => {
+            if (e.target.value === '__other') { setFreeText(true); return; }
+            setFreeText(false);
+            setModel(e.target.value === '' ? null : e.target.value);
+          }}
+        >
+          <option value="">runtime default</option>
+          {knownOptionModels.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+          <option value="__other">something else…</option>
+        </select>
       </Field>
+      {customModel ? (
+        <Field label="New worker option model id" hint="A model this runtime offers that is not in the list.">
+          <input
+            className={cx(inputCx, 'ac-mono')}
+            aria-label="New worker option model id"
+            value={model ?? ''}
+            onChange={(e) => setModel(e.target.value)}
+          />
+        </Field>
+      ) : null}
       <Button onClick={add} disabled={disabled}>Add worker option</Button>
     </div>
   );
@@ -711,13 +761,18 @@ function DaemonModelsSection(): React.ReactElement {
   const overlays = useDaemonModels();
   const save = useSetDaemonModels();
   const runtimes = useRuntimes();
+  const workspaceModels = useModels();
   const list = runtimes.data ?? [];
 
-  if (overlays.isLoading) return <SkeletonRows rows={4} />;
+  if (overlays.isLoading || workspaceModels.isLoading) return <SkeletonRows rows={4} />;
   if (!overlays.data) return <ErrorState code="MODELS_UNREACHABLE" message="The daemon model overlays could not be read." />;
 
   const current = overlays.data;
-  const fallback = emptySetting(list);
+  const emptyFallback = emptySetting(list);
+  // While inheriting, a row previews and seeds an override from *this* workspace's own setting —
+  // the one concrete value on hand — not a hardcoded default (VS-207).
+  const conductorFallback = workspaceModels.data?.conductor ?? emptyFallback;
+  const workersFallback = workspaceModels.data?.workers ?? emptyFallback;
 
   return (
     <div className="flex flex-col gap-5">
@@ -727,7 +782,7 @@ function DaemonModelsSection(): React.ReactElement {
       <OverlaySetting
         label="Conductor"
         setting={current.conductor}
-        fallback={fallback}
+        fallback={conductorFallback}
         runtimes={list}
         onFill={(next) => save.mutate({ conductor: next })}
         onClear={() => save.mutate({ conductor: null })}
@@ -735,7 +790,7 @@ function DaemonModelsSection(): React.ReactElement {
       <OverlaySetting
         label="Workers"
         setting={current.workers}
-        fallback={fallback}
+        fallback={workersFallback}
         runtimes={list}
         onFill={(next) => save.mutate({ workers: next })}
         onClear={() => save.mutate({ workers: null })}
@@ -743,7 +798,7 @@ function DaemonModelsSection(): React.ReactElement {
       <DaemonWorkerOptions
         options={current.workerOptions}
         runtimes={list}
-        fallback={fallback}
+        fallback={emptyFallback}
         onSave={(next) => save.mutate({ workerOptions: next })}
       />
       {save.error ? <ErrorState code="MODELS_NOT_SAVED" message={save.error.message} /> : null}
@@ -761,19 +816,35 @@ function OverlaySetting({ label, setting, fallback, runtimes, onFill, onClear }:
 }): React.ReactElement {
   const filled = setting != null;
   return (
-    <div className="flex flex-col gap-1">
-      <ModelSettingFields
-        label={label}
-        hint={filled ? 'Overrides every workspace.' : 'Per workspace until you pick a runtime.'}
-        setting={setting ?? fallback}
-        runtimes={runtimes}
-        onChange={onFill}
-        onCommit={async (next) => { onFill(next); }}
-      />
-      {filled ? (
-        <Button aria-label={`Clear ${label} overlay`} onClick={onClear}>Use per-workspace settings</Button>
-      ) : null}
-    </div>
+    <ModelSettingFields
+      label={label}
+      hint={
+        filled
+          ? 'Overrides every workspace.'
+          : "Inheriting this workspace's own setting below; another workspace on this daemon may hold a different one."
+      }
+      setting={setting ?? fallback}
+      runtimes={runtimes}
+      disabled={!filled}
+      onChange={onFill}
+      onCommit={async (next) => { onFill(next); }}
+      scopeControl={
+        <Field label="Scope">
+          <select
+            className={cx(inputCx, 'ac-mono')}
+            aria-label={`${label} scope`}
+            value={filled ? 'override' : 'inherit'}
+            onChange={(e) => {
+              if (e.target.value === 'inherit') onClear();
+              else onFill(fallback);
+            }}
+          >
+            <option value="inherit">Inherit — {fallback.runtime} · {fallback.model ?? 'default'}</option>
+            <option value="override">Override for every workspace</option>
+          </select>
+        </Field>
+      }
+    />
   );
 }
 

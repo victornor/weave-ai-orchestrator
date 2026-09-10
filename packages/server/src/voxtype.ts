@@ -79,6 +79,64 @@ export function resolveVoxtypeModel(requested: string | undefined, status: Voxty
   return installed[0]?.id;
 }
 
+export interface WavAnalysis {
+  sampleRate: number;
+  channels: number;
+  bitsPerSample: number;
+  durationSec: number;
+  peakAmplitude: number;
+  rms: number;
+}
+
+/**
+ * Measures the audio actually handed to Voxtype (VS-196): the temp WAV is deleted right after the
+ * call, so this is the only evidence of its format and level that outlives the request. Only reads
+ * 16-bit PCM (what `wav.ts` always produces); anything else returns `null` rather than guessing.
+ */
+export function analyzeWav(buffer: Buffer): WavAnalysis | null {
+  if (buffer.length < 44 || buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') {
+    return null;
+  }
+  let offset = 12;
+  let fmt: { channels: number; sampleRate: number; bitsPerSample: number } | null = null;
+  let data: { start: number; length: number } | null = null;
+  while (offset + 8 <= buffer.length) {
+    const id = buffer.toString('ascii', offset, offset + 4);
+    const size = buffer.readUInt32LE(offset + 4);
+    const body = offset + 8;
+    if (id === 'fmt ' && body + 16 <= buffer.length) {
+      fmt = {
+        channels: buffer.readUInt16LE(body + 2),
+        sampleRate: buffer.readUInt32LE(body + 4),
+        bitsPerSample: buffer.readUInt16LE(body + 14),
+      };
+    } else if (id === 'data') {
+      data = { start: body, length: Math.min(size, buffer.length - body) };
+    }
+    offset = body + size + (size % 2);
+  }
+  if (!fmt || !data || fmt.bitsPerSample !== 16 || fmt.channels < 1 || fmt.sampleRate <= 0) return null;
+
+  const sampleCount = Math.floor(data.length / 2);
+  let peak = 0;
+  let sumSquares = 0;
+  for (let i = 0; i < sampleCount; i++) {
+    const s = buffer.readInt16LE(data.start + i * 2) / 0x8000;
+    const abs = Math.abs(s);
+    if (abs > peak) peak = abs;
+    sumSquares += s * s;
+  }
+  const framesPerChannel = sampleCount / fmt.channels;
+  return {
+    sampleRate: fmt.sampleRate,
+    channels: fmt.channels,
+    bitsPerSample: fmt.bitsPerSample,
+    durationSec: fmt.sampleRate > 0 ? framesPerChannel / fmt.sampleRate : 0,
+    peakAmplitude: peak,
+    rms: sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0,
+  };
+}
+
 export function createVoxtypeProbe(opts: VoxtypeProbeOptions = {}): VoxtypeProbe {
   const binary = opts.binary ?? 'voxtype';
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -103,13 +161,19 @@ export function createVoxtypeProbe(opts: VoxtypeProbeOptions = {}): VoxtypeProbe
       const wav = join(dir, 'dictation.wav');
       try {
         await writeFile(wav, audio);
+        const analysis = analyzeWav(audio);
+        log.info({ analysis }, 'voxtype transcribe input audio');
         const args = model ? ['--model', model, 'transcribe', wav] : ['transcribe', wav];
         const r = await runVoxtype(binary, args, { timeoutMs });
         if (r.code !== 0) {
           log.warn({ code: r.code, err: r.stderr.slice(0, 500) }, 'voxtype transcribe failed');
           throw new OcError('internal', `voxtype transcribe exited with ${r.code}`, { stderr: r.stderr.slice(0, 500) });
         }
-        return extractVoxtypeTranscript(r.stdout);
+        const text = extractVoxtypeTranscript(r.stdout);
+        if (!text) {
+          log.warn({ analysis, stdout: r.stdout.slice(0, 2000) }, 'voxtype transcribe returned an empty transcript');
+        }
+        return text;
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

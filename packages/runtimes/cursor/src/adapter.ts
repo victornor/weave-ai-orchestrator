@@ -9,6 +9,7 @@ import { describeCursorAccount } from './account.js';
 import { buildArgs, namedModel } from './args.js';
 import { readCredential } from './credential.js';
 import { createCursorParser } from './events.js';
+import { listModels as listCursorModels, parseUnknownModelRejection } from './models.js';
 import { asCursorSession } from './session.js';
 
 export const capabilities: RuntimeCapabilities = {
@@ -22,16 +23,6 @@ export const capabilities: RuntimeCapabilities = {
   costReporting: false,
   permissionModes: ['auto', 'restricted', 'bypass'],
 };
-
-const MODELS: RuntimeModel[] = [
-  { id: 'auto', label: 'Auto', provider: 'cursor', source: 'static', tier: 'balanced' },
-  { id: 'grok-4-6', label: 'Grok 4.6', provider: 'xai', source: 'static', tier: 'frontier' },
-  { id: 'opus-5', label: 'Opus 5', provider: 'anthropic', source: 'static', tier: 'frontier' },
-  { id: 'composer-5-6', label: 'Composer 5.6', provider: 'cursor', source: 'static', tier: 'balanced' },
-  { id: 'fable-5-1', label: 'Fable 5.1', provider: 'anthropic', source: 'static', tier: 'frontier' },
-  { id: 'gpt-5', label: 'GPT-5', provider: 'openai', source: 'static', tier: 'frontier' },
-  { id: 'sonnet-4-thinking', label: 'Sonnet 4 Thinking', provider: 'anthropic', source: 'static', tier: 'frontier' },
-];
 
 /**
  * VS-167: `cursor-agent` has spawned and written nothing at all — not even `system.init` — within
@@ -70,7 +61,7 @@ export const adapter: RuntimeAdapter = {
   capabilities,
 
   detect(): Promise<RuntimeDetection> { return detectBinary('cursor-agent', ['--version']); },
-  async listModels(): Promise<RuntimeModel[]> { return MODELS.map((m) => ({ ...m })); },
+  async listModels(): Promise<RuntimeModel[]> { return listCursorModels(); },
   configSchema(): JsonSchema { return structuredClone(CONFIG_SCHEMA); },
   skillsDir(): string { return '.cursor/skills'; },
   instructionFiles(): string[] { return ['AGENTS.md']; },
@@ -149,14 +140,19 @@ export const adapter: RuntimeAdapter = {
     // `spawnLines` naturally returns for our own interrupt) because a true `timedOut` makes
     // `finalize()` overwrite `error` with a generic `timeout`/`tooling` pair.
     const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError || noOutputTimedOut || Boolean(mismatchedModel);
+    const rejection = failed && !noOutputTimedOut && !mismatchedModel
+      ? parseUnknownModelRejection(`${st.errorMessage ?? ''}\n${outcome.stderr}`)
+      : null;
     const error = failed
       ? (noOutputTimedOut
         ? { code: 'no_output', family: 'tooling' as const, message: `cursor-agent produced no output within ${graceMs}ms of starting; interrupted rather than waiting out the daemon's silence window` }
         : mismatchedModel
           ? { code: 'model_mismatch', family: 'tooling' as const, message: `requested model "${requestedModel}" but cursor-agent ran "${mismatchedModel}"` }
-          : classifyError(outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) ?? {
-            code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'cursor turn failed',
-          })
+          : rejection
+            ? { code: 'unknown_model', family: 'tooling' as const, message: `requested model "${rejection.requested}" is not one cursor-agent accepts. Available models: ${rejection.available.join(', ')}` }
+            : classifyError(outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) ?? {
+              code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'cursor turn failed',
+            })
       : undefined;
 
     return {

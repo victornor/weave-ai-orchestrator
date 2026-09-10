@@ -619,7 +619,7 @@ describe('ChatRoute dispatch labels', () => {
     expect(screen.queryByRole('button', { name: /Backend Engineer #2/ })).not.toBeInTheDocument();
   });
 
-  it('colours a project-bound dispatch and omits the marker when the ticket has no project', () => {
+  it('colours a project-bound dispatch identifier and omits the tint when the ticket has no project', () => {
     state.messages = [message({ id: 'm1', body: 'Filed both.' })];
     state.tickets = [
       dispatch({ id: 'tk_1', identifier: 'TST-1', projectId: 'p1', createdAt: '2026-09-01T09:00:01.000Z' }),
@@ -627,7 +627,10 @@ describe('ChatRoute dispatch labels', () => {
     ];
 
     render(<ChatRoute />);
-    expect(label('TST-1').querySelector('[data-project-color]')?.getAttribute('style')).toContain(projectColorVar('p1', ['p1']));
+    const tinted = label('TST-1').querySelector('[data-project-color]') as HTMLElement | null;
+    expect(tinted?.textContent).toBe('TST-1');
+    expect(tinted?.style.color).toBe(projectColorVar('p1', ['p1']));
+    expect(label('TST-1').querySelector('.rounded-full')).toBeNull();
     expect(label('TST-2').querySelector('[data-project-color]')).toBeNull();
   });
 

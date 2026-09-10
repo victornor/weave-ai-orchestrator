@@ -191,20 +191,25 @@ describe('DispatchLabel', () => {
     expect(onClick).toHaveBeenCalledOnce();
   });
 
-  it('shows a project colour dot only when given one', () => {
+  it('colours the ticket identifier only when given a project colour', () => {
     const { rerender } = render(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="working" projectColorVar="var(--project-1)" />);
-    expect(screen.getByRole('button').querySelector('[data-project-color]')?.getAttribute('style')).toContain('var(--project-1)');
+    const tinted = screen.getByRole('button').querySelector('[data-project-color]') as HTMLElement | null;
+    expect(tinted?.textContent).toBe('ACME-42');
+    expect(tinted?.style.color).toBe('var(--project-1)');
+    expect(screen.getByRole('button').querySelector('.rounded-full')).toBeNull();
     rerender(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="working" />);
     expect(screen.getByRole('button').querySelector('[data-project-color]')).toBeNull();
   });
 });
 
 describe('ProjectTag', () => {
-  it('shows a colour dot when colorVar is given, in both active states, and none without it', () => {
+  it('colours the label when colorVar is given, in both active states, and none without it', () => {
     const { rerender } = render(<ProjectTag label="Web" active={false} colorVar="var(--project-2)" />);
-    expect(screen.getByRole('radio').querySelector('[data-project-color]')?.getAttribute('style')).toContain('var(--project-2)');
+    expect((screen.getByRole('radio').querySelector('[data-project-color]') as HTMLElement | null)?.style.color).toBe('var(--project-2)');
+    expect(screen.getByRole('radio').querySelector('.rounded-full')).toBeNull();
     rerender(<ProjectTag label="Web" active colorVar="var(--project-2)" />);
-    expect(screen.getByRole('radio').querySelector('[data-project-color]')?.getAttribute('style')).toContain('var(--project-2)');
+    expect((screen.getByRole('radio').querySelector('[data-project-color]') as HTMLElement | null)?.style.color).toBe('var(--project-2)');
+    expect(screen.getByRole('radio').querySelector('.rounded-full')).toBeNull();
     rerender(<ProjectTag label="Auto" active={false} />);
     expect(screen.getByRole('radio').querySelector('[data-project-color]')).toBeNull();
     rerender(<ProjectTag label="Auto" active />);
@@ -213,9 +218,12 @@ describe('ProjectTag', () => {
 });
 
 describe('WorkerChip', () => {
-  it('shows a project colour dot only when given one', () => {
+  it('colours the worker name only when given a project colour', () => {
     const { rerender } = render(<WorkerChip name="Frontend Engineer #7" status="working" projectColorVar="var(--project-3)" />);
-    expect(screen.getByRole('button').querySelector('[data-project-color]')?.getAttribute('style')).toContain('var(--project-3)');
+    const tinted = screen.getByRole('button').querySelector('[data-project-color]') as HTMLElement | null;
+    expect(tinted?.textContent).toBe('Frontend Engineer #7');
+    expect(tinted?.style.color).toBe('var(--project-3)');
+    expect(screen.getByRole('button').querySelector('.rounded-full')).toBeNull();
     rerender(<WorkerChip name="Frontend Engineer #7" status="working" />);
     expect(screen.getByRole('button').querySelector('[data-project-color]')).toBeNull();
   });

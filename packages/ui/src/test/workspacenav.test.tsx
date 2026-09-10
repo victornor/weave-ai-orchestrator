@@ -273,8 +273,8 @@ describe("a project's colour identity (VS-149)", () => {
         ]),
       },
     }));
-    expect(colourOf('web')?.style.background).toBe(projectColorVar('p1', ['p1', 'p2']));
-    expect(colourOf('api')?.style.background).toBe(projectColorVar('p2', ['p1', 'p2']));
+    expect(colourOf('web')?.style.color).toBe(projectColorVar('p1', ['p1', 'p2']));
+    expect(colourOf('api')?.style.color).toBe(projectColorVar('p2', ['p1', 'p2']));
   });
 });
 

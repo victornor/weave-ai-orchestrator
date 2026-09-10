@@ -156,8 +156,7 @@ function ProjectsGroup({ wsId, wsName, state }: { wsId: string; wsName: string; 
               className="flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5 hover:bg-bg-2"
             >
               {dot ? <span className="size-1.5 rounded-r4" style={{ background: `var(--status-${dot})` }} aria-hidden /> : <span className="size-1.5" aria-hidden />}
-              <span className="size-1.5 rounded-full" style={{ background: projectColorVar(p.id, siblingIds) }} data-project-color aria-hidden />
-              <span className="ac-mono flex-1 truncate text-meta text-text-2">{p.slug}</span>
+              <span className="ac-mono flex-1 truncate text-meta" style={{ color: projectColorVar(p.id, siblingIds) }} data-project-color>{p.slug}</span>
             </A>
           );
         })

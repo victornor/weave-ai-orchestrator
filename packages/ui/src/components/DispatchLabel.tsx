@@ -36,8 +36,7 @@ export function DispatchLabel({
       )}
     >
       <StatusGlyph status={status} size="xs" pulse={status === 'working'} />
-      {projectColorVar ? <span className="size-1.5 rounded-full" style={{ background: projectColorVar }} data-project-color aria-hidden /> : null}
-      <span className="ac-mono text-micro text-text-soft">{identifier}</span>
+      <span className={cx('ac-mono text-micro', projectColorVar ? undefined : 'text-text-soft')} {...(projectColorVar ? { style: { color: projectColorVar }, 'data-project-color': '' } : {})}>{identifier}</span>
       <span className="ac-truncate text-micro text-text-3">{name}</span>
       <span className={cx('ac-mono text-micro', STATUS_TEXT[status])}>{STATUS_LABEL[status]}</span>
     </button>

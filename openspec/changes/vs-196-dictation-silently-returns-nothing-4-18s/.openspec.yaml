@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-10
+goal: "Dictation silently returns nothing: 4.18s of speech transcribes to an
+  empty string"

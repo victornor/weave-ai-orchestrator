@@ -120,6 +120,8 @@ const ERRORS: Record<string, string> = {
 const UNAVAILABLE = 'Dictation is not available in this browser, and the daemon has no transcription provider configured.';
 /** The recognizer heard sound and still returned no words — not the same thing as silence. */
 const NO_TRANSCRIPT = 'The browser heard audio but its speech service returned no words. Try again, or configure a transcription provider on the daemon (Settings \u2192 Conductor) for dictation that never leaves your machines.';
+/** The daemon transcribed successfully but recognized no words (VS-196) \u2014 not a failure, so no error is thrown. */
+const NO_TRANSCRIPT_UPLOAD = 'Nothing was recognized in that recording. Try again.';
 
 /**
  * `onText` receives the **whole** transcript dictated since the mic opened, not the newest fragment:
@@ -239,7 +241,11 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         }
         if (!res.ok) throw new Error(String(res.status));
         const json = (await res.json()) as { text?: string; error?: { message?: string } };
-        if (json.text) cb.current(json.text, true);
+        if (json.text?.trim()) {
+          cb.current(json.text, true);
+        } else {
+          setError(NO_TRANSCRIPT_UPLOAD);
+        }
       })
       .catch(() => setError('Transcription failed on the daemon. Type instead, or retry.'));
   }, []);

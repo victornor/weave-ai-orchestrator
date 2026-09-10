@@ -452,6 +452,20 @@ describe('dictation — voxtype upload', () => {
     await waitFor(() => expect(screen.getByLabelText('out')).toHaveValue('hello host'));
   });
 
+  it('surfaces a message instead of silence when Voxtype returns no words', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return Promise.resolve({ ok: true, status: 200, json: async () => ({ text: '' }) });
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+    render(<VoxtypeHarness backend="voxtype" serverConfigured />);
+    fireEvent.click(screen.getByText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByText('Stop dictation'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
+    expect(screen.getByLabelText('out')).toHaveValue('');
+  });
+
   it('surfaces a failed host transcribe', async () => {
     vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });

@@ -1,14 +1,46 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OcError } from '@agent-conductor/shared';
-import { createVoxtypeProbe, extractVoxtypeTranscript, parseVoxtypeModelsJson, resolveVoxtypeModel } from '../src/voxtype.js';
+
+const logSpy = { info: vi.fn(), warn: vi.fn() };
+vi.mock('@agent-conductor/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@agent-conductor/core')>();
+  return { ...actual, getLogger: () => logSpy };
+});
+
+const { analyzeWav, createVoxtypeProbe, extractVoxtypeTranscript, parseVoxtypeModelsJson, resolveVoxtypeModel } = await import('../src/voxtype.js');
 
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  logSpy.info.mockClear();
+  logSpy.warn.mockClear();
 });
+
+/** A minimal 16-bit PCM WAV, the shape `wav.ts` always produces on the client. */
+function makeWav(samples: number[], opts: { sampleRate?: number; channels?: number } = {}): Buffer {
+  const sampleRate = opts.sampleRate ?? 16000;
+  const channels = opts.channels ?? 1;
+  const data = Buffer.alloc(samples.length * 2);
+  samples.forEach((s, i) => data.writeInt16LE(Math.max(-0x8000, Math.min(0x7fff, Math.round(s * 0x7fff))), i * 2));
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write('WAVE', 8, 'ascii');
+  header.write('fmt ', 12, 'ascii');
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * channels * 2, 28);
+  header.writeUInt16LE(channels * 2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36, 'ascii');
+  header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
+}
 
 const MODELS_JSON = JSON.stringify({
   engines: {
@@ -35,7 +67,16 @@ Does this actually work? I mean, that's pretty cool if it does, but I don't know
 `;
 const CAPTAIN_TRANSCRIPT = "Does this actually work? I mean, that's pretty cool if it does, but I don't know.";
 
-function fakeBin(kind: 'models' | 'transcribe' | 'logs' | 'fail' | 'hang'): string {
+/** VS-196: the 2026-09-10 report — Voxtype's own retry produced "." twice, then gave up. */
+const DEGENERATE_STDOUT = `INFO Using local whisper transcription mode
+INFO Loading whisper model from "/home/user/.local/share/voxtype/models/ggml-large-v3-turbo.bin"
+INFO Model loaded in 0.51s
+WARN Whisper returned degenerate transcript "." for 4.18s audio; retrying with beam search
+WARN Whisper retry also returned degenerate transcript "."; treating as empty
+INFO Transcription completed in 2.51s: ""
+`;
+
+function fakeBin(kind: 'models' | 'transcribe' | 'logs' | 'degenerate' | 'fail' | 'hang'): string {
   const dir = mkdtempSync(join(tmpdir(), 'ac-fake-voxtype-'));
   dirs.push(dir);
   const path = join(dir, 'voxtype');
@@ -43,6 +84,7 @@ function fakeBin(kind: 'models' | 'transcribe' | 'logs' | 'fail' | 'hang'): stri
     models: `process.stdout.write(${JSON.stringify(MODELS_JSON)});`,
     transcribe: `const a=process.argv.slice(2); if(a[0]==='--model'){process.stdout.write('ok:'+a[1]+'\\n'); process.exit(0)} process.exit(1);`,
     logs: `process.stdout.write(${JSON.stringify(CAPTAIN_STDOUT)});`,
+    degenerate: `process.stdout.write(${JSON.stringify(DEGENERATE_STDOUT)});`,
     fail: `process.stderr.write('boom'); process.exit(2);`,
     hang: `setTimeout(()=>{}, 30000);`,
   }[kind];
@@ -79,6 +121,42 @@ describe('extractVoxtypeTranscript', () => {
   it('drops ANSI-wrapped INFO lines', () => {
     const raw = `\x1B[32mINFO Using local whisper transcription mode\x1B[0m\n${CAPTAIN_TRANSCRIPT}\n`;
     expect(extractVoxtypeTranscript(raw)).toBe(CAPTAIN_TRANSCRIPT);
+  });
+});
+
+describe('analyzeWav', () => {
+  it('measures a silent wav as zero peak and rms', () => {
+    const wav = makeWav(new Array(1600).fill(0), { sampleRate: 16000 });
+    expect(analyzeWav(wav)).toEqual({
+      sampleRate: 16000,
+      channels: 1,
+      bitsPerSample: 16,
+      durationSec: 0.1,
+      peakAmplitude: 0,
+      rms: 0,
+    });
+  });
+
+  it('measures a full-scale tone as nonzero peak and rms, with the right duration', () => {
+    const samples = Array.from({ length: 16000 }, (_, i) => Math.sin((2 * Math.PI * 440 * i) / 16000));
+    const wav = makeWav(samples, { sampleRate: 16000 });
+    const analysis = analyzeWav(wav)!;
+    expect(analysis.durationSec).toBeCloseTo(1, 5);
+    expect(analysis.peakAmplitude).toBeGreaterThan(0.9);
+    expect(analysis.rms).toBeGreaterThan(0.5);
+  });
+
+  it('reports the declared sample rate and channel count from the header', () => {
+    const wav = makeWav(new Array(200).fill(0.1), { sampleRate: 48000, channels: 2 });
+    expect(analyzeWav(wav)).toMatchObject({ sampleRate: 48000, channels: 2, durationSec: 100 / 48000 });
+  });
+
+  it('returns null for bytes that are not a wav', () => {
+    expect(analyzeWav(Buffer.from('not a wav file at all'))).toBeNull();
+  });
+
+  it('returns null for a truncated header', () => {
+    expect(analyzeWav(Buffer.from('RIFF'))).toBeNull();
   });
 });
 
@@ -130,6 +208,29 @@ describe('VoxtypeProbe', () => {
     expect(text).not.toMatch(/ac-voxtype-/);
     expect(text).not.toMatch(/\bINFO\b/);
     expect(text).not.toMatch(/samples/);
+  });
+
+  it('logs the measured audio and does not warn when a transcript comes back', async () => {
+    const wav = makeWav(new Array(1600).fill(0.5), { sampleRate: 16000 });
+    await createVoxtypeProbe({ binary: fakeBin('logs') }).transcribe(wav, 'base.en');
+    expect(logSpy.info).toHaveBeenCalledWith(
+      expect.objectContaining({ analysis: expect.objectContaining({ sampleRate: 16000, channels: 1 }) }),
+      'voxtype transcribe input audio',
+    );
+    expect(logSpy.warn).not.toHaveBeenCalled();
+  });
+
+  it('warns with the measured audio and voxtype stdout when the transcript comes back empty (VS-196)', async () => {
+    const wav = makeWav(new Array(1600).fill(0), { sampleRate: 16000 });
+    const text = await createVoxtypeProbe({ binary: fakeBin('degenerate') }).transcribe(wav, 'base.en');
+    expect(text).toBe('');
+    expect(logSpy.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        analysis: expect.objectContaining({ sampleRate: 16000, channels: 1, peakAmplitude: 0 }),
+        stdout: expect.stringContaining('degenerate transcript'),
+      }),
+      'voxtype transcribe returned an empty transcript',
+    );
   });
 
   it('kills a hanging binary', async () => {

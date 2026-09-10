@@ -38,8 +38,8 @@ colour SHALL NOT be capable of being mistaken for one of those meanings by a hum
 
 #### Scenario: A project colour next to a status glyph
 
-- **WHEN** a project's colour marker is shown next to a status glyph (for example on a dispatch
-  label)
+- **WHEN** a project's colour is applied to identifying text next to a status glyph (for example
+  on a dispatch label)
 - **THEN** the two are visually distinguishable from one another and neither is a status colour
   wearing a project's name
 
@@ -58,14 +58,16 @@ projects that look like the same colour.
 
 ### Requirement: A project with no colour assigned shows no marker
 
-A surface that would show a project's colour SHALL show nothing — not a neutral or placeholder
-colour — for anything that is not associated with a project (a workspace-wide message, a ticket
-with no project, an agent with no project).
+A surface that would show a project's colour SHALL leave the identifying text in its default
+colour — not a neutral or placeholder colour, and not a circle — for anything that is not
+associated with a project (a workspace-wide message, a ticket with no project, an agent with no
+project).
 
 #### Scenario: Work with no project
 
 - **WHEN** a dispatch, worker chip, or message has no project associated with it
-- **THEN** no colour marker is shown for it
+- **THEN** its identifying text is not tinted with a project colour, and no colour circle is shown
+  for it
 
 ### Requirement: Colours are unique within a workspace while a free slot exists
 
@@ -94,4 +96,37 @@ worker chip — SHALL all use this assignment, so they stay consistent with one 
 
 - **WHEN** the same project's colour is shown on the sidebar, a chat project tag, a dispatch
   label and a worker chip
-- **THEN** all four show the same colour
+- **THEN** all four colour their identifying text with the same colour
+
+### Requirement: Project colour is the identifying text, never a circle
+
+A surface that shows a project's colour SHALL apply that colour to the identifying text for
+that work — the project slug or name where a project is named, the ticket identifier on a
+dispatch label, the worker name on a worker chip. It SHALL NOT show a separate circle, disc,
+dot, or swatch filled with the project colour. Status glyphs and sync-state markers that
+already exist on those surfaces SHALL remain, and SHALL remain visually distinguishable from
+the project-coloured text.
+
+#### Scenario: Sidebar names the project in colour
+
+- **WHEN** a sidebar group lists a project
+- **THEN** that project's slug is shown in that project's colour, and no project-colour
+  circle is shown on the row
+
+#### Scenario: A composer project tag names the project in colour
+
+- **WHEN** the chat's project selector renders a project's tag
+- **THEN** the tag's label is shown in that project's colour, and the tag has no
+  project-colour circle
+
+#### Scenario: A dispatch label names the ticket in colour
+
+- **WHEN** a dispatch label is shown for a ticket that belongs to a project
+- **THEN** the ticket identifier is shown in that project's colour, and the label has no
+  project-colour circle
+
+#### Scenario: A worker chip names the worker in colour
+
+- **WHEN** a worker chip is shown for an agent whose project is known
+- **THEN** the worker name is shown in that project's colour, and the chip has no
+  project-colour circle

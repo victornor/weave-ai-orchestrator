@@ -422,26 +422,31 @@ distinguishable from the diverged marker, using materially less visual severity 
 already used for an ordinary in-progress state — so that an entirely routine merge does not read as
 an alert.
 
-Independently of its sync state, each project's entry SHALL also show that project's own colour
-(`workspace-navigation/project-colour`), identifying which project the row is, alongside — never
-in place of — the sync marker. Both SHALL be visible at once when the project is not `in_sync`.
+Independently of its sync state, each project's entry SHALL show that project's slug in that
+project's own colour (`workspace-navigation/project-colour`). It SHALL NOT show a separate
+project-colour circle. The sync marker, when present, SHALL remain a status marker alongside the
+coloured slug, never replaced by it. Both SHALL be visible at once when the project is not
+`in_sync`.
 
 #### Scenario: A project that is in sync
 
 - **WHEN** a sidebar group lists a project whose clone is `in_sync`
-- **THEN** that project's entry shows no sync marker, and shows that project's own colour
+- **THEN** that project's entry shows no sync marker, and shows that project's slug in that
+  project's own colour, with no project-colour circle
 
 #### Scenario: A project that has diverged
 
 - **WHEN** a sidebar group lists a project whose clone has `diverged`
 - **THEN** that project's entry shows a marker with the same severity the sidebar uses elsewhere for
-  something that needs a human, and also shows that project's own colour
+  something that needs a human, and shows that project's slug in that project's own colour, with no
+  project-colour circle
 
 #### Scenario: A project that is behind
 
 - **WHEN** a sidebar group lists a project whose clone is `behind`
 - **THEN** that project's entry shows a marker distinguishable from the diverged marker and with
-  materially less visual severity, and also shows that project's own colour
+  materially less visual severity, and shows that project's slug in that project's own colour, with
+  no project-colour circle
 
 #### Scenario: The marker costs no extra request
 
@@ -452,8 +457,8 @@ in place of — the sync marker. Both SHALL be visible at once when the project 
 #### Scenario: Two projects in the same group are told apart by colour
 
 - **WHEN** a sidebar group lists two or more projects
-- **THEN** each is shown with its own project's colour, distinguishable from the other projects
-  listed in that group
+- **THEN** each is shown with its slug in its own project's colour, distinguishable from the other
+  projects listed in that group
 
 ### Requirement: An expanded workspace group offers a New project action
 

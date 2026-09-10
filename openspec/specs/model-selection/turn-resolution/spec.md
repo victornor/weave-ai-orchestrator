@@ -8,11 +8,13 @@ TBD - created by archiving change vs-77-model-selection-is-exactly-two-per-works
 ### Requirement: A turn resolves its runtime and model from one setting
 
 Before a turn is launched the system SHALL resolve the runtime, the model and the effort it will
-use from exactly one of the two workspace settings: the conductor setting for a turn of the
-conductor, the workers setting for a turn of a worker. It SHALL NOT read a runtime, a model or an
-effort from the role, the project or the agent row to make that choice, and there SHALL be no
-fallback chain behind the setting other than letting the runtime choose the model when the setting
-names none.
+use from exactly one source: the conductor setting for a turn of the conductor; for a turn of a
+worker, the worker option named by that worker's ticket when that option still exists in the
+catalog, otherwise the workers setting. It SHALL NOT read a runtime, a model or an effort from
+the role, the project or the agent row to make that choice, and there SHALL be no fallback chain
+behind that source other than letting the runtime choose the model when the resolved setting
+names none, and falling back to the workers setting when the ticket names an option that is no
+longer in the catalog.
 
 A resolved runtime that is not registered on this daemon SHALL fail the turn with the error the
 system already uses for an unreachable runtime, naming the runtime, rather than falling back to
@@ -20,8 +22,15 @@ another one.
 
 #### Scenario: A worker runs on the workers setting
 
-- **WHEN** a worker's turn is launched
+- **WHEN** a worker's turn is launched and its ticket names no worker option, or names an option
+  that is no longer in the catalog
 - **THEN** it is launched on the runtime, model and effort of the workers setting
+
+#### Scenario: A worker runs on its ticket's named option
+
+- **WHEN** a worker's turn is launched and its ticket names a worker option that still exists in
+  the catalog
+- **THEN** it is launched on that option's runtime, model and effort, not the workers setting
 
 #### Scenario: The conductor runs on the conductor setting
 
@@ -90,7 +99,7 @@ setting, so that cost and usage stay attributed to what was really spent.
 
 ### Requirement: Approving a plan starts apply on the runtime in force at launch
 
-Approving a `change` ticket's plan SHALL cause that ticket's worker to take an apply turn even when the workers runtime or model is not the one the propose turn ran on. The apply turn SHALL launch on the workers setting in force at launch. A fresh session on the new runtime is acceptable; sitting idle because the runtime or model changed since the plan-approval card was created is not.
+Approving a `change` ticket's plan SHALL cause that ticket's worker to take an apply turn even when the workers runtime or model is not the one the propose turn ran on. The apply turn SHALL launch on the runtime, model and effort resolved for that ticket at launch (its worker option if that option still exists, otherwise the workers setting). A fresh session on the new runtime is acceptable; sitting idle because the runtime or model changed since the plan-approval card was created is not.
 
 This does not change how a session is persisted when the runtime is unchanged.
 

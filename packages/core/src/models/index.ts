@@ -2,7 +2,7 @@
  * The workspace's two model settings as a service (VS-77, ADR 0011): read them, change one, and
  * settle the question a mixed-runtime migration left open.
  */
-import { OcError, WorkspaceModelsSchema, type WorkspaceModels, type WorkspaceModelsPut } from '@agent-conductor/shared';
+import { OcError, WorkspaceModelsSchema, type ModelsLocked, type WorkspaceModels, type WorkspaceModelsPut } from '@agent-conductor/shared';
 import type { Db } from '@agent-conductor/db';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, ModelsService } from '../api.js';
@@ -10,7 +10,8 @@ import { recordActivity } from '../events.js';
 import { releaseLoginPausesForAbandonedRuntimes } from '../runs/authgate.js';
 import { migrationSummary, type ModelMigration } from './migrate.js';
 
-export { modelSettingFor, workerOptionRuntimes } from './resolve.js';
+export { effectiveModels, modelSettingFor, modelsFor, modelsLocked, workerOptionRuntimes } from './resolve.js';
+import { effectiveModels, modelsLocked } from './resolve.js';
 export { deriveModelSettings, hasModelSettings, migrationSummary, type ModelMigration, type RoleRuntimeRow, type WorkersRule } from './migrate.js';
 
 /** The `meta` row migration 0012 leaves behind: what the roles were running on before it dropped the columns. */
@@ -51,14 +52,26 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
 
   const service: ModelsService = {
     get(): WorkspaceModels {
-      return ctx.config.models;
+      return effectiveModels(ctx.daemon, ctx.config);
+    },
+
+    locked(): ModelsLocked {
+      return modelsLocked(ctx.daemon);
     },
 
     async set(actor: Actor, next: WorkspaceModelsPut | WorkspaceModels): Promise<WorkspaceModels> {
-      const workerOptions = 'workerOptions' in next && next.workerOptions !== undefined
-        ? next.workerOptions
-        : (ctx.config.models.workerOptions ?? []);
-      const parsed = WorkspaceModelsSchema.safeParse({ ...next, workerOptions });
+      const locked = modelsLocked(ctx.daemon);
+      const stored = ctx.config.models;
+      const workerOptions = locked.workerOptions
+        ? (stored.workerOptions ?? [])
+        : ('workerOptions' in next && next.workerOptions !== undefined
+          ? next.workerOptions
+          : (stored.workerOptions ?? []));
+      const parsed = WorkspaceModelsSchema.safeParse({
+        conductor: locked.conductor ? stored.conductor : next.conductor,
+        workers: locked.workers ? stored.workers : next.workers,
+        workerOptions,
+      });
       if (!parsed.success) {
         throw new OcError('validation', `invalid model settings: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
       }
@@ -73,7 +86,7 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
       recordActivity(ctx.db, ctx.workspaceId, actor, 'workspace.models_changed', 'workspace', ctx.workspaceId, { before, after: parsed.data });
       ctx.events.emit('workspace.updated', 'workspace', ctx.workspaceId, { models: parsed.data });
       log.info({ before, after: parsed.data }, 'model settings changed');
-      return parsed.data;
+      return effectiveModels(ctx.daemon, ctx.config);
     },
 
     reconcile(): void {

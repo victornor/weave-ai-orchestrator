@@ -16,7 +16,7 @@ import { nowIso } from '@agent-conductor/db';
 import { LOGIN_PAUSE_CODE, type Agent } from '@agent-conductor/shared';
 import type { CoreServices } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
-import { modelSettingFor, workerOptionRuntimes } from '../models/resolve.js';
+import { modelSettingFor, modelsFor, workerOptionRuntimes } from '../models/resolve.js';
 import { redactSecrets } from '../util/redact.js';
 
 export { LOGIN_PAUSE_CODE } from '@agent-conductor/shared';
@@ -225,9 +225,9 @@ export function loginPauseRuntime(agent: Agent): string | null {
 export function releaseLoginPausesForAbandonedRuntimes(ctx: WorkspaceContext, deps: () => CoreServices): number {
   const log = ctx.log('daemon');
   const governing = new Set([
-    modelSettingFor(ctx.config, 'conductor').runtime,
-    modelSettingFor(ctx.config, 'worker').runtime,
-    ...workerOptionRuntimes(ctx.config),
+    modelSettingFor(modelsFor(ctx), 'conductor').runtime,
+    modelSettingFor(modelsFor(ctx), 'worker').runtime,
+    ...workerOptionRuntimes(ctx.config, ctx.daemon),
   ]);
   const gated = new Set(deps().accounts.gatedRuntimes());
   let released = 0;
@@ -241,7 +241,7 @@ export function releaseLoginPausesForAbandonedRuntimes(ctx: WorkspaceContext, de
     const ticket = a.kind === 'worker' && a.ticketId
       ? ctx.db.get<{ workerModelId: string | null }>('SELECT worker_model_id FROM tickets WHERE id = ?', [a.ticketId])
       : null;
-    const target = modelSettingFor(ctx.config, a.kind, ticket).runtime;
+    const target = modelSettingFor(modelsFor(ctx), a.kind, ticket).runtime;
     const pausedFor = loginPauseRuntime(a) ?? a.runtimeId;
     if (pausedFor === target) continue;  // the pause still describes the runtime its next turn runs on
     if (gated.has(target)) {

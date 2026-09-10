@@ -361,8 +361,10 @@ export interface UsageService {
  * called once per workspace at startup and raises the card a mixed-runtime migration left owing.
  */
 export interface ModelsService {
+  /** Effective settings after a daemon overlay (VS-185). */
   get(): S.WorkspaceModels;
-  /** `workerOptions` omitted keeps the existing catalog; an explicit array (including `[]`) replaces it (VS-162). */
+  locked(): S.ModelsLocked;
+  /** `workerOptions` omitted keeps the existing catalog; an explicit array (including `[]`) replaces it (VS-162). Locked controls are not written. */
   set(actor: Actor, next: S.WorkspaceModelsPut | S.WorkspaceModels): Promise<S.WorkspaceModels>;
   reconcile(): void;
   /** Answer the migration's question: write the workers runtime and close the matter for good. */

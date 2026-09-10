@@ -947,3 +947,69 @@ describe('daemon transcription (VS-179)', () => {
     await expect(res.json()).resolves.toEqual({ text: 'transcribed' });
   });
 });
+
+describe('daemon model overlays (VS-185)', () => {
+  it('GETs empty overlays by default', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/daemon/models', { headers: authed() });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ conductor: null, workers: null, workerOptions: null });
+  });
+
+  it('PUTs conductor, persists, and GET /models is locked without rebuilding deps', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ac-dm-'));
+    writeFileSync(join(dir, 'daemon.yaml'), 'version: 1\n');
+    const { h, fetch } = app({ daemonConfigDir: dir });
+    const setting = { runtime: 'claude', model: 'claude-fable-5-1' };
+    const put = await fetch('/api/daemon/models', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ conductor: setting }),
+    });
+    expect(put.status).toBe(200);
+    await expect(put.json()).resolves.toEqual({ conductor: setting, workers: null, workerOptions: null });
+    expect(h.deps.daemon.models.conductor).toEqual(setting);
+
+    const got = await fetch('/api/daemon/models', { headers: authed() });
+    await expect(got.json()).resolves.toEqual({ conductor: setting, workers: null, workerOptions: null });
+
+    const ws = await fetch('/api/w/ws1/models', { headers: authed() });
+    await expect(ws.json()).resolves.toMatchObject({ conductor: setting, locked: { conductor: true, workers: false, workerOptions: false } });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('omitted keys leave the other overlay; null clears', async () => {
+    const { fetch } = app();
+    await fetch('/api/daemon/models', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ conductor: { runtime: 'claude', model: 'a' }, workers: { runtime: 'codex', model: 'b' } }),
+    });
+    const left = await fetch('/api/daemon/models', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ conductor: null }),
+    });
+    await expect(left.json()).resolves.toEqual({
+      conductor: null,
+      workers: { runtime: 'codex', model: 'b' },
+      workerOptions: null,
+    });
+  });
+
+  it('treats workerOptions [] as no overlay and rejects a duplicate id', async () => {
+    const { fetch } = app();
+    const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
+    await fetch('/api/daemon/models', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ workerOptions: [cheap] }),
+    });
+    const cleared = await fetch('/api/daemon/models', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ workerOptions: [] }),
+    });
+    await expect(cleared.json()).resolves.toMatchObject({ workerOptions: null });
+    const dup = await fetch('/api/daemon/models', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ workerOptions: [cheap, { ...cheap, description: 'b' }] }),
+    });
+    expect(dup.status).toBe(400);
+  });
+});

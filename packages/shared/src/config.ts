@@ -124,6 +124,33 @@ const WorkerOptionsArraySchema = z.array(WorkerModelOptionSchema).max(16).superR
   }
 });
 
+/**
+ * Optional per-control overlays on the daemon (VS-185, ADR 0013). Absent/null (and an empty
+ * `workerOptions` list) means no overlay for that control; a present setting or a non-empty catalog
+ * is filled and governs every workspace.
+ */
+export const DaemonModelsSchema = z.object({
+  conductor: ModelSettingSchema.nullish(),
+  workers: ModelSettingSchema.nullish(),
+  workerOptions: WorkerOptionsArraySchema.nullish(),
+});
+export type DaemonModels = z.infer<typeof DaemonModelsSchema>;
+
+/** `PUT /api/daemon/models`: omitted key leaves that overlay; `null` (or `workerOptions: []`) clears. */
+export const DaemonModelsPutSchema = z.object({
+  conductor: ModelSettingSchema.nullable().optional(),
+  workers: ModelSettingSchema.nullable().optional(),
+  workerOptions: WorkerOptionsArraySchema.nullable().optional(),
+});
+export type DaemonModelsPut = z.infer<typeof DaemonModelsPutSchema>;
+
+export const ModelsLockedSchema = z.object({
+  conductor: z.boolean(),
+  workers: z.boolean(),
+  workerOptions: z.boolean(),
+});
+export type ModelsLocked = z.infer<typeof ModelsLockedSchema>;
+
 /** The whole of model selection for a workspace: two defaults, plus an optional worker-options catalog. */
 export const WorkspaceModelsSchema = z.object({
   conductor: ModelSettingSchema.default({}),
@@ -277,6 +304,11 @@ export const DaemonConfigSchema = z.object({
     /** How long the "is the source ahead" answer is cached before the source is resolved again. */
     updateCheckIntervalSec: z.number().int().min(0).default(900),
   }).default({}),
+  /**
+   * Optional overlays for conductor, workers default, and the worker-options catalog (VS-185).
+   * Empty (the default) leaves every workspace on its own `models` block.
+   */
+  models: DaemonModelsSchema.default({}),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   otlpEndpoint: z.string().optional(),
 });

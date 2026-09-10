@@ -44,7 +44,7 @@ describe('command tree', () => {
   });
 
   it.each([
-    ['daemon', ['start', 'stop', 'status', 'logs', 'set-password', 'install-service', 'upgrade', 'update', 'releases', 'rollback']],
+    ['daemon', ['start', 'stop', 'status', 'logs', 'set-password', 'install-service', 'upgrade', 'update', 'releases', 'rollback', 'models']],
     ['daemon update', ['apply', 'cancel']],
     ['context', ['list', 'use', 'remove', 'show']],
     ['devices', ['list', 'revoke']],
@@ -400,6 +400,37 @@ describe('running commands against a stubbed daemon', () => {
     }) as typeof fetch;
     await buildProgram().parseAsync([...base, 'ticket', 'create', 'Add dark mode', '--worker-model', 'cheap']);
     expect(body).toMatchObject({ workerModelId: 'cheap' });
+  });
+
+  it('refuses models set when the control is locked by a daemon overlay (VS-185)', async () => {
+    stubFetch({
+      '/api/w/acme/models': {
+        conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+        workers: { runtime: 'claude', model: null },
+        locked: { conductor: true, workers: false, workerOptions: false },
+      },
+    });
+    await buildProgram().parseAsync([...base, 'models', 'set', 'conductor', '--model', 'claude-opus-5']);
+    expect(JSON.parse(written.join(''))).toMatchObject({ error: { code: 'conflict' } });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('daemon models set sends the overlay (VS-185)', async () => {
+    const seen = stubFetch({
+      '/api/daemon/models': { conductor: null, workers: null, workerOptions: null },
+    });
+    let put: unknown = null;
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') {
+        put = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify(put), { status: 200 });
+      }
+      return inner(input, init);
+    }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'daemon', 'models', 'set', 'conductor', '--runtime', 'claude', '--model', 'claude-fable-5-1']);
+    expect(put).toEqual({ conductor: { runtime: 'claude', model: 'claude-fable-5-1' } });
+    expect(seen.some((s) => s.includes('/api/daemon/models'))).toBe(true);
   });
 
   it('clears a model back to the runtime default', async () => {

@@ -6,7 +6,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createDecisionsService } from '../decisions/index.js';
 import { createModelsService, deriveModelSettings, hasModelSettings, migrationSummary, recordPendingMigration, WORKERS_RUNTIME_CORRELATION } from './index.js';
-import { modelSettingFor } from './resolve.js';
+import { effectiveModels, modelSettingFor, modelsLocked } from './resolve.js';
 import type { ModelsService } from '../api.js';
 import type { Decision } from '@agent-conductor/shared';
 
@@ -41,6 +41,48 @@ describe('modelSettingFor', () => {
     expect(modelSettingFor(withOpts, 'worker', { workerModelId: 'gone' })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
     expect(modelSettingFor(withOpts, 'worker', { workerModelId: null })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
     expect(modelSettingFor(withOpts, 'conductor', { workerModelId: 'cheap' })).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
+  });
+});
+
+describe('effectiveModels (VS-185)', () => {
+  const workspace = {
+    models: {
+      conductor: { runtime: 'claude', model: 'ws-conductor' },
+      workers: { runtime: 'codex', model: 'ws-workers' },
+      workerOptions: [{ id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' }],
+    },
+  };
+  const overlayConductor = { runtime: 'claude', model: 'daemon-conductor' };
+  const overlayWorkers = { runtime: 'gemini', model: 'daemon-workers' };
+  const overlayCatalog = [{ id: 'strong', description: 'Heavy.', runtime: 'claude', model: 'opus' }];
+
+  it('returns workspace values when every overlay is empty', () => {
+    expect(effectiveModels({}, workspace)).toEqual(workspace.models);
+    expect(effectiveModels({ models: { workerOptions: [] } }, workspace)).toEqual(workspace.models);
+    expect(modelsLocked({})).toEqual({ conductor: false, workers: false, workerOptions: false });
+  });
+
+  it('applies a conductor overlay independently', () => {
+    const daemon = { models: { conductor: overlayConductor } };
+    expect(effectiveModels(daemon, workspace).conductor).toEqual(overlayConductor);
+    expect(effectiveModels(daemon, workspace).workers).toEqual(workspace.models.workers);
+    expect(effectiveModels(daemon, workspace).workerOptions).toEqual(workspace.models.workerOptions);
+    expect(modelsLocked(daemon)).toEqual({ conductor: true, workers: false, workerOptions: false });
+  });
+
+  it('hides the workspace catalog only when the daemon catalog is non-empty', () => {
+    expect(effectiveModels({ models: { workerOptions: overlayCatalog } }, workspace).workerOptions).toEqual(overlayCatalog);
+    expect(effectiveModels({ models: { workerOptions: [] } }, workspace).workerOptions).toEqual(workspace.models.workerOptions);
+    expect(modelsLocked({ models: { workerOptions: overlayCatalog } }).workerOptions).toBe(true);
+    expect(modelsLocked({ models: { workerOptions: [] } }).workerOptions).toBe(false);
+  });
+
+  it('resolves a worker through the overlay catalog', () => {
+    const daemon = { models: { workers: overlayWorkers, workerOptions: overlayCatalog } };
+    const models = effectiveModels(daemon, workspace);
+    expect(modelSettingFor({ models }, 'worker')).toEqual(overlayWorkers);
+    expect(modelSettingFor({ models }, 'worker', { workerModelId: 'strong' })).toEqual({ runtime: 'claude', model: 'opus' });
+    expect(modelSettingFor({ models }, 'worker', { workerModelId: 'cheap' })).toEqual(overlayWorkers);
   });
 });
 
@@ -201,5 +243,23 @@ describe('the models service', () => {
     models.reconcile();
     await h.deps().decisions.answer(HUMAN, open()[0]!.id, { key: 'runtime:codex' });
     expect(models.get().conductor).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
+  });
+
+  it('get() returns a daemon overlay and set() does not write a locked control (VS-185)', async () => {
+    await models.set(HUMAN, { conductor: { runtime: 'claude', model: 'stored-conductor' }, workers: { runtime: 'claude', model: 'stored-workers' } });
+    h.ctx.daemon.models = { conductor: { runtime: 'claude', model: 'daemon-conductor' } };
+    expect(models.get().conductor.model).toBe('daemon-conductor');
+    expect(models.get().workers.model).toBe('stored-workers');
+    expect(models.locked()).toEqual({ conductor: true, workers: false, workerOptions: false });
+
+    const after = await models.set(HUMAN, {
+      conductor: { runtime: 'codex', model: 'should-not-stick' },
+      workers: { runtime: 'codex', model: 'new-workers' },
+    });
+    expect(after.conductor.model).toBe('daemon-conductor');
+    expect(after.workers.model).toBe('new-workers');
+    h.ctx.daemon.models = {};
+    expect(models.get().conductor.model).toBe('stored-conductor');
+    expect(models.get().workers.model).toBe('new-workers');
   });
 });

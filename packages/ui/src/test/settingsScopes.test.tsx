@@ -53,6 +53,8 @@ vi.mock('../api/hooks', () => ({
   useCancelUpgrade: () => ({ mutate: vi.fn(), isPending: false }),
   useTranscription: () => ({ data: { backend: 'chrome', model: null, voxtype: { installed: false, models: [] } }, isLoading: false }),
   useSetTranscription: () => ({ mutate: vi.fn(), isPending: false }),
+  useDaemonModels: () => ({ data: { conductor: null, workers: null, workerOptions: null }, isLoading: false }),
+  useSetDaemonModels: () => ({ mutate: vi.fn(), isPending: false, error: null }),
 }));
 
 const { SettingsRoute } = await import('../routes/Settings');
@@ -116,7 +118,7 @@ describe('the two areas', () => {
 
     fireEvent.click(areaSwitch('This daemon'));
     expect(areaSwitch('This daemon')).toHaveAttribute('aria-checked', 'true');
-    expect(tabNames()).toEqual(['Updates', 'Dictation', 'Security & Devices', 'This device']);
+    expect(tabNames()).toEqual(['Updates', 'Models', 'Dictation', 'Security & Devices', 'This device']);
   });
 
   it('writes the area and the section into the URL without stacking history entries', () => {
@@ -143,6 +145,13 @@ describe('the two areas', () => {
     renderSettings();
     expect(areaSwitch('This daemon')).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('tab', { name: 'Dictation' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens daemon Models from ?section=daemon-models', () => {
+    state.search = { section: 'daemon-models' };
+    renderSettings();
+    expect(areaSwitch('This daemon')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('tab', { name: 'Models' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('shows a valid area when the URL names one that does not exist', () => {

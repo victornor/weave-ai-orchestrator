@@ -8,7 +8,7 @@ import { recordActivity } from '../events.js';
 import { binaryExists, type OnLine } from '../util/exec.js';
 import { git, githubSshRemote } from '../util/git.js';
 import { projectKnowledgeSkeleton } from '../workspace/loader.js';
-import { modelSettingFor } from '../models/resolve.js';
+import { modelSettingFor, modelsFor } from '../models/resolve.js';
 import { createHistoryReader } from './history.js';
 
 /**
@@ -78,7 +78,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
     const { sh } = await import('../util/exec.js');
     // The workers setting's runtime: openspec generates its skill files for the CLI that will read
     // them, and every worker in the workspace runs on that one (VS-77).
-    const init = await sh('openspec', ['init', '--tools', modelSettingFor(ctx.config, 'worker').runtime], {
+    const init = await sh('openspec', ['init', '--tools', modelSettingFor(modelsFor(ctx), 'worker').runtime], {
       cwd: project.clonePath, timeoutMs: 120_000,
       env: { CI: '1', OPENSPEC_TELEMETRY: '0', OPENSPEC_NO_UPDATE_CHECK: '1', NO_COLOR: '1' },
       onLine,

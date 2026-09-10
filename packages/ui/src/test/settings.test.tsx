@@ -93,6 +93,8 @@ vi.mock('../api/hooks', () => ({
     },
     isPending: false,
   }),
+  useDaemonModels: () => ({ data: { conductor: null, workers: null, workerOptions: null }, isLoading: false }),
+  useSetDaemonModels: () => ({ mutate: vi.fn(), isPending: false, error: null }),
 }));
 
 const { SettingsRoute } = await import('../routes/Settings');

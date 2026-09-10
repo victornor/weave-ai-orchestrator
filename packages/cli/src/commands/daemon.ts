@@ -345,6 +345,116 @@ when the daemon is not answering and has to be replaced from here.`)
       const result = await drainAndRestart(command, Number.parseInt(String(opts['drainTimeout'] ?? '900'), 10));
       emit({ release: prev, wasCurrent: switched.previous, ...result }, () => write(`${style.ok('rolled back')} current -> ${prev} · ${result.how}`));
     }));
+
+  const daemonModels = daemon.command('models').description('optional overlays for conductor, workers, and worker-options on every workspace (VS-185)');
+  interface OverlaySetting { runtime?: string; model?: string | null; effort?: string }
+  interface OverlayOption extends OverlaySetting { id?: string; description?: string }
+  interface DaemonModelsView { conductor: OverlaySetting | null; workers: OverlaySetting | null; workerOptions: OverlayOption[] | null }
+  const describeSetting = (s: OverlaySetting | null): string => {
+    if (!s) return '(per workspace)';
+    const parts = [s.runtime ?? '(unset)', s.model ?? '(runtime default)'];
+    if (s.effort) parts.push(`effort ${s.effort}`);
+    return parts.join(' · ');
+  };
+  daemonModels
+    .command('show', { isDefault: true })
+    .description('show daemon model overlays; empty means each workspace uses its own settings')
+    .action(async (_opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command, { workspace: 'none' });
+      const current = await client.get<DaemonModelsView>('/api/daemon/models');
+      emit(current, () => {
+        fields([
+          ['conductor', describeSetting(current.conductor)],
+          ['workers', describeSetting(current.workers)],
+          ...((current.workerOptions ?? []).map((o) => ['option', `${o.id ?? '?'} — ${o.description ?? ''} (${describeSetting(o)})`] as [string, string])),
+        ]);
+        if (!current.workerOptions?.length) fields([['options', '(per workspace)']]);
+      });
+    }));
+  daemonModels
+    .command('set')
+    .argument('<setting>', 'conductor or workers')
+    .option('--runtime <id>', 'runtime id')
+    .option('--model <id>', 'model id, or "default" to let the runtime choose')
+    .option('--effort <effort>', 'reasoning effort, or "default" to clear it')
+    .option('--clear', 'remove this overlay so workspaces use their own setting')
+    .description('fill or clear one daemon overlay')
+    .action(async (setting: string, opts: Record<string, string | boolean | undefined>, command: Command) => run(async () => {
+      if (setting !== 'conductor' && setting !== 'workers') throw new Error(`unknown setting ${setting}: expected conductor or workers`);
+      const { client } = await session(command, { workspace: 'none' });
+      if (opts['clear'] === true) {
+        const result = await client.put<DaemonModelsView>('/api/daemon/models', { [setting]: null });
+        emit(result, () => write(`${style.ok('cleared')} ${setting} overlay`));
+        return;
+      }
+      const current = await client.get<DaemonModelsView>('/api/daemon/models');
+      const next: OverlaySetting = { ...(current[setting] ?? {}) };
+      if (typeof opts['runtime'] === 'string') next.runtime = opts['runtime'];
+      if (typeof opts['model'] === 'string') next.model = opts['model'] === 'default' ? null : opts['model'];
+      if (typeof opts['effort'] === 'string') {
+        if (opts['effort'] === 'default') delete next.effort;
+        else next.effort = opts['effort'];
+      }
+      if (!next.runtime) throw new Error('pass --runtime (or --clear)');
+      const result = await client.put<DaemonModelsView>('/api/daemon/models', { [setting]: next });
+      emit(result, () => write(`${style.ok('updated')} ${setting} overlay = ${describeSetting(result[setting])}`));
+    }));
+  const overlayOptions = daemonModels.command('options').description('named worker-model options that override every workspace catalog');
+  overlayOptions
+    .command('add')
+    .requiredOption('--id <id>', 'kebab-case id')
+    .requiredOption('--description <text>', 'when-to-use note')
+    .requiredOption('--runtime <id>', 'runtime id')
+    .option('--model <id>', 'model id, or "default"')
+    .option('--effort <effort>', 'reasoning effort')
+    .action(async (opts: Record<string, string | undefined>, command: Command) => run(async () => {
+      const { client } = await session(command, { workspace: 'none' });
+      const current = await client.get<DaemonModelsView>('/api/daemon/models');
+      const option: OverlayOption = {
+        id: opts['id'], description: opts['description'], runtime: opts['runtime'],
+        model: opts['model'] === undefined || opts['model'] === 'default' ? null : opts['model'],
+      };
+      if (opts['effort']) option.effort = opts['effort'];
+      const workerOptions = [...(current.workerOptions ?? []), option];
+      const result = await client.put<DaemonModelsView>('/api/daemon/models', { workerOptions });
+      emit(result, () => write(`${style.ok('added')} overlay option ${option.id}`));
+    }));
+  overlayOptions
+    .command('set')
+    .argument('<id>', 'option id to change')
+    .option('--description <text>', 'when-to-use note')
+    .option('--runtime <id>', 'runtime id')
+    .option('--model <id>', 'model id, or "default"')
+    .option('--effort <effort>', 'reasoning effort, or "default" to clear it')
+    .action(async (id: string, opts: Record<string, string | undefined>, command: Command) => run(async () => {
+      const { client } = await session(command, { workspace: 'none' });
+      const current = await client.get<DaemonModelsView>('/api/daemon/models');
+      const list = [...(current.workerOptions ?? [])];
+      const idx = list.findIndex((o) => o.id === id);
+      if (idx < 0) throw new Error(`no overlay option '${id}'`);
+      const next = { ...list[idx]! };
+      if (opts['description'] !== undefined) next.description = opts['description'];
+      if (opts['runtime']) next.runtime = opts['runtime'];
+      if (opts['model'] !== undefined) next.model = opts['model'] === 'default' ? null : opts['model'];
+      if (opts['effort'] !== undefined) {
+        if (opts['effort'] === 'default') delete next.effort;
+        else next.effort = opts['effort'];
+      }
+      list[idx] = next;
+      const result = await client.put<DaemonModelsView>('/api/daemon/models', { workerOptions: list });
+      emit(result, () => write(`${style.ok('updated')} overlay option ${id}`));
+    }));
+  overlayOptions
+    .command('remove')
+    .argument('<id>', 'option id to remove')
+    .action(async (id: string, _opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command, { workspace: 'none' });
+      const current = await client.get<DaemonModelsView>('/api/daemon/models');
+      const workerOptions = (current.workerOptions ?? []).filter((o) => o.id !== id);
+      if (workerOptions.length === (current.workerOptions ?? []).length) throw new Error(`no overlay option '${id}'`);
+      const result = await client.put<DaemonModelsView>('/api/daemon/models', { workerOptions: workerOptions.length ? workerOptions : [] });
+      emit(result, () => write(`${style.ok('removed')} overlay option ${id}`));
+    }));
 }
 
 function readDaemonYaml(): DaemonYaml {

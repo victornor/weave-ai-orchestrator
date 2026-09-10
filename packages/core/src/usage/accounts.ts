@@ -14,6 +14,7 @@ import type { AccountsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { credentialReaderFor, reconcileRuntimeCredential } from '../workspace/loader.js';
 import { redactSecrets } from '../util/redact.js';
+import { effectiveModels } from '../models/resolve.js';
 
 /** A probe may not hold up a tick; the claude CLI answers in well under a second. */
 export const ACCOUNT_PROBE_TIMEOUT_MS = 20_000;
@@ -70,10 +71,11 @@ export function createAccountsService(ctx: WorkspaceContext): AccountsService {
       'SELECT DISTINCT runtime_id AS runtime_id FROM agents WHERE workspace_id = ? AND retired_at IS NULL',
       [ctx.workspaceId],
     );
+    const models = effectiveModels(ctx.daemon, ctx.config);
     const ids = new Set<string>([
-      ctx.config.models.conductor.runtime,
-      ctx.config.models.workers.runtime,
-      ...(ctx.config.models.workerOptions ?? []).map((o) => o.runtime),
+      models.conductor.runtime,
+      models.workers.runtime,
+      ...models.workerOptions.map((o) => o.runtime),
     ]);
     for (const r of rows) if (r.runtimeId) ids.add(r.runtimeId);
     return [...ids].filter(Boolean).sort();

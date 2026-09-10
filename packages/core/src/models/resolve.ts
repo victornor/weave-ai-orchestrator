@@ -1,15 +1,46 @@
 /**
- * Which runtime, model and effort a turn runs on (VS-77, ADR 0011; VS-162, ADR 0012).
+ * Which runtime, model and effort a turn runs on (VS-77, ADR 0011; VS-162, ADR 0012; VS-185, ADR 0013).
  *
- * There is one answer and one place it comes from: the workspace's model settings. The
- * conductor runs on `models.conductor`. A worker runs on the catalog option its ticket
- * names, when that option still exists, otherwise on `models.workers`. This function is
- * the only reader — everything that used to layer `agent.model ?? role.model ??
- * config.defaults.model` goes through it instead, so there is no chain left for a stale
- * row to enter.
+ * There is one answer and one place it comes from: the effective model settings after a daemon
+ * overlay (if filled) is applied to the workspace. The conductor runs on `models.conductor`. A
+ * worker runs on the catalog option its ticket names, when that option still exists, otherwise on
+ * `models.workers`. This function is the only reader — everything that used to layer
+ * `agent.model ?? role.model ?? config.defaults.model` goes through it instead, so there is no
+ * chain left for a stale row to enter.
  */
-import type { AgentKind, ModelSetting, WorkspaceConfig } from '@agent-conductor/shared';
+import type { AgentKind, DaemonModels, ModelSetting, ModelsLocked, WorkspaceConfig, WorkspaceModels } from '@agent-conductor/shared';
 import { DEFAULT_WORKSPACE_MODELS } from '@agent-conductor/shared';
+
+export function catalogOverlayFilled(opts: DaemonModels['workerOptions']): opts is NonNullable<DaemonModels['workerOptions']> {
+  return Array.isArray(opts) && opts.length > 0;
+}
+
+export function effectiveModels(
+  daemon: { models?: DaemonModels } | null | undefined,
+  workspace: Pick<WorkspaceConfig, 'models'>,
+): WorkspaceModels {
+  const stored = workspace.models ?? DEFAULT_WORKSPACE_MODELS;
+  const overlay = daemon?.models ?? {};
+  return {
+    conductor: overlay.conductor ?? stored.conductor,
+    workers: overlay.workers ?? stored.workers,
+    workerOptions: catalogOverlayFilled(overlay.workerOptions) ? overlay.workerOptions : (stored.workerOptions ?? []),
+  };
+}
+
+export function modelsLocked(daemon: { models?: DaemonModels } | null | undefined): ModelsLocked {
+  const overlay = daemon?.models ?? {};
+  return {
+    conductor: overlay.conductor != null,
+    workers: overlay.workers != null,
+    workerOptions: catalogOverlayFilled(overlay.workerOptions),
+  };
+}
+
+/** Workspace config whose `models` block is already the effective one. Pass this to `modelSettingFor`. */
+export function modelsFor(ctx: { daemon?: { models?: DaemonModels }; config: Pick<WorkspaceConfig, 'models'> }): Pick<WorkspaceConfig, 'models'> {
+  return { models: effectiveModels(ctx.daemon, ctx.config) };
+}
 
 /** The setting that governs an agent of this kind, optionally given a worker's ticket. */
 export function modelSettingFor(
@@ -27,7 +58,16 @@ export function modelSettingFor(
   return models.workers;
 }
 
-/** Runtimes named only by the worker-options catalog, used by the account probe and credential homes. */
-export function workerOptionRuntimes(config: Pick<WorkspaceConfig, 'models'>): string[] {
-  return (config.models?.workerOptions ?? []).map((o) => o.runtime).filter(Boolean);
+/** Runtimes named by the effective catalog and by filled daemon overlays, used by the account probe and credential homes. */
+export function workerOptionRuntimes(
+  config: Pick<WorkspaceConfig, 'models'>,
+  daemon?: { models?: DaemonModels } | null,
+): string[] {
+  const models = effectiveModels(daemon, config);
+  const overlay = daemon?.models;
+  return [...new Set([
+    ...models.workerOptions.map((o) => o.runtime),
+    overlay?.conductor?.runtime,
+    overlay?.workers?.runtime,
+  ].filter((id): id is string => Boolean(id)))];
 }

@@ -32,13 +32,14 @@ While a ticket is waiting rather than merging, its turn prompt says so and gives
 2. `git fetch origin`.
 3. Sync: `git rebase origin/<default>` (or merge it in, if that is the project's convention — check `work/AGENTS.md`).
 4. **Resolve conflicts yourself.** Then re-run the full test and lint suite. If a resolution changes behavior the spec described, `ac_ask` before continuing, and end the turn.
-5. `git push --force-with-lease` (only ever your own ticket branch).
-6. Wait for CI when the project requires it. If CI goes red after the rebase, fix it here — that is still your job.
-7. `GH_TOKEN="$(gh auth token)" gh pr merge <n> --<mergeMethod>` (your brief names the method; default `squash`).
-8. `ac_ticket_merge_done(id, {mergeCommit: "<sha>", method: "<mergeMethod>"})`. The daemon verifies that the default branch carries your branch's content — a merge commit, identical trees, a squash of however many commits, or every commit picked individually all count — before accepting.
-9. Stop there. The daemon fast-forwards the primary clone, archives the OpenSpec change, removes your worktree, retires you, moves the ticket to `done` — and admits the next ticket in the project's merge queue.
+5. **For a `change` ticket, or a `task` ticket carrying an OpenSpec change:** `openspec validate <change> --strict`. Rebasing pulls in every spec change archived since you were proposed — including one that touched the same requirement yours does — and this is the same check the daemon's post-merge archive will otherwise fail on, silently, after you have already merged (VS-208). Treat a failure the same as a rebase conflict: bring your MODIFIED block up to date with what is now on the base rather than merging past it, re-validate, then continue. Do not run `openspec archive` yourself either way.
+6. `git push --force-with-lease` (only ever your own ticket branch).
+7. Wait for CI when the project requires it. If CI goes red after the rebase, fix it here — that is still your job.
+8. `GH_TOKEN="$(gh auth token)" gh pr merge <n> --<mergeMethod>` (your brief names the method; default `squash`).
+9. `ac_ticket_merge_done(id, {mergeCommit: "<sha>", method: "<mergeMethod>"})`. The daemon verifies that the default branch carries your branch's content — a merge commit, identical trees, a squash of however many commits, or every commit picked individually all count — before accepting.
+10. Stop there. The daemon fast-forwards the primary clone, archives the OpenSpec change, removes your worktree, retires you, moves the ticket to `done` — and admits the next ticket in the project's merge queue.
 
-For `local-branch`: steps 1–4, then `ac_ticket_merge_done` — the daemon fast-forwards `projects/<id>`. If it is not fast-forwardable, rebase again first.
+For `local-branch`: steps 1–5, then `ac_ticket_merge_done` — the daemon fast-forwards `projects/<id>`. If it is not fast-forwardable, rebase again first.
 
 **If the merge cannot complete** — unresolvable conflict, CI red after real attempts, forge error — do not force it and do not abandon it silently:
 

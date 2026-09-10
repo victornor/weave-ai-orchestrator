@@ -633,9 +633,16 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   }
 
   /** A `change` ticket can be `done` while its OpenSpec change directory is still un-archived on disk (§12.4 drift). */
+  /**
+   * `openspec_change_name IS NOT NULL` is already the full membership test — a `scout`/`question`
+   * ticket never gets one (PLAN §12.2), and a `task` ticket in an OpenSpec-enabled project does
+   * (`skip_specs: true`). No `kind` restriction: a `task` ticket's tracker change is backfilled the
+   * same as a `change` ticket's (VS-208 — a `kind = 'change'` clause here left a fully-merged,
+   * fully-valid tracker change unarchived indefinitely).
+   */
   function reconcileOpenSpecArchives(projects: Map<string, ProjectRow>): void {
     const rows = ctx.db.all<{ id: string; identifier: string; projectId: string | null; changeName: string }>(
-      "SELECT id, identifier, project_id, openspec_change_name AS change_name FROM tickets WHERE workspace_id = ? AND kind = 'change' AND status = 'done' AND openspec_change_name IS NOT NULL",
+      "SELECT id, identifier, project_id, openspec_change_name AS change_name FROM tickets WHERE workspace_id = ? AND status = 'done' AND openspec_change_name IS NOT NULL",
       [ctx.workspaceId],
     );
     for (const t of rows) {
@@ -644,9 +651,34 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       if (!existsSync(join(project.clonePath, 'openspec', 'changes', t.changeName))) continue;
       if (archivedDirFor(project.clonePath, t.changeName)) continue;
       log.info({ ticket: t.identifier, change: t.changeName }, 'archiving an OpenSpec change left behind by a merged ticket');
-      void deps().openspec.archiveAfterMerge(t.id)
-        .catch((e: unknown) => log.warn({ ticket: t.identifier, change: t.changeName, err: String(e) }, 'reconciliation archive failed'));
+      void deps().openspec.archiveAfterMerge(t.id).catch((e: unknown) => recordReconcileArchiveFailure(t, e));
     }
+  }
+
+  /**
+   * A reconciliation-triggered archive failure used to be only a `log.warn` — invisible to anyone
+   * not reading logs, so a standing failure (like VS-205's) could retry and fail silently every
+   * sweep. Records a comment on the ticket and wakes the conductor once per ticket for a given
+   * standing failure (the wake system's own idempotency on `idempotencyKey` already dedupes a
+   * `queued`/`claimed`/`coalesced`/`completed` wake, so a later sweep failing the same way does not
+   * renotify — VS-208).
+   */
+  function recordReconcileArchiveFailure(t: { id: string; identifier: string; changeName: string }, e: unknown): void {
+    const message = e instanceof Error ? e.message : String(e);
+    log.warn({ ticket: t.identifier, change: t.changeName, err: message }, 'reconciliation archive failed');
+    try { deps().tickets.comment(SYSTEM, t.id, `reconciliation could not archive ${t.changeName}: ${message}`, 'status'); }
+    catch (ce) { log.warn({ ticket: t.identifier, err: String(ce) }, 'reconciliation archive-failure comment failed'); }
+    let conductor: Agent;
+    try { conductor = deps().workers.conductor(); } catch { return; }
+    try {
+      deps().wake.enqueue(conductor.id, {
+        source: 'system',
+        reason: `openspec archive failed for ${t.identifier}: ${message}`,
+        payload: { ticketId: t.id, changeName: t.changeName, error: message },
+        idempotencyKey: `reconcile-archive-failed:${t.id}`,
+        requestedBy: SYSTEM,
+      });
+    } catch (we) { log.warn({ ticket: t.identifier, err: String(we) }, 'reconciliation archive-failure wake failed'); }
   }
 
   // ---------- retention (PLAN §16.1) ----------

@@ -77,6 +77,24 @@ describe('openspec cli wrapper', () => {
     expect(bin.calls().at(-1)!.argv).toEqual(['new', 'change', 'tst-1-x', '--goal', 'goal', '--json']);
   });
 
+  it('surfaces the real reason when archive rejects a change, even with nothing on stderr', async () => {
+    const { clone, bin } = setup([
+      { match: ['archive'], exit: 1, json: { archive: null, status: [{ severity: 'error', code: 'archive_spec_update_failed', message: 'conductor-chat/turn-work-trace MODIFIED failed: omits scenario(s) the current spec still has: "A scenario"', fix: 'Fix the change delta specs and rerun. No files were changed.' }] } },
+    ]);
+    const err = await cli.archive({ cwd: clone, bin: bin.path }, 'c').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OcError);
+    expect((err as OcError).message).toContain('omits scenario(s) the current spec still has');
+    expect((err as OcError).message).not.toMatch(/failed: *$/);
+  });
+
+  it('falls back to stderr when archive rejects with no structured issues', async () => {
+    const { clone, bin } = setup([{ match: ['archive'], exit: 1, stdout: '', json: undefined }]);
+    // the fake writes nothing to stderr either in this case; assert the message still names the exit code rather than being empty.
+    const err = await cli.archive({ cwd: clone, bin: bin.path }, 'c').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OcError);
+    expect((err as OcError).message.length).toBeGreaterThan('openspec archive c failed: '.length);
+  });
+
   it('normalises list --specs entries given as strings or objects', async () => {
     const { clone, bin } = setup([
       { match: ['list', '--specs'], json: { specs: ['auth', { id: 'billing', title: 'Billing', path: 'openspec/specs/billing/spec.md', requirementCount: 4 }] } },

@@ -47,7 +47,8 @@ settings were its runtime and its model. The list of workspaces SHALL be reachab
 workspace area, as the way to leave for another workspace.
 
 The daemon area SHALL hold the daemon's update and upgrade state, the operator's account,
-two-factor authentication and signed-in devices, and the dictation backend and Voxtype model.
+two-factor authentication and signed-in devices, the dictation backend and Voxtype model, and the
+optional model overlays (conductor setting, workers default, and named worker-options catalog).
 Settings that exist only in this browser — including dictation diagnostics capture — SHALL remain in
 the This-device section, not in the daemon dictation section.
 
@@ -58,7 +59,7 @@ the This-device section, not in the daemon dictation section.
 
 #### Scenario: A daemon setting is in the daemon area
 
-- **WHEN** the operator looks for the daemon's updates, their password, their two-factor authentication, their signed-in devices, or the dictation backend
+- **WHEN** the operator looks for the daemon's updates, their password, their two-factor authentication, their signed-in devices, the dictation backend, or the daemon model overlays
 - **THEN** each is found in the daemon area
 
 #### Scenario: The workspace list is reachable from the workspace area
@@ -93,7 +94,8 @@ workspace, without the operator having to reload the app.
 #### Scenario: The same daemon state from another workspace
 
 - **WHEN** the daemon area is opened from one workspace and then from another
-- **THEN** both show the same daemon update state, account, device list and dictation backend
+- **THEN** both show the same daemon update state, account, device list, dictation backend and
+  model overlays
 
 #### Scenario: A daemon-level change is not stale in another workspace
 

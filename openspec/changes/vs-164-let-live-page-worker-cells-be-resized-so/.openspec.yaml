@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-10
+goal: Let live-page worker cells be resized so the grid reflows

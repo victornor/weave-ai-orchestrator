@@ -1,7 +1,8 @@
 /**
  * VS-152: the Live page is a grid of currently-working workers, each streaming its run.
+ * VS-164: cells drag-resize on desktop and expand by tap on the phone.
  */
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Run, RunEvent, Ticket } from '@agent-conductor/shared';
 import { agent, run as makeRun, ticket } from './factories';
@@ -61,6 +62,17 @@ class FakeEventSource {
 
 const live = (): FakeEventSource[] => FakeEventSource.open.filter((s) => !s.closed);
 
+const phoneMedia = (): MediaQueryList => ({
+  matches: false,
+  media: '',
+  onchange: null,
+  addEventListener: () => undefined,
+  removeEventListener: () => undefined,
+  addListener: () => undefined,
+  removeListener: () => undefined,
+  dispatchEvent: () => false,
+});
+
 beforeEach(() => {
   FakeEventSource.open = [];
   state.workers = [];
@@ -71,8 +83,43 @@ beforeEach(() => {
   state.persisted = [];
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
+  window.matchMedia = ((q: string) => ({ ...phoneMedia(), media: q })) as unknown as typeof window.matchMedia;
 });
 afterEach(() => vi.clearAllMocks());
+
+function twoWorkers(): void {
+  state.workers = [
+    agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'running' }),
+    agent({ id: 'a2', name: 'Backend Engineer #1', ticketId: 'tk_2', status: 'active' }),
+  ];
+  state.tickets = [
+    ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode' }),
+    ticket({ id: 'tk_2', identifier: 'ACME-7', title: 'Flaky test' }),
+  ];
+}
+
+function stubSm(): void {
+  window.matchMedia = ((q: string) => ({
+    ...phoneMedia(),
+    media: q,
+    matches: q.includes('min-width: 40rem') && !q.includes('80rem'),
+  })) as unknown as typeof window.matchMedia;
+}
+
+function layout(el: HTMLElement, width = 200, height = 150): void {
+  Object.defineProperty(el, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({
+      top: 0, left: 0, bottom: height, right: width, width, height, x: 0, y: 0, toJSON: () => ({}),
+    }),
+  });
+}
+
+function cellOf(name: string): HTMLElement {
+  return screen.getByText(name).closest('article') as HTMLElement;
+}
+
+const stored = (): string | null => sessionStorage.getItem('conductor.live.cellSizes.ws1');
 
 describe('Live page membership', () => {
   it('shows one cell per live worker on a ticket, and names the worker and the ticket', () => {
@@ -181,3 +228,102 @@ describe('Live page streaming', () => {
     expect(screen.getByText('1 working')).toBeInTheDocument();
   });
 });
+
+describe('Live page desktop resize', () => {
+  beforeEach(() => stubSm());
+
+  it('grows then shrinks a cell by dragging its handle, and neighbours stay', () => {
+    twoWorkers();
+    render(<LiveRoute />);
+    const cell = cellOf('Frontend Engineer #7');
+    const other = cellOf('Backend Engineer #1');
+    layout(cell);
+    const handle = screen.getByLabelText('Resize Frontend Engineer #7');
+    expect(handle).toHaveClass('touch-none');
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 200, clientY: 150 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 400, clientY: 150 });
+    expect(cell).toHaveClass('col-span-2');
+    expect(other).toBeInTheDocument();
+
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(stored()).toContain('"a1"');
+
+    layout(cell);
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 200, clientY: 150 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 0, clientY: 150 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(cell).not.toHaveClass('col-span-2');
+  });
+
+  it('writes nothing when the handle is pressed and released without moving', () => {
+    twoWorkers();
+    render(<LiveRoute />);
+    layout(cellOf('Frontend Engineer #7'));
+    const handle = screen.getByLabelText('Resize Frontend Engineer #7');
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 200, clientY: 150 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(cellOf('Frontend Engineer #7')).not.toHaveClass('col-span-2');
+    expect(stored()).toBeNull();
+  });
+
+  it('resets to the equal slot on double-click', () => {
+    twoWorkers();
+    render(<LiveRoute />);
+    const cell = cellOf('Frontend Engineer #7');
+    layout(cell);
+    const handle = screen.getByLabelText('Resize Frontend Engineer #7');
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 200, clientY: 150 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 400, clientY: 150 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(cell).toHaveClass('col-span-2');
+    fireEvent.doubleClick(handle);
+    expect(cell).not.toHaveClass('col-span-2');
+  });
+
+  it('restores the chosen size after a reload in the same session', () => {
+    sessionStorage.setItem('conductor.live.cellSizes.ws1', JSON.stringify({ a1: { cols: 2, rows: 1 } }));
+    twoWorkers();
+    render(<LiveRoute />);
+    expect(cellOf('Frontend Engineer #7')).toHaveClass('col-span-2');
+    expect(cellOf('Backend Engineer #1')).not.toHaveClass('col-span-2');
+  });
+
+  it('offers no handle on empty or loading', () => {
+    state.workers = undefined;
+    render(<LiveRoute />);
+    expect(screen.queryByLabelText(/Resize/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Expand' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Live page phone expand', () => {
+  it('offers expand, not drag, and toggling it enlarges then restores the transcript', () => {
+    twoWorkers();
+    state.running = [makeRun({ id: 'run_1', agentId: 'a1', status: 'running' })];
+    render(<LiveRoute />);
+    expect(screen.queryByLabelText(/Resize/)).not.toBeInTheDocument();
+    const expand = screen.getAllByRole('button', { name: 'Expand' })[0]!;
+    const log = screen.getByLabelText('Transcript of Frontend Engineer #7');
+    expect(log.className).toContain('0.25');
+
+    fireEvent.click(expand);
+    expect(cellOf('Frontend Engineer #7')).toHaveClass('row-span-2');
+    expect(screen.getByLabelText('Transcript of Frontend Engineer #7').className).not.toContain('0.25');
+    expect(screen.getByLabelText('Transcript of Frontend Engineer #7').className).toContain('0.5');
+    expect(cellOf('Backend Engineer #1')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect(cellOf('Frontend Engineer #7')).not.toHaveClass('row-span-2');
+    expect(screen.getByLabelText('Transcript of Frontend Engineer #7').className).toContain('0.25');
+  });
+
+  it('offers neither expand nor drag on empty or loading', () => {
+    state.workers = [];
+    render(<LiveRoute />);
+    expect(screen.getByText('Nobody is working.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Expand' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Resize/)).not.toBeInTheDocument();
+  });
+});
+

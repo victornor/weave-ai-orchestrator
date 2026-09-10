@@ -194,6 +194,16 @@ export const WorkspaceDefaultsSchema = z.object({
    * CLI's own resumable-session handle going stale, not a human's interactive session.
    */
   interactiveSessionIdleTimeoutMinutes: z.number().int().min(1).default(240),
+  /**
+   * VS-202: how long a worker's `last_run_at` may go stale, with its ticket still open, no open
+   * decision, no queued/claimed wakeup and no run in flight, before the supervisor flags it as
+   * stalled. Deliberately its own field rather than reusing `spawnWaitWarnSec`: the five other
+   * conditions already rule out every legitimate reason a worker would be quiet, so this only needs
+   * to absorb the ordinary latency between a run finishing and its follow-up wakeup landing — not
+   * to distinguish a healthy wait from an unhealthy one. 300s is comfortably longer than that
+   * latency and well under the 20 minutes the VS-199 incident sat unnoticed.
+   */
+  stalledWorkerTimeoutSec: z.number().int().min(60).default(300),
   bootstrapBudgetTokens: z.number().int().default(16000),
   knowledgeBudgetTokens: KnowledgeBudgetsSchema.default({}),
   workerArchiveDays: z.number().int().default(30),

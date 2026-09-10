@@ -69,6 +69,8 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   const interrupted = new Map<string, number>();
   const retried = new Set<string>();
   const spawnWaitSince = new Map<string, number>();
+  /** VS-202: agentId -> the `last_run_at` value already raised as stalled, so a still-stalled worker is not re-notified every sweep. */
+  const stalledNotified = new Map<string, string>();
   let timer: NodeJS.Timeout | null = null;
   let ticking = false;
   let bootRecovered = false;
@@ -321,6 +323,48 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       payload: { kind: 'approval_repaired', tickets: repaired },
       requestedBy: { kind: 'system', id: null },
     });
+  }
+
+  interface StalledAgentRow { id: string; ticketId: string; lastRunAt: string; identifier: string }
+
+  /**
+   * VS-202: a worker agent that cannot make further progress on its own — not retired, its ticket
+   * not terminal, no open decision on that ticket, no wakeup queued or claimed for it, no run
+   * queued or running for it, and its `last_run_at` older than the configured threshold. This is
+   * deliberately independent of `watchdog()`: that one only ever looks at `runs` with
+   * `status = 'running'`, so a worker whose turn ended cleanly and was simply never re-woken (the
+   * VS-199 shape) falls entirely outside it.
+   */
+  function stalledWorkers(): StalledAgentRow[] {
+    const timeoutMs = (ctx.config.defaults.stalledWorkerTimeoutSec ?? 300) * 1000;
+    const cutoff = new Date(Date.now() - timeoutMs).toISOString();
+    const terminal = TERMINAL_TICKET_STATUSES.map(() => '?').join(',');
+    return ctx.db.all<StalledAgentRow>(
+      `SELECT a.id AS id, a.ticket_id AS ticket_id, a.last_run_at AS last_run_at, t.identifier AS identifier
+         FROM agents a JOIN tickets t ON t.id = a.ticket_id
+        WHERE a.workspace_id = ? AND a.kind = 'worker' AND a.status != 'retired'
+          AND t.status NOT IN (${terminal})
+          AND a.last_run_at IS NOT NULL AND a.last_run_at < ?
+          AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.agent_id = a.id AND r.status IN ('queued','running'))
+          AND NOT EXISTS (SELECT 1 FROM wakeups w WHERE w.agent_id = a.id AND w.status IN ('queued','claimed'))
+          AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.ticket_id = a.ticket_id AND d.status = 'open')`,
+      [ctx.workspaceId, ...TERMINAL_TICKET_STATUSES, cutoff],
+    );
+  }
+
+  /**
+   * Raises `worker.stalled` (already a `DIGEST_EVENT_TYPES` member, so the conductor sees it on its
+   * next digest with no extra wiring) for each match, deduped per `(agentId, lastRunAt)` so a
+   * worker that is still stalled next sweep is not re-notified until it actually gets a new run.
+   * Detection only, per the ticket: nothing here enqueues a wakeup, retry or restart.
+   */
+  function stalledWorkerScan(): void {
+    for (const row of stalledWorkers()) {
+      if (stalledNotified.get(row.id) === row.lastRunAt) continue;
+      stalledNotified.set(row.id, row.lastRunAt);
+      log.warn({ agentId: row.id, ticket: row.identifier, lastRunAt: row.lastRunAt }, 'worker is idle with an unfinished ticket and nothing left to wake it');
+      ctx.events.emit('worker.stalled', 'agent', row.id, { ticketId: row.ticketId, reason: 'idle', lastRunAt: row.lastRunAt });
+    }
   }
 
   /**
@@ -661,6 +705,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
           lastLiveness = Date.now();
           try { livenessScan(); } catch (e) { log.error({ err: String(e) }, 'liveness scan failed'); }
           await approvalIntegrityScan().catch((e) => log.error({ err: String(e) }, 'approval integrity scan failed'));
+          try { stalledWorkerScan(); } catch (e) { log.error({ err: String(e) }, 'stalled worker scan failed'); }
         }
         try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }
         try { conductorDigest(); } catch (e) { log.error({ err: String(e) }, 'digest failed'); }

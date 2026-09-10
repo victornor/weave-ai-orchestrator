@@ -50,6 +50,18 @@ describe('liveInput default (VS-99)', () => {
   });
 });
 
+describe('stalledWorkerTimeoutSec default (VS-202)', () => {
+  it('defaults to 300 seconds, and accepts an override', () => {
+    expect(WorkspaceDefaultsSchema.parse({}).stalledWorkerTimeoutSec).toBe(300);
+    expect(WorkspaceDefaultsSchema.parse({ stalledWorkerTimeoutSec: 900 }).stalledWorkerTimeoutSec).toBe(900);
+  });
+
+  it('a full workspace config with no override still parses, defaulting to 300', () => {
+    const cfg = WorkspaceConfigSchema.parse({ version: 1, id: 'acme', name: 'Acme', ticketPrefix: 'ACME' });
+    expect(cfg.defaults.stalledWorkerTimeoutSec).toBe(300);
+  });
+});
+
 describe('YOLO mode: the setting', () => {
   it('is off unless the workspace turns it on', () => {
     expect(WorkspaceDefaultsSchema.parse({}).yolo).toBe(false);

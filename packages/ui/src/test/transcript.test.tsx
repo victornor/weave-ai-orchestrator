@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { RunEvent } from '@agent-conductor/shared';
-import { reportUiStatus, runEventsToTranscript } from '../lib/transcript';
+import { groupConsecutiveTools, reportUiStatus, runEventsToTranscript } from '../lib/transcript';
+import type { TranscriptBlock } from '../lib/transcript';
 import { Transcript } from '../components/Transcript';
 import { Markdown } from '../components/Markdown';
 import { markdownToHtml } from '../lib/markdown';
@@ -147,6 +148,43 @@ describe('runEventsToTranscript', () => {
   });
 });
 
+function toolBlock(id: string, name: string): TranscriptBlock {
+  return { id, type: 'tool', tool: name, target: id, durationMs: null, adds: null, dels: null, diff: null };
+}
+
+describe('groupConsecutiveTools', () => {
+  it('folds ten consecutive Reads into one group of 10', () => {
+    const rows = groupConsecutiveTools(Array.from({ length: 10 }, (_, i) => toolBlock(`r${i}`, 'Read')));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ type: 'tools', tool: 'Read' });
+    expect(rows[0]?.type === 'tools' && rows[0].calls).toHaveLength(10);
+  });
+
+  it('keeps Read, Glob, Read as three groups', () => {
+    const rows = groupConsecutiveTools([toolBlock('a', 'Read'), toolBlock('b', 'Glob'), toolBlock('c', 'Read')]);
+    expect(rows.map((r) => (r.type === 'tools' ? r.tool : r.block.type === 'tool' ? r.block.tool : r.block.type))).toEqual([
+      'Read',
+      'Glob',
+      'Read',
+    ]);
+    expect(rows.every((r) => r.type === 'single')).toBe(true);
+  });
+
+  it('does not group a single Read', () => {
+    const rows = groupConsecutiveTools([toolBlock('a', 'Read')]);
+    expect(rows).toEqual([{ type: 'single', block: toolBlock('a', 'Read') }]);
+  });
+
+  it('splits two Reads when a text or phase line sits between them', () => {
+    const text: TranscriptBlock = { id: 't', type: 'text', text: 'next' };
+    const phase: TranscriptBlock = { id: 'p', type: 'phase', phase: 'implementing', durationMs: null, tokens: null };
+    const viaText = groupConsecutiveTools([toolBlock('a', 'Read'), text, toolBlock('b', 'Read')]);
+    const viaPhase = groupConsecutiveTools([toolBlock('a', 'Read'), phase, toolBlock('b', 'Read')]);
+    expect(viaText.map((r) => r.type)).toEqual(['single', 'single', 'single']);
+    expect(viaPhase.map((r) => r.type)).toEqual(['single', 'single', 'single']);
+  });
+});
+
 describe('reportUiStatus', () => {
   it('maps report states that have no matching UiStatus spelling', () => {
     expect(reportUiStatus('needs_decision')).toBe('needs-you');
@@ -210,6 +248,50 @@ describe('Transcript', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Turn report: Opened the PR for VS-147.' }));
     expect(screen.getByText(/"uncommittedWork"/)).toBeInTheDocument();
     expect(screen.getByText(/"nextAction"/)).toBeInTheDocument();
+  });
+
+  it('collapses ten consecutive Reads into Read ×10 and expands to each path', () => {
+    const events = Array.from({ length: 10 }, (_, i) =>
+      ev({ id: `r${i}`, type: 'tool.call', payload: { id: `c${i}`, name: 'Read', input: { file_path: `f${i}.ts` } } }),
+    );
+    render(<Transcript events={events} />);
+    expect(screen.getByText('Read ×10')).toBeInTheDocument();
+    expect(screen.queryByText('f0.ts')).not.toBeInTheDocument();
+    expect(screen.queryByText('f9.ts')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read, 10 calls' }));
+    expect(screen.getByText('f0.ts')).toBeInTheDocument();
+    expect(screen.getByText('f9.ts')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read, 10 calls' }));
+    expect(screen.queryByText('f0.ts')).not.toBeInTheDocument();
+  });
+
+  it('keeps a mixed Read, Glob, Read as three groups', () => {
+    render(
+      <Transcript
+        events={[
+          ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Read', input: { file_path: 'a.ts' } } }),
+          ev({ id: 'b', type: 'tool.call', payload: { id: 'c2', name: 'Glob', input: { pattern: '**/*.ts' } } }),
+          ev({ id: 'c', type: 'tool.call', payload: { id: 'c3', name: 'Read', input: { file_path: 'b.ts' } } }),
+        ]}
+      />,
+    );
+    expect(screen.queryByText(/×/)).not.toBeInTheDocument();
+    expect(screen.getByText('a.ts')).toBeInTheDocument();
+    expect(screen.getByText('**/*.ts')).toBeInTheDocument();
+    expect(screen.getByText('b.ts')).toBeInTheDocument();
+  });
+
+  it('does not count a single Read', () => {
+    render(
+      <Transcript
+        events={[ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Read', input: { file_path: 'solo.ts' } } })]}
+      />,
+    );
+    expect(screen.getByText('Read')).toBeInTheDocument();
+    expect(screen.queryByText(/Read ×/)).not.toBeInTheDocument();
+    expect(screen.getByText('solo.ts')).toBeInTheDocument();
   });
 });
 

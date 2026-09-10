@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
 import { OcError } from '@agent-conductor/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
@@ -6,7 +6,7 @@ import { createUsageService } from './index.js';
 import { recordUsage, type RecordUsageInput } from './service.js';
 
 let h: TestHarness;
-afterEach(() => h?.cleanup());
+afterEach(() => { vi.useRealTimers(); h?.cleanup(); });
 
 function usage(): ReturnType<typeof createUsageService> {
   return createUsageService(h.ctx, h.deps);
@@ -34,6 +34,15 @@ function add(over: Partial<RecordUsageInput> = {}): void {
 }
 
 const DAY = '2026-01-05'; // a Monday
+
+/**
+ * A fixed instant for the `window: '24h'` tests below. Real `Date.now()` races the millisecond
+ * precision of `nowIso()`-stamped rows against the query's own `new Date()`-computed window end
+ * (packages/core/src/usage/service.ts's `range()`) — when the two land in the same millisecond the
+ * strict `occurred_at < end` SQL bound silently excludes the row. Freezing time and advancing the
+ * clock between the insert and the query removes that race entirely.
+ */
+const NOW = new Date('2026-06-01T12:00:00.000Z');
 
 describe('usage series', () => {
   it('buckets rows by hour and only emits buckets that have rows', () => {
@@ -159,10 +168,13 @@ describe('usage scopes', () => {
 describe('usage top / models / ticket', () => {
   it('groups by model and ticket with human labels, ordered by cost', () => {
     h = makeHarness();
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
     const t = mkTicket({ title: 'Fix the thing' });
     const when = nowIso();
     add({ occurredAt: when, model: 'claude-opus-5', ticketId: t.id, costCents: 10, inputTokens: 5 });
     add({ occurredAt: when, model: 'claude-haiku-5', ticketId: null, costCents: 90, inputTokens: 1 });
+    vi.setSystemTime(new Date(NOW.getTime() + 1000));
 
     const byModel = usage().top({ scope: 'workspace', window: '24h', by: 'model' });
     expect(byModel.map((r) => r.key)).toEqual(['claude-haiku-5', 'claude-opus-5']);
@@ -184,11 +196,14 @@ describe('usage top / models / ticket', () => {
 
   it('groups ticket-less usage per agent instead of one unknown bucket', () => {
     h = makeHarness();
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
     const worker = h.addWorker(null);
     const when = nowIso();
     add({ occurredAt: when, agentId: h.conductorId, ticketId: null, costCents: 30, inputTokens: 3 });
     add({ occurredAt: when, agentId: h.conductorId, ticketId: null, costCents: 20, inputTokens: 2 });
     add({ occurredAt: when, agentId: worker, ticketId: null, costCents: 10, inputTokens: 1 });
+    vi.setSystemTime(new Date(NOW.getTime() + 1000));
 
     const rows = usage().top({ scope: 'workspace', window: '24h', by: 'ticket' });
     expect(rows.map((r) => [r.key, r.label, r.costCents])).toEqual([
@@ -201,10 +216,13 @@ describe('usage top / models / ticket', () => {
 
   it('aggregates per model with provider', () => {
     h = makeHarness();
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
     const when = nowIso();
     add({ occurredAt: when, model: 'claude-opus-5', provider: 'anthropic', costCents: 5, inputTokens: 3 });
     add({ occurredAt: when, model: 'claude-opus-5', provider: 'anthropic', costCents: 5, inputTokens: 4 });
     add({ occurredAt: when, model: null, provider: null, costCents: 50, inputTokens: 1 });
+    vi.setSystemTime(new Date(NOW.getTime() + 1000));
 
     const rows = usage().models({ scope: 'workspace', window: '24h' });
     expect(rows[0]).toMatchObject({ model: 'unknown', provider: null, costCents: 50 });

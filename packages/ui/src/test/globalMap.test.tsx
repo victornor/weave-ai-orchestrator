@@ -1,9 +1,9 @@
-/** VS-176: daemon-wide Map page. */
+/** VS-176/VS-192: daemon-wide Map page. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Role, Ticket } from '@agent-conductor/shared';
-import type { WorkspaceProjectsState } from '../api/hooks';
-import { project, ticket } from './factories';
+import type { WorkerListItem, WorkspaceProjectsState } from '../api/hooks';
+import { agent, project, ticket } from './factories';
 
 const go = vi.fn();
 const state = vi.hoisted(() => ({
@@ -12,7 +12,8 @@ const state = vi.hoisted(() => ({
   projects: {} as Record<string, WorkspaceProjectsState>,
   roles: {} as Record<string, Role[] | undefined>,
   tickets: {} as Record<string, Ticket[] | undefined>,
-  knowledge: {} as Record<string, { files: Array<{ projectId: string | null }> } | undefined>,
+  knowledge: {} as Record<string, { files: Array<{ projectId: string | null; updatedAt: string }> } | undefined>,
+  workers: {} as Record<string, WorkerListItem[] | undefined>,
   errors: {} as Record<string, boolean>,
   conductors: {} as Record<string, { agent: { id: string; name: string } } | undefined>,
   reduced: false,
@@ -33,6 +34,7 @@ vi.mock('../api/hooks', () => ({
   useTicketsMany: (ids: string[]) => ids.map((id) => ({ data: state.tickets[id], isError: Boolean(state.errors[id]), refetch: vi.fn() })),
   useKnowledgeIndexMany: (ids: string[]) => ids.map((id) => ({ data: state.knowledge[id], isError: Boolean(state.errors[id]), refetch: vi.fn() })),
   useConductorMany: (ids: string[]) => ids.map((id) => ({ data: state.conductors[id], isError: false })),
+  useWorkersMany: (ids: string[]) => ids.map((id) => ({ data: state.workers[id] ?? [], isError: false })),
 }));
 
 const { GlobalMapRoute } = await import('../routes/GlobalMap');
@@ -44,6 +46,10 @@ function role(over: Partial<Role> = {}): Role {
     sessionPolicy: 'per_ticket', maxWorkers: 2, secrets: [], status: 'active', pauseReason: null, specRevision: 1,
     createdBy: 'c', createdAt: '', updatedAt: '', ...over,
   };
+}
+
+function worker(over: Partial<WorkerListItem> = {}): WorkerListItem {
+  return { ...agent(over), interactiveSession: false, ...over };
 }
 
 function ready(over: Partial<typeof state> = {}): void {
@@ -58,7 +64,11 @@ function ready(over: Partial<typeof state> = {}): void {
     alpha: [ticket({ id: 't1', identifier: 'VS-176', title: 'Map', status: 'in_progress', assigneeRoleId: 'r1', projectId: 'p1' })],
     beta: [],
   };
-  state.knowledge = { alpha: { files: [{ projectId: 'p1' }, { projectId: 'p1' }] }, beta: { files: [] } };
+  state.knowledge = {
+    alpha: { files: [{ projectId: 'p1', updatedAt: '2026-09-01T00:00:00.000Z' }, { projectId: 'p1', updatedAt: '2026-09-02T00:00:00.000Z' }] },
+    beta: { files: [] },
+  };
+  state.workers = {};
   state.errors = {};
   state.conductors = { alpha: { agent: { id: 'c1', name: 'Conductor' } }, beta: undefined };
   state.reduced = false;
@@ -193,5 +203,29 @@ describe('GlobalMapRoute', () => {
     await draw();
     expect(raf).not.toHaveBeenCalled();
     raf.mockRestore();
+  });
+
+  it('draws a beam for a live worker holding an in-flight ticket, and it is not a node', async () => {
+    ready({
+      reduced: true,
+      workers: { alpha: [worker({ id: 'w1', kind: 'worker', ticketId: 't1', status: 'running' })], beta: [] },
+    });
+    const container = await draw();
+    // The beam is decorative: it adds no node (worker ids never appear as a `data-node`), and is
+    // not itself aria-labelled or selectable — matching the ticket-count already asserted for
+    // this fixture in "shows nodes for two workspaces...".
+    const nodeIds = [...container.querySelectorAll('[data-node]')].map((n) => n.getAttribute('data-node'));
+    expect(nodeIds.some((id) => id?.includes('w1'))).toBe(false);
+    expect(screen.queryByLabelText('w1')).not.toBeInTheDocument();
+  });
+
+  it('does not draw a beam once the worker is no longer live', async () => {
+    ready({
+      reduced: true,
+      workers: { alpha: [worker({ id: 'w1', kind: 'worker', ticketId: 't1', status: 'done' })], beta: [] },
+    });
+    const container = await draw();
+    expect(container.querySelectorAll('[data-node]').length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText('w1')).not.toBeInTheDocument();
   });
 });

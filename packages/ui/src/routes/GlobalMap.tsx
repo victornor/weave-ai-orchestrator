@@ -10,10 +10,12 @@ import {
   useKnowledgeIndexMany,
   useRolesMany,
   useTicketsMany,
+  useWorkersMany,
   useWorkspaceProjects,
   useWorkspaces,
 } from '../api/hooks';
 import { useGo } from '../app/link';
+import { isLiveWorker } from '../lib/board';
 import { buildMapModel, type MapNode } from '../lib/map/model';
 
 const MapCanvas = lazy(async () => ({ default: (await import('./MapCanvas')).MapCanvas }));
@@ -28,6 +30,12 @@ export function GlobalMapRoute(): React.ReactElement {
   const ticketQueries = useTicketsMany(ids, { limit: 300 });
   const knowledgeQueries = useKnowledgeIndexMany(ids);
   const conductorQueries = useConductorMany(ids);
+  const workerQueries = useWorkersMany(ids);
+
+  const liveWorkers = useMemo(
+    () => workerQueries.flatMap((q) => (q.data ?? []).filter((w) => w.kind === 'worker' && w.ticketId && isLiveWorker(w))),
+    [workerQueries],
+  );
 
   const failed = listed.filter((_, i) => {
     const p = projectsByWs[listed[i]!.id];
@@ -132,7 +140,7 @@ export function GlobalMapRoute(): React.ReactElement {
             })}
             {model.nodes.length ? (
               <Suspense fallback={<SkeletonRows rows={8} />}>
-                <MapCanvas model={model} onOpen={onOpen} />
+                <MapCanvas model={model} onOpen={onOpen} liveWorkers={liveWorkers} />
               </Suspense>
             ) : failed.length === 0 ? (
               <EmptyState title="Nothing to draw yet." detail="Projects, roles and in-flight tickets show up here." />

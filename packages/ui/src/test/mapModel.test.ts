@@ -52,7 +52,7 @@ describe('buildMapModel', () => {
         projects: [project({ id: 'p1', slug: 'api', workspaceId: 'alpha' })],
         roles: [role({ id: 'r1', workspaceId: 'alpha', projectId: 'p1' })],
         tickets: [ticket({ id: 't1', identifier: 'VS-176', title: 'Map', status: 'in_progress', assigneeRoleId: 'r1', projectId: 'p1', workspaceId: 'alpha' })],
-        knowledge: [{ projectId: 'p1' }, { projectId: 'p1' }, { projectId: 'p1' }],
+        knowledge: [{ projectId: 'p1', updatedAt: '2026-09-01T00:00:00.000Z' }, { projectId: 'p1', updatedAt: '2026-09-02T00:00:00.000Z' }, { projectId: 'p1', updatedAt: '2026-09-03T00:00:00.000Z' }],
         conductor: { id: 'c1', name: 'Conductor' },
       }),
       ws({
@@ -117,7 +117,7 @@ describe('buildMapModel', () => {
       id: 'alpha',
       name: 'Alpha',
       projects: [project({ id: 'p1', slug: 'api' })],
-      knowledge: [{ projectId: 'p1' }, { projectId: 'p1' }, { projectId: 'p1' }, { projectId: 'p1' }],
+      knowledge: [{ projectId: 'p1', updatedAt: '2026-09-01T00:00:00.000Z' }, { projectId: 'p1', updatedAt: '2026-09-02T00:00:00.000Z' }, { projectId: 'p1', updatedAt: '2026-09-03T00:00:00.000Z' }, { projectId: 'p1', updatedAt: '2026-09-04T00:00:00.000Z' }],
     })]);
     expect(model.nodes.filter((n) => n.kind === 'knowledge')).toHaveLength(1);
   });

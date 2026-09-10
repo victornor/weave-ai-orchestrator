@@ -20,6 +20,12 @@ export interface MapNode {
   search?: Record<string, string>;
   projectId?: string;
   projectSlug?: string;
+  /** When this node has one: a role, a ticket, or a knowledge node (its newest file). */
+  updatedAt: string | null;
+  /** Only set on a `ticket` node — drives its status colour. */
+  ticketStatus?: Ticket['status'];
+  /** Only set on `workspace`/`project` nodes: true when an in-flight ticket sits under it. */
+  hasLiveActivity?: boolean;
 }
 
 export interface MapEdge {
@@ -41,7 +47,7 @@ export interface MapWorkspaceInput {
   projects: readonly Project[];
   roles: readonly Role[];
   tickets: readonly Ticket[];
-  knowledge: readonly { projectId: string | null }[];
+  knowledge: readonly { projectId: string | null; updatedAt: string }[];
   conductor: { id: string; name: string } | null;
 }
 
@@ -80,14 +86,17 @@ export function buildMapModel(workspaces: readonly MapWorkspaceInput[]): MapMode
 
   for (const w of workspaces) {
     const wsId = nodeId('workspace', w.id);
-    push({
+    const wsNode: MapNode = {
       id: wsId,
       kind: 'workspace',
       title: w.name,
       workspaceId: w.id,
       workspaceName: w.name,
       href: `/w/${encodeURIComponent(w.id)}/needs`,
-    });
+      updatedAt: null,
+      hasLiveActivity: false,
+    };
+    push(wsNode);
 
     if (w.conductor) {
       const cid = nodeId('conductor', w.conductor.id);
@@ -98,6 +107,7 @@ export function buildMapModel(workspaces: readonly MapWorkspaceInput[]): MapMode
         workspaceId: w.id,
         workspaceName: w.name,
         href: `/w/${encodeURIComponent(w.id)}/chat`,
+        updatedAt: null,
       });
       addEdge(edges, neighbours, wsId, cid);
     }
@@ -114,6 +124,8 @@ export function buildMapModel(workspaces: readonly MapWorkspaceInput[]): MapMode
         href: `/w/${encodeURIComponent(w.id)}/p/${encodeURIComponent(p.slug)}`,
         projectId: p.id,
         projectSlug: p.slug,
+        updatedAt: null,
+        hasLiveActivity: false,
       });
       addEdge(edges, neighbours, wsId, pid);
     }
@@ -132,6 +144,7 @@ export function buildMapModel(workspaces: readonly MapWorkspaceInput[]): MapMode
         href: `/w/${encodeURIComponent(w.id)}/team`,
         projectId: r.projectId,
         projectSlug: project?.slug,
+        updatedAt: r.updatedAt,
       });
       liveRoles.add(r.id);
       const parent = project ? nodeId('project', project.id) : wsId;
@@ -151,20 +164,31 @@ export function buildMapModel(workspaces: readonly MapWorkspaceInput[]): MapMode
         href: `/w/${encodeURIComponent(w.id)}/tickets/${encodeURIComponent(t.identifier)}`,
         projectId: t.projectId ?? undefined,
         projectSlug: project?.slug,
+        updatedAt: t.updatedAt,
+        ticketStatus: t.status,
       });
       const roleId = t.assigneeRoleId && liveRoles.has(t.assigneeRoleId) ? nodeId('role', t.assigneeRoleId) : null;
       if (roleId && byId.has(roleId)) addEdge(edges, neighbours, roleId, tid);
       else if (project) addEdge(edges, neighbours, nodeId('project', project.id), tid);
       else addEdge(edges, neighbours, wsId, tid);
+      wsNode.hasLiveActivity = true;
+      if (project) {
+        const projectNode = byId.get(nodeId('project', project.id));
+        if (projectNode) projectNode.hasLiveActivity = true;
+      }
     }
 
-    const knowledgeProjects = new Set<string>();
-    let workspaceKnowledge = false;
+    const knowledgeProjects = new Map<string, string>();
+    let workspaceKnowledgeUpdatedAt: string | null = null;
     for (const f of w.knowledge) {
-      if (f.projectId && projectById.has(f.projectId)) knowledgeProjects.add(f.projectId);
-      else if (!f.projectId) workspaceKnowledge = true;
+      if (f.projectId && projectById.has(f.projectId)) {
+        const latest = knowledgeProjects.get(f.projectId);
+        if (!latest || f.updatedAt > latest) knowledgeProjects.set(f.projectId, f.updatedAt);
+      } else if (!f.projectId) {
+        if (!workspaceKnowledgeUpdatedAt || f.updatedAt > workspaceKnowledgeUpdatedAt) workspaceKnowledgeUpdatedAt = f.updatedAt;
+      }
     }
-    for (const projectId of knowledgeProjects) {
+    for (const [projectId, updatedAt] of knowledgeProjects) {
       const project = projectById.get(projectId)!;
       const kid = `knowledge:project:${projectId}`;
       push({
@@ -177,10 +201,11 @@ export function buildMapModel(workspaces: readonly MapWorkspaceInput[]): MapMode
         search: { project: projectId, tab: 'knowledge' },
         projectId,
         projectSlug: project.slug,
+        updatedAt,
       });
       addEdge(edges, neighbours, nodeId('project', projectId), kid);
     }
-    if (workspaceKnowledge) {
+    if (workspaceKnowledgeUpdatedAt) {
       const kid = `knowledge:ws:${w.id}`;
       push({
         id: kid,
@@ -190,6 +215,7 @@ export function buildMapModel(workspaces: readonly MapWorkspaceInput[]): MapMode
         workspaceName: w.name,
         href: `/w/${encodeURIComponent(w.id)}/knowledge`,
         search: { tab: 'knowledge' },
+        updatedAt: workspaceKnowledgeUpdatedAt,
       });
       addEdge(edges, neighbours, wsId, kid);
     }

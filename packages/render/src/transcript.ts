@@ -136,6 +136,10 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
   const blocks: TranscriptBlock[] = [];
   /** call id → index in `blocks`, so a late tool.result folds back into its call. */
   const pendingTools = new Map<string, number>();
+  /** call id → index in `blocks`, kept after a tool.result folds so a trailing `command.executed`
+   * (Claude/Gemini/Cursor emit one per shell call, in addition to tool.call/tool.result) can still
+   * find the row it belongs to instead of opening a second, half-empty one. */
+  const completedTools = new Map<string, number>();
   let lastText: TextBlock | null = null;
   let tokensSinceLastPhase = 0;
 
@@ -206,13 +210,18 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
           tool.diffStat = diffStat;
           tool.collapsed = collapsedToolLine(tool.name, tool.target, tool.durationMs, tool.status, diffStat);
           tool.eventIds.push(ev.id ?? `${ev.seq}`);
-          if (callId) pendingTools.delete(callId);
-          else pendingTools.delete(`@name:${name}`);
+          const key = callId ?? `@name:${name}`;
+          pendingTools.delete(key);
+          completedTools.set(key, idx);
         } else {
-          // A result without its call (resumed session, truncated window): still show it.
+          // A result without its call (resumed session, truncated window): still show it. Its
+          // name is often unresolved too (the id was never registered on this side of the
+          // window), so a bare fallback name alone would be its only content — preview the
+          // result body as the target instead of leaving the row that thin.
+          const orphanTarget = target ?? (detail ? oneLine(detail.text, 60) : null);
           push({
-            ...base(ev), kind: 'tool', name, target, status: denied ? 'denied' : isError ? 'error' : 'ok',
-            durationMs: duration, collapsed: collapsedToolLine(name, target, duration, denied ? 'denied' : isError ? 'error' : 'ok', diffStat),
+            ...base(ev), kind: 'tool', name, target: orphanTarget, status: denied ? 'denied' : isError ? 'error' : 'ok',
+            durationMs: duration, collapsed: collapsedToolLine(name, orphanTarget, duration, denied ? 'denied' : isError ? 'error' : 'ok', diffStat),
             detail: detail?.text ?? null, detailTruncated: detail?.truncated ?? false, diffStat,
           } satisfies ToolBlock);
         }
@@ -220,15 +229,46 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
       }
 
       case 'command.executed': {
-        const cmd = scrub(str(p, 'command', 'cmd')) ?? '';
+        const toolUseId = str(p, 'toolUseId', 'id', 'callId', 'toolCallId');
+        const idx = toolUseId ? pendingTools.get(toolUseId) ?? completedTools.get(toolUseId) : undefined;
         const exitCode = num(p, 'exitCode', 'code');
         const duration = num(p, 'durationMs', 'duration_ms');
         const outRaw = scrub(bodyText(p['stdout'] ?? p['output'] ?? p['stderr']));
+        const isError = bool(p, 'isError', 'error') === true || (exitCode !== null && exitCode !== 0);
+
+        if (idx !== undefined && blocks[idx] && blocks[idx]!.kind === 'tool') {
+          // The tool.call/tool.result pair for this same id already rendered one row — the
+          // command in `target`, the result in `detail`. Claude/Gemini/Cursor send this event on
+          // top of that pair for every shell call, without the command text, so on its own it
+          // used to render as a bare "shell" second row. It carries nothing that row is missing,
+          // so it only backfills a gap (a result-less call, or a denied one) and never adds a row.
+          const tool = blocks[idx] as ToolBlock;
+          let changed = false;
+          if (!tool.detail && outRaw) {
+            const filled = truncate(outRaw, maxDetail);
+            tool.detail = filled.text;
+            tool.detailTruncated = filled.truncated;
+          }
+          if (tool.durationMs === null && duration !== null) { tool.durationMs = duration; changed = true; }
+          if (tool.status === 'pending') { tool.status = isError ? 'error' : 'ok'; changed = true; }
+          else if (tool.status === 'ok' && isError) { tool.status = 'error'; changed = true; }
+          if (changed) {
+            tool.collapsed = collapsedToolLine(tool.name, tool.target, tool.durationMs, tool.status, exitCode !== null && exitCode !== 0 ? `exit ${exitCode}` : null);
+          }
+          tool.eventIds.push(ev.id ?? `${ev.seq}`);
+          break;
+        }
+
+        // No matching call in view (resumed session, a window that starts mid-turn): still show
+        // it, under the tool name the payload actually carries rather than a hardcoded 'shell'.
+        const cmd = scrub(str(p, 'command', 'cmd')) ?? '';
+        const name = str(p, 'tool', 'name') ?? 'shell';
+        const target = cmd ? oneLine(cmd, 80) : null;
         const detail = outRaw ? truncate(outRaw, maxDetail) : null;
-        const st: ToolBlock['status'] = exitCode === null ? 'ok' : exitCode === 0 ? 'ok' : 'error';
+        const st: ToolBlock['status'] = isError ? 'error' : 'ok';
         push({
-          ...base(ev), kind: 'tool', name: 'shell', target: oneLine(cmd, 80), status: st, durationMs: duration,
-          collapsed: collapsedToolLine('shell', oneLine(cmd, 80), duration, st, exitCode !== null && exitCode !== 0 ? `exit ${exitCode}` : null),
+          ...base(ev), kind: 'tool', name, target, status: st, durationMs: duration,
+          collapsed: collapsedToolLine(name, target, duration, st, exitCode !== null && exitCode !== 0 ? `exit ${exitCode}` : null),
           detail: detail?.text ?? null, detailTruncated: detail?.truncated ?? false, diffStat: null,
         } satisfies ToolBlock);
         break;

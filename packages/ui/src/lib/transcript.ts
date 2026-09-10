@@ -87,6 +87,9 @@ function resultText(p: Record<string, unknown>): string | null {
 export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBlock[] {
   const out: TranscriptBlock[] = [];
   const openTools = new Map<string, number>();
+  /** Kept after a tool.result folds, so a trailing `command.executed` (Claude/Gemini/Cursor send
+   * one per shell call, on top of tool.call/tool.result) can still find the row it belongs to. */
+  const closedTools = new Map<string, number>();
 
   for (const e of events) {
     const p = e.payload ?? {};
@@ -139,13 +142,16 @@ export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBl
           block.denied = denied;
           block.pending = false;
           openTools.delete(key);
+          if (key) closedTools.set(key, idx!);
         } else {
-          // A result whose call we never saw (resumed session, truncated window): show it anyway.
+          // A result whose call we never saw (resumed session, truncated window): show it
+          // anyway. Its name is often unresolved too, so preview the body instead of leaving a
+          // bare fallback name as the row's only content.
           out.push({
             id: e.id,
             type: 'tool',
             tool: name,
-            target: '',
+            target: detail ? detail.slice(0, 60) : '',
             durationMs: num(p['durationMs']),
             adds: num(p['additions']),
             dels: num(p['deletions']),
@@ -171,7 +177,22 @@ export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBl
         break;
       }
       case 'command.executed': {
-        out.push({ id: e.id, type: 'command', command: str(p['command']), exitCode: num(p['exitCode']), output: str(p['output']) || null });
+        const key = callKey(p, '');
+        const idx = key ? openTools.get(key) ?? closedTools.get(key) : undefined;
+        const block = idx != null ? out[idx] : undefined;
+        const output = str(p['stdout'] ?? p['output'] ?? p['stderr']) || null;
+        if (block && block.type === 'tool') {
+          // The tool.call/tool.result pair for this id already rendered one row. Claude/Gemini/
+          // Cursor send this event on top of that pair for every shell call, without the command
+          // text, so on its own it used to render as a bare "$" row. It only backfills a gap.
+          if (!block.diff && output) block.diff = output;
+          break;
+        }
+        // No matching call in view (resumed session, truncated window): still show it, but only
+        // if it carries something — a command or an output — otherwise it is truly contentless.
+        const command = str(p['command']);
+        if (!command && !output) break;
+        out.push({ id: e.id, type: 'command', command, exitCode: num(p['exitCode']), output });
         break;
       }
       case 'run.phase.timing': {

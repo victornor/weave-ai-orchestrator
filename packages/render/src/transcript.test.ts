@@ -202,13 +202,48 @@ describe('runEventsToTranscript', () => {
     expect((blocks[1] as FileBlock).path).toBe('unknown file');
   });
 
-  it('renders command.executed like a shell tool block', () => {
+  it('renders an orphan command.executed like a shell tool block', () => {
     reset();
     const blocks = runEventsToTranscript([ev('command.executed', { command: 'pnpm vitest', exitCode: 1, durationMs: 4400, stdout: '38/41 passed' })]);
     const t = blocks[0] as ToolBlock;
     expect(t.name).toBe('shell');
     expect(t.status).toBe('error');
     expect(t.collapsed).toBe('shell pnpm vitest exit 1 failed 4.4s');
+  });
+
+  // VS-205: Claude (and Gemini, Cursor) send `command.executed` on top of tool.call/tool.result
+  // for every shell call, without the command text — rendered on its own it used to produce a
+  // bare "shell" second row (the transcript's "$" line with nothing after it). The payloads below
+  // are the exact shapes `packages/runtimes/claude/test/events.test.ts` pins for the real
+  // recorded `packages/runtimes/claude/fixtures/turn-tool-structured.jsonl` (its `Bash` "echo
+  // pong" call, lines 6-7) — see that test for the stream-json round trip.
+  it('folds a real Claude command.executed into its tool.call/tool.result row instead of a second one (VS-205)', () => {
+    reset();
+    const blocks = runEventsToTranscript([
+      ev('tool.call', { id: 'toolu_01CDEhHFYnKmzdtoUb7kxquE', name: 'Bash', input: { command: 'echo pong', description: 'Run echo pong command' } }),
+      ev('tool.result', { id: 'toolu_01CDEhHFYnKmzdtoUb7kxquE', name: 'Bash', isError: false, content: 'pong' }),
+      ev('command.executed', { toolUseId: 'toolu_01CDEhHFYnKmzdtoUb7kxquE', tool: 'Bash', stdout: 'pong', stderr: '', isError: false }),
+    ]);
+    expect(blocks).toHaveLength(1);
+    const t = blocks[0] as ToolBlock;
+    expect(t.name).toBe('Bash');
+    expect(t.target).toBe('echo pong');
+    expect(t.detail).toBe('pong');
+    expect(t.status).toBe('ok');
+    expect(t.eventIds).toEqual(['e1', 'e2', 'e3']);
+  });
+
+  it('backfills a missing result from command.executed instead of duplicating it (VS-205)', () => {
+    reset();
+    const blocks = runEventsToTranscript([
+      ev('tool.call', { id: 'c1', name: 'Bash', input: { command: 'pnpm build' } }),
+      ev('command.executed', { toolUseId: 'c1', tool: 'Bash', stdout: 'build ok', exitCode: 1 }),
+    ]);
+    expect(blocks).toHaveLength(1);
+    const t = blocks[0] as ToolBlock;
+    expect(t.detail).toBe('build ok');
+    expect(t.status).toBe('error');
+    expect(t.collapsed).toBe('Bash pnpm build exit 1 failed');
   });
 
   it('renders lifecycle and error events', () => {

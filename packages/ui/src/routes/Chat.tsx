@@ -986,8 +986,10 @@ function ChatMessage({
         </span>
       ) : null}
       <div
+        data-chat-bubble=""
         className={cx(
-          mine ? 'max-w-[80%] rounded-r10 rounded-br-r4 bg-bg-3 px-3.5 py-2.5 text-body text-text-1' : 'w-full',
+          'min-w-0 overflow-x-hidden rounded-r10 bg-bg-3 px-3.5 py-2.5 text-body text-text-1',
+          mine ? 'max-w-[80%] rounded-br-r4' : 'w-full max-w-full rounded-bl-r4',
         )}
       >
         {/* Both directions through the same renderer: what the human typed reads back the way they

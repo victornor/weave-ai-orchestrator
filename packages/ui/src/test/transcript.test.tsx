@@ -365,6 +365,21 @@ describe('markdown', () => {
     expect(html).toContain('<code class="ac-copy" data-copy="code">code</code>');
     expect(html).toContain('class="ac-doclink"');
   });
+
+  it('renders a GFM pipe table with inline markup in cells', () => {
+    const html = markdownToHtml('| col | type |\n| --- | --- |\n| **id** | `string` |');
+    expect(html).toContain('<div class="ac-table"><table>');
+    expect(html).toContain('<th>col</th>');
+    expect(html).toContain('<th>type</th>');
+    expect(html).toContain('<td><strong>id</strong></td>');
+    expect(html).toContain('<td><code class="ac-copy" data-copy="string">string</code></td>');
+  });
+
+  it('flushes an unclosed fence as a code block', () => {
+    const html = markdownToHtml('intro\n\n```\nstill open');
+    expect(html).toContain('<pre><code>still open</code></pre>');
+    expect(html).toContain('<p>intro</p>');
+  });
 });
 
 describe('Markdown copy control', () => {

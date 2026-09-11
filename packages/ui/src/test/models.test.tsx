@@ -11,7 +11,7 @@ const state = vi.hoisted(() => ({
   models: {} as WorkspaceModels,
   saved: [] as WorkspaceModels[],
   saveError: null as Error | null,
-  runtimeModels: [] as Array<{ id: string; label: string }>,
+  runtimeModels: [] as Array<{ id: string; label: string; efforts?: string[] }>,
   daemonModels: { conductor: null, workers: null, workerOptions: null } as {
     conductor: WorkspaceModels['conductor'] | null;
     workers: WorkspaceModels['workers'] | null;
@@ -258,6 +258,99 @@ describe('Settings — the two model settings', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
     expect(screen.queryByLabelText('Runtime')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
+  });
+});
+
+describe('Settings — thinking level next to the model (VS-228)', () => {
+  it('offers a picker (plus unset) when the selected model lists efforts', () => {
+    state.runtimeModels = [
+      { id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: ['low', 'medium', 'high'] },
+      { id: 'claude-opus-5', label: 'Opus 5', efforts: ['low'] },
+    ];
+    openModels();
+    const select = screen.getByLabelText('Conductor thinking level');
+    expect(select.tagName).toBe('SELECT');
+    expect(within(select).getByRole('option', { name: 'default (unset)' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'high' })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: 'high' } });
+    expect(state.saved.at(-1)!.conductor.effort).toBe('high');
+    fireEvent.change(select, { target: { value: '' } });
+    expect(state.saved.at(-1)!.conductor.effort).toBeUndefined();
+  });
+
+  it('hides thinking level when the model reports none', () => {
+    state.runtimeModels = [
+      { id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: [] },
+      { id: 'claude-opus-5', label: 'Opus 5', efforts: [] },
+    ];
+    openModels();
+    expect(screen.queryByLabelText('Conductor thinking level')).not.toBeInTheDocument();
+  });
+
+  it('uses free text when the model omits efforts', () => {
+    openModels();
+    expect(screen.getByLabelText('Conductor thinking level').tagName).toBe('INPUT');
+  });
+
+  it('clears a stale effort when the model changes to one that does not list it', () => {
+    state.models = { ...state.models, conductor: { runtime: 'claude', model: 'claude-fable-5-1', effort: 'high' } };
+    state.runtimeModels = [
+      { id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: ['low', 'medium', 'high'] },
+      { id: 'claude-opus-5', label: 'Opus 5', efforts: ['low'] },
+    ];
+    openModels();
+    fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: 'claude-opus-5' } });
+    expect(state.saved.at(-1)!.conductor).toEqual({ runtime: 'claude', model: 'claude-opus-5', effort: undefined });
+  });
+
+  it('shows a stale stored effort as free text rather than dropping it', () => {
+    state.models = { ...state.models, conductor: { runtime: 'claude', model: 'claude-fable-5-1', effort: 'ultra' } };
+    state.runtimeModels = [
+      { id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: ['low', 'medium', 'high'] },
+      { id: 'claude-opus-5', label: 'Opus 5' },
+    ];
+    openModels();
+    const box = screen.getByLabelText('Conductor thinking level');
+    expect(box.tagName).toBe('INPUT');
+    expect(box).toHaveValue('ultra');
+  });
+
+  it('submits effort on a new worker option when picked, and omits it when hidden or unset', () => {
+    state.runtimeModels = [
+      { id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: ['low', 'high'] },
+      { id: 'claude-opus-5', label: 'Opus 5', efforts: [] },
+    ];
+    openModels();
+    fireEvent.change(screen.getByLabelText('New worker option id'), { target: { value: 'thinky' } });
+    fireEvent.change(screen.getByLabelText('New worker option description'), { target: { value: 'Needs high thinking.' } });
+    fireEvent.change(screen.getByLabelText('New worker option model'), { target: { value: 'claude-fable-5-1' } });
+    fireEvent.change(screen.getByLabelText('New worker option thinking level'), { target: { value: 'high' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add worker option' }));
+    expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'thinky', description: 'Needs high thinking.', runtime: 'claude', model: 'claude-fable-5-1', effort: 'high' },
+    ]);
+
+    state.saved = [];
+    state.models = { ...state.models, workerOptions: [] };
+    fireEvent.change(screen.getByLabelText('New worker option id'), { target: { value: 'quiet' } });
+    fireEvent.change(screen.getByLabelText('New worker option description'), { target: { value: 'No thinking.' } });
+    fireEvent.change(screen.getByLabelText('New worker option model'), { target: { value: 'claude-opus-5' } });
+    expect(screen.queryByLabelText('New worker option thinking level')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add worker option' }));
+    expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'quiet', description: 'No thinking.', runtime: 'claude', model: 'claude-opus-5' },
+    ]);
+  });
+
+  it('changing thinking level while inheriting a daemon overlay writes nothing (VS-207)', () => {
+    state.search = { section: 'daemon-models' };
+    state.runtimeModels = [
+      { id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: ['low', 'high'] },
+      { id: 'claude-opus-5', label: 'Opus 5' },
+    ];
+    render(<SettingsRoute />);
+    fireEvent.change(screen.getByLabelText('Conductor thinking level'), { target: { value: 'high' } });
+    expect(state.daemonSaved).toEqual([]);
   });
 });
 

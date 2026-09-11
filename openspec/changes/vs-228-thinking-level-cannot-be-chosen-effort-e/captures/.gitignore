@@ -1,0 +1,3 @@
+# Full Codex dump embeds model_messages / base_instructions. Keep the stripped JSON.
+codex-debug-models-bundled.stdout.txt
+codex-debug-models-bundled.stderr.txt

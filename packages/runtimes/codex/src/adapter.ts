@@ -8,6 +8,7 @@ import { extractReport } from '@agent-conductor/shared';
 import { describeCodexAccount } from './account.js';
 import { buildArgs, mcpConfigToml } from './args.js';
 import { createCodexParser } from './events.js';
+import { listModels as listCodexModels } from './models.js';
 import { asCodexSession, type CodexSessionRef } from './session.js';
 
 export const capabilities: RuntimeCapabilities = {
@@ -22,17 +23,7 @@ export const capabilities: RuntimeCapabilities = {
   permissionModes: ['auto', 'restricted', 'bypass'],
 };
 
-/** Codex has no model-list command; this is the pinned set for 0.150.x plus `-c model=` overrides. */
-const MODELS: RuntimeModel[] = [
-  { id: 'gpt-5.6-codex', label: 'GPT-5.6 Codex', provider: 'openai', source: 'static', tier: 'frontier' },
-  { id: 'gpt-5.6', label: 'GPT-5.6', provider: 'openai', source: 'static', tier: 'frontier' },
-  { id: 'gpt-5.1-codex', label: 'GPT-5.1 Codex', provider: 'openai', source: 'static', tier: 'frontier' },
-  { id: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex mini', provider: 'openai', source: 'static', tier: 'fast' },
-  { id: 'gpt-5', label: 'GPT-5', provider: 'openai', source: 'static', tier: 'balanced' },
-  { id: 'gpt-5-mini', label: 'GPT-5 mini', provider: 'openai', source: 'static', tier: 'fast' },
-  { id: 'o3', label: 'o3', provider: 'openai', source: 'static', tier: 'reasoning' },
-  { id: 'o4-mini', label: 'o4-mini', provider: 'openai', source: 'static', tier: 'fast' },
-];
+/** Codex has no `--list-models`; `listModels` tries `codex debug models --bundled` first. */
 
 const CONFIG_SCHEMA: JsonSchema = {
   type: 'object',
@@ -54,7 +45,7 @@ export const adapter: RuntimeAdapter = {
   capabilities,
 
   detect(): Promise<RuntimeDetection> { return detectBinary('codex', ['--version']); },
-  async listModels(): Promise<RuntimeModel[]> { return MODELS.map((m) => ({ ...m })); },
+  async listModels(): Promise<RuntimeModel[]> { return listCodexModels(); },
   configSchema(): JsonSchema { return structuredClone(CONFIG_SCHEMA); },
   skillsDir(): string { return '.agents/skills'; },
   instructionFiles(): string[] { return ['AGENTS.md']; },

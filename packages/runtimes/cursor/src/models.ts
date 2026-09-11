@@ -51,7 +51,7 @@ function humanize(id: string): { label: string; provider: string } {
 
 function toModel(id: string, source: 'detected' | 'static'): RuntimeModel {
   const { label, provider } = humanize(id);
-  return { id, label, provider, source };
+  return { id, label, provider, source, efforts: [] };
 }
 
 /** `auto` plus the sixteen ids confirmed accepted by `cursor-agent` on 2026-09-10 (VS-200) — used only when the dynamic `--list-models` path is unreachable or unparseable. */

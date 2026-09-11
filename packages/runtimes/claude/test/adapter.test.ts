@@ -37,6 +37,21 @@ describe('claude adapter', () => {
     expect(models.map((m) => m.id)).toEqual(expect.arrayContaining(['fable', 'opus', 'sonnet', 'haiku', 'claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001']));
   });
 
+  it('declares per-model thinking levels from the 2.1.266 catalog, not the five-value configSchema enum', async () => {
+    const models = await adapter.listModels();
+    const of = (id: string) => models.find((m) => m.id === id)?.efforts;
+    expect(of('claude-fable-5-1')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(of('claude-opus-5')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(of('claude-sonnet-5')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(of('haiku')).toEqual([]);
+    expect(of('claude-haiku-4-5-20251001')).toEqual([]);
+    expect(of('haiku')).not.toContain('xhigh');
+    expect(of('haiku')).not.toContain('max');
+    const schemaEffort = (adapter.configSchema() as { properties: { effort: { enum: string[] } } }).properties.effort.enum;
+    expect(schemaEffort).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(models.some((m) => JSON.stringify(m.efforts) === JSON.stringify(schemaEffort) && m.id.includes('haiku'))).toBe(false);
+  });
+
   it('declares each model’s own context window rather than one constant for all of them (VS-129)', async () => {
     const windowOf = async (id: string) => (await adapter.listModels()).find((m) => m.id === id)?.contextWindowTokens;
     // fable/opus/sonnet and their pinned -5/-5-1 ids resolve to natively 1M-context models; only

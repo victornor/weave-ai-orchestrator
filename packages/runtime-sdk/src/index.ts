@@ -19,8 +19,10 @@ export interface RuntimeCapabilities {
   contextCompactionAt?: number;
 }
 export interface RuntimeDetection { status: 'available' | 'missing_binary' | 'broken' | 'unsupported'; version?: string; path?: string; notes?: string }
-/** `contextWindowTokens` is the model's own window; a variant with a larger window is its own entry. */
-export interface RuntimeModel { id: string; label: string; provider: string; source: 'detected' | 'static'; tier?: string; notes?: string; contextWindowTokens?: number }
+/** `contextWindowTokens` is the model's own window; a variant with a larger window is its own entry.
+ * `efforts` is the thinking levels this model accepts: a non-empty list is a picker, `[]` means
+ * known to take none, omitted means unknown (free text). Values come from the same path as `source`. */
+export interface RuntimeModel { id: string; label: string; provider: string; source: 'detected' | 'static'; tier?: string; notes?: string; contextWindowTokens?: number; efforts?: string[] }
 export interface McpServerConfig { type: 'http' | 'stdio'; url?: string; command?: string; args?: string[]; headers?: Record<string, string>; env?: Record<string, string> }
 
 export interface TurnInput {

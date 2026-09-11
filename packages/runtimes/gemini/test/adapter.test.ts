@@ -17,10 +17,11 @@ describe('gemini adapter', () => {
     expect(adapter.forkSession).toBeUndefined();
   });
 
-  it('lists static google models', async () => {
+  it('lists static google models with no thinking levels', async () => {
     const models = await adapter.listModels();
     expect(models.every((m) => m.source === 'static' && m.provider === 'google')).toBe(true);
     expect(models.map((m) => m.id)).toContain('gemini-2.5-pro');
+    expect(models.every((m) => Array.isArray(m.efforts) && m.efforts.length === 0)).toBe(true);
   });
 
   it('installs GEMINI.md, skills and a placeholder settings.json', async () => {

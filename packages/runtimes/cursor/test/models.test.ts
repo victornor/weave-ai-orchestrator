@@ -93,6 +93,7 @@ describe('listModels dynamic detection', () => {
     const models = await listModels({ binaryPath: null });
     expect(models.map((m) => m.id)).toEqual(FALLBACK_MODELS.map((m) => m.id));
     expect(models.every((m) => m.source === 'static')).toBe(true);
+    expect(models.every((m) => Array.isArray(m.efforts) && m.efforts.length === 0)).toBe(true);
   });
 
   it('parses a real fake-CLI --list-models response and tags it detected', async () => {
@@ -100,6 +101,7 @@ describe('listModels dynamic detection', () => {
     const models = await listModels({ binaryPath: join(dir, 'cursor-agent') });
     expect(models.map((m) => m.id)).toEqual(['auto', 'composer-2.5']);
     expect(models.every((m) => m.source === 'detected')).toBe(true);
+    expect(models.every((m) => Array.isArray(m.efforts) && m.efforts.length === 0)).toBe(true);
   });
 
   it('falls back to the static list, with a warn log, when the CLI exits non-zero', async () => {

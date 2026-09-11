@@ -108,7 +108,7 @@ export interface WaitingRun { workspace: string; running: number; runIds: string
 
 export interface UpgradeStatusResponse { upgrade: Upgrade | null; waitingFor: WaitingRun[] }
 
-export interface RuntimeModel { id: string; label: string; provider?: string; source?: 'detected' | 'static'; tier?: string; notes?: string; contextWindowTokens?: number }
+export interface RuntimeModel { id: string; label: string; provider?: string; source?: 'detected' | 'static'; tier?: string; notes?: string; contextWindowTokens?: number; efforts?: string[] }
 
 /** One of the two model settings a workspace holds (VS-77): `GET`/`PUT /models`. */
 export interface ModelSetting { runtime: string; model: string | null; effort?: string }

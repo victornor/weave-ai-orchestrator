@@ -1,0 +1,2147 @@
+opencode/big-pickle
+{
+  "id": "big-pickle",
+  "providerID": "opencode",
+  "name": "Big Pickle",
+  "family": "big-pickle",
+  "api": {
+    "id": "big-pickle",
+    "url": "https://opencode.ai/zen/v1",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 200000,
+    "input": 160000,
+    "output": 32000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2025-10-17",
+  "variants": {}
+}
+opencode/ling-3.0-flash-fin-free
+{
+  "id": "ling-3.0-flash-fin-free",
+  "providerID": "opencode",
+  "name": "Ling 3.0 Flash Fin Free",
+  "family": "ling",
+  "api": {
+    "id": "ling-3.0-flash-fin-free",
+    "url": "https://opencode.ai/zen/v1",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 262144,
+    "output": 32768
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-08-27",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "medium": {
+      "reasoningEffort": "medium"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    }
+  }
+}
+opencode/mimo-v2.5-free
+{
+  "id": "mimo-v2.5-free",
+  "providerID": "opencode",
+  "name": "MiMo V2.5 Free",
+  "family": "mimo-v2.5-free",
+  "api": {
+    "id": "mimo-v2.5-free",
+    "url": "https://opencode.ai/zen/v1",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 200000,
+    "output": 32000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": true,
+      "image": true,
+      "video": true,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-04-24",
+  "variants": {}
+}
+opencode/muse-spark-1.2-contributor-free
+{
+  "id": "muse-spark-1.2-contributor-free",
+  "providerID": "opencode",
+  "name": "Muse Spark 1.2 Free",
+  "family": "muse-free",
+  "api": {
+    "id": "muse-spark-1.2-contributor-free",
+    "url": "https://opencode.ai/zen/v1",
+    "npm": "@ai-sdk/openai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1048576,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": true,
+      "image": true,
+      "video": true,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-08-05",
+  "variants": {
+    "minimal": {
+      "reasoningEffort": "minimal",
+      "reasoningSummary": "auto",
+      "include": [
+        "reasoning.encrypted_content"
+      ]
+    },
+    "low": {
+      "reasoningEffort": "low",
+      "reasoningSummary": "auto",
+      "include": [
+        "reasoning.encrypted_content"
+      ]
+    },
+    "medium": {
+      "reasoningEffort": "medium",
+      "reasoningSummary": "auto",
+      "include": [
+        "reasoning.encrypted_content"
+      ]
+    },
+    "high": {
+      "reasoningEffort": "high",
+      "reasoningSummary": "auto",
+      "include": [
+        "reasoning.encrypted_content"
+      ]
+    },
+    "xhigh": {
+      "reasoningEffort": "xhigh",
+      "reasoningSummary": "auto",
+      "include": [
+        "reasoning.encrypted_content"
+      ]
+    }
+  }
+}
+opencode/muse-spark-1.3-contributor-free
+{
+  "id": "muse-spark-1.3-contributor-free",
+  "providerID": "opencode",
+  "name": "Muse Spark 1.3 Free",
+  "family": "muse-free",
+  "api": {
+    "id": "muse-spark-1.3-contributor-free",
+    "url": "https://opencode.ai/zen/v1",
+    "npm": "@ai-sdk/openai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1048576,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": true,
+      "image": true,
+      "video": true,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-09-02",
+  "variants": {
+    "minimal": {
+      "reasoningEffort": "minimal",
+      "reasoningSummary": "auto",
+      "include": [
+        "reasoning.encrypted_content"
+      ]
+    },
+    "low": {
+      "reasoningEffort": "low",
+      "reasoningSummary": "auto",
+      "include": [
+        "reasoning.encrypted_content"
+      ]
+    },
+    "medium": {
+      "reasoningEffort": "medium",
+      "reasoningSummary": "auto",
+      "include": [
+        "reasoning.encrypted_content"
+      ]
+    },
+    "high": {
+      "reasoningEffort": "high",
+      "reasoningSummary": "auto",
+      "include": [
+        "reasoning.encrypted_content"
+      ]
+    },
+    "xhigh": {
+      "reasoningEffort": "xhigh",
+      "reasoningSummary": "auto",
+      "include": [
+        "reasoning.encrypted_content"
+      ]
+    }
+  }
+}
+opencode/nemotron-3-ultra-free
+{
+  "id": "nemotron-3-ultra-free",
+  "providerID": "opencode",
+  "name": "Nemotron 3 Ultra Free",
+  "family": "nemotron-free",
+  "api": {
+    "id": "nemotron-3-ultra-free",
+    "url": "https://opencode.ai/zen/v1",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 128000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-06-04",
+  "variants": {}
+}
+opencode/nemotron-3.5-lightning-free
+{
+  "id": "nemotron-3.5-lightning-free",
+  "providerID": "opencode",
+  "name": "Nemotron 3.5 Lightning Free",
+  "family": "nemotron-free",
+  "api": {
+    "id": "nemotron-3.5-lightning-free",
+    "url": "https://opencode.ai/zen/v1",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 262144,
+    "output": 262144
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-08-11",
+  "variants": {}
+}
+bailian-cli/qwen3.8-flash
+{
+  "id": "qwen3.8-flash",
+  "api": {
+    "id": "qwen3.8-flash",
+    "npm": "@ai-sdk/openai-compatible",
+    "url": ""
+  },
+  "status": "active",
+  "name": "qwen3.8-flash",
+  "providerID": "bailian-cli",
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "options": {},
+  "limit": {
+    "context": 0,
+    "output": 0
+  },
+  "headers": {},
+  "family": "",
+  "release_date": "",
+  "variants": {}
+}
+bailian-cli/qwen3.8-max
+{
+  "id": "qwen3.8-max",
+  "api": {
+    "id": "qwen3.8-max",
+    "npm": "@ai-sdk/openai-compatible",
+    "url": ""
+  },
+  "status": "active",
+  "name": "qwen3.8-max",
+  "providerID": "bailian-cli",
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "options": {},
+  "limit": {
+    "context": 0,
+    "output": 0
+  },
+  "headers": {},
+  "family": "",
+  "release_date": "",
+  "variants": {}
+}
+codeify/gpt-5.6-terra
+{
+  "id": "gpt-5.6-terra",
+  "api": {
+    "id": "gpt-5.6-terra",
+    "npm": "@ai-sdk/openai-compatible",
+    "url": "openai"
+  },
+  "status": "active",
+  "name": "gpt 5.6 terra",
+  "providerID": "codeify",
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "options": {},
+  "limit": {
+    "context": 0,
+    "output": 0
+  },
+  "headers": {},
+  "family": "",
+  "release_date": "",
+  "variants": {}
+}
+codeify/gpt-6-astra-uncensored
+{
+  "id": "gpt-6-astra-uncensored",
+  "api": {
+    "id": "gpt-6-astra-uncensored",
+    "npm": "@ai-sdk/openai-compatible",
+    "url": "openai"
+  },
+  "status": "active",
+  "name": "gpt 6 astra unc",
+  "providerID": "codeify",
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "options": {},
+  "limit": {
+    "context": 0,
+    "output": 0
+  },
+  "headers": {},
+  "family": "",
+  "release_date": "",
+  "variants": {}
+}
+codeify/grok-4.6
+{
+  "id": "grok-4.6",
+  "api": {
+    "id": "grok-4.6",
+    "npm": "@ai-sdk/openai-compatible",
+    "url": "openai"
+  },
+  "status": "active",
+  "name": "qrok 4.6",
+  "providerID": "codeify",
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "options": {},
+  "limit": {
+    "context": 0,
+    "output": 0
+  },
+  "headers": {},
+  "family": "",
+  "release_date": "",
+  "variants": {}
+}
+deepseek/deepseek-flash
+{
+  "id": "deepseek-flash",
+  "providerID": "deepseek",
+  "name": "DeepSeek V4.1 Flash",
+  "family": "deepseek-flash",
+  "api": {
+    "id": "deepseek-flash",
+    "url": "https://api.deepseek.com",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0.15,
+    "output": 0.6,
+    "cache": {
+      "read": 0.003,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 384000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-09-10",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "max": {
+      "reasoningEffort": "max"
+    }
+  }
+}
+deepseek/deepseek-v4-flash
+{
+  "id": "deepseek-v4-flash",
+  "providerID": "deepseek",
+  "name": "DeepSeek V4 Flash",
+  "family": "deepseek-flash",
+  "api": {
+    "id": "deepseek-v4-flash",
+    "url": "https://api.deepseek.com",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0.15,
+    "output": 0.6,
+    "cache": {
+      "read": 0.003,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 384000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-09-10",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "max": {
+      "reasoningEffort": "max"
+    }
+  }
+}
+deepseek/deepseek-v4-flash-vision-exp
+{
+  "id": "deepseek-v4-flash-vision-exp",
+  "providerID": "deepseek",
+  "name": "DeepSeek V4 Flash Vision Exp",
+  "family": "deepseek-flash",
+  "api": {
+    "id": "deepseek-v4-flash-vision-exp",
+    "url": "https://api.deepseek.com",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0.15,
+    "output": 0.6,
+    "cache": {
+      "read": 0.003,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 384000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-09-10",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "max": {
+      "reasoningEffort": "max"
+    }
+  }
+}
+deepseek/deepseek-v4-pro
+{
+  "id": "deepseek-v4-pro",
+  "providerID": "deepseek",
+  "name": "DeepSeek V4 Pro",
+  "family": "deepseek-thinking",
+  "api": {
+    "id": "deepseek-v4-pro",
+    "url": "https://api.deepseek.com",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0.435,
+    "output": 0.87,
+    "cache": {
+      "read": 0.003625,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 384000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-08-12",
+  "variants": {
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "max": {
+      "reasoningEffort": "max"
+    }
+  }
+}
+xai/grok-4.20-0309-non-reasoning
+{
+  "id": "grok-4.20-0309-non-reasoning",
+  "providerID": "xai",
+  "name": "Grok 4.20 (Non-Reasoning)",
+  "family": "grok",
+  "api": {
+    "id": "grok-4.20-0309-non-reasoning",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 1.25,
+    "output": 2.5,
+    "cache": {
+      "read": 0.2,
+      "write": 0
+    },
+    "tiers": [
+      {
+        "input": 2.5,
+        "output": 5,
+        "cache": {
+          "read": 0.4,
+          "write": 0
+        },
+        "tier": {
+          "type": "context",
+          "size": 200000
+        }
+      }
+    ],
+    "experimentalOver200K": {
+      "cache": {
+        "read": 0.4,
+        "write": 0
+      },
+      "input": 2.5,
+      "output": 5
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 30000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": false,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-03-09",
+  "variants": {}
+}
+xai/grok-4.20-0309-reasoning
+{
+  "id": "grok-4.20-0309-reasoning",
+  "providerID": "xai",
+  "name": "Grok 4.20 (Reasoning)",
+  "family": "grok",
+  "api": {
+    "id": "grok-4.20-0309-reasoning",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 1.25,
+    "output": 2.5,
+    "cache": {
+      "read": 0.2,
+      "write": 0
+    },
+    "tiers": [
+      {
+        "input": 2.5,
+        "output": 5,
+        "cache": {
+          "read": 0.4,
+          "write": 0
+        },
+        "tier": {
+          "type": "context",
+          "size": 200000
+        }
+      }
+    ],
+    "experimentalOver200K": {
+      "cache": {
+        "read": 0.4,
+        "write": 0
+      },
+      "input": 2.5,
+      "output": 5
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 30000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-03-09",
+  "variants": {}
+}
+xai/grok-4.20-multi-agent-0309
+{
+  "id": "grok-4.20-multi-agent-0309",
+  "providerID": "xai",
+  "name": "Grok 4.20 Multi-Agent",
+  "family": "grok",
+  "api": {
+    "id": "grok-4.20-multi-agent-0309",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 1.25,
+    "output": 2.5,
+    "cache": {
+      "read": 0.2,
+      "write": 0
+    },
+    "tiers": [
+      {
+        "input": 2.5,
+        "output": 5,
+        "cache": {
+          "read": 0.4,
+          "write": 0
+        },
+        "tier": {
+          "type": "context",
+          "size": 200000
+        }
+      }
+    ],
+    "experimentalOver200K": {
+      "cache": {
+        "read": 0.4,
+        "write": 0
+      },
+      "input": 2.5,
+      "output": 5
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 30000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": false,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-03-09",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "medium": {
+      "reasoningEffort": "medium"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "xhigh": {
+      "reasoningEffort": "xhigh"
+    }
+  }
+}
+xai/grok-4.3
+{
+  "id": "grok-4.3",
+  "providerID": "xai",
+  "name": "Grok 4.3",
+  "family": "grok",
+  "api": {
+    "id": "grok-4.3",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 1.25,
+    "output": 2.5,
+    "cache": {
+      "read": 0.2,
+      "write": 0
+    },
+    "tiers": [
+      {
+        "input": 2.5,
+        "output": 5,
+        "cache": {
+          "read": 0.4,
+          "write": 0
+        },
+        "tier": {
+          "type": "context",
+          "size": 200000
+        }
+      }
+    ],
+    "experimentalOver200K": {
+      "cache": {
+        "read": 0.4,
+        "write": 0
+      },
+      "input": 2.5,
+      "output": 5
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 30000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-04-17",
+  "variants": {
+    "none": {
+      "reasoningEffort": "none"
+    },
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "medium": {
+      "reasoningEffort": "medium"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    }
+  }
+}
+xai/grok-4.5
+{
+  "id": "grok-4.5",
+  "providerID": "xai",
+  "name": "Grok 4.5",
+  "family": "grok",
+  "api": {
+    "id": "grok-4.5",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 2,
+    "output": 6,
+    "cache": {
+      "read": 0.3,
+      "write": 0
+    },
+    "tiers": [
+      {
+        "input": 4,
+        "output": 12,
+        "cache": {
+          "read": 0.6,
+          "write": 0
+        },
+        "tier": {
+          "type": "context",
+          "size": 200000
+        }
+      }
+    ],
+    "experimentalOver200K": {
+      "cache": {
+        "read": 0.6,
+        "write": 0
+      },
+      "input": 4,
+      "output": 12
+    }
+  },
+  "limit": {
+    "context": 500000,
+    "output": 500000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-07-08",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "medium": {
+      "reasoningEffort": "medium"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    }
+  }
+}
+xai/grok-4.6
+{
+  "id": "grok-4.6",
+  "providerID": "xai",
+  "name": "Grok 4.6",
+  "family": "grok",
+  "api": {
+    "id": "grok-4.6",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 2,
+    "output": 6,
+    "cache": {
+      "read": 0.5,
+      "write": 0
+    },
+    "tiers": [
+      {
+        "input": 4,
+        "output": 12,
+        "cache": {
+          "read": 1,
+          "write": 0
+        },
+        "tier": {
+          "type": "context",
+          "size": 200000
+        }
+      }
+    ],
+    "experimentalOver200K": {
+      "cache": {
+        "read": 1,
+        "write": 0
+      },
+      "input": 4,
+      "output": 12
+    }
+  },
+  "limit": {
+    "context": 500000,
+    "output": 500000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-08-12",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "medium": {
+      "reasoningEffort": "medium"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "xhigh": {
+      "reasoningEffort": "xhigh"
+    }
+  }
+}
+xai/grok-build-0.1
+{
+  "id": "grok-build-0.1",
+  "providerID": "xai",
+  "name": "Grok Build 0.1",
+  "family": "grok-build",
+  "api": {
+    "id": "grok-build-0.1",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 1,
+    "output": 2,
+    "cache": {
+      "read": 0.2,
+      "write": 0
+    },
+    "tiers": [
+      {
+        "input": 2,
+        "output": 4,
+        "cache": {
+          "read": 0.4,
+          "write": 0
+        },
+        "tier": {
+          "type": "context",
+          "size": 200000
+        }
+      }
+    ],
+    "experimentalOver200K": {
+      "cache": {
+        "read": 0.4,
+        "write": 0
+      },
+      "input": 2,
+      "output": 4
+    }
+  },
+  "limit": {
+    "context": 256000,
+    "output": 256000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-04-16",
+  "variants": {}
+}
+xai/grok-imagine-image
+{
+  "id": "grok-imagine-image",
+  "providerID": "xai",
+  "name": "Grok Imagine Image",
+  "family": "grok",
+  "api": {
+    "id": "grok-imagine-image",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 16000,
+    "output": 0
+  },
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": true,
+    "toolcall": false,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": false,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-01-28",
+  "variants": {}
+}
+xai/grok-imagine-image-2.0
+{
+  "id": "grok-imagine-image-2.0",
+  "providerID": "xai",
+  "name": "Grok Imagine Image 2.0",
+  "family": "grok",
+  "api": {
+    "id": "grok-imagine-image-2.0",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 64000,
+    "output": 0
+  },
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": true,
+    "toolcall": false,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": false,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-08-07",
+  "variants": {}
+}
+xai/grok-imagine-image-quality
+{
+  "id": "grok-imagine-image-quality",
+  "providerID": "xai",
+  "name": "Grok Imagine Image Quality",
+  "family": "grok",
+  "api": {
+    "id": "grok-imagine-image-quality",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 16000,
+    "output": 0
+  },
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": true,
+    "toolcall": false,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": false,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-04-03",
+  "variants": {}
+}
+xai/grok-imagine-video
+{
+  "id": "grok-imagine-video",
+  "providerID": "xai",
+  "name": "Grok Imagine Video",
+  "family": "grok",
+  "api": {
+    "id": "grok-imagine-video",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1024,
+    "output": 0
+  },
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": true,
+    "toolcall": false,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": true,
+      "pdf": true
+    },
+    "output": {
+      "text": false,
+      "audio": false,
+      "image": false,
+      "video": true,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-01-28",
+  "variants": {}
+}
+xai/grok-imagine-video-1.5
+{
+  "id": "grok-imagine-video-1.5",
+  "providerID": "xai",
+  "name": "Grok Imagine Video 1.5",
+  "family": "grok",
+  "api": {
+    "id": "grok-imagine-video-1.5",
+    "url": "",
+    "npm": "@ai-sdk/xai"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1024,
+    "output": 0
+  },
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": true,
+    "toolcall": false,
+    "input": {
+      "text": true,
+      "audio": true,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": false,
+      "audio": false,
+      "image": false,
+      "video": true,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-05-30",
+  "variants": {}
+}
+zai-coding-plan/glm-4.7
+{
+  "id": "glm-4.7",
+  "providerID": "zai-coding-plan",
+  "name": "GLM-4.7",
+  "family": "glm",
+  "api": {
+    "id": "glm-4.7",
+    "url": "https://api.z.ai/api/coding/paas/v4",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 204800,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2025-12-22",
+  "variants": {}
+}
+zai-coding-plan/glm-5-turbo
+{
+  "id": "glm-5-turbo",
+  "providerID": "zai-coding-plan",
+  "name": "GLM-5-Turbo",
+  "family": "glm",
+  "api": {
+    "id": "glm-5-turbo",
+    "url": "https://api.z.ai/api/coding/paas/v4",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 200000,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-03-16",
+  "variants": {}
+}
+zai-coding-plan/glm-5.2
+{
+  "id": "glm-5.2",
+  "providerID": "zai-coding-plan",
+  "name": "GLM-5.2",
+  "family": "glm",
+  "api": {
+    "id": "glm-5.2",
+    "url": "https://api.z.ai/api/coding/paas/v4",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-06-13",
+  "variants": {
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "max": {
+      "reasoningEffort": "max"
+    }
+  }
+}
+zai-coding-plan/glm-5.2-highspeed
+{
+  "id": "glm-5.2-highspeed",
+  "providerID": "zai-coding-plan",
+  "name": "GLM-5.2 Highspeed",
+  "family": "glm",
+  "api": {
+    "id": "glm-5.2-highspeed",
+    "url": "https://api.z.ai/api/coding/paas/v4",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-06-13",
+  "variants": {
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "max": {
+      "reasoningEffort": "max"
+    }
+  }
+}
+zai-coding-plan/glm-5.3
+{
+  "id": "glm-5.3",
+  "providerID": "zai-coding-plan",
+  "name": "GLM-5.3",
+  "family": "glm",
+  "api": {
+    "id": "glm-5.3",
+    "url": "https://api.z.ai/api/coding/paas/v4",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-08-14",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "max": {
+      "reasoningEffort": "max"
+    }
+  }
+}
+zai-coding-plan/glm-5.3-flash
+{
+  "id": "glm-5.3-flash",
+  "providerID": "zai-coding-plan",
+  "name": "GLM-5.3-Flash",
+  "family": "glm",
+  "api": {
+    "id": "glm-5.3-flash",
+    "url": "https://api.z.ai/api/coding/paas/v4",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": true,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-08-26",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "max": {
+      "reasoningEffort": "max"
+    }
+  }
+}
+zai-coding-plan/glm-5.3-highspeed
+{
+  "id": "glm-5.3-highspeed",
+  "providerID": "zai-coding-plan",
+  "name": "GLM-5.3 Highspeed",
+  "family": "glm",
+  "api": {
+    "id": "glm-5.3-highspeed",
+    "url": "https://api.z.ai/api/coding/paas/v4",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-08-14",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "max": {
+      "reasoningEffort": "max"
+    }
+  }
+}

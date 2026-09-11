@@ -189,6 +189,61 @@ describe('prompt rendering', () => {
     });
   });
 
+  describe('shipped charter and brief templates read their renderer data (VS-247)', () => {
+    /** A fresh task ticket and worker per call: `agents.ticket_id` is unique per live worker. */
+    const freshWorker = (over: Record<string, unknown>): Agent => {
+      const otherTicketId = newId();
+      const now = nowIso();
+      h.db.insert('tickets', {
+        id: otherTicketId, workspaceId: h.workspaceId, projectId: h.projectId, number: 800, identifier: 'TST-800',
+        kind: 'task', title: 'Curate project knowledge (api)', description: '', status: 'todo', priority: 'low',
+        assigneeRoleId: h.roleId, createdByKind: 'agent', createdAt: now, updatedAt: now,
+      });
+      const id = h.addWorker(otherTicketId, over);
+      return h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [id])!;
+    };
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('the shipped charter header names the project, branch, delivery mode and merge method', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const charter = renderCharter(h.ctx, spec);
+      expect(charter).toContain('**Project:** `api`');
+      expect(charter).toContain('default branch `main`');
+      expect(charter).toContain('delivery `pr`');
+      expect(charter).toContain('merge method `squash`');
+      expect(charter).not.toMatch(/\{\{[#/]?[a-z]/i);
+    });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('the shipped charter header reads the project row and its policies, not constants', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      h.db.update('projects', h.projectId, { defaultBranch: 'trunk', policiesJson: { deliveryMode: 'local-branch', mergeMethod: 'merge' } });
+      const charter = renderCharter(h.ctx, spec);
+      expect(charter).toContain('default branch `trunk`');
+      expect(charter).toContain('delivery `local-branch`');
+      expect(charter).toContain('merge method `merge`');
+    });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('the shipped brief gives a no-worktree worker the curation block, not the worktree one', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const brief = renderBrief(h.ctx, h.deps, freshWorker({ worktreePath: null, branch: null }));
+      expect(brief).toContain('This is a curation ticket and has no worktree of its own');
+      expect(brief).toContain('`work/` is a read-only checkout of the project\'s landing branch');
+      expect(brief).toContain('never write to it, never commit, never push');
+      expect(brief).toContain('Load `agent-conductor-knowledge` and follow the curation procedure');
+      expect(brief).not.toContain('Your worktree is');
+      expect(brief).not.toContain('Before anything else, call `ac_worktree_status`');
+      expect(brief).not.toMatch(/\{\{[#/]?[a-z]/i);
+    });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('the shipped brief still gives an ordinary worker its worktree-setup block', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const brief = renderBrief(h.ctx, h.deps, freshWorker({ worktreePath: '/tmp/ac-tst-800/work', branch: 'ac/tst-800-curate' }));
+      expect(brief).toContain('Your worktree is');
+      expect(brief).toContain('Before anything else, call `ac_worktree_status`');
+      expect(brief).not.toContain('This is a curation ticket');
+      expect(brief).not.toMatch(/\{\{[#/]?[a-z]/i);
+    });
+  });
+
   describe('YOLO mode in the instructions', () => {
     const brief = (): string => renderBrief(h.ctx, h.deps, worker);
     const shipped = (): TestHarness['ctx'] => Object.assign(h.ctx, { templatesDir: SHIPPED_TEMPLATES });

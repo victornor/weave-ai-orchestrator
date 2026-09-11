@@ -38,6 +38,20 @@ function ticket(ctx: WorkspaceContext, id: string | null): S.Ticket | null {
   return ctx.db.get<S.Ticket>('SELECT * FROM tickets WHERE id = ?', [id]) ?? null;
 }
 
+/**
+ * The project fields a rendered prompt can state without inventing data: the row's default branch,
+ * and the delivery mode and merge method its policies resolve to. Shared by `workerData` and
+ * `renderCharter` so the charter header and the brief cannot resolve the same policies differently.
+ */
+function projectHeaders(ctx: WorkspaceContext, p: S.Project | null | undefined): { defaultBranch: string; deliveryMode: string; mergeMethod: string } {
+  const policies = (p?.policies ?? {}) as Record<string, unknown>;
+  return {
+    defaultBranch: p?.defaultBranch ?? 'main',
+    deliveryMode: String(policies.deliveryMode ?? ctx.config.defaults.deliveryMode ?? 'pr'),
+    mergeMethod: String(policies.mergeMethod ?? 'squash'),
+  };
+}
+
 /** Bullets under an "Acceptance criteria" heading in the ticket description, if any. */
 export function parseAcceptance(description: string): string[] {
   const lines = description.split('\n');
@@ -80,7 +94,7 @@ export interface WorkerTemplateData extends Record<string, unknown> {
   project: Record<string, unknown>;
   ticket: Record<string, unknown>;
   worktree: { path: string; branch: string; hasAgentsFile: boolean; hasOpenspecConfig: boolean };
-  brief: { definitionOfDone: string; relaunchNote: string | null };
+  brief: { definitionOfDone: string; relaunchNote: string | null; noWorktree: boolean };
   knowledge: { shared: string; project: string };
 }
 
@@ -100,8 +114,8 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
       exclusions: (r as unknown as { exclusions?: string[] })?.exclusions ?? [], notes: (r as unknown as { notes?: string })?.notes ?? '',
     },
     project: {
-      id: p?.slug ?? '', name: p?.name ?? '', defaultBranch: p?.defaultBranch ?? 'main', landingBranch: p ? landingBranchOf(p, t) : 'main', deliveryMode,
-      mergeMethod: String(policies.mergeMethod ?? 'squash'), rules: r?.rules ?? [], openspec: p?.openspecEnabled ?? false,
+      id: p?.slug ?? '', name: p?.name ?? '', ...projectHeaders(ctx, p), landingBranch: p ? landingBranchOf(p, t) : 'main',
+      rules: r?.rules ?? [], openspec: p?.openspecEnabled ?? false,
       yolo: yoloEnabled(policies, ctx.config.defaults.yolo),
     },
     ticket: {
@@ -117,7 +131,7 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
       hasAgentsFile: Boolean(agent.worktreePath && existsSync(join(agent.worktreePath, 'AGENTS.md'))),
       hasOpenspecConfig: Boolean(agent.worktreePath && existsSync(join(agent.worktreePath, 'openspec', 'config.yaml'))),
     },
-    brief: { definitionOfDone: definitionOfDone((t?.kind ?? 'task') as S.TicketKind, deliveryMode), relaunchNote: opts.relaunchNote ?? null },
+    brief: { definitionOfDone: definitionOfDone((t?.kind ?? 'task') as S.TicketKind, deliveryMode), relaunchNote: opts.relaunchNote ?? null, noWorktree: !agent.worktreePath },
     knowledge: { shared: knowledgeText(deps, 'shared'), project: agent.projectId ? knowledgeText(deps, 'project', agent.projectId) : '' },
   };
 }
@@ -126,6 +140,7 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
 
 export function renderCharter(ctx: WorkspaceContext, spec: S.RoleSpec): string {
   const tmpl = loadTemplate(ctx, 'charter.md.tmpl', CHARTER_TMPL);
+  const p = ctx.db.get<S.Project>('SELECT * FROM projects WHERE workspace_id = ? AND slug = ?', [ctx.workspaceId, spec.project]);
   return renderTemplate(tmpl, {
     workspace: { name: ctx.config.name, id: ctx.config.id },
     human: { name: humanName(ctx) },
@@ -134,7 +149,7 @@ export function renderCharter(ctx: WorkspaceContext, spec: S.RoleSpec): string {
       responsibilities: spec.responsibilities, capabilities: spec.capabilities, exclusions: spec.exclusions,
       rules: spec.rules, notes: spec.notes ?? '',
     },
-    project: { id: spec.project },
+    project: { id: spec.project, ...projectHeaders(ctx, p) },
   });
 }
 

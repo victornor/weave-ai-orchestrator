@@ -39,6 +39,19 @@ export const LOGIN_PAUSE_CODE = 'runtime_login_expired';
 export function waitingOnRuntimeLogin(agent: { status?: string; pauseDetail?: AgentPauseDetail | null } | null | undefined): boolean {
   return agent?.status === 'paused' && agent.pauseDetail?.code === LOGIN_PAUSE_CODE;
 }
+/**
+ * The pause code marking a worker as held by a human in their own terminal (VS-249) — the second
+ * exception (alongside `LOGIN_PAUSE_CODE`) to "resume is offered wherever a paused worker is
+ * shown": a worker paused for this reason is given back through handback, never plain resume, since
+ * resume would skip reconciliation. The hold's own data (session/worktree snapshot, reconciliation)
+ * lives in `agent_handovers`, keyed by agent id — this code is only what a generic pause-reason
+ * surface needs to render something sensible without knowing about that table.
+ */
+export const HANDOVER_PAUSE_CODE = 'held_by_human';
+/** Is this agent stopped because a human is holding its session in their own terminal? */
+export function heldByHuman(agent: { status?: string; pauseDetail?: AgentPauseDetail | null } | null | undefined): boolean {
+  return agent?.status === 'paused' && agent.pauseDetail?.code === HANDOVER_PAUSE_CODE;
+}
 export interface Agent { id: string; workspaceId: string; kind: E.AgentKind; projectId: string | null; roleId: string | null; roleRevision: number | null; ticketId: string | null; name: string; runtimeId: string; status: E.AgentStatus; pauseReason: string | null; pauseDetail: AgentPauseDetail | null; errorText: string | null; homePath: string; worktreePath: string | null; branch: string | null; turnEpoch: number; turnCount: number; spawnedBy: string; spawnReason: string | null; briefRevision: number; lastRunAt: string | null; retiredAt: string | null; createdAt: string; updatedAt: string }
 export interface Ticket { id: string; workspaceId: string; projectId: string | null; number: number; identifier: string; kind: E.TicketKind; title: string; description: string; /** One-line why (VS-146); shown on plan-approval cards. Null until set. */ summary: string | null; status: E.TicketStatus; priority: E.TicketPriority; autoMerge: boolean; assigneeRoleId: string | null; workerId: string | null; assigneeHuman: boolean; /** A human is conversing with this ticket's worker directly (VS-101): the session's whole persistent record. */ interactiveSession: boolean; /** Overrides the project's landing branch for this ticket alone (VS-119); set only at creation. */ landingBranch: string | null; /** Workspace catalog option this ticket's worker runs on (VS-162); null means `models.workers`. */ workerModelId: string | null; parentId: string | null; createdByKind: string; createdById: string | null; createdRunId: string | null; originKind: string | null; originFingerprint: string | null; checkoutRunId: string | null; executionRunId: string | null; openspecChangeName: string | null; openspecState: Record<string, unknown> | null; delivery: Record<string, unknown> | null; unblock: { owner: string; action: string } | null; blockedFromStatus: E.TicketStatus | null; monitorNextCheckAt: string | null; blockedTransitionAt: string | null; mergeQueuedAt: string | null; mergeStartedAt: string | null; startedAt: string | null; completedAt: string | null; cancelledAt: string | null; createdAt: string; updatedAt: string }
 export interface TicketComment { id: string; ticketId: string; authorKind: E.AuthorKind; authorId: string | null; runId: string | null; body: string; kind: E.CommentKind; sourceTrust: E.SourceTrust; createdAt: string }

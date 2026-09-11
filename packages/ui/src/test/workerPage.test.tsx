@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { WorkerMessageOutcome } from '../api/types';
+import type { AgentPauseDetail, AgentStatus } from '@agent-conductor/shared';
+import type { HandoverCommandResult, WorkerMessageOutcome } from '../api/types';
 import { agent, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -9,6 +10,13 @@ const state = vi.hoisted(() => ({
   sent: [] as Array<{ id: string; ticketId: string; body: string; live?: boolean }>,
   runEventsRequests: [] as string[],
   actionMutate: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  // VS-249
+  agentStatus: 'active' as AgentStatus,
+  agentPauseDetail: null as AgentPauseDetail | null,
+  handoverCommand: undefined as HandoverCommandResult | undefined,
+  handoverCalls: [] as Array<{ id: string; enabled: boolean }>,
+  startMutate: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  endMutateAsync: vi.fn(async () => undefined) as unknown as ReturnType<typeof vi.fn>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({ useParams: () => ({ workerId: 'a1' }) }));
@@ -22,7 +30,7 @@ vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
 vi.mock('../api/hooks', () => ({
   useWorker: () => ({
     data: {
-      agent: agent({ status: 'active' }),
+      agent: agent({ status: state.agentStatus, pauseDetail: state.agentPauseDetail }),
       ticket: ticket({ id: 'tk_1' }),
       project: { id: 'p1', slug: 'api' },
       usage: null,
@@ -41,7 +49,14 @@ vi.mock('../api/hooks', () => ({
       return state.messageOutcome;
     },
   }),
+  useHandoverCommand: (id: string, enabled: boolean) => {
+    state.handoverCalls.push({ id, enabled });
+    return { data: enabled ? state.handoverCommand : undefined, isLoading: false, isError: false };
+  },
+  useStartHandover: () => ({ mutate: state.startMutate }),
+  useEndHandover: () => ({ mutateAsync: state.endMutateAsync }),
 }));
+vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(() => 'id'), dismiss: vi.fn() }) }));
 
 const { WorkerRoute } = await import('../routes/WorkerPage');
 
@@ -49,6 +64,12 @@ beforeEach(() => {
   state.sent = [];
   state.runEventsRequests = [];
   state.actionMutate = vi.fn();
+  state.agentStatus = 'active';
+  state.agentPauseDetail = null;
+  state.handoverCommand = undefined;
+  state.handoverCalls = [];
+  state.startMutate = vi.fn();
+  state.endMutateAsync = vi.fn(async () => undefined);
   sessionStorage.clear();
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -110,5 +131,64 @@ describe('WorkerPage composer — mid-turn capability and delivery outcome (VS-9
     unmount();
     expect(state.sent).toEqual([]);
     expect(state.actionMutate).not.toHaveBeenCalled();
+  });
+});
+
+describe('WorkerPage session handover (VS-249)', () => {
+  it('does not fetch the command until Session is opened, for a worker that is not held', () => {
+    render(<WorkerRoute />);
+    expect(state.handoverCalls.every((c) => !c.enabled)).toBe(true);
+    expect(screen.queryByRole('button', { name: /take this session/i })).not.toBeInTheDocument();
+  });
+
+  it('opens the band and shows the command when Session is clicked', () => {
+    state.handoverCommand = { resumable: true, command: "cd '/home/a1' && claude --resume sess-1", runtime: 'claude', landingLine: 'Lands in the home directory.', reason: null };
+    render(<WorkerRoute />);
+    fireEvent.click(screen.getByRole('button', { name: 'Session' }));
+    expect(screen.getByText('Lands in the home directory.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /take this session/i })).toBeInTheDocument();
+  });
+
+  it('shows the stated reason and no Take-session button for an unresumable worker', () => {
+    state.handoverCommand = { resumable: false, command: null, runtime: 'gemini', landingLine: null, reason: 'gemini cannot resume a session outside the daemon.' };
+    render(<WorkerRoute />);
+    fireEvent.click(screen.getByRole('button', { name: 'Session' }));
+    expect(screen.getByText('gemini cannot resume a session outside the daemon.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /take this session/i })).not.toBeInTheDocument();
+  });
+
+  it('calls startHandover for this worker when Take this session is clicked', () => {
+    state.handoverCommand = { resumable: true, command: 'claude --resume sess-1', runtime: 'claude', landingLine: null, reason: null };
+    render(<WorkerRoute />);
+    fireEvent.click(screen.getByRole('button', { name: 'Session' }));
+    fireEvent.click(screen.getByRole('button', { name: /take this session/i }));
+    expect(state.startMutate).toHaveBeenCalledWith({ id: 'a1' }, expect.anything());
+  });
+
+  it('a held worker shows Give it back instead of Resume, and no Session toggle', () => {
+    state.agentStatus = 'paused';
+    state.agentPauseDetail = { family: null, code: 'held_by_human', message: null, resetAt: null, runId: null };
+    render(<WorkerRoute />);
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Session' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /give it back/i }).length).toBeGreaterThan(0);
+  });
+
+  it('giving a session back requires a note and calls endHandover with it', async () => {
+    state.agentStatus = 'paused';
+    state.agentPauseDetail = { family: null, code: 'held_by_human', message: null, resetAt: null, runId: null };
+    state.handoverCommand = { resumable: true, command: 'claude --resume sess-1', runtime: 'claude', landingLine: null, reason: null };
+    render(<WorkerRoute />);
+
+    const giveItBackButtons = screen.getAllByRole('button', { name: /give it back/i });
+    fireEvent.click(giveItBackButtons[0]!);
+
+    const noteInput = screen.getByPlaceholderText(/what did you do while you held this session/i);
+    fireEvent.change(noteInput, { target: { value: 'attached Frida to the device' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /give it back/i }));
+    });
+
+    expect(state.endMutateAsync).toHaveBeenCalledWith({ id: 'a1', note: 'attached Frida to the device' });
   });
 });

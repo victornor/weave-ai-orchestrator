@@ -108,6 +108,9 @@ vi.mock('../api/hooks', () => ({
   useWorkers: (p: Record<string, unknown>) => { state.workerQuery = p; return { data: state.workers }; },
   useProjects: () => ({ data: state.projects, isSuccess: true }),
   useTicketDocument: () => ({ data: undefined, isLoading: false, isError: true }),
+  // VS-249: not exercised here — the decision card's handover band only fetches once opened.
+  useHandoverCommandFor: () => ({ data: undefined, isLoading: false, isError: false }),
+  useStartHandoverFor: () => ({ mutate: vi.fn() }),
 }));
 
 vi.mock('../app/link', () => ({ useGo: () => state.go }));

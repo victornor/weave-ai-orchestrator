@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { BuiltCommand, McpServerConfig, TurnInput } from '@agent-conductor/runtime-sdk';
+import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, TurnInput } from '@agent-conductor/runtime-sdk';
 import { asCursorSession } from './session.js';
 
 export const MCP_RELATIVE_PATH = '.cursor/mcp.json';
@@ -98,4 +98,18 @@ export function buildArgs(input: TurnInput): CursorBuiltCommand {
     resumed: Boolean(prev),
     liveInput: false,
   };
+}
+
+/**
+ * VS-249: the bare interactive `cursor-agent --resume` invocation — drops the headless-only
+ * `-p --output-format stream-json --trust` flags `buildArgs` above always sets, reusing the same
+ * `--resume`/`CURSOR_CONFIG_DIR` facts so it cannot drift from the daemon's own resume.
+ */
+export function resumeCommand(input: ResumeCommandInput): ResumeCommand {
+  const ref = asCursorSession(input.session);
+  const args: string[] = ['--resume', ref?.sessionId ?? ''];
+  if (input.model) args.push('--model', input.model);
+  const env: Record<string, string> = {};
+  if (input.configHome) env['CURSOR_CONFIG_DIR'] = input.configHome;
+  return { cmd: 'cursor-agent', args, env };
 }

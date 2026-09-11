@@ -35,6 +35,9 @@ vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: state.projects }),
   useWorkspaceSummary: () => ({ data: { config: state.config } }),
   useTicketDocument: () => ({ data: state.planDoc ?? undefined, isLoading: false, isError: state.planDoc === null }),
+  // VS-249: not exercised here — the decision card's handover band only fetches once opened.
+  useHandoverCommandFor: () => ({ data: undefined, isLoading: false, isError: false }),
+  useStartHandoverFor: () => ({ mutate: vi.fn() }),
 }));
 
 vi.mock('../app/link', () => ({ useGo: () => state.go, A: ({ children }: { children?: React.ReactNode }) => <a href="#">{children}</a> }));

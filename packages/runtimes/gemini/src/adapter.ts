@@ -6,7 +6,7 @@ import type {
 import { classifyError, detectBinary, installBundleFiles, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
 import { describeGeminiAccount } from './account.js';
-import { buildArgs, geminiSettings, SETTINGS_RELATIVE_PATH } from './args.js';
+import { buildArgs, geminiSettings, resumeCommand, SETTINGS_RELATIVE_PATH } from './args.js';
 import { createGeminiParser } from './events.js';
 import { asGeminiSession } from './session.js';
 
@@ -53,6 +53,7 @@ export const adapter: RuntimeAdapter = {
   configSchema(): JsonSchema { return structuredClone(CONFIG_SCHEMA); },
   skillsDir(): string { return '.gemini/skills'; },
   instructionFiles(): string[] { return ['GEMINI.md']; },
+  resumeCommand,
 
   async installInstructions(home: AgentHome, bundle: InstructionBundle): Promise<void> {
     installBundleFiles(home, bundle, {

@@ -172,3 +172,68 @@ describe('POST /workers/:id/message — delivery outcome (VS-99)', () => {
     expect(await res.json()).toEqual({ delivery: 'queued', runId: 'run_1', wakeId: 'wk_9' });
   });
 });
+
+describe('session handover (VS-249)', () => {
+  it('GET handover-command is read-only and reports the offered command', async () => {
+    const { h, fetch } = app();
+    const handoverCommand = vi.fn(() => ({ resumable: true, command: "cd '/home/a1' && claude --resume sess-1", runtime: 'claude', landingLine: 'lands in home', reason: null }));
+    h.impls.workers!['handoverCommand'] = handoverCommand;
+
+    const res = await fetch('/api/w/ws1/workers/ag_1/handover-command', { headers: authed() });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ resumable: true, runtime: 'claude' });
+    expect(handoverCommand).toHaveBeenCalledWith('ag_1');
+  });
+
+  it('POST handover takes the session and returns the command', async () => {
+    const { h, fetch } = app();
+    const startHandover = vi.fn(async () => ({ resumable: true, command: "cd '/home/a1' && claude --resume sess-1", runtime: 'claude', landingLine: 'lands in home', reason: null }));
+    h.impls.workers!['startHandover'] = startHandover;
+
+    const res = await fetch('/api/w/ws1/workers/ag_1/handover', { method: 'POST', headers: authed() });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ resumable: true });
+    expect(startHandover).toHaveBeenCalledWith(expect.anything(), 'ag_1');
+  });
+
+  it('POST handover refuses a worker with a turn running', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['startHandover'] = async () => { throw new OcError('wrong_status', 'Backend Engineer #1 has a turn running; wait for it or cancel first'); };
+
+    const res = await fetch('/api/w/ws1/workers/ag_1/handover', { method: 'POST', headers: authed() });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe('wrong_status');
+  });
+
+  it('POST handover refuses a worker whose session is already held', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['startHandover'] = async () => { throw new OcError('wrong_status', "Backend Engineer #1's session is already held"); };
+
+    const res = await fetch('/api/w/ws1/workers/ag_1/handover', { method: 'POST', headers: authed() });
+    expect(res.status).toBe(409);
+  });
+
+  it('POST handback requires a note', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/workers/ag_1/handback', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST handback gives the session back with the note', async () => {
+    const { h, fetch } = app();
+    const endHandover = vi.fn(async () => ({
+      note: 'debugged over USB',
+      reconciliation: { worktree: { headBefore: 'a', headAfter: 'b', newCommits: 1, dirty: false, changedFiles: 0 }, sessionActivityDetected: true, durationMs: 60_000 },
+    }));
+    h.impls.workers!['endHandover'] = endHandover;
+
+    const res = await fetch('/api/w/ws1/workers/ag_1/handback', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ note: 'debugged over USB' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ note: 'debugged over USB' });
+    expect(endHandover).toHaveBeenCalledWith(expect.anything(), 'ag_1', 'debugged over USB');
+  });
+});

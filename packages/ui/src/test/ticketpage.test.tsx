@@ -49,7 +49,11 @@ vi.mock('../api/hooks', () => ({
   useAnswerDecision: () => ({ mutate: state.answerMutate, isPending: false }),
   useWorker: () => (state.workerDetail ? { data: state.workerDetail, isLoading: false, isError: false } : empty),
   useWorkerMessage: () => ({ mutateAsync: state.messageMutateAsync, isPending: false }),
+  // VS-249: not exercised here — the decision card's handover band only fetches once opened.
+  useHandoverCommandFor: () => empty,
+  useStartHandoverFor: () => ({ mutate: vi.fn() }),
 }));
+vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(() => 'id'), dismiss: vi.fn() }) }));
 
 const { TicketRoute } = await import('../routes/TicketPage');
 

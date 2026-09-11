@@ -188,6 +188,20 @@ export interface RolesService {
 export interface RoleConcurrency { roleMax: number; projectMax: number; effective: number; live: number; projectLive: number; free: number }
 /** What happened to a message sent to a worker (VS-99): which delivery occurred, never both, never neither. */
 export interface WorkerMessageOutcome { delivery: 'mid_turn' | 'queued'; runId: string | null; wake: S.Wakeup | null }
+/**
+ * A human taking a worker's session (VS-249): the copy-ready command (or the stated reason there is
+ * none) plus the id of the hold this opened, so a later `endHandover` call can be matched to it —
+ * though callers address a handover by worker id, not by this id, since a worker only ever has one
+ * open hold at a time.
+ */
+export interface HandoverStartResult { resumable: boolean; command: string | null; runtime: string; landingLine: string | null; reason: string | null }
+/** What changed in the worktree and the session while a hold was open, surfaced on handback. */
+export interface HandoverReconciliation {
+  worktree: { headBefore: string | null; headAfter: string | null; newCommits: number; dirty: boolean; changedFiles: number };
+  sessionActivityDetected: boolean;
+  durationMs: number;
+}
+export interface HandoverEndResult { note: string; reconciliation: HandoverReconciliation }
 export interface WorkersService {
   list(filter?: { status?: S.AgentStatus[]; projectId?: string; roleId?: string; includeRetired?: boolean }): S.Agent[];
   get(id: string): S.Agent;
@@ -216,6 +230,26 @@ export interface WorkersService {
   sessionResumable(id: string): boolean;
   brief(workerId: string): string;
   resetSession(actor: Actor, id: string, reason: string): Promise<void>;
+  /**
+   * The resume command a worker would offer right now, without taking it (VS-249): read-only, safe
+   * to call on every render of a worker or a decision raised for one. `startHandover` calls this
+   * same builder and refuses the mutation when it reports `resumable: false`.
+   */
+  handoverCommand(id: string): HandoverStartResult;
+  /**
+   * Take a worker's session for a human's own terminal (VS-249): refuses a worker with a turn
+   * currently executing, or one already held. Pauses the worker with `HANDOVER_PAUSE_CODE` and opens
+   * an `agent_handovers` row snapshotting the worktree and session, excluding it from dispatch until
+   * `endHandover` (or the supervisor's own abandonment sweep) closes the hold.
+   */
+  startHandover(actor: Actor, workerId: string): Promise<HandoverStartResult>;
+  /**
+   * Give a held session back: refuses an empty note, reconciles the worktree and session against the
+   * snapshot `startHandover` took, posts that reconciliation and the note as a ticket comment, and
+   * resumes ordinary dispatch. Distinct from `resume` on purpose — `resume` refuses a worker with an
+   * open hold, per `run-recovery/paused-worker-visibility`.
+   */
+  endHandover(actor: Actor, workerId: string, note: string): Promise<HandoverEndResult>;
 }
 
 // ---------- wake / runs ----------

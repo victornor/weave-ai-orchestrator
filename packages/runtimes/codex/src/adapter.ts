@@ -6,7 +6,7 @@ import type {
 import { classifyError, detectBinary, installBundleFiles, runTmpDir, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
 import { describeCodexAccount } from './account.js';
-import { buildArgs, mcpConfigToml } from './args.js';
+import { buildArgs, mcpConfigToml, resumeCommand } from './args.js';
 import { createCodexParser } from './events.js';
 import { listModels as listCodexModels } from './models.js';
 import { asCodexSession, type CodexSessionRef } from './session.js';
@@ -49,6 +49,7 @@ export const adapter: RuntimeAdapter = {
   configSchema(): JsonSchema { return structuredClone(CONFIG_SCHEMA); },
   skillsDir(): string { return '.agents/skills'; },
   instructionFiles(): string[] { return ['AGENTS.md']; },
+  resumeCommand,
 
   async installInstructions(home: AgentHome, bundle: InstructionBundle): Promise<void> {
     installBundleFiles(home, bundle, { instructions: { 'AGENTS.md': bundle.instructions }, skillsDir: '.agents/skills' });

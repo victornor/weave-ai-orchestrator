@@ -832,4 +832,59 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0026_agent_handovers (VS-249)', () => {
+    function seedAgent(db: Db, id: string): void {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.insert('agents', {
+        id, workspaceId: 'w1', kind: 'worker', name: 'Backend Engineer #1', runtimeId: 'claude',
+        status: 'active', homePath: '/tmp/home', turnEpoch: 0, turnCount: 0, spawnedBy: 'system',
+        briefRevision: 1, createdAt: 't0', updatedAt: 't0',
+      });
+    }
+
+    it('rejects a status outside active/returned/abandoned', () => {
+      const db = openDb(join(dir, 'handovers1.sqlite'));
+      seedAgent(db, 'a1');
+      expect(() => db.insert('agent_handovers', {
+        id: 'h1', agentId: 'a1', runtimeId: 'claude', startedAt: 't1', startedBy: 'victor',
+        status: 'bogus', lastActivityAt: 't1', createdAt: 't1', updatedAt: 't1',
+      })).toThrow();
+      db.close();
+    });
+
+    it('round-trips an open hold and its later reconciliation', () => {
+      const db = openDb(join(dir, 'handovers2.sqlite'));
+      seedAgent(db, 'a1');
+      db.insert('agent_handovers', {
+        id: 'h1', agentId: 'a1', ticketId: 't1', runtimeId: 'claude',
+        sessionRefJson: { sessionId: 'sess-1' }, worktreeHead: 'abc123', worktreeBranch: 'ac/vs-1-x',
+        startedAt: '2026-09-11T10:00:00.000Z', startedBy: 'victor', status: 'active',
+        lastActivitySignal: 'sig-0', lastActivityAt: '2026-09-11T10:00:00.000Z',
+        createdAt: '2026-09-11T10:00:00.000Z', updatedAt: '2026-09-11T10:00:00.000Z',
+      });
+      expect(db.get('SELECT * FROM agent_handovers WHERE id = ?', ['h1'])).toMatchObject({
+        agentId: 'a1', ticketId: 't1', runtimeId: 'claude', sessionRef: { sessionId: 'sess-1' },
+        worktreeHead: 'abc123', worktreeBranch: 'ac/vs-1-x', status: 'active',
+        returnedAt: null, note: null, reconciliation: null,
+      });
+      db.update('agent_handovers', 'h1', {
+        status: 'returned', returnedAt: '2026-09-11T11:00:00.000Z', note: 'debugged the device over USB',
+        reconciliationJson: { newCommits: 2, dirty: false }, updatedAt: '2026-09-11T11:00:00.000Z',
+      });
+      expect(db.get('SELECT * FROM agent_handovers WHERE id = ?', ['h1'])).toMatchObject({
+        status: 'returned', note: 'debugged the device over USB', reconciliation: { newCommits: 2, dirty: false },
+      });
+      db.close();
+    });
+
+    it('indexes by (agent_id, status) for the "does this agent have an open hold" lookup', () => {
+      const db = openDb(join(dir, 'handovers3.sqlite'));
+      const idx = db.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'agent_handovers'");
+      expect(idx.map((r) => r.name)).toContain('agent_handovers_agent_status');
+      db.close();
+    });
+  });
 });

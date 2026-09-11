@@ -6,7 +6,7 @@ import type {
 import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
 import { describeCursorAccount } from './account.js';
-import { buildArgs, namedModel } from './args.js';
+import { buildArgs, namedModel, resumeCommand } from './args.js';
 import { readCredential } from './credential.js';
 import { createCursorParser } from './events.js';
 import { listModels as listCursorModels, parseUnknownModelRejection } from './models.js';
@@ -80,6 +80,7 @@ export const adapter: RuntimeAdapter = {
 
   async describeAccount(input: AccountProbeInput): Promise<AccountDescription> { return describeCursorAccount(input); },
   readCredential(input: CredentialProbeInput): CredentialFacts { return readCredential(input); },
+  resumeCommand,
 
   async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
     const built = buildArgs(input);

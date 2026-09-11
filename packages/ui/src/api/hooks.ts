@@ -630,6 +630,68 @@ export function useWorkerAction(): UseMutationResult<unknown, Error, { id: strin
   });
 }
 
+/**
+ * The resume command a worker would offer right now, without taking it (VS-249): read-only, so it
+ * can be polled from the worker page or a decision card without committing to a hold.
+ */
+export function useHandoverCommand(id: string, enabled = true): UseQueryResult<T.HandoverCommandResult> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.workerHandoverCommand(ws, id),
+    queryFn: () => api.ws<T.HandoverCommandResult>(ws, `/workers/${id}/handover-command`),
+    enabled: Boolean(id) && enabled,
+  });
+}
+
+/** Take a worker's session for a human's own terminal (VS-249). */
+export function useStartHandover(): UseMutationResult<T.HandoverCommandResult, Error, { id: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }) => api.ws<T.HandoverCommandResult>(ws, `/workers/${id}/handover`, { method: 'POST' }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: qk.worker(ws, v.id) });
+      void qc.invalidateQueries({ queryKey: qk.workers(ws) });
+    },
+  });
+}
+
+/** Give a held session back (VS-249); requires a note describing what happened. */
+export function useEndHandover(): UseMutationResult<T.HandoverEndResult, Error, { id: string; note: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, note }) => api.ws<T.HandoverEndResult>(ws, `/workers/${id}/handback`, { method: 'POST', body: { note } }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: qk.worker(ws, v.id) });
+      void qc.invalidateQueries({ queryKey: qk.workers(ws) });
+    },
+  });
+}
+
+/**
+ * Explicit-workspace variants of the two above (VS-249), for a surface that is not itself scoped to
+ * one workspace — a decision card raised for a worker, shown from a cross-workspace view like Needs
+ * you, carries its own `ws` as a prop rather than reading the route's active workspace.
+ */
+export function useHandoverCommandFor(ws: string, id: string, enabled = true): UseQueryResult<T.HandoverCommandResult> {
+  return useQuery({
+    queryKey: qk.workerHandoverCommand(ws, id),
+    queryFn: () => api.ws<T.HandoverCommandResult>(ws, `/workers/${id}/handover-command`),
+    enabled: Boolean(ws) && Boolean(id) && enabled,
+  });
+}
+export function useStartHandoverFor(): UseMutationResult<T.HandoverCommandResult, Error, { ws: string; id: string }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ws, id }) => api.ws<T.HandoverCommandResult>(ws, `/workers/${id}/handover`, { method: 'POST' }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: qk.worker(v.ws, v.id) });
+      void qc.invalidateQueries({ queryKey: qk.workers(v.ws) });
+    },
+  });
+}
+
 /** Steer a worker (VS-99): posts the ticket comment server-side and attempts mid-turn delivery when `live`. */
 export function useWorkerMessage(): UseMutationResult<T.WorkerMessageOutcome, Error, { id: string; ticketId: string; body: string; live?: boolean }> {
   const ws = useWs();

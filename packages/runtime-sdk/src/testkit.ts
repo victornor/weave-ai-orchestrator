@@ -1,12 +1,14 @@
-import type { InputDelivery, RuntimeAdapter, TurnHandle, TurnInput, TurnSink, TurnResult, RuntimeModel } from './index.js';
+import type { InputDelivery, ResumeCommand, ResumeCommandInput, RuntimeAdapter, TurnHandle, TurnInput, TurnSink, TurnResult, RuntimeModel } from './index.js';
 
 /** A scripted fake runtime for engine tests: returns queued results, records inputs. */
 export class FakeRuntime implements RuntimeAdapter {
   readonly id = 'fake'; readonly displayName = 'Fake';
   /** Flip to `true` before a turn to have `runTurn` hand back a `TurnHandle` with `send`. */
   streamingInput = false;
+  /** VS-249: flip to `false` to simulate a runtime that cannot resume a session at all. */
+  resumableSessions = true;
   get capabilities() {
-    return { resumableSessions: true, forkSessions: false, streamingInput: this.streamingInput, systemPromptInjection: 'system_prompt' as const, structuredOutput: true, mcp: true, usageReporting: 'per_turn' as const, costReporting: false, permissionModes: ['auto'] };
+    return { resumableSessions: this.resumableSessions, forkSessions: false, streamingInput: this.streamingInput, systemPromptInjection: 'system_prompt' as const, structuredOutput: true, mcp: true, usageReporting: 'per_turn' as const, costReporting: false, permissionModes: ['auto'] };
   }
   inputs: TurnInput[] = [];
   queue: Array<Partial<TurnResult> | ((input: TurnInput) => Partial<TurnResult> | Promise<Partial<TurnResult>>)> = [];
@@ -26,6 +28,10 @@ export class FakeRuntime implements RuntimeAdapter {
   async installInstructions() { /* noop */ }
   skillsDir() { return '.fake/skills'; }
   instructionFiles() { return ['AGENTS.md']; }
+  resumeCommand(input: ResumeCommandInput): ResumeCommand {
+    const sessionId = typeof (input.session as { sessionId?: unknown }).sessionId === 'string' ? (input.session as { sessionId: string }).sessionId : 'unknown';
+    return { cmd: 'fake', args: ['--resume', sessionId], env: input.configHome ? { FAKE_CONFIG_DIR: input.configHome } : {} };
+  }
   async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
     this.inputs.push(input);
     sink.onSpawn({ pid: process.pid, pgid: null });

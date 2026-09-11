@@ -5,8 +5,11 @@ import { A } from '../app/link';
 import { Button } from './Button';
 import { Composer } from './Composer';
 import { DocumentPreview } from './DocumentPreview';
+import { HandoverCommand } from './HandoverCommand';
 import { Markdown } from './Markdown';
 import { StatusGlyph } from './StatusGlyph';
+import { useHandoverCommandFor, useStartHandoverFor } from '../api/hooks';
+import { useToast } from './Toast';
 import { clock } from '../lib/format';
 import { cx } from '../lib/cx';
 
@@ -207,6 +210,13 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
   // A long context (a failure's full runtime message, say) stays bounded until asked for in full
   // (VS-201) — never clipped by CSS, which can cut mid-word with no way to tell from outside.
   const [contextExpanded, setContextExpanded] = useState(false);
+  // VS-249: "I need to do this myself" — offered on any open card raised for a worker agent, so a
+  // human deciding this from the card does not have to navigate to the worker first. Fetched only
+  // once asked for, not eagerly on every rendered card.
+  const [sessionOpen, setSessionOpen] = useState(false);
+  const toast = useToast();
+  const handoverCommand = useHandoverCommandFor(ws ?? '', askedBy ?? '', sessionOpen);
+  const startHandover = useStartHandoverFor();
   const target = (decision.target ?? {}) as Target;
   // The document a decision target points at (VS-224), parsed from the untyped record: the
   // rendering is driven by this, never by the decision's kind.
@@ -550,6 +560,39 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             </Button>
           ) : null}
         </div>
+
+        {/* "I need to do this myself" (VS-249): take the asking worker's session for a human's own
+            terminal. Only when the card names who asked and which workspace it belongs to — a
+            decision with neither cannot be resolved to a specific worker. */}
+        {askedBy && ws && !inert ? (
+          <div className="mt-2 border-t border-line-1 pt-2">
+            {sessionOpen ? (
+              <div className="flex flex-col gap-2">
+                {handoverCommand.isLoading ? null : handoverCommand.data ? <HandoverCommand result={handoverCommand.data} /> : null}
+                {handoverCommand.data?.resumable ? (
+                  <Button
+                    variant="secondary"
+                    size="thumb"
+                    compact={compact}
+                    onClick={() => {
+                      startHandover.mutate({ ws, id: askedBy }, {
+                        onSuccess: () => toast.push({ title: 'Session taken', detail: 'Paste the command into a terminal on the daemon host.', status: 'done', ttl: 6000 }),
+                        onError: (e) => toast.push({ title: 'Could not take the session', detail: e.message, status: 'failed' }),
+                      });
+                    }}
+                  >
+                    Take this session
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              <Button variant="ghost" size="thumb" compact={compact} full className="justify-start px-3 text-meta" onClick={() => setSessionOpen(true)}>
+                I need to do this myself
+                <span className="text-micro text-text-4">— take the session</span>
+              </Button>
+            )}
+          </div>
+        ) : null}
 
         {/* Hide from the surface, not from the decision. A full-width 44 px band of its own rather
             than an icon in the corner: on a phone this sits under the thumb that just decided not

@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { BuiltCommand, TurnInput } from '@agent-conductor/runtime-sdk';
+import type { BuiltCommand, ResumeCommand, ResumeCommandInput, TurnInput } from '@agent-conductor/runtime-sdk';
 import { runTmpDir } from '@agent-conductor/runtime-sdk';
 import { asClaudeSession, isUuid } from './session.js';
 
@@ -135,4 +135,20 @@ export function buildArgs(input: TurnInput, opts: ClaudeBuildOpts): ClaudeBuiltC
   }
 
   return { cmd: 'claude', args: [...head, ...args], stdin, env, files, sessionId, resumed: Boolean(resume), liveInput };
+}
+
+/**
+ * VS-249: the bare interactive `claude --resume` invocation for a human's own terminal — never the
+ * headless `-p --output-format stream-json` form `buildArgs` above produces. Reuses `asClaudeSession`
+ * (the same session-ref parsing `buildArgs` uses) and the same `CLAUDE_CONFIG_DIR`/`--add-dir` facts,
+ * so this cannot silently drift from what a daemon-run turn would resume into.
+ */
+export function resumeCommand(input: ResumeCommandInput): ResumeCommand {
+  const ref = asClaudeSession(input.session);
+  const args: string[] = ['--resume', ref?.sessionId ?? ''];
+  if (input.worktreePath && !input.worktreePath.startsWith(input.cwd)) args.push('--add-dir', input.worktreePath);
+  if (input.model) args.push('--model', input.model);
+  const env: Record<string, string> = {};
+  if (input.configHome) env['CLAUDE_CONFIG_DIR'] = input.configHome;
+  return { cmd: 'claude', args, env };
 }

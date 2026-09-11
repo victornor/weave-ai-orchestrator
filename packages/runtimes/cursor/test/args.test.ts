@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnInput } from '@agent-conductor/runtime-sdk';
-import { buildArgs, MAX_ARGV_PROMPT } from '../src/args.js';
+import { buildArgs, MAX_ARGV_PROMPT, resumeCommand } from '../src/args.js';
 
 function input(over: Partial<TurnInput> = {}): TurnInput {
   return {
@@ -121,5 +121,20 @@ describe('cursor buildArgs — argv print mode', () => {
     expect(b.stdin).toBe(big);
     expect(b.args).not.toContain(big);
     expect(b.liveInput).toBe(false);
+  });
+});
+
+describe('resumeCommand (VS-249)', () => {
+  it('builds a bare --resume invocation with no headless flags', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { sessionId: 'sess-1' } });
+    expect(c.cmd).toBe('cursor-agent');
+    expect(c.args).toEqual(['--resume', 'sess-1']);
+    expect(c.args).not.toContain('-p');
+    expect(c.args).not.toContain('--trust');
+  });
+
+  it('sets CURSOR_CONFIG_DIR from configHome and nothing else', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { sessionId: 'sess-1' }, configHome: '/ws/runtimes/cursor' });
+    expect(c.env).toEqual({ CURSOR_CONFIG_DIR: '/ws/runtimes/cursor' });
   });
 });

@@ -289,6 +289,18 @@ export interface WorkerDetail {
 /** `POST /workers/:id/message` result (VS-99): which delivery actually happened. */
 export interface WorkerMessageOutcome { delivery: 'mid_turn' | 'queued'; runId: string | null; wakeId: string | null }
 
+/** `GET/POST /workers/:id/handover(-command)` (VS-249): the offered resume command, or why there is none. */
+export interface HandoverCommandResult { resumable: boolean; command: string | null; runtime: string; landingLine: string | null; reason: string | null }
+/** `POST /workers/:id/handback` result (VS-249). */
+export interface HandoverEndResult {
+  note: string;
+  reconciliation: {
+    worktree: { headBefore: string | null; headAfter: string | null; newCommits: number; dirty: boolean; changedFiles: number };
+    sessionActivityDetected: boolean;
+    durationMs: number;
+  };
+}
+
 export interface RoleDetail {
   role: Role;
   charter: string;

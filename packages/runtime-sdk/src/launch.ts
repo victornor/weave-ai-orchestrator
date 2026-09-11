@@ -39,8 +39,13 @@ function executable(path: string): boolean {
  * When an adapter overlay redirects HOME or the XDG dirs (OpenCode skill isolation), mise would
  * follow them and host shims such as `openspec` die. Pin mise to the daemon process's own roots.
  * Overlay HOME/XDG stay; an explicit overlay `MISE_*` still wins (VS-221).
+ *
+ * Exported (VS-249) so a human's own resume command can apply the identical pin: it is built from
+ * an adapter's `resumeCommand`, which returns only the overlay keys it sets (never the full daemon
+ * env `childEnv` merges in here) — the caller must run this itself against the daemon's own
+ * environment to decide whether the pin is needed and what its values are.
  */
-function pinHostMiseRoots(env: Record<string, string>, daemon: Record<string, string>): void {
+export function pinHostMiseRoots(env: Record<string, string>, daemon: Record<string, string>): void {
   if (
     env['HOME'] === daemon['HOME']
     && env['XDG_DATA_HOME'] === daemon['XDG_DATA_HOME']
@@ -55,10 +60,16 @@ function pinHostMiseRoots(env: Record<string, string>, daemon: Record<string, st
     ?? join(daemon['XDG_CACHE_HOME'] ?? join(hostHome, '.cache'), 'mise');
 }
 
-/** The daemon's own environment with an adapter's overlay on top; entries it does not set are dropped. */
-export function childEnv(overlay: Record<string, string> = {}): Record<string, string> {
+/** The daemon process's own environment, string-valued entries only — `childEnv`'s baseline, and `pinHostMiseRoots`'s second argument for any other caller building a different overlay on top of it. */
+export function daemonEnv(): Record<string, string> {
   const daemon: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') daemon[k] = v;
+  return daemon;
+}
+
+/** The daemon's own environment with an adapter's overlay on top; entries it does not set are dropped. */
+export function childEnv(overlay: Record<string, string> = {}): Record<string, string> {
+  const daemon = daemonEnv();
   const env = { ...daemon, ...overlay };
   pinHostMiseRoots(env, daemon);
   return env;

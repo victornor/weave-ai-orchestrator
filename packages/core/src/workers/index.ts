@@ -2,11 +2,11 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 
 import { join } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
 import {
-  OcError, landingBranchOf, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type TicketStatus,
+  HANDOVER_PAUSE_CODE, OcError, heldByHuman, landingBranchOf, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type TicketStatus,
 } from '@agent-conductor/shared';
 import type { WorktreeProvider } from '@agent-conductor/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
-import type { Actor, CoreServices, WorkerMessageOutcome, WorkersService } from '../api.js';
+import type { Actor, CoreServices, HandoverEndResult, HandoverStartResult, WorkerMessageOutcome, WorkersService } from '../api.js';
 import { recordActivity } from '../events.js';
 import { recordHumanInputEvent, runState } from '../runs/active.js';
 import { renderHome } from './home.js';
@@ -15,6 +15,9 @@ import { createSessions } from '../sessions/index.js';
 import { modelSettingFor, modelsFor } from '../models/resolve.js';
 import { landedWorkTest } from '../worktrees/landed.js';
 import { git, worktreeState } from '../util/git.js';
+import { buildHandoverCommand } from './resume-command.js';
+import { sessionActivitySignal } from './activity-signal.js';
+import { handoverCommentBody, reconcileHandover, type HandoverSnapshot } from './handover-reconcile.js';
 
 export { renderHome, ensureHomeCurrent, skillsFor } from './home.js';
 
@@ -358,6 +361,13 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       if (waitingOnRuntimeLogin(agent) && gatedRuntime(runtimeId)) {
         throw new OcError('conflict', `${agent.name} is waiting on the ${runtimeId} login, not on you. Log that CLI in again and it resumes on its own.`, { runtimeId }, true);
       }
+      // A human holds this session (VS-249): plain resume would dispatch a turn into a worktree and
+      // session the human may still be using, or may have changed without the daemon's knowledge.
+      // Only `endHandover` (or the supervisor's own abandonment sweep) may put this worker back to
+      // work — see the `run-recovery/paused-worker-visibility` delta.
+      if (heldByHuman(agent)) {
+        throw new OcError('wrong_status', `${agent.name}'s session is held by a human; give it back instead of resuming it`);
+      }
       const wasPaused = agent.status === 'paused';
       ctx.db.update('agents', id, { status: 'active', pauseReason: null, pauseDetailJson: null, updatedAt: nowIso() });
       recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.resume', 'agent', id, {});
@@ -455,6 +465,86 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       get(id);
       sessions.reset(id, reason);
       recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.reset_session', 'agent', id, { reason });
+    },
+
+    handoverCommand(id: string): HandoverStartResult {
+      const agent = get(id);
+      const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;
+      let model: string | null = null;
+      try { model = modelSettingFor(modelsFor(ctx), agent.kind, ticket).model ?? null; } catch { /* unconfigured; the command still resolves without a --model flag */ }
+      const result = buildHandoverCommand(ctx, agent, sessions.active(id), model);
+      return result.resumable
+        ? { resumable: true, command: result.command, runtime: result.runtime, landingLine: result.landingLine, reason: null }
+        : { resumable: false, command: null, runtime: result.runtime, landingLine: null, reason: result.reason };
+    },
+
+    async startHandover(actor: Actor, workerId: string): Promise<HandoverStartResult> {
+      const agent = get(workerId);
+      const running = ctx.db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [workerId]);
+      if (running) throw new OcError('wrong_status', `${agent.name} has a turn running; wait for it or cancel first`);
+      const existing = ctx.db.get<{ id: string }>("SELECT id FROM agent_handovers WHERE agent_id = ? AND status = 'active' LIMIT 1", [workerId]);
+      if (existing) throw new OcError('wrong_status', `${agent.name}'s session is already held`);
+
+      const result = service.handoverCommand(workerId);
+      if (!result.resumable) throw new OcError('validation', result.reason ?? `${agent.name}'s runtime cannot resume a session outside the daemon`);
+
+      const project = agent.projectId ? projectOf(agent.projectId) : null;
+      const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;
+      const wt = agent.worktreePath && existsSync(agent.worktreePath)
+        ? await worktreeState(agent.worktreePath, project ? landingBranchOf(project, ticket) : 'main')
+        : null;
+      const session = sessions.active(workerId);
+      const configHome = join(ctx.paths.runtimesHome, agent.runtimeId);
+      const now = nowIso();
+      const id = newId();
+      ctx.db.insert('agent_handovers', {
+        id, agentId: workerId, ticketId: agent.ticketId, runtimeId: agent.runtimeId,
+        sessionRefJson: session?.sessionRef ?? null, worktreeHead: wt?.head ?? null, worktreeBranch: wt?.branch ?? null,
+        startedAt: now, startedBy: actor.id ?? actor.kind, status: 'active',
+        lastActivitySignal: sessionActivitySignal(configHome), lastActivityAt: now, createdAt: now, updatedAt: now,
+      });
+      ctx.db.update('agents', workerId, {
+        status: 'paused', pauseReason: 'held by a human in their own terminal',
+        pauseDetailJson: { family: null, code: HANDOVER_PAUSE_CODE, message: null, resetAt: null, runId: null },
+        updatedAt: now,
+      });
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.handover_start', 'agent', workerId, { runtime: agent.runtimeId }, agent.ticketId);
+      ctx.events.emit('worker.status', 'agent', workerId, { status: 'paused', reason: 'held by a human in their own terminal' });
+      log.info({ workerId }, 'worker session handed to a human');
+      return result;
+    },
+
+    async endHandover(actor: Actor, workerId: string, note: string): Promise<HandoverEndResult> {
+      const trimmed = note.trim();
+      if (!trimmed) throw new OcError('validation', 'a note describing what happened is required to give a session back');
+      const agent = get(workerId);
+      const hold = ctx.db.get<{ id: string; worktreeHead: string | null; lastActivitySignal: string | null; startedAt: string; runtimeId: string }>(
+        "SELECT * FROM agent_handovers WHERE agent_id = ? AND status = 'active' LIMIT 1", [workerId],
+      );
+      if (!hold) throw new OcError('wrong_status', `${agent.name}'s session is not currently held`);
+
+      const snapshot: HandoverSnapshot = { worktreeHead: hold.worktreeHead, runtimeId: hold.runtimeId, lastActivitySignal: hold.lastActivitySignal, startedAt: hold.startedAt };
+      const reconciliation = await reconcileHandover(ctx, agent, snapshot);
+      const now = nowIso();
+      ctx.db.update('agent_handovers', hold.id, { status: 'returned', returnedAt: now, note: trimmed, reconciliationJson: reconciliation, updatedAt: now });
+      ctx.db.update('agents', workerId, { status: 'active', pauseReason: null, pauseDetailJson: null, updatedAt: now });
+      if (agent.ticketId) {
+        try { deps().tickets.comment({ kind: 'system', id: null }, agent.ticketId, handoverCommentBody(agent, reconciliation, trimmed, false), 'status', 'trusted'); }
+        catch (e) { log.warn({ workerId, err: String(e) }, 'posting the handback comment failed'); }
+      }
+      // A wake sent while `agents.status = 'paused'` is skipped outright, not left queued (the wake
+      // service's own gate 2) — same as an ordinary pause/resume, `endHandover` must raise a fresh
+      // wake itself so the worker actually continues, carrying the human's note as context.
+      try {
+        deps().wake.enqueue(workerId, {
+          source: 'system', reason: `session given back: ${trimmed}`.slice(0, 160),
+          payload: { handedBack: true, note: trimmed }, idempotencyKey: `handback:${workerId}:${agent.turnEpoch}`, requestedBy: actor,
+        });
+      } catch (e) { log.error({ workerId, err: String(e) }, 'giving the session back could not queue its next turn'); }
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.handover_end', 'agent', workerId, { newCommits: reconciliation.worktree.newCommits, sessionActivityDetected: reconciliation.sessionActivityDetected }, agent.ticketId);
+      ctx.events.emit('worker.status', 'agent', workerId, { status: 'active' });
+      log.info({ workerId }, 'worker session given back');
+      return { note: trimmed, reconciliation };
     },
   };
   return service;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnInput } from '@agent-conductor/runtime-sdk';
-import { buildArgs, MAX_ARGV_PROMPT, RESTRICTED_TOOLS, userFrame } from '../src/args.js';
+import { buildArgs, MAX_ARGV_PROMPT, resumeCommand, RESTRICTED_TOOLS, userFrame } from '../src/args.js';
 
 const NEW_ID = '11111111-2222-4333-8444-555555555555';
 
@@ -145,5 +145,30 @@ describe('claude buildArgs — liveInput: false (legacy, argv/text-stdin prompt)
     const b = buildArgs(input({ prompt: big, options: { liveInput: false } }), { newSessionId: NEW_ID });
     expect(b.stdin).toBe(big);
     expect(b.args).not.toContain(big);
+  });
+});
+
+describe('resumeCommand (VS-249)', () => {
+  it('builds a bare --resume invocation with no headless flags', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { sessionId: 'sess-1' } });
+    expect(c.cmd).toBe('claude');
+    expect(c.args).toEqual(['--resume', 'sess-1']);
+  });
+
+  it('adds --add-dir when the worktree is not under cwd', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: '/home/agent/work', session: { sessionId: 'sess-1' } });
+    expect(c.args).not.toContain('--add-dir');
+    const c2 = resumeCommand({ cwd: '/home/agent', worktreePath: '/elsewhere/work', session: { sessionId: 'sess-1' } });
+    expect(c2.args).toEqual(['--resume', 'sess-1', '--add-dir', '/elsewhere/work']);
+  });
+
+  it('sets CLAUDE_CONFIG_DIR from configHome and nothing else', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { sessionId: 'sess-1' }, configHome: '/ws/runtimes/claude' });
+    expect(c.env).toEqual({ CLAUDE_CONFIG_DIR: '/ws/runtimes/claude' });
+  });
+
+  it('passes a model when given', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { sessionId: 'sess-1' }, model: 'opus' });
+    expect(c.args).toEqual(['--resume', 'sess-1', '--model', 'opus']);
   });
 });

@@ -102,6 +102,13 @@ still needs a login, resume SHALL NOT be offered for it, because a turn started 
 again. Such a worker SHALL instead be shown as waiting on that login, and SHALL be resumed by the
 system itself once the login is restored.
 
+A worker paused because a human holds its session SHALL be a second exception: plain resume SHALL
+NOT be offered for it, because resuming without reconciliation would let the daemon dispatch a turn
+into a worktree and session the human may still be using, or may have changed without the daemon's
+knowledge. Such a worker SHALL instead be shown as held by a human, and SHALL be put back to work
+only through giving the session back (or through the system's own automatic recovery of an abandoned
+hold), never through the ordinary resume action.
+
 When a resumed worker's ticket is blocked only by that pause, resuming SHALL move the ticket back to
 **exactly the status it held immediately before it was moved to `blocked`** — not a status inferred
 from any other signal, such as whether a run happens to still hold the ticket's execution lock. A
@@ -153,6 +160,13 @@ The conductor SHALL be told the worker resumed.
 - **WHEN** a worker stopped by its runtime's expired login is shown while that runtime still needs a
   login
 - **THEN** resume is not offered for it, and it is shown as waiting on that login
+
+#### Scenario: A worker held by a human is not offered plain resume
+
+- **WHEN** a worker paused because a human holds its session is shown anywhere a paused worker is
+  shown
+- **THEN** plain resume is not offered for it; it is shown as held by a human, and only giving the
+  session back (or the system's own automatic recovery of an abandoned hold) puts it back to work
 
 ### Requirement: Relaunching a paused worker resumes it
 

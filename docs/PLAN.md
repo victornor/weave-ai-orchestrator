@@ -651,6 +651,7 @@ Conductor only:
 - `ac_run_list(ref, {limit?})` → that ticket's or worker's recent runs, newest first, with status, turn, liveness, duration, error family and the run each retry names.
 - `ac_briefing()` → deterministic snapshot JSON (§10.5) for status reports.
 - `ac_project_list()`, `ac_project_add(url, opts)` (requires human decision), `ac_usage(filter)` (same windows as §16.3).
+- `ac_incident_list({reporterKind?, since?, limit?, includeEvidence?})` → system incidents (§ `ac_incident`, VS-222) filed from this workspace plus workspace-less daemon-global rows, newest first, as `{ items, total }` where `total` counts everything matching the filters. Lean by default (no `evidence`; `includeEvidence: true` restores it) and capped like every list tool (`truncated: true`). `since` returns incidents created strictly after an ISO-8601 instant — an incremental caller pages until short, then passes the newest `createdAt` it processed next run. `ac_incident_get(id)` → one incident in full; another workspace's incident is `forbidden`, an unknown id `not_found`. Workers have no incident reads. Filing and the session-auth HTTP routes are unchanged.
 
 Every tool response includes `{ ok, data | error: { code, message, retryable } }`; unknown ids return `not_found`, not exceptions.
 

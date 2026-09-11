@@ -11,11 +11,11 @@ import {
   COMMON_TOOLS, CONDUCTOR_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
-  ROUTINE_ACTIONS, ROUTINE_STATUSES,
+  ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS,
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock,
 } from '@agent-conductor/shared';
-import { flattenWakes, type Actor, type CoreServices, type IncidentsService } from '@agent-conductor/core';
+import { flattenWakes, INCIDENT_LIST_MAX, type Actor, type CoreServices, type IncidentsService } from '@agent-conductor/core';
 import type { RunTokenClaims } from './runtoken.js';
 import type { WorkspaceRuntime } from './types.js';
 import { toOcError } from './http.js';
@@ -416,6 +416,38 @@ export const TOOLS: ToolDef[] = [
       });
       return { id: row.id, createdAt: row.createdAt, reporterKind: row.reporterKind };
     },
+  },
+  {
+    name: 'ac_incident_list', scope: 'conductor', input: z.object({
+      reporterKind: z.enum(INCIDENT_REPORTER_KINDS).optional(),
+      since: z.string().optional().describe('ISO-8601 instant; returns only incidents created strictly after it'),
+      limit: z.number().int().min(1).max(INCIDENT_LIST_MAX).optional(),
+      includeEvidence: z.boolean().optional(),
+    }),
+    description:
+      'List system incidents (VS-174) filed from your workspace, plus workspace-less daemon-global ones, newest first — never another workspace\'s. '
+      + 'Lean by default: no `evidence` per item unless includeEvidence is set; read one in full with ac_incident_get. '
+      + '`total` counts everything matching the filters, not just the returned page. '
+      + 'For an incremental sweep, page until a page comes back short, then pass the newest createdAt you processed as `since` next run — that instant is excluded.',
+    handler: (ctx, i) => {
+      const { items, total } = ctx.incidents.list({
+        reporterKind: i.reporterKind,
+        since: i.since,
+        limit: i.limit,
+        workspaceId: ctx.claims.workspaceId,
+      });
+      return {
+        items: i.includeEvidence ? items : items.map(({ evidence: _evidence, ...row }) => row),
+        total,
+      };
+    },
+  },
+  {
+    name: 'ac_incident_get', scope: 'conductor', input: z.object({ id: z.string().min(1) }),
+    description:
+      'Read one system incident back in full, evidence included, by id. Scoped like ac_incident_list: '
+      + 'your workspace plus workspace-less daemon-global rows; another workspace\'s incident is `forbidden`, an unknown id is `not_found`.',
+    handler: (ctx, i) => ctx.incidents.get(i.id, { workspaceId: ctx.claims.workspaceId }),
   },
   {
     name: 'ac_knowledge_get', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), projectId: z.string().optional() }),

@@ -10,6 +10,7 @@ export const CONDUCTOR_TOOLS = [
   'ac_decision_answer', 'ac_decision_review', 'ac_human_send', 'ac_briefing', 'ac_project_list', 'ac_project_add', 'ac_usage',
   'ac_run_inspect', 'ac_run_list', 'ac_worker_models',
   'ac_routine_list', 'ac_routine_create', 'ac_routine_update', 'ac_routine_remove',
+  'ac_incident_list', 'ac_incident_get',
 ] as const;
 export const WORKER_ONLY_TOOLS = ['ac_ticket_create'] as const; // project-scoped creation for workers
 export type ToolName = (typeof COMMON_TOOLS)[number] | (typeof CONDUCTOR_TOOLS)[number];

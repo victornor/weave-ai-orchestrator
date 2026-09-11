@@ -328,6 +328,13 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       if (ticketId) inv(qk.ticketKnowledgeUsage(ws, ticketId));
       break;
     }
+    case 'routine.created':
+    case 'routine.updated':
+    case 'routine.removed':
+    case 'routine.fired':
+      inv(qk.routines(ws));
+      inv(qk.routine(ws, id));
+      break;
     case 'presentation.updated':
       inv(qk.presentation(ws));
       break;

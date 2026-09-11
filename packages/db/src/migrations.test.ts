@@ -740,4 +740,35 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0024_routines_engine (VS-220)', () => {
+    const cols = (db: Db, table: string): string[] => db.all<{ name: string }>(`PRAGMA table_info(${table})`).map((c) => c.name);
+
+    it('adds in_flight_wake_id and updated_at and can insert an active row', () => {
+      const path = join(dir, 'routines-engine.sqlite');
+      const before = openDbAsOf(path, '0023_operational_ticket_kind.sql');
+      expect(cols(before, 'routines')).not.toContain('in_flight_wake_id');
+      expect(cols(before, 'routines')).not.toContain('updated_at');
+      before.close();
+
+      const db = openDb(path);
+      expect(cols(db, 'routines')).toEqual(expect.arrayContaining(['in_flight_wake_id', 'updated_at']));
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(
+        `INSERT INTO routines (id, workspace_id, name, trigger_json, template_json, status, next_fire_at, created_at, updated_at)
+         VALUES ('r1', 'w1', 'Morning review', '{"kind":"schedule","timezone":"UTC","daily":{"hour":7,"minute":0}}', '{"instruction":"Look at incidents","action":"report","maxTicketsPerFire":0}', 'active', '2026-09-12T07:00:00.000Z', 't0', 't0')`);
+      const row = db.get<{ name: string; status: string; inFlightWakeId: string | null; trigger: unknown; template: unknown }>(
+        'SELECT name, status, in_flight_wake_id, trigger_json, template_json FROM routines WHERE id = ?', ['r1']);
+      expect(row).toMatchObject({
+        name: 'Morning review',
+        status: 'active',
+        inFlightWakeId: null,
+        trigger: { kind: 'schedule', timezone: 'UTC', daily: { hour: 7, minute: 0 } },
+        template: { instruction: 'Look at incidents', action: 'report', maxTicketsPerFire: 0 },
+      });
+      db.close();
+    });
+  });
 });

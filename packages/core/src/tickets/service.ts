@@ -15,6 +15,8 @@ import { createMergeQueue } from './merge-queue.js';
 import { createSerializer } from '../util/serialize.js';
 import { effectiveModels } from '../models/resolve.js';
 import { existsSync } from 'node:fs';
+import { flattenWakes } from '../prompts/index.js';
+import type { Wakeup } from '@agent-conductor/shared';
 
 function ticketBranchFor(t: { identifier: string; title: string }): string {
   const slug = t.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
@@ -38,6 +40,38 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     const opts = effectiveModels(ctx.daemon, ctx.config).workerOptions ?? [];
     if (!opts.some((o) => o.id === id)) throw new OcError('validation', `unknown worker model option '${id}'`);
     return id;
+  }
+
+  function claimedWakesForRun(runId: string): Wakeup[] {
+    const run = db.get<{ wakeupIds: string[] }>('SELECT wakeup_ids_json FROM runs WHERE id = ?', [runId]);
+    const ids = run?.wakeupIds ?? [];
+    if (!ids.length) return [];
+    return db.all<Wakeup>(`SELECT * FROM wakeups WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+  }
+
+  function applyRoutineFilingPolicy(actor: Actor, input: TicketCreateInput): TicketCreateInput {
+    if (actor.kind !== 'agent' || !actor.runId) return input;
+    const flat = flattenWakes(claimedWakesForRun(actor.runId));
+    if (!flat.length) return input;
+    const actionOf = (payload: Record<string, unknown>) => (payload['action'] === 'file_work' ? 'file_work' : 'report');
+    if (flat.every((w) => w.source === 'routine' && actionOf(w.payload) === 'report')) {
+      throw new OcError('forbidden', 'a report scheduled task cannot file tickets; reply to captain with the finding');
+    }
+    const fileWork = flat.filter((w) => w.source === 'routine' && actionOf(w.payload) === 'file_work');
+    if (!fileWork.length) return input;
+    const rid = String(fileWork[0]!.payload['routineId'] ?? '');
+    const cap = Number(fileWork[0]!.payload['maxTicketsPerFire'] ?? 3);
+    const prefix = `routine:${rid}:`;
+    let next = input;
+    if (!next.originKind) {
+      next = { ...next, originKind: 'routine', originFingerprint: next.originFingerprint ?? `${prefix}${newId()}` };
+    }
+    const n = db.get<{ n: number }>(
+      `SELECT COUNT(*) n FROM tickets WHERE workspace_id = ? AND origin_kind = 'routine' AND origin_fingerprint LIKE ? AND (created_run_id = ? OR status NOT IN ('done','cancelled'))`,
+      [ws, `${prefix}%`, actor.runId],
+    )?.n ?? 0;
+    if (n >= cap) throw new OcError('validation', `this scheduled task may file at most ${cap} ticket(s) per fire`);
+    return next;
   }
 
   // Follow-up work a transition schedules but does not wait for. Every timer is tracked so `stop()`
@@ -563,6 +597,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         if (!resolved) throw new OcError('not_found', `project ${input.projectId} not found`);
         input = { ...input, projectId: resolved };
       }
+      input = applyRoutineFilingPolicy(actor, input);
       if (input.parentId && !find(input.parentId)) throw new OcError('not_found', `parent ticket ${input.parentId} not found`);
       const blockedBy = input.blockedBy ?? [];
       for (const b of blockedBy) if (!find(b)) throw new OcError('not_found', `blocker ${b} not found`);

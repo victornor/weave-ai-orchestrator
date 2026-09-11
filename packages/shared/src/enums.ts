@@ -87,6 +87,25 @@ export type SecretScope = (typeof SECRET_SCOPES)[number];
 export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'ticket_blocked', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved'] as const;
 export type WakeSource = (typeof WAKE_SOURCES)[number];
 
+/** Recurring scheduled-task row (VS-220). Human-facing name is "Scheduled tasks"; identifiers stay `routine`. */
+export const ROUTINE_STATUSES = ['active', 'paused'] as const;
+export type RoutineStatus = (typeof ROUTINE_STATUSES)[number];
+
+export const ROUTINE_ACTIONS = ['report', 'file_work'] as const;
+export type RoutineAction = (typeof ROUTINE_ACTIONS)[number];
+
+/** v1 only honours skip_if_active; other PLAN values are rejected on write. */
+export const ROUTINE_CONCURRENCY = ['skip_if_active'] as const;
+export type RoutineConcurrency = (typeof ROUTINE_CONCURRENCY)[number];
+
+export const ROUTINE_USAGE_WINDOWS = ['24h', '7d'] as const;
+export type RoutineUsageWindow = (typeof ROUTINE_USAGE_WINDOWS)[number];
+
+/** Hard cap on tickets a `file_work` fire may originate. */
+export const ROUTINE_MAX_TICKETS_PER_FIRE = 8;
+/** Shortest interval schedule (minutes). */
+export const ROUTINE_MIN_INTERVAL_MINUTES = 15;
+
 export const WAKE_STATUSES = ['queued', 'claimed', 'coalesced', 'skipped', 'completed', 'failed', 'cancelled'] as const;
 export type WakeStatus = (typeof WAKE_STATUSES)[number];
 
@@ -271,7 +290,7 @@ export const CHANGELOG_SOURCES: Record<ChangelogKind, { action: string; detail?:
 /** The kind the changelog's productivity measure counts: work that reached the repository. */
 export const CHANGELOG_MEASURE_KIND: ChangelogKind = 'landed';
 
-export const LOG_DOMAINS = ['daemon', 'wake', 'run', 'runtime', 'ticket', 'openspec', 'decision', 'channel', 'knowledge', 'usage', 'plugin', 'http', 'auth', 'worktree', 'surface', 'supervisor'] as const;
+export const LOG_DOMAINS = ['daemon', 'wake', 'run', 'runtime', 'ticket', 'openspec', 'decision', 'channel', 'knowledge', 'usage', 'plugin', 'http', 'auth', 'worktree', 'surface', 'supervisor', 'routine'] as const;
 export type LogDomain = (typeof LOG_DOMAINS)[number];
 
 export { makeEnum };

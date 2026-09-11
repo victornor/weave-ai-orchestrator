@@ -1,11 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { COMMON_TOOLS, HUMAN_REPLY_TOOL, isHumanReplyToolEvent } from './tools.js';
+import { COMMON_TOOLS, CONDUCTOR_TOOLS, HUMAN_REPLY_TOOL, isHumanReplyToolEvent } from './tools.js';
+import { ROUTINE_ACTIONS, ROUTINE_STATUSES } from './enums.js';
 
 const event = (type: string, payload: Record<string, unknown> | null) => ({ type, payload });
 
 describe('COMMON_TOOLS (VS-174)', () => {
   it('includes ac_incident for every agent', () => {
     expect(COMMON_TOOLS).toContain('ac_incident');
+  });
+});
+
+describe('CONDUCTOR_TOOLS (VS-220)', () => {
+  it('includes the four routine tools', () => {
+    expect(CONDUCTOR_TOOLS).toContain('ac_routine_list');
+    expect(CONDUCTOR_TOOLS).toContain('ac_routine_create');
+    expect(CONDUCTOR_TOOLS).toContain('ac_routine_update');
+    expect(CONDUCTOR_TOOLS).toContain('ac_routine_remove');
+  });
+});
+
+describe('routine enums (VS-220)', () => {
+  it('is active or paused, report or file_work', () => {
+    expect(ROUTINE_STATUSES).toEqual(['active', 'paused']);
+    expect(ROUTINE_ACTIONS).toEqual(['report', 'file_work']);
   });
 });
 

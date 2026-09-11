@@ -168,6 +168,59 @@ export interface JobLogLine { seq: number; step: string; stream: E.JobLogStream;
 /** A long-running workspace-setup operation. Workspace-scoped, durable, readable after a restart. */
 export interface Job { id: string; workspaceId: string; kind: E.JobKind; entityType: string; entityId: string; state: E.JobState; steps: JobStep[]; log: JobLogLine[]; logSeq: number; requestedBy: string; startedAt: string; finishedAt: string | null; failedStep: string | null; message: string | null }
 
+/** Daily wall-clock fire in `timezone`, including DST (VS-220). */
+export interface RoutineScheduleDaily {
+  kind: 'schedule';
+  timezone: string;
+  daily: { hour: number; minute: number };
+}
+/** Interval fire: `fromInstant + everyMinutes` (VS-220). */
+export interface RoutineScheduleInterval {
+  kind: 'schedule';
+  timezone: string;
+  everyMinutes: number;
+}
+export type RoutineTrigger = RoutineScheduleDaily | RoutineScheduleInterval;
+
+/** Instruction carried on each fire. Not a ticket template (ADR 0018). */
+export interface RoutineTemplate {
+  instruction: string;
+  action: E.RoutineAction;
+  maxTicketsPerFire: number;
+  projectId?: string | null;
+}
+
+/**
+ * A recurring alarm that wakes the conductor (VS-220). Human-facing name is "Scheduled tasks";
+ * the row, HTTP, CLI and MCP identifiers stay `routine`.
+ */
+export interface Routine {
+  id: string;
+  workspaceId: string;
+  name: string;
+  trigger: RoutineTrigger;
+  template: RoutineTemplate;
+  roleId: string | null;
+  concurrency: E.RoutineConcurrency;
+  status: E.RoutineStatus;
+  lastFiredAt: string | null;
+  nextFireAt: string | null;
+  inFlightWakeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Per-routine spend rollup (conductor fires plus originated tickets). */
+export interface RoutineUsage {
+  tokensIn: number;
+  tokensOut: number;
+  tokensCached: number;
+  runs: number;
+  costCents: number;
+  costReportedCents: number;
+  window: E.RoutineUsageWindow;
+}
+
 /**
  * One entry in a workspace's changelog (PLAN §13.6). Derived from an `activity` row at read time, so
  * `summary` and `link` are rendered rather than stored — see `changelogEntry` in `@agent-conductor/render`.

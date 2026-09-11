@@ -7,6 +7,7 @@ export const EVENT_TYPES = [
   'decision.created', 'decision.answered', 'decision.expired', 'decision.superseded',
   'wake.queued', 'wake.skipped', 'run.started', 'run.event', 'run.finished',
   'job.started', 'job.finished',
+  'routine.created', 'routine.updated', 'routine.removed', 'routine.fired',
   'thread.message', 'knowledge.updated', 'knowledge.curated', 'spec.indexed', 'usage.recorded', 'knowledge_usage.recorded', 'auth.login', 'auth.logout', 'auth.revoked', 'presentation.updated',
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];

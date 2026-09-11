@@ -55,6 +55,11 @@ vi.mock('../api/hooks', () => ({
   useSetTranscription: () => ({ mutate: vi.fn(), isPending: false }),
   useDaemonModels: () => ({ data: { conductor: null, workers: null, workerOptions: null }, isLoading: false }),
   useSetDaemonModels: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+  useRoutines: () => ({ data: [], isLoading: false, isError: false, refetch: vi.fn() }),
+  useRoutineUsage: () => ({ data: { tokensIn: 0, tokensOut: 0, tokensCached: 0, runs: 0, costCents: 0, costReportedCents: 0, window: '7d' }, isLoading: false }),
+  useCreateRoutine: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
+  usePatchRoutine: () => ({ mutate: vi.fn(), isPending: false }),
+  useRemoveRoutine: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 const { SettingsRoute } = await import('../routes/Settings');
@@ -90,7 +95,7 @@ describe('the area model', () => {
 
   it('puts each setting in the area its data actually belongs to', () => {
     const areaOf = (key: string): string | undefined => SETTINGS_SECTIONS.find((s) => s.key === key)?.area;
-    for (const key of ['workspace', 'projects', 'models', 'channels', 'presentation']) expect(areaOf(key)).toBe('workspace');
+    for (const key of ['workspace', 'projects', 'models', 'channels', 'presentation', 'scheduled']) expect(areaOf(key)).toBe('workspace');
     for (const key of ['updates', 'dictation', 'security', 'device']) expect(areaOf(key)).toBe('daemon');
   });
 
@@ -114,7 +119,7 @@ describe('the two areas', () => {
     renderSettings();
     expect(areaSwitch('This workspace')).toHaveAttribute('aria-checked', 'true');
     expect(areaSwitch('This daemon')).toHaveAttribute('aria-checked', 'false');
-    expect(tabNames()).toEqual(['Workspace', 'Projects', 'Models', 'Channels', 'Presentation']);
+    expect(tabNames()).toEqual(['Workspace', 'Projects', 'Models', 'Channels', 'Presentation', 'Scheduled tasks']);
 
     fireEvent.click(areaSwitch('This daemon'));
     expect(areaSwitch('This daemon')).toHaveAttribute('aria-checked', 'true');
@@ -221,7 +226,7 @@ describe('daemon state is not cached per workspace', () => {
   });
 
   it('keeps workspace-level queries under their workspace', () => {
-    for (const key of [qk.workspace('ws1'), qk.projects('ws1'), qk.conductor('ws1'), qk.presentation('ws1')]) {
+    for (const key of [qk.workspace('ws1'), qk.projects('ws1'), qk.conductor('ws1'), qk.presentation('ws1'), qk.routines('ws1')]) {
       expect(key.slice(0, 2)).toEqual(['w', 'ws1']);
     }
     expect(qk.workspace('ws1')).not.toEqual(qk.workspace('ws2'));

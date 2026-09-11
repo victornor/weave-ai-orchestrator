@@ -379,7 +379,7 @@ Rule: one open decision per `(ticket_id, correlation_key)`. Answering a decision
 
 **events** — the outbox: `id, seq, workspace_id, type (closed enum), entity_type, entity_id, payload_json, created_at, delivered_hooks_json`. Every domain change appends here; hooks/SSE/webhooks consume from `seq`.
 
-**routines** — `id, workspace_id, name, trigger_json ({kind: schedule, cron} | {kind: webhook, publicId, signing}), template_json (ticket template), agent_id, concurrency (coalesce_if_active|skip_if_active|always), status, last_fired_at`. v1 ships the schema and cron trigger only; webhooks in M6.
+**routines** — `id, workspace_id, name, trigger_json ({kind: schedule, timezone, daily:{hour,minute}} | {kind: schedule, timezone, everyMinutes}), template_json ({instruction, action: report|file_work, maxTicketsPerFire, projectId?}), role_id (unused; always the conductor), concurrency (`skip_if_active` only), status (`active`|`paused`), last_fired_at, next_fire_at, in_flight_wake_id, created_at, updated_at`. Human-facing name is **Scheduled tasks**. Fires enqueue `source: routine` via the existing wake funnel when `next_fire_at <= now` (do not pre-arm with `notBefore` — Gate 3 would coalesce into currently-eligible queued wakes). Default action is `report`; `file_work` is the only filing licence. No cron, no webhooks (ADR 0018).
 
 **spec_capabilities**, **spec_requirements**, **spec_changes**, **spec_change_capabilities**, **knowledge_search** (FTS5) — the spec index, §12.5.
 
@@ -1243,6 +1243,7 @@ conductor role list|show|activate|pause|resume|retire|charter show|charter rollb
 conductor worker list|show|pause|resume|relaunch|cancel|purge
 conductor ticket create|list|show|merge-queue [-p <project>]|assign <role>|set --auto-merge|transition|comment|cancel|discard --force|open (browser)
 conductor decision list|show|answer <id> <key|text>
+conductor routine list|show|add|pause|resume|rm     scheduled tasks (recurring conductor alarms); add --daily HH:MM or --every <minutes> --tz --instruction [--action report|file_work] [--max-tickets] [--project]
 conductor chat [ticketId]                              interactive thread (conductor by default; a ticket binds to its live worker)
 conductor say "<text>"                                 one-shot message to the conductor; prints the reply
 conductor briefing                                     four-section briefing (no LLM: rendered from the snapshot)
@@ -1348,7 +1349,7 @@ Each milestone ends with a demo script in `docs/demos/M<n>.md` that the implemen
 - Accept: the M2 demo passes with the role on Codex and again on OpenCode; the model dropdown shows each runtime's models; a third-party surface plugin loaded from a local path places agents somewhere new.
 
 **M6 — Hardening**
-- Stale conductor session bootstrap, reconciliation of tickets against forge/OpenSpec reality, routines (cron), scheduled knowledge curation on the 14-day trigger, workspace pause/resume, worker archive purge, the `claude --bg`/`attach` interactive spike (ADR).
+- Stale conductor session bootstrap, reconciliation of tickets against forge/OpenSpec reality, scheduled tasks (routines that wake the conductor), scheduled knowledge curation on the 14-day trigger, workspace pause/resume, worker archive purge, the `claude --bg`/`attach` interactive spike (ADR).
 - Accept: a 48-hour soak with two workspaces, three projects, four roles and up to twelve concurrent workers shows no lost wakes, no orphan processes or worktrees, no liveness violations older than 5 minutes, and usage totals that reconcile with runtime-reported totals.
 
 ---

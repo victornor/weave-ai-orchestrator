@@ -102,6 +102,11 @@ export const qk = {
   history: (ws: string, project: string) => ['w', ws, 'history', project] as const,
   commit: (ws: string, project: string, sha: string) => ['w', ws, 'history', project, 'commits', sha] as const,
 
+  /** Deliberately not under `projects` — scheduled tasks are workspace-scoped (VS-220). */
+  routines: (ws: string) => ['w', ws, 'routines'] as const,
+  routine: (ws: string, id: string) => ['w', ws, 'routines', id] as const,
+  routineUsage: (ws: string, id: string, window: string) => ['w', ws, 'routines', id, 'usage', window] as const,
+
   presentation: (ws: string) => ['w', ws, 'presentation'] as const,
   presentationSurfaces: (ws: string) => ['w', ws, 'presentation', 'surfaces'] as const,
   telegramToken: (ws: string) => ['w', ws, 'channels', 'telegram', 'token'] as const,

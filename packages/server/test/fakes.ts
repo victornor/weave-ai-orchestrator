@@ -4,7 +4,7 @@
  */
 import { tmpdir } from 'node:os';
 import { Db } from '@agent-conductor/db';
-import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, getLogger, initLogger } from '@agent-conductor/core';
+import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, createRoutinesService, getLogger, initLogger } from '@agent-conductor/core';
 import type { Actor, CoreServices, HistoryQuery, WorkspaceContext } from '@agent-conductor/core';
 import type { AuthService } from '@agent-conductor/core';
 import {
@@ -127,6 +127,11 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   db.migrate();
   db.run('INSERT INTO workspaces (id, slug, name, ticket_prefix, status, root_path, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
     [workspaceId, workspaceId, 'Test workspace', 'ACME', 'active', '/tmp/ws', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z']);
+  db.insert('agents', {
+    id: 'ag_conductor', workspaceId, kind: 'conductor', name: 'Conductor', runtimeId: 'claude', status: 'active',
+    homePath: '/tmp/c', turnEpoch: 0, turnCount: 0, spawnedBy: 'system', briefRevision: 1,
+    createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
+  });
   const bus = new EventBus(db, workspaceId);
 
   const tickets = new Map<string, Ticket>([['tk_1', ticket()]]);
@@ -330,6 +335,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   // And knowledge usage (VS-110): a real read/write projection over this fake's own db, so a tool or
   // route test asserts on the rows it really wrote rather than on a hand-written double.
   (services as { knowledgeUsage: CoreServices['knowledgeUsage'] }).knowledgeUsage = createKnowledgeUsageService(ctx, () => services as unknown as CoreServices);
+  (services as { routines: CoreServices['routines'] }).routines = createRoutinesService(ctx, () => services as unknown as CoreServices);
 
   const runtime: WorkspaceRuntime = { id: workspaceId, ctx, services, channels: null, webhooks: null };
 

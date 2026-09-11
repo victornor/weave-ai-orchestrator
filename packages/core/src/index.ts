@@ -4,6 +4,8 @@ export * from './events.js';
 export * from './logger.js';
 export { createCore } from './create.js';
 export { createJobsService, JOB_LOG_LINES, JOB_LOG_FLUSH_MS } from './jobs/index.js';
+export { createRoutinesService } from './routines/index.js';
+export { nextAfter, parseSchedule } from './routines/schedule.js';
 export { createChangelogService } from './changelog/index.js';
 export { createKnowledgeUsageService } from './knowledge/index.js';
 export { createPullRequestsService, PR_CACHE_TTL_MS, PR_LIST_LIMIT, PR_WINDOW_DAYS } from './pull-requests/index.js';

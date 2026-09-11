@@ -48,6 +48,11 @@ vi.mock('../api/hooks', () => ({
   useSetTranscription: () => ({ mutate: vi.fn(), isPending: false }),
   useDaemonModels: () => ({ data: { conductor: null, workers: null, workerOptions: null }, isLoading: false }),
   useSetDaemonModels: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+  useRoutines: () => ({ data: [], isLoading: false, isError: false, refetch: vi.fn() }),
+  useRoutineUsage: () => ({ data: { tokensIn: 0, tokensOut: 0, tokensCached: 0, runs: 0, costCents: 0, costReportedCents: 0, window: '7d' }, isLoading: false }),
+  useCreateRoutine: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
+  usePatchRoutine: () => ({ mutate: vi.fn(), isPending: false }),
+  useRemoveRoutine: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 const { SettingsRoute } = await import('../routes/Settings');

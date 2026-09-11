@@ -903,4 +903,23 @@ describe('stalled worker detection (VS-202)', () => {
     seedTicket(h, { status: 'in_progress' });
     await expect(supervisor.tick()).resolves.toBeUndefined();
   });
+
+  it('enqueues a conductor wake for a due routine (VS-220)', async () => {
+    const { createWakeService } = await import('../wake/index.js');
+    const { createRoutinesService } = await import('../routines/index.js');
+    const wakeSvc = createWakeService(h.ctx, h.deps);
+    h.services.wake = wakeSvc as never;
+    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
+    const routines = createRoutinesService(h.ctx, h.deps);
+    h.services.routines = routines as never;
+    const r = routines.create({ kind: 'human', id: 'victor' }, {
+      name: 'Tick check',
+      trigger: { kind: 'schedule', timezone: 'UTC', everyMinutes: 15 },
+      instruction: 'Say hello.',
+    });
+    h.db.update('routines', r.id, { nextFireAt: '2020-01-01T00:00:00.000Z' });
+    await supervisor.tick();
+    const wakes = h.db.all<{ source: string; agentId: string }>('SELECT source, agent_id FROM wakeups WHERE source = ?', ['routine']);
+    expect(wakes).toEqual([{ source: 'routine', agentId: h.conductorId }]);
+  });
 });

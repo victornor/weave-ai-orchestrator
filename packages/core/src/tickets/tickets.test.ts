@@ -954,4 +954,57 @@ describe('tickets', () => {
     // The default ordering is unchanged: newest ticket number first.
     expect(tickets.list({ status: ['done', 'cancelled'] }).items.map((t) => t.id)).toEqual([dropped.id, fresh.id, old.id]);
   });
+
+  describe('scheduled-task filing (VS-220)', () => {
+    function seedRun(runId: string, wakes: Array<{ id: string; source: string; payload: Record<string, unknown>; bundle?: unknown[] }>): void {
+      const ids: string[] = [];
+      for (const w of wakes) {
+        ids.push(w.id);
+        h.db.insert('wakeups', {
+          id: w.id, workspaceId: h.workspaceId, agentId: h.conductorId, source: w.source,
+          reason: w.source, payloadJson: w.bundle ? { ...w.payload, bundle: w.bundle } : w.payload,
+          status: 'claimed', runId, createdAt: nowIso(),
+        });
+      }
+      h.db.insert('runs', {
+        id: runId, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: ids, runtimeId: 'claude',
+        turnEpoch: 1, cwd: h.ctx.paths.conductor, createdAt: nowIso(),
+      });
+    }
+
+    it('forbids create when flattened wakes are exclusively report routine fires', () => {
+      seedRun('run-report-only', [{ id: 'wk-r', source: 'routine', payload: { routineId: 'r1', action: 'report', instruction: 'look' } }]);
+      const actor: Actor = { kind: 'agent', id: h.conductorId, runId: 'run-report-only' };
+      expect(() => tickets.create(actor, { kind: 'scout', title: 'From an alarm', projectId: h.projectId })).toThrow(/cannot file tickets/);
+    });
+
+    it('allows create when a report fire is coalesced with a digest or ticket-event wake', () => {
+      seedRun('run-digest', [{
+        id: 'wk-d', source: 'system', payload: { kind: 'digest' },
+        bundle: [{ source: 'routine', reason: 'scheduled task', payload: { routineId: 'r1', action: 'report' } }],
+      }]);
+      const actor: Actor = { kind: 'agent', id: h.conductorId, runId: 'run-digest' };
+      expect(tickets.create(actor, { kind: 'scout', title: 'From a digest turn', projectId: h.projectId }).title).toBe('From a digest turn');
+
+      seedRun('run-ticket-event', [
+        { id: 'wk-t', source: 'ticket_comment', payload: { ticketId: 't1' } },
+        { id: 'wk-r2', source: 'routine', payload: { routineId: 'r1', action: 'report' } },
+      ]);
+      // Two top-level wakes: ticket_comment is claimed as a second row. The run lists both.
+      const actor2: Actor = { kind: 'agent', id: h.conductorId, runId: 'run-ticket-event' };
+      expect(tickets.create(actor2, { kind: 'task', title: 'From a ticket-event turn', projectId: h.projectId }).title).toBe('From a ticket-event turn');
+    });
+
+    it('file_work cap 3 rejects the fourth ticket this fire', () => {
+      seedRun('run-fw', [{
+        id: 'wk-fw', source: 'routine',
+        payload: { routineId: 'r-fw', action: 'file_work', maxTicketsPerFire: 3 },
+      }]);
+      const actor: Actor = { kind: 'agent', id: h.conductorId, runId: 'run-fw' };
+      for (let i = 1; i <= 3; i++) {
+        tickets.create(actor, { kind: 'scout', title: `Item ${i}`, projectId: h.projectId });
+      }
+      expect(() => tickets.create(actor, { kind: 'scout', title: 'Item 4', projectId: h.projectId })).toThrow(/at most 3/);
+    });
+  });
 });

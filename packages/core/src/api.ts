@@ -539,4 +539,37 @@ export interface CoreServices {
   wake: WakeService; runs: RunsService; dispatcher: Dispatcher; supervisor: Supervisor; knowledge: KnowledgeService; specs: SpecsService;
   openspec: OpenSpecService; usage: UsageService; knowledgeUsage: KnowledgeUsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
   changelog: ChangelogService; models: ModelsService; secrets: SecretsService; pullRequests: PullRequestsService;
+  routines: RoutinesService;
+}
+
+export interface RoutineCreateInput {
+  name: string;
+  trigger: S.RoutineTrigger | Record<string, unknown>;
+  instruction: string;
+  action?: S.RoutineAction;
+  maxTicketsPerFire?: number;
+  projectId?: string | null;
+}
+
+export interface RoutinePatch {
+  name?: string;
+  trigger?: S.RoutineTrigger | Record<string, unknown>;
+  instruction?: string;
+  action?: S.RoutineAction;
+  maxTicketsPerFire?: number;
+  projectId?: string | null;
+  status?: S.RoutineStatus;
+}
+
+export interface RoutinesService {
+  list(): S.Routine[];
+  get(id: string): S.Routine;
+  create(actor: Actor, input: RoutineCreateInput): S.Routine;
+  update(actor: Actor, id: string, patch: RoutinePatch): S.Routine;
+  remove(actor: Actor, id: string): void;
+  usage(id: string, window: S.RoutineUsageWindow, now?: Date): S.RoutineUsage;
+  /** Supervisor tick: enqueue a due-now `routine` wake for each active row past `next_fire_at`. */
+  fireDue(now?: string): S.Routine[];
+  /** After a run ends: clear matching in-flight wakes and snap a still-past `next_fire_at` forward. */
+  onRunFinalized(wakes: S.Wakeup[], now?: string): void;
 }

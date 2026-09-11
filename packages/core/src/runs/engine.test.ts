@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@agent-conductor/db';
 import { FakeRuntime, type AccountDescription, type CredentialFacts, type TurnInput, type TurnSink, type TurnResult } from '@agent-conductor/runtime-sdk';
@@ -750,8 +751,8 @@ describe('run engine', () => {
     }
 
     /** A worker mid-ticket, woken once, whose turn fails the way `result` says. */
-    async function failOnce(result: Record<string, unknown> | ((input: TurnInput) => Record<string, unknown>), n = 1): Promise<{ ticketId: string; workerId: string }> {
-      const ticketId = seedTicket(h, { status: 'in_progress', number: n, identifier: `TST-${n}` });
+    async function failOnce(result: Record<string, unknown> | ((input: TurnInput) => Record<string, unknown>), n = 1, ticketOver: Record<string, unknown> = {}): Promise<{ ticketId: string; workerId: string }> {
+      const ticketId = seedTicket(h, { status: 'in_progress', number: n, identifier: `TST-${n}`, ...ticketOver });
       const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
       runtime.queue.push(resultFor(workerId, result as never));
       h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1: Add a README badge' });
@@ -1185,6 +1186,116 @@ describe('run engine', () => {
       expect(card.recommendation).toBe('retry_1h');
       expect(h.db.get<{ pauseDetail: { resetAt: string | null } }>('SELECT pause_detail_json FROM agents WHERE id = ?', [workerId])!.pauseDetail.resetAt).toBeNull();
       expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND source = 'retry'", [workerId])!.n).toBe(0);
+    });
+
+    it('recommends retry at the VS-234 reset instant when now is the failure, not the window start (VS-238)', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-09-11T17:00:12.000Z'));
+      try {
+        const message = readFileSync(
+          join(dirname(fileURLToPath(import.meta.url)), '../../../../openspec/changes/vs-238-a-worker-parked-on-an-exhausted-quota-ca/captures/vs-234-opencode.txt'),
+          'utf8',
+        ).trim();
+        const { ticketId, workerId } = await failOnce({ error: { code: 'rate_limit', family: 'provider_quota', message } });
+        const card = openFor(ticketId)[0]!;
+        expect(card.recommendation).toBe('retry_at_reset');
+        expect(card.context).toContain('2026-09-11 17:54');
+        expect(card.context).toContain('Your limit will reset at 2026-09-12 01:54:35');
+        expect(card.context).not.toContain('2026-09-12 01:54 UTC');
+        const agent = h.db.get<{ pauseDetail: { message?: string; resetAt?: string } }>('SELECT pause_detail_json FROM agents WHERE id = ?', [workerId])!;
+        expect(agent.pauseDetail.message).toContain('Your limit will reset at 2026-09-12 01:54:35');
+        expect(agent.pauseDetail.resetAt).toBe('2026-09-11T17:54:35.000Z');
+        expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND source = 'retry'", [workerId])!.n).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('offers other catalog options on a quota card, never as the recommendation (VS-238)', async () => {
+      h.ctx.config.models.workerOptions = [
+        { id: 'standard', description: 'Specified work.', runtime: 'fake', model: null },
+        { id: 'deep', description: 'Cause unknown.', runtime: 'fake', model: null },
+      ];
+      const { ticketId } = await failOnce(
+        { error: { code: 'rate_limit', family: 'provider_quota', message: 'you are out of credits' } },
+        1,
+        { workerModelId: 'standard' },
+      );
+      const card = openFor(ticketId)[0]!;
+      const keys = card.options.map((o: { key: string }) => o.key);
+      expect(keys).toContain('switch:deep');
+      expect(keys).not.toContain('switch:standard');
+      expect(card.recommendation).not.toMatch(/^switch:/);
+      expect(keys.at(-1)).toBe('cancel');
+    });
+
+    it('does not offer a catalog switch on a spent unknown failure (VS-238)', async () => {
+      h.ctx.config.models.workerOptions = [
+        { id: 'standard', description: 'Specified work.', runtime: 'fake', model: null },
+        { id: 'deep', description: 'Cause unknown.', runtime: 'fake', model: null },
+      ];
+      const { ticketId } = await failOnce({ error: { code: 'boom', family: 'unknown', message: 'the CLI died' } });
+      const keys = openFor(ticketId)[0]!.options.map((o: { key: string }) => o.key);
+      expect(keys.some((k: string) => k.startsWith('switch:'))).toBe(false);
+    });
+
+    it('answering a catalog switch keeps the worktree and changes only the ticket option (VS-238)', async () => {
+      h.ctx.config.models.workerOptions = [
+        { id: 'standard', description: 'Specified work.', runtime: 'fake', model: null },
+        { id: 'deep', description: 'Cause unknown.', runtime: 'opencode', model: 'kimi' },
+      ];
+      const { ticketId, workerId } = await failOnce(
+        { error: { code: 'rate_limit', family: 'provider_quota', message: 'you are out of credits' } },
+        1,
+        { workerModelId: 'standard' },
+      );
+      const worktreePath = join(h.ctx.paths.workers, workerId, 'work');
+      const branch = 'ac/vs-238-test';
+      h.db.update('agents', workerId, { worktreePath, branch });
+      const wtId = newId();
+      h.db.insert('worktrees', {
+        id: wtId, projectId: h.projectId, ticketId, agentId: workerId, provider: 'git',
+        path: worktreePath, branch, status: 'active', createdAt: nowIso(),
+      });
+      h.services.tickets!.addWorkProduct({ kind: 'system', id: null }, ticketId, {
+        type: 'commit', title: 'head', externalId: 'abc1234def', state: 'ready',
+      });
+      const resume = vi.fn((actor: Actor, id: string) => {
+        h.db.update('agents', id, { status: 'active', pauseReason: null, pauseDetailJson: null, updatedAt: nowIso() });
+        h.services.wake!.enqueue(id, { source: 'system', reason: 'resumed', payload: { resumed: true } });
+        return h.db.get('SELECT * FROM agents WHERE id = ?', [id]);
+      });
+      h.services.workers = { resume, relaunch: vi.fn(async (a: Actor, id: string) => resume(a, id)) } as never;
+
+      const card = openFor(ticketId)[0]!;
+      await h.services.decisions!.answer({ kind: 'human', id: 'h1' }, card.id, { key: 'switch:deep' });
+      await tick();
+
+      expect(h.services.tickets!.get(ticketId).workerModelId).toBe('deep');
+      const agentAfter = h.db.get<{ status: string; worktreePath: string; branch: string }>('SELECT * FROM agents WHERE id = ?', [workerId])!;
+      expect(agentAfter).toMatchObject({ status: 'active', worktreePath, branch });
+      const wt = h.db.get<{ path: string; branch: string }>('SELECT * FROM worktrees WHERE id = ?', [wtId])!;
+      expect(wt).toMatchObject({ path: worktreePath, branch });
+      expect(h.services.tickets!.workProducts(ticketId).some((wp) => wp.type === 'commit' && wp.externalId === 'abc1234def')).toBe(true);
+      expect(resume).toHaveBeenCalled();
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND source = 'retry'", [workerId])!.n).toBe(0);
+    });
+
+    it('leaves workerModelId and the worktree untouched while the quota card is unanswered (VS-238)', async () => {
+      h.ctx.config.models.workerOptions = [
+        { id: 'standard', description: 'Specified work.', runtime: 'fake', model: null },
+        { id: 'deep', description: 'Cause unknown.', runtime: 'fake', model: null },
+      ];
+      const { ticketId, workerId } = await failOnce(
+        { error: { code: 'rate_limit', family: 'provider_quota', message: 'you are out of credits' } },
+        1,
+        { workerModelId: 'standard' },
+      );
+      const before = h.db.get<{ worktreePath: string; branch: string; status: string }>('SELECT worktree_path, branch, status FROM agents WHERE id = ?', [workerId])!;
+      expect(h.services.tickets!.get(ticketId).workerModelId).toBe('standard');
+      expect(before.status).toBe('paused');
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND source = 'retry'", [workerId])!.n).toBe(0);
+      expect(openFor(ticketId)[0]!.options.some((o: { key: string }) => o.key === 'switch:deep')).toBe(true);
     });
 
     it('books the attempt only when the human chooses the reset option', async () => {

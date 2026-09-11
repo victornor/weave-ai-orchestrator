@@ -1,0 +1,11 @@
+VS-234 exhausted-window timing (workspace DB, conductor 2026-09-11).
+Parser tests must freeze `now` at the failure instant, not the window's first request,
+and must not assert a UTC reading of the naive clock.
+
+previous_opencode_finished_at=2026-09-11T03:36:11Z
+first_exhausted_window_run_started_at=2026-09-11T12:54:13.863Z
+failure_now=2026-09-11T17:00:12Z
+named_window=5 hour
+naive_reset_clock=2026-09-12 01:54:35
+real_reset_at=2026-09-11T17:54:35.000Z
+utc_misread=2026-09-12T01:54:35.000Z

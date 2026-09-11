@@ -120,6 +120,20 @@ describe('tickets', () => {
     expect(tickets.get(t.id).workerModelId).toBe('cheap');
   });
 
+  it('lets the quota-card writer set workerModelId after spawn and rejects an unknown id (VS-238)', () => {
+    h.ctx.config.models.workerOptions = [
+      { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },
+      { id: 'deep', description: 'Cause unknown.', runtime: 'claude', model: 'opus' },
+    ];
+    const t = make({ workerModelId: 'cheap' });
+    h.db.update('tickets', t.id, { workerId: 'ag_already' });
+    expect(() => tickets.assign(HUMAN, t.id, h.roleId, 'deep')).toThrow(OcError);
+    expect(tickets.setWorkerModelFromQuotaCard(HUMAN, t.id, 'deep').workerModelId).toBe('deep');
+    expect(() => tickets.setWorkerModelFromQuotaCard(HUMAN, t.id, 'nope')).toThrow(OcError);
+    try { tickets.setWorkerModelFromQuotaCard(HUMAN, t.id, 'nope'); } catch (e) { expect((e as OcError).code).toBe('validation'); }
+    expect(tickets.get(t.id).workerModelId).toBe('deep');
+  });
+
   it('stores summary from the input, defaulting null, and accepts a later patch (VS-146)', () => {
     expect(make().summary).toBeNull();
     expect(make({ summary: 'Remind captain why this ticket exists.' }).summary).toBe('Remind captain why this ticket exists.');

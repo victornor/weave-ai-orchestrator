@@ -1,5 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { classifyError, spawnLines } from './process.js';
+
+const VS234_CAPTURE = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../../../openspec/changes/vs-238-a-worker-parked-on-an-exhausted-quota-ca/captures/vs-234-opencode.txt'),
+  'utf8',
+).trim();
 
 const ECHO_SCRIPT = "process.stdin.setEncoding('utf8'); process.stdin.on('data', c => process.stdout.write(c.split('\\n').filter(Boolean).map(l => 'echo:' + l + '\\n').join(''))); process.stdin.on('end', () => process.exit(0));";
 
@@ -56,5 +64,13 @@ describe('classifyError', () => {
     const err = classifyError(1, stderr);
     expect(err?.message.length).toBeLessThan(5000);
     expect(err?.message).toMatch(/…\[\+\d+ chars\]$/);
+  });
+
+  it('keeps the provider quota text so a reset timestamp survives classification (VS-238)', () => {
+    const err = classifyError(1, VS234_CAPTURE);
+    expect(err?.family).toBe('provider_quota');
+    expect(err?.code).toBe('provider_quota');
+    expect(err?.message).toContain('Your limit will reset at 2026-09-12 01:54:35');
+    expect(err?.message).not.toBe('provider rate limited, usage limit or quota exceeded');
   });
 });

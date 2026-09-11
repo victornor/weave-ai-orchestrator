@@ -58,7 +58,10 @@ export function spawnLines(opts: SpawnOpts): { done: Promise<SpawnOutcome>; canc
 export function classifyError(exitCode: number | null, stderr: string): { code: string; family: RunErrorFamily; message: string } | undefined {
   if (exitCode === 0) return undefined;
   const s = stderr.toLowerCase();
-  if (/rate.?limit|429|overloaded|quota|capacity|usage limit|limit reached|resets? (at|in) |out of credits|insufficient credit|spending cap|billing/.test(s)) return { code: 'provider_quota', family: 'provider_quota', message: 'provider rate limited, usage limit or quota exceeded' };
+  if (/rate.?limit|429|overloaded|quota|capacity|usage limit|limit reached|resets? (at|in) |out of credits|insufficient credit|spending cap|billing/.test(s)) {
+    const canned = 'provider rate limited, usage limit or quota exceeded';
+    return { code: 'provider_quota', family: 'provider_quota', message: truncate(stderr.trim() || canned, 4000) };
+  }
   if (/enotfound|econnreset|etimedout|502|503|504|network/.test(s)) return { code: 'transient_upstream', family: 'transient_upstream', message: 'transient upstream failure' };
   if (/unauthori[sz]ed|401|invalid api key|not logged in|login required|authentication|oauth session expired|could not be refreshed|failed to authenticate/.test(s)) return { code: 'auth', family: 'auth', message: 'runtime authentication failed' };
   if (/enoent|command not found|no such file/.test(s)) return { code: 'tooling', family: 'tooling', message: 'runtime binary or dependency missing' };

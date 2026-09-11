@@ -632,6 +632,7 @@ Common (all agents):
 - `ac_spec_list(projectId)`, `ac_spec_get(projectId, capability)`, `ac_spec_search(projectId?, query)`, `ac_spec_change_get(changeName)` → the spec index (§12.5); workers are scoped to their own project.
 - `ac_ticket_merge_done(id, {mergeCommit, method})` → the agent reports that it merged its approved PR; the daemon verifies against the forge and the ticket's landing branch (its own declaration, else its project's, else the default branch — VS-119) before accepting.
 - `ac_worktree_status()` → the worker's worktree path, branch, dirty flag, ahead/behind default, landed evidence (so the worker never guesses).
+- `ac_artifact_kit()` → the AC Artifact Kit on demand: `{ css, tokens, components, playbooks }` — the drift-checked CSS for a self-contained HTML artifact (§ artifact-kit), its parsed token set (`dark`/`light`/`scale`), the semantic component classes with descriptions, and the `agent-conductor-artifacts` skill's playbook reference material. No input, no scoping — every agent gets the same result.
 
 Conductor only:
 - `ac_ticket_create({projectId?, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?})` — `autoMerge` only when the human asked for it in the same request. `summary` is a one-line why (VS-146, max 200), shown on plan-approval cards.

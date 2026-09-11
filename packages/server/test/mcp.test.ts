@@ -74,6 +74,26 @@ describe('MCP endpoint', () => {
     await client.close();
   });
 
+  it('ac_artifact_kit returns the kit and reference material to a worker and a conductor alike', async () => {
+    const worker = await connect();
+    const workerRes = await worker.client.callTool({ name: 'ac_artifact_kit', arguments: {} });
+    const workerPayload = JSON.parse((workerRes.content as Array<{ text: string }>)[0]!.text);
+    expect(workerPayload.ok).toBe(true);
+    expect(workerPayload.data.css).toContain("[data-theme='dark']");
+    expect(workerPayload.data.tokens.dark['--status-blocked']).toMatch(/^#/);
+    expect(workerPayload.data.tokens.scale['--space-1']).toBeTruthy();
+    expect(workerPayload.data.components.some((c: { className: string }) => c.className === 'card')).toBe(true);
+    expect(workerPayload.data.playbooks).toBeTypeOf('object');
+    await worker.client.close();
+
+    const conductor = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const conductorRes = await conductor.client.callTool({ name: 'ac_artifact_kit', arguments: {} });
+    const conductorPayload = JSON.parse((conductorRes.content as Array<{ text: string }>)[0]!.text);
+    expect(conductorPayload.ok).toBe(true);
+    expect(conductorPayload.data.css).toBe(workerPayload.data.css);
+    await conductor.client.close();
+  });
+
   it('returns ok:false rather than throwing for unknown ids', async () => {
     const { client } = await connect();
     const res = await client.callTool({ name: 'ac_ticket_get', arguments: { id: 'ACME-999' } });

@@ -8,8 +8,8 @@ import { renderBrief, renderConductorInstructions, renderWorkerInstructions } fr
 
 const MARKER = '.ac-render.json';
 
-const CONDUCTOR_SKILLS = ['agent-conductor-conductor', 'agent-conductor-hire', 'agent-conductor-planning', 'agent-conductor-briefing', 'agent-conductor-knowledge'];
-const WORKER_SKILLS = ['agent-conductor-worker', 'agent-conductor-openspec', 'agent-conductor-scout', 'agent-conductor-knowledge'];
+const CONDUCTOR_SKILLS = ['agent-conductor-conductor', 'agent-conductor-hire', 'agent-conductor-planning', 'agent-conductor-briefing', 'agent-conductor-knowledge', 'agent-conductor-artifacts'];
+const WORKER_SKILLS = ['agent-conductor-worker', 'agent-conductor-openspec', 'agent-conductor-scout', 'agent-conductor-knowledge', 'agent-conductor-artifacts'];
 
 /** Skill packages shipped with the daemon, filtered to the ones this agent kind loads. */
 export function skillsFor(ctx: WorkspaceContext, kind: 'conductor' | 'worker'): Array<{ name: string; dir: string }> {

@@ -630,6 +630,8 @@ export interface TicketQuery extends Record<string, string | number | boolean | 
   includeTerminal?: boolean;
   /** `finished` orders by when a ticket reached done or cancelled, not by when it was filed. */
   sort?: 'number' | 'finished';
+  /** `label` omits `description` so chat dispatch labels stay a small JSON payload (VS-227). */
+  fields?: 'label';
 }
 
 export function useTickets(params: TicketQuery = {}, opts: { enabled?: boolean; ws?: string } = {}): UseQueryResult<Ticket[]> {
@@ -1012,7 +1014,7 @@ export function useRunTraces({ ids, agent, since }: { ids: readonly string[]; ag
   return useQuery({
     queryKey: qk.runTraces(ws, params),
     queryFn: () => api.ws<RunTrace[] | { traces: RunTrace[] }>(ws, `/runs/traces${qs(params)}`).then((r) => listOf(r, 'traces')),
-    enabled: Boolean(params.ids || params.agent),
+    enabled: Boolean(params.ids || (params.agent && params.since)),
   });
 }
 

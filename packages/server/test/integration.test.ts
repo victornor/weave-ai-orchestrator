@@ -66,6 +66,10 @@ describe('real core services over HTTP', () => {
     }));
     const listed = await (await app.fetch(new Request(`${base}/tickets`, { headers: H }))).json();
     expect(listed.items[0].description).toBe('the body');
+    const lean = await (await app.fetch(new Request(`${base}/tickets?fields=label`, { headers: H }))).json();
+    expect(lean.items[0].description).toBe('');
+    const detail = await (await app.fetch(new Request(`${base}/tickets/${listed.items[0].id}`, { headers: H }))).json();
+    expect(detail.ticket.description).toBe('the body');
   });
 
   it('round-trips a ticket summary on create and patch (VS-146)', async () => {

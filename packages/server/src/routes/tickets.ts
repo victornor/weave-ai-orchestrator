@@ -27,6 +27,7 @@ const ListQuery = z.object({
   project: z.string().optional(), status: csv.optional(), kind: csv.optional(), role: z.string().optional(),
   search: z.string().optional(), limit: z.coerce.number().int().min(1).max(1000).optional(), offset: z.coerce.number().int().min(0).optional(),
   includeTerminal: z.string().optional(), sort: z.enum(['number', 'finished']).optional(),
+  fields: z.enum(['label']).optional(),
 });
 
 export function ticketRoutes(): Hono<AppEnv> {
@@ -37,6 +38,7 @@ export function ticketRoutes(): Hono<AppEnv> {
     return c.json(c.get('ws').services.tickets.list({
       projectId: q.project, status: q.status as never, kind: q.kind as never, roleId: q.role,
       search: q.search, limit: q.limit, offset: q.offset, includeTerminal: q.includeTerminal === 'true', sort: q.sort,
+      fields: q.fields,
     }));
   });
 

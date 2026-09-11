@@ -1178,6 +1178,11 @@ describe('ConnectionBanner', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('shows nothing while the tab is hidden (VS-227)', () => {
+    const { container } = render(<ConnectionBanner state="hidden" capturedAt={null} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('names the capture time when offline', () => {
     render(<ConnectionBanner state="offline" capturedAt="2026-09-01T09:38:00.000Z" queuedCount={2} />);
     expect(screen.getByText(/Offline — showing the state from/)).toBeInTheDocument();

@@ -1018,6 +1018,8 @@ describe('tickets', () => {
     expect(tickets.list({ includeTerminal: true }).total).toBe(2);
     expect(tickets.list({ kind: ['scout'], includeTerminal: true }).items[0]?.id).toBe(two.id);
     expect(tickets.list({ search: 'one' }).total).toBe(1);
+    expect(tickets.list({ fields: 'label' }).items[0]?.description).toBe('');
+    expect(tickets.get(tickets.list().items[0]!.id).description).toBe('the body');
   });
 
   it('orders finished tickets by when they landed, not by ticket number', () => {

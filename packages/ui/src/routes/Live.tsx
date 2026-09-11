@@ -22,6 +22,7 @@ import { useRunEventStream } from '../api/runStream';
 import { useHookWs, useWs } from '../api/context';
 import { A } from '../app/link';
 import { liveWorkingAgents } from '../lib/board';
+import { liveRunTailSlots } from '../lib/liveStreams';
 import {
   type CellSize,
   columnCount,
@@ -77,6 +78,15 @@ export function LiveRoute(): React.ReactElement {
   }, [running.data, queued.data]);
 
   const liveIds = useMemo(() => live.map((w) => w.id), [live]);
+  const tailSlots = useMemo(() => {
+    const streaming = live
+      .filter((w) => {
+        const r = runByAgent.get(w.id);
+        return Boolean(r && isActiveRun(r.status));
+      })
+      .map((w) => w.id);
+    return liveRunTailSlots(streaming);
+  }, [live, runByAgent]);
   const commit = useCallback((id: string, next: CellSize) => {
     setSizes((prev) => writeLiveCellSizes(ws, { ...prev, [id]: next }, liveIds));
   }, [ws, liveIds]);
@@ -111,6 +121,7 @@ export function LiveRoute(): React.ReactElement {
                 desktop={minSm}
                 onSize={(next) => commit(w.id, next)}
                 workerOptions={models.data?.workerOptions}
+                streamLive={tailSlots.has(w.id)}
               />
             ))}
           </div>
@@ -131,6 +142,7 @@ export function LiveCell({
   workerOptions,
   ws: wsProp,
   workspaceName,
+  streamLive = true,
 }: {
   agent: Agent;
   ticket: Ticket | undefined;
@@ -143,10 +155,12 @@ export function LiveCell({
   workerOptions?: WorkerModelOption[];
   ws?: string;
   workspaceName?: string;
+  /** False when this cell is past the Live-floor EventSource cap (VS-227); persisted events still load. */
+  streamLive?: boolean;
 }): React.ReactElement {
   const ws = useHookWs(wsProp);
   const streaming = Boolean(run && isActiveRun(run.status));
-  const { events, status, retryNow } = useRunEventStream(streaming && run ? run.id : null, { live: streaming, ws: wsProp });
+  const { events, status, retryNow } = useRunEventStream(streaming && run ? run.id : null, { live: streaming && streamLive, ws: wsProp });
   const identifier = ticket?.identifier ?? agent.ticketId;
   const title = ticket?.title;
   const ticketLabel = [identifier, title].filter(Boolean).join(' · ') || 'ticket';

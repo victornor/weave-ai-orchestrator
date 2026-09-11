@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { Decision, EventType, WorkspaceEvent } from '@agent-conductor/shared';
 import { qk } from './keys';
-import { BACKOFF, type ConnectionState, type ConnectionStatus } from './sseStream';
+import { BACKOFF, documentIsHidden, type ConnectionState, type ConnectionStatus } from './sseStream';
 
 export type { ConnectionState, ConnectionStatus };
 
@@ -20,6 +20,9 @@ export class EventStream {
   private eventListeners = new Set<EventListener>();
   private status: ConnectionStatus = { state: 'connecting', capturedAt: null, lastSeq: 0, attempts: 0 };
   private stopped = false;
+  /** Background tab (VS-227): EventSource is closed so HTTP/1.1 slots stay free for REST. */
+  private hidden = false;
+  private listening = false;
   /** Whether an earlier connection has already opened this session — the first `onopen` is a fresh
    *  mount, already covered by every query's own initial fetch; every one after it is a reconnect. */
   private everConnected = false;
@@ -45,25 +48,39 @@ export class EventStream {
 
   start(): void {
     this.stopped = false;
-    this.open();
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !this.listening) {
       window.addEventListener('online', this.onOnline);
       window.addEventListener('offline', this.onOffline);
+      document.addEventListener('visibilitychange', this.onVisibility);
+      this.listening = true;
     }
+    if (documentIsHidden()) {
+      this.hidden = true;
+      this.set({ state: 'hidden' });
+      return;
+    }
+    this.open();
   }
 
   stop(): void {
     this.stopped = true;
+    this.hidden = false;
     this.es?.close();
     this.es = null;
-    if (this.timer) clearTimeout(this.timer);
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
     if (typeof window !== 'undefined') {
       window.removeEventListener('online', this.onOnline);
       window.removeEventListener('offline', this.onOffline);
+      document.removeEventListener('visibilitychange', this.onVisibility);
+      this.listening = false;
     }
   }
 
   private onOnline = (): void => {
+    if (this.hidden) return;
     if (this.status.state === 'offline') this.open();
   };
 
@@ -71,17 +88,39 @@ export class EventStream {
     this.set({ state: 'offline' });
   };
 
+  private onVisibility = (): void => {
+    if (documentIsHidden()) {
+      this.pauseForHidden();
+      return;
+    }
+    if (!this.hidden || this.stopped) return;
+    this.hidden = false;
+    this.open();
+  };
+
+  private pauseForHidden(): void {
+    this.hidden = true;
+    this.es?.close();
+    this.es = null;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.set({ state: 'hidden' });
+  }
+
   private set(patch: Partial<ConnectionStatus>): void {
     this.status = { ...this.status, ...patch };
     for (const l of this.listeners) l(this.status);
   }
 
   private open(): void {
-    if (this.stopped) return;
+    if (this.stopped || this.hidden) return;
     this.es?.close();
     const after = this.status.lastSeq ? `?after=${this.status.lastSeq}` : '';
     const es = new EventSource(`/api/w/${encodeURIComponent(this.workspace)}/events${after}`, { withCredentials: true });
     this.es = es;
+    if (this.status.state === 'hidden') this.set({ state: 'connecting' });
 
     es.onopen = () => {
       this.set({ state: 'connected', attempts: 0, capturedAt: new Date().toISOString() });
@@ -93,7 +132,7 @@ export class EventStream {
     };
     es.onerror = () => {
       es.close();
-      if (this.stopped) return;
+      if (this.stopped || this.hidden) return;
       const attempts = this.status.attempts + 1;
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
       this.set({ state: offline ? 'offline' : attempts > BACKOFF.length ? 'offline' : 'reconnecting', attempts });

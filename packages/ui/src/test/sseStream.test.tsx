@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLiveStream } from '../api/sseStream';
+import { resetDocumentVisible, setDocumentHidden } from './visibility';
 
 /** A controllable EventSource, driving `onopen`/`onerror` as well as named frames. */
 class FakeEventSource {
@@ -45,6 +46,7 @@ beforeEach(() => {
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 });
 afterEach(() => {
+  resetDocumentVisible();
   vi.useRealTimers();
   vi.clearAllMocks();
 });
@@ -178,5 +180,42 @@ describe('useLiveStream', () => {
       vi.advanceTimersByTime(20000);
     });
     expect(FakeEventSource.open).toHaveLength(1);
+  });
+});
+
+describe('useLiveStream visibility (VS-227)', () => {
+  it('hides by closing the EventSource without going offline, and resumes from the latest after=', () => {
+    let after = 0;
+    const { result } = renderHook(() =>
+      useLiveStream({
+        resetKey: 'a',
+        eventTypes: [],
+        buildUrl: () => `/api/x${after ? `?after=${after}` : ''}`,
+        onFrame: () => {},
+      }),
+    );
+    act(() => {
+      last().connect();
+    });
+    after = 7;
+    const first = last();
+    act(() => {
+      setDocumentHidden(true);
+    });
+    expect(first.closed).toBe(true);
+    expect(result.current.status.state).toBe('hidden');
+    expect(result.current.status.attempts).toBe(0);
+
+    act(() => {
+      first.fail();
+      vi.advanceTimersByTime(20_000);
+    });
+    expect(FakeEventSource.open.filter((s) => !s.closed)).toHaveLength(0);
+
+    act(() => {
+      setDocumentHidden(false);
+    });
+    expect(last().url).toBe('/api/x?after=7');
+    expect(result.current.status.state).toBe('connecting');
   });
 });

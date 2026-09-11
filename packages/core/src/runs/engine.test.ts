@@ -503,6 +503,62 @@ describe('run engine', () => {
     expect(run.turnEpoch).toBe(7);
   });
 
+  describe('interrupted by a live human message (VS-254)', () => {
+    // A run's `cancelled` cause is set by `runs.cancel(actor, id, 'interrupt', cause)` — pre-seeding
+    // it here on the in-memory active-run map, before `executeRun`, is exactly what that call does,
+    // without needing a real streaming turn to interrupt mid-flight.
+    function seedRunning(agentId: string, cancelled: { mode: 'interrupt' | 'kill'; cause?: 'message' }): string {
+      const runId = newId();
+      h.db.insert('runs', {
+        id: runId, workspaceId: h.workspaceId, agentId, wakeupIdsJson: [], runtimeId: 'fake',
+        status: 'queued', turnEpoch: 1, cwd: h.ctx.paths.conductor, createdAt: nowIso(),
+      });
+      runState(h.ctx).active.set(runId, { runId, agentId, startedAt: Date.now(), pid: null, cancel: async () => undefined, cancelled });
+      return runId;
+    }
+
+    it("a run interrupted for a human's live message finalizes as interrupted with a distinguishing errorCode", async () => {
+      const runId = seedRunning(h.conductorId, { mode: 'interrupt', cause: 'message' });
+      const run = await executeRun(h.ctx, h.deps, runId);
+      expect(run.status).toBe('interrupted');
+      expect(run.errorCode).toBe('interrupted_by_message');
+      expect(run.errorFamily).toBe('tooling');
+    });
+
+    it('a run interrupted with no cause (daemon shutdown, `/runs/:id/cancel`) still finalizes as plain `interrupted`, unchanged', async () => {
+      const runId = seedRunning(h.conductorId, { mode: 'interrupt' });
+      const run = await executeRun(h.ctx, h.deps, runId);
+      expect(run.status).toBe('interrupted');
+      expect(run.errorCode).toBe('interrupted');
+      expect(run.errorFamily).toBe('tooling');
+    });
+
+    it('a run killed (not interrupted) is recorded as `cancelled`, not `interrupted`, with or without a cause', async () => {
+      const runId = seedRunning(h.conductorId, { mode: 'kill' });
+      const run = await executeRun(h.ctx, h.deps, runId);
+      expect(run.status).toBe('cancelled');
+      expect(run.errorCode).toBe('cancelled');
+    });
+
+    it('a worker whose turn finalizes `interrupted_by_message` stays dispatchable: its next wake still starts a run', async () => {
+      const ticketId = seedTicket(h);
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      const runId = seedRunning(workerId, { mode: 'interrupt', cause: 'message' });
+      const run = await executeRun(h.ctx, h.deps, runId);
+      expect(run.status).toBe('interrupted');
+      const agent = h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!;
+      expect(['active', 'error']).toContain(agent.status); // IDLE_AGENT_STATUSES — never parked, never a retry-ladder park
+      const openDecisions = h.db.all('SELECT id FROM decisions WHERE ticket_id = ? AND status = ?', [ticketId, 'open']);
+      expect(openDecisions).toHaveLength(0); // no parkForHuman card was raised for this
+
+      runtime.queue.push({ structured: { state: 'working', summary: 'resumed', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      h.services.wake!.enqueue(workerId, { source: 'live_interrupt', reason: 'stop, wrong direction', payload: { ticketId, message: 'stop, wrong direction', interruptedRunId: runId } });
+      const resumed = await runOnce(workerId);
+      expect(resumed.id).not.toBe(runId);
+      expect(resumed.status).toBe('succeeded');
+    });
+  });
+
   // VS-77: a turn's runtime, model and effort come from the workspace's two model settings, and
   // from nothing else. These are the tests that keep the old fallback chain from growing back.
   describe('resolving what a turn runs on', () => {

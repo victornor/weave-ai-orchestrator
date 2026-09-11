@@ -280,14 +280,22 @@ export interface WorkerDetail {
   usage: UsageTotals | null;
   worktree: { status: string; dirty: boolean; ahead: number; behind: number; path: string | null } | null;
   lastStatusLine?: string | null;
-  /** Whether a message sent right now would reach a running turn (VS-99), and why not when it wouldn't. */
-  input: { midTurn: boolean; reason?: string };
+  /**
+   * Whether a message sent right now would reach a running turn (VS-99), and why not when it
+   * wouldn't. `interrupts` (VS-254): the runtime can't take mid-turn input, but a turn is running,
+   * so a live send would interrupt it rather than queue behind it.
+   */
+  input: { midTurn: boolean; interrupts?: boolean; reason?: string };
   /** Whether this worker's *next* turn would resume its existing session rather than start fresh (VS-106). */
   sessionResumable: boolean;
 }
 
-/** `POST /workers/:id/message` result (VS-99): which delivery actually happened. */
-export interface WorkerMessageOutcome { delivery: 'mid_turn' | 'queued'; runId: string | null; wakeId: string | null }
+/**
+ * `POST /workers/:id/message` result (VS-99): which delivery actually happened. `'interrupted'`
+ * (VS-254) is a human's live send that cancelled the running turn on a runtime that cannot take
+ * mid-turn input, rather than queuing behind it.
+ */
+export interface WorkerMessageOutcome { delivery: 'mid_turn' | 'queued' | 'interrupted'; runId: string | null; wakeId: string | null }
 
 /** `GET/POST /workers/:id/handover(-command)` (VS-249): the offered resume command, or why there is none. */
 export interface HandoverCommandResult { resumable: boolean; command: string | null; runtime: string; landingLine: string | null; reason: string | null }

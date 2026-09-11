@@ -432,17 +432,67 @@ describe('workers', () => {
       expect(wake.calls).toHaveLength(1);
     });
 
-    it('queues when the active run has no `send` — the runtime cannot take mid-turn input', async () => {
+    it("a human's live message interrupts a running turn on a runtime with no `send` (VS-254)", async () => {
       const ticket = seedTicket();
       const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
       wake.calls.length = 0;
       const runId = seedRun(worker);
       runState(h.ctx).active.set(runId, { runId, agentId: worker.id, startedAt: Date.now(), pid: 1, cancel: async () => undefined });
 
-      const outcome = await workers.message(HUMAN, worker.id, 'queue me', { live: true });
+      const outcome = await workers.message(HUMAN, worker.id, 'stop, wrong direction', { live: true });
+      expect(outcome.delivery).toBe('interrupted');
+      expect(outcome.runId).toBe(runId);
+      expect(outcome.wake).not.toBeNull();
+      expect(h.services.runs!.cancel).toHaveBeenCalledWith(HUMAN, runId, 'interrupt', 'message');
+      expect(wake.calls).toHaveLength(1);
+      expect(wake.calls[0]).toMatchObject({ agentId: worker.id, input: expect.objectContaining({ source: 'live_interrupt' }) });
+
+      const events = h.db.all<{ payload: Record<string, unknown> }>('SELECT payload_json FROM run_events WHERE run_id = ?', [runId]);
+      expect(events[0]!.payload).toMatchObject({ delivery: 'interrupted' });
+    });
+
+    it("does not interrupt a live message on the conductor's behalf — only a human's send can (VS-254)", async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      runState(h.ctx).active.set(runId, { runId, agentId: worker.id, startedAt: Date.now(), pid: 1, cancel: async () => undefined });
+
+      const outcome = await workers.message(CONDUCTOR, worker.id, 'also, when you get a chance', { live: true });
       expect(outcome.delivery).toBe('queued');
       expect(outcome.wake).not.toBeNull();
+      expect(h.services.runs!.cancel).not.toHaveBeenCalled();
       expect(wake.calls).toHaveLength(1);
+      expect(wake.calls[0]).toMatchObject({ input: expect.objectContaining({ source: 'conductor_request' }) });
+    });
+
+    it('a live message queues, not interrupts, when the runtime has no `send` and no turn is running', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+
+      const outcome = await workers.message(HUMAN, worker.id, 'no turn to interrupt', { live: true });
+      expect(outcome.delivery).toBe('queued');
+      expect(h.services.runs!.cancel).not.toHaveBeenCalled();
+      expect(wake.calls).toHaveLength(1);
+    });
+
+    it("bounds a live-interrupt message's wake body at 8,000 chars, marking the cut (VS-254)", async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      runState(h.ctx).active.set(runId, { runId, agentId: worker.id, startedAt: Date.now(), pid: 1, cancel: async () => undefined });
+      const longBody = 'x'.repeat(8500);
+
+      const outcome = await workers.message(HUMAN, worker.id, longBody, { live: true });
+      expect(outcome.delivery).toBe('interrupted');
+      const call = wake.calls[0]!;
+      const input = call.input as { reason: string; payload: Record<string, unknown> };
+      expect(input.payload).toMatchObject({ truncated: true, bodyLength: 8500, message: 'x'.repeat(8000) });
+      expect(input.reason).toContain('truncated; full message via ac_ticket_comments');
+      // The full, untruncated body is still on the ticket regardless of the wake's bound.
+      expect(h.services.tickets!.comment).toHaveBeenCalledWith(expect.anything(), ticket.id, longBody, 'relay', 'trusted');
     });
 
     it("queues when `send` reports the channel is closed — the turn's result already arrived", async () => {

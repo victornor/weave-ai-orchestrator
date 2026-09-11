@@ -127,12 +127,12 @@ export function createRunsService(ctx: WorkspaceContext, _deps: () => CoreServic
       });
     },
 
-    async cancel(actor: Actor, id: string, mode: 'interrupt' | 'kill' = 'interrupt'): Promise<void> {
+    async cancel(actor: Actor, id: string, mode: 'interrupt' | 'kill' = 'interrupt', cause?: 'message'): Promise<void> {
       const run = ctx.db.get<Run>('SELECT * FROM runs WHERE id = ? AND workspace_id = ?', [id, ctx.workspaceId]);
       if (!run) throw new OcError('not_found', `run ${id} not found`);
       const entry = state.active.get(id);
       if (entry) {
-        entry.cancelled = mode;
+        entry.cancelled = { mode, cause };
         try { await entry.cancel(mode); } catch (e) { log.warn({ runId: id, err: String(e) }, 'cancel failed'); }
       } else if (run.status === 'running' || run.status === 'queued') {
         const status: RunStatus = 'cancelled';

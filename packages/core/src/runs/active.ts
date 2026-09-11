@@ -10,7 +10,10 @@ export interface ActiveRun {
   startedAt: number;
   pid: number | null;
   cancel(mode: 'interrupt' | 'kill'): Promise<void>;
-  cancelled?: 'interrupt' | 'kill';
+  /** `cause: 'message'` (VS-254) is a human's live message on a runtime that cannot take mid-turn
+   * input; omitted is everything else (daemon shutdown, `/runs/:id/cancel`) — `finalize()` reads
+   * this to set a distinguishing `errorCode`, never the reverse. */
+  cancelled?: { mode: 'interrupt' | 'kill'; cause?: 'message' };
   /** Deliver text to this turn while it runs. Absent until the runtime hands a `send`-carrying handle. */
   send?: (text: string) => Promise<InputDelivery>;
 }
@@ -49,7 +52,7 @@ export function emitRunEvent(ctx: WorkspaceContext, runId: string, ev: RunEvent)
 export function recordHumanInputEvent(
   ctx: WorkspaceContext,
   runId: string,
-  payload: { text: string; authorKind: AuthorKind; authorId: string | null; delivery: 'mid_turn' | 'queued' },
+  payload: { text: string; authorKind: AuthorKind; authorId: string | null; delivery: 'mid_turn' | 'queued' | 'interrupted' },
 ): void {
   const seq = (ctx.db.get<{ n: number }>('SELECT COALESCE(MAX(seq),0) n FROM run_events WHERE run_id = ?', [runId])?.n ?? 0) + 1;
   const ts = nowIso();
@@ -61,18 +64,29 @@ export function recordHumanInputEvent(
   emitRunEvent(ctx, runId, { id: String(seq), runId, seq, ts, type: 'human.input', stream: 'system', level: 'info', payload });
 }
 
-/** What `GET /workers/:id` reports about mid-turn delivery for one agent (VS-99): not a guess — a runtime that cannot take it, or the plain fact that nothing is running right now. */
-export interface LiveInputStatus { midTurn: boolean; reason?: string }
+/**
+ * What `GET /workers/:id` reports about mid-turn delivery for one agent (VS-99): not a guess — a
+ * runtime that cannot take it, or the plain fact that nothing is running right now. `interrupts`
+ * (VS-254) is a third outcome: the runtime cannot take mid-turn input, but a turn is running, so a
+ * human's live send would interrupt it rather than queue behind it.
+ */
+export interface LiveInputStatus { midTurn: boolean; interrupts?: boolean; reason?: string }
 
 /**
- * Whether a human's next message to this agent would reach a running turn: the runtime has to
- * declare `streamingInput`, and a run for this agent has to be executing with a channel actually
- * open (a runtime capability alone is not enough — the turn also has to be the kind that opened
- * one, per `defaults.liveInput`). Read-only; never spawns anything, never blocks.
+ * Whether a human's next message to this agent would reach a running turn, interrupt one, or queue:
+ * `midTurn` needs the runtime to declare `streamingInput` and a run for this agent to be executing
+ * with a channel actually open (a runtime capability alone is not enough — the turn also has to be
+ * the kind that opened one, per `defaults.liveInput`); short of that, `interrupts` is true whenever a
+ * turn for this agent is executing at all — a runtime without `streamingInput` never has `.send`, so
+ * that running turn is always a candidate to interrupt rather than queue behind (VS-254). Read-only;
+ * never spawns anything, never blocks.
  */
 export function describeLiveInput(ctx: WorkspaceContext, agent: Pick<Agent, 'id' | 'runtimeId'>): LiveInputStatus {
   const runtime = ctx.registries.runtimes.get(agent.runtimeId);
   if (!runtime?.capabilities.streamingInput) {
+    for (const active of runState(ctx).active.values()) {
+      if (active.agentId === agent.id) return { midTurn: false, interrupts: true };
+    }
     return { midTurn: false, reason: `${runtime?.displayName ?? agent.runtimeId} does not support delivering input to a turn that is already running` };
   }
   for (const active of runState(ctx).active.values()) {

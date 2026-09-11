@@ -95,7 +95,7 @@ export type DecisionInputType = (typeof DECISION_INPUT_TYPES)[number];
 export const SECRET_SCOPES = ['workspace', 'project', 'role'] as const;
 export type SecretScope = (typeof SECRET_SCOPES)[number];
 
-export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'ticket_blocked', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved'] as const;
+export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'ticket_blocked', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved', 'live_interrupt'] as const;
 export type WakeSource = (typeof WAKE_SOURCES)[number];
 
 /** Recurring scheduled-task row (VS-220). Human-facing name is "Scheduled tasks"; identifiers stay `routine`. */
@@ -147,8 +147,10 @@ export const RECORDED_RUN_PHASES: readonly RunPhase[] = ['prepare_home', 'prepar
 
 /**
  * `human.input` (VS-99): a human sent text to a running agent. Payload
- * `{ text, authorKind, authorId, delivery: 'mid_turn' | 'queued', acknowledgedAt? }` — never
- * `user_input.requested`, which is the agent asking for input, the opposite direction.
+ * `{ text, authorKind, authorId, delivery: 'mid_turn' | 'queued' | 'interrupted', acknowledgedAt? }`
+ * — `'interrupted'` (VS-254) means the running turn was cancelled to deliver it rather than queued
+ * behind it. Never `user_input.requested`, which is the agent asking for input, the opposite
+ * direction.
  */
 export const RUN_EVENT_TYPES = [
   'session.started', 'session.resumed', 'turn.started', 'assistant.text', 'assistant.thinking', 'tool.call', 'tool.result', 'tool.denied',

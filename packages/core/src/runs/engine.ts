@@ -417,7 +417,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
 interface FinalizeInput {
   run: Run; agent: Agent; role: Role | null; project: Project | null; ticket: Ticket | null; wakes: Wakeup[];
   result: TurnResult | null; failure: { code: string; family: RunErrorFamily; message: string } | null; report: RunReport | null;
-  durationMs: number; sessionId: string | null; cancelled: 'interrupt' | 'kill' | null;
+  durationMs: number; sessionId: string | null; cancelled: { mode: 'interrupt' | 'kill'; cause?: 'message' } | null;
   record: (type: RunEvent['type'], payload: Record<string, unknown>, stream?: 'stdout' | 'stderr' | 'runtime' | 'system', level?: string) => void;
 }
 
@@ -434,10 +434,13 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   else if (r?.timedOut) { status = 'timed_out'; errorCode = 'timeout'; errorFamily = 'tooling'; }
   else if (r?.error) { status = 'failed'; errorCode = r.error.code; errorFamily = r.error.family; }
   else if (r && r.exitCode !== 0 && r.exitCode !== null) { status = 'failed'; errorCode = `exit_${r.exitCode}`; errorFamily = 'unknown'; }
-  if (f.cancelled === 'interrupt' || (!f.failure && !r?.error && (r?.signal === 'SIGTERM' || r?.signal === 'SIGKILL' || r?.exitCode === 143 || r?.exitCode === 137))) {
-    // Daemon shutdown, an upgrade's drain timeout, or a human interrupt: not the agent's failure.
-    // Boot recovery re-queues the wake and the session resumes where it stopped.
-    status = 'interrupted'; errorCode = 'interrupted'; errorFamily = 'tooling';
+  if (f.cancelled?.mode === 'interrupt' || (!f.failure && !r?.error && (r?.signal === 'SIGTERM' || r?.signal === 'SIGKILL' || r?.exitCode === 143 || r?.exitCode === 137))) {
+    // Daemon shutdown, an upgrade's drain timeout, a human interrupt (via /runs/:id/cancel), or a
+    // human's live message on a runtime that cannot take mid-turn input (VS-254): not the agent's
+    // failure. Boot recovery re-queues the wake and the session resumes where it stopped.
+    status = 'interrupted';
+    errorCode = f.cancelled?.cause === 'message' ? 'interrupted_by_message' : 'interrupted';
+    errorFamily = 'tooling';
   } else if (f.cancelled) { status = 'cancelled'; errorCode = errorCode ?? 'cancelled'; errorFamily = errorFamily ?? 'tooling'; }
 
   const usage = r?.usage ?? null;

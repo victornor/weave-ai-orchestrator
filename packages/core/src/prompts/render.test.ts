@@ -317,6 +317,25 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('## What to do now');
   });
 
+  it('tells a resumed turn it was interrupted to deliver a live message, and names the message and the stale-lock check (VS-254)', async () => {
+    const wake = {
+      id: 'w-li', workspaceId: h.workspaceId, agentId: worker.id, source: 'live_interrupt',
+      reason: 'stop, wrong direction', payload: { ticketId, message: 'stop, wrong direction', interruptedRunId: 'run-9' }, status: 'claimed',
+    } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).toContain('live_interrupt: stop, wrong direction');
+    expect(prompt).toContain('Your previous turn was interrupted to deliver the live message above');
+    expect(prompt).toContain("index.lock");
+  });
+
+  it('adds no interrupted-by-message note when no `live_interrupt` wake is present', async () => {
+    const wake = { id: 'w-plain', workspaceId: h.workspaceId, agentId: worker.id, source: 'ticket_comment', reason: 'a routine comment', payload: {}, status: 'claimed' } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).not.toContain('interrupted to deliver the live message');
+  });
+
   const wakeFor = (id: string) => ({ id, workspaceId: h.workspaceId, agentId: worker.id, source: 'system', reason: 'assigned', payload: {}, status: 'claimed' } as never);
   const promptAt = async (turnCount: number) => {
     h.db.update('agents', worker.id, { turnCount });

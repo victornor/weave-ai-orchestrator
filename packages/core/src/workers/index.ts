@@ -23,6 +23,18 @@ export { renderHome, ensureHomeCurrent, skillsFor } from './home.js';
 
 const LIVE = "('provisioning','active','running','paused','error')";
 
+/**
+ * Same bound as threads' `HUMAN_MESSAGE_WAKE_BODY_CHARS` and tickets' `TICKET_COMMENT_WAKE_BODY_CHARS`
+ * (VS-242/VS-246): a human's own words flowing into a stored wake payload and a rendered prompt line
+ * get the same treatment everywhere, not a fourth number.
+ */
+const LIVE_INTERRUPT_WAKE_BODY_CHARS = 8000;
+
+function liveInterruptWakeBody(body: string): { body: string; truncated?: true; bodyLength?: number } {
+  if (body.length <= LIVE_INTERRUPT_WAKE_BODY_CHARS) return { body };
+  return { body: body.slice(0, LIVE_INTERRUPT_WAKE_BODY_CHARS), truncated: true, bodyLength: body.length };
+}
+
 export function branchSlug(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'work';
 }
@@ -270,14 +282,24 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       // attempted, so a failed or throwing send still leaves a durable record.
       deps().tickets.comment(actor, agent.ticketId, body, 'relay', actor.kind === 'human' ? 'trusted' : 'agent');
 
-      let delivery: 'mid_turn' | 'queued' = 'queued';
+      let delivery: 'mid_turn' | 'queued' | 'interrupted' = 'queued';
       let runId: string | null = null;
       if (opts.live) {
         for (const active of runState(ctx).active.values()) {
-          if (active.agentId !== workerId || !active.send) continue;
-          runId = active.runId;
-          try { if ((await active.send(body)) === 'delivered') delivery = 'mid_turn'; }
-          catch { /* the runtime could not take it; falls through to queued */ }
+          if (active.agentId !== workerId) continue;
+          if (active.send) {
+            runId = active.runId;
+            try { if ((await active.send(body)) === 'delivered') delivery = 'mid_turn'; }
+            catch { /* the runtime could not take it; falls through to queued */ }
+          } else if (actor.kind === 'human') {
+            // The runtime cannot take mid-turn input, but a human explicitly asked for live
+            // delivery: interrupt the running turn and deliver via the next one instead of queuing
+            // behind it (VS-254). A live send on the conductor's behalf (`ac_worker_message`) leaves
+            // the turn alone, exactly as before this change — see design.md Decision 1.
+            runId = active.runId;
+            delivery = 'interrupted';
+            await deps().runs.cancel(actor, active.runId, 'interrupt', 'message');
+          }
           break;
         }
       }
@@ -289,9 +311,21 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       if (runId) recordHumanInputEvent(ctx, runId, { text: body, authorKind: actor.kind, authorId: actor.id, delivery });
 
       // A message the running turn already has must not also be queued — that would deliver it twice.
-      const wake = delivery === 'mid_turn'
-        ? null
-        : deps().wake.enqueue(workerId, { source: 'conductor_request', reason: body.slice(0, 160), payload: { ticketId: agent.ticketId, message: body }, requestedBy: actor });
+      let wake: ReturnType<CoreServices['wake']['enqueue']> | null = null;
+      if (delivery === 'interrupted') {
+        const wb = liveInterruptWakeBody(body);
+        // Naming `ac_ticket_comments` as the full-text pointer is safe here specifically: the
+        // `tickets.comment(...)` call above already recorded the untruncated `body` as a ticket
+        // comment before any delivery was attempted, regardless of how this send turns out.
+        const reason = wb.truncated ? `${wb.body} (truncated; full message via ac_ticket_comments)` : wb.body;
+        wake = deps().wake.enqueue(workerId, {
+          source: 'live_interrupt', reason,
+          payload: { ticketId: agent.ticketId, message: wb.body, ...(wb.truncated ? { truncated: true as const, bodyLength: wb.bodyLength } : {}), interruptedRunId: runId },
+          requestedBy: actor,
+        });
+      } else if (delivery === 'queued') {
+        wake = deps().wake.enqueue(workerId, { source: 'conductor_request', reason: body.slice(0, 160), payload: { ticketId: agent.ticketId, message: body }, requestedBy: actor });
+      }
       recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.message', 'agent', workerId, { length: body.length, delivery }, agent.ticketId);
       return { delivery, runId, wake };
     },

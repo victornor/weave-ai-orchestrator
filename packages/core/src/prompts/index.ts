@@ -339,6 +339,17 @@ export async function buildTurnPrompt(
   if (opts.charterChanged) notes.push(`- Your role's charter changed: ${opts.charterChanged}`);
   if (opts.relaunchNote) notes.push(`- Relaunch note: ${opts.relaunchNote}`);
   if (opts.interrupted) notes.push('- Your previous turn was interrupted; verify what you had already done before redoing it.');
+  // VS-254: a human's live message on a runtime that cannot take mid-turn input interrupted the
+  // previous turn instead of queuing behind it — the message itself is already the `live_interrupt`
+  // wake's reason, above under "Why you were woken". Established by testing real interrupts against
+  // scratch git repos (design.md): the process group unwinds cleanly, but a `git` command that fails
+  // with "Unable to create '.../index.lock'" is a stale lock the interrupt left behind, not a real
+  // conflict — `git status` alone will not show it.
+  if (flat.some((w) => w.source === 'live_interrupt')) {
+    notes.push(
+      '- Your previous turn was interrupted to deliver the live message above; verify what you had already done before redoing it or acting on the message. If a `git` command now fails with "Unable to create \'.../index.lock\': File exists", that is a stale lock left by the interrupt — remove it and retry, it is not a real conflict.',
+    );
+  }
   if (opts.isFirstTurn || opts.sessionStale) {
     let digest = '';
     try {

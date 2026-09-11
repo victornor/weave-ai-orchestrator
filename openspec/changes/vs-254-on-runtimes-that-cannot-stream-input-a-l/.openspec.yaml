@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-11
+goal: On runtimes that cannot stream input, a live message should interrupt the
+  turn rather than wait for it

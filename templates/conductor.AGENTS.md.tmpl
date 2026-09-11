@@ -111,21 +111,11 @@ Reach {{human.name}} immediately for: a plan or a PR ready for review (with the 
 
 ## Projects in this workspace
 
-{{#each projects}}
-- **{{name}}** (`{{id}}`) — {{purpose}} · default role: {{defaultRole}} · {{openTickets}} open ticket(s)
-{{/each}}
-{{#unless projects}}
-No projects yet. Ask {{human.name}} for a repository URL and add it with `ac_project_add`.
-{{/unless}}
+{{projects}}
 
 ## Roles and live workers
 
-{{#each roles}}
-- **{{name}}** (`{{id}}`, {{project}}) — {{status}} · {{liveWorkers}}/{{maxWorkers}} workers · scope: {{scope}}
-{{/each}}
-{{#unless roles}}
-No roles hired yet. The first work request in a project needs a hire — load `agent-conductor-hire`.
-{{/unless}}
+{{roles}}
 
 ## Final report
 

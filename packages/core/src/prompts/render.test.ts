@@ -10,6 +10,15 @@ import { buildTurnPrompt, humanName, renderBrief, renderCharter, renderConductor
 
 const SHIPPED_TEMPLATES = fileURLToPath(new URL('../../../../templates', import.meta.url));
 
+/** The body between a `## heading` and the next `##` heading, for asserting a rendered section is not blank. */
+function section(markdown: string, heading: string): string {
+  const start = markdown.indexOf(heading);
+  if (start < 0) return '';
+  const rest = markdown.slice(start + heading.length);
+  const end = rest.search(/\n## /);
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
 const spec: RoleSpec = {
   id: 'api-backend', name: 'Backend Engineer', project: 'api', charterSummary: 'Owns the api service.',
   scope: 'Backend work in the api repo.', responsibilities: ['Implement handlers'], capabilities: ['node'],
@@ -139,6 +148,45 @@ describe('prompt rendering', () => {
     expect(out).toContain('`api`');
     expect(out).toContain('Backend Engineer');
     expect(out).not.toMatch(/\{\{|\}\}/);
+  });
+
+  describe('shipped conductor template fills its portfolio sections (VS-243)', () => {
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('lists the live projects and roles, not blank sections', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const out = renderConductorInstructions(h.ctx, h.deps);
+
+      const projects = section(out, '## Projects in this workspace');
+      const roles = section(out, '## Roles and live workers');
+      expect(projects).toContain('`api`');
+      expect(projects).toContain('API');
+      expect(roles).toContain('Backend Engineer');
+      expect(roles).toContain('2 workers live');
+      expect(projects.trim()).not.toBe('');
+      expect(roles.trim()).not.toBe('');
+      expect(out).not.toMatch(/\{\{[#/]?[a-z]/i);
+    });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('renders the empty-state text for a workspace with none', () => {
+      const bare = makeHarness({ bare: true });
+      try {
+        bare.ctx.templatesDir = SHIPPED_TEMPLATES;
+        const out = renderConductorInstructions(bare.ctx, bare.deps);
+        expect(section(out, '## Projects in this workspace')).toContain('(none yet)');
+        expect(section(out, '## Roles and live workers')).toContain('(none hired yet)');
+        expect(out).not.toMatch(/\{\{[#/]?[a-z]/i);
+      } finally {
+        bare.cleanup();
+      }
+    });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('the shipped worker template consumes its object data (no same-class mismatch)', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const out = renderWorkerInstructions(h.ctx, h.deps, worker);
+      expect(out).toContain('Backend Engineer');
+      expect(out).toContain('TST-42');
+      expect(out).toContain('`api`');
+      expect(out).not.toMatch(/\{\{[#/]?[a-z]/i);
+    });
   });
 
   describe('YOLO mode in the instructions', () => {

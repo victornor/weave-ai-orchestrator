@@ -15,7 +15,7 @@ const log = getLogger('http', { component: 'mcp' });
 
 export const MCP_SERVER_NAME = 'agentconductor';
 export const MCP_LIST_RESULT_CAP = 64 * 1024;
-const LIST_TOOLS = new Set(['ac_ticket_list']);
+const LIST_TOOLS = new Set(['ac_ticket_list', 'ac_incident_list']);
 
 /** Encode a tool result for MCP. List tools are capped at MCP_LIST_RESULT_CAP with `truncated: true`. */
 export function encodeMcpToolResult(name: string, result: ToolResult<unknown>): string {

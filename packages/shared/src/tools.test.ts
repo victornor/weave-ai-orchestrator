@@ -26,6 +26,16 @@ describe('CONDUCTOR_TOOLS (VS-223)', () => {
   });
 });
 
+describe('incident read tools (VS-222)', () => {
+  it('are conductor-only: in CONDUCTOR_TOOLS, not in COMMON_TOOLS', () => {
+    expect(CONDUCTOR_TOOLS).toContain('ac_incident_list');
+    expect(CONDUCTOR_TOOLS).toContain('ac_incident_get');
+    expect(COMMON_TOOLS).not.toContain('ac_incident_list');
+    expect(COMMON_TOOLS).not.toContain('ac_incident_get');
+    expect(COMMON_TOOLS).toContain('ac_incident');
+  });
+});
+
 describe('routine enums (VS-220)', () => {
   it('is active or paused, report or file_work', () => {
     expect(ROUTINE_STATUSES).toEqual(['active', 'paused']);

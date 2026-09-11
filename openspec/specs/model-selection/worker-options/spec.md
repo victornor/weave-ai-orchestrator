@@ -11,10 +11,11 @@ workers default.
 
 A workspace SHALL be able to define zero or more named worker model options. Each option SHALL
 carry a kebab-case `id` unique within the catalog, a short when-to-use `description`, the
-`runtime` the worker is launched with, the `model` it is asked to use (nullable, meaning the
-runtime chooses), and optionally the reasoning `effort`. The catalog SHALL live next to the two
-existing model settings, not instead of them. An empty catalog SHALL be valid and SHALL be the
-state of a workspace that has never defined an option.
+`runtime` the worker is launched with (nullable: unset means the option is not yet chosen, as
+specified in `model-selection/unconfigured-option`), the `model` it is asked to use (nullable,
+meaning the runtime chooses when a runtime is set), and optionally the reasoning `effort`. The
+catalog SHALL live next to the two existing model settings, not instead of them. An empty catalog
+SHALL be valid and SHALL be the state of a workspace that has never defined an option.
 
 Adding, editing or removing an option SHALL take effect for the next turn of any worker whose
 ticket names that option, without a daemon restart, and SHALL NOT interrupt a turn already
@@ -32,8 +33,7 @@ characters. A duplicate `id` SHALL be rejected.
 #### Scenario: Options are readable with id and description
 
 - **WHEN** a workspace has defined worker options
-- **THEN** each is returned with its id, description, runtime, model or the fact that the runtime
-  chooses, and its effort where one is set
+- **THEN** each is returned with its id, description, runtime or the fact that none is chosen, model or the fact that the runtime chooses, and its effort where one is set
 
 #### Scenario: A duplicate id is rejected
 
@@ -54,16 +54,16 @@ the ticket, the stored id SHALL NOT be changed by create, assign, or any other r
 When the id is omitted, the ticket SHALL store none and its worker SHALL use the effective
 workers setting. When the id is supplied, it SHALL match an option in the effective catalog
 (the daemon catalog overlay if filled, otherwise the workspace catalog) at the moment of the
-write; otherwise the write SHALL be rejected rather than storing an unknown id or falling back
-silently. A request SHALL NOT accept a raw runtime, model or effort on a ticket — only a
-catalog option id.
+write, and that option SHALL have a runtime chosen; otherwise the write SHALL be rejected rather
+than storing an unknown id, storing an unconfigured id, or falling back silently. A request
+SHALL NOT accept a raw runtime, model or effort on a ticket — only a catalog option id.
 
 The same fields SHALL be available on the HTTP create and assign paths that humans use, and on
 the CLI create command.
 
 #### Scenario: Create with a known option stores it
 
-- **WHEN** a ticket is created with a worker-option id that exists in the catalog
+- **WHEN** a ticket is created with a worker-option id that exists in the catalog and has a runtime chosen
 - **THEN** that id is stored on the ticket
 
 #### Scenario: Create without an option uses the default
@@ -79,7 +79,7 @@ the CLI create command.
 #### Scenario: Assign can set the option before spawn
 
 - **WHEN** a ticket that has no worker is assigned with a worker-option id that exists in the
-  catalog
+  catalog and has a runtime chosen
 - **THEN** that id is stored on the ticket before the worker is spawned
 
 #### Scenario: The option cannot be changed after spawn
@@ -90,10 +90,11 @@ the CLI create command.
 ### Requirement: The conductor can list the catalog without guessing
 
 A conductor-only tool SHALL list the effective workers default setting and every worker option
-in the effective catalog, each option with its id, description, runtime, model and effort. The
-list SHALL NOT require the conductor to know the ids in advance. Workers SHALL NOT be offered
-this tool. The effective catalog SHALL be the daemon catalog overlay when that overlay is
-filled, otherwise the workspace catalog.
+in the effective catalog, each option with its id, description, runtime (or the fact that none
+is chosen), model and effort. The list SHALL NOT require the conductor to know the ids in
+advance. Workers SHALL NOT be offered this tool. The effective catalog SHALL be the daemon
+catalog overlay when that overlay is filled, otherwise the workspace catalog. The tool's
+description SHALL tell the conductor not to file a ticket onto an option that has no runtime.
 
 #### Scenario: The conductor lists options
 
@@ -105,6 +106,11 @@ filled, otherwise the workspace catalog.
 
 - **WHEN** a worker calls the tool that lists worker model options
 - **THEN** the call is not available to that worker
+
+#### Scenario: Unconfigured options are listed as unset
+
+- **WHEN** the catalog contains an option with no runtime
+- **THEN** the list includes that option with no runtime chosen, rather than omitting it or showing claude
 
 ### Requirement: A worker option's model is chosen from the runtime's catalog
 
@@ -208,3 +214,22 @@ Wherever a worker option is added (the workspace catalog and the daemon catalog 
 
 - **WHEN** the chosen model omits the efforts field, or is named via the free-text escape hatch
 - **THEN** the thinking-level field is free text rather than a guessed list
+
+### Requirement: An existing catalog option can be configured in place
+
+Wherever the catalog is edited (the workspace catalog and the daemon catalog overlay use the same
+editor), each existing option SHALL offer the same runtime and model controls as a new option, so
+an option that has no runtime can be given one without being removed and re-added. Changing an
+existing option's runtime or model SHALL persist that option's other fields (id and description)
+unchanged. While an option's runtime is unset, its model control SHALL be unavailable.
+
+#### Scenario: An unconfigured row can be given a runtime
+
+- **WHEN** the operator chooses a runtime on a catalog option that had none
+- **THEN** that option is stored with the chosen runtime, the same id and description, and the
+  warning that it was unconfigured no longer applies to it
+
+#### Scenario: Model is unavailable until a runtime is chosen
+
+- **WHEN** a catalog option has no runtime
+- **THEN** its model control does not accept a choice

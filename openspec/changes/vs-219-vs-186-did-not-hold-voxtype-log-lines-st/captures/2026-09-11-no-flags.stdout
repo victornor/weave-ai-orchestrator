@@ -1,0 +1,11 @@
+Loading audio file: "/tmp/opencode/vs219/tone.wav"
+Audio format: 16000 Hz, 1 channel(s), Int
+Processing 32000 samples (2.00s)...
+[2m2026-09-11T02:10:53.635895Z[0m [32m INFO[0m Using local whisper transcription mode
+[2m2026-09-11T02:10:53.635907Z[0m [32m INFO[0m Loading whisper model from "/home/user/.local/share/voxtype/models/ggml-large-v3-turbo.bin"
+[2m2026-09-11T02:10:53.936088Z[0m [32m INFO[0m Model loaded in 0.30s
+[2m2026-09-11T02:10:54.050790Z[0m [33m WARN[0m Whisper returned degenerate transcript "." for 2.00s audio; retrying with beam search
+[2m2026-09-11T02:10:54.166277Z[0m [33m WARN[0m Whisper retry also returned degenerate transcript "."; treating as empty
+[2m2026-09-11T02:10:54.166289Z[0m [32m INFO[0m Transcription completed in 0.23s: ""
+
+

@@ -36,8 +36,11 @@ export interface VoxtypeProbeOptions {
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 const ANSI_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\))/g;
+// Grounded in captured output, not assumed shapes (VS-186, VS-219): the three progress lines
+// survive even `voxtype -q`; log lines appear both bare (2026-09-10) and prefixed with an
+// ISO-8601 timestamp plus ANSI (2026-09-11), which is why the level word is not line-initial.
 const DIAGNOSTIC_LINE =
-  /^(?:Loading audio file:|Audio format:|Processing\b.*\bsamples\b|(?:INFO|WARN(?:ING)?|DEBUG|ERROR|TRACE)\b|Transcription completed\b)/i;
+  /^(?:Loading audio file:|Audio format:|Processing\b.*\bsamples\b|(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)?\s*(?:INFO|WARN(?:ING)?|DEBUG|ERROR|TRACE)\b|Transcription completed\b)/i;
 
 export function extractVoxtypeTranscript(raw: string): string {
   const cleaned = raw.replace(ANSI_RE, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -163,7 +166,9 @@ export function createVoxtypeProbe(opts: VoxtypeProbeOptions = {}): VoxtypeProbe
         await writeFile(wav, audio);
         const analysis = analyzeWav(audio);
         log.info({ analysis }, 'voxtype transcribe input audio');
-        const args = model ? ['--model', model, 'transcribe', wav] : ['transcribe', wav];
+        // -q: quiet mode. Verified on voxtype 1.0.1 that this suppresses the timestamped
+        // INFO/WARN lines entirely, so logs never share stdout with the transcript (VS-219).
+        const args = model ? ['-q', '--model', model, 'transcribe', wav] : ['-q', 'transcribe', wav];
         const r = await runVoxtype(binary, args, { timeoutMs });
         if (r.code !== 0) {
           log.warn({ code: r.code, err: r.stderr.slice(0, 500) }, 'voxtype transcribe failed');

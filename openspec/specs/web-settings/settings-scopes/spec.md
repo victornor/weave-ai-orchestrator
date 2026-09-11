@@ -10,41 +10,42 @@ deep-linkable from anywhere in the app.
 
 ### Requirement: Settings is split into a workspace area and a daemon area
 
-The Settings page SHALL present exactly two top-level areas, one for settings that apply to the
-current workspace only and one for settings that apply to the whole daemon, each labelled so that the
-operator can tell without reading a section which of the two they are changing. Every section of the
-page SHALL belong to exactly one area, and the sections of the area that is not selected SHALL NOT be
-offered alongside those of the selected one.
+Settings SHALL be two destinations, not one page with a switch: the workspace settings, which hold
+only the settings that apply to the current workspace, and the daemon settings, which hold only the
+settings that apply to the whole daemon and live at their own route above the workspaces. Neither
+destination SHALL offer the other's sections, and neither SHALL offer a control for switching
+between the two areas. Every section SHALL belong to exactly one area.
 
-Switching area SHALL NOT change any setting.
+Moving between the two destinations SHALL NOT change any setting.
 
 #### Scenario: Both areas are offered
 
-- **WHEN** the Settings page is opened
-- **THEN** it offers a workspace area and a daemon area, each labelled, with one of them selected
+- **WHEN** settings is opened from the navigation entry that owns its scope
+- **THEN** both areas exist as their own destinations, each labelled, and the one opened shows only its own area's sections, with no control on the page for switching areas
 
 #### Scenario: Only the selected area's sections are listed
 
-- **WHEN** an area is selected
-- **THEN** the page lists the sections of that area and none of the sections of the other area
+- **WHEN** either destination is shown
+- **THEN** it lists the sections of its own area and none of the sections of the other area
 
 #### Scenario: Switching area changes nothing
 
-- **WHEN** the operator switches from one area to the other
-- **THEN** no setting is written to the daemon, to the workspace or to this browser
+- **WHEN** the operator moves from the workspace settings to the daemon settings or back
+- **THEN** no setting is written to the daemon, to any workspace or to this browser
 
 ### Requirement: Every section is filed under the scope its data actually has
 
-A section SHALL be filed under the workspace area when its data belongs to the current workspace, and
-under the daemon area when its data belongs to the daemon and is therefore the same from every
-workspace.
+A section SHALL belong to the workspace area when its data belongs to the current workspace, and to
+the daemon area when its data belongs to the daemon and is therefore the same from every workspace.
+The workspace area's sections SHALL be shown by the workspace settings, and the daemon area's
+sections SHALL be shown by the daemon settings.
 
 The workspace area SHALL hold the workspace's own settings (its name and identifier, its automatic
 approval policy, its knowledge budgets), its projects, its model settings, its channels, its
 presentation surfaces, and its scheduled tasks (routines). The model settings SHALL be one section
 holding both of the workspace's model settings and nothing else; there SHALL NOT be a separate
-section for the conductor, whose only settings were its runtime and its model. The list of workspaces
-SHALL be reachable from the workspace area, as the way to leave for another workspace.
+section for the conductor, whose only settings were its runtime and its model. The list of
+workspaces SHALL be reachable from the workspace area, as the way to leave for another workspace.
 
 The daemon area SHALL hold the daemon's update and upgrade state, the operator's account,
 two-factor authentication and signed-in devices, the dictation backend and Voxtype model, and the
@@ -55,24 +56,27 @@ the This-device section, not in the daemon dictation section.
 #### Scenario: A workspace setting is in the workspace area
 
 - **WHEN** the operator looks for the current workspace's name, automatic approval policy, knowledge budgets, projects, model settings, channels, presentation surfaces or scheduled tasks
-- **THEN** each is found in the workspace area
+- **THEN** each is found in the workspace settings
 
 #### Scenario: A daemon setting is in the daemon area
 
 - **WHEN** the operator looks for the daemon's updates, their password, their two-factor authentication, their signed-in devices, the dictation backend, or the daemon model overlays
-- **THEN** each is found in the daemon area
+- **THEN** each is found in the daemon settings
 
 #### Scenario: The workspace list is reachable from the workspace area
 
-- **WHEN** the workspace area is shown
-- **THEN** it offers the other workspaces on this daemon and opening one leaves for that workspace
+- **WHEN** the workspace settings are shown
+- **THEN** they offer the other workspaces on this daemon and opening one leaves for that workspace
 
 ### Requirement: Settings held only in this browser are labelled as this device's
 
 Settings that are stored in the browser rather than on the daemon or in a workspace — the colour
 theme and the notification preferences — SHALL be presented together in a section that names the
 device as their scope and SHALL state that they are stored in this browser only. They SHALL NOT be
-presented as belonging to the workspace or to the daemon.
+presented as belonging to the workspace or to the daemon. The section SHALL sit in the daemon area
+— it does not vary by workspace — and its own label and copy SHALL remain what tells the operator
+its true scope, since the daemon settings page presents it under a heading that names the daemon as
+the scope.
 
 #### Scenario: Device settings are grouped and named
 
@@ -81,59 +85,112 @@ presented as belonging to the workspace or to the daemon.
 
 #### Scenario: The theme is not offered as a workspace setting
 
-- **WHEN** the workspace area is shown
+- **WHEN** the workspace settings are shown
 - **THEN** the colour theme is not among its settings
 
 ### Requirement: Daemon-level settings read the same from every workspace
 
-The daemon area SHALL show the same daemon state whichever workspace the page was opened from, and
-SHALL NOT hold a separate copy of that state per workspace. A daemon-level setting changed while
-viewing one workspace SHALL be the state the daemon area shows when it is next viewed from another
-workspace, without the operator having to reload the app.
+The daemon settings SHALL show the same daemon state regardless of which workspace, if any, the
+operator came from, and SHALL NOT hold a separate copy of that state per workspace. The daemon
+settings SHALL be reachable and fully functional without any workspace having been entered, and a
+daemon-level setting changed there SHALL be the state the daemon settings show when next viewed,
+without the operator having to reload the app.
 
 #### Scenario: The same daemon state from another workspace
 
-- **WHEN** the daemon area is opened from one workspace and then from another
-- **THEN** both show the same daemon update state, account, device list, dictation backend and
-  model overlays
+- **WHEN** the daemon settings are opened after working in one workspace and then after working in another
+- **THEN** both show the same daemon update state, account, device list, dictation backend and model overlays
 
 #### Scenario: A daemon-level change is not stale in another workspace
 
-- **WHEN** a daemon-level setting is changed while viewing one workspace and the daemon area is then opened from another workspace
+- **WHEN** a daemon-level setting is changed and the daemon settings are then opened again, whatever workspace the operator was in
 - **THEN** the change is shown, and no per-workspace copy of the earlier state is shown
 
 ### Requirement: The URL identifies the area and the section
 
-The Settings URL SHALL carry the selected area and the selected section, and selecting either SHALL
-update the URL without adding a history entry for each click. Opening that URL SHALL restore the same
-area and section.
-
-A URL that names a section without naming an area SHALL resolve the area from the section, so a link
-may address a section by its key alone. A URL naming an area or a section that does not exist SHALL
-fall back to the first section of a valid area rather than showing nothing.
+Each destination SHALL carry its selected section in the URL, and selecting a section SHALL update
+the URL without adding a history entry for each click. Opening that URL SHALL restore the same
+section. A URL that names a section that does not belong to the destination being opened SHALL
+redirect to the destination that owns it with the same section, rather than showing nothing or
+silently showing the wrong scope: a workspace settings URL naming the daemon area or a daemon
+section SHALL land on the daemon settings at that section, and a daemon settings URL naming a
+workspace section SHALL land on that section of a workspace's settings — the workspace this browser
+remembers — or, when this browser remembers no workspace, on the daemon settings' own first
+section. A URL naming a section that does not exist at all SHALL fall back to the first section of
+the destination being opened rather than showing nothing.
 
 #### Scenario: Selecting a section is reflected in the URL
 
-- **WHEN** the operator selects an area and a section
-- **THEN** the URL names both, and returning to that URL restores that area and that section
+- **WHEN** the operator selects a section of either destination
+- **THEN** the URL names it, and returning to that URL restores that section
 
 #### Scenario: A link addresses a section by key alone
 
-- **WHEN** a link opens Settings naming only a section, such as the daemon's updates
-- **THEN** that section is shown, with its own area selected
+- **WHEN** a link opens either destination naming only a section by its key, such as the daemon's updates
+- **THEN** that section is the one shown
+
+#### Scenario: A workspace settings link naming the daemon side is redirected
+
+- **WHEN** a workspace settings URL names the daemon area, or names a daemon section
+- **THEN** the daemon settings open showing that section, not a workspace page showing daemon state
+
+#### Scenario: A daemon settings link naming a workspace section is redirected
+
+- **WHEN** a daemon settings URL names a workspace section
+- **THEN** the remembered workspace's settings open showing that section; with no remembered workspace, the daemon settings' first section is shown instead, and no error is displayed
 
 #### Scenario: An unknown section falls back
 
-- **WHEN** Settings is opened with an area or a section that does not exist
-- **THEN** a valid area is selected with its first section shown, and no error is displayed
+- **WHEN** either destination is opened with a section that does not exist
+- **THEN** that destination's first section is shown, and no error is displayed
 
 ### Requirement: Every section stays reachable on a phone
 
-On a phone, where Settings is reached from the navigation menu the More tab opens, both areas and
-every section within them SHALL be reachable. No section SHALL become unreachable because it is in
-the area that is not selected on arrival.
+On a phone, where the navigation menu the More tab opens is the way to destinations the bottom bar
+leaves out, both destinations and every section within them SHALL be reachable: the menu's global
+block SHALL offer the daemon settings, and its workspace destinations SHALL offer the workspace
+settings. No section SHALL become unreachable because of the destination the operator arrived at.
 
 #### Scenario: Reaching a daemon section from the More tab
 
-- **WHEN** the operator opens Settings from the More menu on a phone and switches to the daemon area
+- **WHEN** the operator opens the More menu on a phone and enters the daemon settings from its global block
 - **THEN** the daemon area's sections are offered and each can be opened
+
+#### Scenario: Reaching the workspace settings from the More menu
+
+- **WHEN** the operator opens the More menu on a phone
+- **THEN** the workspace destinations offer the workspace settings, and opening it shows the workspace area's sections, each of which can be opened
+
+### Requirement: Each destination is entered from the navigation that owns its scope
+
+The navigation SHALL offer settings at both scopes: the sidebar's daemon-level block, alongside the
+other daemon-wide destinations, SHALL offer an entry that opens the daemon settings directly,
+without entering a workspace; and each workspace's own navigation SHALL offer Settings that opens
+that workspace's settings. The workspace entry SHALL NOT lead to daemon sections, and the daemon
+entry SHALL NOT lead to workspace sections.
+
+#### Scenario: Daemon settings from the sidebar's global block
+
+- **WHEN** the operator uses the settings entry in the sidebar's daemon-level block
+- **THEN** the daemon settings open without any workspace having been entered
+
+#### Scenario: Workspace settings from a workspace's navigation
+
+- **WHEN** the operator uses a workspace's own Settings entry
+- **THEN** that workspace's settings open, showing only workspace sections
+
+### Requirement: Each destination names its scope
+
+The workspace settings SHALL name the workspace they configure, and the daemon settings SHALL say
+they apply to the whole daemon, so that with several workspaces the operator can always tell which
+scope the page in front of them changes. A page whose scope must be inferred SHALL NOT be shown.
+
+#### Scenario: The workspace settings name their workspace
+
+- **WHEN** the workspace settings are shown
+- **THEN** the page names the workspace it configures
+
+#### Scenario: The daemon settings read as daemon-wide
+
+- **WHEN** the daemon settings are shown
+- **THEN** the page says the settings apply to the whole daemon

@@ -61,7 +61,7 @@ import { useGo, useSearchParams } from '../app/link';
 import { useTheme } from '../lib/theme';
 import { readShowSilentTurns, writeShowSilentTurns } from '../lib/chatPrefs';
 import { useDictationDiagnosticsEnabled, writeDictationDiagnosticsEnabled } from '../lib/dictationDiagnostics';
-import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
+import { isRuntimeAvailable, modelOptionLabel, runtimeStatusLabel } from '../lib/runtime';
 import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, runningVersionLabel, shortSha, updateEntry, updateEntryLabel } from '../lib/upgrade';
 import { cx } from '../lib/cx';
 import { workspaceYolo } from '../lib/yolo';
@@ -928,7 +928,7 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
           <option value="">default (the runtime chooses)</option>
           {known.map((m) => (
             <option key={m.id} value={m.id}>
-              {m.label}
+              {modelOptionLabel(m)}
             </option>
           ))}
           <option value="__other">something else…</option>
@@ -1060,7 +1060,7 @@ function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave 
         >
           <option value="">runtime default</option>
           {known.map((m) => (
-            <option key={m.id} value={m.id}>{m.label}</option>
+            <option key={m.id} value={m.id}>{modelOptionLabel(m)}</option>
           ))}
           <option value="__other">something else…</option>
         </select>
@@ -1188,7 +1188,7 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
           <option value="">runtime default</option>
           {knownOptionModels.map((m) => (
             <option key={m.id} value={m.id}>
-              {m.label}
+              {modelOptionLabel(m)}
             </option>
           ))}
           <option value="__other">something else…</option>

@@ -49,9 +49,9 @@ function humanize(id: string): { label: string; provider: string } {
   return { label: variants.length > 0 ? `${base} (${variants.join(', ')})` : base, provider };
 }
 
-function toModel(id: string, source: 'detected' | 'static'): RuntimeModel {
+function toModel(id: string, source: 'detected' | 'static', reportedLabel?: string): RuntimeModel {
   const { label, provider } = humanize(id);
-  return { id, label, provider, source, efforts: [] };
+  return { id, label: reportedLabel ?? label, provider, source, efforts: [] };
 }
 
 /** `auto` plus the sixteen ids confirmed accepted by `cursor-agent` on 2026-09-10 (VS-200) — used only when the dynamic `--list-models` path is unreachable or unparseable. */
@@ -82,8 +82,8 @@ const ANSI_RE = /\x1B\[[0-9;]*[a-zA-Z]/g;
  */
 export function parseListModelsOutput(text: string): RuntimeModel[] {
   const stripped = text.replace(ANSI_RE, '');
-  const ids: string[] = [];
   const seen = new Set<string>();
+  const out: RuntimeModel[] = [];
   for (const raw of stripped.split('\n')) {
     const line = raw.trim();
     if (line.length === 0) continue;
@@ -94,9 +94,11 @@ export function parseListModelsOutput(text: string): RuntimeModel[] {
     id = id.replace(/\s*\([^)]*\)\s*$/, '').trim();
     if (id.length === 0 || seen.has(id)) continue;
     seen.add(id);
-    ids.push(id);
+    // The CLI's own reported name, when the line has one — see design.md — beats re-deriving one from the id.
+    const displayName = dashIdx >= 0 ? line.slice(dashIdx + 3).replace(/\s*\([^)]*\)\s*$/, '').trim() : '';
+    out.push(toModel(id, 'detected', displayName.length > 0 ? displayName : undefined));
   }
-  return ids.map((id) => toModel(id, 'detected'));
+  return out;
 }
 
 /** Parses `Cannot use this model: <id>. Available models: <list>`, including the UI-truncated `, ...` form. */

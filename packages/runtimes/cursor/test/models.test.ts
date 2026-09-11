@@ -58,6 +58,21 @@ describe('parseListModelsOutput', () => {
     expect(parseListModelsOutput('')).toEqual([]);
     expect(parseListModelsOutput('Available models\n\nTip: use --model.')).toEqual([]);
   });
+
+  it('uses the CLI-reported display name as-is instead of the humanizer', () => {
+    const models = parseListModelsOutput('Available models\n\ngpt-5.2 - GPT-5.2\n\nTip: use --model.');
+    expect(models.find((m) => m.id === 'gpt-5.2')?.label).toBe('GPT-5.2');
+  });
+
+  it('strips the trailing (current, default) marker from the reported display name too', () => {
+    const models = parseListModelsOutput('Available models\n\nauto - Auto (current, default)\n\nTip: use --model.');
+    expect(models.find((m) => m.id === 'auto')?.label).toBe('Auto');
+  });
+
+  it('falls back to the derived label for a bare id line with no reported name', () => {
+    const models = parseListModelsOutput('Available models\n\ncursor-grok-4.6-high-fast\n\nTip: use --model.');
+    expect(models.find((m) => m.id === 'cursor-grok-4.6-high-fast')?.label).toContain('Grok 4.6');
+  });
 });
 
 describe('parseUnknownModelRejection', () => {

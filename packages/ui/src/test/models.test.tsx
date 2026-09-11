@@ -173,7 +173,7 @@ describe('Settings — the two model settings', () => {
     openModels();
     const select = screen.getByLabelText('New worker option model');
     expect(within(select).getByRole('option', { name: 'runtime default' })).toBeInTheDocument();
-    expect(within(select).getByRole('option', { name: 'Fable 5.1' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'Fable 5.1 (claude-fable-5-1)' })).toBeInTheDocument();
     fireEvent.change(select, { target: { value: 'claude-opus-5' } });
     fireEvent.change(screen.getByLabelText('New worker option id'), { target: { value: 'strong' } });
     fireEvent.change(screen.getByLabelText('New worker option description'), { target: { value: 'Hard tickets.' } });

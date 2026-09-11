@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-11
+goal: Ids are not monotonic, so every id DESC tie-break is random within a
+  millisecond

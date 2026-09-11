@@ -133,8 +133,7 @@ describe('changelog', () => {
         cursor = r.nextCursor;
         if (!cursor) break;
       }
-      expect(seen).toHaveLength(4);
-      expect(new Set(seen)).toEqual(new Set(ids));
+      expect(seen).toEqual([...ids].reverse());
     });
 
     it('does not repeat or skip when an entry is recorded between two pages', () => {

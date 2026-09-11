@@ -7,7 +7,7 @@ export const COMMON_TOOLS = [
 export const CONDUCTOR_TOOLS = [
   'ac_ticket_create', 'ac_ticket_assign', 'ac_ticket_set_priority', 'ac_role_list', 'ac_role_get', 'ac_role_hire', 'ac_role_update_charter', 'ac_role_set_secrets',
   'ac_role_set_max_workers', 'ac_role_pause', 'ac_role_resume', 'ac_role_retire', 'ac_worker_list', 'ac_worker_get', 'ac_worker_message', 'ac_worker_relaunch', 'ac_worker_cancel',
-  'ac_decision_answer', 'ac_decision_review', 'ac_human_send', 'ac_briefing', 'ac_project_list', 'ac_project_add', 'ac_usage',
+  'ac_decision_answer', 'ac_decision_review', 'ac_human_send', 'ac_thread_message_get', 'ac_briefing', 'ac_project_list', 'ac_project_add', 'ac_usage',
   'ac_run_inspect', 'ac_run_list', 'ac_worker_models',
   'ac_routine_list', 'ac_routine_create', 'ac_routine_update', 'ac_routine_remove',
   'ac_incident_list', 'ac_incident_get',

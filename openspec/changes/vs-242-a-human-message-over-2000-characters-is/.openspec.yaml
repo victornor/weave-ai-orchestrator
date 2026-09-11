@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-11
+goal: A human message over 2000 characters is silently cut, and the conductor
+  has no way to read the rest

@@ -38,6 +38,7 @@ describe('MCP endpoint', () => {
     expect(names).not.toContain('ac_role_hire');        // conductor only
     expect(names).not.toContain('ac_routine_create');
     expect(names).not.toContain('ac_human_send');
+    expect(names).not.toContain('ac_thread_message_get');
     expect(names).not.toContain('ac_decision_review');
     expect(names).not.toContain('ac_run_inspect');      // no worker reads another worker's transcript
     expect(names).not.toContain('ac_run_list');
@@ -51,6 +52,7 @@ describe('MCP endpoint', () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names).toContain('ac_role_hire');
     expect(names).toContain('ac_human_send');
+    expect(names).toContain('ac_thread_message_get');
     expect(names).toContain('ac_decision_review');
     expect(names).toContain('ac_briefing');
     expect(names).toContain('ac_worker_models');

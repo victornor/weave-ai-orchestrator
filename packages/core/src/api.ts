@@ -420,6 +420,8 @@ export interface ThreadsService {
   inbound(actor: Actor, threadId: string, body: string, opts?: { externalMessageId?: string; parts?: unknown[]; projectId?: string | null; replyToMessageId?: string | null; idempotencyKey?: string; attachments?: Array<{ filename: string; mediaType: S.AttachmentMediaType; bytes: Buffer }> }): Promise<S.ThreadMessage>;  // stores + wakes; a repeated idempotencyKey on this thread returns the existing message
   outbound(actor: Actor, threadId: string, body: string, opts?: { parts?: unknown[]; runId?: string | null; replyToMessageId?: string | null }): Promise<S.ThreadMessage>;  // reply target validated + excerpted like inbound
   messages(threadId: string, opts?: { before?: string; limit?: number }): S.ThreadMessage[];
+  /** `not_found` when the message does not exist, or exists but under a different thread — the same response either way. Full stored body, regardless of whether the wake payload that referenced it was truncated (VS-242). */
+  message(threadId: string, messageId: string): S.ThreadMessage;
   /** `not_found` when the attachment does not exist, or exists but under a different thread — the same response either way, so a thread id cannot be used to probe for one that belongs elsewhere. */
   attachment(threadId: string, attachmentId: string): { attachment: S.Attachment; bytes: Buffer };
   primaryThread(): S.ChannelThread | null;

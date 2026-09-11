@@ -19,6 +19,15 @@ const HUMAN_CHANNELS = ['web', 'telegram'];
  */
 export const REPLY_EXCERPT_CHARS = 500;
 
+/**
+ * How much of an inbound human message's body travels directly in the `human_message` wake
+ * payload. 8,000 covers most of how captain actually writes — a pasted report, a stack trace, a
+ * spec section — without letting several messages coalesced into one wake's `payload.bundle`
+ * balloon unboundedly. A message over this bound is marked `truncated: true` with `bodyLength` set
+ * to its real length; the full body stays reachable via `ThreadsService.message()` (VS-242).
+ */
+export const HUMAN_MESSAGE_WAKE_BODY_CHARS = 8000;
+
 export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServices): ThreadsService {
   const db: Db = ctx.db;
   const log = ctx.log('channel');
@@ -49,6 +58,16 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
 
   function excerpt(body: string): string {
     return body.slice(0, REPLY_EXCERPT_CHARS);
+  }
+
+  /**
+   * The `body`, `truncated` and `bodyLength` fields for a `human_message` wake payload. A body at
+   * or under the bound is passed through with no new fields, so it reads exactly as it did before
+   * this bound existed; a longer body is cut with a marker naming its real length.
+   */
+  function wakeBody(body: string): { body: string; truncated?: true; bodyLength?: number } {
+    if (body.length <= HUMAN_MESSAGE_WAKE_BODY_CHARS) return { body };
+    return { body: body.slice(0, HUMAN_MESSAGE_WAKE_BODY_CHARS), truncated: true, bodyLength: body.length };
   }
 
   /** The message a reply names, or a `not_found` throw. Scoped to the thread, so it cannot cross one. */
@@ -200,7 +219,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
               source: 'human_message',
               reason: `message from ${t.humanLabel ?? 'the human'}${project ? ` about ${project.slug}` : ''}`,
               payload: {
-                threadId: t.id, messageId: msg.id, body: body.slice(0, 2000),
+                threadId: t.id, messageId: msg.id, ...wakeBody(body),
                 projectId: project?.id ?? null, projectSlug: project?.slug ?? null,
                 replyToMessageId: msg.replyToMessageId, replyToExcerpt: msg.replyToExcerpt,
                 ...(attachmentParts.length ? { attachmentIds: attachmentParts.map((p) => p.id) } : {}),
@@ -251,6 +270,20 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
         .all<ThreadMessage>(sql, params)
         .map((m) => (m.replyToExcerpt === null ? m : { ...m, replyToExcerpt: excerpt(m.replyToExcerpt) }))
         .reverse();
+    },
+
+    message(threadId, messageId) {
+      // Scoped to the thread in the query itself, the same way `attachment` is: a message from
+      // another thread and an unknown message id come back as the identical `not_found`, so a
+      // caller cannot use this to tell "exists elsewhere" from "does not exist" (VS-242).
+      const r = db.get<ThreadMessage>(
+        `SELECT m.*, r.body AS reply_to_excerpt FROM thread_messages m
+         LEFT JOIN thread_messages r ON r.id = m.reply_to_message_id AND r.thread_id = m.thread_id
+         WHERE m.id = ? AND m.thread_id = ?`,
+        [messageId, threadId],
+      );
+      if (!r) throw new OcError('not_found', `message ${messageId} not found in thread ${threadId}`);
+      return r.replyToExcerpt === null ? r : { ...r, replyToExcerpt: excerpt(r.replyToExcerpt) };
     },
 
     attachment(threadId, attachmentId) {

@@ -1,0 +1,8 @@
+argv: codex debug models --bundled
+version: codex-cli 0.153.4
+capturedAt: 2026-09-11T16:02:55Z
+CODEX_HOME: /tmp/vs228-codex-P1a2
+exit: 0
+517840 openspec/changes/vs-228-thinking-level-cannot-be-chosen-effort-e/captures/codex-debug-models-bundled.stdout.txt
+   184 openspec/changes/vs-228-thinking-level-cannot-be-chosen-effort-e/captures/codex-debug-models-bundled.stderr.txt
+518024 total

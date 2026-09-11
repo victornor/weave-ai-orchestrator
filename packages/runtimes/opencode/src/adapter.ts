@@ -46,14 +46,73 @@ const CONFIG_SCHEMA: JsonSchema = {
   },
 };
 
-/** Parse `opencode models` output: one `provider/model` per line. */
+function isModelIdLine(line: string): boolean {
+  const id = line.trim();
+  return id.length > 0 && id.includes('/') && !/\s/.test(id);
+}
+
+/** Slice a JSON object starting at `from`, respecting strings so braces in values do not end early. */
+function takeJsonObject(text: string, from: number): { json: string; end: number } | null {
+  const start = text.indexOf('{', from);
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (inStr) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return { json: text.slice(start, i + 1), end: i + 1 };
+    }
+  }
+  return null;
+}
+
+function effortsFromVariants(variants: unknown): string[] {
+  if (variants == null || typeof variants !== 'object' || Array.isArray(variants)) return [];
+  const rec = variants as Record<string, { disabled?: boolean } | undefined>;
+  return Object.keys(rec).filter((k) => rec[k]?.disabled !== true);
+}
+
+/**
+ * Parse `opencode models` / `opencode models --verbose`.
+ * Non-verbose: one `provider/model` per line, `efforts` omitted.
+ * Verbose (captured 2026-09-11, OpenCode 1.18.30): id line, then a JSON object whose `variants`
+ * keys are the thinking levels (`{}` → `[]`). A variant with `disabled: true` is skipped.
+ */
 export function parseModels(stdout: string): RuntimeModel[] {
   const out: RuntimeModel[] = [];
-  for (const line of stdout.split('\n')) {
-    const id = line.trim();
-    if (!id || !id.includes('/') || /\s/.test(id)) continue;
+  const lines = stdout.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const id = lines[i]!.trim();
+    i += 1;
+    if (!isModelIdLine(id)) continue;
     const provider = id.slice(0, id.indexOf('/'));
-    out.push({ id, label: id, provider, source: 'detected' });
+    const model: RuntimeModel = { id, label: id, provider, source: 'detected' };
+    while (i < lines.length && lines[i]!.trim() === '') i += 1;
+    if (i < lines.length && lines[i]!.trim().startsWith('{')) {
+      const chunk = lines.slice(i).join('\n');
+      const taken = takeJsonObject(chunk, 0);
+      if (taken) {
+        try {
+          const obj = JSON.parse(taken.json) as { variants?: unknown };
+          if (obj && typeof obj === 'object' && 'variants' in obj) {
+            model.efforts = effortsFromVariants(obj.variants);
+          }
+        } catch { /* omit efforts */ }
+        i += chunk.slice(0, taken.end).split('\n').length;
+      }
+    }
+    out.push(model);
   }
   return out;
 }
@@ -68,7 +127,7 @@ export const adapter: RuntimeAdapter = {
   async listModels(): Promise<RuntimeModel[]> {
     try {
       const exe = (await which('opencode')) ?? 'opencode';
-      const { stdout } = await pExecFile(exe, ['models'], { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 });
+      const { stdout } = await pExecFile(exe, ['models', '--verbose'], { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 });
       const models = parseModels(stdout);
       if (models.length > 0) return models;
     } catch { /* fall through to the static list */ }

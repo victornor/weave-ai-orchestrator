@@ -31,6 +31,9 @@ describe('opencode adapter', () => {
     expect(models.length).toBeGreaterThan(0);
     expect(models.every((m) => m.id.includes('/'))).toBe(true);
     expect(['detected', 'static']).toContain(models[0]!.source);
+    if (models[0]!.source === 'static') {
+      expect(models.every((m) => m.efforts === undefined)).toBe(true);
+    }
   });
 
   it('installs AGENTS.md, skills and a placeholder opencode.json', async () => {

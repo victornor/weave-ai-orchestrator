@@ -590,6 +590,22 @@ function isCustomModel(model: string | null, known: T.RuntimeModel[]): boolean {
   return model !== null && known.length > 0 && !known.some((m) => m.id === model);
 }
 
+function effortsForModel(model: string | null, known: T.RuntimeModel[], custom: boolean): string[] | undefined {
+  if (custom || model == null) return undefined;
+  return known.find((m) => m.id === model)?.efforts;
+}
+
+/** Drop a stored effort the new model does not list; keep it when the new model is unknown (free text). */
+function settingAfterModelChange(setting: T.ModelSetting, model: string | null, known: T.RuntimeModel[]): T.ModelSetting {
+  const custom = isCustomModel(model, known);
+  const efforts = effortsForModel(model, known, custom);
+  let effort = setting.effort;
+  if (effort) {
+    if (efforts && (efforts.length === 0 || !efforts.includes(effort))) effort = undefined;
+  }
+  return { ...setting, model, effort };
+}
+
 function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange, onCommit, scopeControl }: {
   label: string;
   hint: string;
@@ -605,11 +621,24 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
   const known = models.data ?? [];
   const [freeText, setFreeText] = useState(false);
   const custom = freeText || isCustomModel(setting.model, known);
+  const efforts = effortsForModel(setting.model, known, custom);
+  const effortInList = Boolean(setting.effort && efforts && efforts.includes(setting.effort));
+  const effortMode: 'picker' | 'hidden' | 'freetext' =
+    efforts && efforts.length > 0 && (effortInList || !setting.effort) ? 'picker'
+      : efforts && efforts.length === 0 ? 'hidden'
+        : 'freetext';
   const modelId = useCommittableField({
     value: setting.model ?? '',
     onCommit: async (raw) => {
       const model = raw.trim() === '' ? null : raw.trim();
-      await onCommit({ ...setting, model });
+      await onCommit(settingAfterModelChange(setting, model, known));
+    },
+  });
+  const effortField = useCommittableField({
+    value: setting.effort ?? '',
+    onCommit: async (raw) => {
+      const effort = raw.trim() === '' ? undefined : raw.trim();
+      await onCommit({ ...setting, effort });
     },
   });
 
@@ -626,7 +655,7 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
           disabled={disabled}
           onChange={(e) => {
             if (disabled) return;
-            onChange({ ...setting, runtime: e.target.value });
+            onChange({ ...setting, runtime: e.target.value, effort: undefined });
           }}
         >
           {runtimes.map((r) => (
@@ -648,7 +677,7 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
             if (disabled) return;
             if (e.target.value === '__other') { setFreeText(true); return; }
             setFreeText(false);
-            onChange({ ...setting, model: e.target.value === '' ? null : e.target.value });
+            onChange(settingAfterModelChange(setting, e.target.value === '' ? null : e.target.value, known));
           }}
         >
           <option value="">default (the runtime chooses)</option>
@@ -679,6 +708,44 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
           </div>
         </Field>
       ) : null}
+      {effortMode === 'picker' ? (
+        <Field label="Thinking level">
+          <select
+            className={cx(inputCx, 'ac-mono')}
+            aria-label={`${label} thinking level`}
+            value={setting.effort ?? ''}
+            disabled={disabled}
+            onChange={(e) => {
+              if (disabled) return;
+              onChange({ ...setting, effort: e.target.value === '' ? undefined : e.target.value });
+            }}
+          >
+            <option value="">default (unset)</option>
+            {efforts!.map((level) => (
+              <option key={level} value={level}>{level}</option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
+      {effortMode === 'freetext' ? (
+        <Field label="Thinking level" hint="This model does not report which levels it accepts.">
+          <div className="flex items-center gap-2">
+            <input
+              className={cx(inputCx, 'ac-mono')}
+              aria-label={`${label} thinking level`}
+              value={effortField.draft}
+              disabled={disabled}
+              onChange={(e) => {
+                if (disabled) return;
+                effortField.onChange(e.target.value);
+              }}
+              onBlur={effortField.onBlur}
+              onKeyDown={effortField.onKeyDown}
+            />
+            {disabled ? null : <CommitStatus status={effortField.status} error={effortField.error} onSave={effortField.commitNow} />}
+          </div>
+        </Field>
+      ) : null}
     </div>
   );
 }
@@ -694,10 +761,16 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
   const [description, setDescription] = useState('');
   const [runtime, setRuntime] = useState(current.workers.runtime);
   const [model, setModel] = useState<string | null>(null);
+  const [effort, setEffort] = useState<string | undefined>();
   const [freeText, setFreeText] = useState(false);
   const optionModels = useRuntimeModels(runtime);
   const knownOptionModels = optionModels.data ?? [];
   const customModel = freeText || isCustomModel(model, knownOptionModels);
+  const optionEfforts = effortsForModel(model, knownOptionModels, customModel);
+  const optionEffortMode: 'picker' | 'hidden' | 'freetext' =
+    optionEfforts && optionEfforts.length > 0 ? 'picker'
+      : optionEfforts && optionEfforts.length === 0 ? 'hidden'
+        : 'freetext';
 
   // The entry exactly as add() would store it, checked against the same schemas the daemon parses
   // (VS-212) — the limits stay derived from shared, never restated here.
@@ -706,6 +779,7 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
     description: description.trim(),
     runtime,
     model: model?.trim() ? model.trim() : null,
+    ...(effort ? { effort } : {}),
   };
   const fieldIssues = parseFieldIssues(WorkerModelOptionSchema, candidate);
   const listIssues = parseFieldIssues(WorkerOptionsArraySchema, [...options, candidate]);
@@ -731,6 +805,7 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
     setId('');
     setDescription('');
     setModel(null);
+    setEffort(undefined);
     setFreeText(false);
   };
 
@@ -758,7 +833,7 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
         <input className={inputCx} aria-label="New worker option description" value={description} onChange={(e) => setDescription(e.target.value)} />
       </Field>
       <Field label="Runtime">
-        <select className={cx(inputCx, 'ac-mono')} aria-label="New worker option runtime" value={runtime} onChange={(e) => setRuntime(e.target.value)}>
+        <select className={cx(inputCx, 'ac-mono')} aria-label="New worker option runtime" value={runtime} onChange={(e) => { setRuntime(e.target.value); setEffort(undefined); }}>
           {runtimes.map((r) => (
             <option key={r.id} value={r.id} disabled={!isRuntimeAvailable(r)}>
               {r.displayName}
@@ -775,7 +850,10 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
           onChange={(e) => {
             if (e.target.value === '__other') { setFreeText(true); return; }
             setFreeText(false);
-            setModel(e.target.value === '' ? null : e.target.value);
+            const next = e.target.value === '' ? null : e.target.value;
+            setModel(next);
+            const nextEfforts = effortsForModel(next, knownOptionModels, false);
+            if (effort && nextEfforts && (nextEfforts.length === 0 || !nextEfforts.includes(effort))) setEffort(undefined);
           }}
         >
           <option value="">runtime default</option>
@@ -794,6 +872,31 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
             aria-label="New worker option model id"
             value={model ?? ''}
             onChange={(e) => setModel(e.target.value)}
+          />
+        </Field>
+      ) : null}
+      {optionEffortMode === 'picker' ? (
+        <Field label="Thinking level">
+          <select
+            className={cx(inputCx, 'ac-mono')}
+            aria-label="New worker option thinking level"
+            value={effort ?? ''}
+            onChange={(e) => setEffort(e.target.value === '' ? undefined : e.target.value)}
+          >
+            <option value="">default (unset)</option>
+            {optionEfforts!.map((level) => (
+              <option key={level} value={level}>{level}</option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
+      {optionEffortMode === 'freetext' ? (
+        <Field label="Thinking level" hint="This model does not report which levels it accepts.">
+          <input
+            className={cx(inputCx, 'ac-mono')}
+            aria-label="New worker option thinking level"
+            value={effort ?? ''}
+            onChange={(e) => setEffort(e.target.value.trim() === '' ? undefined : e.target.value)}
           />
         </Field>
       ) : null}

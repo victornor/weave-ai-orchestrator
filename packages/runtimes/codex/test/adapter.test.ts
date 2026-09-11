@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { adapter } from '../src/adapter.js';
+import { FALLBACK_MODELS, listModels } from '../src/models.js';
 
 const dirs: string[] = [];
 const tmp = (p: string) => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push(d); return d; };
@@ -16,10 +17,13 @@ describe('codex adapter', () => {
     expect(adapter.capabilities).toMatchObject({ systemPromptInjection: 'file_only', structuredOutput: true, costReporting: false, forkSessions: true });
   });
 
-  it('lists static gpt-5 family and o-series models', async () => {
-    const ids = (await adapter.listModels()).map((m) => m.id);
+  it('lists static gpt-5 family and o-series models when no binary is given', async () => {
+    const models = await listModels({ binaryPath: null });
+    const ids = models.map((m) => m.id);
     expect(ids).toEqual(expect.arrayContaining(['gpt-5', 'gpt-5-mini', 'o3', 'o4-mini']));
-    expect((await adapter.listModels()).every((m) => m.source === 'static')).toBe(true);
+    expect(models.every((m) => m.source === 'static')).toBe(true);
+    expect(models.every((m) => m.efforts === undefined)).toBe(true);
+    expect(ids).toEqual(FALLBACK_MODELS.map((m) => m.id));
   });
 
   it('installs AGENTS.md and skills', async () => {

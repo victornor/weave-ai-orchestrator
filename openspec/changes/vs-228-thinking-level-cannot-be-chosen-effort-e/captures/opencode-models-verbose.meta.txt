@@ -1,0 +1,7 @@
+argv: opencode models --verbose
+version: 1.18.30
+capturedAt: 2026-09-11T16:02:55Z
+exit: 0
+39216 openspec/changes/vs-228-thinking-level-cannot-be-chosen-effort-e/captures/opencode-models-verbose.stdout.txt
+    0 openspec/changes/vs-228-thinking-level-cannot-be-chosen-effort-e/captures/opencode-models-verbose.stderr.txt
+39216 total

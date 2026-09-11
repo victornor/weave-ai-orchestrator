@@ -22,9 +22,19 @@ export const CONTEXT_COMPACTION_AT = 0.92;
  * the installed CLI's own hand-maintained model catalog (`context.window` per model id), not guessed
  * — see VS-129's `design.md` for the extraction method and the full per-model evidence table. Check
  * this against the CLI's own catalog again whenever a model in `MODELS` below changes.
+ *
+ * Thinking levels (VS-228, Claude Code 2.1.266): the CLI picker's universe is
+ * `low|medium|high|xhigh|max`, then it drops `max` unless the catalog flags `max_effort` and
+ * `xhigh` unless it flags `xhigh_effort`. Models without the `effort` capability (Haiku 4.5) take
+ * none — `[]`, not the five-value `configSchema` enum. Aliases inherit the latest pinned id's flags.
  */
 const CONTEXT_WINDOW_TOKENS_STANDARD = 200_000;
 const CONTEXT_WINDOW_TOKENS_1M = 1_000_000;
+
+/** Catalog-derived picker for a model that flags `effort` (Claude Code 2.1.266). */
+const EFFORTS_LOW_TO_MAX = ['low', 'medium', 'high', 'xhigh', 'max'];
+/** Haiku 4.5's catalog entry has no `effort` capability. */
+const EFFORTS_NONE: string[] = [];
 
 export const capabilities: RuntimeCapabilities = {
   resumableSessions: true,
@@ -45,14 +55,14 @@ export const capabilities: RuntimeCapabilities = {
 
 /** Aliases plus pinned ids. Claude Code has no machine-readable model list, so this is `static`. */
 const MODELS: RuntimeModel[] = [
-  { id: 'fable', label: 'Fable (latest)', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
-  { id: 'opus', label: 'Opus (latest)', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
-  { id: 'sonnet', label: 'Sonnet (latest)', provider: 'anthropic', source: 'static', tier: 'balanced', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
-  { id: 'haiku', label: 'Haiku (latest)', provider: 'anthropic', source: 'static', tier: 'fast', contextWindowTokens: CONTEXT_WINDOW_TOKENS_STANDARD },
-  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
-  { id: 'claude-opus-5', label: 'Claude Opus 5', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
-  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', provider: 'anthropic', source: 'static', tier: 'balanced', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M },
-  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'anthropic', source: 'static', tier: 'fast', contextWindowTokens: CONTEXT_WINDOW_TOKENS_STANDARD },
+  { id: 'fable', label: 'Fable (latest)', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M, efforts: EFFORTS_LOW_TO_MAX },
+  { id: 'opus', label: 'Opus (latest)', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M, efforts: EFFORTS_LOW_TO_MAX },
+  { id: 'sonnet', label: 'Sonnet (latest)', provider: 'anthropic', source: 'static', tier: 'balanced', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M, efforts: EFFORTS_LOW_TO_MAX },
+  { id: 'haiku', label: 'Haiku (latest)', provider: 'anthropic', source: 'static', tier: 'fast', contextWindowTokens: CONTEXT_WINDOW_TOKENS_STANDARD, efforts: EFFORTS_NONE },
+  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M, efforts: EFFORTS_LOW_TO_MAX },
+  { id: 'claude-opus-5', label: 'Claude Opus 5', provider: 'anthropic', source: 'static', tier: 'frontier', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M, efforts: EFFORTS_LOW_TO_MAX },
+  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', provider: 'anthropic', source: 'static', tier: 'balanced', contextWindowTokens: CONTEXT_WINDOW_TOKENS_1M, efforts: EFFORTS_LOW_TO_MAX },
+  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'anthropic', source: 'static', tier: 'fast', contextWindowTokens: CONTEXT_WINDOW_TOKENS_STANDARD, efforts: EFFORTS_NONE },
 ];
 
 const CONFIG_SCHEMA: JsonSchema = {

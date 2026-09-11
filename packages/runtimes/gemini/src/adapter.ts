@@ -23,11 +23,11 @@ export const capabilities: RuntimeCapabilities = {
 };
 
 const MODELS: RuntimeModel[] = [
-  { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro', provider: 'google', source: 'static', tier: 'frontier' },
-  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', provider: 'google', source: 'static', tier: 'balanced' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google', source: 'static', tier: 'frontier' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', source: 'static', tier: 'balanced' },
-  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', provider: 'google', source: 'static', tier: 'fast' },
+  { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro', provider: 'google', source: 'static', tier: 'frontier', efforts: [] },
+  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', provider: 'google', source: 'static', tier: 'balanced', efforts: [] },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google', source: 'static', tier: 'frontier', efforts: [] },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', source: 'static', tier: 'balanced', efforts: [] },
+  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', provider: 'google', source: 'static', tier: 'fast', efforts: [] },
 ];
 
 const CONFIG_SCHEMA: JsonSchema = {

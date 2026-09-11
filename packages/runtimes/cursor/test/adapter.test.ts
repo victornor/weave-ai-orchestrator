@@ -27,8 +27,14 @@ describe('cursor adapter', () => {
     await listModels({ binaryPath: null });
     const models = await adapter.listModels();
     expect(models.every((m) => m.source === 'static')).toBe(true);
+    expect(models.every((m) => Array.isArray(m.efforts) && m.efforts.length === 0)).toBe(true);
     expect(models.map((m) => m.id)).toEqual(FALLBACK_MODELS.map((m) => m.id));
     expect(models.map((m) => m.id)).not.toContain('grok-4-6');
+  });
+
+  it('does not declare an effort property — thinking is distinct model ids', () => {
+    const props = (adapter.configSchema() as { properties: Record<string, unknown> }).properties;
+    expect(props).not.toHaveProperty('effort');
   });
 
   it('installs AGENTS.md, a CLAUDE.md pointer, and skills', async () => {

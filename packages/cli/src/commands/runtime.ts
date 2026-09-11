@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { ApiError } from '../api.js';
 import { emit, fields, style, table, write } from '../output.js';
+import { resolveWorkspaceStateDir } from '../release.js';
 import { items, run, session } from './util.js';
 
 interface RuntimeDescriptor {
@@ -90,7 +91,7 @@ export function register(program: Command): void {
       );
       const fallback = FALLBACK[id];
       const envName = descriptor.configHomeEnv ?? fallback?.env ?? 'XDG_CONFIG_HOME';
-      const configHome = root ? join(root, '.agent-conductor', 'runtimes', id) : '';
+      const configHome = root ? join(resolveWorkspaceStateDir(root).stateDir, 'runtimes', id) : '';
       const command_ = descriptor.login?.command ?? fallback?.command[0] ?? id;
       const args = descriptor.login?.args ?? fallback?.command.slice(1) ?? [];
       const instructions = descriptor.login?.instructions ?? fallback?.instructions ?? [];

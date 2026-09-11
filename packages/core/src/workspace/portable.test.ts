@@ -67,7 +67,7 @@ describe('exportWorkspace', () => {
     expect(readdirSync(join(result.path, 'roles', 'backend')).sort()).toEqual(['CHARTER.md', 'role.yaml']);
     expect(existsSync(join(result.path, 'knowledge', 'workspace', 'WORKSPACE.md'))).toBe(true);
     expect(existsSync(join(result.path, 'knowledge', 'workspace', 'archive'))).toBe(false);
-    for (const forbidden of ['db.sqlite', 'runs', '.agent-conductor', 'workers']) {
+    for (const forbidden of ['db.sqlite', 'runs', '.weave', 'workers']) {
       expect(existsSync(join(result.path, forbidden))).toBe(false);
     }
   });

@@ -3,24 +3,22 @@
  * `conductor` is a pure remote client: every command works identically against a local or remote daemon.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join, parse as parsePath, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { ContextsFileSchema, type ContextsFile } from '@agent-conductor/shared';
+import { configDir as resolveConfigDir, stateHome as resolveStateHome } from '@agent-conductor/release';
 
 export interface ContextEntry { url: string; token: string; workspace?: string; certPin?: string }
 
 export const DEFAULT_URL = 'http://127.0.0.1:7433';
 
+/** VS-258: collapsed into `@agent-conductor/release`, the one place old/new resolution happens. */
 export function configHome(): string {
-  if (process.env['AC_CONFIG_HOME']) return process.env['AC_CONFIG_HOME'];
-  const xdg = process.env['XDG_CONFIG_HOME'];
-  return xdg && xdg.trim() !== '' ? join(xdg, 'agent-conductor') : join(homedir(), '.config', 'agent-conductor');
+  return resolveConfigDir();
 }
 
 export function stateHome(): string {
-  const xdg = process.env['XDG_STATE_HOME'];
-  return xdg && xdg.trim() !== '' ? join(xdg, 'agent-conductor') : join(homedir(), '.local', 'state', 'agent-conductor');
+  return resolveStateHome();
 }
 
 export function contextsPath(): string {

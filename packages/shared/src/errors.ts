@@ -3,6 +3,7 @@ export const ERROR_CODES = [
   'wrong_status', 'budget_exceeded', 'duplicate_entry', 'entry_too_long', 'runtime_unreachable', 'model_unconfigured', 'worktree_dirty', 'worktree_not_landed',
   'openspec_validation_failed', 'openspec_not_found', 'merge_not_approved', 'merge_unverified', 'role_full', 'auth_bad_credentials',
   'auth_locked', 'auth_session_expired', 'auth_totp_required', 'auth_totp_invalid', 'net_daemon_unreachable', 'internal',
+  'ambiguous_install_path',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 

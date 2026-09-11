@@ -703,12 +703,164 @@ describe('decisions', () => {
       });
       const flagged = decisions.review(conductor(), merge.id, { status: 'concerns', note: 'screenshot is cropped' });
       expect(flagged.conductorReviewStatus).toBe('concerns');
-      await decisions.answer(HUMAN, merge.id, { key: 'approve' });
+      // VS-266: a concern holds the approving answer — overriding it is required to still take this path.
+      await decisions.answer(HUMAN, merge.id, { key: 'approve', overrideHold: true, overrideReason: 'merging anyway, the screenshot is unrelated' });
       const answered = decisions.get(merge.id);
       expect(answered.answerKey).toBe('approve');
       expect(answered.conductorReviewStatus).toBe('concerns');
       expect(answered.conductorReviewNote).toBe('screenshot is cropped');
       expect(tickets.get(t2.id).status).toBe('merging');
+    });
+  });
+
+  describe('holding approval on a concern (VS-266)', () => {
+    const conductor = (): Actor => ({ kind: 'agent', id: h.conductorId, runId: 'run-conductor' });
+
+    it('refuses to approve a plan_approval the conductor marked concerns, naming what is being waited on', async () => {
+      const t = ticket();
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      decisions.review(conductor(), plan.id, { status: 'concerns', note: 'the migration needs splitting' });
+      await expect(decisions.answer(HUMAN, plan.id, { key: 'approve' })).rejects.toMatchObject({
+        code: 'revision_pending',
+        details: { conductorReviewNote: 'the migration needs splitting' },
+      });
+      expect(decisions.get(plan.id).status).toBe('open');
+    });
+
+    it('refuses to approve a merge_approval the conductor marked concerns', async () => {
+      const t = ticket();
+      h.db.update('tickets', t.id, { status: 'in_review' });
+      const merge = decisions.create(AGENT, {
+        ticketId: t.id, kind: 'merge_approval', title: 'Merge?',
+        options: [{ key: 'approve', label: 'Approve merge' }, { key: 'changes', label: 'Request changes' }],
+      });
+      decisions.review(conductor(), merge.id, { status: 'concerns', note: 'CI is flaky, re-run first' });
+      await expect(decisions.answer(HUMAN, merge.id, { key: 'approve' })).rejects.toMatchObject({ code: 'revision_pending' });
+      expect(decisions.get(merge.id).status).toBe('open');
+    });
+
+    it('never blocks a non-approving answer, whatever the review state', async () => {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      h.db.update('tickets', t.id, { status: 'proposed', workerId });
+      const plan = decisions.create(AGENT, {
+        ticketId: t.id, kind: 'plan_approval', title: 'Plan', askedByAgentId: workerId,
+        options: [{ key: 'approve', label: 'Approve' }, { key: 'revise', label: 'Revise' }, { key: 'reject', label: 'Reject' }],
+      });
+      decisions.review(conductor(), plan.id, { status: 'concerns', note: 'needs work' });
+      await decisions.answer(HUMAN, plan.id, { key: 'revise', text: 'please split it' });
+      expect(decisions.get(plan.id).status).toBe('answered');
+      expect(tickets.get(t.id).status).toBe('proposing');
+
+      const t2 = ticket({ title: 'Merge this too' });
+      const worker2 = h.addWorker(t2.id);
+      h.db.update('tickets', t2.id, { status: 'in_review', workerId: worker2 });
+      const merge = decisions.create(AGENT, {
+        ticketId: t2.id, kind: 'merge_approval', title: 'Merge?', askedByAgentId: worker2,
+        options: [{ key: 'approve', label: 'Approve merge' }, { key: 'changes', label: 'Request changes' }],
+      });
+      decisions.review(conductor(), merge.id, { status: 'concerns', note: 'flaky test' });
+      await decisions.answer(HUMAN, merge.id, { key: 'changes', text: 'please fix' });
+      expect(decisions.get(merge.id).status).toBe('answered');
+      expect(tickets.get(t2.id).status).toBe('in_progress');
+    });
+
+    it('lets a human override the hold, and records who, when and why', async () => {
+      const t = ticket();
+      h.db.update('tickets', t.id, { status: 'proposed' });
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      decisions.review(conductor(), plan.id, { status: 'concerns', note: 'needs work' });
+      await decisions.answer(HUMAN, plan.id, { key: 'approve', overrideHold: true, overrideReason: 'acceptable risk, ship it' });
+      expect(decisions.get(plan.id).status).toBe('answered');
+      expect(tickets.get(t.id).status).toBe('approved');
+
+      const rows = h.db.all<{ actorId: string; actorKind: string; details: Record<string, unknown> }>(
+        "SELECT actor_id, actor_kind, details_json FROM activity WHERE action = 'decision.hold_overridden'",
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ actorId: 'victor', actorKind: 'human', details: { reason: 'acceptable risk, ship it' } });
+      expect(tickets.comments(t.id).some((c) => c.body.includes('acceptable risk, ship it'))).toBe(true);
+    });
+
+    it('refuses the override without a stated reason, or with overrideHold unset', async () => {
+      const t = ticket();
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      decisions.review(conductor(), plan.id, { status: 'concerns', note: 'needs work' });
+      await expect(decisions.answer(HUMAN, plan.id, { key: 'approve', overrideReason: 'no flag set' })).rejects.toMatchObject({ code: 'revision_pending' });
+      await expect(decisions.answer(HUMAN, plan.id, { key: 'approve', overrideHold: true, overrideReason: '   ' })).rejects.toMatchObject({ code: 'revision_pending' });
+      expect(decisions.get(plan.id).status).toBe('open');
+      expect(h.db.all("SELECT id FROM activity WHERE action = 'decision.hold_overridden'")).toHaveLength(0);
+    });
+
+    it('ignores an override on a decision that is not held', async () => {
+      const t = ticket();
+      h.db.update('tickets', t.id, { status: 'proposed' });
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      await decisions.answer(HUMAN, plan.id, { key: 'approve', overrideHold: true, overrideReason: 'not needed here' });
+      expect(tickets.get(t.id).status).toBe('approved');
+      expect(h.db.all("SELECT id FROM activity WHERE action = 'decision.hold_overridden'")).toHaveLength(0);
+      expect(tickets.comments(t.id).some((c) => c.body.includes('not needed here'))).toBe(false);
+    });
+
+    it('a worker that never revises does not strand the human: the override needs no live worker', async () => {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      h.db.update('tickets', t.id, { status: 'proposed', workerId });
+      h.db.update('agents', workerId, { status: 'retired' });
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan', askedByAgentId: workerId });
+      decisions.review(conductor(), plan.id, { status: 'concerns', note: 'the worker went quiet' });
+      await decisions.answer(HUMAN, plan.id, { key: 'approve', overrideHold: true, overrideReason: 'worker retired, proceeding without a revision' });
+      expect(tickets.get(t.id).status).toBe('approved');
+    });
+
+    it('lifts the hold when a plan sent back for revision is re-proposed: the fresh decision starts unseen', async () => {
+      const t = ticket();
+      h.db.update('tickets', t.id, { status: 'proposing' });
+      await tickets.transition(AGENT, t.id, { to: 'proposed' });
+      const firstPlan = decisions.list({ ticketId: t.id, status: ['open'] }).find((d) => d.kind === 'plan_approval')!;
+      decisions.review(conductor(), firstPlan.id, { status: 'concerns', note: 'needs another pass' });
+      await expect(decisions.answer(HUMAN, firstPlan.id, { key: 'approve' })).rejects.toMatchObject({ code: 'revision_pending' });
+
+      await decisions.answer(HUMAN, firstPlan.id, { key: 'revise', text: 'go again' });
+      expect(tickets.get(t.id).status).toBe('proposing');
+      expect(decisions.get(firstPlan.id).status).toBe('answered');
+
+      await tickets.transition(AGENT, t.id, { to: 'proposed' });
+      const secondPlan = decisions.list({ ticketId: t.id, status: ['open'] }).find((d) => d.kind === 'plan_approval')!;
+      expect(secondPlan.id).not.toBe(firstPlan.id);
+      expect(secondPlan.conductorReviewStatus).toBe('unseen');
+      await decisions.answer(HUMAN, secondPlan.id, { key: 'approve' });
+      expect(tickets.get(t.id).status).toBe('approved');
+    });
+
+    it('lifts the hold when a merge approval held by a concern is redelivered: the fresh decision starts unseen', async () => {
+      const t = ticket();
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'https://example.com/pr/1' });
+      await tickets.transition(AGENT, t.id, { to: 'in_review' });
+      const firstMerge = decisions.list({ ticketId: t.id, status: ['open'] }).find((d) => d.kind === 'merge_approval')!;
+      decisions.review(conductor(), firstMerge.id, { status: 'concerns', note: 'the diff still has the debug log' });
+      await expect(decisions.answer(HUMAN, firstMerge.id, { key: 'approve' })).rejects.toMatchObject({ code: 'revision_pending' });
+
+      await decisions.answer(HUMAN, firstMerge.id, { key: 'changes', text: 'strip the debug log' });
+      expect(tickets.get(t.id).status).toBe('in_progress');
+      expect(decisions.get(firstMerge.id).status).toBe('answered');
+
+      await tickets.transition(AGENT, t.id, { to: 'in_review' });
+      const secondMerge = decisions.list({ ticketId: t.id, status: ['open'] }).find((d) => d.kind === 'merge_approval')!;
+      expect(secondMerge.id).not.toBe(firstMerge.id);
+      expect(secondMerge.conductorReviewStatus).toBe('unseen');
+      await decisions.answer(HUMAN, secondMerge.id, { key: 'approve' });
+      expect(tickets.get(t.id).status).toBe('merging');
+    });
+
+    it('does not lift its own hold when marked concerns again with no revision cycle in between', async () => {
+      const t = ticket();
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      decisions.review(conductor(), plan.id, { status: 'concerns', note: 'first pass' });
+      decisions.review(conductor(), plan.id, { status: 'concerns', note: 'still not right' });
+      await expect(decisions.answer(HUMAN, plan.id, { key: 'approve' })).rejects.toMatchObject({ code: 'revision_pending' });
+      expect(decisions.get(plan.id).status).toBe('open');
     });
   });
 });

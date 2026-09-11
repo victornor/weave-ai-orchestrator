@@ -1,5 +1,5 @@
 import { decisionRow, newId, nowIso, type Db } from '@agent-conductor/db';
-import { OcError, CONDUCTOR_REVIEW_KINDS, CONDUCTOR_REVIEW_NOTE_MAX, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type TicketStatus } from '@agent-conductor/shared';
+import { OcError, CONDUCTOR_REVIEW_KINDS, CONDUCTOR_REVIEW_NOTE_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type TicketStatus } from '@agent-conductor/shared';
 import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -382,11 +382,34 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     return out;
   }
 
-  async function answer(actor: Actor, id: string, ans: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }): Promise<Decision> {
+  /** The option key that moves a review-carrying kind's ticket forward — the one this hold applies to. Every carrying kind currently names it `approve`, but this reads the contract rather than assuming it stays that way. */
+  function approvingKeyOf(kind: DecisionKind): string | null {
+    if (!(CONDUCTOR_REVIEW_KINDS as readonly string[]).includes(kind)) return null;
+    return (NAMED_CARD_OPTION_KEYS as Record<string, { approve?: string }>)[kind]?.approve ?? null;
+  }
+
+  async function answer(
+    actor: Actor,
+    id: string,
+    ans: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string },
+  ): Promise<Decision> {
     const d = get(id);
     if (d.status !== 'open') {
       const supersededBy = d.status === 'superseded' ? replacementFor(d) : null;
       throw new OcError('wrong_status', `decision ${id} is ${d.status}`, { status: d.status, ...(supersededBy ? { supersededBy } : {}) });
+    }
+    // VS-266: a decision the conductor marked `concerns` refuses its approving answer, from any
+    // actor, until it stops being the live question (answered, or superseded by a fresh one raised
+    // through a real revision cycle) or a human deliberately overrides the hold. Every other answer
+    // — revise, reject, the non-approving merge option, any answer on a decision that is not held —
+    // is untouched by this check.
+    const held = d.conductorReviewStatus === 'concerns' && ans.key != null && ans.key === approvingKeyOf(d.kind);
+    const overrideReason = (ans.overrideReason ?? '').trim();
+    const overridden = held && ans.overrideHold === true && overrideReason !== '';
+    if (held && !overridden) {
+      throw new OcError('revision_pending', `decision ${id} is held: the conductor has concerns and no revision has landed`, {
+        conductorReviewNote: d.conductorReviewNote, conductorReviewedAt: d.conductorReviewedAt,
+      });
     }
     const suppliedInputs = ans.inputs ?? {};
     const hasInputs = (d.inputs ?? []).length > 0;
@@ -415,9 +438,16 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       });
       const next = get(d.id);
       recordActivity(db, ws, actor, 'decision.answer', 'decision', d.id, { key, kind: d.kind }, d.ticketId);
+      if (overridden) recordActivity(db, ws, actor, 'decision.hold_overridden', 'decision', d.id, { reason: overrideReason }, d.ticketId);
       ctx.events.emit('decision.answered', 'decision', d.id, next);
       return next;
     });
+
+    // Recorded in the audit trail above; also surfaced in-place on the ticket, since that is where a
+    // human reading back "why did this merge/approve without a revision" would look first (VS-266).
+    if (overridden && d.ticketId) {
+      deps().tickets.comment(actor, d.ticketId, `Approval held by a conductor concern was overridden: ${overrideReason}`, 'comment', 'trusted');
+    }
 
     // Verbatim answer text is already recorded; side effects come second so a failure never loses the answer.
     const effective = key ?? '';

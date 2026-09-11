@@ -42,7 +42,7 @@ export interface DecisionCardProps {
   ticketSummary?: string | null;
   /** VS-146: tighter padding and button chrome. Chat only; Needs you stays at the default. */
   compact?: boolean;
-  onAnswer: (answer: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }) => void;
+  onAnswer: (answer: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string }) => void;
   className?: string;
 }
 
@@ -99,6 +99,8 @@ export function ConductorReviewLine({ decision }: { decision: Decision }): React
     <div className="mb-2" data-conductor-review={copy.tone}>
       <p className={cx('text-micro', copy.tone === 'concerns' ? 'font-medium' : null, toneClass)}>{copy.line}</p>
       {copy.note ? <p className="mt-1 whitespace-pre-wrap text-meta text-text-1">{copy.note}</p> : null}
+      {/* VS-266: in addition to the concern line and note, not a replacement for either. */}
+      {copy.held ? <p className="mt-1 text-micro font-medium text-blocked">Approval is held until this is revised, or you override it.</p> : null}
     </div>
   );
 }
@@ -203,6 +205,7 @@ const CONTEXT_PREVIEW_CHARS = 500;
  */
 export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, askedBy, asker, busy, queued, plan, autoApproving, onHide, ticketFiledByConductor, ticketSummary, compact, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
+  const [overriding, setOverriding] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [freeText, setFreeText] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -250,6 +253,9 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
     inputs.length ? { ...a, inputs: collected() } : a;
 
   const answer = (key: string, text?: string): void => onAnswer(withInputs(text === undefined ? { key } : { key, text }));
+  // VS-266: the conductor has concerns on this open decision — its approving option is refused
+  // server-side without a deliberate override, so the button reflects the rule rather than being it.
+  const held = conductorReviewCopy(decision)?.held ?? false;
   const why = decision.kind === 'plan_approval' ? ticketSummary?.trim() : '';
   const section = compact ? 'mb-2' : 'mb-3';
   // The plan itself, so nothing is approved unread. Doubles as the document-preview suppression
@@ -482,6 +488,24 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
           />
         ) : null}
 
+        {overriding && !inert ? (
+          <Composer
+            className={section}
+            rows={2}
+            autoFocus
+            scope={<span>Overriding the hold on {ticketIdentifier ?? 'this ticket'} — say why this approves without a revision.</span>}
+            placeholder="Why override the hold?"
+            submitLabel="Override & approve"
+            onSubmit={(t) => {
+              onAnswer({
+                key: decision.kind === 'merge_approval' ? NAMED_CARD_OPTION_KEYS.merge_approval.approve : decision.kind === 'action_approval' ? NAMED_CARD_OPTION_KEYS.action_approval.approve : NAMED_CARD_OPTION_KEYS.plan_approval.approve,
+                overrideHold: true, overrideReason: t,
+              });
+              setOverriding(false);
+            }}
+          />
+        ) : null}
+
         {missing.length && !inert ? (
           <p className="mb-2 text-micro text-text-3" role="status">
             {missing[0]!.label} is needed before this can be sent.
@@ -501,7 +525,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             </p>
           ) : inert ? null : decision.kind === 'plan_approval' || decision.kind === 'action_approval' ? (
             <>
-              <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(decision.kind === 'action_approval' ? NAMED_CARD_OPTION_KEYS.action_approval.approve : NAMED_CARD_OPTION_KEYS.plan_approval.approve)} kbd="⏎">
+              <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0 || held} onClick={() => answer(decision.kind === 'action_approval' ? NAMED_CARD_OPTION_KEYS.action_approval.approve : NAMED_CARD_OPTION_KEYS.plan_approval.approve)} kbd="⏎">
                 Approve
               </Button>
               <Button variant="secondary" size="thumb" compact={compact} className="flex-1" disabled={busy} onClick={() => setRevising((v) => !v)}>
@@ -510,14 +534,24 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
               <Button variant="ghost" size="thumb" compact={compact} className="w-12 border border-line-2" aria-label="Reject" disabled={busy} onClick={() => answer(decision.kind === 'action_approval' ? NAMED_CARD_OPTION_KEYS.action_approval.reject : NAMED_CARD_OPTION_KEYS.plan_approval.reject)}>
                 ✕
               </Button>
+              {held ? (
+                <Button variant="ghost" size="thumb" compact={compact} className="flex-1 border border-line-2" disabled={busy} onClick={() => setOverriding((v) => !v)}>
+                  Override & approve…
+                </Button>
+              ) : null}
             </>
           ) : decision.kind === 'merge_approval' ? (
             <>
               {/* No Hold: hiding the card (VS-72) already covers "not now" without answering, and a
                   merge approval has only `approve`/`changes` to answer with (VS-111). */}
-              <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.merge_approval.approve)}>
+              <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0 || held} onClick={() => answer(NAMED_CARD_OPTION_KEYS.merge_approval.approve)}>
                 Approve merge
               </Button>
+              {held ? (
+                <Button variant="ghost" size="thumb" compact={compact} className="flex-1 border border-line-2" disabled={busy} onClick={() => setOverriding((v) => !v)}>
+                  Override & approve…
+                </Button>
+              ) : null}
               {ws && decision.ticketId ? (
                 <A
                   to="/w/$ws/tickets/$ticketId"

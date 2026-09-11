@@ -111,6 +111,7 @@ function nextSteps(error: ApiError): string[] {
     case 'not_found': return ['list what exists with the matching `conductor ... list` command'];
     case 'worktree_dirty': return ['inspect it with `conductor worktree verify <id>`'];
     case 'merge_not_approved': return ['approve the merge decision with `conductor decision list`'];
+    case 'revision_pending': return ['wait for the conductor\'s concern to be revised, or force it through with `conductor decision answer <id> approve --override-hold "<reason>"`'];
     default: return error.retryable ? ['retryable: try again'] : [];
   }
 }

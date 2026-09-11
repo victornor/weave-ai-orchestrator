@@ -146,6 +146,8 @@ export interface CardModel {
    * shows the question and points at the web app rather than offering an answer it cannot complete.
    */
   answerElsewhere: boolean;
+  /** VS-266: the conductor has concerns and this decision is still open — its approving option is refused without a deliberate override. False for every other decision, including one that does not carry a conductor review at all. */
+  held: boolean;
 }
 
 // ---------------------------------------------------------------- tickets / workers

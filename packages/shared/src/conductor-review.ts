@@ -8,11 +8,18 @@ export type ConductorReviewCopy = {
   line: string;
   note: string | null;
   tone: 'unseen' | 'looked' | 'concerns' | 'after';
+  /**
+   * VS-266: true exactly when this decision's approving answer is currently refused — a `concerns`
+   * mark on a still-`open` decision. False for every other state, including an `answered`/
+   * `superseded`/`withdrawn`/`expired` decision that carries a `concerns` mark: there is nothing
+   * left to approve on those, for reasons unrelated to this hold.
+   */
+  held: boolean;
 };
 
 export type ConductorReviewFields = Pick<
   Decision,
-  'kind' | 'conductorReviewStatus' | 'conductorReviewedAt' | 'conductorReviewNote' | 'answeredAt'
+  'kind' | 'status' | 'conductorReviewStatus' | 'conductorReviewedAt' | 'conductorReviewNote' | 'answeredAt'
 >;
 
 /** Plan, merge and action cards carry the state; every other kind returns null from `conductorReviewCopy`. */
@@ -35,23 +42,27 @@ export function reviewIsAfterAnswer(d: Pick<Decision, 'conductorReviewedAt' | 'a
  */
 export function conductorReviewCopy(d: ConductorReviewFields): ConductorReviewCopy | null {
   if (!carriesConductorReview(d.kind)) return null;
-  const status: ConductorReviewStatus = d.conductorReviewStatus ?? 'unseen';
+  const reviewStatus: ConductorReviewStatus = d.conductorReviewStatus ?? 'unseen';
   const after = reviewIsAfterAnswer(d);
-  if (status === 'unseen') {
-    return { line: "Conductor hasn't reviewed yet", note: null, tone: 'unseen' };
+  if (reviewStatus === 'unseen') {
+    return { line: "Conductor hasn't reviewed yet", note: null, tone: 'unseen', held: false };
   }
-  if (status === 'looked') {
+  if (reviewStatus === 'looked') {
     // VS-234: the line states the outcome, the required note carries the reasoning. Marks made
     // before notes were required have none — the line still renders, nothing fills its place.
     return {
       line: after ? 'Conductor reviewed after you answered — no concerns' : 'Conductor reviewed — no concerns',
       note: d.conductorReviewNote ?? null,
       tone: after ? 'after' : 'looked',
+      held: false,
     };
   }
   return {
     line: after ? 'Conductor reviewed after you answered — has concerns' : 'Conductor reviewed — has concerns',
     note: d.conductorReviewNote ?? null,
     tone: 'concerns',
+    // VS-266: only an open decision is still waiting on an answer at all — held is moot once it is
+    // answered, superseded, withdrawn or expired.
+    held: d.status === 'open',
   };
 }

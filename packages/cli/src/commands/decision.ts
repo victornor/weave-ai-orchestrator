@@ -28,6 +28,17 @@ export function printCard(card: CardModel): void {
   if (card.confirm) write(style.warn(`  ${card.confirm.prompt}`));
 }
 
+/**
+ * `--override-hold <reason>` (VS-266): a distinct, deliberate pair, meaningful only on a decision
+ * the card model itself reports as held — never a no-op flag that silently does nothing, and never
+ * satisfiable by resubmitting the same key the hold already refused.
+ */
+export function resolveOverrideHold(card: Pick<CardModel, 'held' | 'id'>, reason: string | undefined): { overrideHold: true; overrideReason: string } | undefined {
+  if (reason === undefined) return undefined;
+  if (!card.held) throw new ApiError('validation', `${card.id} is not held by a conductor concern; --override-hold does not apply here`, 400);
+  return { overrideHold: true, overrideReason: reason };
+}
+
 export function register(program: Command): void {
   const decision = program.command('decision').description('decisions waiting for an answer');
 
@@ -71,6 +82,7 @@ export function register(program: Command): void {
     .option('--text <text>', 'free-text answer (with or without a key)')
     .option('--remember', 'remember this answer for similar decisions')
     .option('--yes', 'skip the typed confirmation on destructive decisions')
+    .option('--override-hold <reason>', 'deliberately approve a decision the conductor has concerns about, stating why (VS-266)')
     .description('answer a decision')
     .action(async (id: string, answer: string | undefined, opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const { client } = await session(command);
@@ -89,6 +101,8 @@ export function register(program: Command): void {
       }
       if (!key && !text) throw new ApiError('validation', 'pass an option key, an option number, or free text', 400, { options: card.options.map((o) => o.key) });
 
+      const override = resolveOverrideHold(card, typeof opts['overrideHold'] === 'string' ? opts['overrideHold'] : undefined);
+
       const chosen = card.options.find((o) => o.key === key);
       if (card.confirm && chosen?.tone === 'danger' && opts['yes'] !== true) {
         const confirmed = await promptTyped(card.confirm.expect, card.confirm.prompt);
@@ -102,6 +116,7 @@ export function register(program: Command): void {
       if (key) body['key'] = key;
       if (text) body['text'] = text;
       if (opts['remember'] === true) body['remember'] = true;
+      if (override) Object.assign(body, override);
 
       const result = await client.write({
         tool: 'ac_decision_answer', input: { decisionId: id, ...body },

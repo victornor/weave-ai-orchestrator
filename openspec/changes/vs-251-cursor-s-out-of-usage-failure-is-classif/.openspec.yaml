@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-11
+goal: Widen classifyError's quota matcher so real provider out-of-usage phrasing
+  (cursor confirmed, others captured where possible) lands as provider_quota
+  instead of unknown
+skip_specs: true

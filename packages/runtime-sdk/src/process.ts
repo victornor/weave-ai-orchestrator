@@ -58,7 +58,7 @@ export function spawnLines(opts: SpawnOpts): { done: Promise<SpawnOutcome>; canc
 export function classifyError(exitCode: number | null, stderr: string): { code: string; family: RunErrorFamily; message: string } | undefined {
   if (exitCode === 0) return undefined;
   const s = stderr.toLowerCase();
-  if (/rate.?limit|429|overloaded|quota|capacity|usage limit|limit reached|resets? (at|in) |out of credits|insufficient credit|spending cap|billing/.test(s)) {
+  if (/rate.?limit|429|overloaded|quota|capacity|usage limit|limit reached|resets? (at|in) |out of credits|insufficient credit|spending cap|billing|out of usage/.test(s)) {
     const canned = 'provider rate limited, usage limit or quota exceeded';
     return { code: 'provider_quota', family: 'provider_quota', message: truncate(stderr.trim() || canned, 4000) };
   }

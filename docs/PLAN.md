@@ -404,7 +404,7 @@ Statuses and meaning (each status states who owns the next move):
 | `in_review` | human | work product exists (PR or branch); a `merge_approval` decision owned by the human is open, unless `auto_merge` is set |
 | `merging` | worker | the human approved the merge, or `auto_merge` is on and CI is green; the same worker syncs with the ticket's landing branch (its own declaration, else its project's, else the default branch — VS-119), resolves conflicts, re-runs checks, and merges |
 | `blocked` | named owner | MUST have a routable path: open blockers, an open decision, or `unblock_json {owner, action}`; prose-only blocked is rejected |
-| `done` | nobody | terminal; for `change`: merge landed on the ticket's landing branch (verified by reconciliation), OpenSpec change archived on the project's landing branch, worktree removed, worker retired |
+| `done` | nobody | terminal; for `change`: merge landed on the ticket's landing branch (verified by reconciliation), OpenSpec change archived on the project's landing branch, worktree removed, worker retired; for `task`: either that same merge path or a stated ending with no unlanded commits (ADR 0016) |
 | `cancelled` | nobody | terminal |
 
 Transitions are validated in `core/tickets/transitions.ts` (single owner). Agents request transitions through the MCP tool `ac_ticket_transition`; the daemon applies guards and returns the resulting state or a typed error (`invalid_disposition`, `missing_action_path`, `not_checked_out`). The full flow for `change` tickets is in §12.
@@ -880,7 +880,7 @@ Detailed rules:
 
 ### 12.3 Flow for other kinds
 
-- `task`: `todo → in_progress → in_review → done` (skips propose/approval unless the project sets `taskApproval: human`). Uses the OpenSpec change (skip_specs) only as a tasks.md tracker if enabled.
+- `task`: `todo → in_progress → in_review → done` when there is a diff to land; a task that produced nothing needing landing finishes at `done` straight from `in_progress`, with the ending and its reason stated in the transition note — no work product, no merge approval (ADR 0016). The daemon enforces the boundary: `done` is refused while the branch carries commits its landing branch does not contain, or when the ending is not stated. Skips propose/approval unless the project sets `taskApproval: human`. Uses the OpenSpec change (skip_specs) only as a tasks.md tracker if enabled.
 - `scout`: `todo → in_progress → done`; deliverable is the `report` document; the worker MUST NOT push or open PRs; it may create throwaway branches locally. The report format: what you did, what you found, evidence (commands, file:line), recommendation. The conductor reads reports and decides whether to create a `change` ticket (evidence ≠ authorization).
 - `question`: `todo → done`; answer is a comment.
 

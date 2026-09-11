@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { GitWorktreeProvider } from './git.js';
-import { landedWorkTest } from './landed.js';
+import { landedWorkTest, unlandedCommitCount } from './landed.js';
 import { renderWtConfig } from './wtconfig.js';
 import { git } from '../util/git.js';
 import { projectKeyFromUrl } from '../util/git.js';
@@ -170,6 +170,47 @@ describe('landed-work test', () => {
 
     const onDefault = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'ac/tst-10', landingBranch: 'main', localBranch: true });
     expect(onDefault.landed).toBe(false);
+  });
+});
+
+describe('unlandedCommitCount (VS-215 task-done gate)', () => {
+  it('counts commits the landing branch does not contain', async () => {
+    const repo = await initRepo();
+    const target = join(tmpDir(), 'work');
+    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'ac/tst-11', base: 'main', targetPath: target });
+    await commit(target, 'a.txt', 'a', 'feat: a');
+    await commit(target, 'b.txt', 'b', 'feat: b');
+    expect(await unlandedCommitCount({ repoPath: repo, worktreePath: target, branch: 'ac/tst-11', landingBranch: 'main' })).toBe(2);
+  });
+
+  it('counts 0 for an ancestor branch or a worktree with no new commits', async () => {
+    const repo = await initRepo();
+    const target = join(tmpDir(), 'work');
+    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'ac/tst-12', base: 'main', targetPath: target });
+    expect(await unlandedCommitCount({ repoPath: repo, worktreePath: target, branch: 'ac/tst-12', landingBranch: 'main' })).toBe(0);
+    await commit(target, 'a.txt', 'a', 'feat: a');
+    await git(['merge', '--ff-only', 'ac/tst-12'], repo);
+    expect(await unlandedCommitCount({ repoPath: repo, worktreePath: target, branch: 'ac/tst-12', landingBranch: 'main' })).toBe(0);
+  });
+
+  it('counts 0 for a branch whose commits are patch-id equivalent (squash/cherry-pick)', async () => {
+    const repo = await initRepo();
+    const target = join(tmpDir(), 'work');
+    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'ac/tst-13', base: 'main', targetPath: target });
+    await commit(target, 'a.txt', 'a', 'feat: a');
+    await git(['cherry-pick', 'ac/tst-13'], repo);
+    expect(await unlandedCommitCount({ repoPath: repo, worktreePath: target, branch: 'ac/tst-13', landingBranch: 'main' })).toBe(0);
+  });
+
+  it('counts 0 when the worktree or the clone is missing, and warns only when git fails', async () => {
+    const repo = await initRepo();
+    expect(await unlandedCommitCount({ repoPath: repo, worktreePath: join(tmpDir(), 'absent'), branch: 'ac/tst-14', landingBranch: 'main' })).toBe(0);
+    expect(await unlandedCommitCount({ repoPath: null, worktreePath: repo, branch: 'main', landingBranch: 'main' })).toBe(0);
+
+    const warns: unknown[] = [];
+    // A branch ref git cannot resolve makes both reads fail; the gate fails open, loudly.
+    expect(await unlandedCommitCount({ repoPath: repo, worktreePath: repo, branch: 'no-such-branch', landingBranch: 'main' }, { warn: (o) => warns.push(o) })).toBe(0);
+    expect(warns.length).toBe(1);
   });
 });
 

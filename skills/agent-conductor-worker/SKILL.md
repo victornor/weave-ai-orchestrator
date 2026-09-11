@@ -26,12 +26,19 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 | `in_progress` | Keep applying. When every task is done, deliver. | `ac_ticket_transition(id, "in_review")` with a work product |
 | `in_review` | Nothing, normally — you are waiting on the human. Answer comments. | `ac_report({state:"paused"})` or an idle report |
 | `merging` | The merge procedure (`references/delivery.md`). | `ac_ticket_merge_done` |
-| `todo` (`task`) | Implement, test, deliver. | `in_review` |
+| `todo` (`task`) | Implement, test, then choose your ending (next section). | `in_review` with a work product — or `done`, ending stated in the note, when nothing needs landing |
 | `todo` (`scout`) | Investigate; write the report document. Load `agent-conductor-scout`. | `done` |
 | `todo` (`question`) | Answer as a ticket comment with evidence, then `ac_report` with `state: done` — that report closes a question ticket for you. | `done` |
 | `blocked` | Only if the blocker cleared. Otherwise idle. | the status the work resumes in |
 
 For `change` tickets also load `agent-conductor-openspec` — it holds the propose/apply mapping and what never to do.
+
+## A task's ending matches what it produced
+
+- **You produced a diff that should land** → deliver per `references/delivery.md` → `in_review`, exactly as always.
+- **You produced nothing that needs landing** (a config tweak, a cleanup, the answer is the ticket) → finish at `done`: state the ending and why in the transition note, `ac_ticket_transition(id, "done", {note: "ending: done — <why nothing needs landing>"})`. No PR, no merge approval.
+
+The daemon enforces the boundary rather than trusting the vibe: `done` is refused with `worktree_not_landed` while your branch carries commits its landing branch does not contain, and with `validation` when the note is missing. A rejection is information: `worktree_not_landed` means you produced a diff — deliver it through `in_review`.
 
 ## Ticket rules
 
@@ -113,6 +120,7 @@ Your last message is one fenced ```json block:
 | Implementing during the propose phase | The plan has not been approved | Artifacts only until the ticket is `approved` |
 | Merging because CI is green | Green is not consent | Merge only when the ticket is in `merging` |
 | Running `openspec archive` | The daemon owns archiving, after verification | Stop at `ac_ticket_merge_done` |
+| Finishing a task at `done` with unlanded commits | The daemon refuses it (`worktree_not_landed`); unlanded work must not strand in a worktree | Deliver the diff through `in_review`, or cancel if the work is not wanted |
 | Fixing something unrelated you noticed | Silent scope expansion nobody approved | Note it in a comment; the conductor decides |
 | Looking for more work when the inbox is empty | You do not generate your own work | Report `idle` and end |
 | Running the real coding CLI to check something | One refresh rotates the token and signs every agent out, the conductor included | A fake CLI and a scratch config dir; say so in the PR if it truly needs the real one |

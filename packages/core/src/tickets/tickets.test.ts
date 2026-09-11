@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
 import { OcError, TICKET_KINDS, TICKET_STATUSES, TRANSITIONS, NAMED_CARD_OPTION_KEYS, canTransition, type Agent, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, fakeSpecs, type TestHarness } from '../testing/context.js';
 import { createTicketsService } from './service.js';
+import { GitWorktreeProvider } from '../worktrees/git.js';
+import { git } from '../util/git.js';
 import type { Actor, TicketsService } from '../api.js';
 
 const AGENT: Actor = { kind: 'agent', id: 'agent-1', runId: 'run-1' };
@@ -121,7 +126,7 @@ describe('tickets', () => {
     await tickets.transition(SYSTEM, t.id, { to: 'in_progress' });
     tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'u' });
     await tickets.transition(AGENT, t.id, { to: 'in_review' });
-    await tickets.transition(HUMAN, t.id, { to: 'done' });
+    await tickets.transition(HUMAN, t.id, { to: 'done', note: 'ending: done — reviewed without merging' });
     expect(tickets.get(t.id).createdRunId).toBe('run-1');
   });
 
@@ -153,8 +158,10 @@ describe('tickets', () => {
             let err: unknown;
             try {
               // Reopening a finished ticket is a human's call (PLAN §6.2); everything else the machine may do.
+              // The note satisfies the task-done guard: a `done` needs its ending stated (VS-215).
               await tickets.transition(from === 'done' || from === 'cancelled' ? HUMAN : SYSTEM, t.id, {
                 to: to as TicketStatus,
+                note: 'ending stated for the guard',
                 blockedBy: [blocker.id],
                 unblock: { owner: 'human', action: 'decide' },
               });
@@ -253,6 +260,125 @@ describe('tickets', () => {
       const workerId = h.addWorker(t.id);
       expect((await tickets.transition(HUMAN, t.id, { to: 'merging' })).status).toBe('merging');
       expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'merge_approved')).toBe(true);
+    });
+  });
+
+  describe('task completion gate (VS-215)', () => {
+    // The gate reads the project through the service (as mergeDone does); the default harness bag
+    // has no projects service, so give it one over this harness's own row.
+    beforeEach(() => {
+      h.services.projects = {
+        get: (id: string) => {
+          const row = h.db.get<{ clonePath: string; policies: unknown }>('SELECT clone_path AS "clonePath", policies_json AS "policies" FROM projects WHERE id = ?', [id]);
+          if (!row) throw new OcError('not_found', `project ${id} not found`);
+          const raw = row.policies;
+          const policies = typeof raw === 'string' ? JSON.parse(raw) : (raw ?? {});
+          return { id, clonePath: row.clonePath, defaultBranch: 'main', landingBranch: null, policies } as never;
+        },
+      } as never;
+    });
+
+    const cloneOf = (): string =>
+      h.db.get<{ clonePath: string }>('SELECT clone_path AS "clonePath" FROM projects WHERE id = ?', [h.projectId])!.clonePath;
+
+    async function initClone(): Promise<string> {
+      const repo = cloneOf();
+      mkdirSync(repo, { recursive: true });
+      await git(['init', '-b', 'main'], repo);
+      await git(['config', 'user.email', 'test@example.com'], repo);
+      await git(['config', 'user.name', 'Test'], repo);
+      await git(['config', 'commit.gpgsign', 'false'], repo);
+      writeFileSync(join(repo, 'README.md'), '# repo\n', 'utf8');
+      await git(['add', '.'], repo);
+      await git(['commit', '-m', 'init'], repo);
+      return repo;
+    }
+
+    /** A real worktree for the ticket, plus the worktrees row the gate reads. */
+    async function makeWorktree(t: { id: string }, commits = 0): Promise<{ repo: string; path: string; branch: string }> {
+      const repo = await initClone();
+      const branch = `ac/${t.id.slice(-6).toLowerCase()}-task`;
+      const path = join(mkdtempSync(join(tmpdir(), 'ac-215-')), 'work');
+      await new GitWorktreeProvider().create({ repoPath: repo, branch, base: 'main', targetPath: path });
+      for (let i = 0; i < commits; i++) {
+        writeFileSync(join(path, `f${i}.txt`), `work ${i}\n`, 'utf8');
+        await git(['add', '.'], path);
+        await git(['commit', '-m', `feat: work ${i}`], path);
+      }
+      h.db.insert('worktrees', {
+        id: newId(), projectId: h.projectId, ticketId: t.id, agentId: null, provider: 'git',
+        path, branch, status: 'active', createdAt: nowIso(),
+      });
+      return { repo, path, branch };
+    }
+
+    const taskInProgress = async (over: Partial<Parameters<TicketsService['create']>[1]> = {}) => {
+      const t = make({ kind: 'task', title: 'Chore', ...over });
+      await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+      return t;
+    };
+
+    it('finishes a no-commit task at done with no merge approval and records the stated ending', async () => {
+      const t = await taskInProgress();
+      await makeWorktree(t);
+      decisions.create.mockClear();
+      const done = await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: done — config-only, nothing to land' });
+      expect(done.status).toBe('done');
+      expect(decisions.create).not.toHaveBeenCalled();
+      const comment = h.db.get<{ body: string }>('SELECT body FROM ticket_comments WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1', [t.id]);
+      expect(comment!.body).toContain('nothing to land');
+    });
+
+    it('rejects done without a stated ending, naming the two endings', async () => {
+      const t = await taskInProgress();
+      await expect(tickets.transition(AGENT, t.id, { to: 'done' })).rejects.toMatchObject({ code: 'validation' });
+      expect(tickets.get(t.id).status).toBe('in_progress');
+    });
+
+    it('refuses done while the branch carries unlanded commits, and keeps the status', async () => {
+      const t = await taskInProgress();
+      await makeWorktree(t, 1);
+      await expect(tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: done' }))
+        .rejects.toMatchObject({ code: 'worktree_not_landed', message: /in_review/ });
+      expect(tickets.get(t.id).status).toBe('in_progress');
+      // The same request from a human is refused too: the guard protects unlanded work, not just agents.
+      await expect(tickets.transition(HUMAN, t.id, { to: 'done', note: 'ending: done' }))
+        .rejects.toMatchObject({ code: 'worktree_not_landed' });
+    });
+
+    it('does not refuse done when the branch commits are patch-id equivalent (squash-landed)', async () => {
+      const t = await taskInProgress();
+      const { repo, branch } = await makeWorktree(t, 1);
+      await git(['cherry-pick', branch], repo);
+      const done = await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: done — landed by squash' });
+      expect(done.status).toBe('done');
+    });
+
+    it('does not refuse done for a task without a worktree row', async () => {
+      const t = await taskInProgress();
+      const done = await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: done — answered in place' });
+      expect(done.status).toBe('done');
+    });
+
+    it('leaves scout endings untouched: done without a note stays legal', async () => {
+      const t = make({ kind: 'scout', title: 'Investigate' });
+      await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+      expect((await tickets.transition(AGENT, t.id, { to: 'done' })).status).toBe('done');
+    });
+
+    it('delivers a task with commits through in_review and a merge approval, and lands it as today', async () => {
+      const t = await taskInProgress();
+      await makeWorktree(t, 1);
+      tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'u' });
+      decisions.create.mockClear();
+      expect((await tickets.transition(AGENT, t.id, { to: 'in_review' })).status).toBe('in_review');
+      expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'merge_approval', ticketId: t.id }));
+
+      // Post-merge completion bypasses the gate: mergeDone writes done directly (landed via ff).
+      h.db.update('projects', h.projectId, { policiesJson: { deliveryMode: 'local-branch' } });
+      h.db.update('tickets', t.id, { status: 'merging' });
+      const done = await tickets.mergeDone(AGENT, t.id, { mergeCommit: 'abc1234', method: 'merge' });
+      expect(done.status).toBe('done');
     });
   });
 
@@ -501,7 +627,7 @@ describe('tickets', () => {
       const t = make({ kind: 'task' });
       const workerId = h.addWorker(t.id);
       h.db.update('tickets', t.id, { status: 'in_progress' });
-      await tickets.transition(AGENT, t.id, { to: 'done' });
+      await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' });
       const worker = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [workerId])!;
       expect(LIVE.has(worker.status)).toBe(false);
       expect(worker.status).toBe('done');
@@ -511,14 +637,14 @@ describe('tickets', () => {
       const t = make({ kind: 'task' });
       const workerId = h.addWorker(t.id, { status: 'retired', retiredAt: nowIso() });
       h.db.update('tickets', t.id, { status: 'in_progress' });
-      await tickets.transition(AGENT, t.id, { to: 'done' });
+      await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' });
       expect(h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [workerId])!.status).toBe('retired');
     });
 
     it('still transitions a ticket that has no worker', async () => {
       const t = make({ kind: 'task' });
       h.db.update('tickets', t.id, { status: 'in_progress' });
-      expect((await tickets.transition(AGENT, t.id, { to: 'done' })).status).toBe('done');
+      expect((await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' })).status).toBe('done');
     });
   });
 

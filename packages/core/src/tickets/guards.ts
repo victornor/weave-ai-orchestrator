@@ -14,6 +14,8 @@ export interface GuardFacts {
   hasWorkProduct: boolean;
   /** `auto_merge` is on, or a `merge_approval` decision was answered `approve`. */
   mergeApproved: boolean;
+  /** The transition carries a non-blank note — the stated ending a task's `done` requires (VS-215). */
+  hasEndingNote: boolean;
 }
 
 /**
@@ -41,6 +43,9 @@ export function checkTransition(kind: TicketKind, from: TicketStatus, to: Ticket
   }
   if (to === 'merging' && !facts.mergeApproved) {
     throw new OcError('merge_not_approved', 'merging requires an approved merge_approval decision or auto_merge', { from });
+  }
+  if (kind === 'task' && to === 'done' && !facts.hasEndingNote) {
+    throw new OcError('validation', 'finishing a task at done requires a note stating the ending and why; deliver through in_review instead when there is a diff to land', { from });
   }
 }
 

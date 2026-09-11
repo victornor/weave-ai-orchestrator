@@ -279,7 +279,7 @@ describe('decisions', () => {
     const t = ticket({ kind: 'task' });
     await tickets.transition(AGENT, t.id, { to: 'in_progress' });
     const merge = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Approve the merge' });
-    await tickets.transition(AGENT, t.id, { to: 'done' });
+    await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' });
     expect(decisions.get(merge.id).status).toBe('withdrawn');
   });
 
@@ -295,7 +295,7 @@ describe('decisions', () => {
     await tickets.transition(AGENT, t.id, { to: 'in_progress' });
     const finding = decisions.create(AGENT, { ticketId: t.id, kind: 'gate_finding', title: 'Something noticed' });
     const answered = await decisions.answer(HUMAN, finding.id, { key: 'ack', text: 'noted' });
-    await tickets.transition(AGENT, t.id, { to: 'done' });
+    await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' });
     expect(decisions.get(finding.id)).toMatchObject({ status: 'answered', answerKey: 'ack', answerText: 'noted', answeredAt: answered.answeredAt });
   });
 

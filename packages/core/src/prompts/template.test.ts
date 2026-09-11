@@ -56,4 +56,16 @@ describe('brief helpers', () => {
     expect(definitionOfDone('scout', 'pr')).toContain('report');
     expect(definitionOfDone('question', 'pr')).toContain('ac_ticket_comment');
   });
+
+  it('gives a task both endings: in_review for a diff, done with a stated ending otherwise (VS-215)', () => {
+    const pr = definitionOfDone('task', 'pr');
+    expect(pr).toContain('in_review');
+    expect(pr).toContain('`done`');
+    expect(pr).toContain('transition note');
+    expect(pr).toContain('refused');
+    const local = definitionOfDone('task', 'local-branch');
+    expect(local).toContain('in_review');
+    expect(local).toContain('`done`');
+    expect(local).toContain('refused');
+  });
 });

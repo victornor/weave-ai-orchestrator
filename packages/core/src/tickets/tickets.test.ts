@@ -851,6 +851,18 @@ describe('tickets', () => {
       });
       expect(tickets.livenessViolations().map((v) => v.id)).not.toContain(t.id);
     });
+
+    it('flags an in_progress operational ticket whose action_approval is answered and whose worker has no queued wake', () => {
+      const t = make({ kind: 'operational', title: 'Restart the daemon' });
+      h.addWorker(t.id);
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      h.db.insert('decisions', {
+        id: newId(), workspaceId: h.workspaceId, ticketId: t.id, kind: 'action_approval', owner: 'human',
+        title: 'Approve the action?', context: '', status: 'answered', answerKey: 'approve',
+        correlationKey: `action_approval:${t.id}`, createdAt: nowIso(), answeredAt: nowIso(),
+      });
+      expect(tickets.livenessViolations().map((v) => v.id)).toContain(t.id);
+    });
   });
 
   describe('repairApprovals', () => {
@@ -926,6 +938,46 @@ describe('tickets', () => {
         ticketId: stranded.id, kind: 'action_approval', owner: 'human',
       }));
       expect(decisions.create.mock.calls[0]?.[1]?.options.map((o: { key: string }) => o.key)).toEqual(Object.values(NAMED_CARD_OPTION_KEYS.action_approval));
+    });
+
+    it('does not re-raise after approve, even across repeated repair sweeps', async () => {
+      const t = make({ kind: 'operational', title: 'deploy' });
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      const written = tickets.putDocument(AGENT, t.id, 'action', 'systemctl restart agent-conductor');
+      const target = decisions.create.mock.calls[0]?.[1]?.target as { documentId: string; revision: number };
+      expect(target).toEqual({ documentId: written.documentId, revision: 1 });
+      h.db.insert('decisions', {
+        id: newId(), workspaceId: h.workspaceId, ticketId: t.id, kind: 'action_approval', owner: 'human',
+        title: 'Approve?', context: '', status: 'answered', answerKey: 'approve',
+        correlationKey: `action_approval:${t.id}`, targetJson: target, createdAt: nowIso(), answeredAt: nowIso(),
+      });
+      decisions.create.mockClear();
+      expect(await tickets.repairApprovals()).toEqual([]);
+      expect(await tickets.repairApprovals()).toEqual([]);
+      expect(decisions.create).not.toHaveBeenCalled();
+    });
+
+    it('does not re-raise after revise until a new action revision is written', async () => {
+      const t = make({ kind: 'operational', title: 'deploy' });
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      const first = tickets.putDocument(AGENT, t.id, 'action', 'systemctl restart agent-conductor');
+      const target = decisions.create.mock.calls[0]?.[1]?.target as { documentId: string; revision: number };
+      expect(target).toEqual({ documentId: first.documentId, revision: 1 });
+      h.db.insert('decisions', {
+        id: newId(), workspaceId: h.workspaceId, ticketId: t.id, kind: 'action_approval', owner: 'human',
+        title: 'Approve?', context: '', status: 'answered', answerKey: 'revise',
+        correlationKey: `action_approval:${t.id}`, targetJson: target, createdAt: nowIso(), answeredAt: nowIso(),
+      });
+      decisions.create.mockClear();
+      expect(await tickets.repairApprovals()).toEqual([]);
+      expect(decisions.create).not.toHaveBeenCalled();
+
+      const second = tickets.putDocument(AGENT, t.id, 'action', 'systemctl restart agent-conductor --now');
+      expect(second.revision).toBe(2);
+      expect(decisions.create).toHaveBeenCalledTimes(1);
+      expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        ticketId: t.id, kind: 'action_approval', target: { documentId: second.documentId, revision: 2 },
+      }));
     });
   });
 

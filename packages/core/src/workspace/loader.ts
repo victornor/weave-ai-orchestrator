@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import YAML from 'yaml';
 import { openDb, newId, nowIso } from '@agent-conductor/db';
+import { configDir as resolveConfigDir } from '@agent-conductor/release';
 import {
   DaemonConfigSchema, DEFAULT_KNOWLEDGE_BUDGETS, DEFAULT_WORKER_TIERS, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, WorkspaceRegistrySchema, OcError,
   type DaemonConfig, type KnowledgeBudgets, type WorkspaceConfig, type WorkspaceRegistry,
@@ -26,15 +27,21 @@ export const WORKSPACE_FILE = 'workspace.yaml';
 
 // ---------- config dir (daemon-level) ----------
 
+/** VS-258: collapsed into `@agent-conductor/release`, the one place old/new resolution happens. */
 function configDir(): string {
-  if (process.env.AC_CONFIG_HOME) return process.env.AC_CONFIG_HOME;
-  const xdg = process.env.XDG_CONFIG_HOME;
-  return xdg && xdg.trim().length ? join(xdg, 'agent-conductor') : join(homedir(), '.config', 'agent-conductor');
+  return resolveConfigDir();
 }
 
-/** The plain default with no override of any kind considered — VS-143's isolation boundary. */
-function plainDefaultConfigDir(): string {
-  return join(homedir(), '.config', 'agent-conductor');
+/**
+ * VS-258: the plain defaults with no override of any kind considered — VS-143's isolation boundary —
+ * under either name this product is known by. Not run through `resolveConfigDir()`'s old/new/fresh
+ * resolution: `isDefaultConfigDir` below only needs to recognise either literal spelling, and doing
+ * that independently of resolution means a host with both plain defaults present (an ambiguous
+ * installation, elsewhere a refused case) can never make this identity check itself throw for a
+ * daemon that isn't even using either default. See design.md Decision 5 on the vs-258 change.
+ */
+function plainDefaultConfigDirs(): [old: string, new_: string] {
+  return [join(homedir(), '.config', 'agent-conductor'), join(homedir(), '.config', 'weave')];
 }
 
 /**
@@ -44,7 +51,8 @@ function plainDefaultConfigDir(): string {
  * see `daemon-isolation/credential-scope` and `daemon-isolation/dispatch-gate`.
  */
 function isDefaultConfigDir(resolved: string): boolean {
-  return resolve(resolved) === resolve(plainDefaultConfigDir());
+  const r = resolve(resolved);
+  return plainDefaultConfigDirs().some((d) => r === resolve(d));
 }
 
 function readYamlFile(path: string): unknown {
@@ -188,7 +196,7 @@ class Loader implements WorkspaceLoader {
       const path = join(root, 'knowledge', rel);
       if (!existsSync(path)) { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, body({ name: config.name, humanName, budgets: config.defaults.knowledgeBudgetTokens }), 'utf8'); }
     }
-    const gitignore = join(root, '.agent-conductor', '.gitignore');
+    const gitignore = join(workspacePaths(root).state, '.gitignore');
     if (!existsSync(gitignore)) writeFileSync(gitignore, '*\n', 'utf8');
     writeWtConfig(workspacePaths(root).wtConfig, []);
     return config;

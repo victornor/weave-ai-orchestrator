@@ -23,7 +23,7 @@ import {
 import { getLogger, recordActivity } from '@agent-conductor/core';
 import {
   buildRelease, cliBinIn, commitSubjectsInRange, currentLink, inOwnScope, planRestart, pruneReleases,
-  readLink, releaseSha, switchRelease,
+  readLink, releaseSha, resolveWorkspaceStateDir, switchRelease,
 } from '@agent-conductor/release';
 import type { WorkspaceRuntime } from './types.js';
 import type { UpdateChecker } from './release-info.js';
@@ -490,10 +490,14 @@ export function backupDatabases(configDir: string): string[] {
   const dir = join(configDir, 'backups', new Date().toISOString().replace(/[:.]/g, '-'));
   const out: string[] = [];
   const sources: Array<{ src: string; name: string }> = [{ src: join(configDir, 'daemon.sqlite'), name: 'daemon.sqlite' }];
+  let workspaces: Array<{ id: string; path: string }> = [];
   try {
     const reg = (parseYaml(readFileSync(join(configDir, 'workspaces.yaml'), 'utf8')) ?? {}) as { workspaces?: Array<{ id: string; path: string }> };
-    for (const w of reg.workspaces ?? []) sources.push({ src: join(w.path, '.agent-conductor', 'db.sqlite'), name: `workspace-${w.id}.sqlite` });
+    workspaces = reg.workspaces ?? [];
   } catch { /* no registry */ }
+  // VS-258: not folded into the try above — an ambiguous workspace install must fail this backup
+  // loudly, not be swallowed by the registry's own "no registry file" catch.
+  for (const w of workspaces) sources.push({ src: join(resolveWorkspaceStateDir(w.path).stateDir, 'db.sqlite'), name: `workspace-${w.id}.sqlite` });
   for (const { src, name } of sources) {
     if (!existsSync(src)) continue;
     mkdirSync(dir, { recursive: true });

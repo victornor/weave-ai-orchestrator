@@ -1,5 +1,6 @@
 import type { Db } from '@agent-conductor/db';
-import type { WorkspaceConfig, DaemonConfig } from '@agent-conductor/shared';
+import { OcError, type WorkspaceConfig, type DaemonConfig } from '@agent-conductor/shared';
+import { resolveWorkspaceStateDir, type WorkspaceInstallStatus } from '@agent-conductor/release';
 import type { RuntimeAdapter } from '@agent-conductor/runtime-sdk';
 import type { ChannelAdapter } from '@agent-conductor/channel-sdk';
 import type { SurfaceAdapter } from '@agent-conductor/surface-sdk';
@@ -25,9 +26,28 @@ export interface WorkspacePaths {
   /** VS-133: chat message attachments — never under anything `packages/ui`'s dist serves. */
   attachments: string;
 }
+/**
+ * VS-258: the per-workspace state directory (`.agent-conductor/` or `.weave/`) and the conductor
+ * agent's home (`conductor/` or `weaver/`) resolve together, from one decision, so a workspace can
+ * never end up with mismatched halves — see `resolveWorkspaceStateDir` (`@agent-conductor/release`)
+ * and this change's design.md Decision 3. An ambiguous installation (both names' `db.sqlite` exist)
+ * is a loud `OcError`, never a silent pick.
+ */
 export function workspacePaths(root: string): WorkspacePaths {
   const j = (...p: string[]) => [root, ...p].join('/');
-  return { root, state: j('.agent-conductor'), db: j('.agent-conductor', 'db.sqlite'), runs: j('.agent-conductor', 'runs'), conductor: j('conductor'), roles: j('roles'), workers: j('workers'), archive: j('archive', 'workers'), projects: j('projects'), knowledge: j('knowledge'), runtimesHome: j('.agent-conductor', 'runtimes'), wtConfig: j('.agent-conductor', 'wt.toml'), secretsFile: j('.agent-conductor', 'secrets.enc'), secretsKey: j('.agent-conductor', 'secrets.key'), attachments: j('.agent-conductor', 'attachments') };
+  let status: WorkspaceInstallStatus;
+  let state: string;
+  try {
+    ({ status, stateDir: state } = resolveWorkspaceStateDir(root));
+  } catch (cause) {
+    throw new OcError('ambiguous_install_path', (cause as Error).message, { root });
+  }
+  const js = (...p: string[]) => [state, ...p].join('/');
+  return {
+    root, state, db: js('db.sqlite'), runs: js('runs'), conductor: j(status === 'old' ? 'conductor' : 'weaver'),
+    roles: j('roles'), workers: j('workers'), archive: j('archive', 'workers'), projects: j('projects'), knowledge: j('knowledge'),
+    runtimesHome: js('runtimes'), wtConfig: js('wt.toml'), secretsFile: js('secrets.enc'), secretsKey: js('secrets.key'), attachments: js('attachments'),
+  };
 }
 
 export interface WorkspaceContext {

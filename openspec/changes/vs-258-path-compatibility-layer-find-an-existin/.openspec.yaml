@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-11
+goal: Path resolvers accept either the old (agent-conductor/conductor) or new
+  (weave/weaver) installation names, with a defined old-wins/new-wins policy and
+  no silent ambiguity, as a no-op safety net ahead of the rename

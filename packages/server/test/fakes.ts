@@ -338,6 +338,8 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     workspaceId,
     config: WorkspaceConfigSchema.parse({ version: 1, id: workspaceId, name: 'Test workspace', ticketPrefix: 'ACME' }),
     daemon: daemonCfg,
+    // VS-258: a hand-built double, never routed through workspacePaths()/resolveWorkspaceStateDir() —
+    // this literal does not track (and does not need to track) which name a real workspace resolves to.
     paths: { root: '/tmp/ws', state: '/tmp/ws/.agent-conductor', db: ':memory:', runs: '', conductor: '', roles: '', workers: '', archive: '', projects: '', knowledge: '', runtimesHome: '', wtConfig: '', secretsFile: '', secretsKey: '' },
     db, events: bus, registries: createRegistries(),
     log: (domain: Parameters<typeof getLogger>[0]) => getLogger(domain),

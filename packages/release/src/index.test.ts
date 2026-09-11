@@ -2,13 +2,61 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  LAUNCHD_LABEL, SERVICE_NAME, commitSubjectsInRange, inOwnScope, planRestart, releaseStamp, releaseVersion,
+  LAUNCHD_LABEL, SERVICE_NAME, commitSubjectsInRange, configDir, dataHome, inOwnScope, planRestart, releaseStamp,
+  releaseVersion, stateHome,
 } from './index.js';
 
 const tmps: string[] = [];
 afterEach(() => { while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
+
+function tmp(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tmps.push(dir);
+  return dir;
+}
+
+describe('dataHome / configDir / stateHome (VS-258)', () => {
+  const savedEnv = { ...process.env };
+  beforeEach(() => {
+    for (const k of ['AC_CONFIG_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME']) delete process.env[k];
+  });
+  afterEach(() => {
+    for (const k of ['AC_CONFIG_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME']) {
+      if (savedEnv[k] === undefined) delete process.env[k]; else process.env[k] = savedEnv[k];
+    }
+  });
+
+  it('dataHome resolves old, new, fresh and refuses when both exist', () => {
+    const base = tmp('ac-data-');
+    process.env['XDG_DATA_HOME'] = base;
+    expect(dataHome()).toBe(join(base, 'weave')); // fresh: neither exists yet
+    mkdirSync(join(base, 'agent-conductor'));
+    expect(dataHome()).toBe(join(base, 'agent-conductor'));
+    mkdirSync(join(base, 'weave'));
+    expect(() => dataHome()).toThrow(/ambiguous install/);
+  });
+
+  it('configDir resolves old, new, fresh, and an explicit override bypasses resolution entirely', () => {
+    const base = tmp('ac-config-');
+    process.env['XDG_CONFIG_HOME'] = base;
+    expect(configDir()).toBe(join(base, 'weave'));
+    mkdirSync(join(base, 'agent-conductor'));
+    expect(configDir()).toBe(join(base, 'agent-conductor'));
+
+    process.env['AC_CONFIG_HOME'] = '/explicit/override';
+    expect(configDir()).toBe('/explicit/override');
+  });
+
+  it('stateHome resolves old, new and fresh', () => {
+    const base = tmp('ac-state-');
+    process.env['XDG_STATE_HOME'] = base;
+    expect(stateHome()).toBe(join(base, 'weave'));
+    mkdirSync(join(base, 'weave'));
+    expect(stateHome()).toBe(join(base, 'weave'));
+  });
+});
 
 describe('planRestart', () => {
   const base = { platform: 'linux' as NodeJS.Platform, unitInstalled: false, launchdInstalled: false, systemdRunAvailable: false };

@@ -14,14 +14,37 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { resolveInstallPath } from './paths.js';
+
+export * from './paths.js';
+
+/** VS-258: `<base>/agent-conductor` or `<base>/weave`, whichever exists; a fresh host gets the new name. */
+function resolveUserDir(base: string): string {
+  const r = resolveInstallPath(join(base, 'agent-conductor'), join(base, 'weave'));
+  if (r.status === 'ambiguous') throw new Error(`ambiguous install: both ${r.oldPath} and ${r.newPath} exist`);
+  return r.path;
+}
 
 export function dataHome(): string {
   const xdg = process.env['XDG_DATA_HOME'];
-  return xdg && xdg.trim() !== '' ? join(xdg, 'agent-conductor') : join(homedir(), '.local', 'share', 'agent-conductor');
+  return resolveUserDir(xdg && xdg.trim() !== '' ? xdg : join(homedir(), '.local', 'share'));
 }
 export function releasesDir(): string { return join(dataHome(), 'releases'); }
 export function currentLink(): string { return join(dataHome(), 'current'); }
 export function previousLink(): string { return join(dataHome(), 'previous'); }
+
+/** VS-258: collapsed from independent copies in `packages/core` and `packages/cli`. */
+export function configDir(): string {
+  if (process.env['AC_CONFIG_HOME']) return process.env['AC_CONFIG_HOME'];
+  const xdg = process.env['XDG_CONFIG_HOME'];
+  return resolveUserDir(xdg && xdg.trim() !== '' ? xdg : join(homedir(), '.config'));
+}
+
+/** VS-258: collapsed into this package alongside `configDir()`/`dataHome()`. */
+export function stateHome(): string {
+  const xdg = process.env['XDG_STATE_HOME'];
+  return resolveUserDir(xdg && xdg.trim() !== '' ? xdg : join(homedir(), '.local', 'state'));
+}
 
 export function readLink(path: string): string | null {
   try { return lstatSync(path).isSymbolicLink() ? resolve(dirname(path), readlinkSync(path)) : null; } catch { return null; }

@@ -8,7 +8,7 @@ import { parse as parseYaml } from 'yaml';
 import { join } from 'node:path';
 import { configHome } from '../contexts.js';
 import { LAUNCHD_LABEL, SERVICE_NAME, followLog, installLaunchdAgent, installService, isRunning, logFile, pidFile, readPid, renderLaunchdPlist, renderServiceUnit, resolveServerBin, serviceUnitPath, startDaemon, stopDaemon, tailLog } from '../daemon.js';
-import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, releaseStamp, switchRelease } from '../release.js';
+import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, releaseStamp, resolveWorkspaceStateDir, switchRelease } from '../release.js';
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { AC_ENV, isTerminalUpgrade, type Upgrade } from '@agent-conductor/shared';
@@ -467,14 +467,19 @@ function readDaemonYaml(): DaemonYaml {
 }
 
 /** Copy daemon.sqlite and every registered workspace db into <config>/backups/<stamp>/ (sqlite online backup, safe while running). */
-function backupDatabases(): string[] {
+/** Exported for its own unit test (VS-258) — this file's copy is independent of `packages/server`'s. */
+export function backupDatabases(): string[] {
   const dir = join(configHome(), 'backups', new Date().toISOString().replace(/[:.]/g, '-'));
   const out: string[] = [];
   const sources: Array<{ src: string; name: string }> = [{ src: join(configHome(), 'daemon.sqlite'), name: 'daemon.sqlite' }];
+  let workspaces: Array<{ id: string; path: string }> = [];
   try {
     const reg = (parseYaml(readFileSync(join(configHome(), 'workspaces.yaml'), 'utf8')) ?? {}) as { workspaces?: Array<{ id: string; path: string }> };
-    for (const w of reg.workspaces ?? []) sources.push({ src: join(w.path, '.agent-conductor', 'db.sqlite'), name: `workspace-${w.id}.sqlite` });
+    workspaces = reg.workspaces ?? [];
   } catch { /* no registry */ }
+  // VS-258: not folded into the try above — an ambiguous workspace install must fail this backup
+  // loudly, not be swallowed by the registry's own "no registry file" catch.
+  for (const w of workspaces) sources.push({ src: join(resolveWorkspaceStateDir(w.path).stateDir, 'db.sqlite'), name: `workspace-${w.id}.sqlite` });
   for (const { src, name } of sources) {
     if (!existsSync(src)) continue;
     mkdirSync(dir, { recursive: true });

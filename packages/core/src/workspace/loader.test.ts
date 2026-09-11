@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -40,13 +40,16 @@ describe('workspace loader', () => {
   it('scaffolds the §5 layout and the knowledge skeletons', async () => {
     const config = await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
     expect(config.ticketPrefix).toBe('ACME');
+    // VS-258: a fresh workspace (nothing on disk under either name) lands on the new names.
     for (const rel of [
-      'workspace.yaml', '.agent-conductor', '.agent-conductor/runs', '.agent-conductor/runtimes', '.agent-conductor/wt.toml',
-      'conductor', 'roles', 'workers', 'archive/workers', 'projects',
+      'workspace.yaml', '.weave', '.weave/runs', '.weave/runtimes', '.weave/wt.toml',
+      'weaver', 'roles', 'workers', 'archive/workers', 'projects',
       'knowledge/workspace/WORKSPACE.md', 'knowledge/workspace/SHARED.md', 'knowledge/workspace/decisions.md', 'knowledge/projects',
     ]) expect(existsSync(join(root, rel)), rel).toBe(true);
     expect(readFileSync(join(root, 'knowledge/workspace/SHARED.md'), 'utf8')).toContain('Shared conventions');
-    expect(readFileSync(join(root, '.agent-conductor/wt.toml'), 'utf8')).toContain('json-schema = 2');
+    expect(readFileSync(join(root, '.weave/wt.toml'), 'utf8')).toContain('json-schema = 2');
+    // VS-258: the state directory's .gitignore is written through workspacePaths(), not a hardcoded literal.
+    expect(readFileSync(join(root, '.weave/.gitignore'), 'utf8')).toBe('*\n');
     await expect(loader.initWorkspace(root, { id: 'acme', name: 'Acme', ticketPrefix: 'ACME' })).rejects.toMatchObject({ code: 'conflict' });
   });
 
@@ -88,12 +91,36 @@ describe('workspace loader', () => {
     expect(ctx.db.get<{ slug: string }>('SELECT slug FROM workspaces')!.slug).toBe('acme');
     expect([...ctx.registries.worktreeProviders.keys()].sort()).toEqual(['git', 'worktrunk']);
     expect(ctx.registries.forges.has('github')).toBe(true);
-    expect(existsSync(join(root, '.agent-conductor/runtimes/claude'))).toBe(true);
-    expect(ctx.paths.db).toBe(join(root, '.agent-conductor', 'db.sqlite'));
+    // VS-258: a fresh workspace lands on the new name.
+    expect(existsSync(join(root, '.weave/runtimes/claude'))).toBe(true);
+    expect(ctx.paths.db).toBe(join(root, '.weave', 'db.sqlite'));
 
     // Loading again reuses the same workspace row.
     const again = await load();
     expect(again.workspaceId).toBe(ctx.workspaceId);
+  });
+
+  it('an existing installation under the old name loads byte-identically to before this change, and no .weave/weaver reappears (VS-258, acceptance criterion 2)', async () => {
+    await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+    const first = await load();
+    const workspaceId = first.workspaceId;
+    first.db.close(); // afterEach tolerates the double-close of an already-closed db
+
+    // Simulate what every workspace running today actually looks like: rename the fresh install's
+    // new-named directories to the old ones, exactly as if this workspace had always been on the old
+    // name (nothing in this change ever performs this rename itself — see design.md's Migration Plan).
+    renameSync(join(root, '.weave'), join(root, '.agent-conductor'));
+    renameSync(join(root, 'weaver'), join(root, 'conductor'));
+
+    const ctx = await load();
+    expect(ctx.workspaceId).toBe(workspaceId); // same workspace row, found under the old name
+    expect(ctx.paths.state).toBe(join(root, '.agent-conductor'));
+    expect(ctx.paths.db).toBe(join(root, '.agent-conductor', 'db.sqlite'));
+    expect(ctx.paths.conductor).toBe(join(root, 'conductor'));
+    expect(existsSync(join(root, '.agent-conductor', 'runtimes', 'claude'))).toBe(true);
+    // The whole safety claim: no second, empty .weave/weaver is created beside the real installation.
+    expect(existsSync(join(root, '.weave'))).toBe(false);
+    expect(existsSync(join(root, 'weaver'))).toBe(false);
   });
 
   it('resolves ${ENV} references and writes them back unresolved', async () => {
@@ -129,7 +156,7 @@ describe('workspace loader', () => {
       ...ctx.config,
       projects: [{ id: 'api', url: 'git@github.com:acme/api.git', defaultBranch: 'main', maxWorkers: 4, warmPaths: [], setupCommand: 'pnpm install', openspec: { enabled: true }, policies: {} }],
     });
-    const toml = readFileSync(join(root, '.agent-conductor/wt.toml'), 'utf8');
+    const toml = readFileSync(workspacePaths(root).wtConfig, 'utf8');
     expect(toml).toContain('[projects."github.com/acme/api"]');
     expect(toml).toContain('setup = "pnpm install"');
   });
@@ -147,7 +174,7 @@ describe('workspace loader', () => {
       if (!roles.length) return;
 
       // Seed the rows on the schema as it stood before 0012, then let the load migrate both.
-      const db = openDbAsOf(join(root, '.agent-conductor', 'db.sqlite'), '0011_agent_pause_detail.sql');
+      const db = openDbAsOf(workspacePaths(root).db, '0011_agent_pause_detail.sql');
       db.run(`INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
               VALUES ('ws1', 'acme', 'Acme Labs', 'ACME', 1, 'active', ?, 't0', 't0')`, [root]);
       db.run(`INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, runtime_id, created_at, updated_at)
@@ -321,7 +348,8 @@ describe('workspace loader', () => {
   });
 
   it('reads and writes the daemon registry and config under XDG_CONFIG_HOME', () => {
-    expect(loader.configDir()).toBe(join(cfgDir, 'agent-conductor'));
+    // VS-258: a fresh XDG_CONFIG_HOME (nothing on disk under either name) lands on the new name.
+    expect(loader.configDir()).toBe(join(cfgDir, 'weave'));
     expect(loader.readRegistry().workspaces).toEqual([]);
     loader.writeRegistry({ workspaces: [{ id: 'acme', path: root }] });
     expect(loader.readRegistry().workspaces).toEqual([{ id: 'acme', path: root }]);
@@ -383,12 +411,25 @@ describe('workspace loader', () => {
     });
   });
 
-  describe('isDefaultConfigDir (VS-143)', () => {
+  describe('isDefaultConfigDir (VS-143, VS-258)', () => {
     it('is true for the plain default, regardless of how the value got there', () => {
       const plainDefault = join(homedir(), '.config', 'agent-conductor');
       expect(loader.isDefaultConfigDir(plainDefault)).toBe(true);
       // The generated systemd unit sets AC_CONFIG_HOME to exactly this path — still the default.
       expect(loader.isDefaultConfigDir(join(homedir(), '.config', 'agent-conductor'))).toBe(true);
+    });
+
+    it('is also true for the new name\'s plain default (VS-258)', () => {
+      expect(loader.isDefaultConfigDir(join(homedir(), '.config', 'weave'))).toBe(true);
+    });
+
+    it('is unaffected by an ambiguous host installation — it compares identity directly, never through the refusing resolver (VS-258)', () => {
+      // Neither directory need actually exist for this comparison: isDefaultConfigDir never touches
+      // the filesystem, unlike configDir()'s own old/new/fresh resolution. This is the whole point —
+      // a host that happens to have both plain defaults present must not make this check throw for
+      // some unrelated, explicitly-scoped daemon.
+      expect(() => loader.isDefaultConfigDir('/some/unrelated/scratch/dir')).not.toThrow();
+      expect(loader.isDefaultConfigDir('/some/unrelated/scratch/dir')).toBe(false);
     });
 
     it('is false for a throwaway config dir, such as XDG_CONFIG_HOME resolves to in this suite', () => {

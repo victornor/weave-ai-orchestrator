@@ -174,10 +174,18 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
       timer.unref?.();
     },
 
-    async stop(): Promise<void> {
+    async stop(timeoutMs?: number): Promise<boolean> {
       state.stopping = true;
       if (timer) { clearInterval(timer); timer = null; }
-      await dispatcher.drain();
+      if (timeoutMs === undefined) { await dispatcher.drain(); return true; }
+      let timedOut = false;
+      let handle: NodeJS.Timeout;
+      await Promise.race([
+        dispatcher.drain(),
+        new Promise<void>((r) => { handle = setTimeout(() => { timedOut = true; r(); }, timeoutMs); }),
+      ]);
+      clearTimeout(handle!);
+      return !timedOut;
     },
 
     async drain(): Promise<void> {

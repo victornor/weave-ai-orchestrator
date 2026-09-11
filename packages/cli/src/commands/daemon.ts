@@ -79,9 +79,17 @@ export function register(program: Command): void {
   daemon
     .command('stop')
     .description('stop the daemon started from this machine')
-    .action(async () => run(async () => {
+    .option('--drain-timeout <sec>', 'seconds to wait for running turns before stopping', '180')
+    .action(async (opts: Record<string, string>, command: Command) => run(async () => {
+      // VS-262: the same bounded, deliberate grace period `daemon restart`/`upgrade`/`rollback`
+      // already give running turns before signalling the process — a plain stop used to skip this
+      // entirely and go straight to `stopDaemon()`'s SIGTERM.
+      const { interrupted } = await drainViaHttp(command, Number.parseInt(String(opts['drainTimeout'] ?? '180'), 10));
       const result = await stopDaemon();
-      emit(result, () => write(result.stopped ? `${style.ok('stopped')} pid ${result.pid}` : 'not running'));
+      emit({ ...result, interrupted }, () => {
+        write(result.stopped ? `${style.ok('stopped')} pid ${result.pid}` : 'not running');
+        if (interrupted.length) write(style.warn(`${interrupted.length} run(s) were still going and got interrupted; they resume on their own`));
+      });
     }));
 
   daemon
@@ -495,17 +503,26 @@ export function backupDatabases(): string[] {
   return out;
 }
 
-async function drainAndRestart(command: Command, drainTimeoutSec: number): Promise<{ how: string; version: string | null; interrupted: Array<{ workspace: string; runId: string }> }> {
-  let interrupted: Array<{ workspace: string; runId: string }> = [];
-  let client: Awaited<ReturnType<typeof session>>['client'] | null = null;
+/**
+ * VS-262: `POST /api/daemon/drain` before a kill signal, shared by `daemon stop` and
+ * `drainAndRestart` — the drain-before-kill sequence every operator-initiated stop of the daemon
+ * goes through. A failure here (daemon unreachable, already down) is swallowed rather than blocking
+ * the stop/restart that follows.
+ */
+async function drainViaHttp(command: Command, drainTimeoutSec: number): Promise<{ interrupted: Array<{ workspace: string; runId: string }>; client: Awaited<ReturnType<typeof session>>['client'] | null }> {
   try {
-    client = (await session(command, { workspace: 'none' })).client;
+    const { client } = await session(command, { workspace: 'none' });
     write(style.dim(`draining (up to ${drainTimeoutSec}s for running turns) …`));
     const d = await client.post<{ drained: boolean; running: Array<{ workspace: string; runId: string }> }>('/api/daemon/drain', { timeoutSec: drainTimeoutSec });
-    interrupted = d.running;
+    return { interrupted: d.running, client };
   } catch (e) {
     write(style.warn(`drain skipped: ${(e as Error).message}`));
+    return { interrupted: [], client: null };
   }
+}
+
+async function drainAndRestart(command: Command, drainTimeoutSec: number): Promise<{ how: string; version: string | null; interrupted: Array<{ workspace: string; runId: string }> }> {
+  const { interrupted, client } = await drainViaHttp(command, drainTimeoutSec);
   let how: string;
   const unitInstalled = existsSync(serviceUnitPath()) && process.platform === 'linux';
   if (unitInstalled) {

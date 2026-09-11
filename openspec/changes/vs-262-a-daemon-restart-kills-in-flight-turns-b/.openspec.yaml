@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+goal: A daemon restart kills in-flight turns because the kill timeout is shorter
+  than the drain it follows

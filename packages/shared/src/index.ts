@@ -14,4 +14,5 @@ export * from './decision-target.js';
 export * from './push.js';
 export * from './channels.js';
 export * from './attachments.js';
+export * from './daemon-shutdown.js';
 export { estimateTokens } from './tokens.js';

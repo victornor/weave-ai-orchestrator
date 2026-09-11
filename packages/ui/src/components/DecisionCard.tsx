@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { NAMED_CARD_OPTION_KEYS, conductorReviewCopy } from '@agent-conductor/shared';
+import { NAMED_CARD_OPTION_KEYS, conductorReviewCopy, documentTarget } from '@agent-conductor/shared';
 import type { Decision, DecisionAnswerInputs, DecisionInput, UiStatus } from '@agent-conductor/shared';
 import { A } from '../app/link';
 import { Button } from './Button';
 import { Composer } from './Composer';
+import { DocumentPreview } from './DocumentPreview';
 import { Markdown } from './Markdown';
 import { StatusGlyph } from './StatusGlyph';
 import { clock } from '../lib/format';
@@ -57,6 +58,9 @@ interface Target {
   scope?: string;
   worktreePath?: string;
   confirm?: string;
+  /** The document a decision target can point at (VS-224); typed for reference — rendering goes through `documentTarget`. */
+  documentId?: string;
+  revision?: number;
 }
 
 /** Decisions with a purpose-built body and buttons; everything else takes the option-list path. */
@@ -204,6 +208,9 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
   // (VS-201) — never clipped by CSS, which can cut mid-word with no way to tell from outside.
   const [contextExpanded, setContextExpanded] = useState(false);
   const target = (decision.target ?? {}) as Target;
+  // The document a decision target points at (VS-224), parsed from the untyped record: the
+  // rendering is driven by this, never by the decision's kind.
+  const docTarget = documentTarget(decision);
   const inputs = decision.inputs ?? [];
   const destructive = decision.kind === 'discard_approval';
   // A decision belonging to no project is the workspace's, and says so: an absent label and one that
@@ -235,6 +242,11 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
   const answer = (key: string, text?: string): void => onAnswer(withInputs(text === undefined ? { key } : { key, text }));
   const why = decision.kind === 'plan_approval' ? ticketSummary?.trim() : '';
   const section = compact ? 'mb-2' : 'mb-3';
+  // The plan itself, so nothing is approved unread. Doubles as the document-preview suppression
+  // (VS-224): plan approvals carry a document target too, and their plan is already on screen
+  // here — a document never renders twice on one card. The general preview consults this slot
+  // rather than the kind, so the next purpose-built slot suppresses it the same way.
+  const planSlot = decision.kind === 'plan_approval' && !inert ? plan : null;
 
   return (
     <article
@@ -305,7 +317,11 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
         ) : null}
 
         {/* plan approval — the plan itself, so nothing is approved unread */}
-        {decision.kind === 'plan_approval' && !inert ? plan : null}
+        {planSlot}
+
+        {/* the document a decision target points at (VS-224) — any kind whose card does not already
+            render it through a purpose-built slot */}
+        {docTarget && !planSlot ? <DocumentPreview decision={decision} /> : null}
 
         {/* merge approval — CI and diff stats */}
         {decision.kind === 'merge_approval' ? (

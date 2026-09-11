@@ -92,6 +92,15 @@ export function ticketRoutes(): Hono<AppEnv> {
     return c.json(c.get('ws').services.tickets.comment(c.get('actor'), c.req.param('id'), text, 'comment', 'trusted'), 201);
   });
 
+  // VS-224: read by document id — how a decision's document target is followed. Registered before
+  // the key route below so `by-id` is never consumed as a key.
+  app.get('/:id/documents/by-id/:documentId', (c) => {
+    const rev = c.req.query('revision');
+    const doc = c.get('ws').services.tickets.getDocumentById(c.req.param('id'), c.req.param('documentId'), rev ? Number(rev) : undefined);
+    if (!doc) throw new OcError('not_found', `document ${c.req.param('documentId')} not found`);
+    return c.json(doc);
+  });
+
   app.get('/:id/documents/:key', (c) => {
     const rev = c.req.query('revision');
     const doc = c.get('ws').services.tickets.getDocument(c.req.param('id'), c.req.param('key'), rev ? Number(rev) : undefined);

@@ -6,6 +6,7 @@ import { StatusGlyph, StatusBadge } from '../components/StatusGlyph';
 import { TicketCard } from '../components/TicketCard';
 import { WorkerCard } from '../components/WorkerCard';
 import { DecisionCard } from '../components/DecisionCard';
+import { DocumentPreview } from '../components/DocumentPreview';
 import { DispatchLabel } from '../components/DispatchLabel';
 import { ProjectTag, WorkerChip } from '../components/Chips';
 import { Composer } from '../components/Composer';
@@ -19,8 +20,20 @@ import { MergeQueueBadge, MergeQueueStrip } from '../components/MergeQueue';
 import { agent, decision, ticket } from './factories';
 
 const planDoc = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+const docById = vi.hoisted(() => ({
+  head: null as Record<string, unknown> | null,
+  named: null as Record<string, unknown> | null,
+  calls: [] as Array<[string | undefined, string | undefined, number | undefined]>,
+}));
 vi.mock('../api/hooks', () => ({
   useTicketDocument: () => planDoc.current ?? { data: undefined, isLoading: false, isError: true },
+  // VS-224: the document-target fetch. `head` answers the HEAD call, `named` the revision-named
+  // one; `calls` records every call so a test can prove the hook never ran.
+  useTicketDocumentById: (id?: string, documentId?: string, revision?: number) => {
+    docById.calls.push([id, documentId, revision]);
+    const source = revision === undefined ? docById.head : docById.named;
+    return source ?? { data: undefined, isLoading: false, isError: true };
+  },
 }));
 // DecisionCard's "Ask the worker" (VS-106) and "Show PR" (VS-107) links are the only things in this
 // file that reach a route; a plain anchor stands in so these tests keep running with no
@@ -1218,6 +1231,129 @@ describe('PlanPreview', () => {
     planDoc.current = doc('# Plan');
     const { container } = render(<PlanPreview decision={decision({ kind: 'merge_approval' })} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe('the document a decision target points at (VS-224)', () => {
+  const headDoc = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    data: { key: 'action', documentId: 'doc_1', revision: 2, currentRevision: 2, body: 'systemctl restart acd', createdAt: '', ...over },
+    isLoading: false,
+    isError: false,
+  });
+  const namedDoc = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    data: { key: 'action', documentId: 'doc_1', revision: 2, currentRevision: 3, body: 'older revision body', createdAt: '', ...over },
+    isLoading: false,
+    isError: false,
+  });
+  const actionDecision = decision({
+    kind: 'action_approval',
+    title: 'Approve the action for VOFM-25: deploy the headers',
+    context: 'Review the action document below — approve to run it; revise to send feedback; reject to cancel.',
+    target: { documentId: 'doc_1', revision: 2 },
+    options: [
+      { key: 'approve', label: 'Approve', recommended: true },
+      { key: 'revise', label: 'Revise…' },
+      { key: 'reject', label: 'Reject' },
+    ],
+  });
+
+  it('shows the action document on the card with the revision it names, open by default', () => {
+    docById.head = headDoc();
+    docById.named = null;
+    docById.calls = [];
+    render(<DecisionCard decision={actionDecision} onAnswer={() => undefined} />);
+    expect(screen.getByText('systemctl restart acd')).toBeInTheDocument();
+    expect(screen.getByText('r2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Hide the document/ })).toHaveAttribute('aria-expanded', 'true');
+    // One HEAD request; the revision-named call shares its cache key.
+    expect(docById.calls.map((c) => c[2])).toEqual([undefined, undefined]);
+  });
+
+  it('renders the document for a decision of another kind carrying the same target shape', () => {
+    docById.head = headDoc({ documentId: 'doc_9', revision: 1, currentRevision: 1, body: 'generic document body' });
+    docById.named = null;
+    docById.calls = [];
+    render(<DecisionCard decision={question({ target: { documentId: 'doc_9', revision: 1 } })} onAnswer={() => undefined} />);
+    expect(screen.getByText('generic document body')).toBeInTheDocument();
+  });
+
+  it('leaves decisions without a document target exactly as they are, fetching nothing', () => {
+    docById.head = headDoc({ body: 'must not appear' });
+    docById.named = null;
+    docById.calls = [];
+    render(
+      <DecisionCard
+        decision={decision({ kind: 'merge_approval', target: { prUrl: 'https://git.example/acme/web/pull/12', prNumber: 12, ci: { passed: 2, total: 2 } } })}
+        ws="ws1"
+        onAnswer={() => undefined}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Approve merge/ })).toBeInTheDocument();
+    expect(screen.queryByText('must not appear')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Read the document' })).not.toBeInTheDocument();
+    expect(docById.calls).toHaveLength(0);
+  });
+
+  it('never shows a superseded revision as current', () => {
+    docById.head = headDoc({ revision: 3, currentRevision: 3, body: 'current head body' });
+    docById.named = namedDoc();
+    docById.calls = [];
+    render(<DecisionCard decision={actionDecision} onAnswer={() => undefined} />);
+    expect(screen.getByText(/revised since this was asked/)).toBeInTheDocument();
+    expect(screen.getByText(/superseded by r3/)).toBeInTheDocument();
+    expect(screen.getByText('older revision body')).toBeInTheDocument();
+    expect(screen.queryByText('current head body')).not.toBeInTheDocument();
+  });
+
+  it('says when the revision it names does not exist instead of passing off HEAD content', () => {
+    docById.head = headDoc({ revision: 3, currentRevision: 3 });
+    docById.named = null;
+    docById.calls = [];
+    render(<DecisionCard decision={decision({ ...actionDecision, target: { documentId: 'doc_1', revision: 5 } })} onAnswer={() => undefined} />);
+    expect(screen.getByText('Revision r5 could not be found — the document is at r3.')).toBeInTheDocument();
+    expect(screen.queryByText('systemctl restart acd')).not.toBeInTheDocument();
+  });
+
+  it('says so when the document cannot be read at all', () => {
+    docById.head = null;
+    docById.named = null;
+    docById.calls = [];
+    render(<DecisionCard decision={actionDecision} onAnswer={() => undefined} />);
+    expect(screen.getByText('The document this decision points at could not be found.')).toBeInTheDocument();
+  });
+
+  it('holds the space with a skeleton while the document loads', () => {
+    docById.head = { data: undefined, isLoading: true, isError: false };
+    docById.named = null;
+    docById.calls = [];
+    render(<DocumentPreview decision={actionDecision} />);
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
+  });
+
+  it('renders a plan approval exactly once, through the plan slot, and never fetches by id', () => {
+    docById.head = headDoc({ key: 'plan', documentId: 'doc_plan', body: 'general preview body' });
+    docById.named = null;
+    docById.calls = [];
+    const d = decision({ target: { documentId: 'doc_plan', revision: 1 } });
+    render(<DecisionCard decision={d} plan={<PlanPreview decision={d} />} onAnswer={() => undefined} />);
+    expect(screen.getByRole('button', { name: /Read the plan/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Read the document/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Hide the document/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('general preview body')).not.toBeInTheDocument();
+    expect(docById.calls).toHaveLength(0);
+  });
+
+  it('shows an answered plan approval its plan as a record through the general preview', () => {
+    docById.head = headDoc({ key: 'plan', documentId: 'doc_plan', revision: 1, currentRevision: 1, body: 'the approved plan' });
+    docById.named = null;
+    docById.calls = [];
+    const d = decision({ status: 'answered', answerKey: 'approve', answeredAt: '2026-09-11T10:00:00.000Z', target: { documentId: 'doc_plan', revision: 1 } });
+    render(<DecisionCard decision={d} plan={<PlanPreview decision={d} />} onAnswer={() => undefined} />);
+    const toggle = screen.getByRole('button', { name: /Read the document/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('the approved plan')).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.getByText('the approved plan')).toBeInTheDocument();
   });
 });
 

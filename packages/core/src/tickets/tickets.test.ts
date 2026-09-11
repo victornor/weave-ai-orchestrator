@@ -469,6 +469,34 @@ describe('tickets', () => {
       expect(tickets.documents(t.id)[1]?.updatedAt).not.toBe('');
     });
 
+    describe('reading a document by id (VS-224)', () => {
+      it('reads the current revision by id and names the key and currentRevision', () => {
+        const t = make();
+        tickets.putDocument(AGENT, t.id, 'action', 'systemctl restart');
+        tickets.putDocument(AGENT, t.id, 'action', 'systemctl restart --now');
+        const doc = h.db.get<{ id: string }>('SELECT id FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, 'action'])!;
+        const found = tickets.getDocumentById(t.id, doc.id);
+        expect(found).toMatchObject({ key: 'action', documentId: doc.id, revision: 2, currentRevision: 2, body: 'systemctl restart --now' });
+      });
+
+      it('reads an earlier revision at that revision', () => {
+        const t = make();
+        tickets.putDocument(AGENT, t.id, 'action', 'v1');
+        tickets.putDocument(AGENT, t.id, 'action', 'v2');
+        const doc = h.db.get<{ id: string }>('SELECT id FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, 'action'])!;
+        expect(tickets.getDocumentById(t.id, doc.id, 1)).toMatchObject({ revision: 1, currentRevision: 2, body: 'v1' });
+      });
+
+      it('returns null for an unknown id, another ticket\'s document, and a revision that never existed', () => {
+        const a = make();
+        const b = make();
+        const written = tickets.putDocument(AGENT, a.id, 'report', 'only on a');
+        expect(tickets.getDocumentById(a.id, 'doc_unknown')).toBeNull();
+        expect(tickets.getDocumentById(b.id, written.documentId)).toBeNull();
+        expect(tickets.getDocumentById(a.id, written.documentId, 99)).toBeNull();
+      });
+    });
+
     it('raises a human-owned action_approval when an operational ticket writes action, and YOLO does not answer it', () => {
       h.ctx.config.defaults.yolo = true;
       const t = make({ kind: 'operational', title: 'Restart the daemon' });

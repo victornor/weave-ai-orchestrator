@@ -252,6 +252,18 @@ export interface TicketDocument {
   createdAt: string;
 }
 
+/** `GET /tickets/:id/documents/by-id/:documentId` (VS-224): what a decision's document target fetches. */
+export interface TicketDocumentById {
+  key: string;
+  documentId: string;
+  /** The revision this response carries — HEAD unless the query named one. */
+  revision: number;
+  /** The document's current revision, for the superseded check. */
+  currentRevision: number;
+  body: string;
+  createdAt: string;
+}
+
 export interface DocumentRevision {
   revision: number;
   createdAt: string;

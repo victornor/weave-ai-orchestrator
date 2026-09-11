@@ -6,6 +6,7 @@ import { workerPauseDetail } from '@agent-conductor/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';
+import { OutcomeChip } from '../components/TicketCard';
 import { MergeQueueBadge } from '../components/MergeQueue';
 import { Skeleton, SkeletonRows } from '../components/Skeleton';
 import { ErrorState, EmptyState } from '../components/States';
@@ -122,6 +123,7 @@ export function TicketRoute(): React.ReactElement {
           <span className="flex items-center gap-2">
             {ticket.interactiveSession ? <Badge tone="accent">interactive</Badge> : null}
             {isFolded(ticket.status) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
+            {ticket.status === 'done' || ticket.status === 'cancelled' ? <OutcomeChip ticket={ticket} /> : null}
             {ticket.status === 'merging' ? (
               <MergeQueueBadge
                 position={detail.data.mergeQueue.position}

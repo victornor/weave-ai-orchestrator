@@ -118,6 +118,21 @@ describe('TicketCard', () => {
   });
 });
 
+describe('TicketCard — incomplete delivery (VS-250)', () => {
+  it('marks a done ticket whose merged PR has no merge-done record, not an ordinary merge', () => {
+    render(<TicketCard ticket={ticket({ status: 'done', delivery: { prUrl: 'https://example.com/pull/190', prState: 'merged' } })} />);
+    expect(screen.getByText('delivery incomplete')).toBeInTheDocument();
+    expect(screen.queryByText('PR merged')).not.toBeInTheDocument();
+    expect(screen.queryByText('merged')).not.toBeInTheDocument();
+  });
+
+  it("still reads merge-done's complete record as merged", () => {
+    render(<TicketCard ticket={ticket({ status: 'done', delivery: { merged: true, mergeCommit: 'a'.repeat(40), method: 'squash' } })} />);
+    expect(screen.getByText('merged')).toBeInTheDocument();
+    expect(screen.queryByText('delivery incomplete')).not.toBeInTheDocument();
+  });
+});
+
 describe('TicketCard — a paused worker', () => {
   it('says on the board why the work stopped', () => {
     render(<TicketCard ticket={ticket()} workerName="Frontend Engineer #7" workerPausedFor="provider_quota · limit resets in 2 hours" />);

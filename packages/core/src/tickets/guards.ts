@@ -38,6 +38,11 @@ export function checkTransition(kind: TicketKind, from: TicketStatus, to: Ticket
       throw new OcError('missing_action_path', 'blocked requires open blockers, an open decision, or unblock {owner, action}', { from });
     }
   }
+  if (from === 'merging' && to === 'done') {
+    // VS-250: the old bypass set `done` with no complete delivery (VS-227). merge-done writes that
+    // record and touches `done` directly, so it never comes through here.
+    throw new OcError('invalid_disposition', 'a ticket leaves merging for done only through ac_ticket_merge_done — report the merged pull request with that tool', { from, to });
+  }
   if (to === 'in_review' && !facts.hasWorkProduct) {
     throw new OcError('invalid_disposition', 'in_review requires a work product (record the PR, branch or report first)', { from });
   }

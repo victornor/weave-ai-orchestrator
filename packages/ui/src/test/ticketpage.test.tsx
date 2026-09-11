@@ -287,3 +287,20 @@ describe('TicketRoute header chip carries the full message in its tooltip (VS-20
     expect(chip.getAttribute('title')).toContain('gpt-5.59-sol-high');
   });
 });
+
+describe('TicketRoute header names an incomplete delivery (VS-250)', () => {
+  it('shows delivery incomplete for a done ticket whose merged PR has no merge-done record', () => {
+    state.ticketStatus = 'done';
+    state.ticketOverrides = { delivery: { prUrl: 'https://example.com/pull/190', prState: 'merged' } };
+    render(<TicketRoute />);
+    expect(screen.getByText('delivery incomplete')).toBeInTheDocument();
+  });
+
+  it("shows merged for merge-done's complete record", () => {
+    state.ticketStatus = 'done';
+    state.ticketOverrides = { delivery: { merged: true, mergeCommit: 'a'.repeat(40) } };
+    render(<TicketRoute />);
+    expect(screen.getByText('merged')).toBeInTheDocument();
+    expect(screen.queryByText('delivery incomplete')).not.toBeInTheDocument();
+  });
+});

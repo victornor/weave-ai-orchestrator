@@ -192,6 +192,9 @@ describe('tickets', () => {
             tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'https://example.com/pr/1' });
             h.db.update('tickets', t.id, { status: from, autoMerge: 1 });
             const allowed = canTransition(kind as TicketKind, from as TicketStatus, to as TicketStatus);
+            // VS-250: `merging -> done` stays graph-legal (mergeDone finishes that ticket), but the
+            // transition() call is refused — only merge-done may write that edge.
+            const guardRefuses = allowed && from === 'merging' && to === 'done';
             let ok = true;
             let err: unknown;
             try {
@@ -207,10 +210,31 @@ describe('tickets', () => {
               ok = false;
               err = e;
             }
-            expect(ok, `${kind}: ${from} -> ${to} expected ${allowed ? 'allowed' : 'rejected'} (${String(err)})`).toBe(allowed);
-            if (ok) expect(tickets.get(t.id).status).toBe(to);
+            expect(ok, `${kind}: ${from} -> ${to} expected ${allowed ? 'allowed' : 'rejected'} (${String(err)})`).toBe(allowed && !guardRefuses);
+            if (guardRefuses) {
+              expect(err).toMatchObject({ code: 'invalid_disposition' });
+              expect((err as OcError).message).toContain('ac_ticket_merge_done');
+              expect(tickets.get(t.id).status).toBe('merging');
+            } else if (ok) {
+              expect(tickets.get(t.id).status).toBe(to);
+            }
           }
         }
+      }
+    });
+
+    // VS-250: the old bypass let a ticket leave merging for done with no complete delivery record
+    // (the VS-227 shape). Only merge-done writes that edge now.
+    it('refuses merging -> done through transition() and names merge-done, for change and task', async () => {
+      for (const kind of ['change', 'task'] as const) {
+        const t = make({ kind, title: `${kind} merging` });
+        tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'https://example.com/pr/1' });
+        h.db.update('tickets', t.id, { status: 'merging', autoMerge: 1 });
+        await expect(tickets.transition(SYSTEM, t.id, { to: 'done', note: 'ending stated for the guard' })).rejects.toMatchObject({
+          code: 'invalid_disposition',
+          message: expect.stringContaining('ac_ticket_merge_done'),
+        });
+        expect(tickets.get(t.id).status).toBe('merging');
       }
     });
 
@@ -718,7 +742,8 @@ describe('tickets', () => {
       await tickets.transition(AGENT, blocker.id, { to: 'in_review' }).catch(() => undefined);
       tickets.addWorkProduct(AGENT, blocker.id, { type: 'branch', title: 'ac/x' });
       h.db.update('tickets', blocker.id, { status: 'merging', autoMerge: 1 });
-      await tickets.transition(SYSTEM, blocker.id, { to: 'done' });
+      // VS-250: done from merging is merge-done's alone, and that is the path these tests mean.
+      await tickets.mergeDone(SYSTEM, blocker.id, {});
       expect(tickets.get(dep.id).status).toBe('todo');
       expect(wake.calls.some((c) => c.agentId === depWorker && c.input.source === 'blockers_resolved')).toBe(true);
     });
@@ -735,7 +760,8 @@ describe('tickets', () => {
 
       tickets.addWorkProduct(AGENT, blocker.id, { type: 'branch', title: 'ac/x' });
       h.db.update('tickets', blocker.id, { status: 'merging', autoMerge: 1 });
-      await tickets.transition(SYSTEM, blocker.id, { to: 'done' });
+      // VS-250: done from merging is merge-done's alone, and that is the path these tests mean.
+      await tickets.mergeDone(SYSTEM, blocker.id, {});
 
       expect(tickets.get(dep.id)).toMatchObject({ status: 'approved', blockedFromStatus: null });
     });

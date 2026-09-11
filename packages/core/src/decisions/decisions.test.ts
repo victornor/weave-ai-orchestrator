@@ -570,10 +570,10 @@ describe('decisions', () => {
     it('lets the conductor mark looked and concerns on plan, merge and action, open or answered', async () => {
       const t = ticket();
       const openPlan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
-      const looked = decisions.review(conductor(), openPlan.id, { status: 'looked' });
+      const looked = decisions.review(conductor(), openPlan.id, { status: 'looked', note: '  plan matches the ticket  ' });
       expect(looked.conductorReviewStatus).toBe('looked');
       expect(looked.conductorReviewedAt).toBeTruthy();
-      expect(looked.conductorReviewNote).toBeNull();
+      expect(looked.conductorReviewNote).toBe('plan matches the ticket');
       expect(looked.conductorReviewedByAgentId).toBe(h.conductorId);
 
       const merge = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Merge', correlationKey: `merge:${t.id}` });
@@ -583,9 +583,19 @@ describe('decisions', () => {
 
       const action = decisions.create(AGENT, { ticketId: t.id, kind: 'action_approval', title: 'Action', correlationKey: `action:${t.id}` });
       await decisions.answer(HUMAN, action.id, { key: 'approve' });
-      const after = decisions.review(conductor(), action.id, { status: 'looked' });
+      const after = decisions.review(conductor(), action.id, { status: 'looked', note: 'ran the action steps' });
       expect(after.conductorReviewStatus).toBe('looked');
       expect(after.status).toBe('answered');
+    });
+
+    it('refuses a clean mark without a note, exactly as it refuses a noteless concern (VS-234)', () => {
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      expect(() => decisions.review(conductor(), d.id, { status: 'looked' })).toThrow(/looked requires a note/);
+      expect(() => decisions.review(conductor(), d.id, { status: 'looked', note: '   ' })).toThrow(/looked requires a note/);
+      expect(() => decisions.review(conductor(), d.id, { status: 'looked', note: 'x'.repeat(501) })).toThrow(/500/);
+      expect(decisions.get(d.id).conductorReviewStatus).toBe('unseen');
+      expect(decisions.get(d.id).conductorReviewNote).toBeNull();
     });
 
     it('refuses concerns without a note and a note over 500 characters', () => {
@@ -635,7 +645,7 @@ describe('decisions', () => {
       }
     });
 
-    it('looked clears a previous note and each mark sets a fresh reviewedAt', () => {
+    it('a clean mark replaces a previous concern note and each mark sets a fresh reviewedAt (VS-234)', () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-09-11T03:00:00.000Z'));
       const t = ticket();
@@ -643,9 +653,9 @@ describe('decisions', () => {
       const first = decisions.review(conductor(), d.id, { status: 'concerns', note: 'split the migration' });
       expect(first.conductorReviewNote).toBe('split the migration');
       vi.setSystemTime(new Date('2026-09-11T03:00:01.000Z'));
-      const second = decisions.review(conductor(), d.id, { status: 'looked' });
+      const second = decisions.review(conductor(), d.id, { status: 'looked', note: 'migration was split, all clear now' });
       expect(second.conductorReviewStatus).toBe('looked');
-      expect(second.conductorReviewNote).toBeNull();
+      expect(second.conductorReviewNote).toBe('migration was split, all clear now');
       expect(second.conductorReviewedAt! > first.conductorReviewedAt!).toBe(true);
       vi.useRealTimers();
     });
@@ -654,7 +664,7 @@ describe('decisions', () => {
       const t = ticket();
       const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
       const before = wake.calls.length;
-      const marked = decisions.review(conductor(), d.id, { status: 'looked' });
+      const marked = decisions.review(conductor(), d.id, { status: 'looked', note: 'plan covers the scope' });
       await new Promise((r) => setImmediate(r));
       expect(h.events.some((e) => e.type === 'decision.updated' && (e.payload as { id: string }).id === marked.id)).toBe(true);
       const ev = h.events.find((e) => e.type === 'decision.updated')!;

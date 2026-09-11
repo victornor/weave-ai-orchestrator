@@ -67,7 +67,7 @@ describe('decisionToCard', () => {
       { label: 'Diff', value: '+18 −2', format: 'diff' },
       { label: 'Files', value: '3 files', format: 'mono' },
       { label: 'Branch', value: 'ac/acme-42', format: 'mono' },
-      { label: 'Review', value: "Conductor hasn't looked yet", format: 'text' },
+      { label: 'Review', value: "Conductor hasn't reviewed yet", format: 'text' },
     ]);
   });
 
@@ -258,11 +258,11 @@ describe('decisionToCard', () => {
     });
   });
 
-  describe('conductor review body lines (VS-223)', () => {
+  describe('conductor review body lines (VS-223, VS-234)', () => {
     it('shows the unseen line on plan, merge and action cards', () => {
       for (const kind of ['plan_approval', 'merge_approval', 'action_approval'] as const) {
         const card = decisionToCard(decision({ kind }), { now });
-        expect(card.body).toContainEqual({ label: 'Review', value: "Conductor hasn't looked yet", format: 'text' });
+        expect(card.body).toContainEqual({ label: 'Review', value: "Conductor hasn't reviewed yet", format: 'text' });
       }
     });
 
@@ -276,14 +276,16 @@ describe('decisionToCard', () => {
       const prior = decisionToCard(decision({
         kind: 'plan_approval', status: 'answered', answeredAt: '2026-09-11T03:02:00.000Z',
         conductorReviewStatus: 'looked', conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+        conductorReviewNote: 'diff is exactly the plan',
       }), { now });
-      expect(prior.body).toContainEqual({ label: 'Review', value: 'Conductor looked', format: 'text' });
+      expect(prior.body).toContainEqual({ label: 'Review', value: 'Conductor reviewed — no concerns', format: 'text' });
 
       const after = decisionToCard(decision({
         kind: 'merge_approval', status: 'answered', answeredAt: '2026-09-11T03:01:00.000Z',
         conductorReviewStatus: 'looked', conductorReviewedAt: '2026-09-11T03:02:00.000Z',
+        conductorReviewNote: 'squash-merge verified after the rebase',
       }), { now });
-      expect(after.body).toContainEqual({ label: 'Review', value: 'Conductor looked after you answered', format: 'text' });
+      expect(after.body).toContainEqual({ label: 'Review', value: 'Conductor reviewed after you answered — no concerns', format: 'text' });
     });
 
     it('includes the concern note as a following body line', () => {
@@ -292,8 +294,33 @@ describe('decisionToCard', () => {
         conductorReviewedAt: '2026-09-11T03:01:00.000Z',
         conductorReviewNote: 'the migration contradicts itself',
       }), { now });
-      expect(card.body).toContainEqual({ label: 'Review', value: 'Conductor looked — has concerns', format: 'text' });
+      expect(card.body).toContainEqual({ label: 'Review', value: 'Conductor reviewed — has concerns', format: 'text' });
       expect(card.body).toContainEqual({ label: null, value: 'the migration contradicts itself', format: 'text' });
+    });
+
+    it('shows a clean mark with its note, and a legacy mark as the line alone (VS-234)', () => {
+      const noted = decisionToCard(decision({
+        kind: 'merge_approval', conductorReviewStatus: 'looked',
+        conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+        conductorReviewNote: 'squash diff matches the approved plan',
+      }), { now });
+      expect(noted.body).toContainEqual({ label: 'Review', value: 'Conductor reviewed — no concerns', format: 'text' });
+      expect(noted.body).toContainEqual({ label: null, value: 'squash diff matches the approved plan', format: 'text' });
+
+      const legacy = decisionToCard(decision({
+        kind: 'merge_approval', conductorReviewStatus: 'looked',
+        conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+        conductorReviewNote: null,
+        target: { prUrl: 'https://github.com/acme/web/pull/12', ciPassed: 7, ciTotal: 7, additions: 18, deletions: 2, files: 3, branch: 'ac/acme-42' },
+      }), { now });
+      expect(legacy.body).toEqual([
+        { label: 'PR', value: 'https://github.com/acme/web/pull/12', format: 'link' },
+        { label: 'CI', value: '7/7', format: 'mono' },
+        { label: 'Diff', value: '+18 −2', format: 'diff' },
+        { label: 'Files', value: '3 files', format: 'mono' },
+        { label: 'Branch', value: 'ac/acme-42', format: 'mono' },
+        { label: 'Review', value: 'Conductor reviewed — no concerns', format: 'text' },
+      ]);
     });
   });
 });

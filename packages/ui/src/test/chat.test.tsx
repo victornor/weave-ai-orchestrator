@@ -1504,7 +1504,7 @@ describe('ChatRoute decision cards', () => {
     ];
     render(<ChatRoute />);
     const card = screen.getByLabelText(/Plan: review state on the card/);
-    expect(within(card).getByText("Conductor hasn't looked yet")).toBeInTheDocument();
+    expect(within(card).getByText("Conductor hasn't reviewed yet")).toBeInTheDocument();
   });
 
   it('shows no provenance tag on a card that concerns no ticket (VS-146)', () => {

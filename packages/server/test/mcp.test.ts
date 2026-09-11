@@ -94,7 +94,7 @@ describe('MCP endpoint', () => {
     const before = worker.h.runtime.services.decisions.get('dec_1');
     const refused = await worker.client.callTool({
       name: 'ac_decision_review',
-      arguments: { decisionId: 'dec_1', status: 'looked' },
+      arguments: { decisionId: 'dec_1', status: 'looked', note: 'plan matches the ticket' },
     });
     const refusedPayload = JSON.parse((refused.content as Array<{ text: string }>)[0]!.text);
     expect(refusedPayload.ok).toBe(false);
@@ -109,11 +109,12 @@ describe('MCP endpoint', () => {
     );
     const okRes = await conductor.client.callTool({
       name: 'ac_decision_review',
-      arguments: { decisionId: created.id, status: 'looked' },
+      arguments: { decisionId: created.id, status: 'looked', note: 'plan matches the ticket' },
     });
     const okPayload = JSON.parse((okRes.content as Array<{ text: string }>)[0]!.text);
     expect(okPayload.ok).toBe(true);
     expect(okPayload.data.conductorReviewStatus).toBe('looked');
+    expect(okPayload.data.conductorReviewNote).toBe('plan matches the ticket');
     await conductor.client.close();
   });
 

@@ -554,18 +554,18 @@ describe('DecisionCard', () => {
     });
   });
 
-  describe('conductor review line (VS-223)', () => {
+  describe('conductor review line (VS-223, VS-234)', () => {
     it('shows unseen on a plan card and still sends the real Approve/Revise/Reject keys', () => {
       const onAnswer = vi.fn();
       render(<DecisionCard decision={decision({ kind: 'plan_approval' })} onAnswer={onAnswer} />);
-      const line = screen.getByText("Conductor hasn't looked yet");
+      const line = screen.getByText("Conductor hasn't reviewed yet");
       expect(line).toHaveClass('text-blocked');
       fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
       fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
       expect(onAnswer.mock.calls.map((c) => c[0]?.key)).toEqual(['approve', 'reject']);
     });
 
-    it('shows looked on a merge card as understated present text, still Approve merge', () => {
+    it('shows a reviewed merge card as its conclusion with its note, still Approve merge', () => {
       const onAnswer = vi.fn();
       const { unmount } = render(
         <DecisionCard
@@ -573,21 +573,57 @@ describe('DecisionCard', () => {
             kind: 'merge_approval',
             conductorReviewStatus: 'looked',
             conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+            conductorReviewNote: 'squash diff matches the approved plan',
           })}
           onAnswer={onAnswer}
         />,
       );
-      const looked = screen.getByText('Conductor looked');
+      const looked = screen.getByText('Conductor reviewed — no concerns');
       expect(looked).toHaveClass('text-text-3');
       expect(looked).not.toHaveClass('text-blocked');
-      expect(screen.queryByText("Conductor hasn't looked yet")).not.toBeInTheDocument();
+      expect(screen.getByText('squash diff matches the approved plan')).toBeInTheDocument();
+      expect(screen.queryByText("Conductor hasn't reviewed yet")).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Approve merge' }));
       expect(onAnswer).toHaveBeenCalledWith(expect.objectContaining({ key: 'approve' }));
       unmount();
 
       render(<DecisionCard decision={decision({ kind: 'merge_approval' })} onAnswer={() => undefined} />);
-      expect(screen.getByText("Conductor hasn't looked yet")).toBeInTheDocument();
-      expect(screen.queryByText('Conductor looked')).not.toBeInTheDocument();
+      expect(screen.getByText("Conductor hasn't reviewed yet")).toBeInTheDocument();
+      expect(screen.queryByText('Conductor reviewed — no concerns')).not.toBeInTheDocument();
+    });
+
+    it('renders a legacy clean mark (no note) as the line alone (VS-234)', () => {
+      render(
+        <DecisionCard
+          decision={decision({
+            kind: 'merge_approval',
+            conductorReviewStatus: 'looked',
+            conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+            conductorReviewNote: null,
+          })}
+          onAnswer={() => undefined}
+        />,
+      );
+      expect(screen.getByText('Conductor reviewed — no concerns')).toBeInTheDocument();
+      const review = screen.getByText('Conductor reviewed — no concerns').parentElement!;
+      expect(review.querySelectorAll('p')).toHaveLength(1);
+    });
+
+    it('approving a reviewed card is immediate and sends the same key as an unseen one (VS-234)', () => {
+      const onAnswer = vi.fn();
+      render(
+        <DecisionCard
+          decision={decision({
+            kind: 'plan_approval',
+            conductorReviewStatus: 'looked',
+            conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+            conductorReviewNote: 'plan covers the scope',
+          })}
+          onAnswer={onAnswer}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
+      expect(onAnswer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ key: 'approve' }));
     });
 
     it('shows the concern note as a text block, not a Badge, and approve still fires', () => {
@@ -603,7 +639,7 @@ describe('DecisionCard', () => {
           onAnswer={onAnswer}
         />,
       );
-      expect(screen.getByText('Conductor looked — has concerns')).toBeInTheDocument();
+      expect(screen.getByText('Conductor reviewed — has concerns')).toBeInTheDocument();
       const note = screen.getByText('the migration contradicts itself');
       expect(note.tagName).toBe('P');
       const review = container.querySelector('[data-conductor-review="concerns"]');
@@ -622,11 +658,12 @@ describe('DecisionCard', () => {
             answeredAt: '2026-09-11T03:01:00.000Z',
             conductorReviewStatus: 'looked',
             conductorReviewedAt: '2026-09-11T03:02:00.000Z',
+            conductorReviewNote: 'looked again after the merge',
           })}
           onAnswer={() => undefined}
         />,
       );
-      expect(screen.getByText('Conductor looked after you answered')).toBeInTheDocument();
+      expect(screen.getByText('Conductor reviewed after you answered — no concerns')).toBeInTheDocument();
     });
 
     it('puts no review line on a question card', () => {
@@ -636,7 +673,7 @@ describe('DecisionCard', () => {
 
     it('still shows the line on a compact chat card, not behind an expander', () => {
       render(<DecisionCard decision={decision({ kind: 'plan_approval' })} compact onAnswer={() => undefined} />);
-      expect(screen.getByText("Conductor hasn't looked yet")).toBeInTheDocument();
+      expect(screen.getByText("Conductor hasn't reviewed yet")).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
     });
   });

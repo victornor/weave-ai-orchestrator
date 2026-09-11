@@ -258,7 +258,8 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
           ...cur,
           conductorReviewStatus: input.status,
           conductorReviewedAt: new Date().toISOString(),
-          conductorReviewNote: input.status === 'concerns' ? (input.note ?? '').trim() || null : null,
+          // VS-234: both marks carry the note (the tool schema enforces its presence).
+          conductorReviewNote: (input.note ?? '').trim() || null,
           conductorReviewedByAgentId: _actor.id,
         };
         decisions.set(id, d);

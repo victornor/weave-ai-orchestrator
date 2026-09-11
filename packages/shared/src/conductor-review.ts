@@ -1,7 +1,7 @@
 import { CONDUCTOR_REVIEW_KINDS, type ConductorReviewStatus, type DecisionKind } from './enums.js';
 import type { Decision } from './types.js';
 
-/** Cap on `conductorReviewNote` so a concern fits a phone card (VS-223). Longer argument is an `ac_ask`. */
+/** Cap on `conductorReviewNote` — the concern summary or the clean mark's reason (VS-223, VS-234) — so it fits a phone card. Longer argument is an `ac_ask`. */
 export const CONDUCTOR_REVIEW_NOTE_MAX = 500;
 
 export type ConductorReviewCopy = {
@@ -38,17 +38,19 @@ export function conductorReviewCopy(d: ConductorReviewFields): ConductorReviewCo
   const status: ConductorReviewStatus = d.conductorReviewStatus ?? 'unseen';
   const after = reviewIsAfterAnswer(d);
   if (status === 'unseen') {
-    return { line: "Conductor hasn't looked yet", note: null, tone: 'unseen' };
+    return { line: "Conductor hasn't reviewed yet", note: null, tone: 'unseen' };
   }
   if (status === 'looked') {
+    // VS-234: the line states the outcome, the required note carries the reasoning. Marks made
+    // before notes were required have none — the line still renders, nothing fills its place.
     return {
-      line: after ? 'Conductor looked after you answered' : 'Conductor looked',
-      note: null,
+      line: after ? 'Conductor reviewed after you answered — no concerns' : 'Conductor reviewed — no concerns',
+      note: d.conductorReviewNote ?? null,
       tone: after ? 'after' : 'looked',
     };
   }
   return {
-    line: after ? 'Conductor looked after you answered — has concerns' : 'Conductor looked — has concerns',
+    line: after ? 'Conductor reviewed after you answered — has concerns' : 'Conductor reviewed — has concerns',
     note: d.conductorReviewNote ?? null,
     tone: 'concerns',
   };

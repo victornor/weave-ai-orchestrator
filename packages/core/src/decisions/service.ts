@@ -473,15 +473,19 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     if (input.status !== 'looked' && input.status !== 'concerns') {
       throw new OcError('validation', 'review status must be looked or concerns');
     }
-    let note: string | null = null;
-    if (input.status === 'concerns') {
-      const trimmed = (input.note ?? '').trim();
-      if (!trimmed) throw new OcError('validation', 'concerns requires a note');
-      if (trimmed.length > CONDUCTOR_REVIEW_NOTE_MAX) {
-        throw new OcError('validation', `review note is at most ${CONDUCTOR_REVIEW_NOTE_MAX} characters`);
-      }
-      note = trimmed;
+    // VS-234: both marks cost a written reason — the concern's summary, or the clean mark's stated
+    // reason the work is clean (the sentence that would otherwise go to the chat). Either replaces
+    // whatever a previous mark left.
+    const trimmed = (input.note ?? '').trim();
+    if (!trimmed) {
+      throw new OcError('validation', input.status === 'looked'
+        ? 'looked requires a note: state why the work is clean'
+        : 'concerns requires a note');
     }
+    if (trimmed.length > CONDUCTOR_REVIEW_NOTE_MAX) {
+      throw new OcError('validation', `review note is at most ${CONDUCTOR_REVIEW_NOTE_MAX} characters`);
+    }
+    const note = trimmed;
     return tx(db, () => {
       db.update('decisions', d.id, {
         conductorReviewStatus: input.status,

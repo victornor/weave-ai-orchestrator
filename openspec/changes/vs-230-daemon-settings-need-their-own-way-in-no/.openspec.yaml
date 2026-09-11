@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-11
+goal: Daemon settings need their own way in, not a toggle hidden inside a workspace

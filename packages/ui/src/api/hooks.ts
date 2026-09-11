@@ -591,6 +591,17 @@ export function useModels(): UseQueryResult<T.WorkspaceModels> {
   return useQuery({ queryKey: qk.models(ws), queryFn: () => api.ws<T.WorkspaceModels>(ws, '/models') });
 }
 
+/**
+ * `useModels` where a workspace may not be in context at all — the daemon settings page is reached
+ * without one (VS-230). Without a workspace the query is disabled and answers no data, so a caller
+ * seeding a daemon overlay from "this workspace's" setting falls back to its runtime default
+ * instead of throwing.
+ */
+export function useModelsOptional(): UseQueryResult<T.WorkspaceModels | undefined> {
+  const ws = useHookWs();
+  return useQuery({ queryKey: qk.models(ws), queryFn: () => api.ws<T.WorkspaceModels>(ws, '/models'), enabled: ws !== '' });
+}
+
 /** `useModels` for several workspaces at once (VS-217); the shared query key dedupes the two. */
 export function useModelsMany(ids: readonly string[]): UseQueryResult<T.WorkspaceModels>[] {
   return useQueries({

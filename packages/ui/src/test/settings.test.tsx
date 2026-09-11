@@ -103,7 +103,7 @@ vi.mock('../api/hooks', () => ({
   useRemoveRoutine: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-const { SettingsRoute } = await import('../routes/Settings');
+const { WorkspaceSettingsRoute, DaemonSettingsRoute } = await import('../routes/Settings');
 
 beforeEach(() => {
   state.patches = [];
@@ -131,7 +131,7 @@ beforeEach(() => {
 
 describe('Settings — knowledge budgets', () => {
   it('shows every configured budget', () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     expect(screen.getByLabelText('Project knowledge base')).toHaveValue(10000);
     expect(screen.getByLabelText('Linked document')).toHaveValue(10000);
     expect(screen.getByLabelText('Shared conventions')).toHaveValue(2000);
@@ -140,7 +140,7 @@ describe('Settings — knowledge budgets', () => {
   });
 
   it('patches only the budget that changed', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     const input = screen.getByLabelText('Project knowledge base');
     fireEvent.change(input, { target: { value: '25000' } });
     fireEvent.blur(input);
@@ -148,7 +148,7 @@ describe('Settings — knowledge budgets', () => {
   });
 
   it('says nothing to the daemon when a budget is unchanged or not a sane token count', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     const input = screen.getByLabelText('Project knowledge base');
     fireEvent.blur(input);
     fireEvent.change(input, { target: { value: '12' } });
@@ -160,7 +160,7 @@ describe('Settings — knowledge budgets', () => {
   });
 
   it('an out-of-range value is rejected and keeps the typed number visible (VS-141 AC #3)', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     const input = screen.getByLabelText('Project knowledge base');
     fireEvent.change(input, { target: { value: '12' } });
     fireEvent.blur(input);
@@ -170,7 +170,7 @@ describe('Settings — knowledge budgets', () => {
   });
 
   it('shows a visible confirmation once a commit resolves, without reloading (VS-141 AC #2)', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     const input = screen.getByLabelText('Project knowledge base');
     fireEvent.change(input, { target: { value: '25000' } });
     fireEvent.blur(input);
@@ -178,7 +178,7 @@ describe('Settings — knowledge budgets', () => {
   });
 
   it('Enter commits the value without blurring (VS-141 AC #4)', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     const input = screen.getByLabelText('Project knowledge base');
     fireEvent.change(input, { target: { value: '25000' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -186,7 +186,7 @@ describe('Settings — knowledge budgets', () => {
   });
 
   it('a dirty field survives switching sections without an explicit blur (VS-141 AC #1/#6)', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     const input = screen.getByLabelText('Project knowledge base');
     fireEvent.change(input, { target: { value: '25000' } });
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
@@ -194,7 +194,7 @@ describe('Settings — knowledge budgets', () => {
   });
 
   it('shows an unsaved indicator and an explicit save action while a field is dirty', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     const input = screen.getByLabelText('Project knowledge base');
     expect(screen.queryByText('Unsaved')).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: '25000' } });
@@ -206,7 +206,7 @@ describe('Settings — knowledge budgets', () => {
 
 describe('Settings — YOLO mode', () => {
   it('reads off by default and turns the mode on', () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     const toggle = screen.getByLabelText('YOLO mode');
     expect(toggle).toHaveAttribute('aria-checked', 'false');
 
@@ -216,7 +216,7 @@ describe('Settings — YOLO mode', () => {
 
   it('turns the mode off again when it is on', () => {
     state.config = { defaults: { yolo: true } };
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     expect(screen.getByLabelText('YOLO mode')).toHaveAttribute('aria-checked', 'true');
 
     fireEvent.click(screen.getByLabelText('YOLO mode'));
@@ -226,7 +226,7 @@ describe('Settings — YOLO mode', () => {
   it('overrides the mode per project and clears the override by dropping the key', () => {
     state.config = { defaults: { yolo: true } };
     state.projects = [{ id: 'p1', slug: 'api', status: 'ready', gitUrl: 'g', maxWorkers: 2, policies: { requireCi: true } }];
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
 
     const select = screen.getByLabelText('YOLO mode for api');
@@ -243,7 +243,7 @@ describe('Settings — YOLO mode', () => {
 
 describe('Settings — add project Auto-merge default (VS-153)', () => {
   function openProjects(): void {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
   }
 
@@ -271,7 +271,7 @@ describe('Settings — add project Auto-merge default (VS-153)', () => {
 
 describe('Settings — add project Max workers follows the project schema (VS-212)', () => {
   function openProjects(): void {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
   }
 
@@ -313,7 +313,7 @@ describe('Settings — a project landing branch (VS-122)', () => {
   });
 
   it('shows the default branch as a placeholder when none is declared, and sets one on blur', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
 
     const field = screen.getByLabelText('landing branch for api');
@@ -327,7 +327,7 @@ describe('Settings — a project landing branch (VS-122)', () => {
 
   it('shows an already-declared landing branch and changes it on blur', async () => {
     state.projects = [{ ...state.projects[0]!, landingBranch: 'edge' }];
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
 
     const field = screen.getByLabelText('landing branch for api');
@@ -340,7 +340,7 @@ describe('Settings — a project landing branch (VS-122)', () => {
 
   it('clearing the field sends an empty string', async () => {
     state.projects = [{ ...state.projects[0]!, landingBranch: 'edge' }];
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
 
     const field = screen.getByLabelText('landing branch for api');
@@ -351,7 +351,7 @@ describe('Settings — a project landing branch (VS-122)', () => {
 
   it('a rejected branch keeps the typed value and states why, instead of reverting it (VS-141 AC #3)', async () => {
     state.projectPatchError = "branch 'nope' was not found on origin";
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
 
     const field = screen.getByLabelText('landing branch for api');
@@ -364,7 +364,7 @@ describe('Settings — a project landing branch (VS-122)', () => {
 
   it('correcting and retrying after a rejection sends the corrected draft', async () => {
     state.projectPatchError = "branch 'nope' was not found on origin";
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
 
     const field = screen.getByLabelText('landing branch for api');
@@ -379,7 +379,7 @@ describe('Settings — a project landing branch (VS-122)', () => {
   });
 
   it('Enter commits the value, on a phone keyboard exactly as on desktop (VS-141 AC #4)', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
 
     const field = screen.getByLabelText('landing branch for api');
@@ -389,7 +389,7 @@ describe('Settings — a project landing branch (VS-122)', () => {
   });
 
   it('a dirty landing-branch field survives switching sections without an explicit blur (VS-141 AC #1/#6)', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
 
     const field = screen.getByLabelText('landing branch for api');
@@ -402,7 +402,7 @@ describe('Settings — a project landing branch (VS-122)', () => {
 
 describe('Settings — the workspace name (VS-141)', () => {
   it('commits on blur', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     const input = screen.getByDisplayValue('Acme');
     fireEvent.change(input, { target: { value: 'Acme Renamed' } });
     fireEvent.blur(input);
@@ -410,7 +410,7 @@ describe('Settings — the workspace name (VS-141)', () => {
   });
 
   it('rejects an empty name without touching the daemon, and keeps it correctable', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     const input = screen.getByDisplayValue('Acme');
     fireEvent.change(input, { target: { value: '' } });
     fireEvent.blur(input);
@@ -419,7 +419,7 @@ describe('Settings — the workspace name (VS-141)', () => {
   });
 
   it('a dirty name survives switching sections without an explicit blur', async () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     const input = screen.getByDisplayValue('Acme');
     fireEvent.change(input, { target: { value: 'Acme Renamed' } });
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
@@ -435,14 +435,14 @@ describe('Settings — the workspace list', () => {
 
   it('is the first section on the page', () => {
     state.workspaces = [listItem()];
-    const { container } = render(<SettingsRoute />);
+    const { container } = render(<WorkspaceSettingsRoute />);
     const labels = [...container.querySelectorAll('.ac-label')].map((el) => el.textContent);
     expect(labels[0]).toBe('Workspaces');
   });
 
   it('lists every workspace and marks the current one', () => {
     state.workspaces = [listItem(), listItem({ id: 'beta', name: 'Beta', ticketPrefix: 'BET' })];
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     expect(screen.getByText('Acme')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
     expect(screen.getByText('current')).toBeInTheDocument();
@@ -450,14 +450,14 @@ describe('Settings — the workspace list', () => {
 
   it('shows each workspace its Needs-you count, and nothing at zero', () => {
     state.workspaces = [listItem(), listItem({ id: 'beta', name: 'Beta', needsYou: 4 })];
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     expect(screen.getByLabelText('4 waiting for you')).toBeInTheDocument();
     expect(screen.queryByLabelText('0 waiting for you')).not.toBeInTheDocument();
   });
 
   it('navigates to a workspace that is chosen', () => {
     state.workspaces = [listItem(), listItem({ id: 'beta', name: 'Beta' })];
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByText('Beta'));
     expect(state.went).toContain('/w/beta/needs');
   });
@@ -466,7 +466,7 @@ describe('Settings — the workspace list', () => {
 /** VS-125: the Telegram bot token field, and the allowlist writing the field the channel reads. */
 describe('Settings — Telegram', () => {
   const openChannels = (): void => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Channels' }));
   };
 
@@ -551,7 +551,7 @@ describe('Settings — Telegram', () => {
 /** VS-135: pending identities and turning off legacy open access, both from the interface. */
 describe('Settings — Telegram pending identities', () => {
   const openChannels = (): void => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Channels' }));
   };
 
@@ -594,7 +594,7 @@ describe('Settings — Telegram pending identities', () => {
 describe('Settings — daemon dictation', () => {
   const open = (): void => {
     state.search = { section: 'dictation' };
-    render(<SettingsRoute />);
+    render(<DaemonSettingsRoute />);
   };
 
   it('defaults to Chrome and does not activate Voxtype when it is missing', () => {
@@ -616,9 +616,9 @@ describe('Settings — daemon dictation', () => {
     expect(state.transcriptionPuts).toEqual([{ backend: 'voxtype', model: 'base.en' }]);
   });
 
-  it('keeps diagnostics on This device', () => {
+  it('keeps diagnostics on This device, on the daemon settings page (VS-230)', () => {
     state.search = { section: 'device' };
-    render(<SettingsRoute />);
+    render(<DaemonSettingsRoute />);
     expect(screen.getByLabelText('Dictation diagnostics capture')).toBeInTheDocument();
   });
 });

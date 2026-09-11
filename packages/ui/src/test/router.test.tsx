@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { router } from '../router';
 import { LiveRoute } from '../routes/Live';
 import { MergeQueueRoute } from '../routes/MergeQueue';
+import { WorkspaceSettingsRoute } from '../routes/Settings';
+import { DaemonSettingsShell } from '../router';
 import { ProjectOverviewRoute } from '../routes/project/ProjectOverview';
 
 interface RouteNode {
   path?: string;
   children?: RouteNode[];
-  options?: { component?: unknown; validateSearch?: unknown };
+  options?: { component?: unknown; validateSearch?: unknown; beforeLoad?: unknown };
 }
 
 /** Every workspace section is a child of `w/$ws`; a route missing here is unreachable by URL. */
@@ -22,6 +24,14 @@ describe('the global routes (VS-168)', () => {
     const paths = (root.children ?? []).map((r) => r.path);
     expect(paths).toEqual(expect.arrayContaining(['needs', 'live', 'chats', 'incidents', 'map', 'w/$ws']));
   });
+
+  it('registers the daemon settings at /settings, a sibling of /w/$ws with its own component (VS-230)', () => {
+    const root = router.routeTree as unknown as RouteNode;
+    const paths = (root.children ?? []).map((r) => r.path);
+    expect(paths).toContain('settings');
+    const route = (root.children ?? []).find((r) => r.path === 'settings');
+    expect(route?.options?.component).toBe(DaemonSettingsShell);
+  });
 });
 
 describe('the workspace routes', () => {
@@ -29,6 +39,13 @@ describe('the workspace routes', () => {
     const route = workspaceRoutes().find((r) => r.path === 'live');
     expect(route).toBeDefined();
     expect(route?.options?.component).toBe(LiveRoute);
+  });
+
+  it('registers the workspace settings with the workspace component, deciding redirects before render (VS-230)', () => {
+    const route = workspaceRoutes().find((r) => r.path === 'settings');
+    expect(route).toBeDefined();
+    expect(route?.options?.component).toBe(WorkspaceSettingsRoute);
+    expect(route?.options?.beforeLoad).toBeTypeOf('function');
   });
 
   it('registers the merge queue at its own address, with its own component', () => {

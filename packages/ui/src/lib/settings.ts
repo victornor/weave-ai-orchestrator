@@ -1,5 +1,8 @@
 /**
- * The Settings page's two areas and the sections filed under them (VS-52).
+ * The settings' two areas and the sections filed under them (VS-52), and — since VS-230 — the two
+ * routes they are shown by: the workspace area at `/w/$ws/settings` and the daemon area at
+ * `/settings`, which needs no workspace. There is no switcher; a link naming one area's section
+ * from the other's route is redirected (see `redirectForSettingsRoute`).
  *
  * A section belongs to the workspace area when its data belongs to the current workspace, and to
  * the daemon area when it belongs to the daemon and therefore reads the same from every workspace.
@@ -66,4 +69,62 @@ export function resolveSettingsLocation(search: {
   if (found) return { area: found.area, section: found.key };
   const area = knownArea(search.area) ?? DEFAULT_AREA;
   return { area, section: firstSectionOf(area) };
+}
+
+/**
+ * The two routes settings is split into (VS-230): the workspace's own settings under
+ * `/w/$ws/settings`, and the daemon's at `/settings`, above the workspaces and in need of none.
+ * The daemon area of the sections table is what the daemon route shows; the workspace area, the
+ * workspace route.
+ */
+export type SettingsRouteKind = 'workspace' | 'daemon';
+
+/** The section one route's own area shows for a URL's `?section=`: a link may name a section by
+ * key alone, but only one that belongs to this route — anything else falls back to the first
+ * section rather than showing another area's section under this route's heading. */
+export function sectionForRoute(route: SettingsRouteKind, search: { section?: string } | undefined): SettingsSectionKey {
+  const area: SettingsAreaKey = route === 'daemon' ? 'daemon' : 'workspace';
+  const found = SETTINGS_SECTIONS.find((s) => s.key === search?.section);
+  return found && found.area === area ? found.key : firstSectionOf(area);
+}
+
+/** What a settings URL should do instead of rendering: nothing, or move to the owning route. */
+export type SettingsRedirect =
+  | { type: 'stay' }
+  | { type: 'redirect'; to: string; search: Record<string, string | undefined>; ws?: string };
+
+/**
+ * Decide where a settings URL belongs, so a link carried over from the one-page area switcher still
+ * lands on what it named (VS-230) instead of 404ing or silently showing the wrong scope.
+ *
+ * From the workspace route, anything resolving to the daemon area — an explicit `?area=daemon` or a
+ * daemon section — moves to the daemon route with its section; the rest of the search travels along.
+ * From the daemon route, only an *explicitly named* workspace side (`?area=workspace` or a known
+ * workspace section) moves, to the remembered workspace's settings: the default must stay, or a
+ * bare `/settings` would redirect forever. With no workspace remembered there is nothing to show a
+ * workspace section in, so the stale names are dropped and the daemon page's first section shows.
+ * An unknown section never redirects — each route falls back to its own first section, as before.
+ */
+export function redirectForSettingsRoute(
+  route: SettingsRouteKind,
+  search: { area?: string | undefined; section?: string | undefined } & Record<string, string | undefined>,
+  rememberedWorkspace?: string | null | undefined,
+): SettingsRedirect {
+  const rest: Record<string, string | undefined> = { ...search };
+  delete rest.area;
+  delete rest.section;
+
+  const resolved = resolveSettingsLocation(search);
+  if (route === 'workspace') {
+    if (resolved.area !== 'daemon') return { type: 'stay' };
+    return { type: 'redirect', to: '/settings', search: { ...rest, section: resolved.section } };
+  }
+
+  const namedWorkspaceSide =
+    search.area === 'workspace' ||
+    SETTINGS_SECTIONS.some((s) => s.key === search.section && s.area === 'workspace');
+  if (!namedWorkspaceSide) return { type: 'stay' };
+  const ws = rememberedWorkspace?.trim() || null;
+  if (!ws) return { type: 'redirect', to: '/settings', search: rest };
+  return { type: 'redirect', to: '/w/$ws/settings', search: { ...rest, section: resolved.section }, ws };
 }

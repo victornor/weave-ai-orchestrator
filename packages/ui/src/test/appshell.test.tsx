@@ -1,5 +1,5 @@
 /** The rail: its workspace list, its daemon-update entry, and the shell's own indicators. */
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UpdateStatus, Upgrade } from '../api/types';
 
@@ -154,11 +154,15 @@ describe('FanInStreams gating on global pages', () => {
     expect(fanIn.calls).toHaveLength(0);
   });
 
-  it('is still rendered on the other global pages', () => {
-    state.path = '/needs';
-    state.workspaces = [listItem({ id: 'ws1' }), listItem({ id: 'ws2', name: 'Beta' })];
-    render(<AppShell />);
-    expect(fanIn.calls).toEqual([['ws1', 'ws2']]);
+  it('is still rendered on the other global pages, the daemon settings included (VS-230)', () => {
+    for (const path of ['/needs', '/settings']) {
+      fanIn.calls = [];
+      state.path = path;
+      state.workspaces = [listItem({ id: 'ws1' }), listItem({ id: 'ws2', name: 'Beta' })];
+      cleanup();
+      render(<AppShell />);
+      expect(fanIn.calls).toEqual([['ws1', 'ws2']]);
+    }
   });
 });
 
@@ -178,11 +182,11 @@ describe('the rail update entry', () => {
     expect(entry).toHaveTextContent('b'.repeat(10));
   });
 
-  it('links straight to the Updates section of Settings', () => {
+  it('links straight to the Updates section of the daemon settings', () => {
     state.update = status();
     render(<AppShell />);
     const entry = indicator() as HTMLElement;
-    expect(entry).toHaveAttribute('href', '/w/ws1/settings');
+    expect(entry).toHaveAttribute('href', '/settings');
     expect(JSON.parse(entry.getAttribute('data-search') ?? '{}')).toEqual({ section: 'updates' });
   });
 

@@ -31,7 +31,7 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
   const conn = useConnection();
   const toast = useToast();
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const onGlobalPage = path === '/needs' || path === '/live' || path === '/chats' || path === '/incidents' || path === '/map';
+  const onGlobalPage = path === '/needs' || path === '/live' || path === '/chats' || path === '/incidents' || path === '/map' || path === '/settings';
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [scopeIndex, setScopeIndex] = useState(-1);
@@ -199,12 +199,12 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
       {/* desktop rail — the only place all projects appear at once */}
       <aside className="hidden w-rail flex-none flex-col border-r border-line-1 bg-bg-input p-2.5 md:flex">
         {/* Self-contained block at the top of the rail: it is about the daemon, not any one
-            workspace, and it routes to the Updates section by key so a settings reshuffle cannot
-            strand it. It replaces the dot the Settings entry used to carry — one fact, one entry. */}
+            workspace, and it routes to the Updates section by key on the daemon's settings page, so
+            a settings reshuffle cannot strand it. It replaces the dot the Settings entry used to
+            carry — one fact, one entry. */}
         {update ? (
           <A
-            to="/w/$ws/settings"
-            params={{ ws: chromeWs }}
+            to="/settings"
             search={{ section: 'updates' }}
             aria-label={updateEntryLabel(update)}
             className="mb-3.5 flex flex-none flex-col gap-1 rounded-r6 border border-accent-edge bg-accent-tint px-2.5 py-2"

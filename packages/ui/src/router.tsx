@@ -18,7 +18,8 @@ import { RunRoute } from './routes/RunPage';
 import { UsageRoute } from './routes/Usage';
 import { KnowledgeRoute } from './routes/Knowledge';
 import { ProjectOverviewRoute } from './routes/project/ProjectOverview';
-import { SettingsRoute } from './routes/Settings';
+import { DaemonSettingsRoute, WorkspaceSettingsRoute } from './routes/Settings';
+import { redirectForSettingsRoute } from './lib/settings';
 import { GlobalNeedsRoute } from './routes/GlobalNeeds';
 import { GlobalLiveRoute } from './routes/GlobalLive';
 import { GlobalChatsRoute } from './routes/GlobalChats';
@@ -77,6 +78,30 @@ const globalMapRoute = createRoute({
   ),
 });
 
+// The daemon's settings, above the workspaces and in need of one (VS-230). A URL naming a
+// workspace section instead moves to a workspace's settings — or, with none remembered, sheds the
+// stale names and shows the daemon page's first section.
+export function DaemonSettingsShell(): React.ReactElement {
+  return (
+    <AppShell>
+      <DaemonSettingsRoute />
+    </AppShell>
+  );
+}
+
+const globalSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  validateSearch: (s: Record<string, unknown>) => s,
+  beforeLoad: ({ search }) => {
+    const r = redirectForSettingsRoute('daemon', search as Record<string, string | undefined>, getWorkspaceId());
+    if (r.type === 'redirect') {
+      throw redirect({ to: r.to, search: r.search, ...(r.ws ? { params: { ws: r.ws } } : {}) } as never);
+    }
+  },
+  component: DaemonSettingsShell,
+});
+
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
@@ -130,7 +155,20 @@ const usageRoute = child('/usage', UsageRoute, searchPassthrough);
 const knowledgeRoute = child('/knowledge', KnowledgeRoute, searchPassthrough);
 // A project is addressed by its slug; its id resolves to the same page, as `GET /projects/:id` does.
 const projectRoute = child('/p/$project', ProjectOverviewRoute, searchPassthrough);
-const settingsRoute = child('/settings', SettingsRoute, searchPassthrough);
+// This workspace's settings only (VS-230). A URL naming the daemon side — `?area=daemon` or one of
+// its sections — moves to `/settings`, carrying the section and the rest of the search.
+const settingsRoute = createRoute({
+  getParentRoute: () => wsRoute,
+  path: '/settings',
+  validateSearch: searchPassthrough,
+  beforeLoad: ({ search }) => {
+    const r = redirectForSettingsRoute('workspace', search as Record<string, string | undefined>);
+    if (r.type === 'redirect') {
+      throw redirect({ to: r.to, search: r.search, ...(r.ws ? { params: { ws: r.ws } } : {}) } as never);
+    }
+  },
+  component: WorkspaceSettingsRoute,
+});
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -141,6 +179,7 @@ const routeTree = rootRoute.addChildren([
   globalChatsRoute,
   globalIncidentsRoute,
   globalMapRoute,
+  globalSettingsRoute,
   wsRoute.addChildren([
     wsIndexRoute,
     needsRoute,

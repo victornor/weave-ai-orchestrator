@@ -78,7 +78,7 @@ vi.mock('../api/hooks', () => ({
   useSetDaemonModels: () => ({ mutate: vi.fn(), isPending: false, error: null }),
 }));
 
-const { SettingsRoute } = await import('../routes/Settings');
+const { WorkspaceSettingsRoute: SettingsRoute } = await import('../routes/Settings');
 
 function openScheduled(): void {
   render(<SettingsRoute />);

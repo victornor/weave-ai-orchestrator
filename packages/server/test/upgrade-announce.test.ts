@@ -3,6 +3,10 @@
  * channel and no daemon: the upgrade row and the workspace databases are real, and the two things the
  * announcement reaches — the primary chat thread and the conductor's wake queue — are recorded by fakes.
  */
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, renameSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Db, newId, nowIso } from '@agent-conductor/db';
 import { DaemonConfigSchema, type Upgrade, type UpgradeAnnouncement, type UpgradeState } from '@agent-conductor/shared';
@@ -351,7 +355,7 @@ describe('the announcement line', () => {
     to: { path: TO, sha: 'b'.repeat(40), version: '1.1.0' },
     running: { path: TO, sha: 'b'.repeat(40), version: '1.1.0' },
     startedAt: null, finishedAt: null, backUpAt: '2026-02-02T10:30:00.000Z',
-    runs: { drained: 0, interrupted: 0, resumed: 0 }, tickets: [], migrations: [],
+    runs: { drained: 0, interrupted: 0, resumed: 0 }, tickets: [], undelivered: { count: 0, identifiers: [] }, migrations: [],
     health: { ok: true, checks: [] }, failure: null,
   };
 
@@ -374,5 +378,103 @@ describe('the announcement line', () => {
     });
     expect(text).not.toMatch(/back up at/);
     expect(text).toMatch(/not fully back up: database \(disk I\/O error\) failed\./);
+  });
+
+  it('reads exactly as it does today when nothing is undelivered', () => {
+    const text = announcementText(base);
+    expect(text).toMatch(/^Upgraded to 1\.1\.0, back up at \d\d:\d\d\.$/);
+  });
+
+  it('names a single undelivered change', () => {
+    const text = announcementText({ ...base, undelivered: { count: 1, identifiers: ['TST-227'] } });
+    expect(text).toMatch(/^Upgraded to 1\.1\.0, back up at \d\d:\d\d\. 1 change is in the release without a delivery record \(TST-227\)\.$/);
+  });
+
+  it('pluralises and lists more than one undelivered change', () => {
+    const text = announcementText({ ...base, undelivered: { count: 2, identifiers: ['TST-227', 'TST-228'] } });
+    expect(text).toMatch(/2 changes are in the release without a delivery record \(TST-227, TST-228\)\.$/);
+  });
+
+  it('still names the count when the identifiers could not be read', () => {
+    const text = announcementText({ ...base, undelivered: { count: 3, identifiers: [] } });
+    expect(text).toMatch(/3 changes are in the release without a delivery record\.$/);
+  });
+});
+
+// ---------- reporting undelivered commits (VS-239) ----------
+
+describe('reporting a release with undelivered ticket-referencing commits', () => {
+  const tmps: string[] = [];
+  afterEach(() => { while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
+
+  /**
+   * A real throwaway git repo, standing in for a release directory: one commit per subject, renamed
+   * to `<stamp>-<sha>` at HEAD so `releaseBuiltAt`/`releaseSha` read it exactly like a real one. Only
+   * `commitSubjectsInRange` (via `git -C <dir> log`) needs this to be real, not a mock — the whole
+   * point of the check is that it trusts nothing about the shape of a commit message it wrote itself.
+   */
+  function releaseRepo(stamp: string, subjects: string[]): { path: string; shaOf: (subject: string) => string } {
+    const scratch = mkdtempSync(join(tmpdir(), 'ac-relannounce-'));
+    const git = (...args: string[]): string => execFileSync('git', args, { cwd: scratch, encoding: 'utf8' }).trim();
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'user.name', 'Test');
+    const shaOf = new Map<string, string>();
+    for (const subject of subjects) {
+      git('commit', '--allow-empty', '-q', '-m', subject);
+      shaOf.set(subject, git('rev-parse', 'HEAD'));
+    }
+    const path = join(tmpdir(), `${stamp}-${shaOf.get(subjects[subjects.length - 1]!)}`);
+    renameSync(scratch, path);
+    tmps.push(path);
+    return { path, shaOf: (subject) => shaOf.get(subject)! };
+  }
+
+  it('reproduces the VS-227 shape: a done ticket whose delivery has no mergeCommit still shows up as undelivered', async () => {
+    const ws = fx.addWorkspace('ws1');
+    // Two tickets' work landed in the release's commit history; only one left a delivery record —
+    // the other is VS-227's shape: it shipped (its commit is right there) but `mergeDone` never ran.
+    const repo = releaseRepo('20260202-120000', [
+      'chore: baseline',
+      'TST-1: a ticket whose merge went through mergeDone as usual',
+      'chore(openspec): archive tst-1-a-ticket',
+      'TST-227: pause hidden SSE and bound chat fetches so panes populate',
+      'chore(openspec): archive tst-227-pause-hidden-sse',
+    ]);
+    const fromSha = repo.shaOf('chore: baseline');
+    const from = `/rel/20260101-120000-${fromSha}`; // never has to exist: releaseSha falls back to the name
+    ws.land('TST-1', 'a ticket whose merge went through mergeDone as usual', afterBuild(from, 3));
+    fx.seed({ fromRelease: from, toRelease: repo.path, toSha: null });
+
+    await fx.service().announce();
+
+    expect(ws.sent[0]!.text).toMatch(/^Upgraded to 1\.1\.0, back up at \d\d:\d\d\. 1 change is in the release without a delivery record \(TST-227\)\.$/);
+    expect(ws.woken[0]!.payload.tickets.map((t) => t.identifier)).toEqual(['TST-1']);
+    expect(ws.woken[0]!.payload.undelivered).toEqual({ count: 1, identifiers: ['TST-227'] });
+  });
+
+  it('reads exactly as it does today when every ticket-referencing commit has a delivery record', async () => {
+    const ws = fx.addWorkspace('ws1');
+    const repo = releaseRepo('20260202-120000', [
+      'chore: baseline',
+      'TST-1: fully delivered',
+      'chore(openspec): archive tst-1-fully-delivered',
+    ]);
+    const fromSha = repo.shaOf('chore: baseline');
+    const from = `/rel/20260101-120000-${fromSha}`;
+    ws.land('TST-1', 'fully delivered', afterBuild(from, 3));
+    fx.seed({ fromRelease: from, toRelease: repo.path, toSha: null });
+
+    await fx.service().announce();
+
+    expect(ws.sent[0]!.text).toMatch(/^Upgraded to 1\.1\.0, back up at \d\d:\d\d\.$/);
+    expect(ws.woken[0]!.payload.undelivered).toEqual({ count: 0, identifiers: [] });
+  });
+
+  it('reports nothing extra when the release directory has no readable git history', async () => {
+    const ws = fx.addWorkspace('ws1');
+    fx.seed(); // the base fixture's TO is a plain path with no .git at all
+    await fx.service().announce();
+    expect(ws.woken[0]!.payload.undelivered).toEqual({ count: 0, identifiers: [] });
   });
 });

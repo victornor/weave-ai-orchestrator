@@ -17,6 +17,9 @@ import type {
 /** At most this many landed tickets travel in one announcement; the changelog holds the rest. */
 export const ANNOUNCED_TICKETS = 20;
 
+/** At most this many undelivered identifiers are named; the count says the true total (VS-239). */
+export const ANNOUNCED_UNDELIVERED = 20;
+
 /** A landed delivery as the announcement names it. */
 export interface LandedTicket { identifier: string; title: string; at: string }
 
@@ -28,6 +31,12 @@ export interface AnnouncementFacts {
   shaOf(release: string | null): string | null;
   /** Work that landed in this workspace inside the release window. */
   landed(window: { since: string | null; until: string }): LandedTicket[];
+  /**
+   * Ticket identifiers named at the start of a commit subject between two commits, restricted to this
+   * workspace's own ticket prefix — a diagnostic only, never a second source for the landed list
+   * itself (VS-239). Empty whenever either commit is missing or the release's history cannot be read.
+   */
+  commitTicketRefs(from: string | null, to: string | null): string[];
   /** Wakes queued in this workspace and waiting for the dispatcher that just started. */
   queuedWakes(): number;
   migrations: string[];
@@ -69,19 +78,28 @@ export function upgradeOutcome(row: Upgrade, running: UpgradeRelease): UpgradeAn
 export function buildAnnouncement(row: Upgrade, facts: AnnouncementFacts): UpgradeAnnouncement {
   const outcome = upgradeOutcome(row, facts.running);
   const window = releaseWindow(row, facts.now);
+  const from = { path: row.fromRelease, sha: facts.shaOf(row.fromRelease), version: null };
+  // Only a completed upgrade is running its target, so only then does the version belong to it.
+  const to = { path: row.toRelease, sha: row.toSha ?? facts.shaOf(row.toRelease), version: outcome === 'completed' ? row.cameBackVersion ?? facts.running.version : null };
+  // The full landed set, not the bounded slice below — an identifier past the display cap must still
+  // count as accounted for, or the undelivered check would wrongly flag it (VS-239).
+  const landed = window.since ? facts.landed(window) : [];
+  const landedIds = new Set(landed.map((t) => t.identifier));
+  const commitRefs = window.since ? facts.commitTicketRefs(from.sha, to.sha) : [];
+  const undeliveredIds = commitRefs.filter((id) => !landedIds.has(id));
   return {
     kind: 'daemon.upgraded',
     upgradeId: row.id,
     outcome,
-    from: { path: row.fromRelease, sha: facts.shaOf(row.fromRelease), version: null },
-    // Only a completed upgrade is running its target, so only then does the version belong to it.
-    to: { path: row.toRelease, sha: row.toSha ?? facts.shaOf(row.toRelease), version: outcome === 'completed' ? row.cameBackVersion ?? facts.running.version : null },
+    from,
+    to,
     running: facts.running,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
     backUpAt: facts.now,
     runs: { drained: row.drainedRuns ?? 0, interrupted: row.interruptedRuns ?? 0, resumed: facts.queuedWakes() },
-    tickets: window.since ? facts.landed(window).slice(0, ANNOUNCED_TICKETS) : [],
+    tickets: landed.slice(0, ANNOUNCED_TICKETS),
+    undelivered: { count: undeliveredIds.length, identifiers: undeliveredIds.slice(0, ANNOUNCED_UNDELIVERED) },
     migrations: facts.migrations,
     health: { ok: facts.checks.every((c) => c.ok), checks: facts.checks },
     failure: outcome === 'completed' ? null : { reason: row.reason, message: row.message },
@@ -109,6 +127,17 @@ const failingChecks = (a: UpgradeAnnouncement): string =>
   a.health.checks.filter((c) => !c.ok).map((c) => `${c.name} (${c.detail})`).join(', ');
 
 /**
+ * The clause naming a gap between the release's commits and its delivery records (VS-239), or the
+ * empty string when there is none — so the completed-upgrade line is unchanged in the normal case.
+ */
+const undeliveredClause = (a: UpgradeAnnouncement): string => {
+  if (a.undelivered.count === 0) return '';
+  const noun = a.undelivered.count === 1 ? 'change is' : 'changes are';
+  const named = a.undelivered.identifiers.length ? ` (${a.undelivered.identifiers.join(', ')})` : '';
+  return ` ${a.undelivered.count} ${noun} in the release without a delivery record${named}.`;
+};
+
+/**
  * One line, posted on the primary chat thread. It says what is running and when it came back, and it
  * never claims the system is back up when a check says otherwise — that claim is the whole point of it.
  */
@@ -116,9 +145,10 @@ export function announcementText(a: UpgradeAnnouncement): string {
   const at = clockTime(a.backUpAt);
   if (a.outcome === 'completed') {
     const head = `Upgraded to ${releaseLabel(a.to)}`;
-    return a.health.ok
+    const base = a.health.ok
       ? `${head}, back up at ${at}.`
       : `${head} and restarted at ${at}, but not fully back up: ${failingChecks(a)} failed.`;
+    return `${base}${undeliveredClause(a)}`;
   }
   const head = a.outcome === 'rolled_back'
     ? `The upgrade to ${releaseLabel(a.to)} was rolled back`

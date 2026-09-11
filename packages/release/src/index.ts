@@ -159,6 +159,24 @@ export function releaseSha(release: string): string | null {
   return m?.[1] ?? null;
 }
 
+/**
+ * Commit subjects strictly between `from` and `to` (exclusive/inclusive, like `git log from..to`),
+ * read from a release directory's own clone — it keeps its `.git`, so no second checkout is needed.
+ * Empty whenever the read cannot be trusted: either sha missing, no readable `.git` (a pruned
+ * release), or the shas are not related by ancestry in this clone's history. Never throws.
+ */
+export function commitSubjectsInRange(release: string, from: string | null, to: string | null): string[] {
+  if (!from || !to || !existsSync(join(release, '.git'))) return [];
+  try {
+    const out = execFileSync('git', ['-C', release, 'log', '--reverse', '--format=%s', `${from}..${to}`], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return out.split('\n').map((l) => l.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** Short git sha used as the running version, or `'unknown'` when none can be recovered. */
 export function releaseVersion(release: string): string {
   const sha = releaseSha(release);

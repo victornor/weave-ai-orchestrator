@@ -22,8 +22,8 @@ import {
 } from '@agent-conductor/shared';
 import { getLogger, recordActivity } from '@agent-conductor/core';
 import {
-  buildRelease, cliBinIn, currentLink, inOwnScope, planRestart, pruneReleases, readLink,
-  releaseSha, switchRelease,
+  buildRelease, cliBinIn, commitSubjectsInRange, currentLink, inOwnScope, planRestart, pruneReleases,
+  readLink, releaseSha, switchRelease,
 } from '@agent-conductor/release';
 import type { WorkspaceRuntime } from './types.js';
 import type { UpdateChecker } from './release-info.js';
@@ -301,12 +301,40 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
     );
   }
 
-  function facts(w: WorkspaceRuntime): AnnouncementFacts {
+  /** The workspace's own ticket prefix, e.g. `VS` — read once per announcement rather than assumed. */
+  function workspaceTicketPrefix(w: WorkspaceRuntime): string | null {
+    return w.ctx.db.get<{ ticketPrefix: string }>(
+      'SELECT ticket_prefix AS ticketPrefix FROM workspaces WHERE id = ?', [w.ctx.workspaceId])?.ticketPrefix ?? null;
+  }
+
+  /**
+   * Ticket identifiers a commit subject names at its start (`<PREFIX>-<n>: ...`, this monorepo's own
+   * convention), deduplicated, in the order first seen — used only to size and name a gap against the
+   * delivery records, never to build the list of landed tickets itself (VS-239).
+   */
+  function ticketRefsInSubjects(subjects: string[], prefix: string): string[] {
+    const re = new RegExp(`^${prefix}-(\\d+):`);
+    const seen = new Set<string>();
+    for (const subject of subjects) {
+      const m = re.exec(subject);
+      if (m) seen.add(`${prefix}-${m[1]}`);
+    }
+    return [...seen];
+  }
+
+  function facts(w: WorkspaceRuntime, row: Upgrade): AnnouncementFacts {
     const migrations = [...new Set([...db.appliedMigrations, ...w.ctx.db.appliedMigrations])];
+    const prefix = workspaceTicketPrefix(w);
     return {
       running: { path: deps.releaseRoot, sha: releaseSha(deps.releaseRoot), version: deps.version },
       shaOf: (release) => (release ? releaseSha(release) : null),
       landed: (window) => landedTickets(w, window),
+      // Read from `row.toRelease` — the specific upgrade being announced — never `deps.releaseRoot`,
+      // which is whatever this daemon happens to be running by the time it gets around to announcing.
+      commitTicketRefs: (from, to) => {
+        if (!prefix || !row.toRelease) return [];
+        return ticketRefsInSubjects(commitSubjectsInRange(row.toRelease, from, to), prefix);
+      },
       queuedWakes: () => w.ctx.db.get<{ n: number }>(
         "SELECT COUNT(*) AS n FROM wakeups WHERE workspace_id = ? AND status = 'queued'", [w.ctx.workspaceId])?.n ?? 0,
       migrations,
@@ -320,7 +348,7 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
    * whatever state the conductor is in; the wake carries the detail the line leaves out.
    */
   async function announceTo(w: WorkspaceRuntime, row: Upgrade): Promise<void> {
-    const announcement = buildAnnouncement(row, facts(w));
+    const announcement = buildAnnouncement(row, facts(w, row));
     await w.services.threads.notifyHuman({ kind: 'system', id: null }, { text: announcementText(announcement) });
     const conductor = await w.services.workers.ensureConductor();
     w.services.wake.enqueue(conductor.id, {

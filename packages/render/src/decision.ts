@@ -110,6 +110,7 @@ export function decisionToCard(decision: Decision, ctx: DecisionCardContext = {}
     age: formatAge(d.createdAt, ctx.now ?? new Date()),
     answer: d.status === 'answered' ? { key: d.answerKey ?? null, text: d.answerText ? redact(d.answerText) : null, at: d.answeredAt ?? null } : null,
     answerElsewhere,
+    held: conductorReviewCopy(d)?.held ?? false,
   };
   if (answerElsewhere) {
     // No options either: offering buttons that cannot carry the values would answer the decision
@@ -236,6 +237,8 @@ function body(variant: CardVariant, d: Decision, target: Record<string, unknown>
   if (review) {
     push('Review', review.line);
     if (review.note) push(null, review.note);
+    // VS-266: in addition to the concern line and note, not a replacement for either.
+    if (review.held) push(null, 'Approval is held until this is revised, or you override it.');
   }
   return lines;
 }

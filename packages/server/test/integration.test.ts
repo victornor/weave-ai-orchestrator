@@ -173,6 +173,35 @@ describe('real core services over HTTP', () => {
     expect(services.wake.listForAgent(workerId).length).toBeGreaterThan(0);
   });
 
+  it('refuses approving a decision the conductor has concerns about over the REST route, then accepts an override (VS-266)', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const services = deps.workspaces.get(harness.workspaceId)!.services;
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+
+    const ticket = services.tickets.create({ kind: 'human', id: null }, { projectId: harness.projectId, kind: 'task', title: 'Add dark mode' });
+    const workerId = harness.addWorker(ticket.id);
+    harness.db.update('tickets', ticket.id, { status: 'in_review' });
+    const decision = services.decisions.create({ kind: 'agent', id: workerId }, {
+      kind: 'merge_approval', title: 'Merge dark mode?', ticketId: ticket.id, askedByAgentId: workerId, options: [{ key: 'approve', label: 'Approve' }, { key: 'changes', label: 'Request changes' }],
+    });
+    services.decisions.review({ kind: 'agent', id: harness.conductorId }, decision.id, { status: 'concerns', note: 'no dark-mode screenshot attached' });
+
+    const refused = await app.fetch(new Request(`${base}/decisions/${decision.id}/answer`, {
+      method: 'POST', headers: H, body: JSON.stringify({ key: 'approve' }),
+    }));
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error.code).toBe('revision_pending');
+    expect(services.decisions.get(decision.id).status).toBe('open');
+
+    const overridden = await app.fetch(new Request(`${base}/decisions/${decision.id}/answer`, {
+      method: 'POST', headers: H,
+      body: JSON.stringify({ key: 'approve', overrideHold: true, overrideReason: 'screenshot not required for this change' }),
+    }));
+    expect(overridden.status).toBe(200);
+    expect(services.tickets.get(ticket.id).status).toBe('merging');
+  });
+
   it('serves an agent tool call backed by real services', async () => {
     const { deps, harness } = boot();
     const app = createApp(deps);

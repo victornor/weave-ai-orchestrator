@@ -1099,7 +1099,7 @@ export function useDecisionsMany(
   });
 }
 
-export function useAnswerDecision(): UseMutationResult<unknown, Error, { id: string; ws?: string; key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs }> {
+export function useAnswerDecision(): UseMutationResult<unknown, Error, { id: string; ws?: string; key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string }> {
   const ctxWs = useHookWs();
   const qc = useQueryClient();
   return useMutation({

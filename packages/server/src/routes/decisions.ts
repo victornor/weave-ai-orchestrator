@@ -16,6 +16,9 @@ export function decisionRoutes(): Hono<AppEnv> {
     const answer = await body(c, z.object({
       key: z.string().optional(), text: z.string().optional(), remember: z.boolean().optional(),
       inputs: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
+      // VS-266: only consulted when the answer would otherwise be refused for a concern-held
+      // approving option; a deliberate, distinct pair, never a second click on the same key.
+      overrideHold: z.boolean().optional(), overrideReason: z.string().optional(),
     }));
     return c.json(await c.get('ws').services.decisions.answer(c.get('actor'), c.req.param('id'), answer));
   });

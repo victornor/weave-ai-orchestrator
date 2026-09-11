@@ -95,8 +95,12 @@ export interface DecisionsService {
   create(actor: Actor, input: DecisionCreateInput): S.Decision;
   get(id: string): S.Decision;
   list(filter?: { status?: S.DecisionStatus[]; owner?: S.DecisionOwner; ticketId?: string; limit?: number }): S.Decision[];
-  /** Async: side effects drive ticket transitions and role activation. */
-  answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean; inputs?: S.DecisionAnswerInputs }): Promise<S.Decision>;
+  /**
+   * Async: side effects drive ticket transitions and role activation. `overrideHold` +
+   * `overrideReason` (VS-266) matter only when the answer would otherwise be refused for a
+   * concern-held approving option — supplied on any other answer, they are accepted but ignored.
+   */
+  answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean; inputs?: S.DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string }): Promise<S.Decision>;
   /**
    * Asserted conductor review of a plan/merge/action card (VS-223). Does not wake anyone and does
    * not affect `answer()`. Actor must be the workspace conductor.

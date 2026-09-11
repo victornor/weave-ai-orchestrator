@@ -166,6 +166,19 @@ describe('YOLO mode', () => {
       expect(tickets.comments(t.id).some((c) => c.body.includes('CI is red'))).toBe(true);
     });
 
+    it('does not silently approve an unattended merge the conductor has concerns about (VS-266)', async () => {
+      const t = change();
+      h.addWorker(t.id);
+      await deliver(t);
+      const merge = only(t.id, 'merge_approval')!;
+      decisions.review({ kind: 'agent', id: h.conductorId, runId: 'run-conductor' }, merge.id, { status: 'concerns', note: 'the diff still has a debug log' });
+
+      expect(await tickets.autoMergeSweep()).toBe(0);
+      expect(only(t.id, 'merge_approval')?.status).toBe('open');
+      expect(tickets.get(t.id).status).toBe('in_review');
+      expect(tickets.comments(t.id).some((c) => c.body.includes('the conductor has concerns'))).toBe(true);
+    });
+
     it('does not wait for checks when the project does not require them', async () => {
       ciState = 'pending';
       setPolicies({ requireCi: false });

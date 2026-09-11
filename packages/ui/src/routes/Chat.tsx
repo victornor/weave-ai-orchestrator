@@ -501,7 +501,7 @@ export function ChatPage({
   // queued, whatever happens to it — it goes to the daemon or nowhere, and the human is told it
   // was not sent. A non-secret answer is queued like any other write, both when the chat already
   // knows it is offline and when the send itself fails because the daemon could not be reached.
-  const answerDecision = (id: string, a: { key?: string; text?: string; inputs?: DecisionAnswerInputs }): void => {
+  const answerDecision = (id: string, a: { key?: string; text?: string; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string }): void => {
     const carriesSecret = decisionCarriesSecret(decisions.data?.find((d) => d.id === id));
     const queueThisAnswer = (): void => {
       enqueue({ kind: 'decision', path: `/decisions/${id}/answer`, body: a, label: a.key ?? a.text ?? 'decision' });

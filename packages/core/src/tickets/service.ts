@@ -1123,7 +1123,13 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           if (pending) await autoApprove(t, pending);
           else await service.transition({ kind: 'system', id: null }, t.id, { to: 'merging', note: 'auto-merge: no approval required for this ticket' });
           advanced++;
-        } catch (e) { log.warn({ ticket: t.identifier, err: String(e) }, 'auto-merge advance failed'); }
+        } catch (e) {
+          // VS-266: a YOLO ticket's merge approval can be held by a conductor concern exactly like a
+          // human-owned one — surfaced on the ticket the same way the CI-red wait is, rather than
+          // only a log line, so the human sees why auto-merge stalled here.
+          if (e instanceof OcError && e.code === 'revision_pending') { systemComment(t.id, 'auto-merge is waiting: the conductor has concerns', { kind: 'system', id: null }); continue; }
+          log.warn({ ticket: t.identifier, err: String(e) }, 'auto-merge advance failed');
+        }
       }
       return advanced;
     },

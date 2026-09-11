@@ -652,8 +652,9 @@ describe('DecisionCard', () => {
       expect(onAnswer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ key: 'approve' }));
     });
 
-    it('shows the concern note as a text block, not a Badge, and approve still fires', () => {
-      const onAnswer = vi.fn();
+    it('shows the concern note as a text block, not a Badge', () => {
+      // VS-266: an open concern now holds approval — see the "held approval" describe block below
+      // for the disabled Approve and the override path. This test stays about the note's rendering.
       const { container } = render(
         <DecisionCard
           decision={decision({
@@ -662,7 +663,7 @@ describe('DecisionCard', () => {
             conductorReviewedAt: '2026-09-11T03:01:00.000Z',
             conductorReviewNote: 'the migration contradicts itself',
           })}
-          onAnswer={onAnswer}
+          onAnswer={() => undefined}
         />,
       );
       expect(screen.getByText('Conductor reviewed — has concerns')).toBeInTheDocument();
@@ -670,8 +671,6 @@ describe('DecisionCard', () => {
       expect(note.tagName).toBe('P');
       const review = container.querySelector('[data-conductor-review="concerns"]');
       expect(review?.querySelector('[class*="uppercase"]')).toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
-      expect(onAnswer).toHaveBeenCalledWith(expect.objectContaining({ key: 'approve' }));
     });
 
     it('uses after-the-fact copy on an answered card', () => {
@@ -701,6 +700,80 @@ describe('DecisionCard', () => {
       render(<DecisionCard decision={decision({ kind: 'plan_approval' })} compact onAnswer={() => undefined} />);
       expect(screen.getByText("Conductor hasn't reviewed yet")).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('held approval (VS-266)', () => {
+    const held = (kind: 'plan_approval' | 'action_approval' | 'merge_approval') =>
+      decision({
+        kind, status: 'open', conductorReviewStatus: 'concerns',
+        conductorReviewedAt: '2026-09-11T03:01:00.000Z', conductorReviewNote: 'the migration needs splitting',
+      });
+
+    it('disables Approve on a held plan_approval and shows the held sentence', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={held('plan_approval')} onAnswer={onAnswer} />);
+      expect(screen.getByText('Approval is held until this is revised, or you override it.')).toBeInTheDocument();
+      const approve = screen.getByRole('button', { name: /^Approve/ });
+      expect(approve).toBeDisabled();
+      fireEvent.click(approve);
+      expect(onAnswer).not.toHaveBeenCalled();
+    });
+
+    it('disables Approve merge on a held merge_approval', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={held('merge_approval')} onAnswer={onAnswer} />);
+      const approve = screen.getByRole('button', { name: 'Approve merge' });
+      expect(approve).toBeDisabled();
+      fireEvent.click(approve);
+      expect(onAnswer).not.toHaveBeenCalled();
+    });
+
+    it('does not disable Approve, or show the held sentence, once looked replaces the concern', () => {
+      render(
+        <DecisionCard
+          decision={decision({ kind: 'plan_approval', conductorReviewStatus: 'looked', conductorReviewedAt: '2026-09-11T03:01:00.000Z', conductorReviewNote: 'clean now' })}
+          onAnswer={() => undefined}
+        />,
+      );
+      expect(screen.queryByText(/is held/)).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Approve/ })).not.toBeDisabled();
+    });
+
+    it('Revise and Reject stay enabled on a held plan_approval', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={held('plan_approval')} ticketIdentifier="ACME-42" onAnswer={onAnswer} />);
+      fireEvent.click(screen.getByRole('button', { name: /Revise/ }));
+      fireEvent.change(screen.getByLabelText('What should change?'), { target: { value: 'split the migration' } });
+      fireEvent.keyDown(screen.getByLabelText('What should change?'), { key: 'Enter' });
+      expect(onAnswer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ key: 'revise' }));
+    });
+
+    it('offers a distinct Override & approve control that requires its own reason', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={held('plan_approval')} ticketIdentifier="ACME-42" onAnswer={onAnswer} />);
+      fireEvent.click(screen.getByRole('button', { name: /Override & approve/ }));
+      const field = screen.getByLabelText('Why override the hold?');
+      // Submitting empty does nothing — Composer refuses a blank answer.
+      fireEvent.keyDown(field, { key: 'Enter' });
+      expect(onAnswer).not.toHaveBeenCalled();
+      fireEvent.change(field, { target: { value: 'acceptable risk, ship it' } });
+      fireEvent.keyDown(field, { key: 'Enter' });
+      expect(onAnswer).toHaveBeenCalledExactlyOnceWith({ key: 'approve', overrideHold: true, overrideReason: 'acceptable risk, ship it' });
+    });
+
+    it('offers the override control on a held merge_approval too, with the merge approve key', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={held('merge_approval')} onAnswer={onAnswer} />);
+      fireEvent.click(screen.getByRole('button', { name: /Override & approve/ }));
+      fireEvent.change(screen.getByLabelText('Why override the hold?'), { target: { value: 'CI is flaky, unrelated' } });
+      fireEvent.keyDown(screen.getByLabelText('Why override the hold?'), { key: 'Enter' });
+      expect(onAnswer).toHaveBeenCalledExactlyOnceWith({ key: 'approve', overrideHold: true, overrideReason: 'CI is flaky, unrelated' });
+    });
+
+    it('offers no override control when the decision is not held', () => {
+      render(<DecisionCard decision={decision({ kind: 'plan_approval' })} onAnswer={() => undefined} />);
+      expect(screen.queryByRole('button', { name: /Override & approve/ })).not.toBeInTheDocument();
     });
   });
 

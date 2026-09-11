@@ -298,6 +298,31 @@ describe('decisionToCard', () => {
       expect(card.body).toContainEqual({ label: null, value: 'the migration contradicts itself', format: 'text' });
     });
 
+    it('marks the card held and adds the held sentence for an open concern (VS-266)', () => {
+      const card = decisionToCard(decision({
+        kind: 'plan_approval', status: 'open', conductorReviewStatus: 'concerns',
+        conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+        conductorReviewNote: 'the migration contradicts itself',
+      }), { now });
+      expect(card.held).toBe(true);
+      expect(card.body).toContainEqual({ label: null, value: 'Approval is held until this is revised, or you override it.', format: 'text' });
+    });
+
+    it('is not held once the concern-marked decision is answered', () => {
+      const card = decisionToCard(decision({
+        kind: 'merge_approval', status: 'answered', answeredAt: '2026-09-11T03:02:00.000Z',
+        conductorReviewStatus: 'concerns', conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+        conductorReviewNote: 'screenshot is cropped',
+      }), { now });
+      expect(card.held).toBe(false);
+      expect(card.body.some((l) => l.value.includes('is held'))).toBe(false);
+    });
+
+    it('is never held for a kind that does not carry conductor review', () => {
+      const card = decisionToCard(decision({ kind: 'question', status: 'open' }), { now });
+      expect(card.held).toBe(false);
+    });
+
     it('shows a clean mark with its note, and a legacy mark as the line alone (VS-234)', () => {
       const noted = decisionToCard(decision({
         kind: 'merge_approval', conductorReviewStatus: 'looked',

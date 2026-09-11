@@ -16,6 +16,7 @@ function fields(
 ): ConductorReviewFields {
   return {
     kind,
+    status: 'open',
     conductorReviewStatus: 'unseen',
     conductorReviewedAt: null,
     conductorReviewNote: null,
@@ -79,25 +80,25 @@ describe('conductorReviewCopy', () => {
 
   it('uses the exact unanswered and after-the-fact copy (VS-234)', () => {
     expect(conductorReviewCopy(fields('plan_approval'))).toEqual({
-      line: "Conductor hasn't reviewed yet", note: null, tone: 'unseen',
+      line: "Conductor hasn't reviewed yet", note: null, tone: 'unseen', held: false,
     });
     expect(conductorReviewCopy(fields('merge_approval', {
       conductorReviewStatus: 'looked', conductorReviewedAt: PRIOR, conductorReviewNote: 'migration matches the plan',
-    }))).toEqual({ line: 'Conductor reviewed — no concerns', note: 'migration matches the plan', tone: 'looked' });
+    }))).toEqual({ line: 'Conductor reviewed — no concerns', note: 'migration matches the plan', tone: 'looked', held: false });
     expect(conductorReviewCopy(fields('action_approval', {
       conductorReviewStatus: 'looked', conductorReviewedAt: LATER, answeredAt: PRIOR, conductorReviewNote: 'diff is exactly the plan',
-    }))).toEqual({ line: 'Conductor reviewed after you answered — no concerns', note: 'diff is exactly the plan', tone: 'after' });
+    }))).toEqual({ line: 'Conductor reviewed after you answered — no concerns', note: 'diff is exactly the plan', tone: 'after', held: false });
     expect(conductorReviewCopy(fields('plan_approval', {
       conductorReviewStatus: 'concerns', conductorReviewedAt: PRIOR,
       conductorReviewNote: 'split the migration',
     }))).toEqual({
-      line: 'Conductor reviewed — has concerns', note: 'split the migration', tone: 'concerns',
+      line: 'Conductor reviewed — has concerns', note: 'split the migration', tone: 'concerns', held: true,
     });
     expect(conductorReviewCopy(fields('merge_approval', {
-      conductorReviewStatus: 'concerns', conductorReviewedAt: LATER, answeredAt: PRIOR,
+      status: 'answered', conductorReviewStatus: 'concerns', conductorReviewedAt: LATER, answeredAt: PRIOR,
       conductorReviewNote: 'CI is red',
     }))).toEqual({
-      line: 'Conductor reviewed after you answered — has concerns', note: 'CI is red', tone: 'concerns',
+      line: 'Conductor reviewed after you answered — has concerns', note: 'CI is red', tone: 'concerns', held: false,
     });
   });
 
@@ -105,7 +106,30 @@ describe('conductorReviewCopy', () => {
     const copy = conductorReviewCopy(fields('plan_approval', {
       conductorReviewStatus: 'looked', conductorReviewedAt: PRIOR, conductorReviewNote: null,
     }));
-    expect(copy).toEqual({ line: 'Conductor reviewed — no concerns', note: null, tone: 'looked' });
+    expect(copy).toEqual({ line: 'Conductor reviewed — no concerns', note: null, tone: 'looked', held: false });
+  });
+
+  describe('held (VS-266)', () => {
+    it('is true only for an open decision marked concerns', () => {
+      expect(conductorReviewCopy(fields('plan_approval', {
+        status: 'open', conductorReviewStatus: 'concerns', conductorReviewedAt: PRIOR, conductorReviewNote: 'needs work',
+      }))!.held).toBe(true);
+    });
+
+    it('is false once the decision is no longer open, even with a concerns mark', () => {
+      for (const status of ['answered', 'superseded', 'withdrawn', 'expired'] as const) {
+        expect(conductorReviewCopy(fields('merge_approval', {
+          status, conductorReviewStatus: 'concerns', conductorReviewedAt: PRIOR, conductorReviewNote: 'needs work',
+        }))!.held, status).toBe(false);
+      }
+    });
+
+    it('is false for unseen and looked, regardless of status', () => {
+      expect(conductorReviewCopy(fields('plan_approval', { status: 'open' }))!.held).toBe(false);
+      expect(conductorReviewCopy(fields('plan_approval', {
+        status: 'open', conductorReviewStatus: 'looked', conductorReviewedAt: PRIOR, conductorReviewNote: 'clean',
+      }))!.held).toBe(false);
+    });
   });
 
   it('does not sell a clean review as a sign-off (VS-234)', () => {

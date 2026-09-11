@@ -53,7 +53,7 @@ Workers may also call `ac_ticket_create` for **child tickets inside their own pr
 | `ac_worker_relaunch` | `id`, `note` |
 | `ac_worker_cancel` | `id`, `reason` — leaves the worktree; discarding unlanded work is a human decision |
 | `ac_decision_answer` | `id`, `{key?, text}` — only for decisions the conductor owns |
-| `ac_decision_review` | `decisionId`, `{status: 'looked'\|'concerns', note?}` — mark that you have read a plan, merge or action approval. Workers cannot call this |
+| `ac_decision_review` | `decisionId`, `{status: 'looked'\|'concerns', note}` — mark that you have reviewed a plan, merge or action approval; the note (concern, or why it is clean) appears on the card. Workers cannot call this |
 | `ac_human_send` | `threadId?`, `body` — the only way the conductor's words reach the human |
 | `ac_briefing` | — |
 | `ac_project_list` | — |

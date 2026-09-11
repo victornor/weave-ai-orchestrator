@@ -248,7 +248,7 @@ export class ChannelManager {
       const thread = this.services.threads.primaryThread();
       if (!thread) { log.debug({ decisionId }, 'no primary thread for the review follow-up'); return; }
       const note = (decision.conductorReviewNote ?? '').trim() || 'has concerns';
-      const text = `Conductor looked at ${decision.title} — has concerns: ${note}`;
+      const text = `Conductor reviewed ${decision.title} — has concerns: ${note}`;
       await this.services.threads.outbound(SYSTEM, thread.id, text);
     } catch (e) {
       log.warn({ err: e, decisionId }, 'could not push a decision review follow-up');

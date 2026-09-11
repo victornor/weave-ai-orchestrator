@@ -93,7 +93,7 @@ describe('NeedsYouRoute', () => {
   it('shows the conductor-review line on an unseen plan card (VS-223)', () => {
     state.decisions = [decision({ kind: 'plan_approval', title: 'Approve the plan for ACME-42' })];
     render(<NeedsYouRoute />);
-    expect(screen.getByText("Conductor hasn't looked yet")).toBeInTheDocument();
+    expect(screen.getByText("Conductor hasn't reviewed yet")).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Approve/ })).toBeInTheDocument();
   });
 

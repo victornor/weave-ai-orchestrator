@@ -68,7 +68,7 @@ describe('conductorReviewCopy', () => {
         const copy = conductorReviewCopy(fields(kind, {
           conductorReviewStatus: status,
           conductorReviewedAt: status === 'unseen' ? null : t.reviewedAt,
-          conductorReviewNote: status === 'concerns' ? 'the migration contradicts itself' : null,
+          conductorReviewNote: status === 'concerns' ? 'the migration contradicts itself' : (status === 'looked' ? 'migration matches the plan' : null),
           answeredAt: t.answeredAt,
         }));
         expect(copy, `${kind} ${status} ${t.name}`).not.toBeNull();
@@ -77,33 +77,40 @@ describe('conductorReviewCopy', () => {
     }
   });
 
-  it('uses the exact unanswered and after-the-fact copy', () => {
+  it('uses the exact unanswered and after-the-fact copy (VS-234)', () => {
     expect(conductorReviewCopy(fields('plan_approval'))).toEqual({
-      line: "Conductor hasn't looked yet", note: null, tone: 'unseen',
+      line: "Conductor hasn't reviewed yet", note: null, tone: 'unseen',
     });
     expect(conductorReviewCopy(fields('merge_approval', {
-      conductorReviewStatus: 'looked', conductorReviewedAt: PRIOR,
-    }))).toEqual({ line: 'Conductor looked', note: null, tone: 'looked' });
+      conductorReviewStatus: 'looked', conductorReviewedAt: PRIOR, conductorReviewNote: 'migration matches the plan',
+    }))).toEqual({ line: 'Conductor reviewed — no concerns', note: 'migration matches the plan', tone: 'looked' });
     expect(conductorReviewCopy(fields('action_approval', {
-      conductorReviewStatus: 'looked', conductorReviewedAt: LATER, answeredAt: PRIOR,
-    }))).toEqual({ line: 'Conductor looked after you answered', note: null, tone: 'after' });
+      conductorReviewStatus: 'looked', conductorReviewedAt: LATER, answeredAt: PRIOR, conductorReviewNote: 'diff is exactly the plan',
+    }))).toEqual({ line: 'Conductor reviewed after you answered — no concerns', note: 'diff is exactly the plan', tone: 'after' });
     expect(conductorReviewCopy(fields('plan_approval', {
       conductorReviewStatus: 'concerns', conductorReviewedAt: PRIOR,
       conductorReviewNote: 'split the migration',
     }))).toEqual({
-      line: 'Conductor looked — has concerns', note: 'split the migration', tone: 'concerns',
+      line: 'Conductor reviewed — has concerns', note: 'split the migration', tone: 'concerns',
     });
     expect(conductorReviewCopy(fields('merge_approval', {
       conductorReviewStatus: 'concerns', conductorReviewedAt: LATER, answeredAt: PRIOR,
       conductorReviewNote: 'CI is red',
     }))).toEqual({
-      line: 'Conductor looked after you answered — has concerns', note: 'CI is red', tone: 'concerns',
+      line: 'Conductor reviewed after you answered — has concerns', note: 'CI is red', tone: 'concerns',
     });
   });
 
-  it('does not sell a clean look as a sign-off', () => {
+  it('renders a legacy clean mark with no note as the line alone (VS-234)', () => {
     const copy = conductorReviewCopy(fields('plan_approval', {
-      conductorReviewStatus: 'looked', conductorReviewedAt: PRIOR,
+      conductorReviewStatus: 'looked', conductorReviewedAt: PRIOR, conductorReviewNote: null,
+    }));
+    expect(copy).toEqual({ line: 'Conductor reviewed — no concerns', note: null, tone: 'looked' });
+  });
+
+  it('does not sell a clean review as a sign-off (VS-234)', () => {
+    const copy = conductorReviewCopy(fields('plan_approval', {
+      conductorReviewStatus: 'looked', conductorReviewedAt: PRIOR, conductorReviewNote: 'migration matches the plan',
     }));
     expect(copy!.line).not.toMatch(/signed off|approved by|✓|✔|✅/i);
     expect(copy!.tone).toBe('looked');

@@ -647,9 +647,9 @@ export const TOOLS: ToolDef[] = [
     input: z.object({
       decisionId: z.string().min(1),
       status: z.enum(['looked', 'concerns']),
-      note: z.string().optional(),
+      note: z.string().min(1),
     }),
-    description: 'Mark that you have read a plan, merge or action approval. looked = you read it and have nothing to flag; concerns requires a short note shown on the card. Do not mark at turn start or in a batch. A clean look is not an endorsement. Never use this to answer those decisions.',
+    description: 'Mark that you have reviewed a plan, merge or action approval. Both marks need a note shown on the card: concerns = what you object to; looked = the one or two sentences you would otherwise write in chat about why the work is clean. Do not mark at turn start or in a batch. A clean mark says the review found nothing to object to — it is not an endorsement and never your approval. Never use this to answer those decisions.',
     handler: (ctx, i) => svc(ctx).decisions.review(ctx.actor, i.decisionId, { status: i.status, note: i.note }),
   },
   {

@@ -187,7 +187,7 @@ describe("TicketRoute's Activity tab answers the merge approval (VS-106)", () =>
     state.decisions = [decision({ kind: 'plan_approval', ticketId: 'tk_1', title: 'Approve the plan for ACME-42' })];
     render(<TicketRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Plan' }));
-    expect(screen.getByText("Conductor hasn't looked yet")).toBeInTheDocument();
+    expect(screen.getByText("Conductor hasn't reviewed yet")).toBeInTheDocument();
   });
 
   it('approve answers the decision with key "approve"', () => {

@@ -263,6 +263,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       const r = await ensureHomeCurrent(ctx, deps, agent);
       if (r.briefUpdated) promptOptions.briefUpdated = true;
       if (r.charterChanged) promptOptions.charterChanged = 'the role charter was revised since your last turn';
+      if (r.rerendered) promptOptions.homeRerendered = true;
     });
 
     // 2. prepare worktree (never reset, clean or switch branches)

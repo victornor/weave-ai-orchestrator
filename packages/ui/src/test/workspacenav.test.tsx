@@ -165,6 +165,21 @@ describe('the active workspace and section', () => {
     expect(within(block).getByRole('link', { name: 'New project' })).toBeInTheDocument();
   });
 
+  it('does not list an archived project, and New project remains (VS-235)', () => {
+    render(nav({
+      projectsByWs: {
+        alpha: ready([
+          project({ id: 'p1', slug: 'web' }),
+          project({ id: 'p-arch', slug: 'old', status: 'archived' }),
+        ]),
+      },
+    }));
+    const block = screen.getByLabelText('Alpha projects');
+    expect(within(block).queryByText('old')).not.toBeInTheDocument();
+    expect(within(block).getByText('web')).toBeInTheDocument();
+    expect(within(block).getByRole('link', { name: 'New project' })).toBeInTheDocument();
+  });
+
   it('scopes a failed fetch to its own group, leaving another expanded group unaffected', () => {
     render(nav({
       projectsByWs: { alpha: ready(), beta: failed, gamma: ready([project({ id: 'p3', slug: 'gam-proj' })]) },
@@ -275,6 +290,18 @@ describe("a project's colour identity (VS-149)", () => {
     }));
     expect(colourOf('web')?.style.color).toBe(projectColorVar('p1', ['p1', 'p2']));
     expect(colourOf('api')?.style.color).toBe(projectColorVar('p2', ['p1', 'p2']));
+  });
+
+  it('still colours an active row against archived siblings (VS-235)', () => {
+    render(nav({
+      projectsByWs: {
+        alpha: ready([
+          project({ id: 'p1', slug: 'web' }),
+          project({ id: 'p-arch', slug: 'old', status: 'archived' }),
+        ]),
+      },
+    }));
+    expect(colourOf('web')?.style.color).toBe(projectColorVar('p1', ['p1', 'p-arch']));
   });
 });
 

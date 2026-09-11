@@ -146,7 +146,7 @@ function ProjectsGroup({ wsId, wsName, state }: { wsId: string; wsName: string; 
           Couldn&rsquo;t load projects
         </div>
       ) : (
-        (state?.projects ?? []).map((p) => {
+        (state?.projects ?? []).filter((p) => p.status !== 'archived').map((p) => {
           const dot = SYNC_DOT[p.syncState];
           return (
             <A

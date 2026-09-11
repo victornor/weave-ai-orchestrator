@@ -1,12 +1,20 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectConfigSchema } from '@agent-conductor/shared';
+import { ApiError } from '../api/client';
 
 const state = vi.hoisted(() => ({
   patches: [] as Array<Record<string, unknown>>,
   projectPatches: [] as Array<{ id: string; patch: Record<string, unknown> }>,
   projectPatchError: null as string | null,
   projects: [] as Array<Record<string, unknown>>,
+  destProjects: [] as Array<Record<string, unknown>>,
+  workers: [] as Array<{ projectId: string | null; status: string }>,
+  removeCalls: [] as string[],
+  removeError: null as unknown,
+  moveArgs: [] as Array<{ destWs: string; project: Record<string, unknown> }>,
+  moveWrites: [] as string[],
+  moveMode: 'ok' as 'ok' | 'slug_clash' | 'add_fail' | 'archive_fail',
   config: {} as Record<string, unknown>,
   workspaces: [] as Array<Record<string, unknown>>,
   went: [] as string[],
@@ -39,10 +47,36 @@ vi.mock('../api/hooks', () => ({
     mutateAsync: async (body: Record<string, unknown>) => { state.patches.push(body); return {}; },
     isPending: false,
   }),
-  useProjects: () => ({ data: state.projects, isLoading: false }),
+  useProjects: (wsOverride?: string) => ({
+    data: wsOverride && wsOverride !== 'ws1' ? state.destProjects : state.projects,
+    isLoading: false,
+  }),
   useRuntimes: () => ({ data: [] }),
+  useWorkers: () => ({ data: state.workers, isLoading: false }),
   useAddProject: () => ({
     mutate: (body: Record<string, unknown>) => { state.addCalls.push(body); },
+    isPending: false,
+  }),
+  useRemoveProject: () => ({
+    mutateAsync: async ({ id }: { id: string }) => {
+      if (state.removeError) throw state.removeError;
+      state.removeCalls.push(id);
+    },
+    isPending: false,
+  }),
+  useMoveProject: () => ({
+    mutateAsync: async (args: { destWs: string; project: Record<string, unknown> }) => {
+      const { MoveProjectError } = await import('../lib/moveProject');
+      state.moveArgs.push(args);
+      const destHas = state.destProjects.some((p) => p.slug === args.project['slug']);
+      if (destHas || state.moveMode === 'slug_clash') {
+        throw new MoveProjectError('slug_clash', `The destination already has a project named ${String(args.project['slug'])}`);
+      }
+      state.moveWrites.push('post');
+      if (state.moveMode === 'add_fail') throw new MoveProjectError('add_failed', 'dest add failed');
+      if (state.moveMode === 'archive_fail') throw new MoveProjectError('archive_failed', 'archive failed');
+      state.moveWrites.push('delete');
+    },
     isPending: false,
   }),
   usePatchProject: () => ({
@@ -110,6 +144,13 @@ beforeEach(() => {
   state.projectPatches = [];
   state.projectPatchError = null;
   state.projects = [];
+  state.destProjects = [];
+  state.workers = [];
+  state.removeCalls = [];
+  state.removeError = null;
+  state.moveArgs = [];
+  state.moveWrites = [];
+  state.moveMode = 'ok';
   state.workspaces = [];
   state.went = [];
   state.search = {};
@@ -620,5 +661,170 @@ describe('Settings — daemon dictation', () => {
     state.search = { section: 'device' };
     render(<DaemonSettingsRoute />);
     expect(screen.getByLabelText('Dictation diagnostics capture')).toBeInTheDocument();
+  });
+});
+
+function readyProject(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'p1',
+    slug: 'api',
+    name: 'API',
+    status: 'ready',
+    gitUrl: 'git@example.com:acme/api.git',
+    maxWorkers: 2,
+    defaultBranch: 'main',
+    landingBranch: null,
+    setupCommand: null,
+    policies: {},
+    ...over,
+  };
+}
+
+function twoWorkspaces(): Array<Record<string, unknown>> {
+  return [
+    { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME', root: '/a', projects: [], needsYou: 0 },
+    { id: 'ws2', name: 'fern-ofm', ticketPrefix: 'VOFM', root: '/b', projects: [], needsYou: 0 },
+  ];
+}
+
+function openProjects(): void {
+  render(<WorkspaceSettingsRoute />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+}
+
+describe('Settings — remove a project (VS-235)', () => {
+  it('states archive semantics on confirm, then archives the project', async () => {
+    state.projects = [readyProject()];
+    openProjects();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    const dialog = screen.getByRole('dialog', { name: 'Remove api' });
+    expect(dialog).toHaveTextContent('archived, not deleted');
+    expect(dialog).toHaveTextContent('Tickets and knowledge stay in this workspace');
+    expect(dialog).toHaveTextContent('The clone is left on disk');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(state.removeCalls).toEqual(['p1']));
+  });
+
+  it('shows an archived row without edit, remove, or move', () => {
+    state.workspaces = twoWorkspaces();
+    state.projects = [readyProject({ status: 'archived' })];
+    openProjects();
+    expect(screen.getByText('archived')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Move' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('landing branch for api')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('YOLO mode for api')).not.toBeInTheDocument();
+  });
+
+  it('disables Remove when workers are not retired or done, naming them', () => {
+    state.projects = [readyProject()];
+    state.workers = [{ projectId: 'p1', status: 'paused' }];
+    openProjects();
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeDisabled();
+    expect(screen.getByText('project api still has 1 live worker(s)')).toBeInTheDocument();
+  });
+
+  it('shows a DELETE conflict as the same reason, not a failure toast', async () => {
+    state.projects = [readyProject()];
+    state.removeError = new ApiError(409, { code: 'conflict', message: 'project api still has 1 live worker(s)' });
+    openProjects();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(screen.getByText('project api still has 1 live worker(s)')).toBeInTheDocument());
+    expect(state.removeCalls).toEqual([]);
+    expect(state.toasts.filter((t) => t.status === 'failed')).toEqual([]);
+  });
+});
+
+describe('Settings — move a project (VS-235)', () => {
+  it('is not offered with only one workspace', () => {
+    state.projects = [readyProject()];
+    state.workspaces = [{ id: 'ws1', name: 'Acme', ticketPrefix: 'ACME', root: '/a', projects: [], needsYou: 0 }];
+    openProjects();
+    expect(screen.queryByRole('button', { name: 'Move' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument();
+  });
+
+  it('names the destination and what stays, then POSTs dest before DELETEing source', async () => {
+    state.workspaces = twoWorkspaces();
+    state.projects = [readyProject({
+      slug: 'vfuf',
+      name: 'vfuf',
+      gitUrl: 'git@example.com:v/vfuf.git',
+      maxWorkers: 3,
+      landingBranch: 'edge',
+      setupCommand: 'pnpm i',
+      policies: { autoMergeDefault: false },
+    })];
+    openProjects();
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }));
+    fireEvent.change(screen.getByLabelText('Destination workspace'), { target: { value: 'ws2' } });
+    const dialog = screen.getByRole('dialog', { name: 'Move vfuf' });
+    expect(dialog).toHaveTextContent('fern-ofm');
+    expect(dialog).toHaveTextContent('stay in this workspace');
+    expect(dialog).toHaveTextContent('The clone on disk here is left');
+    expect(dialog).toHaveTextContent('fern-ofm clones afresh');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(state.moveWrites).toEqual(['post', 'delete']));
+    expect(state.moveArgs[0]).toMatchObject({
+      destWs: 'ws2',
+      project: {
+        id: 'p1',
+        slug: 'vfuf',
+        gitUrl: 'git@example.com:v/vfuf.git',
+        name: 'vfuf',
+        defaultBranch: 'main',
+        landingBranch: 'edge',
+        maxWorkers: 3,
+        setupCommand: 'pnpm i',
+        policies: { autoMergeDefault: false },
+      },
+    });
+  });
+
+  it('disables Move when workers are not retired or done', () => {
+    state.workspaces = twoWorkspaces();
+    state.projects = [readyProject()];
+    state.workers = [{ projectId: 'p1', status: 'idle' }];
+    openProjects();
+    expect(screen.getByRole('button', { name: 'Move' })).toBeDisabled();
+    expect(screen.getByText('project api still has 1 live worker(s)')).toBeInTheDocument();
+  });
+
+  it('refuses a dest slug clash before either write', async () => {
+    state.workspaces = twoWorkspaces();
+    state.projects = [readyProject()];
+    state.destProjects = [{ id: 'd1', slug: 'api', status: 'archived' }];
+    openProjects();
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }));
+    fireEvent.change(screen.getByLabelText('Destination workspace'), { target: { value: 'ws2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(screen.getByText('The destination already has a project named api')).toBeInTheDocument());
+    expect(state.moveWrites).toEqual([]);
+    expect(state.toasts.filter((t) => t.status === 'failed')).toEqual([]);
+  });
+
+  it('a dest-add failure leaves the source active and says to retry', async () => {
+    state.workspaces = twoWorkspaces();
+    state.projects = [readyProject()];
+    state.moveMode = 'add_fail';
+    openProjects();
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }));
+    fireEvent.change(screen.getByLabelText('Destination workspace'), { target: { value: 'ws2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(screen.getByText(/still in this workspace — retry Move/)).toBeInTheDocument());
+    expect(state.moveWrites).toEqual(['post']);
+  });
+
+  it('an archive failure after dest add says dest already has it and to Remove here', async () => {
+    state.workspaces = twoWorkspaces();
+    state.projects = [readyProject()];
+    state.moveMode = 'archive_fail';
+    openProjects();
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }));
+    fireEvent.change(screen.getByLabelText('Destination workspace'), { target: { value: 'ws2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(screen.getByText('fern-ofm already has this project. Remove it from this workspace.')).toBeInTheDocument());
+    expect(state.moveWrites).toEqual(['post']);
   });
 });

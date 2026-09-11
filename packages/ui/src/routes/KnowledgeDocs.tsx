@@ -8,23 +8,27 @@ import { Button } from '../components/Button';
 import { Badge } from '../components/StatusGlyph';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
-import { useKnowledgeDocDetail, useKnowledgeDocMutation, useKnowledgeDocs, useProjects } from '../api/hooks';
+import {
+  useKnowledgeDoc, useKnowledgeDocDetail, useKnowledgeDocMutation, useKnowledgeDocs, useKnowledgeMoveDoc, useKnowledgeMutation, useKnowledgeRevisions, useProjects,
+} from '../api/hooks';
 import type { KnowledgeDocSummary } from '../api/types';
 import { ago } from '../lib/format';
 import { cx } from '../lib/cx';
+import { A } from '../app/link';
+import { useWs } from '../api/context';
 
 export interface DocRef { scope: string; slug: string; project?: string }
 
-/** `projects/<slug>/docs/<doc>.md` → { scope, slug, project } */
+/** `projects/<slug>/docs/[<folder>/...]<doc>.md` → { scope, slug, project }. Any folder depth (VS-265). */
 export function refFromPath(path: string, projects: Array<{ id: string; slug: string }>): DocRef | null {
-  let m = /^projects\/([^/]+)\/docs\/([^/]+)\.md$/.exec(path);
+  let m = /^projects\/([^/]+)\/docs\/(?:[^/]+\/)*([^/]+)\.md$/.exec(path);
   if (m) {
     const project = projects.find((p) => p.slug === m![1])?.id;
     return { scope: 'project', slug: m[2]!, ...(project ? { project } : {}) };
   }
-  m = /^workspace\/shared\/([^/]+)\.md$/.exec(path);
+  m = /^workspace\/shared\/(?:[^/]+\/)*([^/]+)\.md$/.exec(path);
   if (m) return { scope: 'shared', slug: m[1]! };
-  m = /^workspace\/docs\/([^/]+)\.md$/.exec(path);
+  m = /^workspace\/docs\/(?:[^/]+\/)*([^/]+)\.md$/.exec(path);
   if (m) return { scope: 'workspace', slug: m[1]! };
   return null;
 }
@@ -111,8 +115,11 @@ export function DocsPanel({ project, open, onOpen }: { project?: string; open: D
 export function DocPanel({ doc, projects, onOpen, onClose }: { doc: DocRef; projects: Array<{ id: string; slug: string }>; onOpen: (ref: DocRef) => void; onClose: () => void }): React.ReactElement {
   const detail = useKnowledgeDocDetail(doc.scope, doc.slug, doc.project);
   const mutate = useKnowledgeDocMutation();
+  const move = useKnowledgeMoveDoc();
   const [editing, setEditing] = useState(false);
+  const [moving, setMoving] = useState(false);
   const [body, setBody] = useState('');
+  const [folder, setFolder] = useState('');
 
   // A [[slug]] resolves inside the same scope first, then to a shared document — same rule as the daemon.
   const follow = (slug: string): void => {
@@ -144,8 +151,23 @@ export function DocPanel({ doc, projects, onOpen, onClose }: { doc: DocRef; proj
             </Button>
             <Button size="sm" onClick={() => setEditing(false)}>Cancel</Button>
           </>
+        ) : moving ? (
+          <>
+            <input
+              value={folder}
+              onChange={(e) => setFolder(e.target.value)}
+              placeholder="folder (empty = root)"
+              aria-label="Move to folder"
+              className="ac-mono h-7 w-48 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1 outline-none"
+            />
+            <Button size="sm" variant="primary" onClick={() => { move.mutate({ scope: doc.scope, slug: doc.slug, project: doc.project, folder: folder || undefined }); setMoving(false); }}>
+              Move
+            </Button>
+            <Button size="sm" onClick={() => setMoving(false)}>Cancel</Button>
+          </>
         ) : (
           <>
+            <Button size="sm" onClick={() => { setFolder(detail.data?.folder ?? ''); setMoving(true); }}>Move</Button>
             <Button size="sm" onClick={() => { setBody(detail.data?.body ?? ''); setEditing(true); }}>Edit</Button>
             <Button
               size="sm"
@@ -163,6 +185,7 @@ export function DocPanel({ doc, projects, onOpen, onClose }: { doc: DocRef; proj
           </>
         )}
       </header>
+      {detail.data?.folder ? <div className="ac-mono border-b border-line-1 px-3.5 py-1.5 text-nano text-text-4">{detail.data.folder}/</div> : null}
 
       <div className="grid gap-0 lg:grid-cols-[1fr_15rem]">
         <div className="p-3.5" onClick={onClick}>
@@ -224,6 +247,100 @@ export function DocPanel({ doc, projects, onOpen, onClose }: { doc: DocRef; proj
           </aside>
         ) : null}
       </div>
+    </section>
+  );
+}
+
+/** A hub file's viewer (PROJECT.md/WORKSPACE.md/SHARED.md/decisions.md) — governed differently from a linked document: curated in place, no folder, no move. */
+export function KnowledgeDocPanel({ scope, project, onClose, onOpenDoc }: { scope: string; project?: string; onClose: () => void; onOpenDoc?: (ref: DocRef) => void }): React.ReactElement {
+  const doc = useKnowledgeDoc(scope, project);
+  const onBodyClick = (e: React.MouseEvent<HTMLDivElement>): void => {
+    const a = (e.target as HTMLElement).closest('a[href^="#doc:"]');
+    if (!a || !onOpenDoc) return;
+    e.preventDefault();
+    const slug = a.getAttribute('href')!.slice('#doc:'.length);
+    onOpenDoc({ scope: scope === 'project' ? 'project' : 'shared', slug, ...(project ? { project } : {}) });
+  };
+  const revisions = useKnowledgeRevisions(scope, project);
+  const mutate = useKnowledgeMutation();
+  const ws = useWs();
+  const [editing, setEditing] = useState(false);
+  const [body, setBody] = useState('');
+
+  return (
+    <section className="ac-card">
+      <header className="flex items-center gap-2 border-b border-line-1 px-3.5 py-2.5">
+        <span className="ac-mono text-micro text-text-2">{doc.data?.path ?? scope}</span>
+        <div className="flex-1" />
+        {editing ? (
+          <>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => {
+                mutate.mutate({ scope, ...(project ? { project } : {}), op: 'put', body });
+                setEditing(false);
+              }}
+            >
+              Save
+            </Button>
+            <Button size="sm" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              size="sm"
+              onClick={() => {
+                setBody(doc.data?.body ?? '');
+                setEditing(true);
+              }}
+            >
+              Edit
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          </>
+        )}
+      </header>
+      <div className="p-3.5" onClick={onBodyClick}>
+        {doc.isLoading ? (
+          <SkeletonRows rows={4} />
+        ) : editing ? (
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            aria-label="Knowledge body"
+            className="ac-mono h-96 w-full resize-y rounded-r6 border border-line-2 bg-bg-input p-3 text-micro leading-relaxed text-text-1 outline-none"
+          />
+        ) : (
+          <Markdown source={doc.data?.body ?? ''} />
+        )}
+      </div>
+      {revisions.data?.length ? (
+        <div className="border-t border-line-1 p-3.5">
+          <div className="ac-label mb-2">Revisions</div>
+          <div className="flex flex-col gap-1.5">
+            {revisions.data.slice(0, 8).map((r) => (
+              <div key={r.revision} className="flex items-center gap-3">
+                <span className="ac-mono text-micro text-text-3">r{r.revision}</span>
+                <span className="flex-1 text-micro text-text-2">{r.reason}</span>
+                {r.ticketIdentifier ? (
+                  <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: r.ticketIdentifier }} className="ac-mono text-nano text-accent-link">
+                    {r.ticketIdentifier}
+                  </A>
+                ) : null}
+                <span className="ac-mono text-nano text-text-4">{ago(r.createdAt)}</span>
+                <button type="button" className="text-micro text-accent-link" onClick={() => mutate.mutate({ scope, ...(project ? { project } : {}), op: 'revert', revision: r.revision })}>
+                  Revert
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

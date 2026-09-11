@@ -351,7 +351,7 @@ describe('knowledge', () => {
   it('lists the hub file"s sections and the project"s documents', () => {
     state.hub = { path: 'p', scope: 'project', body: '## Overview\n\n- a\n\n## Landmines\n\n- b\n', tokenEstimate: 500, budgetTokens: 10000, lastCuratedAt: null, curationPending: false };
     state.docs = [
-      { path: 'projects/api/docs/run-engine.md', scope: 'project', projectId: 'p1', projectSlug: 'api', slug: 'run-engine', title: 'The run engine', summary: '', tokenEstimate: 900, budgetTokens: 2000, links: 1, backlinks: 0, updatedAt: daysAgo(3) },
+      { path: 'projects/api/docs/run-engine.md', scope: 'project', projectId: 'p1', projectSlug: 'api', slug: 'run-engine', folder: null, title: 'The run engine', summary: '', tokenEstimate: 900, budgetTokens: 2000, links: 1, backlinks: 0, updatedAt: daysAgo(3) },
     ];
     render(<ProjectOverviewRoute />);
     const card = section('Knowledge');
@@ -374,8 +374,8 @@ describe('knowledge', () => {
   it('shows the counts for an orphan, a stale document and an unresolved link', () => {
     state.health = {
       hubs: [],
-      orphans: [{ path: 'p1', scope: 'project', projectId: 'p1', projectSlug: 'api', slug: 'orphan', title: 'Orphan', summary: '', tokenEstimate: 1, budgetTokens: 1, links: 0, backlinks: 0, updatedAt: daysAgo(1) }],
-      stale: [{ path: 'p2', scope: 'project', projectId: 'p1', projectSlug: 'api', slug: 'stale', title: 'Stale', summary: '', tokenEstimate: 1, budgetTokens: 1, links: 0, backlinks: 1, updatedAt: daysAgo(120) }],
+      orphans: [{ path: 'p1', scope: 'project', projectId: 'p1', projectSlug: 'api', slug: 'orphan', folder: null, title: 'Orphan', summary: '', tokenEstimate: 1, budgetTokens: 1, links: 0, backlinks: 0, updatedAt: daysAgo(1) }],
+      stale: [{ path: 'p2', scope: 'project', projectId: 'p1', projectSlug: 'api', slug: 'stale', folder: null, title: 'Stale', summary: '', tokenEstimate: 1, budgetTokens: 1, links: 0, backlinks: 1, updatedAt: daysAgo(120) }],
       unresolvedLinks: [{ fromPath: 'p3', fromTitle: 'From', toSlug: 'nowhere' }],
     };
     render(<ProjectOverviewRoute />);

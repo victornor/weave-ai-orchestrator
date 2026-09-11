@@ -317,8 +317,14 @@ export interface KnowledgeService {
   /** Linked documents (PLAN §13): topic pages under a scope that link to each other with [[slug]]. */
   listDocs(filter?: { scope?: S.KnowledgeScope; projectId?: string | null }): KnowledgeDocSummary[];
   getDoc(scope: S.KnowledgeScope, slug: string, projectId?: string | null): KnowledgeDocDetail;
-  putDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, body: string, projectId?: string | null, reason?: S.KnowledgeRevisionReason): KnowledgeDocWriteResult;
+  /** `folder` places a *new* document; it is ignored when `slug` already resolves somewhere (VS-265). */
+  putDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, body: string, projectId?: string | null, reason?: S.KnowledgeRevisionReason, folder?: string | null): KnowledgeDocWriteResult;
   deleteDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, projectId?: string | null): void;
+  /** Move an existing document to a different folder (or the scope root when `folder` is omitted). No link changes: addressing is by slug, never by path (VS-265). */
+  moveDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, projectId: string | null | undefined, folder: string | null | undefined): { path: string };
+  /** Dated archive files a scope has accumulated (deletions, curation), most recent first. Never indexed or linkable (VS-265). */
+  listArchive(scope: S.KnowledgeScope, projectId?: string | null): Array<{ path: string; date: string }>;
+  getArchive(scope: S.KnowledgeScope, projectId: string | null | undefined, path: string): { path: string; body: string };
   graph(projectId?: string | null): KnowledgeGraph;
   /** The knowledge network's health (VS-102): derived on read, no new table. `projectId` omitted means the whole workspace. */
   health(projectId?: string | null): KnowledgeHealth;
@@ -330,7 +336,10 @@ export interface KnowledgeHealth {
   unresolvedLinks: Array<{ fromPath: string; fromTitle: string; toSlug: string }>;
 }
 export interface KnowledgeDocSummary {
-  path: string; scope: S.KnowledgeScope; projectId: string | null; projectSlug: string | null; slug: string; title: string; summary: string;
+  path: string; scope: S.KnowledgeScope; projectId: string | null; projectSlug: string | null; slug: string;
+  /** The folder segment of `path`, or `null` when the document sits flat under `docs/` (VS-265). */
+  folder: string | null;
+  title: string; summary: string;
   tokenEstimate: number; budgetTokens: number; links: number; backlinks: number; updatedAt: string;
 }
 export interface KnowledgeDocDetail extends KnowledgeDocSummary {

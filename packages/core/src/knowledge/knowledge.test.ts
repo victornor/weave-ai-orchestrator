@@ -553,4 +553,117 @@ describe('knowledge', () => {
     expect(doc.linksTo.map((l) => l.slug)).toEqual(['payments-webhooks']);
     expect(knowledge.listDocs({ projectId: h.projectId }).find((d) => d.slug === 'knowledge-documents')!.links).toBe(1);
   });
+
+  // ---------- folders (VS-265) ----------
+
+  it('creates a document nested two folders deep, reads and lists it by slug alone', () => {
+    const written = knowledge.putDoc(WORKER, 'project', 'retry-policy', '# Retry policy\n\nBackoff and jitter.\n', h.projectId, 'note', 'runbooks/incidents');
+    expect(written.path).toBe('projects/api/docs/runbooks/incidents/retry-policy.md');
+    expect(existsSync(join(h.ctx.paths.knowledge, written.path))).toBe(true);
+
+    // getDoc, ensureDoc (via note) and deleteDoc all find it by slug alone, no folder needed
+    const doc = knowledge.getDoc('project', 'retry-policy', h.projectId);
+    expect(doc.folder).toBe('runbooks/incidents');
+    knowledge.note(WORKER, 'project', 'Overview', 'Escalate after three retries.', h.projectId, 'retry-policy');
+    expect(knowledge.getDoc('project', 'retry-policy', h.projectId).body).toContain('Escalate after three retries');
+    expect(knowledge.listDocs({ projectId: h.projectId }).find((d) => d.slug === 'retry-policy')?.folder).toBe('runbooks/incidents');
+    knowledge.deleteDoc(HUMAN, 'project', 'retry-policy', h.projectId);
+    expect(() => knowledge.getDoc('project', 'retry-policy', h.projectId)).toThrow(/does not exist/);
+  });
+
+  it('lists a flat document with a null folder, unchanged from before folders existed', () => {
+    knowledge.putDoc(WORKER, 'project', 'payments-webhooks', '# Payments webhooks\n\nFlat, no folder.\n', h.projectId);
+    const summary = knowledge.listDocs({ projectId: h.projectId }).find((d) => d.slug === 'payments-webhooks')!;
+    expect(summary.folder).toBeNull();
+    expect(knowledge.getDoc('project', 'payments-webhooks', h.projectId).folder).toBeNull();
+  });
+
+  it('rejects a malformed folder and creates nothing', () => {
+    expect(() => knowledge.putDoc(WORKER, 'project', 'retry-policy', '# Retry policy\n', h.projectId, 'note', 'Runbooks')).toThrow(/kebab-case/);
+    expect(knowledge.listDocs({ projectId: h.projectId })).toEqual([]);
+  });
+
+  it('writing to an existing slug updates it in place and ignores a disagreeing folder', () => {
+    const first = knowledge.putDoc(WORKER, 'project', 'retry-policy', '# Retry policy\n\nv1.\n', h.projectId, 'note', 'runbooks');
+    const second = knowledge.putDoc(WORKER, 'project', 'retry-policy', '# Retry policy\n\nv2.\n', h.projectId, 'note', 'somewhere-else');
+    expect(second.path).toBe(first.path);
+    expect(knowledge.listDocs({ projectId: h.projectId })).toHaveLength(1);
+    expect(knowledge.getDoc('project', 'retry-policy', h.projectId).body).toContain('v2');
+  });
+
+  it('acceptance criterion 3: a [[slug]] link to a foldered document resolves and the backlink index finds it, same scope', () => {
+    knowledge.putDoc(WORKER, 'project', 'retry-policy', '# Retry policy\n\nBackoff and jitter.\n', h.projectId, 'note', 'runbooks/incidents');
+    knowledge.putDoc(WORKER, 'project', 'oncall-guide', '# Oncall guide\n\nSee [[retry-policy]] before paging anyone.\n', h.projectId);
+
+    const target = knowledge.getDoc('project', 'retry-policy', h.projectId);
+    expect(target.linkedFrom.map((l) => l.slug)).toEqual(['oncall-guide']);
+    const linker = knowledge.getDoc('project', 'oncall-guide', h.projectId);
+    expect(linker.linksTo).toEqual([{ slug: 'retry-policy', path: 'projects/api/docs/runbooks/incidents/retry-policy.md', title: 'Retry policy' }]);
+  });
+
+  it('acceptance criterion 3, cross-scope: a project document still falls back to a foldered shared document', () => {
+    // today's existing fallback (own scope, then workspace/decisions, then shared) must survive
+    // folders — findDocPath is single-scope by design, resolveLink keeps the fallback loop.
+    knowledge.putDoc(WORKER, 'shared', 'incident-severities', '# Incident severities\n\nSEV1-4 definitions.\n', null, 'note', 'guides');
+    knowledge.putDoc(WORKER, 'project', 'oncall-guide', '# Oncall guide\n\nSee [[incident-severities]] to triage.\n', h.projectId);
+
+    const linker = knowledge.getDoc('project', 'oncall-guide', h.projectId);
+    expect(linker.linksTo).toEqual([{ slug: 'incident-severities', path: 'workspace/shared/guides/incident-severities.md', title: 'Incident severities' }]);
+    const target = knowledge.getDoc('shared', 'incident-severities');
+    expect(target.linkedFrom.map((l) => l.slug)).toEqual(['oncall-guide']);
+  });
+
+  it('moves a document to a new folder, preserving links from both directions', () => {
+    knowledge.putDoc(WORKER, 'project', 'retry-policy', '# Retry policy\n\nBackoff and jitter.\n', h.projectId, 'note', 'runbooks');
+    knowledge.putDoc(WORKER, 'project', 'oncall-guide', '# Oncall guide\n\nSee [[retry-policy]].\n', h.projectId);
+
+    const moved = knowledge.moveDoc(HUMAN, 'project', 'retry-policy', h.projectId, 'runbooks/incidents');
+    expect(moved.path).toBe('projects/api/docs/runbooks/incidents/retry-policy.md');
+    expect(existsSync(join(h.ctx.paths.knowledge, 'projects/api/docs/runbooks/retry-policy.md'))).toBe(false);
+    expect(existsSync(join(h.ctx.paths.knowledge, moved.path))).toBe(true);
+
+    // the outgoing side: the linking document still resolves to the new path
+    expect(knowledge.getDoc('project', 'oncall-guide', h.projectId).linksTo).toEqual([{ slug: 'retry-policy', path: moved.path, title: 'Retry policy' }]);
+    // the incoming side: the moved document still finds its backlink
+    expect(knowledge.getDoc('project', 'retry-policy', h.projectId).linkedFrom.map((l) => l.slug)).toEqual(['oncall-guide']);
+    // moving again to the same slug's own document written elsewhere is unmoved (own outgoing link intact)
+    expect(knowledge.getDoc('project', 'retry-policy', h.projectId).body).toContain('Backoff and jitter');
+  });
+
+  it('moving a folder-less document to the scope root is a no-op when it is already there', () => {
+    const written = knowledge.putDoc(WORKER, 'project', 'payments-webhooks', '# Payments webhooks\n\nFlat.\n', h.projectId);
+    const moved = knowledge.moveDoc(HUMAN, 'project', 'payments-webhooks', h.projectId, undefined);
+    expect(moved.path).toBe(written.path);
+  });
+
+  it('refuses to move a document that does not exist, touching nothing', () => {
+    expect(() => knowledge.moveDoc(HUMAN, 'project', 'nonexistent', h.projectId, 'somewhere')).toThrow(/does not exist/);
+    expect(knowledge.listDocs({ projectId: h.projectId })).toEqual([]);
+  });
+
+  it('lists no archive for a scope that has never had anything removed', () => {
+    knowledge.get('project', h.projectId);
+    expect(knowledge.listArchive('project', h.projectId)).toEqual([]);
+  });
+
+  it('surfaces a deleted document under the scope archive, most recent first, read-only', () => {
+    knowledge.putDoc(WORKER, 'project', 'retry-policy', '# Retry policy\n\nBackoff and jitter.\n', h.projectId);
+    knowledge.deleteDoc(HUMAN, 'project', 'retry-policy', h.projectId);
+
+    const archive = knowledge.listArchive('project', h.projectId);
+    expect(archive).toHaveLength(1);
+    expect(archive[0]!.path).toMatch(/^projects\/api\/docs\/archive\/\d{4}-\d{2}-\d{2}\.md$/);
+
+    const content = knowledge.getArchive('project', h.projectId, archive[0]!.path);
+    expect(content.body).toContain('retry-policy');
+    expect(content.body).toContain('Backoff and jitter');
+  });
+
+  it('rejects reading an archive path outside the requested scope', () => {
+    knowledge.putDoc(WORKER, 'project', 'retry-policy', '# Retry policy\n\nv1.\n', h.projectId);
+    knowledge.deleteDoc(HUMAN, 'project', 'retry-policy', h.projectId);
+    const [entry] = knowledge.listArchive('project', h.projectId);
+    expect(() => knowledge.getArchive('shared', null, entry!.path)).toThrow(/no archive file/);
+    expect(() => knowledge.getArchive('project', h.projectId, `${entry!.path}/../../../etc/passwd`)).toThrow(/no archive file/);
+  });
 });

@@ -252,27 +252,46 @@ export function withBudgetStated(body: string, budget: number): string {
 
 export const DOC_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,63}$/;
 
+/**
+ * A folder is one or more `/`-separated segments, each shaped like a slug (kebab-case, 2-64 chars).
+ * That segment shape rules out a leading, trailing or doubled `/` and a `.`/`..` segment by
+ * construction — there is no separate check for those (VS-265).
+ */
+export const FOLDER_RE = /^[a-z0-9][a-z0-9-]{1,63}(?:\/[a-z0-9][a-z0-9-]{1,63})*$/;
+
 /** Path of a linked document relative to `knowledge/`. `decisions` has no documents. */
-export function docPathFor(scope: KnowledgeScope, slug: string, projectSlug?: string | null): string {
+export function docPathFor(scope: KnowledgeScope, slug: string, projectSlug?: string | null, folder?: string | null): string {
   if (!DOC_SLUG_RE.test(slug)) throw new OcError('validation', `document slug "${slug}" must be kebab-case (a-z, 0-9, -), 2-64 characters`);
+  if (folder && !FOLDER_RE.test(folder)) {
+    throw new OcError('validation', `document folder "${folder}" must be one or more kebab-case segments (a-z, 0-9, -, 2-64 characters each) separated by /`);
+  }
+  const dir = folder ? `${folder}/` : '';
   switch (scope) {
     case 'project':
       if (!projectSlug) throw new OcError('validation', 'a project document needs a project');
-      return `projects/${projectSlug}/docs/${slug}.md`;
-    case 'shared': return `workspace/shared/${slug}.md`;
-    case 'workspace': return `workspace/docs/${slug}.md`;
+      return `projects/${projectSlug}/docs/${dir}${slug}.md`;
+    case 'shared': return `workspace/shared/${dir}${slug}.md`;
+    case 'workspace': return `workspace/docs/${dir}${slug}.md`;
     case 'decisions': throw new OcError('validation', 'the decisions log has no documents');
   }
 }
 
-/** Is this knowledge path a linked document (as opposed to one of the four hub files)? */
+/** Is this knowledge path a linked document (as opposed to one of the four hub files)? Any folder depth (VS-265). */
 export function isDocPath(rel: string): boolean {
-  return /\/docs\/[^/]+\.md$/.test(rel) || /^workspace\/shared\/[^/]+\.md$/.test(rel);
+  return /\/docs\/(?:[^/]+\/)*[^/]+\.md$/.test(rel) || /^workspace\/shared\/(?:[^/]+\/)*[^/]+\.md$/.test(rel);
 }
 
 export function docSlugOf(rel: string): string | null {
   const m = /([^/]+)\.md$/.exec(rel);
   return isDocPath(rel) && m ? m[1]! : null;
+}
+
+/** The folder segment of a document's path, or `null` when it sits flat under `docs/` (VS-265). */
+export function docFolderOf(rel: string): string | null {
+  if (!isDocPath(rel)) return null;
+  const m = /\/docs\/((?:[^/]+\/)*)[^/]+\.md$/.exec(rel) ?? /^workspace\/shared\/((?:[^/]+\/)*)[^/]+\.md$/.exec(rel);
+  const folder = m?.[1]?.replace(/\/$/, '') ?? '';
+  return folder || null;
 }
 
 /** Blank out inline code spans on one line, keeping the prose around them. */

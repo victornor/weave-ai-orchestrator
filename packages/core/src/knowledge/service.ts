@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync, renameSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { knowledgeRow, newId, nowIso, type Db } from '@agent-conductor/db';
 import {
@@ -10,7 +10,7 @@ import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
 import {
-  CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, budgetOf, countWords, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
+  CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, budgetOf, countWords, docFolderOf, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
   isDocPath, isHubStub, normalize, parseDoc, parseLinks, relPathFor, renderDoc, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated,
 } from './files.js';
 
@@ -116,33 +116,48 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     return { row, abs, body };
   }
 
-  function indexFile(row: FileRow, body: string): void {
+  function indexSearch(row: FileRow, body: string): void {
     db.run("DELETE FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [row.path]);
     db.run('INSERT INTO knowledge_search (kind, project_id, ref, title, body) VALUES (?,?,?,?,?)', [
       'knowledge', row.projectId ?? '', row.path, titleOf(body) ?? row.path, body,
     ]);
+  }
+
+  function indexFile(row: FileRow, body: string): void {
+    indexSearch(row, body);
     indexLinks(row, body);
   }
 
   // ---------- linked documents ----------
 
-  /** A [[slug]] resolves within the file's own scope first, then to a shared document. */
-  function resolveLink(row: FileRow, slug: string): string | null {
-    const candidates: Array<string | null> = [];
-    if (row.scope === 'project' && row.projectId) {
-      const p = db.get<ProjectRow>('SELECT id, slug, name FROM projects WHERE id = ?', [row.projectId]);
-      if (p) candidates.push(docPathForSafe('project', slug, p.slug));
-    }
-    if (row.scope === 'workspace' || row.scope === 'decisions') candidates.push(docPathForSafe('workspace', slug));
-    candidates.push(docPathForSafe('shared', slug));
-    for (const c of candidates) {
-      if (!c) continue;
-      if (db.get('SELECT 1 FROM knowledge_files WHERE workspace_id = ? AND path = ?', [ws, c])) return c;
-    }
+  /**
+   * The one place a document's slug is resolved to its actual path within a single scope (+
+   * project), searching every folder it could be filed in rather than computing the one path it
+   * used to be forced to sit at (VS-265). Returns `null` when no document of that slug exists there.
+   */
+  function findDocPath(scope: KnowledgeScope, slug: string, projectRowId?: string | null): string | null {
+    const rows = projectRowId
+      ? db.all<{ path: string }>('SELECT path FROM knowledge_files WHERE workspace_id = ? AND scope = ? AND project_id = ?', [ws, scope, projectRowId])
+      : db.all<{ path: string }>('SELECT path FROM knowledge_files WHERE workspace_id = ? AND scope = ? AND project_id IS NULL', [ws, scope]);
+    for (const r of rows) if (docSlugOf(r.path) === slug) return r.path;
     return null;
   }
-  function docPathForSafe(scope: KnowledgeScope, slug: string, projectSlug?: string | null): string | null {
-    try { return docPathFor(scope, slug, projectSlug); } catch { return null; }
+
+  /**
+   * A [[slug]] resolves within the file's own scope first, then to a shared document — the scope
+   * fallback is `resolveLink`'s own loop, not pushed down into `findDocPath` (single-scope by
+   * design), or a project-to-shared link silently stops resolving (VS-265 plan review).
+   */
+  function resolveLink(row: FileRow, slug: string): string | null {
+    const candidates: Array<{ scope: KnowledgeScope; projectRowId?: string | null }> = [];
+    if (row.scope === 'project' && row.projectId) candidates.push({ scope: 'project', projectRowId: row.projectId });
+    if (row.scope === 'workspace' || row.scope === 'decisions') candidates.push({ scope: 'workspace' });
+    candidates.push({ scope: 'shared' });
+    for (const c of candidates) {
+      const hit = findDocPath(c.scope, slug, c.projectRowId);
+      if (hit) return hit;
+    }
+    return null;
   }
 
   function indexLinks(row: FileRow, body: string): void {
@@ -169,6 +184,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
   function docSummaryOf(row: FileRow, body: string): KnowledgeDocSummary {
     return {
       path: row.path, scope: row.scope, projectId: row.projectId, projectSlug: projectSlugOf(row.projectId), slug: docSlugOf(row.path) ?? row.path,
+      folder: docFolderOf(row.path),
       title: docTitle(body) ?? docSlugOf(row.path) ?? row.path, summary: docSummary(body), tokenEstimate: row.tokenEstimate, budgetTokens: budgetOfRow(row),
       links: db.get<{ n: number }>('SELECT COUNT(*) n FROM knowledge_links WHERE workspace_id = ? AND from_path = ?', [ws, row.path])?.n ?? 0,
       backlinks: db.get<{ n: number }>('SELECT COUNT(*) n FROM knowledge_links WHERE workspace_id = ? AND to_path = ?', [ws, row.path])?.n ?? 0,
@@ -176,14 +192,16 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     };
   }
 
-  function locateDoc(scope: KnowledgeScope, slug: string, projectId?: string | null): { rel: string; abs: string; projectRowId: string | null } {
-    if (scope === 'project') {
-      const p = projectOf(projectId);
-      const rel = docPathFor(scope, slug, p.slug);
-      return { rel, abs: join(ctx.paths.knowledge, rel), projectRowId: p.id };
-    }
-    const rel = docPathFor(scope, slug);
-    return { rel, abs: join(ctx.paths.knowledge, rel), projectRowId: null };
+  /**
+   * Resolve a document by slug first (wherever its folder placed it); only when none exists yet
+   * does a `folder` argument (the create case) or the flat path (no folder involved) decide where
+   * it goes (VS-265).
+   */
+  function locateDoc(scope: KnowledgeScope, slug: string, projectId?: string | null, folder?: string | null): { rel: string; abs: string; projectRowId: string | null } {
+    const p = scope === 'project' ? projectOf(projectId) : null;
+    const projectRowId = p?.id ?? null;
+    const rel = findDocPath(scope, slug, projectRowId) ?? docPathFor(scope, slug, p?.slug, folder);
+    return { rel, abs: join(ctx.paths.knowledge, rel), projectRowId };
   }
 
   /** A document `note()` can append to: it must already exist — a bare append cannot invent a `# Title`. */
@@ -254,6 +272,46 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     mkdirSync(dirname(archive), { recursive: true });
     const block = [`\n<!-- removed from ${row.path} at ${nowIso()} (${reason}) -->`, ...removed.map((l) => l.trimEnd())].join('\n') + '\n';
     appendFileSync(archive, block, 'utf8');
+  }
+
+  /**
+   * `archiveEntries` writes next to whatever file it archived from — a project's hub or, for a
+   * deleted document, that document's own (possibly foldered) directory — so there is no single
+   * archive directory per scope. `workspace`/`shared`/`decisions` hubs all sit in `workspace/`
+   * anyway, so their archives are already one tree; project scope roots at that project (VS-265).
+   */
+  function archiveRootFor(scope: KnowledgeScope, projectId?: string | null): { rootRel: string; rootAbs: string } {
+    const rootRel = scope === 'project' ? `projects/${projectOf(projectId).slug}` : 'workspace';
+    return { rootRel, rootAbs: join(ctx.paths.knowledge, rootRel) };
+  }
+
+  /** Every dated archive file under a scope's root, most recent first (VS-265). Read-only; never indexed or linkable. */
+  function listArchive(scope: KnowledgeScope, projectId?: string | null): Array<{ path: string; date: string }> {
+    const { rootRel, rootAbs } = archiveRootFor(scope, projectId);
+    const out: Array<{ path: string; date: string }> = [];
+    const walk = (dirAbs: string, dirRel: string): void => {
+      if (!existsSync(dirAbs)) return;
+      for (const entry of readdirSync(dirAbs, { withFileTypes: true })) {
+        const rel = dirRel ? `${dirRel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) { walk(join(dirAbs, entry.name), rel); continue; }
+        if (dirRel.split('/').pop() === 'archive' && entry.name.endsWith('.md')) {
+          out.push({ path: `${rootRel}/${rel}`, date: entry.name.slice(0, -'.md'.length) });
+        }
+      }
+    };
+    walk(rootAbs, '');
+    return out.sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  /** One archive file's raw content, addressed by the `path` `listArchive` reported (VS-265). */
+  function getArchive(scope: KnowledgeScope, projectId: string | null | undefined, path: string): { path: string; body: string } {
+    const { rootRel } = archiveRootFor(scope, projectId);
+    if (!path.startsWith(`${rootRel}/`) || !/\/archive\/[^/]+\.md$/.test(path) || path.includes('..')) {
+      throw new OcError('not_found', `no archive file at ${path}`);
+    }
+    const abs = join(ctx.paths.knowledge, path);
+    if (!existsSync(abs)) throw new OcError('not_found', `no archive file at ${path}`);
+    return { path, body: readFileSync(abs, 'utf8') };
   }
 
   function fireCuration(scope: KnowledgeScope, projectId?: string | null): void {
@@ -547,14 +605,16 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       return detail;
     },
 
-    putDoc(actor, scope, slug, body, projectId, reason = 'note') {
+    putDoc(actor, scope, slug, body, projectId, reason = 'note', folder) {
       const text = body.replace(/\r\n/g, '\n').trim() + '\n';
       if (!docTitle(text)) throw new OcError('validation', 'a document starts with a `# Title` line');
       const tokens = estimateTokens(text);
       const budget = ctx.config.defaults.knowledgeBudgetTokens.document;
       if (tokens > budget) throw new OcError('budget_exceeded', `a document is at most ${budget} tokens; this one is ${tokens}. Split it into linked documents.`, { tokenEstimate: tokens, budgetTokens: budget });
       if (/(?:sk|ghp|xox[bp])-[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\s/]+:[^\s@/]+@/i.test(text)) throw new OcError('validation', 'documents never carry secrets, tokens or credentialed URLs');
-      const { rel, abs, projectRowId } = locateDoc(scope, slug, projectId);
+      // `folder` only decides where a *new* document is created; locateDoc finds an existing one by
+      // slug first, so a folder disagreeing with where it already lives is ignored, not a move (VS-265).
+      const { rel, abs, projectRowId } = locateDoc(scope, slug, projectId, folder);
       let row = fileRow(rel);
       if (!row) {
         const id = newId();
@@ -587,6 +647,33 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         recordActivity(db, ws, actor, 'knowledge.delete', 'knowledge_file', row.id, { path: rel });
         ctx.events.emit('knowledge.updated', 'knowledge_file', row.id, { path: rel, scope, projectId: row.projectId, deleted: true });
       });
+    },
+
+    moveDoc(actor, scope, slug, projectId, folder) {
+      const p = scope === 'project' ? projectOf(projectId) : null;
+      const projectRowId = p?.id ?? null;
+      const oldRel = findDocPath(scope, slug, projectRowId);
+      if (!oldRel) throw new OcError('not_found', `document ${slug} does not exist in the ${scope} scope`);
+      const newRel = docPathFor(scope, slug, p?.slug, folder);
+      if (newRel === oldRel) return { path: newRel };
+      const row = fileRow(oldRel)!;
+      const oldAbs = join(ctx.paths.knowledge, oldRel);
+      const newAbs = join(ctx.paths.knowledge, newRel);
+      tx(db, () => {
+        mkdirSync(dirname(newAbs), { recursive: true });
+        renameSync(oldAbs, newAbs);
+        db.update('knowledge_files', row.id, { path: newRel, updatedAt: nowIso() });
+        // Only the path moves. `to_slug` is untouched, so nothing addressing this document by
+        // `[[slug]]` needs to know — only the cached path resolutions have to follow (VS-265).
+        db.run('UPDATE knowledge_links SET from_path = ? WHERE workspace_id = ? AND from_path = ?', [newRel, ws, oldRel]);
+        db.run('UPDATE knowledge_links SET to_path = ? WHERE workspace_id = ? AND to_path = ?', [newRel, ws, oldRel]);
+        db.run("DELETE FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [oldRel]);
+        const freshRow = fileRow(newRel)!;
+        indexSearch(freshRow, readBody(newAbs));
+        recordActivity(db, ws, actor, 'knowledge.move', 'knowledge_file', row.id, { from: oldRel, to: newRel });
+        ctx.events.emit('knowledge.updated', 'knowledge_file', row.id, { path: newRel, scope, projectId: row.projectId, movedFrom: oldRel });
+      });
+      return { path: newRel };
     },
 
     graph(projectId) {
@@ -685,6 +772,13 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       const next = appendEntry(body, 'Decisions', line);
       write(SYSTEM, row, abs, next, 'note');
       if (estimateTokens(next) > budgetOfRow(row) * 0.8) fireCuration('decisions');
+    },
+
+    listArchive(scope, projectId) {
+      return listArchive(scope, projectId);
+    },
+    getArchive(scope, projectId, path) {
+      return getArchive(scope, projectId, path);
     },
   };
 

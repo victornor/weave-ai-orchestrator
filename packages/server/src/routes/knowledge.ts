@@ -34,12 +34,25 @@ export function knowledgeRoutes(): Hono<AppEnv> {
   });
   app.get('/docs/:scope/:slug', (c) => c.json(c.get('ws').services.knowledge.getDoc(scopeParam.parse(c.req.param('scope')), c.req.param('slug'), project(c))));
   app.put('/docs/:scope/:slug', async (c) => {
-    const { body: text } = await body(c, z.object({ body: z.string().min(1) }));
-    return c.json(c.get('ws').services.knowledge.putDoc(c.get('actor'), scopeParam.parse(c.req.param('scope')), c.req.param('slug'), text, project(c), 'human'));
+    const { body: text, folder } = await body(c, z.object({ body: z.string().min(1), folder: z.string().min(2).optional() }));
+    return c.json(c.get('ws').services.knowledge.putDoc(c.get('actor'), scopeParam.parse(c.req.param('scope')), c.req.param('slug'), text, project(c), 'human', folder));
   });
   app.delete('/docs/:scope/:slug', (c) => { c.get('ws').services.knowledge.deleteDoc(c.get('actor'), scopeParam.parse(c.req.param('scope')), c.req.param('slug'), project(c)); return c.json({ ok: true }); });
+  // Move places an existing document at a different folder (or the scope root with no `folder`);
+  // human/UI only — not exposed as an agent tool (VS-265, see design.md).
+  app.post('/docs/:scope/:slug/move', async (c) => {
+    const { folder } = await body(c, z.object({ folder: z.string().min(2).optional() }));
+    return c.json(c.get('ws').services.knowledge.moveDoc(c.get('actor'), scopeParam.parse(c.req.param('scope')), c.req.param('slug'), project(c), folder));
+  });
   app.get('/graph', (c) => c.json(c.get('ws').services.knowledge.graph(project(c))));
   app.get('/health', (c) => c.json(c.get('ws').services.knowledge.health(project(c))));
+  // Read-only view of the dated archive files deletion/curation already write to disk (VS-265).
+  // Registered before `/:scope` for the same reason as `/docs`, `/graph`, `/health` above.
+  app.get('/:scope/archive', (c) => c.json(c.get('ws').services.knowledge.listArchive(scopeParam.parse(c.req.param('scope')), project(c))));
+  // The path segment is a full `knowledge/`-relative archive file path (e.g.
+  // `projects/api/docs/archive/2026-09-11.md`), so it has to swallow slashes, same as
+  // `/:project/capabilities/:capability{.+}` above.
+  app.get('/:scope/archive/:path{.+}', (c) => c.json(c.get('ws').services.knowledge.getArchive(scopeParam.parse(c.req.param('scope')), project(c), c.req.param('path'))));
   app.get('/:scope', (c) => c.json(c.get('ws').services.knowledge.get(scopeParam.parse(c.req.param('scope')), project(c))));
   app.put('/:scope', async (c) => {
     const { body: text } = await body(c, z.object({ body: z.string() }));

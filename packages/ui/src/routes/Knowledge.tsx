@@ -10,10 +10,8 @@ import { EmptyState, ErrorState } from '../components/States';
 import {
   useCapabilities,
   useCapability,
-  useKnowledgeDoc,
   useKnowledgeIndex,
   useKnowledgeMutation,
-  useKnowledgeRevisions,
   useProjects,
   useSearch,
   useSpecChange,
@@ -22,18 +20,18 @@ import {
 } from '../api/hooks';
 import { ago } from '../lib/format';
 import { cx } from '../lib/cx';
-import { DocsPanel, DocPanel, refFromPath, type DocRef } from './KnowledgeDocs';
+import { DocsPanel, DocPanel, KnowledgeDocPanel, refFromPath, type DocRef } from './KnowledgeDocs';
+import { KnowledgeExplorer } from './KnowledgeExplorer';
 import { ChangelogPanel } from './Changelog';
-import { A, useSearchParams } from '../app/link';
-import { useWs } from '../api/context';
+import { useSearchParams } from '../app/link';
 
 // The graph is the only screen that needs a force-layout engine. Loading it on demand keeps
 // `d3-force` and the renderer out of the chunk every other page pays for.
 const KnowledgeGraphView = lazy(async () => ({ default: (await import('./KnowledgeGraph')).KnowledgeGraphView }));
 
-type Tab = 'knowledge' | 'changelog' | 'graph' | 'specs';
+type Tab = 'knowledge' | 'explorer' | 'changelog' | 'graph' | 'specs';
 
-const TABS: readonly Tab[] = ['knowledge', 'changelog', 'graph', 'specs'];
+const TABS: readonly Tab[] = ['knowledge', 'explorer', 'changelog', 'graph', 'specs'];
 const asTab = (v: string | undefined): Tab | null => (TABS.includes(v as Tab) ? (v as Tab) : null);
 
 export function KnowledgeRoute(): React.ReactElement {
@@ -84,6 +82,7 @@ export function KnowledgeRoute(): React.ReactElement {
             <Tabs
               items={[
                 { key: 'knowledge', label: 'Knowledge' },
+                { key: 'explorer', label: 'Explorer' },
                 { key: 'changelog', label: 'Changelog' },
                 { key: 'graph', label: 'Graph' },
                 { key: 'specs', label: 'Specs' },
@@ -100,6 +99,8 @@ export function KnowledgeRoute(): React.ReactElement {
           <SearchResults hits={search.data ?? []} loading={search.isLoading} />
         ) : tab === 'knowledge' ? (
           <KnowledgePanel project={project || undefined} />
+        ) : tab === 'explorer' ? (
+          <KnowledgeExplorer project={project || undefined} />
         ) : tab === 'changelog' ? (
           // No project selected is the workspace changelog: every project's entries plus the ones
           // belonging to none. That is the scope the panel gets when `project` is undefined.
@@ -203,99 +204,6 @@ function GraphPanel({ project }: { project?: string }): React.ReactElement {
       {openDoc ? <DocPanel doc={openDoc} projects={projects.data ?? []} onOpen={(ref) => { setOpenHub(null); setOpenDoc(ref); }} onClose={() => setOpenDoc(null)} /> : null}
       {openHub ? <KnowledgeDocPanel scope={openHub.scope} project={openHub.project} onClose={() => setOpenHub(null)} onOpenDoc={(ref) => { setOpenHub(null); setOpenDoc(ref); }} /> : null}
     </div>
-  );
-}
-
-function KnowledgeDocPanel({ scope, project, onClose, onOpenDoc }: { scope: string; project?: string; onClose: () => void; onOpenDoc?: (ref: DocRef) => void }): React.ReactElement {
-  const doc = useKnowledgeDoc(scope, project);
-  const onBodyClick = (e: React.MouseEvent<HTMLDivElement>): void => {
-    const a = (e.target as HTMLElement).closest('a[href^="#doc:"]');
-    if (!a || !onOpenDoc) return;
-    e.preventDefault();
-    const slug = a.getAttribute('href')!.slice('#doc:'.length);
-    onOpenDoc({ scope: scope === 'project' ? 'project' : 'shared', slug, ...(project ? { project } : {}) });
-  };
-  const revisions = useKnowledgeRevisions(scope, project);
-  const mutate = useKnowledgeMutation();
-  const ws = useWs();
-  const [editing, setEditing] = useState(false);
-  const [body, setBody] = useState('');
-
-  return (
-    <section className="ac-card">
-      <header className="flex items-center gap-2 border-b border-line-1 px-3.5 py-2.5">
-        <span className="ac-mono text-micro text-text-2">{doc.data?.path ?? scope}</span>
-        <div className="flex-1" />
-        {editing ? (
-          <>
-            <Button
-              size="sm"
-              variant="primary"
-              onClick={() => {
-                mutate.mutate({ scope, ...(project ? { project } : {}), op: 'put', body });
-                setEditing(false);
-              }}
-            >
-              Save
-            </Button>
-            <Button size="sm" onClick={() => setEditing(false)}>
-              Cancel
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button
-              size="sm"
-              onClick={() => {
-                setBody(doc.data?.body ?? '');
-                setEditing(true);
-              }}
-            >
-              Edit
-            </Button>
-            <Button size="sm" variant="ghost" onClick={onClose}>
-              Close
-            </Button>
-          </>
-        )}
-      </header>
-      <div className="p-3.5" onClick={onBodyClick}>
-        {doc.isLoading ? (
-          <SkeletonRows rows={4} />
-        ) : editing ? (
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            aria-label="Knowledge body"
-            className="ac-mono h-96 w-full resize-y rounded-r6 border border-line-2 bg-bg-input p-3 text-micro leading-relaxed text-text-1 outline-none"
-          />
-        ) : (
-          <Markdown source={doc.data?.body ?? ''} />
-        )}
-      </div>
-      {revisions.data?.length ? (
-        <div className="border-t border-line-1 p-3.5">
-          <div className="ac-label mb-2">Revisions</div>
-          <div className="flex flex-col gap-1.5">
-            {revisions.data.slice(0, 8).map((r) => (
-              <div key={r.revision} className="flex items-center gap-3">
-                <span className="ac-mono text-micro text-text-3">r{r.revision}</span>
-                <span className="flex-1 text-micro text-text-2">{r.reason}</span>
-                {r.ticketIdentifier ? (
-                  <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: r.ticketIdentifier }} className="ac-mono text-nano text-accent-link">
-                    {r.ticketIdentifier}
-                  </A>
-                ) : null}
-                <span className="ac-mono text-nano text-text-4">{ago(r.createdAt)}</span>
-                <button type="button" className="text-micro text-accent-link" onClick={() => mutate.mutate({ scope, ...(project ? { project } : {}), op: 'revert', revision: r.revision })}>
-                  Revert
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </section>
   );
 }
 

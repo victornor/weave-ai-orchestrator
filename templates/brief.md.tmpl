@@ -43,7 +43,13 @@ This project has no `work/AGENTS.md` of its own — do not try to read one. The 
 {{/unless}}
 {{/unless}}
 {{#if brief.noWorktree}}
-**This is a curation ticket and has no worktree of its own.** Your working directory is your home. `work/` is a read-only checkout of the project's landing branch, for fact-checking only: never write to it, never commit, never push. Do not call `ac_worktree_status`. Load `agent-conductor-knowledge` and follow the curation procedure.
+**This is a curation ticket and has no worktree of its own.** Your working directory is your home. `work/` is the project's primary clone, read-only, for fact-checking only: never write to it, never commit, never push. Its absolute path is `{{worktree.path}}`.
+
+{{#if worktree.verifiedFreshAt}}
+This checkout was fetched and fast-forwarded to `origin/{{project.landingBranch}}` immediately before this turn started, verified as of `{{worktree.verifiedFreshAt}}` — it is current, not a rule you need to double-check. A claim you still cannot verify one way or the other against it (an ambiguous path, something that may have moved) is left alone and named in your ticket comment, never removed on a guess.
+{{/if}}
+
+Do not call `ac_worktree_status`. Load `agent-conductor-knowledge` and follow the curation procedure.
 {{/if}}
 
 ## Rules

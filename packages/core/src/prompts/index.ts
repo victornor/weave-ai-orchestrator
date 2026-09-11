@@ -93,7 +93,7 @@ export interface WorkerTemplateData extends Record<string, unknown> {
   role: Record<string, unknown>;
   project: Record<string, unknown>;
   ticket: Record<string, unknown>;
-  worktree: { path: string; branch: string; hasAgentsFile: boolean; hasOpenspecConfig: boolean };
+  worktree: { path: string; branch: string; hasAgentsFile: boolean; hasOpenspecConfig: boolean; verifiedFreshAt: string | null };
   brief: { definitionOfDone: string; relaunchNote: string | null; noWorktree: boolean };
   knowledge: { shared: string; project: string };
 }
@@ -125,11 +125,16 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
       interactiveSession: Boolean(t?.interactiveSession),
     },
     worktree: {
-      path: agent.worktreePath ?? 'work/', branch: agent.branch ?? '',
+      // A curation ticket has no worktree of its own (VS-256): its `work/` is the project's primary
+      // clone, verified current for this turn by the engine's freshness gate before the brief is
+      // ever rendered — the real absolute path, never the unbacked literal string `work/`.
+      path: agent.worktreePath ?? (t?.originKind === 'curation' && p ? p.clonePath : 'work/'),
+      branch: agent.branch ?? '',
       // The brief must never claim a project-repo file exists that the daemon has not actually
       // checked for (VS-211) — many projects have no AGENTS.md or OpenSpec config of their own.
       hasAgentsFile: Boolean(agent.worktreePath && existsSync(join(agent.worktreePath, 'AGENTS.md'))),
       hasOpenspecConfig: Boolean(agent.worktreePath && existsSync(join(agent.worktreePath, 'openspec', 'config.yaml'))),
+      verifiedFreshAt: t?.originKind === 'curation' ? (p?.lastFetchedAt ?? null) : null,
     },
     brief: { definitionOfDone: definitionOfDone((t?.kind ?? 'task') as S.TicketKind, deliveryMode), relaunchNote: opts.relaunchNote ?? null, noWorktree: !agent.worktreePath },
     knowledge: { shared: knowledgeText(deps, 'shared'), project: agent.projectId ? knowledgeText(deps, 'project', agent.projectId) : '' },

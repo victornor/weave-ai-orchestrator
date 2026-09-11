@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +10,7 @@ import { makeHarness, type TestHarness } from '../testing/context.js';
 import type { Actor } from '../api.js';
 import { createDecisionsService } from '../decisions/service.js';
 import { createTicketsService } from '../tickets/service.js';
+import { createProjectsService } from '../projects/index.js';
 import { createWakeService } from '../wake/index.js';
 import { createAccountsService } from '../usage/accounts.js';
 import { createKnowledgeUsageService } from '../knowledge/index.js';
@@ -18,6 +20,7 @@ import { createDispatcher, type CoreDispatcher } from './dispatcher.js';
 import { countRetries, executeRun } from './engine.js';
 import { makeRedactor } from './engine.js';
 import { runTokenSecret, verifyRunToken } from './runtoken.js';
+import { git } from '../util/git.js';
 import { runState } from './active.js';
 
 const tick = () => new Promise((r) => setImmediate(r));
@@ -1569,6 +1572,187 @@ describe('run engine', () => {
       expect(openGateFindings(ticketId)).toHaveLength(0);
     });
   });
+  // VS-255: a curation worker had no worktree of its own and fact-checked against the primary clone
+  // exactly as it happened to sit on disk — two days behind `origin/main` — and removed real
+  // knowledge entries as "contradicted". VS-256 gates every curation turn on that clone being fetched
+  // and fast-forwarded to `origin/<landingBranch>` first; when that cannot be established, the turn
+  // never runs and the ticket is blocked instead.
+  describe('curation checkout freshness gate (VS-256)', () => {
+    const dirs: string[] = [];
+
+    beforeEach(() => {
+      h.services.tickets = createTicketsService(h.ctx, h.deps);
+      h.services.projects = createProjectsService(h.ctx, h.deps);
+    });
+    afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+
+    async function initRepo(dir: string): Promise<void> {
+      mkdirSync(dir, { recursive: true });
+      await git(['init', '-b', 'main'], dir, 30_000);
+      await git(['config', 'user.email', 'test@example.com'], dir, 10_000);
+      await git(['config', 'user.name', 'Test'], dir, 10_000);
+      // A second clone pushes into this one in one test below — a non-bare repo refuses a push to
+      // its checked-out branch by default; nothing here ever reads this repo's own working tree.
+      await git(['config', 'receive.denyCurrentBranch', 'ignore'], dir, 10_000);
+    }
+    async function commit(dir: string, file: string, contents: string, message: string): Promise<void> {
+      mkdirSync(dirname(join(dir, file)), { recursive: true });
+      writeFileSync(join(dir, file), contents, 'utf8');
+      await git(['add', '.'], dir, 10_000);
+      await git(['commit', '-m', message], dir, 10_000);
+    }
+
+    /** A fresh bare-ish `origin` and a real clone of it wired up as the project's own `clonePath`. */
+    async function seedRemoteAndClone(): Promise<{ remoteDir: string; clonePath: string }> {
+      const remoteDir = mkdtempSync(join(tmpdir(), 'ac-vs256-remote-'));
+      dirs.push(remoteDir);
+      await initRepo(remoteDir);
+      await commit(remoteDir, 'README.md', '# api\n', 'init');
+      const clonePath = h.db.get<{ clonePath: string }>('SELECT clone_path FROM projects WHERE id = ?', [h.projectId])!.clonePath;
+      await git(['clone', remoteDir, clonePath], h.root, 30_000);
+      await git(['config', 'user.email', 'test@example.com'], clonePath, 10_000);
+      await git(['config', 'user.name', 'Test'], clonePath, 10_000);
+      return { remoteDir, clonePath };
+    }
+
+    function seedCuration(over: Record<string, unknown> = {}): { ticketId: string; workerId: string } {
+      const ticketId = seedTicket(h, { originKind: 'curation', ...over });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null, branch: null });
+      return { ticketId, workerId };
+    }
+
+    it('fetches and fast-forwards a behind (not diverged) clone, then runs the turn against the now-current tree', async () => {
+      const { remoteDir, clonePath } = await seedRemoteAndClone();
+      // A second clone pushes a commit to origin after the primary clone above was cut — the exact
+      // VS-255 shape: local HEAD behind origin/main, no local divergence.
+      const otherClone = mkdtempSync(join(tmpdir(), 'ac-vs256-other-'));
+      dirs.push(otherClone);
+      await git(['clone', remoteDir, otherClone], h.root, 30_000);
+      await git(['config', 'user.email', 'test@example.com'], otherClone, 10_000);
+      await git(['config', 'user.name', 'Test'], otherClone, 10_000);
+      await commit(otherClone, 'docs/backup-and-restore.md', '# Backup and restore\n', 'add backup runbook');
+      const pushed = await git(['push'], otherClone, 30_000);
+      expect(pushed.ok).toBe(true);
+      // The primary clone has not fetched yet, so this file genuinely does not exist there until the gate runs.
+      expect(existsSync(join(clonePath, 'docs', 'backup-and-restore.md'))).toBe(false);
+
+      const { workerId } = seedCuration();
+      runtime.queue.push({ structured: { state: 'done', summary: 'curated', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'curate' });
+      const run = await runOnce(workerId);
+
+      expect(run.status).toBe('succeeded');
+      expect(runtime.inputs).toHaveLength(1);
+      expect(runtime.inputs[0]!.worktree).toEqual({ path: clonePath, branch: '' });
+      // The clone's checked-out files now reflect origin's current tip — the newer commit is real,
+      // not something a stale checkout would have (mis)reported as missing.
+      expect(existsSync(join(clonePath, 'docs', 'backup-and-restore.md'))).toBe(true);
+      const project = h.db.get<{ syncState: string }>('SELECT sync_state AS syncState FROM projects WHERE id = ?', [h.projectId]);
+      expect(project?.syncState).toBe('in_sync');
+    });
+
+    it('runs normally, with no surprise, when the clone is already current', async () => {
+      const { clonePath } = await seedRemoteAndClone();
+      const { workerId } = seedCuration({ number: 2, identifier: 'TST-2' });
+      runtime.queue.push({ structured: { state: 'done', summary: 'curated', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'curate' });
+      const run = await runOnce(workerId);
+      expect(run.status).toBe('succeeded');
+      expect(runtime.inputs[0]!.worktree).toEqual({ path: clonePath, branch: '' });
+    });
+
+    it('blocks the ticket and never runs the turn when the primary clone has diverged and cannot be fast-forwarded', async () => {
+      const { remoteDir, clonePath } = await seedRemoteAndClone();
+      // Real divergence needs commits on both sides that the other lacks — origin moves via a
+      // second clone pushing to it, and the primary clone (which nothing should ever commit to
+      // directly) gets an unrelated local commit of its own. A local-only commit alone would just
+      // leave the clone strictly ahead, which `merge --ff-only` treats as already up to date.
+      const otherClone = mkdtempSync(join(tmpdir(), 'ac-vs256-diverge-'));
+      dirs.push(otherClone);
+      await git(['clone', remoteDir, otherClone], h.root, 30_000);
+      await git(['config', 'user.email', 'test@example.com'], otherClone, 10_000);
+      await git(['config', 'user.name', 'Test'], otherClone, 10_000);
+      await commit(otherClone, 'docs/backup-and-restore.md', '# Backup and restore\n', 'add backup runbook');
+      const pushed = await git(['push'], otherClone, 30_000);
+      expect(pushed.ok).toBe(true);
+      await commit(clonePath, 'local-only.txt', 'oops\n', 'stray local commit');
+
+      const { ticketId, workerId } = seedCuration();
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'curate' });
+      const run = await runOnce(workerId);
+
+      expect(run.status).toBe('failed');
+      expect(run.errorCode).toBe('checkout_stale');
+      expect(run.errorFamily).toBe('tooling');
+      expect(runtime.inputs).toHaveLength(0);
+      const ticket = h.services.tickets!.get(ticketId);
+      expect(ticket.status).toBe('blocked');
+      expect(ticket.unblock?.owner).toBe('conductor');
+      expect(ticket.unblock?.action).toContain(h.projectSlug);
+      expect(ticket.unblock?.action).toContain('diverged');
+    });
+
+    it('blocks the ticket and never runs the turn when fetching origin fails', async () => {
+      const { clonePath } = await seedRemoteAndClone();
+      await git(['remote', 'set-url', 'origin', join(h.root, 'nonexistent-remote')], clonePath, 10_000);
+
+      const { ticketId, workerId } = seedCuration();
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'curate' });
+      const run = await runOnce(workerId);
+
+      expect(run.status).toBe('failed');
+      expect(run.errorCode).toBe('checkout_stale');
+      expect(runtime.inputs).toHaveLength(0);
+      const ticket = h.services.tickets!.get(ticketId);
+      expect(ticket.status).toBe('blocked');
+      expect(ticket.unblock?.owner).toBe('conductor');
+      expect(ticket.unblock?.action).toContain('could not fetch');
+    });
+
+    it('checks freshness again on a second turn, rather than trusting the first turn verified it', async () => {
+      const { remoteDir, clonePath } = await seedRemoteAndClone();
+      const { ticketId, workerId } = seedCuration();
+
+      runtime.queue.push({ structured: { state: 'working', summary: 'first pass', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'curate' });
+      const first = await runOnce(workerId);
+      expect(first.status).toBe('succeeded');
+      expect(runtime.inputs).toHaveLength(1);
+
+      // Origin moves (via a second clone pushing to it) and the primary clone picks up an unrelated
+      // local commit of its own — real two-sided divergence, not just the clone getting ahead.
+      const otherClone = mkdtempSync(join(tmpdir(), 'ac-vs256-diverge2-'));
+      dirs.push(otherClone);
+      await git(['clone', remoteDir, otherClone], h.root, 30_000);
+      await git(['config', 'user.email', 'test@example.com'], otherClone, 10_000);
+      await git(['config', 'user.name', 'Test'], otherClone, 10_000);
+      await commit(otherClone, 'docs/backup-and-restore.md', '# Backup and restore\n', 'add backup runbook');
+      const pushed = await git(['push'], otherClone, 30_000);
+      expect(pushed.ok).toBe(true);
+      await commit(clonePath, 'local-only.txt', 'oops\n', 'stray local commit between turns');
+
+      h.services.wake!.enqueue(workerId, { source: 'human_message', reason: 'one more pass' });
+      const second = await runOnce(workerId);
+      expect(second.status).toBe('failed');
+      expect(second.errorCode).toBe('checkout_stale');
+      expect(runtime.inputs).toHaveLength(1); // still just the one input from the first, fresh turn
+      const ticket = h.services.tickets!.get(ticketId);
+      expect(ticket.status).toBe('blocked');
+    });
+
+    it('never gates a non-curation, no-worktree ticket', async () => {
+      const fetchSpy = vi.spyOn(h.services.projects!, 'fetch');
+      const ticketId = seedTicket(h, { number: 3, identifier: 'TST-3' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      runtime.queue.push({ structured: { state: 'done', summary: 'ordinary task', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'go' });
+      const run = await runOnce(workerId);
+      expect(run.status).toBe('succeeded');
+      expect(runtime.inputs).toHaveLength(1);
+      expect(runtime.inputs[0]!.worktree).toBeNull();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('dispatcher', () => {
@@ -1633,6 +1817,7 @@ describe('dispatcher', () => {
     await dispatcher.drain();
     expect(h.db.all('SELECT * FROM runs')).toHaveLength(0);
   });
+
 });
 
 describe('redaction', () => {

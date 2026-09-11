@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path';
 import { nowIso } from '@agent-conductor/db';
 import {
-  AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents, OcError,
+  AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents, OcError, landingBranchOf,
   isWorkerOptionConfigured,
   type Agent, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
   type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
@@ -243,6 +243,50 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     });
   }
 
+  // VS-256: a curation turn fact-checks the knowledge base against the project's primary clone —
+  // the only checkout it has (it is always spawned `noWorktree`). That clone is otherwise only kept
+  // current by the hourly reconcile sweep, whose own fast-forward failures are silently logged
+  // (VS-131); without this gate a curation turn can run against a clone that is arbitrarily stale and
+  // remove a knowledge entry as "contradicted" by evidence that was simply behind (VS-255). Checked
+  // on every turn, not only the first, so a relaunch or a later turn on the same ticket is covered
+  // the same way (design.md Decision 3 of vs-256-curation-fact-checks-against-a-stale-che).
+  if (ticket?.originKind === 'curation' && project) {
+    let freshnessError: string | null = null;
+    try {
+      await deps().projects.fetch(project.id);
+      const row = ctx.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id]);
+      if (!row || row.syncState !== 'in_sync') {
+        freshnessError = `primary clone for ${project.slug} has diverged from origin/${landingBranchOf(row ?? project, ticket)} and could not be fast-forwarded`;
+      } else {
+        Object.assign(project, row);
+      }
+    } catch (e) {
+      freshnessError = `could not fetch origin for ${project.slug}'s primary clone: ${String(e)}`;
+    }
+    if (freshnessError) {
+      ctx.events.emit('run.started', 'run', runId, { agentId: agent.id, ticketId: agent.ticketId, turnEpoch: run.turnEpoch });
+      record('run.started', { agentId: agent.id, turnEpoch: run.turnEpoch, wakeups: run.wakeupIds ?? [] }, 'system');
+      record('error', { message: freshnessError, code: 'checkout_stale' }, 'system', 'error');
+      try {
+        await deps().tickets.transition({ kind: 'system', id: null }, ticket.id, {
+          to: 'blocked',
+          unblock: {
+            owner: 'conductor',
+            action: `curation for ${project.slug} needs a checkout verified current before it can run safely — ${freshnessError}. Bring the primary clone in sync, then retry curation.`,
+          },
+        });
+      } catch (e) {
+        log.warn({ err: String(e) }, 'could not transition curation ticket to blocked after a checkout freshness failure');
+      }
+      return finalize(ctx, deps, sessions, {
+        run, agent, role, project, ticket, wakes, result: null,
+        failure: { code: 'checkout_stale', family: 'tooling', message: freshnessError },
+        report: null, durationMs: Date.now() - started, sessionId: null,
+        cancelled: null, record,
+      });
+    }
+  }
+
   ctx.db.update('runs', runId, { status: 'running', startedAt: nowIso(), runtimeId: setting.runtime, model: setting.model ?? null });
   ctx.db.update('agents', agent.id, { status: 'running', runtimeId: setting.runtime, updatedAt: nowIso() });
   // The row was loaded before that update; finalize reads it for what this turn ran on, so it has to
@@ -337,7 +381,12 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       runId,
       turnEpoch: run.turnEpoch,
       cwd: agent.homePath,
-      worktree: agent.worktreePath ? { path: agent.worktreePath, branch: agent.branch ?? '' } : null,
+      // A curation ticket has no worktree of its own, but by the gate above its evidence — the
+      // project's primary clone — is verified current for this turn; grant the runtime the same
+      // `--add-dir` filesystem access a real worktree would get, so `work/` in its brief is real.
+      worktree: agent.worktreePath
+        ? { path: agent.worktreePath, branch: agent.branch ?? '' }
+        : (ticket?.originKind === 'curation' && project ? { path: project.clonePath, branch: '' } : null),
       session: { policy: turnSession.policy, ref: turnSession.ref, isFirstTurn: turnSession.isFirstTurn },
       systemPrompt: { text: systemPromptText, mode: turnSession.isFirstTurn ? 'inject' : 'skip' },
       prompt,

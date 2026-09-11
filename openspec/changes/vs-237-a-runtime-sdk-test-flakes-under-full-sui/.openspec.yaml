@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-11
+goal: "A runtime-sdk test flakes under full-suite load: open mode keeps stdin
+  writable"
+skip_specs: true

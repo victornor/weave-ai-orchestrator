@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Ticket } from '@agent-conductor/shared';
+import type { Agent, Ticket, WorkerModelOption } from '@agent-conductor/shared';
 import { agent, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   active: [] as Ticket[],
   finished: [] as Ticket[],
   workers: [] as Agent[],
+  workerOptions: undefined as WorkerModelOption[] | undefined,
   queries: [] as Array<{ params: Record<string, unknown>; enabled: boolean }>,
   decisions: [] as Array<Record<string, unknown>>,
   config: {} as Record<string, unknown>,
@@ -29,6 +30,7 @@ vi.mock('../api/hooks', () => ({
   useWorkers: () => ({ data: state.workers }),
   useDecisions: () => ({ data: state.decisions }),
   useWorkspaceSummary: () => ({ data: { config: state.config } }),
+  useModels: () => ({ data: state.workerOptions === undefined ? undefined : { workerOptions: state.workerOptions } }),
 }));
 
 const { BoardRoute } = await import('../routes/Board');
@@ -50,6 +52,7 @@ beforeEach(() => {
   state.decisions = [];
   state.config = {};
   state.workers = [];
+  state.workerOptions = undefined;
   state.go = vi.fn();
   state.active = [ticket({ id: 'tk_1', identifier: 'VS-1', title: 'Still going', status: 'in_progress' })];
   state.finished = [
@@ -131,6 +134,34 @@ describe('BoardRoute finished tickets', () => {
 
     fireEvent.click(screen.getByRole('radio', { name: 'Hidden' }));
     expect(screen.queryByRole('columnheader', { name: 'Outcome' })).toBeNull();
+  });
+});
+
+describe('BoardRoute worker model tier tag (VS-217)', () => {
+  const opt = (id: string): WorkerModelOption => ({ id, description: `${id} tier`, runtime: 'claude', model: null });
+
+  it('shows the ticket\'s option id on the kanban card, phone row and table row when several options are configured', () => {
+    state.workerOptions = [opt('quick'), opt('standard'), opt('deep')];
+    state.active = [ticket({ id: 'tk_1', identifier: 'VS-1', title: 'Still going', status: 'in_progress', workerModelId: 'deep' })];
+    render(<BoardRoute />);
+    // The board renders the phone row and the kanban card at once; both carry the tag.
+    expect(screen.getAllByText('deep').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('radio', { name: 'Table' }));
+    expect(screen.getAllByText('deep').length).toBeGreaterThan(0);
+  });
+
+  it('labels a ticket on the workers default, so an untagged card is never a guess', () => {
+    state.workerOptions = [opt('quick'), opt('standard')];
+    state.active = [ticket({ id: 'tk_1', identifier: 'VS-1', title: 'Still going', status: 'in_progress' })];
+    render(<BoardRoute />);
+    expect(screen.getAllByText('default').length).toBeGreaterThan(0);
+  });
+
+  it('hides the tag when one option is configured — the count is derived, not hardcoded', () => {
+    state.workerOptions = [opt('quick')];
+    state.active = [ticket({ id: 'tk_1', identifier: 'VS-1', title: 'Still going', status: 'in_progress', workerModelId: 'quick' })];
+    render(<BoardRoute />);
+    expect(screen.queryByText('quick')).not.toBeInTheDocument();
   });
 });
 

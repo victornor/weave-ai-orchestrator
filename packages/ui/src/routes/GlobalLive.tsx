@@ -2,11 +2,11 @@
  * Daemon-wide Live floor (VS-168): one cell per live worker on a ticket, across every workspace.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { isActiveRun, type Agent, type Run, type Ticket } from '@agent-conductor/shared';
+import { isActiveRun, type Agent, type Run, type Ticket, type WorkerModelOption } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
-import { useRunsMany, useTicketsMany, useWorkersMany, useWorkspaces } from '../api/hooks';
+import { useModelsMany, useRunsMany, useTicketsMany, useWorkersMany, useWorkspaces } from '../api/hooks';
 import { liveWorkingAgents } from '../lib/board';
 import {
   type CellSize,
@@ -39,12 +39,15 @@ export function GlobalLiveRoute(): React.ReactElement {
   const ticketQueries = useTicketsMany(ids, { limit: 300 });
   const runningQueries = useRunsMany(ids, { status: 'running', limit: 200 });
   const queuedQueries = useRunsMany(ids, { status: 'queued', limit: 200 });
+  // Per-workspace effective catalogs (VS-217) so a global cell carries the same tier tag as the
+  // workspace Live page's.
+  const modelQueries = useModelsMany(ids);
   const minSm = useMediaQuery('(min-width: 40rem)');
   const minXl = useMediaQuery('(min-width: 80rem)');
   const colsMax = columnCount(minSm, minXl);
   const [sizes, setSizes] = useState(() => readLiveCellSizes(GLOBAL_SIZE_KEY));
 
-  type Cell = { ws: string; name: string; agent: Agent; ticket: Ticket | undefined; run: Run | null };
+  type Cell = { ws: string; name: string; agent: Agent; ticket: Ticket | undefined; run: Run | null; options?: WorkerModelOption[] };
   const cells = useMemo<Cell[]>(() => {
     const out: Cell[] = [];
     for (let i = 0; i < listed.length; i++) {
@@ -66,11 +69,12 @@ export function GlobalLiveRoute(): React.ReactElement {
           agent,
           ticket: agent.ticketId ? ticketsById.get(agent.ticketId) : undefined,
           run: runByAgent.get(agent.id) ?? null,
+          options: modelQueries[i]?.data?.workerOptions,
         });
       }
     }
     return out;
-  }, [listed, workerQueries, ticketQueries, runningQueries, queuedQueries]);
+  }, [listed, workerQueries, ticketQueries, runningQueries, queuedQueries, modelQueries]);
 
   const liveIds = useMemo(() => cells.map((c) => c.agent.id), [cells]);
   const commit = useCallback((id: string, next: CellSize) => {
@@ -124,6 +128,7 @@ export function GlobalLiveRoute(): React.ReactElement {
                     colsMax={colsMax}
                     desktop={minSm}
                     onSize={(next) => commit(c.agent.id, next)}
+                    workerOptions={c.options}
                     ws={c.ws}
                     workspaceName={c.name}
                   />

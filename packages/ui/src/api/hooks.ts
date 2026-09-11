@@ -535,6 +535,16 @@ export function useModels(): UseQueryResult<T.WorkspaceModels> {
   return useQuery({ queryKey: qk.models(ws), queryFn: () => api.ws<T.WorkspaceModels>(ws, '/models') });
 }
 
+/** `useModels` for several workspaces at once (VS-217); the shared query key dedupes the two. */
+export function useModelsMany(ids: readonly string[]): UseQueryResult<T.WorkspaceModels>[] {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: qk.models(id),
+      queryFn: () => api.ws<T.WorkspaceModels>(id, '/models'),
+    })),
+  });
+}
+
 /**
  * `PUT /models` replaces both settings, so the whole block goes back every time — a partial body
  * would drop the setting that was not being changed.

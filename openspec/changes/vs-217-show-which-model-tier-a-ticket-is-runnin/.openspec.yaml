@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-11
+goal: Show which model tier a ticket is running on, in the board and live view

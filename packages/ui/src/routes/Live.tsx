@@ -8,15 +8,16 @@
  * rather than literal Tailwind classes, since the granularity is too fine to enumerate as classes.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { agentUiStatus, isActiveRun, type Agent, type Run, type Ticket } from '@agent-conductor/shared';
+import { agentUiStatus, isActiveRun, type Agent, type Run, type Ticket, type WorkerModelOption } from '@agent-conductor/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { RunTranscript } from '../components/RunTranscript';
 import { StreamStatusNotice } from '../components/StreamStatus';
 import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { StatusBadge } from '../components/StatusGlyph';
+import { WorkerModelTag } from '../components/WorkerModelTag';
 import { Button } from '../components/Button';
-import { useRuns, useTickets, useWorkers } from '../api/hooks';
+import { useModels, useRuns, useTickets, useWorkers } from '../api/hooks';
 import { useRunEventStream } from '../api/runStream';
 import { useHookWs, useWs } from '../api/context';
 import { A } from '../app/link';
@@ -52,6 +53,8 @@ export function LiveRoute(): React.ReactElement {
   const tickets = useTickets({ limit: 300 });
   const running = useRuns({ status: 'running', limit: 200 });
   const queued = useRuns({ status: 'queued', limit: 200 });
+  // The tier tag's catalog (VS-217); undefined while loading keeps every cell untagged.
+  const models = useModels();
   const minSm = useMediaQuery('(min-width: 40rem)');
   const minXl = useMediaQuery('(min-width: 80rem)');
   const colsMax = columnCount(minSm, minXl);
@@ -107,6 +110,7 @@ export function LiveRoute(): React.ReactElement {
                 colsMax={colsMax}
                 desktop={minSm}
                 onSize={(next) => commit(w.id, next)}
+                workerOptions={models.data?.workerOptions}
               />
             ))}
           </div>
@@ -124,6 +128,7 @@ export function LiveCell({
   colsMax,
   desktop,
   onSize,
+  workerOptions,
   ws: wsProp,
   workspaceName,
 }: {
@@ -134,6 +139,8 @@ export function LiveCell({
   colsMax: number;
   desktop: boolean;
   onSize: (next: CellSize) => void;
+  /** The workspace's effective worker model options (VS-217); two or more turn the tier tag on. */
+  workerOptions?: WorkerModelOption[];
   ws?: string;
   workspaceName?: string;
 }): React.ReactElement {
@@ -160,13 +167,16 @@ export function LiveCell({
           <div className="truncate text-ui font-medium text-text-1">{agent.name}</div>
           {workspaceName ? <div className="truncate text-micro text-text-3">{workspaceName}</div> : null}
           {identifier ? (
-            <A
-              to="/w/$ws/tickets/$ticketId"
-              params={{ ws, ticketId: identifier }}
-              className="ac-mono mt-0.5 block truncate text-micro text-accent-link hover:underline"
-            >
-              {ticketLabel}
-            </A>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+              <A
+                to="/w/$ws/tickets/$ticketId"
+                params={{ ws, ticketId: identifier }}
+                className="ac-mono block min-w-10 flex-1 truncate text-micro text-accent-link hover:underline"
+              >
+                {ticketLabel}
+              </A>
+              {ticket ? <WorkerModelTag ticket={ticket} options={workerOptions} /> : null}
+            </div>
           ) : (
             <div className="ac-mono mt-0.5 truncate text-micro text-text-3">no ticket</div>
           )}

@@ -1,7 +1,7 @@
 /** VS-168: daemon-wide Live page. */
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Run, Ticket } from '@agent-conductor/shared';
+import type { Agent, Run, Ticket, WorkerModelOption } from '@agent-conductor/shared';
 import { agent, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   tickets: {} as Record<string, Ticket[]>,
   running: {} as Record<string, Run[]>,
   queued: {} as Record<string, Run[]>,
+  models: {} as Record<string, WorkerModelOption[] | undefined>,
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
@@ -27,6 +28,7 @@ vi.mock('../api/hooks', () => ({
   useRunsMany: (ids: string[], params: { status?: string } = {}) => ids.map((id) => ({
     data: params.status === 'queued' ? (state.queued[id] ?? []) : (state.running[id] ?? []),
   })),
+  useModelsMany: (ids: string[]) => ids.map((id) => ({ data: state.models[id] === undefined ? undefined : { workerOptions: state.models[id] } })),
   useRunEvents: () => ({ data: [], isLoading: false }),
 }));
 
@@ -43,7 +45,10 @@ beforeEach(() => {
   state.tickets = {};
   state.running = {};
   state.queued = {};
+  state.models = {};
 });
+
+const opt = (id: string): WorkerModelOption => ({ id, description: `${id} tier`, runtime: 'claude', model: null });
 
 describe('GlobalLiveRoute', () => {
   it('shows cells from two workspaces and names them', () => {
@@ -97,5 +102,21 @@ describe('GlobalLiveRoute', () => {
   it('shows empty when nobody is working anywhere', () => {
     render(<GlobalLiveRoute />);
     expect(screen.getByText('Nobody is working.')).toBeInTheDocument();
+  });
+
+  it('carries the workspace\'s tier tag on a cell when several options are configured there (VS-217)', () => {
+    state.models = { alpha: [opt('quick'), opt('standard'), opt('deep')], beta: [] };
+    state.workers = {
+      alpha: [agent({ id: 'w1', name: 'Frontend #1', status: 'running', ticketId: 't1' })],
+      beta: [agent({ id: 'w2', name: 'Backend #1', status: 'running', ticketId: 't2' })],
+    };
+    state.tickets = {
+      alpha: [ticket({ id: 't1', identifier: 'ALP-1', title: 'One', workerModelId: 'deep' })],
+      beta: [ticket({ id: 't2', identifier: 'BET-1', title: 'Two', workerModelId: 'quick' })],
+    };
+    render(<GlobalLiveRoute />);
+    expect(screen.getByText('deep')).toBeInTheDocument();
+    // Beta configures fewer than two options: no tag there, whatever alpha shows.
+    expect(screen.queryByText('quick')).not.toBeInTheDocument();
   });
 });

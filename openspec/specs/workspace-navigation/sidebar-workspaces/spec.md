@@ -91,9 +91,9 @@ one, and within it SHALL mark the section link matching the current location. Ex
 SHALL be marked active at a time, and a section link in a non-active workspace's group SHALL NOT be
 marked active even when its section matches the current one.
 
-When the app is showing a global Needs you, Live, Chats, Incidents or Map page, no workspace group
-SHALL be marked active, and the matching link in the global section SHALL be marked as the current
-one.
+When the app is showing a global Needs you, Live, Chats, Incidents, Map, Scheduled or Settings page,
+no workspace group SHALL be marked active, and the matching link in the global section SHALL be
+marked as the current one.
 
 #### Scenario: Showing a board
 
@@ -130,6 +130,12 @@ one.
 - **WHEN** the app is showing the global Map page
 - **THEN** no workspace group is marked active, and the global section's Map link is marked as the
   current one
+
+#### Scenario: Showing global Scheduled
+
+- **WHEN** the app is showing the global Scheduled page
+- **THEN** no workspace group is marked active, and the global section's Scheduled link is marked as
+  the current one
 
 ### Requirement: Navigating to another workspace switches context without a reload
 
@@ -188,8 +194,9 @@ active workspace when a workspace page is showing, and SHALL NOT grow a workspac
 The last of those tabs SHALL NOT navigate. It SHALL open a menu, presented over the application as a
 dismissible dialog, containing:
 
-- Global Needs you, Global Live, Global Chats, Global Incidents and Global Map, each named,
-  addressing the daemon-wide pages rather than a workspace, listed above the per-workspace leftovers;
+- Global Needs you, Global Live, Global Chats, Global Incidents, Global Map, Global Scheduled and
+  Global Settings, each named, addressing the daemon-wide pages rather than a workspace, listed
+  above the per-workspace leftovers;
 - a link to every destination the application has that the bar's tabs do not carry, including the
   merge queue and Live, each named and addressing the active workspace;
 - the active workspace's projects, each named by its slug and opening that project's overview, and
@@ -285,6 +292,11 @@ other route still reaches the other workspaces.
 
 - **WHEN** the human opens More on a phone and chooses Global Map
 - **THEN** the app shows the global Map page and the menu is dismissed
+
+#### Scenario: Reaching global Scheduled from More
+
+- **WHEN** the human opens More on a phone and chooses Global Scheduled
+- **THEN** the app shows the global Scheduled page and the menu is dismissed
 
 ### Requirement: Chat's reading position survives a workspace switch
 
@@ -526,17 +538,18 @@ dismiss the menu on activate.
 ### Requirement: A global section sits above the workspace list
 
 On a desktop viewport the sidebar SHALL show a global section above the workspace list, containing
-a link named Needs you, a link named Live, a link named Chats, a link named Incidents and a link
-named Map, in that order. Those links SHALL address the daemon-wide pages, not a workspace. The
-section SHALL be present whether or not a workspace is currently being shown, and whether or not the
-workspace list has loaded.
+a link named Needs you, a link named Live, a link named Chats, a link named Incidents, a link named
+Map, a link named Scheduled and a link named Settings, in that order. Those links SHALL address the
+daemon-wide pages, not a workspace. The section SHALL be present whether or not a workspace is
+currently being shown, and whether or not the workspace list has loaded.
 
 The global section SHALL NOT replace any workspace group's own Needs you, Live or Chat links.
 
 #### Scenario: The global section is above the workspaces
 
 - **WHEN** the sidebar is shown on a desktop viewport
-- **THEN** Needs you, Live, Chats, Incidents and Map links appear above the workspace list
+- **THEN** Needs you, Live, Chats, Incidents, Map, Scheduled and Settings links appear above the
+  workspace list
 
 #### Scenario: Needs you in the global section opens global Needs you
 
@@ -563,16 +576,22 @@ The global section SHALL NOT replace any workspace group's own Needs you, Live o
 - **WHEN** the human activates Map in the sidebar's global section
 - **THEN** the app shows the global Map page without a document reload
 
+#### Scenario: Scheduled in the global section opens global Scheduled
+
+- **WHEN** the human activates Scheduled in the sidebar's global section
+- **THEN** the app shows the global Scheduled page without a document reload
+
 #### Scenario: The section is there before workspaces load
 
 - **WHEN** the sidebar renders before the workspace list has loaded
-- **THEN** the global Needs you, Live, Chats, Incidents and Map links are already shown
+- **THEN** the global Needs you, Live, Chats, Incidents, Map, Scheduled and Settings links are
+  already shown
 
 ### Requirement: Opening a global page does not switch workspace context
 
-Following a global Needs you, Live, Chats, Incidents or Map link SHALL navigate within the running
-application without a document reload, SHALL NOT mark any workspace group as the active one, and
-SHALL NOT change the workspace remembered for the next time the app is started.
+Following a global Needs you, Live, Chats, Incidents, Map, Scheduled or Settings link SHALL navigate
+within the running application without a document reload, SHALL NOT mark any workspace group as the
+active one, and SHALL NOT change the workspace remembered for the next time the app is started.
 
 When no workspace page is being shown, the keyboard shortcuts for the sections SHALL navigate to
 that section of the workspace remembered for the next launch, if one is remembered; if none is
@@ -601,11 +620,17 @@ remembered they SHALL do nothing.
 - **THEN** the app shows the global Incidents page, A's group is no longer marked active, and the
   workspace remembered for the next launch is still A
 
+#### Scenario: Jumping to global Scheduled does not switch workspace
+
+- **WHEN** the human is viewing workspace A's board and activates Scheduled in the global section
+- **THEN** the app shows the global Scheduled page, A's group is no longer marked active, and the
+  workspace remembered for the next launch is still A
+
 ### Requirement: Global pages render without a workspace provider
 
-The global Needs you, Live, Chats, Incidents and Map pages SHALL load and render when the URL has
-no workspace id. Shared chrome on those pages SHALL NOT require a workspace to be the active one,
-and SHALL NOT throw because no workspace context is present.
+The global Needs you, Live, Chats, Incidents, Map, Scheduled and Settings pages SHALL load and
+render when the URL has no workspace id. Shared chrome on those pages SHALL NOT require a workspace
+to be the active one, and SHALL NOT throw because no workspace context is present.
 
 Visiting any of those pages SHALL NOT change the workspace remembered for the next time the app is
 started. Per-workspace pages under a workspace path SHALL keep wrapping that workspace as the
@@ -619,7 +644,8 @@ active one.
 
 #### Scenario: The other global pages load the same way
 
-- **WHEN** the app opens global Live, Chats, Incidents or Map and no workspace is in the URL
+- **WHEN** the app opens global Live, Chats, Incidents, Map, Scheduled or Settings and no workspace
+  is in the URL
 - **THEN** each page renders without an error that workspace context is missing, and the workspace
   remembered for the next launch is unchanged
 

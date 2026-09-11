@@ -25,14 +25,26 @@ describe('parseModels — captured `opencode models --verbose` (2026-09-11, 1.18
     ]);
   });
 
+  it('labels a detected model with the CLI-reported name, not the raw id', () => {
+    const models = parseModels(fixture('models-verbose.txt'));
+    const flash = models.find((m) => m.id === 'deepseek/deepseek-flash');
+    expect(flash?.label).toBe('DeepSeek V4.1 Flash');
+    const v4Flash = models.find((m) => m.id === 'deepseek/deepseek-v4-flash');
+    expect(v4Flash?.label).toBe('DeepSeek V4 Flash');
+    // the id that looks least specific ("deepseek-flash") is the newer release — the whole point
+    // of this ticket is that the label, not the id, is what tells them apart.
+    expect(flash?.label).not.toBe(flash?.id);
+  });
+
   it('omits a disabled variant (surgical `disabled: true` on otherwise-real ling JSON; live dump had none)', () => {
     const models = parseModels(fixture('models-verbose-disabled.txt'));
     expect(models.find((m) => m.id === 'opencode/ling-3.0-flash-fin-free')?.efforts).toEqual(['medium', 'high']);
   });
 
-  it('omits efforts on a non-verbose id-only listing', () => {
+  it('omits efforts on a non-verbose id-only listing, and labels it by id', () => {
     const models = parseModels('anthropic/claude-sonnet-5\nopenai/gpt-5.1\n');
     expect(models.map((m) => m.id)).toEqual(['anthropic/claude-sonnet-5', 'openai/gpt-5.1']);
     expect(models.every((m) => m.efforts === undefined)).toBe(true);
+    expect(models.every((m) => m.label === m.id)).toBe(true);
   });
 });

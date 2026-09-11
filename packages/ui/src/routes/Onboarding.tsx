@@ -16,7 +16,7 @@ import { StreamStatusNotice } from '../components/StreamStatus';
 import { useJobStream } from '../api/jobStream';
 import { duration } from '../lib/format';
 import { cx } from '../lib/cx';
-import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
+import { isRuntimeAvailable, modelOptionLabel, runtimeStatusLabel } from '../lib/runtime';
 
 type Step = 'workspace' | 'models' | 'projects' | 'create';
 const STEPS: Array<{ key: Step; label: string }> = [
@@ -351,7 +351,7 @@ export function OnboardingRoute(): React.ReactElement {
             <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT}>
               <option value="">default</option>
               {(models.data ?? []).map((m) => (
-                <option key={m.id} value={m.id}>{m.label}</option>
+                <option key={m.id} value={m.id}>{modelOptionLabel(m)}</option>
               ))}
             </select>
           </Field>

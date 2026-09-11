@@ -84,9 +84,10 @@ function effortsFromVariants(variants: unknown): string[] {
 
 /**
  * Parse `opencode models` / `opencode models --verbose`.
- * Non-verbose: one `provider/model` per line, `efforts` omitted.
- * Verbose (captured 2026-09-11, OpenCode 1.18.30): id line, then a JSON object whose `variants`
- * keys are the thinking levels (`{}` → `[]`). A variant with `disabled: true` is skipped.
+ * Non-verbose: one `provider/model` per line, `efforts` omitted, label is the id.
+ * Verbose (captured 2026-09-11, OpenCode 1.18.30): id line, then a JSON object whose `name` is
+ * the CLI's own display name (used as the label) and whose `variants` keys are the thinking
+ * levels (`{}` → `[]`). A variant with `disabled: true` is skipped.
  */
 export function parseModels(stdout: string): RuntimeModel[] {
   const out: RuntimeModel[] = [];
@@ -104,11 +105,12 @@ export function parseModels(stdout: string): RuntimeModel[] {
       const taken = takeJsonObject(chunk, 0);
       if (taken) {
         try {
-          const obj = JSON.parse(taken.json) as { variants?: unknown };
-          if (obj && typeof obj === 'object' && 'variants' in obj) {
-            model.efforts = effortsFromVariants(obj.variants);
+          const obj = JSON.parse(taken.json) as { name?: unknown; variants?: unknown };
+          if (obj && typeof obj === 'object') {
+            if (typeof obj.name === 'string' && obj.name.length > 0) model.label = obj.name;
+            if ('variants' in obj) model.efforts = effortsFromVariants(obj.variants);
           }
-        } catch { /* omit efforts */ }
+        } catch { /* omit name/efforts */ }
         i += chunk.slice(0, taken.end).split('\n').length;
       }
     }

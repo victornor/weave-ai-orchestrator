@@ -1,4 +1,4 @@
-import type { RuntimeInfo } from '../api/types';
+import type { RuntimeInfo, RuntimeModel } from '../api/types';
 
 /**
  * `GET /api/runtimes` returns `adapter.detect()` verbatim (packages/server/src/routes/daemon.ts),
@@ -22,4 +22,13 @@ export function runtimeStatusLabel(r: RuntimeInfo): string {
     default:
       return 'unknown';
   }
+}
+
+/**
+ * Text for one option in a model picker: the id that actually gets written to config is never
+ * hidden behind a friendlier name. `label` equalling `id` means no better name was available, so
+ * showing the id once is enough.
+ */
+export function modelOptionLabel(model: RuntimeModel): string {
+  return model.label === model.id ? model.id : `${model.label} (${model.id})`;
 }

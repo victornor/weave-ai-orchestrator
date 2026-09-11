@@ -680,7 +680,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       const order = filter.sort === 'finished'
         ? 'COALESCE(completed_at, cancelled_at, updated_at) DESC, number DESC'
         : 'number DESC';
-      const items = db.all<Record<string, unknown>>(`SELECT * FROM tickets WHERE ${clause} ORDER BY ${order} LIMIT ? OFFSET ?`, [...params, limit, offset]).map(row);
+      const items = db.all<Record<string, unknown>>(`SELECT * FROM tickets WHERE ${clause} ORDER BY ${order} LIMIT ? OFFSET ?`, [...params, limit, offset]).map(row)
+        .map((t) => (filter.fields === 'label' ? { ...t, description: '' } : t));
       return { items, total } satisfies Page<Ticket>;
     },
 

@@ -37,7 +37,7 @@ import {
 } from '../api/hooks';
 import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
-import { ApiError, NetworkError } from '../api/client';
+import { ApiError, NetworkError, SEND_TIMEOUT_MS, withTimeout } from '../api/client';
 import { attachmentPartsOf, attachmentToView, contextStrip, resolveModel, runtimeLimitStrip } from '@agent-conductor/render';
 import { chatEntries, chatRows } from '../lib/dispatch';
 import { useShowSilentTurns } from '../lib/chatPrefs';
@@ -123,7 +123,7 @@ export function ChatPage({
   const decisions = useDecisions({ status: ['open', 'answered'], owner: 'human', limit: 200 });
   const answer = useAnswerDecision();
   // Terminal tickets and retired workers are exactly the dispatches whose labels must keep showing.
-  const tickets = useTickets({ limit: 200, includeTerminal: true });
+  const tickets = useTickets({ limit: 200, includeTerminal: true, fields: 'label' });
   const workers = useWorkers({ includeRetired: true });
   const projects = useProjects();
   const projectIds = useMemo(() => (projects.data ?? []).map((p) => p.id), [projects.data]);
@@ -270,7 +270,8 @@ export function ChatPage({
     [messages.data],
   );
   const oldestLoaded = messages.data?.[0]?.createdAt ?? null;
-  const traces = useRunTraces({ ids: messageRuns, agent: conductorId, since: oldestLoaded });
+  const tracesReady = Boolean(oldestLoaded || messageRuns.length);
+  const traces = useRunTraces({ ids: messageRuns, agent: tracesReady ? conductorId : null, since: oldestLoaded });
 
   const showSilent = useShowSilentTurns();
   const rows = useMemo(
@@ -574,9 +575,11 @@ export function ChatPage({
         return Promise.reject(new Error('offline'));
       }
       setSending(true);
-      return post
-        .mutateAsync({ threadId: fetchId, body: text, projectId, files: attached, idempotencyKey, ...(replyToId ? { replyToMessageId: replyToId } : {}) })
-        .then(() => { patch({ replyToId: null, projectId: null }); })
+      return withTimeout(
+        post.mutateAsync({ threadId: fetchId, body: text, projectId, files: attached, idempotencyKey, ...(replyToId ? { replyToMessageId: replyToId } : {}) }),
+        SEND_TIMEOUT_MS,
+      )
+        .then(() => { setSending(false); patch({ replyToId: null, projectId: null }); })
         .catch((e: unknown) => {
           setSending(false);
           toast.push({ title: 'Message not sent', detail: e instanceof Error ? e.message : 'unknown error', status: 'failed' });
@@ -596,9 +599,12 @@ export function ChatPage({
     // reset only on a confirmed send — a refusal keeps both so the retry is still scoped.
     // A NetworkError is the same condition the `offline` branch queues for; the device just has
     // not noticed it yet, so it is treated as settled (queued) rather than as a retryable failure.
-    return post
-        .mutateAsync({ threadId: fetchId, body: text, projectId, idempotencyKey, ...(replyToId ? { replyToMessageId: replyToId } : {}) })
-      .then(() => { patch({ replyToId: null, projectId: null }); })
+    // Sending… and the working-bridge clear when the POST settles (VS-227), not only on run.finished.
+    return withTimeout(
+      post.mutateAsync({ threadId: fetchId, body: text, projectId, idempotencyKey, ...(replyToId ? { replyToMessageId: replyToId } : {}) }),
+      SEND_TIMEOUT_MS,
+    )
+      .then(() => { setSending(false); patch({ replyToId: null, projectId: null }); })
       .catch((e: unknown) => {
         setSending(false);
         if (e instanceof NetworkError) {

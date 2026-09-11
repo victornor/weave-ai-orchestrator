@@ -8,6 +8,7 @@ import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { useModelsMany, useRunsMany, useTicketsMany, useWorkersMany, useWorkspaces } from '../api/hooks';
 import { liveWorkingAgents } from '../lib/board';
+import { liveRunTailSlots } from '../lib/liveStreams';
 import {
   type CellSize,
   columnCount,
@@ -77,6 +78,10 @@ export function GlobalLiveRoute(): React.ReactElement {
   }, [listed, workerQueries, ticketQueries, runningQueries, queuedQueries, modelQueries]);
 
   const liveIds = useMemo(() => cells.map((c) => c.agent.id), [cells]);
+  const tailSlots = useMemo(
+    () => liveRunTailSlots(cells.filter((c) => c.run && isActiveRun(c.run.status)).map((c) => c.agent.id)),
+    [cells],
+  );
   const commit = useCallback((id: string, next: CellSize) => {
     setSizes((prev) => writeLiveCellSizes(GLOBAL_SIZE_KEY, { ...prev, [id]: next }, liveIds));
   }, [liveIds]);
@@ -131,6 +136,7 @@ export function GlobalLiveRoute(): React.ReactElement {
                     workerOptions={c.options}
                     ws={c.ws}
                     workspaceName={c.name}
+                    streamLive={tailSlots.has(c.agent.id)}
                   />
                 ))}
               </div>

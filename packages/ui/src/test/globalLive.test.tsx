@@ -1,8 +1,8 @@
 /** VS-168: daemon-wide Live page. */
 import { render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Run, Ticket, WorkerModelOption } from '@agent-conductor/shared';
-import { agent, ticket } from './factories';
+import { agent, run as makeRun, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
   workspaces: [] as Array<{ id: string; name: string }>,
@@ -34,6 +34,21 @@ vi.mock('../api/hooks', () => ({
 
 const { GlobalLiveRoute } = await import('../routes/GlobalLive');
 
+class FakeEventSource {
+  static open: FakeEventSource[] = [];
+  readonly listeners = new Map<string, Array<(m: MessageEvent<string>) => void>>();
+  onmessage: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+  constructor(readonly url: string) { FakeEventSource.open.push(this); }
+  addEventListener(type: string, fn: (m: MessageEvent<string>) => void): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+  }
+  close(): void { this.closed = true; }
+}
+
+const live = (): FakeEventSource[] => FakeEventSource.open.filter((s) => !s.closed);
+
 beforeEach(() => {
   state.workspaces = [
     { id: 'alpha', name: 'Alpha' },
@@ -46,7 +61,11 @@ beforeEach(() => {
   state.running = {};
   state.queued = {};
   state.models = {};
+  FakeEventSource.open = [];
+  (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
+  window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
+afterEach(() => vi.clearAllMocks());
 
 const opt = (id: string): WorkerModelOption => ({ id, description: `${id} tier`, runtime: 'claude', model: null });
 
@@ -118,5 +137,28 @@ describe('GlobalLiveRoute', () => {
     expect(screen.getByText('deep')).toBeInTheDocument();
     // Beta configures fewer than two options: no tag there, whatever alpha shows.
     expect(screen.queryByText('quick')).not.toBeInTheDocument();
+  });
+
+  it('caps concurrent run-tail EventSources at two across workspaces (VS-227)', () => {
+    state.workers = {
+      alpha: [
+        agent({ id: 'w1', name: 'Frontend #1', status: 'running', ticketId: 't1' }),
+        agent({ id: 'w2', name: 'Frontend #2', status: 'running', ticketId: 't2' }),
+      ],
+      beta: [agent({ id: 'w3', name: 'Backend #1', status: 'running', ticketId: 't3' })],
+    };
+    state.tickets = {
+      alpha: [ticket({ id: 't1', identifier: 'ALP-1', title: 'One' }), ticket({ id: 't2', identifier: 'ALP-2', title: 'Two' })],
+      beta: [ticket({ id: 't3', identifier: 'BET-1', title: 'Three' })],
+    };
+    state.running = {
+      alpha: [makeRun({ id: 'run_1', agentId: 'w1', status: 'running' }), makeRun({ id: 'run_2', agentId: 'w2', status: 'running' })],
+      beta: [makeRun({ id: 'run_3', agentId: 'w3', status: 'running' })],
+    };
+    render(<GlobalLiveRoute />);
+    expect(live().map((s) => s.url)).toEqual([
+      '/api/w/alpha/runs/run_1/events/stream',
+      '/api/w/alpha/runs/run_2/events/stream',
+    ]);
   });
 });

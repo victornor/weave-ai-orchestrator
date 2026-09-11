@@ -20,7 +20,7 @@ export function ConnectionBanner({
   queuedCount?: number;
   className?: string;
 }): React.ReactElement | null {
-  if (state === 'connected' || state === 'connecting') return null;
+  if (state === 'connected' || state === 'connecting' || state === 'hidden') return null;
   const offline = state === 'offline' || state === 'unreachable';
   return (
     <div

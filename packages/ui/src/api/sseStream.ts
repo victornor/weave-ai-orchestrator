@@ -11,7 +11,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 
-export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'unreachable';
+export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'unreachable' | 'hidden';
 
 export interface ConnectionStatus {
   state: ConnectionState;
@@ -42,6 +42,11 @@ export interface LiveStream {
 
 const INITIAL_STATUS: ConnectionStatus = { state: 'connecting', capturedAt: null, attempts: 0 };
 
+/** True when this document is in a background tab (VS-227): persistent streams must not hold HTTP/1.1 slots. */
+export function documentIsHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
 export function useLiveStream(opts: LiveStreamOptions): LiveStream {
   const { eventTypes, resetKey } = opts;
   // Read through refs so a caller need not memoize buildUrl/onFrame across renders.
@@ -58,6 +63,7 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStream {
     if (resetKey === null) return;
 
     let stopped = false;
+    let hidden = false;
     let es: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let attempts = 0;
@@ -69,7 +75,7 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStream {
     };
 
     const open = (): void => {
-      if (stopped) return;
+      if (stopped || hidden) return;
       es?.close();
       if (timer) {
         clearTimeout(timer);
@@ -88,7 +94,7 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStream {
       for (const type of eventTypes) source.addEventListener(type, (m) => onFrameRef.current(m as MessageEvent<string>));
       source.onerror = () => {
         source.close();
-        if (stopped) return;
+        if (stopped || hidden) return;
         attempts += 1;
         const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
         set({ state: offline ? 'offline' : 'reconnecting', attempts });
@@ -110,12 +116,35 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStream {
       set({ state: 'offline' });
     };
 
+    const onVisibility = (): void => {
+      if (documentIsHidden()) {
+        hidden = true;
+        es?.close();
+        es = null;
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        set({ state: 'hidden' });
+        return;
+      }
+      if (!hidden) return;
+      hidden = false;
+      open();
+    };
+
     if (typeof window !== 'undefined') {
       window.addEventListener('online', onOnline);
       window.addEventListener('offline', onOffline);
+      document.addEventListener('visibilitychange', onVisibility);
     }
 
-    open();
+    if (documentIsHidden()) {
+      hidden = true;
+      set({ state: 'hidden' });
+    } else {
+      open();
+    }
 
     return () => {
       stopped = true;
@@ -124,6 +153,7 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStream {
       if (typeof window !== 'undefined') {
         window.removeEventListener('online', onOnline);
         window.removeEventListener('offline', onOffline);
+        document.removeEventListener('visibilitychange', onVisibility);
       }
     };
     // `eventTypes` is expected to be a stable reference (a module-level constant); it is read from

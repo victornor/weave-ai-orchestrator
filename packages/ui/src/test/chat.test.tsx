@@ -539,7 +539,7 @@ describe('ChatRoute dispatch labels', () => {
     state.workers = [agent({ id: 'w1', ticketId: 'tk_1', name: 'Backend Engineer #1', status: 'retired' })];
 
     render(<ChatRoute />);
-    expect(state.ticketQuery).toMatchObject({ includeTerminal: true });
+    expect(state.ticketQuery).toMatchObject({ includeTerminal: true, fields: 'label' });
     expect(state.workerQuery).toMatchObject({ includeRetired: true });
     expect(state.workerQuery).not.toHaveProperty('status');
     expect(label('TST-1')).toBeInTheDocument();
@@ -910,6 +910,30 @@ describe('ChatRoute sending while the daemon is unreachable', () => {
     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Message the conductor…')).toHaveValue('a very long message');
   });
+
+  it('a send whose fetch never settles leaves Sending… then queues after 15s (VS-227)', async () => {
+    vi.useFakeTimers();
+    try {
+      state.postDeferred = new Promise(() => { /* never settles */ });
+      render(<ChatRoute />);
+      const box = screen.getByLabelText('Message the conductor…');
+      fireEvent.change(box, { target: { value: 'hello' } });
+      fireEvent.click(screen.getByLabelText('Send'));
+      expect(screen.getByRole('status')).toHaveTextContent('Sending…');
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+
+      expect(vi.mocked(enqueue).mock.calls[0]?.[0]).toMatchObject({
+        path: '/threads/th_1/messages',
+        body: { body: 'hello' },
+      });
+      expect(screen.queryByText('Sending…')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Message the conductor…')).toHaveValue('');
+      expect(screen.getByLabelText('Message the conductor…')).not.toBeDisabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('ChatRoute send lifecycle (VS-148)', () => {
@@ -927,6 +951,16 @@ describe('ChatRoute send lifecycle (VS-148)', () => {
     await waitFor(() => expect(state.posted).toHaveLength(1));
     expect(withoutKey(state.posted[0]!)).toMatchObject({ threadId: 'th_1', body: 'once' });
     expect(state.posted[0]!.idempotencyKey).toEqual(expect.any(String));
+  });
+
+  it('clears Sending… when the POST succeeds even without run.finished (VS-227)', async () => {
+    render(<ChatRoute />);
+    const box = screen.getByLabelText('Message the conductor…');
+    fireEvent.change(box, { target: { value: 'hello' } });
+    fireEvent.click(screen.getByLabelText('Send'));
+    await waitFor(() => expect(state.posted).toHaveLength(1));
+    expect(screen.queryByText('Sending…')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
   });
 
   it('a failed plain-text send keeps the text, reply reference and project pick', async () => {
@@ -2239,6 +2273,13 @@ describe('ChatRoute turn work trace', () => {
 
     expect(state.traceQuery).toEqual({ ids: ['run_1', 'run_2'], agent: 'ag_conductor', since: '2026-09-01T09:00:00.000Z' });
   });
+
+  it('does not request traces until a message window is known (VS-227)', () => {
+    state.messages = [];
+    state.messagesLoaded = true;
+    render(<ChatRoute />);
+    expect(state.traceQuery).toEqual({ ids: [], agent: null, since: null });
+  });
 });
 
 /**
@@ -2740,5 +2781,15 @@ describe('ChatRoute workspace switch (VS-166)', () => {
     await waitFor(() => expect(screen.getByText('workspace two history')).toBeInTheDocument());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(state.messageThreadIds.at(-1)).toBe('th_2');
+  });
+
+  it('a hanging messages fetch that errors shows retry, not the skeleton (VS-227)', async () => {
+    const { NetworkError } = await import('../api/client');
+    state.messagesLoaded = false;
+    state.messagesError = new NetworkError();
+    render(<ChatRoute />);
+    expect(screen.getByText(/Could not load the thread/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByText('Tell me what you need.')).not.toBeInTheDocument();
   });
 });

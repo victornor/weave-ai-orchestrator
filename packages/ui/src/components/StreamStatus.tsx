@@ -16,7 +16,7 @@ export function StreamStatusNotice({
   onRetry: () => void;
   className?: string;
 }): React.ReactElement | null {
-  if (status.state === 'connected' || status.state === 'connecting') return null;
+  if (status.state === 'connected' || status.state === 'connecting' || status.state === 'hidden') return null;
   const offline = status.state === 'offline' || status.state === 'unreachable';
   return (
     <div

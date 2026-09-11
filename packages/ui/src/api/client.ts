@@ -77,12 +77,48 @@ export class NetworkError extends Error {
   }
 }
 
+/** GET/HEAD abort so a starved request becomes an error instead of an eternal skeleton (VS-227). */
+export const GET_TIMEOUT_MS = 30_000;
+/** POST/PUT/PATCH/DELETE abort so a send cannot sit on “Sending…” forever (VS-227). */
+export const SEND_TIMEOUT_MS = 15_000;
+
 export interface RequestInitLike {
   method?: string;
   body?: unknown;
   signal?: AbortSignal;
   headers?: Record<string, string>;
   raw?: BodyInit;
+  /** Override the method's default abort; `0` disables the timer. */
+  timeoutMs?: number;
+}
+
+function combineSignals(signals: AbortSignal[]): AbortSignal | undefined {
+  if (signals.length === 0) return undefined;
+  if (signals.length === 1) return signals[0];
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals);
+  const ctrl = new AbortController();
+  const abortFrom = (s: AbortSignal): void => {
+    if (!ctrl.signal.aborted) ctrl.abort(s.reason);
+  };
+  for (const s of signals) {
+    if (s.aborted) {
+      ctrl.abort(s.reason);
+      return ctrl.signal;
+    }
+    s.addEventListener('abort', () => abortFrom(s), { once: true });
+  }
+  return ctrl.signal;
+}
+
+/** Reject with `NetworkError` if `promise` has not settled within `ms`. */
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new NetworkError()), ms);
+    promise.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
 }
 
 export async function request<T>(path: string, init: RequestInitLike = {}): Promise<T> {
@@ -96,18 +132,34 @@ export async function request<T>(path: string, init: RequestInitLike = {}): Prom
     body = JSON.stringify(init.body);
   }
 
+  const method = init.method ?? (body ? 'POST' : 'GET');
+  const timeoutMs = init.timeoutMs ?? ((method === 'GET' || method === 'HEAD') ? GET_TIMEOUT_MS : SEND_TIMEOUT_MS);
+  const timeoutCtrl = new AbortController();
+  const timer = timeoutMs > 0 ? setTimeout(() => timeoutCtrl.abort(), timeoutMs) : undefined;
+  const signal = combineSignals([
+    ...(init.signal ? [init.signal] : []),
+    ...(timeoutMs > 0 ? [timeoutCtrl.signal] : []),
+  ]);
+
   let res: Response;
   try {
     res = await fetch(path, {
-      method: init.method ?? (body ? 'POST' : 'GET'),
+      method,
       credentials: 'include',
       headers,
       ...(body === undefined ? {} : { body }),
-      ...(init.signal ? { signal: init.signal } : {}),
+      ...(signal ? { signal } : {}),
     });
   } catch (cause) {
-    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+    const aborted = cause instanceof DOMException && (cause.name === 'AbortError' || cause.name === 'TimeoutError');
+    if (aborted) {
+      // Query cancellation must stay AbortError so TanStack does not surface it as a failed fetch.
+      if (timeoutCtrl.signal.aborted && !init.signal?.aborted) throw new NetworkError();
+      throw cause;
+    }
     throw new NetworkError();
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   if (res.status === 204) return undefined as T;

@@ -223,6 +223,40 @@ describe('Live page streaming', () => {
     expect(screen.getByText('Reading the failing test.')).toBeInTheDocument();
   });
 
+  it('caps concurrent run-tail EventSources at two, and a waiting cell opens when a slot frees (VS-227)', () => {
+    state.workers = [
+      agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'running' }),
+      agent({ id: 'a2', name: 'Backend Engineer #1', ticketId: 'tk_2', status: 'running' }),
+      agent({ id: 'a3', name: 'Platform Engineer #3', ticketId: 'tk_3', status: 'running' }),
+    ];
+    state.tickets = [
+      ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-7', title: 'Flaky test' }),
+      ticket({ id: 'tk_3', identifier: 'ACME-9', title: 'Slow chats' }),
+    ];
+    state.running = [
+      makeRun({ id: 'run_1', agentId: 'a1', status: 'running' }),
+      makeRun({ id: 'run_2', agentId: 'a2', status: 'running' }),
+      makeRun({ id: 'run_3', agentId: 'a3', status: 'running' }),
+    ];
+    const { rerender } = render(<LiveRoute />);
+    expect(live().map((s) => s.url)).toEqual([
+      '/api/w/ws1/runs/run_1/events/stream',
+      '/api/w/ws1/runs/run_2/events/stream',
+    ]);
+
+    state.workers = [
+      agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'paused' }),
+      agent({ id: 'a2', name: 'Backend Engineer #1', ticketId: 'tk_2', status: 'running' }),
+      agent({ id: 'a3', name: 'Platform Engineer #3', ticketId: 'tk_3', status: 'running' }),
+    ];
+    rerender(<LiveRoute />);
+    expect(live().map((s) => s.url)).toEqual([
+      '/api/w/ws1/runs/run_2/events/stream',
+      '/api/w/ws1/runs/run_3/events/stream',
+    ]);
+  });
+
   it('drops a cell when the worker leaves the live set, without a remount of the others', () => {
     state.workers = [
       agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'running' }),

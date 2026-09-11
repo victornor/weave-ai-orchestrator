@@ -165,7 +165,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     if (t.openspecChangeName) return t.openspecChangeName;
     const p = project(t.projectId);
     if (!p || !p.openspecEnabled) return null;
-    if (t.kind === 'scout' || t.kind === 'question') return null;
+    if (t.kind === 'scout' || t.kind === 'question' || t.kind === 'operational') return null;
     if (t.kind === 'task' && (p.policies as { taskTicketsUseOpenspec?: boolean } | null)?.taskTicketsUseOpenspec === false) return null;
     const name = openspecChangeName(t.identifier, t.title);
     db.update('tickets', t.id, { openspecChangeName: name, updatedAt: nowIso() });
@@ -196,11 +196,39 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   }
 
   /** The open approval of `kind` on a ticket, if the human has not answered it first. */
-  function openApproval(ticketId: string, kind: 'plan_approval' | 'merge_approval'): string | null {
+  function openApproval(ticketId: string, kind: 'plan_approval' | 'merge_approval' | 'action_approval'): string | null {
     return db.get<{ id: string }>(
       'SELECT id FROM decisions WHERE ticket_id = ? AND kind = ? AND status = ? ORDER BY created_at DESC LIMIT 1',
       [ticketId, kind, 'open'],
     )?.id ?? null;
+  }
+
+  const actionApprovalOptions = [
+    { key: NAMED_CARD_OPTION_KEYS.action_approval.approve, label: 'Approve', description: 'The worker runs the stated action.', recommended: true },
+    { key: NAMED_CARD_OPTION_KEYS.action_approval.revise, label: 'Revise', description: 'Send it back with feedback.' },
+    { key: NAMED_CARD_OPTION_KEYS.action_approval.reject, label: 'Reject', description: 'Cancel the ticket.' },
+  ];
+
+  /** Human-owned, never YOLO, never `proposalApproval: none`. */
+  function raiseActionApproval(
+    actor: Actor,
+    t: Ticket,
+    doc: { id: string; currentRevision: number } | undefined,
+    repaired: boolean,
+  ): { id: string } {
+    return deps().decisions.create(actor, {
+      ticketId: t.id, kind: 'action_approval', owner: 'human',
+      title: `Approve the action for ${t.identifier}: ${t.title}`,
+      context: repaired
+        ? `Review the action document. Approve to run it; revise to send feedback; reject to cancel. (Re-raised: the previous approval was lost.)`
+        : `Review the action document. Approve to run it; revise to send feedback; reject to cancel.`,
+      options: actionApprovalOptions,
+      allowFreeText: true,
+      correlationKey: `action_approval:${t.id}`,
+      target: doc ? { documentId: doc.id, revision: doc.currentRevision } : undefined,
+      askedByAgentId: t.workerId,
+      askedInRunId: actor.runId ?? null,
+    });
   }
 
   function systemComment(ticketId: string, body: string, actor: Actor, kind: CommentKind = 'status'): void {
@@ -318,7 +346,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       throw new OcError('forbidden', "the `plan` document key is reserved for the daemon-generated plan digest; use `report` (or another key) for your own notes", { key });
     }
     const t = get(id);
-    return tx(db, () => {
+    const written = tx(db, () => {
       let doc = db.get<{ id: string; currentRevision: number }>('SELECT id, current_revision FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, key]);
       if (!doc) {
         const docId = newId();
@@ -342,6 +370,13 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       }
       return { documentId: doc.id, revision };
     });
+    // An operational ticket's `action` document is the pre-action gate: each write supersedes
+    // (via create's correlation key) and raises a human-owned `action_approval`. YOLO and
+    // `proposalApproval: none` do not grant it.
+    if (key === 'action' && t.kind === 'operational') {
+      raiseActionApproval(actor, t, { id: written.documentId, currentRevision: written.revision }, false);
+    }
+    return written;
   }
 
   // ---------- transitions ----------
@@ -358,13 +393,16 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     checkTransition(t.kind, t.status, to, facts(t, input));
 
     // Async gates run before the write transaction opens.
-    // VS-215: a task ticket finishes at `done` only when nothing it produced needs landing. Commits
-    // the landing branch does not contain must be delivered through `in_review` (or cancelled), and
-    // that holds for human actors too — it is the same protection the discard rules provide.
-    if (to === 'done' && t.kind === 'task') {
+    // VS-215 / VS-216: a task or operational ticket finishes at `done` only when nothing it
+    // produced needs landing. That holds for human actors too — it is the same protection the
+    // discard rules provide. The task-only note requirement stays in checkTransition.
+    if (to === 'done' && (t.kind === 'task' || t.kind === 'operational')) {
       const commits = await unlandedCommitsFor(t);
       if (commits > 0) {
-        throw new OcError('worktree_not_landed', `${t.identifier}'s branch carries ${commits} commit(s) not contained in its landing branch; deliver through in_review instead`, { commits });
+        const hint = t.kind === 'task'
+          ? 'deliver through in_review instead'
+          : 'an operational ticket must not finish with unlanded commits';
+        throw new OcError('worktree_not_landed', `${t.identifier}'s branch carries ${commits} commit(s) not contained in its landing branch; ${hint}`, { commits });
       }
     }
     let planBody: string | null = null;
@@ -953,15 +991,16 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     },
 
     /**
-     * A `proposed` change ticket, or an `in_review` ticket without `auto_merge`, is always supposed
-     * to have an open decision — that decision is its action path, which is exactly why
-     * `livenessViolations` leaves both statuses alone. Whatever closed the decision without moving
-     * the ticket on (VS-104: an overloaded document key; conceivably something else in the future)
-     * raises a fresh one here, so the ticket is never left silently stranded.
+     * A `proposed` change ticket, an `in_review` ticket without `auto_merge`, or an operational
+     * ticket that already wrote its `action` document, is always supposed to have an open decision
+     * — that decision is its action path, which is exactly why `livenessViolations` leaves those
+     * tickets alone. Whatever closed the decision without moving the ticket on (VS-104: an
+     * overloaded document key; conceivably something else in the future) raises a fresh one here,
+     * so the ticket is never left silently stranded. An operational repair is never YOLO-answered.
      */
     async repairApprovals() {
       const SYSTEM: Actor = { kind: 'system', id: null };
-      const repaired: Array<{ id: string; identifier: string; kind: 'plan_approval' | 'merge_approval' }> = [];
+      const repaired: Array<{ id: string; identifier: string; kind: 'plan_approval' | 'merge_approval' | 'action_approval' }> = [];
 
       const proposed = db
         .all<Record<string, unknown>>("SELECT * FROM tickets WHERE workspace_id = ? AND status = 'proposed' AND kind = 'change'", [ws])
@@ -1018,6 +1057,17 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         // Not auto-answered here even under YOLO: `autoMergeSweep` already answers a pending
         // merge_approval on a YOLO ticket every tick, so it picks this one up on its own next pass.
         repaired.push({ id: t.id, identifier: t.identifier, kind: 'merge_approval' });
+      }
+
+      const operational = db
+        .all<Record<string, unknown>>("SELECT * FROM tickets WHERE workspace_id = ? AND kind = 'operational' AND status NOT IN ('done','cancelled')", [ws])
+        .map(row);
+      for (const t of operational) {
+        if (openApproval(t.id, 'action_approval')) continue;
+        const doc = db.get<{ id: string; currentRevision: number }>('SELECT id, current_revision FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, 'action']);
+        if (!doc) continue;
+        raiseActionApproval(SYSTEM, t, doc, true);
+        repaired.push({ id: t.id, identifier: t.identifier, kind: 'action_approval' });
       }
 
       return repaired;

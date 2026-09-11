@@ -33,7 +33,7 @@ const SCOUT: Record<TicketStatus, readonly TicketStatus[]> = {
   blocked: ['todo', 'in_progress', 'cancelled'],
   done: ['in_progress'], cancelled: ['todo'],
 };
-export const TRANSITIONS: Record<TicketKind, Record<TicketStatus, readonly TicketStatus[]>> = { change: CHANGE, task: TASK, scout: SCOUT, question: SCOUT };
+export const TRANSITIONS: Record<TicketKind, Record<TicketStatus, readonly TicketStatus[]>> = { change: CHANGE, task: TASK, scout: SCOUT, question: SCOUT, operational: SCOUT };
 
 export function canTransition(kind: TicketKind, from: TicketStatus, to: TicketStatus): boolean {
   return TRANSITIONS[kind][from].includes(to);

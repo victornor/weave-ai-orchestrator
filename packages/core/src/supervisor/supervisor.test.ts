@@ -827,6 +827,17 @@ describe('stalled worker detection (VS-202)', () => {
     expect(stalledEventsFor(agentId)).toHaveLength(0);
   });
 
+  it('does not flag an operational worker waiting on an open action_approval', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress', kind: 'operational' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    h.db.insert('decisions', {
+      id: newId(), workspaceId: h.workspaceId, ticketId, kind: 'action_approval', owner: 'human',
+      title: 'Approve the action?', context: '', optionsJson: [], allowFreeText: 1, status: 'open', createdAt: nowIso(),
+    });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(0);
+  });
+
   it('does not flag a worker with a wakeup already queued', async () => {
     const ticketId = seedTicket(h, { status: 'in_progress' });
     const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });

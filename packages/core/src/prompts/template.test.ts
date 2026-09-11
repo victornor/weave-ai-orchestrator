@@ -55,6 +55,9 @@ describe('brief helpers', () => {
     expect(definitionOfDone('change', 'pr')).toContain('open a PR');
     expect(definitionOfDone('scout', 'pr')).toContain('report');
     expect(definitionOfDone('question', 'pr')).toContain('ac_ticket_comment');
+    expect(definitionOfDone('operational', 'pr')).toContain('action_approval');
+    expect(definitionOfDone('operational', 'pr')).toContain('unlanded');
+    expect(definitionOfDone('operational', 'pr')).not.toContain('open a PR');
   });
 
   it('gives a task both endings: in_review for a diff, done with a stated ending otherwise (VS-215)', () => {

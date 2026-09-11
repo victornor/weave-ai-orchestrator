@@ -98,6 +98,11 @@ describe('TicketCard', () => {
     expect(screen.queryByText('auto-approving')).not.toBeInTheDocument();
     expect(screen.getByRole('img')).toHaveAccessibleName('needs you');
   });
+
+  it('labels a finished operational ticket as ran', () => {
+    render(<TicketCard ticket={ticket({ kind: 'operational', status: 'done', title: 'Restart the daemon' })} />);
+    expect(screen.getByText('ran')).toBeInTheDocument();
+  });
 });
 
 describe('TicketCard — a paused worker', () => {
@@ -487,6 +492,25 @@ describe('DecisionCard', () => {
       fireEvent.keyDown(screen.getByLabelText('What should change?'), { key: 'Enter' });
       expect(onAnswer).toHaveBeenCalledTimes(1);
       expect(validKeys('plan_approval')).toContain(onAnswer.mock.calls[0]?.[0]?.key);
+    });
+
+    it('action_approval: Approve and Reject', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={decision({ kind: 'action_approval' })} onAnswer={onAnswer} />);
+      fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+      expect(onAnswer).toHaveBeenCalledTimes(2);
+      for (const call of onAnswer.mock.calls) expect(validKeys('action_approval')).toContain(call[0]?.key);
+    });
+
+    it('action_approval: Revise', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={decision({ kind: 'action_approval' })} ticketIdentifier="ACME-42" onAnswer={onAnswer} />);
+      fireEvent.click(screen.getByRole('button', { name: /Revise/ }));
+      fireEvent.change(screen.getByLabelText('What should change?'), { target: { value: 'name the host' } });
+      fireEvent.keyDown(screen.getByLabelText('What should change?'), { key: 'Enter' });
+      expect(onAnswer).toHaveBeenCalledTimes(1);
+      expect(validKeys('action_approval')).toContain(onAnswer.mock.calls[0]?.[0]?.key);
     });
 
     it('merge_approval: Approve merge, and offers no Hold', () => {

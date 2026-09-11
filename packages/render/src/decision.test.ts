@@ -149,8 +149,13 @@ describe('decisionToCard', () => {
   // packages/core/src/roles/index.ts), so this fails the same way a hand-written literal that
   // drifts from NAMED_CARD_OPTION_KEYS would.
   it('never offers a named-variant option key the decision does not accept', () => {
-    const real: Record<'plan_approval' | 'merge_approval' | 'hire_approval' | 'discard_approval', Array<{ key: string; label: string }>> = {
+    const real: Record<'plan_approval' | 'merge_approval' | 'hire_approval' | 'discard_approval' | 'action_approval', Array<{ key: string; label: string }>> = {
       plan_approval: [
+        { key: 'approve', label: 'Approve' },
+        { key: 'revise', label: 'Revise' },
+        { key: 'reject', label: 'Reject' },
+      ],
+      action_approval: [
         { key: 'approve', label: 'Approve' },
         { key: 'revise', label: 'Revise' },
         { key: 'reject', label: 'Reject' },

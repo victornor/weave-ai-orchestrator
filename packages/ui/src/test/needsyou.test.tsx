@@ -242,6 +242,15 @@ describe('NeedsYou — YOLO mode', () => {
     expect(screen.getByRole('button', { name: /hire/i })).toBeInTheDocument();
   });
 
+  it('leaves an action_approval for the human even when YOLO is on', () => {
+    state.config = { defaults: { yolo: true } };
+    state.decisions = [onTicket({ kind: 'action_approval', title: 'Approve the action for ACME-42' })];
+    render(<NeedsYouRoute />);
+
+    expect(screen.queryByLabelText('Auto-approved by YOLO mode')).toBeNull();
+    expect(screen.getByRole('button', { name: /^approve/i })).toBeInTheDocument();
+  });
+
   it('keeps the approve action when the ticket\'s project has opted out', () => {
     state.config = { defaults: { yolo: true } };
     const d = onTicket({ kind: 'merge_approval', title: 'Approve the merge for ACME-42' });

@@ -20,7 +20,7 @@ export type RoleStatus = (typeof ROLE_STATUSES)[number];
 export const SESSION_POLICIES = ['per_ticket', 'fresh', 'persistent'] as const;
 export type SessionPolicy = (typeof SESSION_POLICIES)[number];
 
-export const TICKET_KINDS = ['change', 'task', 'scout', 'question'] as const;
+export const TICKET_KINDS = ['change', 'task', 'scout', 'question', 'operational'] as const;
 export type TicketKind = (typeof TICKET_KINDS)[number];
 
 export const TICKET_STATUSES = ['backlog', 'todo', 'proposing', 'proposed', 'approved', 'in_progress', 'in_review', 'merging', 'blocked', 'done', 'cancelled'] as const;
@@ -40,13 +40,13 @@ export type MergeMethod = (typeof MERGE_METHODS)[number];
 export const APPROVAL_OWNERS = ['human', 'conductor', 'none'] as const;
 export type ApprovalOwner = (typeof APPROVAL_OWNERS)[number];
 
-export const DECISION_KINDS = ['approval', 'question', 'concern', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval', 'retry_approval'] as const;
+export const DECISION_KINDS = ['approval', 'question', 'concern', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval', 'retry_approval', 'action_approval'] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 
 /**
  * What the general-purpose ask tool (`ac_ask`) may construct (VS-127): `question`, `concern` and
  * `gate_finding` only. `plan_approval`, `merge_approval`, `hire_approval`, `discard_approval`,
- * `retry_approval` and the generic `approval` stay exclusively system-raised — each of those already
+ * `retry_approval`, `action_approval` and the generic `approval` stay exclusively system-raised — each of those already
  * sets its own owner directly (tickets, roles, the run engine) — so a caller of `ac_ask` can never
  * construct one and collide its correlation key with a real approval's.
  */
@@ -61,7 +61,7 @@ export type DecisionStatus = (typeof DECISION_STATUSES)[number];
 
 /**
  * The option keys a "named variant" decision card (packages/ui's DecisionCard: `plan_approval`,
- * `merge_approval`, `hire_approval`, `discard_approval`) is allowed to send with its hard-coded
+ * `merge_approval`, `hire_approval`, `discard_approval`, `action_approval`) is allowed to send with its hard-coded
  * buttons, keyed by name so a call site can cite `NAMED_CARD_OPTION_KEYS.merge_approval.approve`
  * rather than a free-floating string literal. The daemon's decision creation for these kinds MUST
  * offer exactly these keys, so a card's button can never send a key its decision does not accept
@@ -72,7 +72,8 @@ export const NAMED_CARD_OPTION_KEYS = {
   merge_approval: { approve: 'approve', changes: 'changes' },
   hire_approval: { approve: 'approve', reject: 'reject' },
   discard_approval: { approve: 'approve', reject: 'reject' },
-} as const satisfies Record<'plan_approval' | 'merge_approval' | 'hire_approval' | 'discard_approval', Record<string, string>>;
+  action_approval: { approve: 'approve', revise: 'revise', reject: 'reject' },
+} as const satisfies Record<'plan_approval' | 'merge_approval' | 'hire_approval' | 'discard_approval' | 'action_approval', Record<string, string>>;
 export type NamedCardKind = keyof typeof NAMED_CARD_OPTION_KEYS;
 
 /** What a decision can ask for beyond an option (VS-92). `secret` never records its value — only the name it was stored under. */

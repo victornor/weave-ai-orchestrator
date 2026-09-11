@@ -31,9 +31,23 @@ export class Db {
       if (through !== undefined && f > through) break;
       if (applied.has(f)) continue;
       const sql = readFileSync(join(MIGRATIONS_DIR, f), 'utf8');
+      // SQLite's `PRAGMA foreign_keys` is a no-op inside a transaction, so a rebuild of a
+      // referenced table cannot DROP while children exist unless FK is off *before* BEGIN.
+      // Opt-in only: an unmarked file keeps today's DROP-with-children failure (VS-216).
+      const fkOff = migrationWantsForeignKeysOff(sql);
+      if (fkOff) this.sqlite.exec('PRAGMA foreign_keys = OFF');
       this.sqlite.exec('BEGIN');
-      try { this.sqlite.exec(sql); this.sqlite.prepare("INSERT INTO meta(key, value) VALUES (?, ?)").run(`migration:${f}`, f); this.sqlite.exec('COMMIT'); this.appliedMigrations.push(f); }
-      catch (e) { this.sqlite.exec('ROLLBACK'); throw e; }
+      try {
+        this.sqlite.exec(sql);
+        this.sqlite.prepare("INSERT INTO meta(key, value) VALUES (?, ?)").run(`migration:${f}`, f);
+        this.sqlite.exec('COMMIT');
+        this.appliedMigrations.push(f);
+      } catch (e) {
+        this.sqlite.exec('ROLLBACK');
+        throw e;
+      } finally {
+        if (fkOff) this.sqlite.exec('PRAGMA foreign_keys = ON');
+      }
     }
   }
   close(): void { this.sqlite.close(); }
@@ -70,6 +84,16 @@ export class Db {
     vals.push(id);
     return this.run(`UPDATE ${table} SET ${sets.join(', ')} WHERE id = ?`, vals).changes;
   }
+}
+
+/** First non-empty line of a migration file is `-- ac:foreign_keys_off`. */
+export function migrationWantsForeignKeysOff(sql: string): boolean {
+  for (const line of sql.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    return trimmed === '-- ac:foreign_keys_off';
+  }
+  return false;
 }
 
 function encode(key: string, v: unknown): SQLInputValue {

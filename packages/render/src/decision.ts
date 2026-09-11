@@ -23,6 +23,7 @@ type RawOption = { key: string; label: string; description?: string; recommended
 
 const VARIANTS: Record<string, CardVariant> = {
   plan_approval: 'plan_approval',
+  action_approval: 'action_approval',
   merge_approval: 'merge_approval',
   hire_approval: 'hire_approval',
   discard_approval: 'discard_approval',
@@ -38,6 +39,11 @@ const DEFAULTS: Record<CardVariant, CardOption[]> = {
     opt('approve', 'Approve', 'primary', 'The worker starts implementing the plan.'),
     opt('revise', 'Revise…', 'default', 'Send the plan back with a note; the composer opens pre-scoped to it.'),
     opt('reject', 'Reject', 'default', 'Drop the plan; the ticket goes back to the conductor.'),
+  ],
+  action_approval: [
+    opt('approve', 'Approve', 'primary', 'The worker runs the stated action.'),
+    opt('revise', 'Revise…', 'default', 'Send the action back with a note; the composer opens pre-scoped to it.'),
+    opt('reject', 'Reject', 'default', 'Cancel the ticket; the action does not run.'),
   ],
   merge_approval: [
     opt('approve', 'Approve merge', 'primary', 'Merge the pull request and archive the change.'),
@@ -70,7 +76,7 @@ export function decisionToCard(decision: Decision, ctx: DecisionCardContext = {}
   const freeform = variant === 'question' || variant === 'concern';
   const options = freeform ? questionOptions(provided) : mergeOptions(DEFAULTS[variant], provided, variant);
   const destructive = variant === 'discard_approval';
-  const allowFreeText = typeof d.allowFreeText === 'boolean' ? d.allowFreeText : freeform || variant === 'plan_approval';
+  const allowFreeText = typeof d.allowFreeText === 'boolean' ? d.allowFreeText : freeform || variant === 'plan_approval' || variant === 'action_approval';
 
   const identifier = ctx.ticketIdentifier ?? tstr(target, 'ticketIdentifier', 'identifier') ?? d.ticketId ?? null;
   // Always a project chunk (VS-92): a card with no label reads as one whose project is unknown, and
@@ -199,6 +205,12 @@ function body(variant: CardVariant, d: Decision, target: Record<string, unknown>
       push('Tasks', tasks !== null ? String(tasks) : null, 'mono');
       const plan = tstr(target, 'plan', 'summary');
       if (plan) push(null, oneLine(redact(plan), 400));
+      break;
+    }
+    case 'action_approval': {
+      push('Document', tstr(target, 'documentId'), 'mono');
+      const revision = tnum(target, 'revision');
+      push('Revision', revision !== null ? String(revision) : null, 'mono');
       break;
     }
     case 'discard_approval': {

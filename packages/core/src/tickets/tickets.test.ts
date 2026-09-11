@@ -130,9 +130,17 @@ describe('tickets', () => {
     expect(tickets.get(t.id).createdRunId).toBe('run-1');
   });
 
-  it('binds an OpenSpec change name for change tickets in openspec projects', () => {
+    it('binds an OpenSpec change name for change tickets in openspec projects', () => {
     expect(make().openspecChangeName).toBe('tst-1-add-dark-mode');
     expect(make({ kind: 'scout', title: 'Investigate' }).openspecChangeName).toBeNull();
+    expect(make({ kind: 'operational', title: 'Restart the daemon' }).openspecChangeName).toBeNull();
+  });
+
+  it('creates an operational ticket the same way as a scout: assigned in todo, no OpenSpec name', () => {
+    const t = make({ kind: 'operational', title: 'Restart the daemon' });
+    expect(t.kind).toBe('operational');
+    expect(t.status).toBe('todo');
+    expect(t.openspecChangeName).toBeNull();
   });
 
   it('rejects blocker cycles', () => {
@@ -366,6 +374,19 @@ describe('tickets', () => {
       expect((await tickets.transition(AGENT, t.id, { to: 'done' })).status).toBe('done');
     });
 
+    it('leaves operational endings without a note legal, and refuses unlanded commits', async () => {
+      const t = make({ kind: 'operational', title: 'Restart the daemon' });
+      await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+      expect((await tickets.transition(AGENT, t.id, { to: 'done' })).status).toBe('done');
+
+      const withCommits = make({ kind: 'operational', title: 'Restart again' });
+      await tickets.transition(AGENT, withCommits.id, { to: 'in_progress' });
+      await makeWorktree(withCommits, 1);
+      await expect(tickets.transition(AGENT, withCommits.id, { to: 'done' }))
+        .rejects.toMatchObject({ code: 'worktree_not_landed', message: /unlanded commits/ });
+      expect(tickets.get(withCommits.id).status).toBe('in_progress');
+    });
+
     it('delivers a task with commits through in_review and a merge approval, and lands it as today', async () => {
       const t = await taskInProgress();
       await makeWorktree(t, 1);
@@ -446,6 +467,31 @@ describe('tickets', () => {
         { key: 'report', revision: 2 },
       ]);
       expect(tickets.documents(t.id)[1]?.updatedAt).not.toBe('');
+    });
+
+    it('raises a human-owned action_approval when an operational ticket writes action, and YOLO does not answer it', () => {
+      h.ctx.config.defaults.yolo = true;
+      const t = make({ kind: 'operational', title: 'Restart the daemon' });
+      decisions.create.mockClear();
+      const written = tickets.putDocument(AGENT, t.id, 'action', 'systemctl restart agent-conductor');
+      expect(written.revision).toBe(1);
+      expect(decisions.create).toHaveBeenCalledTimes(1);
+      expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        ticketId: t.id, kind: 'action_approval', owner: 'human',
+      }));
+      const call = decisions.create.mock.calls[0]?.[1];
+      expect(call?.options.map((o: { key: string }) => o.key)).toEqual(Object.values(NAMED_CARD_OPTION_KEYS.action_approval));
+      expect(call?.target).toEqual({ documentId: written.documentId, revision: 1 });
+      tickets.putDocument(AGENT, t.id, 'action', 'systemctl restart agent-conductor --now');
+      expect(decisions.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('stores an action document on a non-operational ticket without raising action_approval', () => {
+      const t = make({ kind: 'scout', title: 'Investigate' });
+      decisions.create.mockClear();
+      tickets.putDocument(AGENT, t.id, 'action', 'not a gate');
+      expect(decisions.create).not.toHaveBeenCalled();
+      expect(tickets.getDocument(t.id, 'action')?.body).toBe('not a gate');
     });
 
     it('opens a merge_approval on in_review unless auto_merge is set', async () => {
@@ -793,6 +839,18 @@ describe('tickets', () => {
       h.db.update('tickets', ordinary.id, { status: 'in_progress' });
       expect(tickets.livenessViolations().map((t) => t.id)).toContain(ordinary.id);
     });
+
+    it('ignores an in_progress operational ticket waiting on an open action_approval', () => {
+      const t = make({ kind: 'operational', title: 'Restart the daemon' });
+      h.addWorker(t.id);
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      expect(tickets.livenessViolations().map((v) => v.id)).toContain(t.id);
+      h.db.insert('decisions', {
+        id: newId(), workspaceId: h.workspaceId, ticketId: t.id, kind: 'action_approval', owner: 'human',
+        title: 'Approve the action?', context: '', status: 'open', correlationKey: `action_approval:${t.id}`, createdAt: nowIso(),
+      });
+      expect(tickets.livenessViolations().map((v) => v.id)).not.toContain(t.id);
+    });
   });
 
   describe('repairApprovals', () => {
@@ -841,6 +899,33 @@ describe('tickets', () => {
         title: 'Approve?', context: '', status: 'open', correlationKey: `plan_approval:${t.id}`, createdAt: nowIso(),
       });
       expect(await tickets.repairApprovals()).toEqual([]);
+    });
+
+    it('re-raises action_approval for an operational ticket that wrote action and has none open, without YOLO', async () => {
+      h.ctx.config.defaults.yolo = true;
+      const neverWrote = make({ kind: 'operational', title: 'never wrote' });
+      h.db.update('tickets', neverWrote.id, { status: 'in_progress' });
+
+      const stranded = make({ kind: 'operational', title: 'stranded action' });
+      h.db.update('tickets', stranded.id, { status: 'in_progress' });
+      h.db.insert('ticket_documents', { id: newId(), ticketId: stranded.id, key: 'action', currentRevision: 1 });
+
+      const fine = make({ kind: 'operational', title: 'fine action' });
+      h.db.update('tickets', fine.id, { status: 'in_progress' });
+      h.db.insert('ticket_documents', { id: newId(), ticketId: fine.id, key: 'action', currentRevision: 1 });
+      h.db.insert('decisions', {
+        id: newId(), workspaceId: h.workspaceId, ticketId: fine.id, kind: 'action_approval', owner: 'human',
+        title: 'Approve?', context: '', status: 'open', correlationKey: `action_approval:${fine.id}`, createdAt: nowIso(),
+      });
+      decisions.create.mockClear();
+
+      const repaired = await tickets.repairApprovals();
+      expect(repaired).toEqual([{ id: stranded.id, identifier: stranded.identifier, kind: 'action_approval' }]);
+      expect(decisions.create).toHaveBeenCalledTimes(1);
+      expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        ticketId: stranded.id, kind: 'action_approval', owner: 'human',
+      }));
+      expect(decisions.create.mock.calls[0]?.[1]?.options.map((o: { key: string }) => o.key)).toEqual(Object.values(NAMED_CARD_OPTION_KEYS.action_approval));
     });
   });
 

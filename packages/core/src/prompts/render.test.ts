@@ -409,6 +409,28 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('SHARED.md + PROJECT.md digest');
   });
 
+  it('pastes the bootstrap digest for a stale worker session whose home was not re-rendered this turn (VS-244)', async () => {
+    const recorded: unknown[][] = [];
+    h.services.knowledgeUsage = {
+      recordBootstrap: (...args: unknown[]) => { recorded.push(args); },
+    } as never;
+    const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: worker.id, source: 'system', reason: 'resume', payload: {}, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], { sessionStale: true, homeRerendered: false, runId: 'run-1' });
+    expect(prompt).toContain('SHARED.md + PROJECT.md digest');
+    expect(recorded).toEqual([['run-1', worker.id, ticketId, []]]);
+  });
+
+  it('still skips the bootstrap paste for a stale worker session whose home was freshly re-rendered this turn (VS-244)', async () => {
+    const recorded: unknown[][] = [];
+    h.services.knowledgeUsage = {
+      recordBootstrap: (...args: unknown[]) => { recorded.push(args); },
+    } as never;
+    const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: worker.id, source: 'system', reason: 'resume', payload: {}, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], { sessionStale: true, homeRerendered: true, runId: 'run-1' });
+    expect(prompt).not.toContain('SHARED.md + PROJECT.md digest');
+    expect(recorded).toEqual([['run-1', worker.id, ticketId, []]]);
+  });
+
   it('tells the admitted worker it holds the project merge slot and must re-sync', async () => {
     h.db.update('tickets', ticketId, { status: 'merging', mergeQueuedAt: nowIso(), mergeStartedAt: nowIso() });
     const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: worker.id, source: 'merge_approved', reason: 'front of the queue', payload: {}, status: 'claimed' } as never;

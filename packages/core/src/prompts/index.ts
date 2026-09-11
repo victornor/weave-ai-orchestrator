@@ -203,6 +203,9 @@ export interface TurnPromptOptions {
   sessionStale?: boolean;
   briefUpdated?: boolean;
   charterChanged?: string | null;
+  /** Whether `ensureHomeCurrent` re-rendered AGENTS.md this turn (VS-244): tells the worker
+   * bootstrap-digest exclusion below whether the brief it excuses is actually current. */
+  homeRerendered?: boolean;
   relaunchNote?: string | null;
   interrupted?: boolean;
   turnEpoch?: number;
@@ -346,8 +349,12 @@ export async function buildTurnPrompt(
       // recording failure can never wipe out a digest that was already built successfully.
       try { if (opts.runId) deps().knowledgeUsage.recordBootstrap(opts.runId, agent.id, agent.ticketId ?? null, d.parts ?? []); } catch { /* measurement only */ }
     } catch { digest = ''; }
-    // Workers already inline SHARED + PROJECT in AGENTS.md; pasting the digest again doubles the first-turn bill (VS-161).
-    if (digest && agent.kind !== 'worker') notes.push(`- Bootstrap:\n\n${digest}`);
+    // Workers already inline SHARED + PROJECT in AGENTS.md, so pasting the digest too would double
+    // the bill (VS-161) — but only when that inline copy is actually current. A stale session whose
+    // home was NOT re-rendered this turn has no other way to see knowledge that moved on since its
+    // AGENTS.md was last written, so the exclusion holds only when the home render is fresh (VS-244).
+    const workerNeedsDigest = agent.kind === 'worker' && Boolean(opts.sessionStale) && !opts.homeRerendered;
+    if (digest && (agent.kind !== 'worker' || workerNeedsDigest)) notes.push(`- Bootstrap:\n\n${digest}`);
   }
   if (notes.length) { parts.push('\n## Notes'); parts.push(notes.join('\n')); }
 

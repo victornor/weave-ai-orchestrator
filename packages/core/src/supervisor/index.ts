@@ -49,6 +49,25 @@ const QUEUE_ORDER_SQL = `CASE priority ${TICKET_PRIORITIES.map((p, i) => `WHEN '
 
 const DIGEST_EVENT_TYPES = new Set(['ticket.created', 'project.added', 'ticket.status', 'ticket.merged', 'decision.created', 'decision.expired', 'worker.stalled', 'worker.retired', 'run.finished']);
 
+/**
+ * VS-245: the digest carries a finished run's stored report summary into the conductor's wake.
+ * `DIGEST_SUMMARY_ENTRY_CHARS` bounds one entry's summary and `DIGEST_SUMMARY_TOTAL_CHARS` bounds
+ * the summary text across the whole digest, so a burst of finished runs cannot grow a prompt-bound
+ * wake without bound. See `worker-supervision/conductor-digest`.
+ */
+const DIGEST_SUMMARY_ENTRY_CHARS = 400;
+const DIGEST_SUMMARY_TOTAL_CHARS = 1600;
+
+/**
+ * Hard-bound a stored report summary to `max` characters, including a visible truncation marker.
+ * Deliberately not `truncate()` from runtime-sdk: its `[+N chars]` marker is appended past `max`,
+ * which would let an entry — and so the digest's total — exceed the ceiling this cap exists to hold.
+ */
+function capSummaryText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+}
+
 function processAlive(pid: number | null): boolean {
   if (!pid) return false;
   try { process.kill(pid, 0); return true; } catch { return false; }
@@ -390,6 +409,22 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     });
   }
 
+  /**
+   * VS-245: the summary a finished run stored in its own structured report, or an explicit reason it
+   * has none. Read from `runs.result_json` — the stored report's first reader — rather than the
+   * `run.finished` event's `summary`, which conflates a report's summary with a raw final-text
+   * excerpt and a runtime failure message and so cannot tell "the agent reported this" from "no
+   * report was stored". The returned text is the agent's own account, never a verified outcome.
+   */
+  function digestRunSummary(runId: string): { agentReportedSummary?: string; summaryOmitted?: 'no_report' } {
+    try {
+      const row = ctx.db.get<{ result: { summary?: unknown } | null }>('SELECT result_json FROM runs WHERE id = ?', [runId]);
+      const summary = row?.result?.summary;
+      if (typeof summary === 'string' && summary.trim()) return { agentReportedSummary: summary };
+    } catch { /* a failed read degrades to the explicit no-report entry below */ }
+    return { summaryOmitted: 'no_report' };
+  }
+
   function conductorDigest(): void {
     const interval = (ctx.config.defaults.conductorDigestIntervalSec ?? 120) * 1000;
     if (Date.now() - lastDigestAt < interval) return;
@@ -421,10 +456,30 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     });
     if (!relevant.length) return;
     lastDigestAt = Date.now();
+    // VS-245: a finished run's entry carries the summary it stored in its report, capped per entry
+    // and across the digest. Entries past the total budget say their summary was omitted; a run with
+    // no stored report says so plainly. The event list keeps its existing `slice(0, 30)` bound.
+    type DigestEntry = { type: string; entityId: string; at: string; agentReportedSummary?: string; summaryOmitted?: 'no_report' | 'digest_cap' };
+    const entries: DigestEntry[] = [];
+    let summaryBudget = DIGEST_SUMMARY_TOTAL_CHARS;
+    for (const e of relevant.slice(0, 30)) {
+      const entry: DigestEntry = { type: e.type, entityId: e.entityId, at: e.createdAt };
+      if (e.type === 'run.finished') {
+        const stored = digestRunSummary(e.entityId);
+        if (stored.agentReportedSummary === undefined) entry.summaryOmitted = 'no_report';
+        else if (summaryBudget <= 0) entry.summaryOmitted = 'digest_cap';
+        else {
+          const text = capSummaryText(stored.agentReportedSummary, Math.min(DIGEST_SUMMARY_ENTRY_CHARS, summaryBudget));
+          entry.agentReportedSummary = text;
+          summaryBudget -= text.length;
+        }
+      }
+      entries.push(entry);
+    }
     try {
       deps().wake.enqueue(conductor.id, {
         source: 'system', reason: 'digest',
-        payload: { since: lastSeq, events: relevant.slice(0, 30).map((e) => ({ type: e.type, entityId: e.entityId, at: e.createdAt })) },
+        payload: { since: lastSeq, events: entries },
         requestedBy: { kind: 'system', id: null },
       });
     } catch (e) { log.warn({ err: String(e) }, 'digest wake failed'); }

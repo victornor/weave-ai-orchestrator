@@ -54,6 +54,7 @@ describe('MCP endpoint', () => {
     expect(names).toContain('ac_decision_review');
     expect(names).toContain('ac_briefing');
     expect(names).toContain('ac_worker_models');
+    expect((await client.listTools()).tools.find((t) => t.name === 'ac_worker_models')?.description).toMatch(/unconfigured/);
     expect(names).toContain('ac_run_inspect');
     expect(names).toContain('ac_run_list');
     expect(names).toContain('ac_routine_list');

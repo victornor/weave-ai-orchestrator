@@ -75,9 +75,9 @@ export function resolveIsolation(configDir: string, shareHostCredentials?: boole
 export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle> {
   const configDir = opts.configDir ?? workspaceLoader.configDir();
   const isolated = resolveIsolation(configDir, opts.shareHostCredentials);
-  const daemonCfg = withListen(workspaceLoader.readDaemonConfig(configDir), opts.listen);
-  initLogger(daemonCfg.logLevel);
   await mkdir(configDir, { recursive: true });
+  const daemonCfg = withListen(workspaceLoader.ensureFreshDaemonConfig(configDir), opts.listen);
+  initLogger(daemonCfg.logLevel);
 
   const daemonDb = openDb(join(configDir, 'daemon.sqlite'));
   const auth = createAuthService(daemonDb, daemonCfg);

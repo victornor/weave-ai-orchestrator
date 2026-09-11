@@ -75,7 +75,7 @@ export function createAccountsService(ctx: WorkspaceContext): AccountsService {
     const ids = new Set<string>([
       models.conductor.runtime,
       models.workers.runtime,
-      ...models.workerOptions.map((o) => o.runtime),
+      ...models.workerOptions.map((o) => o.runtime).filter((id): id is string => id != null),
     ]);
     for (const r of rows) if (r.runtimeId) ids.add(r.runtimeId);
     return [...ids].filter(Boolean).sort();

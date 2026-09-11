@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MERGE_CONCURRENCY, DaemonConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, mergeConcurrencyOf, yoloEnabled } from './config.js';
+import { DEFAULT_MERGE_CONCURRENCY, DEFAULT_WORKER_TIERS, DaemonConfigSchema, ModelSettingSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkerModelOptionSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, isWorkerOptionConfigured, mergeConcurrencyOf, yoloEnabled } from './config.js';
 
 describe('project config: landingBranch (VS-119)', () => {
   it('parses without a landing branch declared', () => {
@@ -141,6 +141,44 @@ describe('daemon config: models overlays (VS-185)', () => {
         ],
       },
     }).success).toBe(false);
+  });
+});
+
+describe('worker option runtime unset (VS-236)', () => {
+  it('parses an omitted runtime as null, not claude', () => {
+    expect(WorkerModelOptionSchema.parse({ id: 'quick', description: 'x' })).toEqual({
+      id: 'quick', description: 'x', runtime: null, model: null,
+    });
+  });
+
+  it('keeps an explicit runtime configured', () => {
+    expect(WorkerModelOptionSchema.parse({ id: 'quick', description: 'x', runtime: 'codex', model: null })).toEqual({
+      id: 'quick', description: 'x', runtime: 'codex', model: null,
+    });
+    expect(isWorkerOptionConfigured({ id: 'quick', description: 'x', runtime: 'codex', model: null })).toBe(true);
+    expect(isWorkerOptionConfigured({ id: 'quick', description: 'x', runtime: null, model: null })).toBe(false);
+  });
+
+  it('does not change conductor/workers defaults or empty daemon overlays', () => {
+    expect(ModelSettingSchema.parse({})).toEqual({ runtime: 'claude', model: null });
+    const cfg = DaemonConfigSchema.parse({});
+    expect(cfg.models.conductor).toBeUndefined();
+    expect(cfg.models.workers).toBeUndefined();
+    expect(cfg.models.workerOptions).toBeUndefined();
+  });
+
+  it('seeds three unconfigured tiers with the verbatim descriptions', () => {
+    expect(DEFAULT_WORKER_TIERS.map((o) => o.id)).toEqual(['quick', 'standard', 'deep']);
+    expect(DEFAULT_WORKER_TIERS.every((o) => o.runtime === null && o.model === null)).toBe(true);
+    expect(DEFAULT_WORKER_TIERS[0]!.description).toBe(
+      'Fastest. The fix is already located and specified — a known one-liner, rename, or config value. No diagnosis, no design choice, nothing production-facing.',
+    );
+    expect(DEFAULT_WORKER_TIERS[1]!.description).toBe(
+      'Default for specified work: cause known, approach clear, but spans several files or needs judgement on tests and edge cases. Not for finding out why something broke.',
+    );
+    expect(DEFAULT_WORKER_TIERS[2]!.description).toBe(
+      'Cause unknown, a design decision is open, or it touches production or shared infrastructure. All scouts. "Find out why" belongs here however small the fix looks.',
+    );
   });
 });
 

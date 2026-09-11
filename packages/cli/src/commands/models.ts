@@ -32,6 +32,9 @@ function describe(s: ModelSetting | undefined): string {
 }
 
 function describeOption(o: WorkerModelOption): string {
+  if (o.runtime == null || o.runtime === '') {
+    return `${o.id ?? '?'} — ${o.description ?? ''} (no runtime chosen)`;
+  }
   return `${o.id ?? '?'} — ${o.description ?? ''} (${describe(o)})`;
 }
 

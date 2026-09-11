@@ -107,6 +107,7 @@ function nextSteps(error: ApiError): string[] {
     case 'auth_totp_required': return ['pass the six-digit code when prompted'];
     case 'auth_locked': return ['wait for the lockout to expire, then try again'];
     case 'runtime_unreachable': return ['check the runtime with `conductor runtime detect`', 'or switch runtime with `conductor role set-runtime <role> <runtime>`'];
+    case 'model_unconfigured': return ['choose an adapter for that option in daemon Settings → Models, or with `conductor daemon models`'];
     case 'not_found': return ['list what exists with the matching `conductor ... list` command'];
     case 'worktree_dirty': return ['inspect it with `conductor worktree verify <id>`'];
     case 'merge_not_approved': return ['approve the merge decision with `conductor decision list`'];

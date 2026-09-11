@@ -1,6 +1,6 @@
 import { newId, nowIso, ticketRow, type Db } from '@agent-conductor/db';
 import {
-  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, landingBranchOf, yoloEnabled,
+  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, landingBranchOf, yoloEnabled, isWorkerOptionConfigured,
   type CommentKind, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
 } from '@agent-conductor/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
@@ -46,7 +46,11 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   function resolveWorkerModelId(id: string | null | undefined): string | null {
     if (id == null || id === '') return null;
     const opts = effectiveModels(ctx.daemon, ctx.config).workerOptions ?? [];
-    if (!opts.some((o) => o.id === id)) throw new OcError('validation', `unknown worker model option '${id}'`);
+    const opt = opts.find((o) => o.id === id);
+    if (!opt) throw new OcError('validation', `unknown worker model option '${id}'`);
+    if (!isWorkerOptionConfigured(opt)) {
+      throw new OcError('model_unconfigured', `worker option '${id}' has no runtime chosen`, { optionId: id });
+    }
     return id;
   }
 

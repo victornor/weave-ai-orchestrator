@@ -16,6 +16,11 @@ export interface WorkspaceLoader {
   writeRegistry(reg: WorkspaceRegistry, configDir?: string): void;
   readDaemonConfig(configDir?: string): DaemonConfig;
   writeDaemonConfig(cfg: DaemonConfig, configDir?: string): void;
+  /**
+   * First-boot seed (VS-236): when `daemon.yaml` is missing, write it with the three unconfigured
+   * worker tiers and return that config. An existing file is read unchanged.
+   */
+  ensureFreshDaemonConfig(configDir?: string): DaemonConfig;
   configDir(): string;
   /** VS-143: whether `resolved` is the host's one conventional config directory (see `daemon-isolation`). */
   isDefaultConfigDir(resolved: string): boolean;

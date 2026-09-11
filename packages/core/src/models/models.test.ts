@@ -8,7 +8,7 @@ import { createDecisionsService } from '../decisions/index.js';
 import { createModelsService, deriveModelSettings, hasModelSettings, migrationSummary, recordPendingMigration, WORKERS_RUNTIME_CORRELATION } from './index.js';
 import { effectiveModels, modelSettingFor, modelsLocked } from './resolve.js';
 import type { ModelsService } from '../api.js';
-import type { Decision } from '@agent-conductor/shared';
+import { OcError, type Decision } from '@agent-conductor/shared';
 
 const HUMAN = { kind: 'human' as const, id: 'victor' };
 const role = (runtimeId: string, model: string | null = null, effort: string | null = null) => ({ runtimeId, model, effort });
@@ -41,6 +41,26 @@ describe('modelSettingFor', () => {
     expect(modelSettingFor(withOpts, 'worker', { workerModelId: 'gone' })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
     expect(modelSettingFor(withOpts, 'worker', { workerModelId: null })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
     expect(modelSettingFor(withOpts, 'conductor', { workerModelId: 'cheap' })).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
+  });
+
+  it('refuses an unconfigured catalog option rather than falling back to claude (VS-236)', () => {
+    const withOpts = {
+      models: {
+        conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+        workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' },
+        workerOptions: [
+          { id: 'deep', description: 'Cause unknown.', runtime: null, model: null },
+        ],
+      },
+    };
+    expect(() => modelSettingFor(withOpts, 'worker', { workerModelId: 'deep' })).toThrow(OcError);
+    try {
+      modelSettingFor(withOpts, 'worker', { workerModelId: 'deep' });
+    } catch (e) {
+      expect((e as OcError).code).toBe('model_unconfigured');
+      expect((e as OcError).message).toContain('deep');
+    }
+    expect(modelSettingFor(withOpts, 'worker', { workerModelId: 'gone' })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
   });
 });
 

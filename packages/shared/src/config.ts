@@ -103,14 +103,21 @@ export const ModelSettingSchema = z.object({
 export type ModelSetting = z.infer<typeof ModelSettingSchema>;
 
 /**
- * One named worker model a ticket may point at (VS-162, ADR 0012). `id` is the kebab slug the
- * conductor passes as `workerModelId`; `description` is the when-to-use note.
+ * One named worker model a ticket may point at (VS-162, ADR 0012; VS-236, ADR 0019). `id` is the
+ * kebab slug the conductor passes as `workerModelId`; `description` is the when-to-use note.
+ * `runtime: null` means the option is not yet chosen — distinct from `model: null` (the runtime picks).
  */
 export const WorkerModelOptionSchema = ModelSettingSchema.extend({
   id: slug,
   description: z.string().min(1).max(200),
+  runtime: z.string().min(1).nullable().default(null),
 });
 export type WorkerModelOption = z.infer<typeof WorkerModelOptionSchema>;
+
+/** A worker option whose adapter has been chosen and can be used to launch a worker (VS-236). */
+export function isWorkerOptionConfigured(opt: WorkerModelOption): opt is WorkerModelOption & { runtime: string } {
+  return opt.runtime != null;
+}
 
 /** The whole catalog as the daemon validates it — the editor validates against this too (VS-212). */
 export const WorkerOptionsArraySchema = z.array(WorkerModelOptionSchema).max(16).superRefine((opts, ctx) => {
@@ -124,6 +131,32 @@ export const WorkerOptionsArraySchema = z.array(WorkerModelOptionSchema).max(16)
     seen.add(id);
   }
 });
+
+/**
+ * The three daemon catalog tiers a missing `daemon.yaml` is seeded with (VS-236). Descriptions are
+ * the when-to-use copy captain asked to keep verbatim. Not a schema default — existing installs
+ * that omitted `models` must stay empty.
+ */
+export const DEFAULT_WORKER_TIERS: WorkerModelOption[] = WorkerOptionsArraySchema.parse([
+  {
+    id: 'quick',
+    description: 'Fastest. The fix is already located and specified — a known one-liner, rename, or config value. No diagnosis, no design choice, nothing production-facing.',
+    runtime: null,
+    model: null,
+  },
+  {
+    id: 'standard',
+    description: 'Default for specified work: cause known, approach clear, but spans several files or needs judgement on tests and edge cases. Not for finding out why something broke.',
+    runtime: null,
+    model: null,
+  },
+  {
+    id: 'deep',
+    description: 'Cause unknown, a design decision is open, or it touches production or shared infrastructure. All scouts. "Find out why" belongs here however small the fix looks.',
+    runtime: null,
+    model: null,
+  },
+]);
 
 /**
  * Optional per-control overlays on the daemon (VS-185, ADR 0013). Absent/null (and an empty

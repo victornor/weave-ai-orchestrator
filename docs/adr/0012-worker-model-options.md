@@ -1,6 +1,6 @@
 # ADR 0012 — Named worker model options, picked per ticket
 
-**Status:** accepted · 2026-09-09 · amends ADR 0011 (the two settings remain; a ticket may name a catalog id) · amended by ADR 0013 (the catalog a ticket names is the effective catalog after a daemon overlay)
+**Status:** accepted · 2026-09-09 · amends ADR 0011 (the two settings remain; a ticket may name a catalog id) · amended by ADR 0013 (the catalog a ticket names is the effective catalog after a daemon overlay) · amended by ADR 0019 (`runtime: null` is unconfigured; a fresh `daemon.yaml` ships three such tiers)
 
 ## Context
 
@@ -15,7 +15,8 @@ The exception is narrower: a workspace-defined catalog, and a ticket that points
 ## Decision
 
 `workspace.yaml`'s `models` block keeps `conductor` and `workers` as the defaults. It gains
-`workerOptions`: `{ id, description, runtime, model, effort? }[]`, empty by default.
+`workerOptions`: `{ id, description, runtime, model, effort? }[]`, empty by default. `runtime` may
+be null (ADR 0019): that option is unconfigured and cannot launch a worker.
 
 A ticket may store `workerModelId`, set at create or at assign while it has no worker. After spawn
 the id is sticky. `modelSettingFor(config, kind, ticket?)` looks the id up; a missing, unknown, or

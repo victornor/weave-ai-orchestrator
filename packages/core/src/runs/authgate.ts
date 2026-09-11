@@ -13,7 +13,7 @@
  * it again without the human answering anything.
  */
 import { nowIso } from '@agent-conductor/db';
-import { LOGIN_PAUSE_CODE, type Agent } from '@agent-conductor/shared';
+import { LOGIN_PAUSE_CODE, OcError, type Agent } from '@agent-conductor/shared';
 import type { CoreServices } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { modelSettingFor, modelsFor, workerOptionRuntimes } from '../models/resolve.js';
@@ -241,7 +241,13 @@ export function releaseLoginPausesForAbandonedRuntimes(ctx: WorkspaceContext, de
     const ticket = a.kind === 'worker' && a.ticketId
       ? ctx.db.get<{ workerModelId: string | null }>('SELECT worker_model_id FROM tickets WHERE id = ?', [a.ticketId])
       : null;
-    const target = modelSettingFor(modelsFor(ctx), a.kind, ticket).runtime;
+    let target: string;
+    try {
+      target = modelSettingFor(modelsFor(ctx), a.kind, ticket).runtime;
+    } catch (e) {
+      if (!(e instanceof OcError) || e.code !== 'model_unconfigured') throw e;
+      continue;
+    }
     const pausedFor = loginPauseRuntime(a) ?? a.runtimeId;
     if (pausedFor === target) continue;  // the pause still describes the runtime its next turn runs on
     if (gated.has(target)) {

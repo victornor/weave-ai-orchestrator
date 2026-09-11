@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path';
 import { nowIso } from '@agent-conductor/db';
 import {
-  AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents,
+  AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents, OcError,
   type Agent, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
   type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
 } from '@agent-conductor/shared';
@@ -226,7 +226,21 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   // The one place a turn's runtime, model and effort come from (VS-77). The agent row records the
   // runtime it is on so the worker pages and the account probe can read it; it is corrected here
   // rather than consulted, so a stale row can never decide what this turn launches.
-  const setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket);
+  let setting;
+  try {
+    setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket);
+  } catch (e) {
+    if (!(e instanceof OcError) || e.code !== 'model_unconfigured') throw e;
+    ctx.events.emit('run.started', 'run', runId, { agentId: agent.id, ticketId: agent.ticketId, turnEpoch: run.turnEpoch });
+    record('run.started', { agentId: agent.id, turnEpoch: run.turnEpoch, wakeups: run.wakeupIds ?? [] }, 'system');
+    record('error', { message: e.message, code: e.code }, 'system', 'error');
+    return finalize(ctx, deps, sessions, {
+      run, agent, role, project, ticket, wakes, result: null,
+      failure: { code: e.code, family: 'tooling', message: e.message },
+      report: null, durationMs: Date.now() - started, sessionId: null,
+      cancelled: null, record,
+    });
+  }
 
   ctx.db.update('runs', runId, { status: 'running', startedAt: nowIso(), runtimeId: setting.runtime, model: setting.model ?? null });
   ctx.db.update('agents', agent.id, { status: 'running', runtimeId: setting.runtime, updatedAt: nowIso() });

@@ -317,7 +317,7 @@ plugins:
   - ./plugins/jira-sync
 ```
 
-Daemon-level settings (listen addresses, TLS, auth, ACME, trusted proxy, transcription provider, optional model overlays) live in `~/.config/agent-conductor/daemon.yaml`, not in any workspace; secrets there are also env references. `models.conductor` / `models.workers` / `models.workerOptions` are optional overlays (VS-185, ADR 0013): filled, they govern every workspace and lock the matching workspace Settings fields; empty, each workspace uses its own `models` block.
+Daemon-level settings (listen addresses, TLS, auth, ACME, trusted proxy, transcription provider, optional model overlays) live in `~/.config/agent-conductor/daemon.yaml`, not in any workspace; secrets there are also env references. `models.conductor` / `models.workers` / `models.workerOptions` are optional overlays (VS-185, ADR 0013): filled, they govern every workspace and lock the matching workspace Settings fields; empty, each workspace uses its own `models` block. A missing `daemon.yaml` is seeded with `workerOptions: quick`, `standard`, `deep` — captain's when-to-use descriptions, `runtime: null`, no conductor/workers overlay (VS-236, ADR 0019). An existing file is never rewritten, including `version: 1` with no `models` block. An option whose `runtime` is null is unconfigured: naming it on a ticket is `model_unconfigured` (HTTP 400) and starts no runtime. The web app shows an undismissable banner until every daemon option has an adapter.
 
 Roles are NOT normally listed in `workspace.yaml`; they are hired at runtime and live in `roles/<id>/role.yaml` (which the daemon writes). Workers are pure runtime state. A workspace can be exported/imported as a directory (§20).
 

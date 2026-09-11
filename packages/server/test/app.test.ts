@@ -1045,4 +1045,31 @@ describe('daemon model overlays (VS-185)', () => {
     });
     expect(dup.status).toBe(400);
   });
+
+  it('round-trips worker options with runtime null and persists a later adapter (VS-236)', async () => {
+    const { fetch } = app();
+    const tiers = [
+      { id: 'quick', description: 'Fastest.', runtime: null, model: null },
+      { id: 'standard', description: 'Default for specified work.', runtime: null, model: null },
+      { id: 'deep', description: 'Cause unknown.', runtime: null, model: null },
+    ];
+    const put = await fetch('/api/daemon/models', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ workerOptions: tiers }),
+    });
+    expect(put.status).toBe(200);
+    await expect(put.json()).resolves.toMatchObject({ workerOptions: tiers });
+    const got = await fetch('/api/daemon/models', { headers: authed() });
+    await expect(got.json()).resolves.toMatchObject({ workerOptions: tiers });
+
+    const configured = { id: 'quick', description: 'Fastest.', runtime: 'claude', model: null };
+    const next = await fetch('/api/daemon/models', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ workerOptions: [configured, tiers[1], tiers[2]] }),
+    });
+    expect(next.status).toBe(200);
+    await expect(next.json()).resolves.toMatchObject({
+      workerOptions: [configured, tiers[1], tiers[2]],
+    });
+  });
 });

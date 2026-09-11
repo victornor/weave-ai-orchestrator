@@ -1,5 +1,5 @@
 import { newId, nowIso } from '@agent-conductor/db';
-import type { Agent, Run, Wakeup } from '@agent-conductor/shared';
+import { OcError, type Agent, type Run, type Wakeup } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices, Dispatcher } from '../api.js';
 import { executeRun } from './engine.js';
@@ -96,7 +96,14 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
       const ticket = agent.ticketId
         ? ctx.db.get<{ workerModelId: string | null }>('SELECT worker_model_id FROM tickets WHERE id = ?', [agent.ticketId])
         : null;
-      const setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket);
+      let setting;
+      try {
+        setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket);
+      } catch (e) {
+        if (!(e instanceof OcError) || e.code !== 'model_unconfigured') throw e;
+        // Placeholder for the queued row; the engine fails the turn before any runtime starts.
+        setting = { runtime: '', model: null };
+      }
       ctx.db.insert('runs', {
         id: runId, workspaceId: ctx.workspaceId, agentId: agent.id, ticketId: agent.ticketId,
         wakeupIdsJson: ids, runtimeId: setting.runtime, model: setting.model, status: 'queued',

@@ -83,6 +83,20 @@ describe('tickets', () => {
     try { make({ workerModelId: 'nope' }); } catch (e) { expect((e as OcError).code).toBe('validation'); }
   });
 
+  it('rejects an unconfigured worker option id (VS-236)', () => {
+    h.ctx.config.models.workerOptions = [
+      { id: 'deep', description: 'Cause unknown.', runtime: null, model: null },
+      { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },
+    ];
+    expect(() => make({ workerModelId: 'deep' })).toThrow(OcError);
+    try { make({ workerModelId: 'deep' }); } catch (e) {
+      expect((e as OcError).code).toBe('model_unconfigured');
+      expect((e as OcError).message).toContain('deep');
+    }
+    expect(make({ workerModelId: 'cheap' }).workerModelId).toBe('cheap');
+    expect(tickets.list({}).items.some((t) => t.workerModelId === 'deep')).toBe(false);
+  });
+
   it('validates workerModelId against a filled daemon catalog (VS-185)', () => {
     h.ctx.config.models.workerOptions = [
       { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },

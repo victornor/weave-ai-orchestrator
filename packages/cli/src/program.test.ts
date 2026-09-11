@@ -433,6 +433,38 @@ describe('running commands against a stubbed daemon', () => {
     expect(seen.some((s) => s.includes('/api/daemon/models'))).toBe(true);
   });
 
+  it('prints that an unconfigured worker option has no runtime chosen (VS-236)', async () => {
+    stubFetch({
+      '/api/w/acme/models': {
+        conductor: { runtime: 'claude', model: null },
+        workers: { runtime: 'claude', model: null },
+        workerOptions: [{ id: 'quick', description: 'Fastest.', runtime: null, model: null }],
+      },
+    });
+    configureOutput({ json: false, color: false });
+    await buildProgram().parseAsync([...base.filter((a) => a !== '--json'), 'models', 'show']);
+    const text = written.join('');
+    expect(text).toContain('no runtime chosen');
+    expect(text).toMatch(/quick.*no runtime chosen/);
+    expect(text).not.toMatch(/quick[^\n]*claude/);
+  });
+
+  it('prints the same for a daemon overlay option with runtime null (VS-236)', async () => {
+    stubFetch({
+      '/api/daemon/models': {
+        conductor: null,
+        workers: null,
+        workerOptions: [{ id: 'deep', description: 'Cause unknown.', runtime: null, model: null }],
+      },
+    });
+    configureOutput({ json: false, color: false });
+    await buildProgram().parseAsync([...base.filter((a) => a !== '--json'), 'daemon', 'models', 'show']);
+    const text = written.join('');
+    expect(text).toContain('no runtime chosen');
+    expect(text).toMatch(/deep.*no runtime chosen/);
+    expect(text).not.toMatch(/deep[^\n]*claude/);
+  });
+
   it('clears a model back to the runtime default', async () => {
     const models = { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: 'claude-opus-5' } };
     let put: { workers?: { model?: string | null } } | null = null;

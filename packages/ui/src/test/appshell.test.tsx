@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   /** What the mocked `useWorkspaceProjects` answers for each workspace id, keyed by id. */
   projectsByWs: {} as Record<string, { status: 'pending' | 'error' | 'success'; projects: Array<Record<string, unknown>> }>,
   path: '/w/ws1/chat',
+  daemonWorkerOptions: null as Array<{ id: string; description: string; runtime: string | null; model: string | null }> | null,
 }));
 
 /** Every `ids` array the mocked `FanInStreams` was rendered with, in render order (VS-199). */
@@ -102,6 +103,7 @@ vi.mock('../api/hooks', () => ({
   useTransitionTicket: () => ({ mutate: vi.fn() }),
   useWorkspaceSummary: () => ({ data: { workspace: { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME' }, config: state.config }, isError: false, error: null, refetch: vi.fn() }),
   useWorkspaces: () => ({ data: state.workspaces }),
+  useDaemonModels: () => ({ data: { conductor: null, workers: null, workerOptions: state.daemonWorkerOptions }, isLoading: false }),
 }));
 
 const { AppShell } = await import('../app/AppShell');
@@ -144,6 +146,7 @@ beforeEach(() => {
   moreSheet.projects = [];
   fanIn.calls = [];
   localStorage.clear();
+  state.daemonWorkerOptions = null;
 });
 
 describe('FanInStreams gating on global pages', () => {
@@ -425,5 +428,46 @@ describe('the phone tab bar', () => {
     const { container } = render(<AppShell />);
     expect(shell(container).dataset.bar).toBe('shown');
     expect(screen.getByLabelText('bar stand-in')).toHaveAttribute('aria-pressed', 'false');
+  });
+});
+
+describe('AppShell — unconfigured worker-tier banner (VS-236)', () => {
+  const banner = (): HTMLElement | null => screen.queryByRole('status', { name: 'Worker adapters are not chosen' });
+  const unconfigured = [
+    { id: 'quick', description: 'Fastest.', runtime: null, model: null },
+    { id: 'standard', description: 'Default.', runtime: 'claude', model: null },
+  ];
+
+  it('shows on a workspace route while any daemon option has no runtime', () => {
+    state.daemonWorkerOptions = unconfigured;
+    render(<AppShell />);
+    expect(banner()).toBeInTheDocument();
+    expect(banner()).toHaveTextContent('Worker adapters are not chosen yet');
+    expect(banner()).toHaveTextContent('daemon Settings → Models');
+    expect(screen.queryByRole('button', { name: /dismiss/i })).not.toBeInTheDocument();
+    const link = within(banner() as HTMLElement).getByRole('link', { name: 'Open Models' });
+    expect(link).toHaveAttribute('href', '/settings');
+    expect(JSON.parse(link.getAttribute('data-search') ?? '{}')).toEqual({ section: 'daemon-models' });
+  });
+
+  it('shows on /settings the same way', () => {
+    state.path = '/settings';
+    state.daemonWorkerOptions = unconfigured;
+    render(<AppShell />);
+    expect(banner()).toBeInTheDocument();
+  });
+
+  it('is absent when every option is configured', () => {
+    state.daemonWorkerOptions = [
+      { id: 'quick', description: 'Fastest.', runtime: 'claude', model: null },
+    ];
+    render(<AppShell />);
+    expect(banner()).not.toBeInTheDocument();
+  });
+
+  it('is absent when the daemon overlay is empty', () => {
+    state.daemonWorkerOptions = null;
+    render(<AppShell />);
+    expect(banner()).not.toBeInTheDocument();
   });
 });

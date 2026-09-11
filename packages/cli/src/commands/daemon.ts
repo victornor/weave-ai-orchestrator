@@ -366,7 +366,7 @@ when the daemon is not answering and has to be replaced from here.`)
         fields([
           ['conductor', describeSetting(current.conductor)],
           ['workers', describeSetting(current.workers)],
-          ...((current.workerOptions ?? []).map((o) => ['option', `${o.id ?? '?'} — ${o.description ?? ''} (${describeSetting(o)})`] as [string, string])),
+          ...((current.workerOptions ?? []).map((o) => ['option', o.runtime ? `${o.id ?? '?'} — ${o.description ?? ''} (${describeSetting(o)})` : `${o.id ?? '?'} — ${o.description ?? ''} (no runtime chosen)`] as [string, string])),
         ]);
         if (!current.workerOptions?.length) fields([['options', '(per workspace)']]);
       });

@@ -201,6 +201,23 @@ describe('Settings — the two model settings', () => {
     expect(state.saved.at(-1)!.workerOptions).toEqual([cheap]);
   });
 
+  it('an unconfigured option row does not select claude and disables the model until a runtime is chosen (VS-236)', () => {
+    state.models = {
+      ...state.models,
+      workerOptions: [{ id: 'quick', description: 'Fastest.', runtime: null, model: null }],
+    };
+    openModels();
+    expect(screen.getByText(/quick — Fastest/)).toBeInTheDocument();
+    const runtime = screen.getByLabelText('quick runtime');
+    expect(runtime).toHaveValue('');
+    expect(within(runtime).getByRole('option', { name: 'Not chosen' })).toBeInTheDocument();
+    expect(screen.getByLabelText('quick model')).toBeDisabled();
+    fireEvent.change(runtime, { target: { value: 'codex' } });
+    expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'quick', description: 'Fastest.', runtime: 'codex', model: null },
+    ]);
+  });
+
   it('disables a locked conductor control (VS-185)', () => {
     state.models = {
       ...state.models,

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-11
+goal: A fresh deployment should ship the three worker tiers, unconfigured and
+  visibly so

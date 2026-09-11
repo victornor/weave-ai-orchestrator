@@ -800,6 +800,91 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
   );
 }
 
+function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave }: {
+  option: T.WorkerModelOption;
+  options: T.WorkerModelOption[];
+  current: T.WorkspaceModels;
+  runtimes: T.RuntimeInfo[];
+  disabled?: boolean;
+  onSave: (next: T.WorkspaceModels) => void;
+}): React.ReactElement {
+  const configured = option.runtime != null;
+  const models = useRuntimeModels(option.runtime);
+  const known = models.data ?? [];
+  const [freeText, setFreeText] = useState(false);
+  const custom = freeText || isCustomModel(option.model, known);
+  const patch = (next: T.WorkerModelOption): void => {
+    onSave({ ...current, workerOptions: options.map((x) => x.id === option.id ? next : x) });
+  };
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <span className="ac-mono min-w-0 flex-1 text-meta text-text-1">{option.id} — {option.description}</span>
+        <Button
+          aria-label={`Remove worker option ${option.id}`}
+          disabled={disabled}
+          onClick={() => onSave({ ...current, workerOptions: options.filter((x) => x.id !== option.id) })}
+        >
+          Remove
+        </Button>
+      </div>
+      <Field label="Runtime">
+        <select
+          className={cx(inputCx, 'ac-mono')}
+          aria-label={`${option.id} runtime`}
+          value={option.runtime ?? ''}
+          disabled={disabled}
+          onChange={(e) => {
+            const runtime = e.target.value === '' ? null : e.target.value;
+            setFreeText(false);
+            patch({ id: option.id, description: option.description, runtime, model: runtime == null ? null : option.model });
+          }}
+        >
+          <option value="">Not chosen</option>
+          {runtimes.map((r) => (
+            <option key={r.id} value={r.id} disabled={!isRuntimeAvailable(r)}>
+              {r.displayName}
+              {isRuntimeAvailable(r) ? '' : ` (${runtimeStatusLabel(r)})`}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Model">
+        <select
+          className={cx(inputCx, 'ac-mono')}
+          aria-label={`${option.id} model`}
+          value={custom ? '__other' : option.model ?? ''}
+          disabled={disabled || !configured}
+          onChange={(e) => {
+            if (e.target.value === '__other') { setFreeText(true); return; }
+            setFreeText(false);
+            const model = e.target.value === '' ? null : e.target.value;
+            const next = settingAfterModelChange({ runtime: option.runtime ?? '', model: option.model, effort: option.effort }, model, known);
+            patch({ ...option, model: next.model, effort: next.effort });
+          }}
+        >
+          <option value="">runtime default</option>
+          {known.map((m) => (
+            <option key={m.id} value={m.id}>{m.label}</option>
+          ))}
+          <option value="__other">something else…</option>
+        </select>
+      </Field>
+      {custom && configured ? (
+        <Field label={`${option.id} model id`} hint="A model this runtime offers that is not in the list.">
+          <input
+            className={cx(inputCx, 'ac-mono')}
+            aria-label={`${option.id} model id`}
+            value={option.model ?? ''}
+            disabled={disabled}
+            onChange={(e) => patch({ ...option, model: e.target.value })}
+          />
+        </Field>
+      ) : null}
+    </div>
+  );
+}
+
 function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
   current: T.WorkspaceModels;
   runtimes: T.RuntimeInfo[];
@@ -865,16 +950,15 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
       <p className="text-micro text-text-3">{disabled ? 'Set in the daemon settings → Models' : 'Named models the conductor can pick per ticket. The workers setting above is the default when a ticket names none.'}</p>
       {options.length === 0 ? <p className="text-micro text-text-3">None yet.</p> : null}
       {options.map((o) => (
-        <div key={o.id} className="flex items-center gap-2">
-          <span className="ac-mono min-w-0 flex-1 text-meta text-text-1">{o.id} — {o.description} ({o.runtime} · {o.model ?? 'default'})</span>
-          <Button
-            aria-label={`Remove worker option ${o.id}`}
-            disabled={disabled}
-            onClick={() => onSave({ ...current, workerOptions: options.filter((x) => x.id !== o.id) })}
-          >
-            Remove
-          </Button>
-        </div>
+        <WorkerOptionRow
+          key={o.id}
+          option={o}
+          options={options}
+          current={current}
+          runtimes={runtimes}
+          disabled={disabled}
+          onSave={onSave}
+        />
       ))}
       <Field label="New option id" error={idIssue}>
         <input className={cx(inputCx, 'ac-mono')} aria-label="New worker option id" value={id} onChange={(e) => setId(e.target.value)} />

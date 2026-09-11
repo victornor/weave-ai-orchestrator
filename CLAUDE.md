@@ -46,7 +46,7 @@ packages/
   surfaces/       headless, tmux, herdr, hyprland
 skills/           agent-facing SKILL.md packages installed into agent homes (see skills/README.md)
 templates/        always-loaded prompt templates: conductor/worker AGENTS.md, charter, brief, KB seeds
-scripts/          guard-boundaries.mjs, guard-console.mjs (these are `pnpm lint`)
+scripts/          guard-boundaries.mjs, guard-console.mjs, guard-test-fixtures.mjs (these are `pnpm lint`)
 ```
 
 Dependency direction, enforced by `scripts/guard-boundaries.mjs`:

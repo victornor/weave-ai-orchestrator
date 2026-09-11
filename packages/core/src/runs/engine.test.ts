@@ -1193,7 +1193,7 @@ describe('run engine', () => {
       vi.setSystemTime(new Date('2026-09-11T17:00:12.000Z'));
       try {
         const message = readFileSync(
-          join(dirname(fileURLToPath(import.meta.url)), '../../../../openspec/changes/vs-238-a-worker-parked-on-an-exhausted-quota-ca/captures/vs-234-opencode.txt'),
+          join(dirname(fileURLToPath(import.meta.url)), 'fixtures/vs-234-opencode.txt'),
           'utf8',
         ).trim();
         const { ticketId, workerId } = await failOnce({ error: { code: 'rate_limit', family: 'provider_quota', message } });

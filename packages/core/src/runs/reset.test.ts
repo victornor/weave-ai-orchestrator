@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parseResetTime } from './engine.js';
 
-const captures = join(dirname(fileURLToPath(import.meta.url)), '../../../../openspec/changes/vs-238-a-worker-parked-on-an-exhausted-quota-ca/captures');
+const captures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const readCapture = (name: string): string => readFileSync(join(captures, name), 'utf8').trim();
 
 describe('parseResetTime', () => {

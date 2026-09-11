@@ -753,7 +753,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'ac_worker_models', scope: 'conductor', input: z.object({}),
-    description: 'The workspace workers default and the named worker-model options (id + description + runtime/model). Call this before filing a ticket that should not use the default.',
+    description: 'The workspace workers default and the named worker-model options (id + description + runtime/model). An option with runtime null is unconfigured — do not file a ticket onto it until an adapter is chosen. Call this before filing a ticket that should not use the default.',
     handler: (ctx) => {
       const models = svc(ctx).models.get();
       return { default: models.workers, options: models.workerOptions ?? [] };

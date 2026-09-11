@@ -555,6 +555,22 @@ describe('run engine', () => {
       expect(other.inputs.at(-1)).toMatchObject({ model: 'the-option-model' });
     });
 
+    it('refuses an unconfigured catalog option and starts no runtime (VS-236)', async () => {
+      h.ctx.config.models.workers = { runtime: 'fake', model: 'the-default' };
+      h.ctx.config.models.workerOptions = [
+        { id: 'deep', description: 'Cause unknown.', runtime: null, model: null },
+      ];
+      const ticketId = seedTicket(h, { workerModelId: 'deep' });
+      const workerId = h.addWorker(ticketId, { worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      const run = await runOnce();
+      expect(run.status).toBe('failed');
+      expect(run.errorCode).toBe('model_unconfigured');
+      expect(run.errorFamily).toBe('tooling');
+      expect(runtime.inputs).toHaveLength(0);
+      expect(other.inputs).toHaveLength(0);
+    });
+
     it('sends the two kinds to their own settings in the same workspace', async () => {
       h.ctx.config.models = {
         conductor: { runtime: 'fake', model: 'the-conductor-model' },

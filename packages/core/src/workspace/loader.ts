@@ -4,7 +4,7 @@ import { join, resolve, dirname, basename } from 'node:path';
 import YAML from 'yaml';
 import { openDb, newId, nowIso } from '@agent-conductor/db';
 import {
-  DaemonConfigSchema, DEFAULT_KNOWLEDGE_BUDGETS, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, WorkspaceRegistrySchema, OcError,
+  DaemonConfigSchema, DEFAULT_KNOWLEDGE_BUDGETS, DEFAULT_WORKER_TIERS, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, WorkspaceRegistrySchema, OcError,
   type DaemonConfig, type KnowledgeBudgets, type WorkspaceConfig, type WorkspaceRegistry,
 } from '@agent-conductor/shared';
 import type { Registries, WorkspaceContext } from '../context.js';
@@ -272,7 +272,7 @@ class Loader implements WorkspaceLoader {
       ...opts.registries.runtimes.keys(),
       models.conductor.runtime,
       models.workers.runtime,
-      ...models.workerOptions.map((o) => o.runtime),
+      ...models.workerOptions.map((o) => o.runtime).filter((id): id is string => id != null),
     ]);
     for (const id of runtimeIds) {
       if (!id) continue;
@@ -335,6 +335,14 @@ class Loader implements WorkspaceLoader {
 
   writeDaemonConfig(cfg: DaemonConfig, dir?: string): void {
     writeYamlFile(join(dir ?? configDir(), 'daemon.yaml'), DaemonConfigSchema.parse(cfg));
+  }
+
+  ensureFreshDaemonConfig(dir?: string): DaemonConfig {
+    const path = join(dir ?? configDir(), 'daemon.yaml');
+    if (existsSync(path)) return this.readDaemonConfig(dir);
+    const seeded = DaemonConfigSchema.parse({ models: { workerOptions: DEFAULT_WORKER_TIERS } });
+    this.writeDaemonConfig(seeded, dir);
+    return seeded;
   }
 }
 

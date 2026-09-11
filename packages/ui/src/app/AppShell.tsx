@@ -10,7 +10,7 @@ import { CommandPalette } from '../components/CommandPalette';
 import type { Command } from '../components/CommandPalette';
 import { ConnectionBanner, UnreachableScreen } from '../components/ConnectionBanner';
 import { FanInStreams, useConnection, useOptionalWorkspace, useWorkspaceEvents } from '../api/context';
-import { useDaemonUpdate, useDaemonUpgrade, useDecisions, useTickets, useTransitionTicket, useWorkspaceProjects, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
+import { useDaemonModels, useDaemonUpdate, useDaemonUpgrade, useDecisions, useTickets, useTransitionTicket, useWorkspaceProjects, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
 import { useToast } from '../components/Toast';
 import { useHotkeys } from '../lib/hotkeys';
 import { flushQueue, useQueueCount } from '../lib/queue';
@@ -237,6 +237,7 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
 
       <div className="flex min-w-0 flex-1 flex-col">
         <ConnectionBanner state={conn.state} capturedAt={conn.capturedAt} queuedCount={queuedCount} />
+        <ModelsUnconfiguredBanner />
         {!onGlobalPage && workspaceYolo(summary.data?.config) ? (
           <div
             role="status"
@@ -288,6 +289,25 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
         isActive={isActive}
         onNewWorkspace={() => go('/onboarding')}
       />
+    </div>
+  );
+}
+
+function ModelsUnconfiguredBanner(): React.ReactElement | null {
+  const overlays = useDaemonModels();
+  const unconfigured = (overlays.data?.workerOptions ?? []).some((o) => o.runtime == null);
+  if (!unconfigured) return null;
+  return (
+    <div
+      role="status"
+      aria-label="Worker adapters are not chosen"
+      className="flex h-banner items-center gap-2 bg-failed/10 px-4 text-micro text-failed"
+    >
+      <span className="size-1.5 rounded-pill bg-current" aria-hidden />
+      <span>Worker adapters are not chosen yet. Finish them in daemon Settings → Models before running workers.</span>
+      <A to="/settings" search={{ section: 'daemon-models' }} className="ml-auto font-medium">
+        Open Models
+      </A>
     </div>
   );
 }

@@ -44,6 +44,7 @@ vi.mock('../api/hooks', async (importOriginal) => {
     useTickets: () => ({ data: [] }),
     useWorkspaceSummary: () => ({ data: undefined, isError: false, error: null, refetch: vi.fn() }),
     useWorkspaces: () => ({ data: [], isError: false, refetch: vi.fn() }),
+    useDaemonModels: () => ({ data: { conductor: null, workers: null, workerOptions: null }, isLoading: false }),
   };
 });
 

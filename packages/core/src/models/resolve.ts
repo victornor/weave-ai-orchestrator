@@ -9,7 +9,7 @@
  * chain left for a stale row to enter.
  */
 import type { AgentKind, DaemonModels, ModelSetting, ModelsLocked, WorkspaceConfig, WorkspaceModels } from '@agent-conductor/shared';
-import { DEFAULT_WORKSPACE_MODELS } from '@agent-conductor/shared';
+import { DEFAULT_WORKSPACE_MODELS, OcError, isWorkerOptionConfigured } from '@agent-conductor/shared';
 
 export function catalogOverlayFilled(opts: DaemonModels['workerOptions']): opts is NonNullable<DaemonModels['workerOptions']> {
   return Array.isArray(opts) && opts.length > 0;
@@ -53,7 +53,12 @@ export function modelSettingFor(
   const id = ticket?.workerModelId;
   if (id) {
     const opt = (models.workerOptions ?? []).find((o) => o.id === id);
-    if (opt) return { runtime: opt.runtime, model: opt.model, ...(opt.effort !== undefined ? { effort: opt.effort } : {}) };
+    if (opt) {
+      if (!isWorkerOptionConfigured(opt)) {
+        throw new OcError('model_unconfigured', `worker option '${id}' has no runtime chosen`, { optionId: id });
+      }
+      return { runtime: opt.runtime, model: opt.model, ...(opt.effort !== undefined ? { effort: opt.effort } : {}) };
+    }
   }
   return models.workers;
 }

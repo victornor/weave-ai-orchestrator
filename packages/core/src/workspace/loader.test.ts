@@ -332,6 +332,57 @@ describe('workspace loader', () => {
     expect(loader.readDaemonConfig().logLevel).toBe('debug');
   });
 
+  describe('ensureFreshDaemonConfig (VS-236)', () => {
+    it('seeds the three unconfigured tiers when daemon.yaml is missing', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'ac-fresh-'));
+      try {
+        const cfg = loader.ensureFreshDaemonConfig(dir);
+        expect(existsSync(join(dir, 'daemon.yaml'))).toBe(true);
+        expect(cfg.models.workerOptions?.map((o) => o.id)).toEqual(['quick', 'standard', 'deep']);
+        expect(cfg.models.workerOptions?.every((o) => o.runtime === null && o.model === null)).toBe(true);
+        expect(cfg.models.conductor).toBeUndefined();
+        expect(cfg.models.workers).toBeUndefined();
+        expect(cfg.models.workerOptions?.[0]?.description).toContain('Fastest. The fix is already located');
+        expect(cfg.models.workerOptions?.[1]?.description).toContain('Default for specified work');
+        expect(cfg.models.workerOptions?.[2]?.description).toContain('Cause unknown');
+        const roundTrip = loader.readDaemonConfig(dir);
+        expect(roundTrip.models.workerOptions).toEqual(cfg.models.workerOptions);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('leaves an existing daemon.yaml without models empty', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'ac-existing-'));
+      try {
+        writeFileSync(join(dir, 'daemon.yaml'), 'version: 1\n', 'utf8');
+        const cfg = loader.ensureFreshDaemonConfig(dir);
+        expect(cfg.models.workerOptions).toBeUndefined();
+        expect(cfg.models.conductor).toBeUndefined();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('leaves an existing catalog overlay unchanged', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'ac-custom-'));
+      try {
+        writeFileSync(join(dir, 'daemon.yaml'), YAML.stringify({
+          version: 1,
+          models: {
+            workerOptions: [{ id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' }],
+          },
+        }), 'utf8');
+        const cfg = loader.ensureFreshDaemonConfig(dir);
+        expect(cfg.models.workerOptions).toEqual([
+          { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },
+        ]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('isDefaultConfigDir (VS-143)', () => {
     it('is true for the plain default, regardless of how the value got there', () => {
       const plainDefault = join(homedir(), '.config', 'agent-conductor');

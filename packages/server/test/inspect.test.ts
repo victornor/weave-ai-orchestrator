@@ -369,3 +369,21 @@ describe('scope', () => {
     expect((d['transcript'] as Array<{ text: string }>)[0]!.text).toBe('Filed VS-61.');
   });
 });
+
+describe('ac_worker_models (VS-236)', () => {
+  it('lists an unconfigured option as unset, not as claude', async () => {
+    harness = makeHarness({
+      daemon: {
+        models: {
+          workerOptions: [{ id: 'quick', description: 'Fastest.', runtime: null, model: null }],
+        },
+      },
+    });
+    const res = await call(harness, 'ac_worker_models', {});
+    expect(res.ok).toBe(true);
+    const data = res.data as { default: { runtime: string }; options: Array<{ id: string; description: string; runtime: string | null; model: string | null }> };
+    expect(data.options).toEqual([{ id: 'quick', description: 'Fastest.', runtime: null, model: null }]);
+    expect(data.options[0]!.runtime).toBeNull();
+    expect(data.default.runtime).toBe('claude');
+  });
+});

@@ -2,7 +2,8 @@
 
 **Status:** accepted · 2026-09-10 · amends ADR 0011 and ADR 0012 (the two workspace settings and the
 workspace catalog remain; a filled daemon overlay is the effective value for that control on every
-workspace)
+workspace) · amended by ADR 0019 (a missing `daemon.yaml` is seeded with three unconfigured tiers;
+an existing file is never rewritten)
 
 ## Context
 

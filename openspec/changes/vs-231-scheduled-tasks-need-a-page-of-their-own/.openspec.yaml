@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-11
+goal: Scheduled tasks need a page of their own, with the history of what each
+  fire did

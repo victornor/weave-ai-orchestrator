@@ -229,6 +229,24 @@ export interface RoutineUsage {
 }
 
 /**
+ * One kept fire of a routine, derived from its wake joined to the conductor run (VS-231).
+ * `sharedTurn` is true when that run also claimed work that was not this routine.
+ */
+export interface RoutineFire {
+  wakeId: string;
+  runId: string | null;
+  firedAt: string;
+  status: string;
+  summary: string | null;
+  sharedTurn: boolean;
+}
+
+/** A routine as `list()` returns it: the row plus how many non-skipped fires it has kept. */
+export interface RoutineListItem extends Routine {
+  fireCount: number;
+}
+
+/**
  * One entry in a workspace's changelog (PLAN §13.6). Derived from an `activity` row at read time, so
  * `summary` and `link` are rendered rather than stored — see `changelogEntry` in `@agent-conductor/render`.
  */

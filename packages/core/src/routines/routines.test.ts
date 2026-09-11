@@ -171,3 +171,192 @@ describe('routines (VS-220)', () => {
     expect(u.runs).toBe(2);
   });
 });
+
+describe('routine fire history (VS-231)', () => {
+  let h: TestHarness;
+  let routines: RoutinesService;
+
+  beforeEach(() => {
+    h = makeHarness();
+    h.services.wake = createWakeService(h.ctx, h.deps);
+    h.services.workers = { conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.projects = { get: (id: string) => { if (id === h.projectId) return { id }; throw new OcError('not_found', `project ${id} not found`); } } as never;
+    routines = createRoutinesService(h.ctx, h.deps);
+    h.services.routines = routines;
+  });
+  afterEach(() => h.cleanup());
+
+  const add = () => routines.create(HUMAN, {
+    name: 'Morning review',
+    trigger: dailyTrigger(),
+    instruction: "Look at yesterday's incidents and report.",
+  });
+
+  const insertWake = (over: {
+    id: string;
+    source?: string;
+    status?: string;
+    payload?: Record<string, unknown>;
+    coalescedIntoId?: string | null;
+    runId?: string | null;
+    createdAt: string;
+  }) => {
+    h.ctx.db.insert('wakeups', {
+      id: over.id,
+      workspaceId: h.workspaceId,
+      agentId: h.conductorId,
+      source: over.source ?? 'routine',
+      reason: 'test fire',
+      payloadJson: over.payload ?? {},
+      status: over.status ?? 'queued',
+      coalescedIntoId: over.coalescedIntoId ?? null,
+      runId: over.runId ?? null,
+      createdAt: over.createdAt,
+    });
+  };
+
+  const insertRun = (over: {
+    id: string;
+    wakeupIds: string[];
+    status?: string;
+    summary?: string | null;
+    createdAt: string;
+  }) => {
+    h.ctx.db.insert('runs', {
+      id: over.id,
+      workspaceId: h.workspaceId,
+      agentId: h.conductorId,
+      wakeupIdsJson: over.wakeupIds,
+      runtimeId: 'claude',
+      status: over.status ?? 'succeeded',
+      turnEpoch: 1,
+      cwd: h.ctx.paths.conductor,
+      summary: over.summary ?? null,
+      createdAt: over.createdAt,
+    });
+  };
+
+  it('lists a finished run\'s summary and a skipped enqueue is absent', () => {
+    const r = add();
+    h.ctx.db.update('routines', r.id, { nextFireAt: '2026-09-11T07:00:00.000Z' });
+    h.ctx.db.update('agents', h.conductorId, { status: 'paused' });
+    expect(routines.fireDue('2026-09-11T07:00:05.000Z')).toHaveLength(0);
+    expect(routines.fires(r.id)).toEqual([]);
+    expect(routines.list().find((x) => x.id === r.id)?.fireCount).toBe(0);
+
+    h.ctx.db.update('agents', h.conductorId, { status: 'active' });
+    expect(routines.fireDue('2026-09-11T07:00:10.000Z')).toHaveLength(1);
+    const wake = h.db.get<Wakeup>("SELECT * FROM wakeups WHERE status = 'queued'")!;
+    insertRun({
+      id: 'run-done',
+      wakeupIds: [wake.id],
+      status: 'succeeded',
+      summary: 'Looked at incidents; nothing cheap.',
+      createdAt: '2026-09-11T07:01:00.000Z',
+    });
+    h.ctx.db.update('wakeups', wake.id, { runId: 'run-done', status: 'claimed' });
+    expect(routines.fires(r.id)).toEqual([
+      expect.objectContaining({
+        wakeId: wake.id,
+        runId: 'run-done',
+        status: 'succeeded',
+        summary: 'Looked at incidents; nothing cheap.',
+        sharedTurn: false,
+      }),
+    ]);
+  });
+
+  it('lists an in-flight fire without inventing a summary', () => {
+    const r = add();
+    h.ctx.db.update('routines', r.id, { nextFireAt: '2026-09-11T07:00:00.000Z' });
+    expect(routines.fireDue('2026-09-11T07:00:05.000Z')).toHaveLength(1);
+    const wake = h.db.get<Wakeup>("SELECT * FROM wakeups")!;
+    expect(routines.fires(r.id)).toEqual([
+      expect.objectContaining({
+        wakeId: wake.id,
+        runId: null,
+        status: 'queued',
+        summary: null,
+        sharedTurn: false,
+      }),
+    ]);
+  });
+
+  it('lists two wakes on one run as two fires', () => {
+    const r = add();
+    insertWake({ id: 'w1', payload: { routineId: r.id }, status: 'claimed', runId: 'run-pair', createdAt: '2026-09-11T07:00:00.000Z' });
+    insertWake({ id: 'w2', payload: { routineId: r.id }, status: 'claimed', runId: 'run-pair', createdAt: '2026-09-11T07:15:00.000Z' });
+    insertRun({
+      id: 'run-pair',
+      wakeupIds: ['w1', 'w2'],
+      summary: 'Handled both slots.',
+      createdAt: '2026-09-11T07:16:00.000Z',
+    });
+    const fires = routines.fires(r.id);
+    expect(fires).toHaveLength(2);
+    expect(fires.map((f) => f.wakeId)).toEqual(['w2', 'w1']);
+    expect(fires.every((f) => f.runId === 'run-pair' && f.summary === 'Handled both slots.')).toBe(true);
+  });
+
+  it('marks a fire coalesced with a human-message wake as sharedTurn', () => {
+    const r = add();
+    insertWake({
+      id: 'parent',
+      source: 'human_message',
+      status: 'claimed',
+      runId: 'run-mix',
+      payload: { bundle: [{ source: 'routine', reason: 'scheduled task', payload: { routineId: r.id } }] },
+      createdAt: '2026-09-11T07:00:01.000Z',
+    });
+    insertWake({
+      id: 'fire',
+      payload: { routineId: r.id },
+      status: 'coalesced',
+      coalescedIntoId: 'parent',
+      createdAt: '2026-09-11T07:00:00.000Z',
+    });
+    insertRun({
+      id: 'run-mix',
+      wakeupIds: ['parent'],
+      summary: 'Answered captain and the morning review.',
+      createdAt: '2026-09-11T07:02:00.000Z',
+    });
+    expect(routines.fires(r.id)).toEqual([
+      expect.objectContaining({
+        wakeId: 'fire',
+        runId: 'run-mix',
+        summary: 'Answered captain and the morning review.',
+        sharedTurn: true,
+      }),
+    ]);
+  });
+
+  it('leaves a solo fire unlabelled', () => {
+    const r = add();
+    insertWake({ id: 'solo', payload: { routineId: r.id }, status: 'claimed', runId: 'run-solo', createdAt: '2026-09-11T07:00:00.000Z' });
+    insertRun({
+      id: 'run-solo',
+      wakeupIds: ['solo'],
+      summary: 'Only this alarm.',
+      createdAt: '2026-09-11T07:01:00.000Z',
+    });
+    expect(routines.fires(r.id)[0]).toMatchObject({ sharedTurn: false, summary: 'Only this alarm.' });
+  });
+
+  it('counts three kept wakes and zero for a never-fired routine', () => {
+    const kept = add();
+    const never = routines.create(HUMAN, {
+      name: 'Never',
+      trigger: dailyTrigger(8),
+      instruction: 'Do not fire.',
+    });
+    insertWake({ id: 'a', payload: { routineId: kept.id }, createdAt: '2026-09-11T07:00:00.000Z' });
+    insertWake({ id: 'b', payload: { routineId: kept.id }, createdAt: '2026-09-11T08:00:00.000Z' });
+    insertWake({ id: 'c', payload: { routineId: kept.id }, createdAt: '2026-09-11T09:00:00.000Z' });
+    insertWake({ id: 'skip', payload: { routineId: kept.id }, status: 'skipped', createdAt: '2026-09-11T06:00:00.000Z' });
+    const listed = routines.list();
+    expect(listed.find((x) => x.id === kept.id)?.fireCount).toBe(3);
+    expect(listed.find((x) => x.id === never.id)?.fireCount).toBe(0);
+    expect(routines.fires(never.id)).toEqual([]);
+  });
+});

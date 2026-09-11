@@ -46,6 +46,8 @@ export function routineRoutes(): Hono<AppEnv> {
     return c.json(c.get('ws').services.routines.usage(c.req.param('id'), q.window));
   });
 
+  app.get('/:id/fires', (c) => c.json({ items: c.get('ws').services.routines.fires(c.req.param('id')) }));
+
   app.get('/:id', (c) => c.json(c.get('ws').services.routines.get(c.req.param('id'))));
 
   app.patch('/:id', async (c) => c.json(c.get('ws').services.routines.update(c.get('actor'), c.req.param('id'), await body(c, PatchSchema))));

@@ -6,12 +6,14 @@ import { newId, nowIso } from '@agent-conductor/db';
 import {
   OcError, ROUTINE_ACTIONS, ROUTINE_CONCURRENCY, ROUTINE_MAX_TICKETS_PER_FIRE, ROUTINE_STATUSES,
   ROUTINE_USAGE_WINDOWS, resolveUsageWindow,
-  type Routine, type RoutineAction, type RoutineConcurrency, type RoutineStatus, type RoutineTemplate,
-  type RoutineTrigger, type RoutineUsage, type RoutineUsageWindow, type Wakeup,
+  type Routine, type RoutineAction, type RoutineConcurrency, type RoutineFire, type RoutineListItem,
+  type RoutineStatus, type RoutineTemplate, type RoutineTrigger, type RoutineUsage, type RoutineUsageWindow,
+  type Wakeup,
 } from '@agent-conductor/shared';
 import type { Actor, CoreServices, RoutineCreateInput, RoutinePatch, RoutinesService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
+import { flattenWakes } from '../prompts/index.js';
 import { nextAfter, parseSchedule } from './schedule.js';
 
 const LIVE_WAKE = new Set(['queued', 'claimed']);
@@ -31,6 +33,10 @@ function parseTemplate(raw: { instruction: string; action?: unknown; maxTicketsP
   }
   const projectId = typeof raw.projectId === 'string' && raw.projectId.trim() ? raw.projectId.trim() : null;
   return { instruction, action, maxTicketsPerFire: cap, projectId };
+}
+
+function isThisRoutineWake(w: { source: string; payload: Record<string, unknown> }, routineId: string): boolean {
+  return w.source === 'routine' && String(w.payload['routineId'] ?? '') === routineId;
 }
 
 function asRoutine(row: Routine): Routine {
@@ -75,7 +81,18 @@ export function createRoutinesService(ctx: WorkspaceContext, deps: () => CoreSer
 
   return {
     list() {
-      return ctx.db.all<Routine>('SELECT * FROM routines WHERE workspace_id = ? ORDER BY name COLLATE NOCASE, created_at', [ws]).map(asRoutine);
+      const rows = ctx.db.all<Routine>('SELECT * FROM routines WHERE workspace_id = ? ORDER BY name COLLATE NOCASE, created_at', [ws]).map(asRoutine);
+      const counts = ctx.db.all<{ routineId: string; n: number }>(
+        `SELECT json_extract(w.payload_json, '$.routineId') AS routine_id, COUNT(*) AS n
+           FROM wakeups w
+          WHERE w.workspace_id = ?
+            AND w.source = 'routine'
+            AND w.status != 'skipped'
+          GROUP BY routine_id`,
+        [ws],
+      );
+      const byId = new Map(counts.map((c) => [c.routineId, Number(c.n)]));
+      return rows.map((r): RoutineListItem => ({ ...r, fireCount: byId.get(r.id) ?? 0 }));
     },
 
     get,
@@ -159,6 +176,56 @@ export function createRoutinesService(ctx: WorkspaceContext, deps: () => CoreSer
       ctx.db.run('DELETE FROM routines WHERE id = ? AND workspace_id = ?', [id, ws]);
       recordActivity(ctx.db, ws, actor, 'routine.remove', 'routine', id, {});
       ctx.events.emit('routine.removed', 'routine', id, { id });
+    },
+
+    fires(id) {
+      get(id);
+      const rows = ctx.db.all<{
+        id: string;
+        createdAt: string;
+        status: string;
+        runId: string | null;
+      }>(
+        `SELECT w.id, w.created_at, w.status,
+                COALESCE(w.run_id, p.run_id) AS run_id
+           FROM wakeups w
+           LEFT JOIN wakeups p ON p.id = w.coalesced_into_id
+          WHERE w.workspace_id = ?
+            AND w.source = 'routine'
+            AND json_extract(w.payload_json, '$.routineId') = ?
+            AND w.status != 'skipped'
+          ORDER BY w.created_at DESC, w.id DESC`,
+        [ws, id],
+      );
+      const runCache = new Map<string, { status: string; summary: string | null; sharedTurn: boolean }>();
+      const ofRun = (runId: string): { status: string; summary: string | null; sharedTurn: boolean } | null => {
+        const hit = runCache.get(runId);
+        if (hit) return hit;
+        const run = ctx.db.get<{ status: string; summary: string | null; wakeupIds: string[] }>(
+          'SELECT status, summary, wakeup_ids_json FROM runs WHERE id = ?',
+          [runId],
+        );
+        if (!run) return null;
+        const ids = run.wakeupIds ?? [];
+        const claimed = ids.length
+          ? ctx.db.all<Wakeup>(`SELECT * FROM wakeups WHERE id IN (${ids.map(() => '?').join(',')})`, ids)
+          : [];
+        const sharedTurn = flattenWakes(claimed).some((w) => !isThisRoutineWake(w, id));
+        const val = { status: run.status, summary: run.summary ?? null, sharedTurn };
+        runCache.set(runId, val);
+        return val;
+      };
+      return rows.map((w): RoutineFire => {
+        const run = w.runId ? ofRun(w.runId) : null;
+        return {
+          wakeId: w.id,
+          runId: w.runId,
+          firedAt: w.createdAt,
+          status: run?.status ?? w.status,
+          summary: run?.summary ?? null,
+          sharedTurn: run?.sharedTurn ?? false,
+        };
+      });
     },
 
     usage(id, window, now) {

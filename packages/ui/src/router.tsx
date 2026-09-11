@@ -25,6 +25,7 @@ import { GlobalLiveRoute } from './routes/GlobalLive';
 import { GlobalChatsRoute } from './routes/GlobalChats';
 import { GlobalIncidentsRoute } from './routes/GlobalIncidents';
 import { GlobalMapRoute } from './routes/GlobalMap';
+import { GlobalScheduledRoute } from './routes/GlobalScheduled';
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 
@@ -74,6 +75,16 @@ const globalMapRoute = createRoute({
   component: () => (
     <AppShell>
       <GlobalMapRoute />
+    </AppShell>
+  ),
+});
+const globalScheduledRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/scheduled',
+  validateSearch: (s: Record<string, unknown>) => s,
+  component: () => (
+    <AppShell>
+      <GlobalScheduledRoute />
     </AppShell>
   ),
 });
@@ -161,8 +172,8 @@ const settingsRoute = createRoute({
   getParentRoute: () => wsRoute,
   path: '/settings',
   validateSearch: searchPassthrough,
-  beforeLoad: ({ search }) => {
-    const r = redirectForSettingsRoute('workspace', search as Record<string, string | undefined>);
+  beforeLoad: ({ search, params }) => {
+    const r = redirectForSettingsRoute('workspace', search as Record<string, string | undefined>, params.ws);
     if (r.type === 'redirect') {
       throw redirect({ to: r.to, search: r.search, ...(r.ws ? { params: { ws: r.ws } } : {}) } as never);
     }
@@ -179,6 +190,7 @@ const routeTree = rootRoute.addChildren([
   globalChatsRoute,
   globalIncidentsRoute,
   globalMapRoute,
+  globalScheduledRoute,
   globalSettingsRoute,
   wsRoute.addChildren([
     wsIndexRoute,

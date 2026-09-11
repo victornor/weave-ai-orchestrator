@@ -99,7 +99,7 @@ describe('what the More menu lists', () => {
     expect(within(nav).getAllByRole('link')).toHaveLength(MORE_ITEMS.length);
   });
 
-  it('lists Global Needs you, Live, Chats, Incidents, Map and the daemon Settings above the per-workspace leftovers', () => {
+  it('lists Global Needs you, Live, Chats, Incidents, Map, Scheduled and the daemon Settings above the per-workspace leftovers', () => {
     open();
     const global = within(sheet()).getByRole('navigation', { name: 'Global' });
     expect(within(global).getByRole('link', { name: /Needs you/ })).toHaveAttribute('href', '/needs');
@@ -107,6 +107,7 @@ describe('what the More menu lists', () => {
     expect(within(global).getByRole('link', { name: /Chats/ })).toHaveAttribute('href', '/chats');
     expect(within(global).getByRole('link', { name: /Incidents/ })).toHaveAttribute('href', '/incidents');
     expect(within(global).getByRole('link', { name: /Map/ })).toHaveAttribute('href', '/map');
+    expect(within(global).getByRole('link', { name: /Scheduled/ })).toHaveAttribute('href', '/scheduled');
     // The daemon's settings have their own address above the workspaces (VS-230).
     expect(within(global).getByRole('link', { name: /Settings/ })).toHaveAttribute('href', '/settings');
   });

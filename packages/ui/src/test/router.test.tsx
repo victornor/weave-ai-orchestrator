@@ -19,10 +19,10 @@ const workspaceRoutes = (): RouteNode[] => {
 };
 
 describe('the global routes (VS-168)', () => {
-  it('registers /needs, /live, /chats, /incidents and /map as siblings of /w/$ws', () => {
+  it('registers /needs, /live, /chats, /incidents, /map and /scheduled as siblings of /w/$ws', () => {
     const root = router.routeTree as unknown as RouteNode;
     const paths = (root.children ?? []).map((r) => r.path);
-    expect(paths).toEqual(expect.arrayContaining(['needs', 'live', 'chats', 'incidents', 'map', 'w/$ws']));
+    expect(paths).toEqual(expect.arrayContaining(['needs', 'live', 'chats', 'incidents', 'map', 'scheduled', 'w/$ws']));
   });
 
   it('registers the daemon settings at /settings, a sibling of /w/$ws with its own component (VS-230)', () => {

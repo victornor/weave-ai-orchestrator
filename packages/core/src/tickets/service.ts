@@ -23,6 +23,14 @@ function ticketBranchFor(t: { identifier: string; title: string }): string {
   return `ac/${t.identifier.toLowerCase()}-${slug}`;
 }
 
+/** Two SHAs name the same object when one is a prefix of the other (workers often pass 7–12 chars). */
+function sameGitSha(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (x.length < 7 || y.length < 7) return x === y;
+  return x === y || x.startsWith(y) || y.startsWith(x);
+}
+
 interface ProjectRow { id: string; slug: string; clonePath: string; openspecEnabled: number; policies: Record<string, unknown> | null }
 
 const TERMINAL = new Set<TicketStatus>(TERMINAL_TICKET_STATUSES);
@@ -945,6 +953,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       if (t.status !== 'merging') throw new OcError('wrong_status', `${t.identifier} is ${t.status}, not merging`);
       // Land the delivery into the primary clone first (ff for local-branch; verify containment for pr). Not landed → the worker keeps the ticket in merging.
       let landInfo: LandResult | null = null;
+      let trustedMerge: string | undefined;
       if (t.projectId) {
         let project: Project | null = null;
         try { project = deps().projects.get(t.projectId); } catch { project = null; }
@@ -954,7 +963,38 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           // One landing at a time per project: this checks out and fast-forwards the clone every
           // ticket of the project shares, and reconciliation can call mergeDone outside the queue.
           const p = project;
-          landInfo = await serialize(project.id, () => landDelivery(ctx.config, p, t, branch));
+          const mode = ((p.policies as { deliveryMode?: string } | null)?.deliveryMode ?? ctx.config.defaults.deliveryMode) as 'pr' | 'local-branch';
+          let mergeCommit: string | undefined;
+          if (mode === 'pr') {
+            const pr = db.get<{ url: string | null }>("SELECT url FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' ORDER BY created_at DESC LIMIT 1", [t.id]);
+            if (pr?.url) {
+              const forge = ctx.registries.forges.get('github');
+              const state = forge ? await forge.prState(p.clonePath, pr.url).catch(() => null) : null;
+              if (state && state.state !== 'merged') {
+                throw new OcError(
+                  'merge_unverified',
+                  `pull request is ${state.state}, not merged; merge the PR first (or wait for the forge), then report again`,
+                  { forgeState: state.state, prUrl: pr.url, reported: info.mergeCommit ?? null },
+                );
+              }
+              if (state?.state === 'merged' && state.mergeCommit) {
+                if (info.mergeCommit && !sameGitSha(info.mergeCommit, state.mergeCommit)) {
+                  throw new OcError(
+                    'merge_unverified',
+                    `reported merge commit ${info.mergeCommit.slice(0, 12)} is not the forge's ${state.mergeCommit.slice(0, 12)} for this pull request`,
+                    { reported: info.mergeCommit, forge: state.mergeCommit, prUrl: pr.url },
+                  );
+                }
+                mergeCommit = state.mergeCommit;
+                trustedMerge = state.mergeCommit;
+              }
+            }
+          }
+          // VS-232 — both halves are load-bearing, do not simplify:
+          // 1. Use the forge's merge commit for this PR (caller SHA is a cross-check; omitting it is fine).
+          // 2. When the forge is unreachable, do not forward the worker's SHA: ancestry of any
+          //    commit already on the landing branch would close a ticket that never merged.
+          landInfo = await serialize(project.id, () => landDelivery(ctx.config, p, t, branch, mergeCommit ? { mergeCommit } : undefined));
           recordActivity(db, ws, actor, 'ticket.delivery_landed', 'ticket', t.id, { ...landInfo }, t.id);
         } else log.warn({ ticketId: t.id }, 'mergeDone: no project clone available; skipping delivery landing');
       }
@@ -977,17 +1017,18 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       }
 
       const next = tx(db, () => {
-        if (info.mergeCommit) {
+        const recordedSha = trustedMerge ?? info.mergeCommit ?? null;
+        if (recordedSha) {
           db.insert('ticket_work_products', {
-            id: newId(), ticketId: t.id, runId: actor.runId ?? null, type: 'commit', provider: 'git', externalId: info.mergeCommit,
-            url: null, title: `merge ${info.mergeCommit.slice(0, 12)}`, state: 'merged', isPrimary: false,
+            id: newId(), ticketId: t.id, runId: actor.runId ?? null, type: 'commit', provider: 'git', externalId: recordedSha,
+            url: null, title: `merge ${recordedSha.slice(0, 12)}`, state: 'merged', isPrimary: false,
             metadataJson: { method: info.method ?? null }, createdAt: nowIso(), updatedAt: nowIso(),
           });
         }
-        const delivery = { ...(t.delivery ?? {}), merged: true, mergeCommit: info.mergeCommit ?? landInfo?.head ?? null, method: info.method ?? landInfo?.mode ?? null, archivedAs, landed: landInfo?.detail ?? null };
+        const delivery = { ...(t.delivery ?? {}), merged: true, mergeCommit: recordedSha ?? landInfo?.head ?? null, method: info.method ?? landInfo?.mode ?? null, archivedAs, landed: landInfo?.detail ?? null };
         const updated = touch(t.id, { status: 'done', completedAt: nowIso(), deliveryJson: delivery, unblockJson: null, mergeQueuedAt: null, mergeStartedAt: null });
-        recordActivity(db, ws, actor, 'ticket.merged', 'ticket', t.id, { mergeCommit: info.mergeCommit ?? null, archivedAs, skipped }, t.id);
-        ctx.events.emit('ticket.merged', 'ticket', t.id, { ticketId: t.id, mergeCommit: info.mergeCommit ?? null, archivedAs, skipped });
+        recordActivity(db, ws, actor, 'ticket.merged', 'ticket', t.id, { mergeCommit: recordedSha, archivedAs, skipped }, t.id);
+        ctx.events.emit('ticket.merged', 'ticket', t.id, { ticketId: t.id, mergeCommit: recordedSha, archivedAs, skipped });
         ctx.events.emit('ticket.status', 'ticket', t.id, updated);
         return updated;
       });

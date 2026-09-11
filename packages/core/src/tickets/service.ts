@@ -35,6 +35,43 @@ interface ProjectRow { id: string; slug: string; clonePath: string; openspecEnab
 
 const TERMINAL = new Set<TicketStatus>(TERMINAL_TICKET_STATUSES);
 
+/**
+ * How much of a human comment's body travels in a `ticket_comment` wake payload. Deliberately the
+ * same value as threads' `HUMAN_MESSAGE_WAKE_BODY_CHARS` (VS-242): a human reply on a ticket-bound
+ * thread is the same prose as one on a free thread, so the two paths should cut at the same place.
+ * A comment over this bound is marked `truncated: true` with `bodyLength` set to its real length,
+ * and the full comment stays reachable via `ac_ticket_comments` (VS-246).
+ */
+export const TICKET_COMMENT_WAKE_BODY_CHARS = 8000;
+
+/** Named in a wake reason when its payload was cut, so a worker reading a fragment knows what to call. */
+const FULL_COMMENT_HINT = 'full comment via ac_ticket_comments';
+
+/**
+ * The `body`, `truncated` and `bodyLength` fields for a `ticket_comment` wake payload, mirroring
+ * threads' `wakeBody()` (VS-242): within the bound the body passes through with no new fields, so it
+ * reads exactly as it did before this bound existed; over it the slice is marked with the real length.
+ */
+function commentWakeBody(body: string): { body: string; truncated?: true; bodyLength?: number } {
+  if (body.length <= TICKET_COMMENT_WAKE_BODY_CHARS) return { body };
+  return { body: body.slice(0, TICKET_COMMENT_WAKE_BODY_CHARS), truncated: true, bodyLength: body.length };
+}
+
+/** A wake reason that names the read path when its payload carries only a fragment of the comment. */
+function commentWakeReason(prefix: string, truncated: boolean): string {
+  return truncated ? `${prefix} (truncated; ${FULL_COMMENT_HINT})` : prefix;
+}
+
+/**
+ * A one-line excerpt of a comment body for a prose context (the relaunch note, the no-role wake
+ * reason). Marks the cut explicitly rather than ending silently — `payload.body` is already bounded,
+ * so a second slice here would otherwise be invisible — and names the tool that returns the rest.
+ */
+function commentExcerpt(body: string, max: number): string {
+  if (body.length <= max) return body;
+  return `${body.slice(0, max)}… (truncated; ${FULL_COMMENT_HINT})`;
+}
+
 export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServices): TicketsService {
   const db: Db = ctx.db;
   const log = ctx.log('ticket');
@@ -592,7 +629,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
    * done/cancelled → reopen and bring a worker back on the ticket's branch; a parked or failed
    * worker → relaunch it with the comment; an unassigned ticket → the conductor hears about it.
    */
-  async function followUpWithoutWorker(actor: Actor, ticketId: string, payload: { ticketId: string; commentId: string; body: string }): Promise<void> {
+  async function followUpWithoutWorker(actor: Actor, ticketId: string, payload: { ticketId: string; commentId: string; body: string; truncated?: true; bodyLength?: number }): Promise<void> {
     const t = get(ticketId);
     if (t.workerId) return;
     if (t.status === 'done' || t.status === 'cancelled') {
@@ -601,7 +638,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     const fresh = get(t.id);
     const worker = latestWorkerFor(fresh.id);
     if (worker && worker.status !== 'retired') {
-      await deps().workers.relaunch(actor, worker.id, `The human replied on ${fresh.identifier}: ${payload.body.slice(0, 300)}`);
+      await deps().workers.relaunch(actor, worker.id, `The human replied on ${fresh.identifier}: ${commentExcerpt(payload.body, 300)}`);
       return;
     }
     if (fresh.assigneeRoleId) {
@@ -609,13 +646,13 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       if (fresh.status === 'in_progress' || fresh.status === 'todo' || fresh.status === 'approved' || fresh.status === 'in_review') {
         await deps().workers.spawnForTicket(actor, fresh.id);
         const spawned = get(fresh.id);
-        if (spawned.workerId) wake(spawned.workerId, 'ticket_comment', `new comment on ${fresh.identifier}`, payload);
+        if (spawned.workerId) wake(spawned.workerId, 'ticket_comment', commentWakeReason(`new comment on ${fresh.identifier}`, payload.truncated === true), payload);
       }
       return;
     }
     try {
       const conductor = deps().workers.conductor();
-      wake(conductor.id, 'ticket_comment', `${fresh.identifier} got a reply but has no role: ${payload.body.slice(0, 160)}`, payload);
+      wake(conductor.id, 'ticket_comment', `${fresh.identifier} got a reply but has no role: ${commentExcerpt(payload.body, 160)}`, payload);
     } catch { /* no conductor yet */ }
   }
 
@@ -840,15 +877,16 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         id: newId(), ticketId: t.id, authorKind: actor.kind, authorId: actor.id, runId: actor.runId ?? null,
         body, kind, sourceTrust: trust, createdAt: nowIso(),
       };
+      const wakeBody = commentWakeBody(body);
       return tx(db, () => {
         db.insert('ticket_comments', { ...c });
         recordActivity(db, ws, actor, 'ticket.comment', 'ticket_comment', c.id, { kind }, t.id);
         ctx.events.emit('ticket.comment', 'ticket', t.id, c);
         if (actor.kind === 'human' && t.workerId) {
-          wake(t.workerId, 'ticket_comment', `new comment on ${t.identifier}`, { ticketId: t.id, commentId: c.id, body: body.slice(0, 500) });
+          wake(t.workerId, 'ticket_comment', commentWakeReason(`new comment on ${t.identifier}`, wakeBody.truncated === true), { ticketId: t.id, commentId: c.id, ...wakeBody });
         } else if (actor.kind === 'human' && kind === 'comment') {
           // A reply with nobody listening: reopen a finished ticket, bring a worker back, or tell the conductor.
-          const followUp = { ticketId: t.id, commentId: c.id, body: body.slice(0, 500) };
+          const followUp = { ticketId: t.id, commentId: c.id, ...wakeBody };
           setImmediate(() => { void followUpWithoutWorker(actor, t.id, followUp).catch((e) => log.warn({ err: String(e), ticket: t.identifier }, 'follow-up after a comment failed')); });
         }
         return c;

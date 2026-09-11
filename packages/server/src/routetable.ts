@@ -169,6 +169,13 @@ export const ROUTES: RouteRow[] = [
   { method: 'POST', path: `${W}/push/subscriptions`, tag: 'push', summary: 'Register a web push subscription', auth: 'session', mutating: true },
   { method: 'DELETE', path: `${W}/push/subscriptions/{id}`, tag: 'push', summary: 'Remove a subscription', auth: 'session', mutating: true },
 
+  { method: 'GET', path: `${W}/routines`, tag: 'routines', summary: 'Scheduled tasks (recurring conductor alarms)', auth: 'session' },
+  { method: 'POST', path: `${W}/routines`, tag: 'routines', summary: 'Create a scheduled task', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/routines/{id}`, tag: 'routines', summary: 'One scheduled task', auth: 'session' },
+  { method: 'PATCH', path: `${W}/routines/{id}`, tag: 'routines', summary: 'Update, pause or resume a scheduled task', auth: 'session', mutating: true },
+  { method: 'DELETE', path: `${W}/routines/{id}`, tag: 'routines', summary: 'Remove a scheduled task', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/routines/{id}/usage`, tag: 'routines', summary: 'Spend attributable to a scheduled task; ?window=24h|7d', auth: 'session' },
+
   { method: 'GET', path: `${W}/agent/inbox`, tag: 'agent', summary: 'This run wakes, bundled', auth: 'run' },
   { method: 'GET', path: `${W}/agent/tools`, tag: 'agent', summary: 'Tools this agent may call, with JSON schemas', auth: 'run' },
   { method: 'POST', path: `${W}/agent/tools/{tool}`, tag: 'agent', summary: 'Call one ac_* tool; returns ToolResult', auth: 'run', mutating: true },

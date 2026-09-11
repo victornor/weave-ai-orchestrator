@@ -512,6 +512,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   f.record('run.finalized', { status, liveness, costCents, model }, 'system');
   ctx.events.emit('run.finished', 'run', runId, { agentId: f.agent.id, ticketId: f.agent.ticketId, status, liveness, costCents, summary });
   runState(ctx).active.delete(runId);
+  try { deps().routines.onRunFinalized(f.wakes); } catch { /* routines service unavailable */ }
 
   // An authentication failure is not this turn's problem but the runtime's: one credential is shared
   // per host, so retrying can only fail again and parking would raise a card per worker for one

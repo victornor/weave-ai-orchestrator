@@ -741,6 +741,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
           try { stalledWorkerScan(); } catch (e) { log.error({ err: String(e) }, 'stalled worker scan failed'); }
         }
         try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }
+        try { deps().routines.fireDue(); } catch { /* routines service unavailable */ }
         try { conductorDigest(); } catch (e) { log.error({ err: String(e) }, 'digest failed'); }
         if (due('supervisor:curation_at', CURATION_EVERY_MS)) await curationPass().catch((e) => log.error({ err: String(e) }, 'curation pass failed'));
         if (due('supervisor:knowledge_health_at', KNOWLEDGE_HEALTH_EVERY_MS)) await knowledgeHealthPass().catch((e) => log.error({ err: String(e) }, 'knowledge health pass failed'));

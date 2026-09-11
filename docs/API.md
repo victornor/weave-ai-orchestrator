@@ -42,6 +42,13 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `ac_session` httpOn
 `POST /channels/telegram/pending/:externalUserId/approve` → `{ allowedUserIds: number[] }` — adds the id to the allowlist, clears its pending row, and restarts the Telegram channel so their next message is accepted, no daemon restart. Approving an id already on the allowlist is a no-op that still returns the current list.
 `POST /channels/telegram/allow-all/disable` → `{ ok: true }` — turns off a workspace's `allowAll` grandfathering (VS-125) in favour of the allowlist, and restarts the channel. There is no route that turns `allowAll` on; it can only ever be true for a workspace that already had it set before VS-135.
 
+### Scheduled tasks (routines)
+Human-facing name is **Scheduled tasks**; HTTP/CLI/MCP identifiers stay `routines` / `routine` (VS-220). Recurring alarms that wake the conductor with an instruction via the existing wake queue. Default action is `report` (look, then reply); `file_work` is the only filing licence. Cap `maxTicketsPerFire` ≤ 8 (defaults 0 / 3).
+
+`GET /routines` → `{ items: [Routine] }` · `POST /routines` `{ name, trigger, instruction, action?, maxTicketsPerFire?, projectId? }` → **201** `Routine`. `trigger` is `{ kind: 'schedule', timezone?, daily: { hour, minute } }` or `{ kind: 'schedule', timezone?, everyMinutes }` (`everyMinutes` ≥ 15). Webhook and cron are `validation` 400. Timezone defaults to the host IANA zone.
+`GET /routines/:id` → `Routine` · `PATCH /routines/:id` `{ name?, trigger?, instruction?, action?, maxTicketsPerFire?, projectId?, status?: 'active'|'paused' }` — resume (`status: 'active'`) arms the next future slot · `DELETE /routines/:id` → `{ ok: true }`
+`GET /routines/:id/usage?window=24h|7d` → `{ tokensIn, tokensOut, tokensCached, runs, costCents, costReportedCents, window }` — conductor-turn spend for that routine's fires plus originated-ticket spend. Session auth; run tokens cannot call these routes.
+
 ### Projects
 `GET /projects` · `POST /projects` `{ url, id?, defaultBranch?, landingBranch?, maxWorkers?, setupCommand?, policies? }` (strict: a project carries no runtime or model, and no top-level `autoMerge`; `policies.autoMergeDefault` (VS-153) is the project's auto-merge default, not the ticket-level flag; `landingBranch` (VS-119) is the branch its tickets' work actually lands on when it differs from `defaultBranch` — Fernwood's is `edge`, promoted to `main` separately by a human — and falls back to `defaultBranch` when unset) → **202** `{ project, jobId }` · `GET /projects/:id` · `PATCH /projects/:id` · `DELETE /projects/:id` · `POST /projects/:id/fetch`
 

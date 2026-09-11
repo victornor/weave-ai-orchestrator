@@ -11,6 +11,7 @@ import {
   COMMON_TOOLS, CONDUCTOR_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
+  ROUTINE_ACTIONS, ROUTINE_STATUSES,
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock,
 } from '@agent-conductor/shared';
@@ -236,7 +237,7 @@ export const TOOLS: ToolDef[] = [
     description: 'Everything that woke you for this turn, bundled: human messages, ticket events, answered decisions and steering from the conductor. Call this first; it is cheap and it is the only place new instructions arrive mid-life.',
     handler: (ctx) => {
       const wakes = bundledWakes(ctx);
-      const bucket = { messages: [] as unknown[], tickets: [] as unknown[], decisions: [] as unknown[], steering: [] as unknown[], other: [] as unknown[] };
+      const bucket = { messages: [] as unknown[], tickets: [] as unknown[], decisions: [] as unknown[], steering: [] as unknown[], routines: [] as unknown[], other: [] as unknown[] };
       // Image bytes for any attachment on a bundled human_message wake, collected across every
       // entry so one ac_inbox call surfaces every image the conductor was woken with, not just the
       // first (openspec design.md — Decision 5).
@@ -256,8 +257,13 @@ export const TOOLS: ToolDef[] = [
             bucket.decisions.push(entry); break;
           }
           case 'conductor_request': case 'mention': bucket.steering.push(entry); break;
+          case 'routine': break;
           default: bucket.other.push(entry);
         }
+      }
+      for (const w of flattenWakes(wakes)) {
+        if (w.source !== 'routine') continue;
+        bucket.routines.push({ source: w.source, reason: w.reason, payload: w.payload });
       }
       const result = { runId: ctx.claims.runId, agentId: ctx.claims.agentId, agentKind: ctx.claims.agentKind, ticketId: ctx.claims.ticketId, ...bucket };
       return images.length ? withMcpContent(result, images) : result;
@@ -642,6 +648,45 @@ export const TOOLS: ToolDef[] = [
     name: 'ac_usage', scope: 'conductor', input: UsageSchema,
     description: 'Token and cost usage for a scope and window (workspace, project:<id>, role:<id>, worker:<id>, ticket:<id>, model:<id>). Costs are estimates unless the runtime reported them.',
     handler: (ctx, i) => svc(ctx).usage.series(i),
+  },
+  {
+    name: 'ac_routine_list', scope: 'conductor', input: z.object({}),
+    description: 'Scheduled tasks (recurring conductor alarms). Human-facing name is Scheduled tasks; identifiers stay routine.',
+    handler: (ctx) => ({ items: svc(ctx).routines.list() }),
+  },
+  {
+    name: 'ac_routine_create', scope: 'conductor', input: z.object({
+      name: z.string().min(1),
+      trigger: z.record(z.string(), z.unknown()),
+      instruction: z.string().min(1),
+      action: z.enum(ROUTINE_ACTIONS).optional(),
+      maxTicketsPerFire: z.number().int().optional(),
+      projectId: z.string().nullish(),
+    }),
+    description: 'Create a scheduled task that wakes you with an instruction. Default action is report (look, then reply to captain). file_work is the only filing licence. Do not invent routines unless captain asked.',
+    handler: (ctx, i) => svc(ctx).routines.create(ctx.actor, i),
+  },
+  {
+    name: 'ac_routine_update', scope: 'conductor', input: z.object({
+      id: z.string().min(1),
+      name: z.string().min(1).optional(),
+      trigger: z.record(z.string(), z.unknown()).optional(),
+      instruction: z.string().min(1).optional(),
+      action: z.enum(ROUTINE_ACTIONS).optional(),
+      maxTicketsPerFire: z.number().int().optional(),
+      projectId: z.string().nullish(),
+      status: z.enum(ROUTINE_STATUSES).optional(),
+    }),
+    description: 'Update, pause or resume a scheduled task. PATCH status paused|active; resume arms the next future slot.',
+    handler: (ctx, i) => {
+      const { id, ...patch } = i;
+      return svc(ctx).routines.update(ctx.actor, id, patch);
+    },
+  },
+  {
+    name: 'ac_routine_remove', scope: 'conductor', input: z.object({ id: z.string().min(1) }),
+    description: 'Remove a scheduled task. It will not fire again.',
+    handler: (ctx, i) => { svc(ctx).routines.remove(ctx.actor, i.id); return { ok: true }; },
   },
   {
     name: 'ac_run_inspect', scope: 'conductor', input: RunInspectSchema,

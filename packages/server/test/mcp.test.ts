@@ -36,6 +36,7 @@ describe('MCP endpoint', () => {
     expect(names).toContain('ac_ticket_transition');
     expect(names).toContain('ac_ticket_create');       // WORKER_ONLY_TOOLS
     expect(names).not.toContain('ac_role_hire');        // conductor only
+    expect(names).not.toContain('ac_routine_create');
     expect(names).not.toContain('ac_human_send');
     expect(names).not.toContain('ac_run_inspect');      // no worker reads another worker's transcript
     expect(names).not.toContain('ac_run_list');
@@ -53,6 +54,8 @@ describe('MCP endpoint', () => {
     expect(names).toContain('ac_worker_models');
     expect(names).toContain('ac_run_inspect');
     expect(names).toContain('ac_run_list');
+    expect(names).toContain('ac_routine_list');
+    expect(names).toContain('ac_routine_create');
     await client.close();
   });
 
@@ -444,5 +447,50 @@ describe('MCP list-result cap (VS-161)', () => {
     const text = encodeMcpToolResult('ac_ticket_get', huge);
     expect(text.length).toBeGreaterThan(MCP_LIST_RESULT_CAP);
     expect(text).not.toContain('"truncated":true');
+  });
+});
+
+describe('scheduled task MCP (VS-220)', () => {
+  const TRIGGER = { kind: 'schedule', timezone: 'UTC', everyMinutes: 15 };
+  const CREATE = { name: 'Morning review', trigger: TRIGGER, instruction: 'Look at incidents' };
+
+  it('lets the conductor create a row', async () => {
+    const { client } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const res = await client.callTool({ name: 'ac_routine_create', arguments: CREATE });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.ok).toBe(true);
+    expect(payload.data).toMatchObject({ name: 'Morning review', template: { action: 'report', instruction: 'Look at incidents' } });
+    const listed = await client.callTool({ name: 'ac_routine_list', arguments: {} });
+    const list = JSON.parse((listed.content as Array<{ text: string }>)[0]!.text);
+    expect(list.data.items).toHaveLength(1);
+    await client.close();
+  });
+
+  it('rejects a worker call with no row stored', async () => {
+    const { client } = await connect();
+    const res = await client.callTool({ name: 'ac_routine_create', arguments: CREATE });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.ok).toBe(false);
+    expect(payload.error.code).toBe('forbidden');
+    expect(harness!.runtime.services.routines.list()).toEqual([]);
+    await client.close();
+  });
+
+  it('ac_inbox lists a routine fire under routines, not other', async () => {
+    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    h.impls.wake!['listForAgent'] = () => [wakeup({
+      id: 'wk_1',
+      source: 'routine',
+      reason: 'scheduled task: Morning review',
+      payload: { routineId: 'rt_1', name: 'Morning review', instruction: 'Look at incidents', action: 'report' },
+    })];
+    const res = await client.callTool({ name: 'ac_inbox', arguments: {} });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.data.routines).toEqual([expect.objectContaining({
+      source: 'routine',
+      payload: expect.objectContaining({ instruction: 'Look at incidents' }),
+    })]);
+    expect(payload.data.other ?? []).not.toEqual(expect.arrayContaining([expect.objectContaining({ source: 'routine' })]));
+    await client.close();
   });
 });

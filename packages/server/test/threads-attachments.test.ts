@@ -38,13 +38,7 @@ function withRealThreads(options: Parameters<typeof makeHarness>[0] = {}): { h: 
   const attachmentsDir = mkdtempSync(join(tmpdir(), 'ac-attachments-route-'));
   attachmentsDirs.push(attachmentsDir);
   (h.runtime.ctx.paths as { attachments: string }).attachments = attachmentsDir;
-  // `threads.bindOrGet` addresses every new thread's agent as "the workspace's conductor" — the
-  // fake harness's db has none by default (it normally never needs one; `threads` is stubbed).
-  const now = nowIso();
-  h.db.insert('agents', {
-    id: newId(), workspaceId: h.runtime.id, kind: 'conductor', name: 'Conductor', runtimeId: 'claude',
-    status: 'active', homePath: '/tmp/conductor', turnEpoch: 0, turnCount: 0, spawnedBy: 'system', briefRevision: 1, createdAt: now, updatedAt: now,
-  });
+  // makeHarness seeds a conductor agent (`ag_conductor`); threads.bindOrGet addresses that row.
   h.runtime.services.threads = createThreadsService(h.runtime.ctx, () => h.runtime.services);
   return { h, fetch: (path, init) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433${path}`, init)) };
 }

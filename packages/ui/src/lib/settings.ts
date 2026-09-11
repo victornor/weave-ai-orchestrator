@@ -24,6 +24,7 @@ export const SETTINGS_SECTIONS = [
   { key: 'models', label: 'Models', area: 'workspace' },
   { key: 'channels', label: 'Channels', area: 'workspace' },
   { key: 'presentation', label: 'Presentation', area: 'workspace' },
+  { key: 'scheduled', label: 'Scheduled tasks', area: 'workspace' },
   { key: 'updates', label: 'Updates', area: 'daemon' },
   { key: 'daemon-models', label: 'Models', area: 'daemon' },
   { key: 'dictation', label: 'Dictation', area: 'daemon' },

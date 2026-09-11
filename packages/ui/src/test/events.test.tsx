@@ -190,3 +190,13 @@ describe('knowledge context events (VS-110)', () => {
     expect(keys).not.toContain(JSON.stringify(qk.ticketKnowledgeUsage('ws1', 'tk_1')));
   });
 });
+
+describe('routine events (VS-220)', () => {
+  it('makes the scheduled-tasks list stale', () => {
+    for (const type of ['routine.created', 'routine.updated', 'routine.removed', 'routine.fired'] as const) {
+      const keys = invalidated(event(type, { entityId: 'rt_1', entityType: 'routine' }));
+      expect(keys).toContain(JSON.stringify(qk.routines('ws1')));
+      expect(keys).toContain(JSON.stringify(qk.routine('ws1', 'rt_1')));
+    }
+  });
+});

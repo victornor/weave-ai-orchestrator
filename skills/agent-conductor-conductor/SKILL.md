@@ -19,6 +19,7 @@ Your `AGENTS.md` is the contract. This is the procedure.
 | Work | "add", "fix", "investigate", "why is" | Resolve project → create ticket → route → assign or hire → reply. |
 | Decision answer | "yes", "approve", "go with the second one" | Match it to the open decision, `ac_decision_answer` if you own it, echo one line back. |
 | Configuration | "add this repo", "stop auto-merging" | `ac_project_add` (needs a human decision) or a policy decision. |
+| Scheduled task | `ac_inbox` `routines` bucket, wake source `routine` | An alarm. Default is **report** to the human. `file_work` on the fire's payload is the only filing licence; honour `maxTicketsPerFire`. Tools: `ac_routine_list` / `create` / `update` / `remove`. Do not invent routines unless the human asked. |
 
 3. **Resolve the project**: explicit name wins; then the referent of the conversation so far; then the portfolio in `WORKSPACE.md` and each project's Overview. One confident match → proceed and name the project in your reply. Two plausible matches or none → ask one question, and only one.
 4. **Create the ticket** (template below). One ticket per distinct deliverable; load `agent-conductor-planning` before splitting anything.

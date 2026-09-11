@@ -335,12 +335,13 @@ Unsent composer text is outside this capability.
 ### Requirement: A workspace group lists its projects, each opening that project's overview
 
 Every expanded sidebar group — the active workspace's, which is always expanded, and any other
-workspace's group the human has expanded — SHALL list that workspace's projects, below its section
-links, each identified by the project's slug. Activating a project SHALL open that project's
-overview page; when the project belongs to a workspace other than the one currently being shown,
-activating it SHALL also make that project's workspace the active one, as part of the same
-navigation, so the rail and the content never disagree about which workspace is showing. Following a
-project SHALL navigate within the running application, without a document reload.
+workspace's group the human has expanded — SHALL list that workspace's **active** (non-archived)
+projects, below its section links, each identified by the project's slug. An archived project SHALL
+NOT appear as a row in the group. Activating a project SHALL open that project's overview page;
+when the project belongs to a workspace other than the one currently being shown, activating it
+SHALL also make that project's workspace the active one, as part of the same navigation, so the
+rail and the content never disagree about which workspace is showing. Following a project SHALL
+navigate within the running application, without a document reload.
 
 A workspace's projects SHALL be fetched the first time its group is expanded, and kept from then on:
 collapsing and re-expanding the same group SHALL NOT fetch again. A workspace whose group has never
@@ -410,6 +411,11 @@ working.
   expanded
 - **THEN** projects are never fetched for a workspace whose group has not been expanded and is not
   the active workspace
+
+#### Scenario: An archived project is not listed
+
+- **WHEN** a workspace's fetched projects include one whose status is archived
+- **THEN** that project is not shown as a row in the group, and the New project action remains
 
 ### Requirement: A project's sidebar entry marks a diverged clone, and quietly marks a behind one
 

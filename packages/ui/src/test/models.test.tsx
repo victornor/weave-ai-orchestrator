@@ -437,3 +437,79 @@ describe('Settings — the add-option editor enforces the catalog rules before s
     expect(state.saved).toHaveLength(0);
   });
 });
+
+describe('Settings — an existing worker option row shows its thinking level (VS-252)', () => {
+  const fableAndOpus = [
+    { id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: ['low', 'medium', 'high'] },
+    { id: 'claude-opus-5', label: 'Opus 5', efforts: ['low'] },
+  ];
+
+  it('shows the stored effort and saves a change, keeping id and description', () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: 'claude-fable-5-1', effort: 'high' }] };
+    state.runtimeModels = fableAndOpus;
+    openModels();
+    const select = screen.getByLabelText('tier thinking level');
+    expect(select.tagName).toBe('SELECT');
+    expect(select).toHaveValue('high');
+    expect(within(select).getByRole('option', { name: 'default (unset)' })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: 'low' } });
+    expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: 'claude-fable-5-1', effort: 'low' },
+    ]);
+  });
+
+  it('renders an option with no effort as unset rather than implying one', () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'No effort.', runtime: 'claude', model: 'claude-fable-5-1' }] };
+    state.runtimeModels = fableAndOpus;
+    openModels();
+    const select = screen.getByLabelText('tier thinking level');
+    expect(select).toHaveValue('');
+    expect(within(select).getByRole('option', { name: 'default (unset)' })).toBeInTheDocument();
+  });
+
+  it('hides the control when the option model reports no efforts', () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'No thinking.', runtime: 'claude', model: 'claude-opus-5' }] };
+    state.runtimeModels = [{ id: 'claude-opus-5', label: 'Opus 5', efforts: [] }];
+    openModels();
+    expect(screen.queryByLabelText('tier thinking level')).not.toBeInTheDocument();
+  });
+
+  it('offers free text when the option model is not listed', () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'Unlisted.', runtime: 'claude', model: 'a-model-nobody-lists', effort: 'high' }] };
+    state.runtimeModels = [{ id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: ['low', 'high'] }];
+    openModels();
+    const box = screen.getByLabelText('tier thinking level');
+    expect(box.tagName).toBe('INPUT');
+    expect(box).toHaveValue('high');
+  });
+
+  it('shows no thinking-level control while the option has no runtime', () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'quick', description: 'Fastest.', runtime: null, model: null }] };
+    state.runtimeModels = fableAndOpus;
+    openModels();
+    expect(screen.getByText(/quick — Fastest/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('quick thinking level')).not.toBeInTheDocument();
+  });
+
+  it('announces an effort a model change discards, and stores it cleared', () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: 'claude-fable-5-1', effort: 'high' }] };
+    state.runtimeModels = fableAndOpus;
+    openModels();
+    fireEvent.change(screen.getByLabelText('tier model'), { target: { value: 'claude-opus-5' } });
+    expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: 'claude-opus-5', effort: undefined },
+    ]);
+    expect(screen.getByText(/“high” was cleared/)).toBeInTheDocument();
+  });
+
+  it('stays quiet when a model change keeps the effort', () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: 'claude-fable-5-1', effort: 'low' }] };
+    state.runtimeModels = fableAndOpus;
+    openModels();
+    fireEvent.change(screen.getByLabelText('tier model'), { target: { value: 'claude-opus-5' } });
+    expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: 'claude-opus-5', effort: 'low' },
+    ]);
+    expect(screen.queryByText(/was cleared/)).not.toBeInTheDocument();
+  });
+});

@@ -840,6 +840,16 @@ function effortsForModel(model: string | null, known: T.RuntimeModel[], custom: 
   return known.find((m) => m.id === model)?.efforts;
 }
 
+/** The one rule every thinking-level control uses (VS-252): a non-empty reported list is a picker,
+ * an empty list means the model takes none so the control hides, and an unknown list — or a stored
+ * effort the list does not contain — is free text. `efforts` is undefined when the model is custom
+ * or unset, which shares the free-text branch. */
+function effortModeFor(efforts: string[] | undefined, stored: string | undefined): 'picker' | 'hidden' | 'freetext' {
+  if (efforts && efforts.length > 0) return !stored || efforts.includes(stored) ? 'picker' : 'freetext';
+  if (efforts && efforts.length === 0) return 'hidden';
+  return 'freetext';
+}
+
 /** Drop a stored effort the new model does not list; keep it when the new model is unknown (free text). */
 function settingAfterModelChange(setting: T.ModelSetting, model: string | null, known: T.RuntimeModel[]): T.ModelSetting {
   const custom = isCustomModel(model, known);
@@ -867,11 +877,7 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
   const [freeText, setFreeText] = useState(false);
   const custom = freeText || isCustomModel(setting.model, known);
   const efforts = effortsForModel(setting.model, known, custom);
-  const effortInList = Boolean(setting.effort && efforts && efforts.includes(setting.effort));
-  const effortMode: 'picker' | 'hidden' | 'freetext' =
-    efforts && efforts.length > 0 && (effortInList || !setting.effort) ? 'picker'
-      : efforts && efforts.length === 0 ? 'hidden'
-        : 'freetext';
+  const effortMode = effortModeFor(efforts, setting.effort);
   const modelId = useCommittableField({
     value: setting.model ?? '',
     onCommit: async (raw) => {
@@ -1008,6 +1014,11 @@ function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave 
   const known = models.data ?? [];
   const [freeText, setFreeText] = useState(false);
   const custom = freeText || isCustomModel(option.model, known);
+  const efforts = effortsForModel(option.model, known, custom);
+  const effortMode = effortModeFor(efforts, option.effort);
+  // A model change can discard the stored effort; the notice names what went, and clears on the
+  // next model change (VS-252).
+  const [discarded, setDiscarded] = useState<string | null>(null);
   const patch = (next: T.WorkerModelOption): void => {
     onSave({ ...current, workerOptions: options.map((x) => x.id === option.id ? next : x) });
   };
@@ -1055,6 +1066,7 @@ function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave 
             setFreeText(false);
             const model = e.target.value === '' ? null : e.target.value;
             const next = settingAfterModelChange({ runtime: option.runtime ?? '', model: option.model, effort: option.effort }, model, known);
+            setDiscarded(option.effort && option.effort !== next.effort ? option.effort : null);
             patch({ ...option, model: next.model, effort: next.effort });
           }}
         >
@@ -1075,6 +1087,44 @@ function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave 
             onChange={(e) => patch({ ...option, model: e.target.value })}
           />
         </Field>
+      ) : null}
+      {configured && effortMode === 'picker' ? (
+        <Field label="Thinking level">
+          <select
+            className={cx(inputCx, 'ac-mono')}
+            aria-label={`${option.id} thinking level`}
+            value={option.effort ?? ''}
+            disabled={disabled}
+            onChange={(e) => {
+              setDiscarded(null);
+              patch({ ...option, effort: e.target.value === '' ? undefined : e.target.value });
+            }}
+          >
+            <option value="">default (unset)</option>
+            {efforts!.map((level) => (
+              <option key={level} value={level}>{level}</option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
+      {configured && effortMode === 'freetext' ? (
+        <Field label="Thinking level" hint="This model does not report which levels it accepts.">
+          <input
+            className={cx(inputCx, 'ac-mono')}
+            aria-label={`${option.id} thinking level`}
+            value={option.effort ?? ''}
+            disabled={disabled}
+            onChange={(e) => {
+              setDiscarded(null);
+              patch({ ...option, effort: e.target.value.trim() === '' ? undefined : e.target.value });
+            }}
+          />
+        </Field>
+      ) : null}
+      {configured && discarded ? (
+        <p className="text-micro text-needs-you" role="status">
+          Thinking level “{discarded}” was cleared — the new model does not accept it.
+        </p>
       ) : null}
     </div>
   );
@@ -1097,10 +1147,7 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
   const knownOptionModels = optionModels.data ?? [];
   const customModel = freeText || isCustomModel(model, knownOptionModels);
   const optionEfforts = effortsForModel(model, knownOptionModels, customModel);
-  const optionEffortMode: 'picker' | 'hidden' | 'freetext' =
-    optionEfforts && optionEfforts.length > 0 ? 'picker'
-      : optionEfforts && optionEfforts.length === 0 ? 'hidden'
-        : 'freetext';
+  const optionEffortMode = effortModeFor(optionEfforts, effort);
 
   // The entry exactly as add() would store it, checked against the same schemas the daemon parses
   // (VS-212) — the limits stay derived from shared, never restated here.

@@ -25,6 +25,46 @@ describe('childEnv', () => {
     expect(env['PATH']).toBe(process.env['PATH']);
     expect(env['CLAUDE_CONFIG_DIR']).toBe('/runtimes/claude');
     expect(env['AC_LAUNCH_FIXTURE']).toBe('from-the-overlay');
+    expect(env['MISE_DATA_DIR']).toBe(process.env['MISE_DATA_DIR']);
+    expect(env['MISE_CONFIG_DIR']).toBe(process.env['MISE_CONFIG_DIR']);
+    expect(env['MISE_CACHE_DIR']).toBe(process.env['MISE_CACHE_DIR']);
+  });
+
+  it('pins host mise roots when the overlay redirects HOME and XDG (VS-221)', () => {
+    const configHome = join(home, 'runtime');
+    mkdirSync(configHome);
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('XDG_DATA_HOME', join(home, '.local', 'share'));
+    vi.stubEnv('XDG_CONFIG_HOME', join(home, '.config'));
+    vi.stubEnv('XDG_CACHE_HOME', join(home, '.cache'));
+    const env = childEnv({
+      HOME: configHome,
+      XDG_DATA_HOME: configHome,
+      XDG_CONFIG_HOME: configHome,
+    });
+    expect(env['HOME']).toBe(configHome);
+    expect(env['XDG_DATA_HOME']).toBe(configHome);
+    expect(env['XDG_CONFIG_HOME']).toBe(configHome);
+    expect(env['MISE_DATA_DIR']).toBe(join(home, '.local', 'share', 'mise'));
+    expect(env['MISE_CONFIG_DIR']).toBe(join(home, '.config', 'mise'));
+    expect(env['MISE_CACHE_DIR']).toBe(join(home, '.cache', 'mise'));
+  });
+
+  it('keeps an explicit overlay MISE_DATA_DIR when HOME is redirected', () => {
+    const configHome = join(home, 'runtime');
+    mkdirSync(configHome);
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('XDG_DATA_HOME', join(home, '.local', 'share'));
+    vi.stubEnv('XDG_CONFIG_HOME', join(home, '.config'));
+    vi.stubEnv('XDG_CACHE_HOME', join(home, '.cache'));
+    const env = childEnv({
+      HOME: configHome,
+      MISE_DATA_DIR: '/isolated/mise',
+    });
+    expect(env['HOME']).toBe(configHome);
+    expect(env['MISE_DATA_DIR']).toBe('/isolated/mise');
+    expect(env['MISE_CONFIG_DIR']).toBe(join(home, '.config', 'mise'));
+    expect(env['MISE_CACHE_DIR']).toBe(join(home, '.cache', 'mise'));
   });
 });
 

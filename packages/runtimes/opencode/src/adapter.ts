@@ -4,7 +4,7 @@ import type {
   AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
   RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@agent-conductor/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, spawnLines, which, writeFiles } from '@agent-conductor/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, which, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
 import { describeOpenCodeAccount } from './account.js';
 import { buildArgs, CONFIG_RELATIVE_PATH, opencodeConfig } from './args.js';
@@ -109,11 +109,12 @@ export const adapter: RuntimeAdapter = {
 
     const parser = createOpenCodeParser({ resumed: built.resumed });
     let seq = 0;
+    const launch = launchCommand(built.cmd, built.env);
     const run = spawnLines({
-      cmd: built.cmd,
+      cmd: launch.cmd,
       args: built.args,
       cwd: input.cwd,
-      env: { ...(process.env as Record<string, string>), ...built.env },
+      env: launch.env,
       stdin: null,
       timeoutMs: input.limits.timeoutMs,
       onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),

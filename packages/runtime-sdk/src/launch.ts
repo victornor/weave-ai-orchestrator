@@ -35,11 +35,33 @@ function executable(path: string): boolean {
   } catch { return false; }
 }
 
+/**
+ * When an adapter overlay redirects HOME or the XDG dirs (OpenCode skill isolation), mise would
+ * follow them and host shims such as `openspec` die. Pin mise to the daemon process's own roots.
+ * Overlay HOME/XDG stay; an explicit overlay `MISE_*` still wins (VS-221).
+ */
+function pinHostMiseRoots(env: Record<string, string>, daemon: Record<string, string>): void {
+  if (
+    env['HOME'] === daemon['HOME']
+    && env['XDG_DATA_HOME'] === daemon['XDG_DATA_HOME']
+    && env['XDG_CONFIG_HOME'] === daemon['XDG_CONFIG_HOME']
+  ) return;
+  const hostHome = daemon['HOME'] ?? homedir();
+  env['MISE_DATA_DIR'] ??= daemon['MISE_DATA_DIR']
+    ?? join(daemon['XDG_DATA_HOME'] ?? join(hostHome, '.local', 'share'), 'mise');
+  env['MISE_CONFIG_DIR'] ??= daemon['MISE_CONFIG_DIR']
+    ?? join(daemon['XDG_CONFIG_HOME'] ?? join(hostHome, '.config'), 'mise');
+  env['MISE_CACHE_DIR'] ??= daemon['MISE_CACHE_DIR']
+    ?? join(daemon['XDG_CACHE_HOME'] ?? join(hostHome, '.cache'), 'mise');
+}
+
 /** The daemon's own environment with an adapter's overlay on top; entries it does not set are dropped. */
 export function childEnv(overlay: Record<string, string> = {}): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') env[k] = v;
-  return { ...env, ...overlay };
+  const daemon: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') daemon[k] = v;
+  const env = { ...daemon, ...overlay };
+  pinHostMiseRoots(env, daemon);
+  return env;
 }
 
 export interface Launch {

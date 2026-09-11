@@ -10,12 +10,17 @@ TBD - created by archiving change vs-77-model-selection-is-exactly-two-per-works
 Before a turn is launched the system SHALL resolve the runtime, the model and the effort it will
 use from exactly one source: the effective conductor setting for a turn of the conductor; for a
 turn of a worker, the worker option named by that worker's ticket when that option still exists in
-the effective catalog, otherwise the effective workers setting. The effective setting or catalog
-SHALL be the daemon overlay when that overlay is filled, otherwise the workspace's stored value.
-It SHALL NOT read a runtime, a model or an effort from the role, the project or the agent row to
-make that choice, and there SHALL be no fallback chain behind that source other than letting the
-runtime choose the model when the resolved setting names none, and falling back to the effective
-workers setting when the ticket names an option that is no longer in the effective catalog.
+the effective catalog and has a runtime chosen, otherwise the effective workers setting. The
+effective setting or catalog SHALL be the daemon overlay when that overlay is filled, otherwise
+the workspace's stored value. It SHALL NOT read a runtime, a model or an effort from the role, the
+project or the agent row to make that choice, and there SHALL be no fallback chain behind that
+source other than letting the runtime choose the model when the resolved setting names none, and
+falling back to the effective workers setting when the ticket names an option that is no longer in
+the effective catalog.
+
+A named option that still exists but has no runtime SHALL NOT fall back to the workers setting
+and SHALL NOT launch any runtime. That turn SHALL fail as specified in
+`model-selection/unconfigured-option`.
 
 A resolved runtime that is not registered on this daemon SHALL fail the turn with the error the
 system already uses for an unreachable runtime, naming the runtime, rather than falling back to
@@ -30,7 +35,7 @@ another one.
 #### Scenario: A worker runs on its ticket's named option
 
 - **WHEN** a worker's turn is launched and its ticket names a worker option that still exists in
-  the catalog
+  the catalog and has a runtime chosen
 - **THEN** it is launched on that option's runtime, model and effort, not the workers setting
 
 #### Scenario: The conductor runs on the conductor setting

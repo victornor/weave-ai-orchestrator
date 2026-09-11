@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-11
+goal: "Workers cannot run host CLIs: redirected HOME breaks every mise shim"

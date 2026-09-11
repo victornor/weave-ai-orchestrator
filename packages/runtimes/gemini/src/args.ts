@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { BuiltCommand, McpServerConfig, TurnInput } from '@agent-conductor/runtime-sdk';
+import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, TurnInput } from '@agent-conductor/runtime-sdk';
 import { asGeminiSession, isUuid } from './session.js';
 
 export const SETTINGS_RELATIVE_PATH = '.gemini/settings.json';
@@ -70,4 +70,19 @@ export function buildArgs(input: TurnInput, opts: GeminiBuildOpts): GeminiBuiltC
   args.push('-p', promptArg);
 
   return { cmd: 'gemini', args, stdin, env, files, sessionId, resumed: Boolean(prev) };
+}
+
+/**
+ * VS-249: the bare interactive `gemini --resume` invocation — drops the headless `-o stream-json
+ * --skip-trust -p <prompt>` flags `buildArgs` above always sets, reusing the same `--resume`/
+ * `--include-directories`/`GEMINI_CLI_HOME` facts so it cannot drift from the daemon's own resume.
+ */
+export function resumeCommand(input: ResumeCommandInput): ResumeCommand {
+  const ref = asGeminiSession(input.session);
+  const args: string[] = ['--resume', ref?.sessionId ?? ''];
+  if (input.worktreePath && !input.worktreePath.startsWith(input.cwd)) args.push('--include-directories', input.worktreePath);
+  if (input.model) args.push('-m', input.model);
+  const env: Record<string, string> = {};
+  if (input.configHome) env['GEMINI_CLI_HOME'] = input.configHome;
+  return { cmd: 'gemini', args, env };
 }

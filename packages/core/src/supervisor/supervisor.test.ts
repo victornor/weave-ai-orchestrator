@@ -751,6 +751,126 @@ describe('supervisor idle interactive sessions (VS-101)', () => {
   });
 });
 
+describe('supervisor abandoned handover sweep (VS-249)', () => {
+  let h: TestHarness;
+  let supervisor: Supervisor;
+  let comment: ReturnType<typeof vi.fn>;
+
+  function configHomeFor(runtimeId: string): string {
+    const dir = join(h.ctx.paths.runtimesHome, runtimeId);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  function seedHold(over: Record<string, unknown> = {}): { agentId: string; holdId: string } {
+    const agentId = h.addWorker(null, { runtimeId: 'fake', status: 'paused', worktreePath: null });
+    const holdId = newId();
+    const now = nowIso();
+    h.db.insert('agent_handovers', {
+      id: holdId, agentId, ticketId: null, runtimeId: 'fake', sessionRefJson: { sessionId: 'sess-1' },
+      worktreeHead: null, worktreeBranch: null, startedAt: now, startedBy: 'victor', status: 'active',
+      lastActivitySignal: null, lastActivityAt: now, createdAt: now, updatedAt: now, ...over,
+    });
+    return { agentId, holdId };
+  }
+
+  beforeEach(() => {
+    h = makeHarness();
+    h.services.wake = fakeWake() as never;
+    comment = vi.fn(() => ({ id: 'c1' }));
+    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }), cancel: vi.fn() } as never;
+    h.services.tickets = { livenessViolations: () => [], comment } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
+    h.ctx.config.defaults.handoverAbandonTimeoutMinutes = 120;
+    h.ctx.config.defaults.handoverQuietMinutes = 30;
+    supervisor = createSupervisor(h.ctx, h.deps);
+  });
+  afterEach(() => { supervisor.stop(); h.cleanup(); });
+
+  it('closes a never-touched hold once past the abandon timeout, with the never-active note', async () => {
+    configHomeFor('fake');
+    const { agentId, holdId } = seedHold({ startedAt: new Date(Date.now() - 121 * 60_000).toISOString(), lastActivityAt: new Date(Date.now() - 121 * 60_000).toISOString() });
+    await supervisor.tick();
+
+    expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [agentId])!.status).toBe('active');
+    const hold = h.db.get<{ status: string; note: string }>('SELECT status, note FROM agent_handovers WHERE id = ?', [holdId])!;
+    expect(hold.status).toBe('abandoned');
+    expect(hold.note).toMatch(/no session activity was ever detected/);
+  });
+
+  it('leaves a hold past the abandon timeout open when the activity signal changed this tick', async () => {
+    const dir = configHomeFor('fake');
+    const { agentId, holdId } = seedHold({ startedAt: new Date(Date.now() - 121 * 60_000).toISOString(), lastActivityAt: new Date(Date.now() - 121 * 60_000).toISOString(), lastActivitySignal: null });
+    writeFileSync(join(dir, 'session.jsonl'), '{"a":1}\n');
+
+    await supervisor.tick();
+
+    expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [agentId])!.status).toBe('paused');
+    const hold = h.db.get<{ status: string; lastActivitySignal: string | null }>('SELECT status, last_activity_signal AS lastActivitySignal FROM agent_handovers WHERE id = ?', [holdId])!;
+    expect(hold.status).toBe('active');
+    expect(hold.lastActivitySignal).not.toBeNull();
+  });
+
+  it('closes a hold whose activity stopped handoverQuietMinutes ago, with the activity-then-quiet note', async () => {
+    const dir = configHomeFor('fake');
+    writeFileSync(join(dir, 'session.jsonl'), '{"a":1}\n');
+    const { sessionActivitySignal } = await import('../workers/activity-signal.js');
+    const signal = sessionActivitySignal(dir);
+    const { agentId, holdId } = seedHold({
+      startedAt: new Date(Date.now() - 200 * 60_000).toISOString(),
+      lastActivitySignal: signal,
+      lastActivityAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+    });
+
+    await supervisor.tick();
+
+    expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [agentId])!.status).toBe('active');
+    const hold = h.db.get<{ status: string; note: string }>('SELECT status, note FROM agent_handovers WHERE id = ?', [holdId])!;
+    expect(hold.status).toBe('abandoned');
+    expect(hold.note).toMatch(/activity stopped/);
+  });
+
+  it('never closes a hold with continuous activity, however long it has been open', async () => {
+    const dir = configHomeFor('fake');
+    writeFileSync(join(dir, 'session.jsonl'), '{"a":1}\n');
+    const { sessionActivitySignal } = await import('../workers/activity-signal.js');
+    const staleSignal = sessionActivitySignal(dir);
+    const { agentId, holdId } = seedHold({
+      startedAt: new Date(Date.now() - 300 * 60_000).toISOString(),
+      lastActivitySignal: staleSignal,
+      lastActivityAt: new Date(Date.now() - 300 * 60_000).toISOString(),
+    });
+    // Activity right now, this tick — the signal must differ from what was stored.
+    writeFileSync(join(dir, 'session.jsonl'), '{"a":2,"more":"data-to-change-size"}\n');
+
+    await supervisor.tick();
+
+    expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [agentId])!.status).toBe('paused');
+    expect(h.db.get<{ status: string }>('SELECT status FROM agent_handovers WHERE id = ?', [holdId])!.status).toBe('active');
+  });
+
+  it('posts the reconciliation and note as a ticket comment when the ticket is known', async () => {
+    configHomeFor('fake');
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { runtimeId: 'fake', status: 'paused', worktreePath: null });
+    const holdId = newId();
+    const started = new Date(Date.now() - 121 * 60_000).toISOString();
+    h.db.insert('agent_handovers', {
+      id: holdId, agentId, ticketId, runtimeId: 'fake', sessionRefJson: { sessionId: 'sess-1' },
+      worktreeHead: null, worktreeBranch: null, startedAt: started, startedBy: 'victor', status: 'active',
+      lastActivitySignal: null, lastActivityAt: started, createdAt: started, updatedAt: started,
+    });
+
+    await supervisor.tick();
+
+    expect(comment).toHaveBeenCalledWith(
+      { kind: 'system', id: null }, ticketId, expect.stringContaining('no activity detected'), 'status', 'trusted',
+    );
+  });
+});
+
 /**
  * VS-202: the watchdog above only ever inspects `runs` with `status = 'running'`, so a worker whose
  * turn ended cleanly and was simply never re-woken (the VS-199 incident shape) is invisible to it.

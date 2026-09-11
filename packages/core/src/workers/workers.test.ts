@@ -605,4 +605,93 @@ describe('workers', () => {
     expect(workers.pause(HUMAN, worker.id, 'lunch').status).toBe('paused');
     expect(workers.resume(HUMAN, worker.id).status).toBe('active');
   });
+
+  describe('session handover (VS-249)', () => {
+    async function spawnWithSession(): Promise<import('@agent-conductor/shared').Agent> {
+      const worker = await workers.spawnForTicket(SYSTEM, seedTicket().id);
+      h.db.run("UPDATE agent_sessions SET session_ref_json = ? WHERE agent_id = ?", [JSON.stringify({ sessionId: 'sess-1' }), worker.id]);
+      return worker;
+    }
+
+    it('handoverCommand says why when the runtime has no session yet', async () => {
+      const worker = await workers.spawnForTicket(SYSTEM, seedTicket().id);
+      const result = workers.handoverCommand(worker.id);
+      expect(result.resumable).toBe(false);
+      expect(result.reason).toMatch(/no session/i);
+    });
+
+    it('startHandover pauses the worker, opens a hold, and returns a command', async () => {
+      const worker = await spawnWithSession();
+      const result = await workers.startHandover(HUMAN, worker.id);
+      expect(result.resumable).toBe(true);
+      expect(result.command).toContain('--resume');
+      expect(result.command).toContain('sess-1');
+
+      const after = workers.get(worker.id);
+      expect(after.status).toBe('paused');
+      expect(after.pauseDetail).toMatchObject({ code: 'held_by_human' });
+
+      const hold = h.db.get<{ status: string; agentId: string }>("SELECT * FROM agent_handovers WHERE agent_id = ? AND status = 'active'", [worker.id]);
+      expect(hold).toBeTruthy();
+    });
+
+    it('refuses to take a worker with a turn currently running', async () => {
+      const worker = await spawnWithSession();
+      h.db.insert('runs', { id: 'run-x', workspaceId: h.workspaceId, agentId: worker.id, runtimeId: 'claude', status: 'running', turnEpoch: 1, cwd: worker.homePath, createdAt: nowIso() });
+      await expect(workers.startHandover(HUMAN, worker.id)).rejects.toThrow(/running/i);
+    });
+
+    it('refuses to take a worker whose session is already held', async () => {
+      const worker = await spawnWithSession();
+      await workers.startHandover(HUMAN, worker.id);
+      await expect(workers.startHandover(HUMAN, worker.id)).rejects.toThrow(/already held/i);
+    });
+
+    it('plain resume refuses a worker whose session is held', async () => {
+      const worker = await spawnWithSession();
+      await workers.startHandover(HUMAN, worker.id);
+      expect(() => workers.resume(HUMAN, worker.id)).toThrow(/held by a human/i);
+      // The hold itself is unaffected by the refused resume attempt.
+      const hold = h.db.get<{ status: string }>("SELECT status FROM agent_handovers WHERE agent_id = ? AND status = 'active'", [worker.id]);
+      expect(hold?.status).toBe('active');
+    });
+
+    it('endHandover rejects an empty or missing note without changing state', async () => {
+      const worker = await spawnWithSession();
+      await workers.startHandover(HUMAN, worker.id);
+      await expect(workers.endHandover(HUMAN, worker.id, '')).rejects.toThrow(/note/i);
+      await expect(workers.endHandover(HUMAN, worker.id, '   ')).rejects.toThrow(/note/i);
+      expect(workers.get(worker.id).status).toBe('paused');
+    });
+
+    it('endHandover reconciles the worktree, posts a ticket comment, and resumes ordinary dispatch', async () => {
+      const worker = await spawnWithSession();
+      const started = await workers.startHandover(HUMAN, worker.id);
+      expect(started.resumable).toBe(true);
+
+      writeFileSync(join(worker.worktreePath!, 'device-notes.txt'), 'usb trace attached\n');
+      await git(['add', '.'], worker.worktreePath!);
+      await git(['commit', '-m', 'debug notes'], worker.worktreePath!);
+
+      const result = await workers.endHandover(HUMAN, worker.id, 'attached Frida to the device and poked around');
+      expect(result.reconciliation.worktree.newCommits).toBe(1);
+      expect(result.note).toBe('attached Frida to the device and poked around');
+
+      const after = workers.get(worker.id);
+      expect(after.status).toBe('active');
+      expect(after.pauseDetail).toBeNull();
+
+      const hold = h.db.get<{ status: string; note: string }>("SELECT status, note FROM agent_handovers WHERE agent_id = ?", [worker.id]);
+      expect(hold).toMatchObject({ status: 'returned', note: 'attached Frida to the device and poked around' });
+
+      expect(h.services.tickets!.comment).toHaveBeenCalledWith(
+        expect.anything(), worker.ticketId, expect.stringContaining('new commit'), 'status', 'trusted',
+      );
+    });
+
+    it('endHandover refuses a worker with no open hold', async () => {
+      const worker = await spawnWithSession();
+      await expect(workers.endHandover(HUMAN, worker.id, 'note')).rejects.toThrow(/not currently held/i);
+    });
+  });
 });

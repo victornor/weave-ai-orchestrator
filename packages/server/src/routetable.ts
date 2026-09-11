@@ -92,6 +92,9 @@ export const ROUTES: RouteRow[] = [
   { method: 'POST', path: `${W}/workers/{id}/cancel`, tag: 'workers', summary: 'Cancel a worker', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/workers/{id}/pause`, tag: 'workers', summary: 'Pause a worker', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/workers/{id}/resume`, tag: 'workers', summary: 'Resume a worker', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/workers/{id}/handover-command`, tag: 'workers', summary: 'The resume command this worker would offer, without taking it (VS-249)', auth: 'session' },
+  { method: 'POST', path: `${W}/workers/{id}/handover`, tag: 'workers', summary: 'Take a worker\'s session for a human\'s own terminal (VS-249)', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/workers/{id}/handback`, tag: 'workers', summary: 'Give a held session back, with a required note (VS-249)', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/conductor`, tag: 'workers', summary: 'The conductor agent', auth: 'session' },
   { method: 'POST', path: `${W}/conductor/reset-session`, tag: 'workers', summary: 'Drop the conductor session', auth: 'session', mutating: true },
 

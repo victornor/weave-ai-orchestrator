@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnInput } from '@agent-conductor/runtime-sdk';
-import { buildArgs, opencodeConfig } from '../src/args.js';
+import { buildArgs, opencodeConfig, resumeCommand } from '../src/args.js';
 
 function input(over: Partial<TurnInput> = {}): TurnInput {
   return {
@@ -65,5 +65,20 @@ describe('opencode buildArgs', () => {
   it('emits a local MCP server as a command array', () => {
     expect(JSON.parse(opencodeConfig({ l: { type: 'stdio', command: 'node', args: ['s.js'], env: { A: '1' } } })).mcp.l)
       .toEqual({ type: 'local', command: ['node', 's.js'], enabled: true, environment: { A: '1' } });
+  });
+});
+
+describe('resumeCommand (VS-249)', () => {
+  it('builds a bare -s <sessionId> invocation, not `run`', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { sessionId: 'ses_1' } });
+    expect(c.cmd).toBe('opencode');
+    expect(c.args).toEqual(['-s', 'ses_1']);
+    expect(c.args).not.toContain('run');
+    expect(c.args).not.toContain('--format');
+  });
+
+  it('relocates HOME and both XDG dirs to configHome, matching buildArgs', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { sessionId: 'ses_1' }, configHome: '/ws/runtimes/opencode' });
+    expect(c.env).toEqual({ HOME: '/ws/runtimes/opencode', XDG_CONFIG_HOME: '/ws/runtimes/opencode', XDG_DATA_HOME: '/ws/runtimes/opencode' });
   });
 });

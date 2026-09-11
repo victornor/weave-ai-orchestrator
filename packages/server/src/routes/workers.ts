@@ -95,6 +95,14 @@ export function workerRoutes(): Hono<AppEnv> {
 
   app.post('/:id/resume', (c) => c.json(c.get('ws').services.workers.resume(c.get('actor'), c.req.param('id'))));
 
+  // VS-249: read-only, safe to poll — what `POST .../handover` would return without taking anything.
+  app.get('/:id/handover-command', (c) => c.json(c.get('ws').services.workers.handoverCommand(c.req.param('id'))));
+  app.post('/:id/handover', async (c) => c.json(await c.get('ws').services.workers.startHandover(c.get('actor'), c.req.param('id'))));
+  app.post('/:id/handback', async (c) => {
+    const { note } = await body(c, z.object({ note: z.string().min(1) }));
+    return c.json(await c.get('ws').services.workers.endHandover(c.get('actor'), c.req.param('id'), note));
+  });
+
   return app;
 }
 

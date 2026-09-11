@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnInput } from '@agent-conductor/runtime-sdk';
-import { buildArgs, geminiSettings, MAX_ARGV_PROMPT } from '../src/args.js';
+import { buildArgs, geminiSettings, MAX_ARGV_PROMPT, resumeCommand } from '../src/args.js';
 
 const NEW_ID = '11111111-2222-4333-8444-555555555555';
 function input(over: Partial<TurnInput> = {}): TurnInput {
@@ -61,5 +61,25 @@ describe('gemini buildArgs', () => {
     const b = buildArgs(input({ prompt: big }), { newSessionId: NEW_ID });
     expect(`${b.stdin}${b.args.at(-1)}`).toBe(big);
     expect(b.args.at(-1)!.endsWith('TAIL')).toBe(true);
+  });
+});
+
+describe('resumeCommand (VS-249)', () => {
+  it('builds a bare --resume invocation with no headless flags', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { sessionId: 'sess-1' } });
+    expect(c.cmd).toBe('gemini');
+    expect(c.args).toEqual(['--resume', 'sess-1']);
+    expect(c.args).not.toContain('-o');
+    expect(c.args).not.toContain('-p');
+  });
+
+  it('adds --include-directories when the worktree is not under cwd', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: '/elsewhere/work', session: { sessionId: 'sess-1' } });
+    expect(c.args).toEqual(['--resume', 'sess-1', '--include-directories', '/elsewhere/work']);
+  });
+
+  it('sets GEMINI_CLI_HOME from configHome and nothing else', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { sessionId: 'sess-1' }, configHome: '/ws/runtimes/gemini' });
+    expect(c.env).toEqual({ GEMINI_CLI_HOME: '/ws/runtimes/gemini' });
   });
 });

@@ -25,6 +25,11 @@ const docById = vi.hoisted(() => ({
   named: null as Record<string, unknown> | null,
   calls: [] as Array<[string | undefined, string | undefined, number | undefined]>,
 }));
+const handoverState = vi.hoisted(() => ({
+  current: null as { resumable: boolean; command: string | null; runtime: string; landingLine: string | null; reason: string | null } | null,
+  startMutate: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  calls: [] as Array<{ ws: string; id: string; enabled: boolean }>,
+}));
 vi.mock('../api/hooks', () => ({
   useTicketDocument: () => planDoc.current ?? { data: undefined, isLoading: false, isError: true },
   // VS-224: the document-target fetch. `head` answers the HEAD call, `named` the revision-named
@@ -34,7 +39,13 @@ vi.mock('../api/hooks', () => ({
     const source = revision === undefined ? docById.head : docById.named;
     return source ?? { data: undefined, isLoading: false, isError: true };
   },
+  useHandoverCommandFor: (ws: string, id: string, enabled: boolean) => {
+    handoverState.calls.push({ ws, id, enabled });
+    return { data: enabled ? (handoverState.current ?? undefined) : undefined, isLoading: false, isError: false };
+  },
+  useStartHandoverFor: () => ({ mutate: handoverState.startMutate }),
 }));
+vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(() => 'id'), dismiss: vi.fn() }) }));
 // DecisionCard's "Ask the worker" (VS-106) and "Show PR" (VS-107) links are the only things in this
 // file that reach a route; a plain anchor stands in so these tests keep running with no
 // RouterProvider, still carrying `to`/`params`/`search` as data attributes for tests that check them.
@@ -939,6 +950,52 @@ describe('DecisionCard', () => {
     expect(defaultBody).toHaveClass('p-3.5');
     expect(screen.getByRole('button', { name: /Approve/ })).toHaveClass('px-4', 'text-body', 'h-thumb');
     expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+  });
+
+  describe('session handover (VS-249)', () => {
+    it('offers no "I need to do this myself" band without both an asker and a workspace', () => {
+      const { unmount } = render(<DecisionCard decision={decision()} askedBy="a1" onAnswer={() => undefined} />);
+      expect(screen.queryByText(/i need to do this myself/i)).not.toBeInTheDocument();
+      unmount();
+      render(<DecisionCard decision={decision()} ws="ws1" onAnswer={() => undefined} />);
+      expect(screen.queryByText(/i need to do this myself/i)).not.toBeInTheDocument();
+    });
+
+    it('does not fetch the command until the band is opened', () => {
+      handoverState.calls = [];
+      render(<DecisionCard decision={decision()} askedBy="a1" ws="ws1" onAnswer={() => undefined} />);
+      expect(handoverState.calls.every((c) => !c.enabled)).toBe(true);
+    });
+
+    it('shows the command and a Take this session button for a resumable worker', () => {
+      handoverState.current = { resumable: true, command: "cd '/home/a1' && claude --resume sess-1", runtime: 'claude', landingLine: 'Lands in the home directory.', reason: null };
+      render(<DecisionCard decision={decision()} askedBy="a1" ws="ws1" onAnswer={() => undefined} />);
+      fireEvent.click(screen.getByText(/i need to do this myself/i));
+      expect(screen.getByText('Lands in the home directory.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /take this session/i })).toBeInTheDocument();
+    });
+
+    it('shows the stated reason and no Take-session button for an unresumable worker', () => {
+      handoverState.current = { resumable: false, command: null, runtime: 'gemini', landingLine: null, reason: 'gemini cannot resume a session outside the daemon.' };
+      render(<DecisionCard decision={decision()} askedBy="a1" ws="ws1" onAnswer={() => undefined} />);
+      fireEvent.click(screen.getByText(/i need to do this myself/i));
+      expect(screen.getByText('gemini cannot resume a session outside the daemon.')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /take this session/i })).not.toBeInTheDocument();
+    });
+
+    it('calls startHandover with the decision\'s workspace and asking agent', () => {
+      handoverState.current = { resumable: true, command: 'claude --resume sess-1', runtime: 'claude', landingLine: null, reason: null };
+      handoverState.startMutate = vi.fn();
+      render(<DecisionCard decision={decision()} askedBy="a1" ws="ws1" onAnswer={() => undefined} />);
+      fireEvent.click(screen.getByText(/i need to do this myself/i));
+      fireEvent.click(screen.getByRole('button', { name: /take this session/i }));
+      expect(handoverState.startMutate).toHaveBeenCalledWith({ ws: 'ws1', id: 'a1' }, expect.anything());
+    });
+
+    it('offers nothing on an answered (inert) card', () => {
+      render(<DecisionCard decision={decision({ status: 'answered' })} askedBy="a1" ws="ws1" onAnswer={() => undefined} />);
+      expect(screen.queryByText(/i need to do this myself/i)).not.toBeInTheDocument();
+    });
   });
 });
 

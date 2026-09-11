@@ -91,6 +91,28 @@ export interface CredentialFacts {
 
 export interface InstructionBundle { instructions: string; skills: Array<{ name: string; dir: string }> }
 
+/** Input to `resumeCommand` (VS-249): the working context a human's own resume needs to reproduce. */
+export interface ResumeCommandInput {
+  /** The agent's home — the same `cwd` the daemon's own turn would use. */
+  cwd: string;
+  /** The worktree, when it is not under `cwd` and needs its own directory-inclusion flag. */
+  worktreePath: string | null;
+  /** The stored session ref to resume. Callers only call this when one exists. */
+  session: SessionRef;
+  /** The runtime's own per-workspace config home, when it needs one set as an env var. */
+  configHome?: string;
+  model?: string | null;
+}
+/**
+ * The bare interactive invocation that resumes `session` in a human's own terminal — never the
+ * headless/turn form `buildArgs` produces (no `-p`, no structured output flag, no MCP wiring): a
+ * human typing at this needs the runtime's ordinary interactive UI, not one more scripted turn.
+ * `env` carries only the overlay keys this runtime's resume needs (its config-dir variable, and for
+ * an adapter that relocates `HOME` entirely, the `MISE_*` pin described in `launch.ts`) — never the
+ * daemon's full environment, which a human's own shell already has correctly for itself.
+ */
+export interface ResumeCommand { cmd: string; args: string[]; env: Record<string, string> }
+
 export interface RuntimeAdapter {
   readonly id: string; readonly displayName: string; readonly capabilities: RuntimeCapabilities;
   detect(): Promise<RuntimeDetection>;
@@ -119,6 +141,13 @@ export interface RuntimeAdapter {
   skillsDir(): string;
   /** Instruction discovery file name at the home root (AGENTS.md, CLAUDE.md, GEMINI.md). */
   instructionFiles(): string[];
+  /**
+   * The bare interactive command that resumes `input.session` in a human's own terminal (VS-249).
+   * Omitted by an adapter whose CLI has no interactive form to hand a session to, even when
+   * `capabilities.resumableSessions` is true for the daemon's own (headless) resume. Pure: no I/O,
+   * no spawning — the caller resolves the binary path with `launchCommand`.
+   */
+  resumeCommand?(input: ResumeCommandInput): ResumeCommand;
 }
 export * from './launch.js';
 export * from './process.js';

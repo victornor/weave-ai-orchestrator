@@ -1243,7 +1243,7 @@ conductor project list|show|remove|fetch|set-policy <key>=<value>...
 conductor project set-landing-branch <id> [branch] [--clear]        set/change/clear the landing branch after creation (VS-122); applies to the next ticket action, no restart needed
 conductor runtime list|detect|login <id>              runtime availability and auth per workspace
 conductor role list|show|activate|pause|resume|retire|charter show|charter rollback|memory show
-conductor worker list|show|pause|resume|relaunch|cancel|purge
+conductor worker list|show|pause|resume|relaunch|cancel|purge|handover|handback --note <note>   handover/handback (VS-249): take a worker's session for your own terminal, or give it back
 conductor ticket create|list|show|merge-queue [-p <project>]|assign <role>|set --auto-merge|transition|comment|cancel|discard --force|open (browser)
 conductor decision list|show|answer <id> <key|text>
 conductor routine list|show|add|pause|resume|rm     scheduled tasks (recurring conductor alarms); add --daily HH:MM or --every <minutes> --tz --instruction [--action report|file_work] [--max-tickets] [--project]

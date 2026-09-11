@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnInput } from '@agent-conductor/runtime-sdk';
-import { buildArgs, mcpConfigToml, mcpOverrides } from '../src/args.js';
+import { buildArgs, mcpConfigToml, mcpOverrides, resumeCommand } from '../src/args.js';
 
 function input(over: Partial<TurnInput> = {}): TurnInput {
   return {
@@ -83,5 +83,20 @@ describe('codex buildArgs', () => {
     const o = mcpOverrides('local', { type: 'stdio', command: 'node', args: ['server.js'], env: { A: '1' } });
     expect(s(o.args)).toBe('-c mcp_servers.local.command="node" -c mcp_servers.local.args=["server.js"] -c mcp_servers.local.env.A="1"');
     expect(mcpConfigToml({ local: { type: 'stdio', command: 'node', args: ['server.js'] } })).toContain('command = "node"');
+  });
+});
+
+describe('resumeCommand (VS-249)', () => {
+  it('builds a bare `resume <threadId>` invocation, not `exec resume`', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { threadId: 'thread-1' } });
+    expect(c.cmd).toBe('codex');
+    expect(c.args).toEqual(['resume', 'thread-1']);
+    expect(c.args).not.toContain('exec');
+    expect(c.args).not.toContain('--json');
+  });
+
+  it('sets CODEX_HOME from configHome and nothing else', () => {
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { threadId: 'thread-1' }, configHome: '/ws/runtimes/codex' });
+    expect(c.env).toEqual({ CODEX_HOME: '/ws/runtimes/codex' });
   });
 });

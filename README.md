@@ -334,6 +334,7 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | `conductor worker list [-p] [-r] [-s] [--all]` · `conductor worker show <id>` · `conductor worker brief <id>` | live workers |
 | `conductor worker message <id> <text>` | direct message to a worker (wakes it) |
 | `conductor worker pause \| resume \| cancel \| relaunch \| purge <id>` | worker lifecycle |
+| `conductor worker handover <id>` · `conductor worker handback <id> --note <note>` | take a worker's session for your own terminal, or give it back (VS-249) |
 | `conductor ticket create <title...> [-p] [-k kind] [--priority] [-d desc] [--assign role] [--auto-merge] [--parent] [--blocked-by]` | create a ticket |
 | `conductor ticket list [-p] [-s] [-k] [-r] [--search] [--limit]` · `conductor ticket show <id>` | the board in the terminal |
 | `conductor ticket merge-queue [-p <project>]` | who is landing now and who is waiting behind them |

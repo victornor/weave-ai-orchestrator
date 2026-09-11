@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
 import type { RunEvent } from '@agent-conductor/shared';
-import { agentUiStatus } from '@agent-conductor/shared';
+import { agentUiStatus, heldByHuman } from '@agent-conductor/shared';
 import { workerPauseReason } from '@agent-conductor/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
@@ -12,7 +12,9 @@ import { StatusBadge } from '../components/StatusGlyph';
 import { SkeletonRows } from '../components/Skeleton';
 import { ErrorState, EmptyState } from '../components/States';
 import { Markdown } from '../components/Markdown';
-import { useRunEvents, useWorker, useWorkerAction, useWorkerBrief, useWorkerMessage } from '../api/hooks';
+import { HandoverCommand } from '../components/HandoverCommand';
+import { useToast } from '../components/Toast';
+import { useHandoverCommand, useEndHandover, useRunEvents, useStartHandover, useWorker, useWorkerAction, useWorkerBrief, useWorkerMessage } from '../api/hooks';
 import { useWorkspaceEvents, useWs } from '../api/context';
 import { useGo } from '../app/link';
 import { cents, tokens } from '../lib/format';
@@ -32,6 +34,13 @@ export function WorkerRoute(): React.ReactElement {
   const brief = useWorkerBrief(workerId);
   const action = useWorkerAction();
   const message = useWorkerMessage();
+  const toast = useToast();
+  const held = detail.data ? heldByHuman(detail.data.agent) : false;
+  const [sessionOpen, setSessionOpen] = useState(false);
+  const [givingBack, setGivingBack] = useState(false);
+  const handoverCommand = useHandoverCommand(workerId, sessionOpen || held);
+  const startHandover = useStartHandover();
+  const endHandover = useEndHandover();
   const [lastOutcome, setLastOutcome] = useState<string | null>(null);
   // The steer box and the ticket page's reply box post to the same conversation, so they share one
   // draft: a note started on either is there on the other.
@@ -115,11 +124,22 @@ export function WorkerRoute(): React.ReactElement {
                 Ticket
               </Button>
             ) : null}
-            {agent.status === 'paused' ? (
+            {agent.status === 'paused' && !held ? (
               <Button size="sm" onClick={() => action.mutate({ id: workerId, action: 'resume' })}>
                 Resume
               </Button>
             ) : null}
+            {held ? (
+              givingBack ? null : (
+                <Button size="sm" onClick={() => { setSessionOpen(true); setGivingBack(true); }}>
+                  Give it back
+                </Button>
+              )
+            ) : (
+              <Button size="sm" variant="secondary" onClick={() => setSessionOpen((v) => !v)}>
+                Session
+              </Button>
+            )}
             <Button size="sm" onClick={() => action.mutate({ id: workerId, action: 'relaunch', note: 'relaunched from the web app' })}>
               Relaunch
             </Button>
@@ -130,6 +150,47 @@ export function WorkerRoute(): React.ReactElement {
         }
         tabs={<Tabs items={TABS} active={tab} onChange={setTab} className="px-3 md:px-4" />}
       />
+
+      {sessionOpen || held ? (
+        <div className="flex-none border-b border-line-1 bg-bg-0 px-4 py-3 md:px-5">
+          <div className="mx-auto flex max-w-3xl flex-col gap-2.5">
+            {handoverCommand.isLoading ? (
+              <SkeletonRows rows={2} />
+            ) : handoverCommand.data ? (
+              <HandoverCommand result={handoverCommand.data} />
+            ) : null}
+            {held ? (
+              givingBack ? (
+                <Composer
+                  rows={3}
+                  placeholder="What did you do while you held this session?"
+                  submitLabel="Give it back"
+                  onSubmit={async (note) => {
+                    await endHandover.mutateAsync({ id: workerId, note });
+                    setGivingBack(false);
+                    setSessionOpen(false);
+                    toast.push({ title: 'Session given back', status: 'done', ttl: 4000 });
+                  }}
+                />
+              ) : (
+                <Button size="sm" onClick={() => setGivingBack(true)}>Give it back</Button>
+              )
+            ) : handoverCommand.data?.resumable ? (
+              <Button
+                size="sm"
+                onClick={() => {
+                  startHandover.mutate({ id: workerId }, {
+                    onSuccess: () => toast.push({ title: 'Session taken', detail: 'Paste the command into a terminal on the daemon host.', status: 'done', ttl: 6000 }),
+                    onError: (e) => toast.push({ title: 'Could not take the session', detail: e.message, status: 'failed' }),
+                  });
+                }}
+              >
+                Take this session
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <PageBody>
         {tab === 'transcript' ? (

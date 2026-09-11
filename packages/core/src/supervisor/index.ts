@@ -9,6 +9,8 @@ import { ungateRuntime } from '../runs/authgate.js';
 import { archivedDirFor } from '../openspec/index.js';
 import { CURATION_BUDGET_FRACTION, budgetOf, isDocPath } from '../knowledge/files.js';
 import { sh } from '../util/exec.js';
+import { sessionActivitySignal } from '../workers/activity-signal.js';
+import { handoverCommentBody, reconcileHandover, type HandoverSnapshot } from '../workers/handover-reconcile.js';
 
 const TICK_MS = 15_000;
 const LIVENESS_EVERY_MS = 60_000;
@@ -293,6 +295,60 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         await deps().workers.cancel(SYSTEM, agent.id, 'idle interactive session');
         log.info({ agentId: agent.id, ticketId: agent.ticketId }, 'interactive session cancelled: idle');
       } catch (e) { log.warn({ agentId: agent.id, err: String(e) }, 'idle session cancel failed'); }
+    }
+  }
+
+  /**
+   * VS-249: closes a hold nobody gave back — but only once it has gone quiet, not merely once it is
+   * old (`session-handover/lease`). Every open hold's activity signal is re-sampled each tick; a
+   * change updates the row and defers closing regardless of elapsed time. A hold closes only once it
+   * is both older than `handoverAbandonTimeoutMinutes` and has shown no signal change for
+   * `handoverQuietMinutes`, using the same reconciliation `endHandover` uses.
+   */
+  async function reconcileAbandonedHandovers(): Promise<void> {
+    const abandonMinutes = ctx.config.defaults.handoverAbandonTimeoutMinutes ?? 120;
+    const quietMinutes = ctx.config.defaults.handoverQuietMinutes ?? 30;
+    const open = ctx.db.all<{
+      id: string; agentId: string; ticketId: string | null; runtimeId: string; worktreeHead: string | null;
+      lastActivitySignal: string | null; lastActivityAt: string; startedAt: string;
+    }>("SELECT * FROM agent_handovers WHERE status = 'active'");
+    const now = Date.now();
+
+    for (const hold of open) {
+      const agent = ctx.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [hold.agentId]);
+      if (!agent) continue;
+      const configHome = join(ctx.paths.runtimesHome, hold.runtimeId);
+      const signalNow = sessionActivitySignal(configHome);
+      if (signalNow !== hold.lastActivitySignal) {
+        const at = nowIso();
+        ctx.db.update('agent_handovers', hold.id, { lastActivitySignal: signalNow, lastActivityAt: at, updatedAt: at });
+        continue;
+      }
+      if (now - Date.parse(hold.startedAt) < abandonMinutes * 60_000) continue;
+      if (now - Date.parse(hold.lastActivityAt) < quietMinutes * 60_000) continue;
+
+      const snapshot: HandoverSnapshot = { worktreeHead: hold.worktreeHead, runtimeId: hold.runtimeId, lastActivitySignal: hold.lastActivitySignal, startedAt: hold.startedAt };
+      try {
+        const reconciliation = await reconcileHandover(ctx, agent, snapshot);
+        const finishedAt = nowIso();
+        const everActive = hold.lastActivitySignal !== null;
+        const note = everActive
+          ? `recovered automatically after activity stopped; last session activity observed at ${hold.lastActivityAt}, ${quietMinutes} min of quiet since`
+          : `recovered automatically after ${abandonMinutes} min; no session activity was ever detected`;
+        ctx.db.update('agent_handovers', hold.id, { status: 'abandoned', returnedAt: finishedAt, note, reconciliationJson: reconciliation, updatedAt: finishedAt });
+        ctx.db.update('agents', hold.agentId, { status: 'active', pauseReason: null, pauseDetailJson: null, updatedAt: finishedAt });
+        if (agent.ticketId) {
+          try { deps().tickets.comment(SYSTEM, agent.ticketId, handoverCommentBody(agent, reconciliation, note, true), 'status', 'trusted'); }
+          catch (e) { log.warn({ agentId: agent.id, err: String(e) }, 'posting the abandoned-handover comment failed'); }
+        }
+        try {
+          deps().wake.enqueue(hold.agentId, {
+            source: 'system', reason: 'session handed back automatically after being abandoned',
+            payload: { handedBack: true, abandoned: true }, idempotencyKey: `handback:${hold.agentId}:${agent.turnEpoch}`, requestedBy: SYSTEM,
+          });
+        } catch (e) { log.error({ agentId: agent.id, err: String(e) }, 'recovering the abandoned hold could not queue its next turn'); }
+        log.info({ agentId: agent.id, holdId: hold.id }, 'abandoned handover closed automatically');
+      } catch (e) { log.warn({ agentId: agent.id, err: String(e) }, 'closing an abandoned handover failed'); }
     }
   }
 
@@ -790,6 +846,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         await pumpMergeQueues().catch((e) => log.error({ err: String(e) }, 'merge queue pump failed'));
         await retireFinished().catch((e) => log.error({ err: String(e) }, 'retire pass failed'));
         await retireIdleSessions().catch((e) => log.error({ err: String(e) }, 'idle session retire pass failed'));
+        await reconcileAbandonedHandovers().catch((e) => log.error({ err: String(e) }, 'abandoned handover sweep failed'));
         if (Date.now() - lastLiveness > LIVENESS_EVERY_MS) {
           lastLiveness = Date.now();
           try { livenessScan(); } catch (e) { log.error({ err: String(e) }, 'liveness scan failed'); }

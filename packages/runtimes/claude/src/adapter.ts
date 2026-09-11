@@ -9,7 +9,7 @@ import { classifyError, detectBinary, installBundleFiles, launchCommand, runTmpD
 import { extractReport } from '@agent-conductor/shared';
 import { probeAccount } from './account.js';
 import { readCredential } from './credential.js';
-import { buildArgs, RESTRICTED_TOOLS, userFrame } from './args.js';
+import { buildArgs, resumeCommand, RESTRICTED_TOOLS, userFrame } from './args.js';
 import { createClaudeParser } from './events.js';
 import { asClaudeSession, type ClaudeSessionRef } from './session.js';
 
@@ -126,6 +126,8 @@ export const adapter: RuntimeAdapter = {
 
   /** The credential's expiry, read from the file. Spawns nothing and returns no token (VS-75). */
   readCredential(input: CredentialProbeInput): CredentialFacts { return readCredential(input); },
+
+  resumeCommand,
 
   async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
     const tmpDir = runTmpDir(input.runId);

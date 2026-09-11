@@ -7,7 +7,7 @@ import type {
 import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, which, writeFiles } from '@agent-conductor/runtime-sdk';
 import { extractReport } from '@agent-conductor/shared';
 import { describeOpenCodeAccount } from './account.js';
-import { buildArgs, CONFIG_RELATIVE_PATH, opencodeConfig } from './args.js';
+import { buildArgs, CONFIG_RELATIVE_PATH, opencodeConfig, resumeCommand } from './args.js';
 import { createOpenCodeParser } from './events.js';
 import { asOpenCodeSession, type OpenCodeSessionRef } from './session.js';
 
@@ -139,6 +139,7 @@ export const adapter: RuntimeAdapter = {
   configSchema(): JsonSchema { return structuredClone(CONFIG_SCHEMA); },
   skillsDir(): string { return '.opencode/skills'; },
   instructionFiles(): string[] { return ['AGENTS.md']; },
+  resumeCommand,
 
   async installInstructions(home: AgentHome, bundle: InstructionBundle): Promise<void> {
     installBundleFiles(home, bundle, {

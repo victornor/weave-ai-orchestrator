@@ -164,7 +164,34 @@ export function register(program: Command): void {
       const result = await client.wpost(`/workers/${encodeURIComponent(id)}/purge`, { force: opts['force'] === true });
       emit(result, () => write(`${style.ok('purged')} ${id}`));
     }));
+
+  worker
+    .command('handover')
+    .argument('<id>')
+    .description("take a worker's session for your own terminal (VS-249)")
+    .action(async (id: string, _opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const result = await client.wpost<HandoverCommandResult>(`/workers/${encodeURIComponent(id)}/handover`, {});
+      emit(result, () => {
+        if (!result.resumable) { write(style.bad(result.reason ?? 'this worker cannot resume a session outside the daemon')); return; }
+        if (result.landingLine) write(style.dim(result.landingLine));
+        write(result.command ?? '');
+      });
+    }));
+
+  worker
+    .command('handback')
+    .argument('<id>')
+    .requiredOption('--note <note>', 'what you did while you held the session')
+    .description('give a held session back')
+    .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const result = await client.wpost(`/workers/${encodeURIComponent(id)}/handback`, { note: opts['note'] });
+      emit(result, () => write(`${style.ok('given back')} ${id}`));
+    }));
 }
+
+interface HandoverCommandResult { resumable: boolean; command: string | null; runtime: string; landingLine: string | null; reason: string | null }
 
 function numberOr(value: unknown, fallback: number | null): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;

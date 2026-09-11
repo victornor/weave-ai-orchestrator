@@ -229,6 +229,20 @@ export const WorkspaceDefaultsSchema = z.object({
    */
   interactiveSessionIdleTimeoutMinutes: z.number().int().min(1).default(240),
   /**
+   * VS-249: how long a human may hold a worker's session before the supervisor's abandonment sweep
+   * is even willing to consider closing it. The sweep also requires `handoverQuietMinutes` of no
+   * observed session activity on top of this — elapsed time alone never closes a hold still in use.
+   */
+  handoverAbandonTimeoutMinutes: z.number().int().min(1).default(120),
+  /**
+   * VS-249: how long a held session's activity signal (a cheap stat of the runtime's session file)
+   * must go unchanged, once `handoverAbandonTimeoutMinutes` has passed, before the hold is closed
+   * automatically. Shorter than the abandon timeout on purpose: once real activity has been seen at
+   * least once, a normal pause (stepping away, waiting on hardware) should not need the full two
+   * hours to be told apart from an abandonment.
+   */
+  handoverQuietMinutes: z.number().int().min(1).default(30),
+  /**
    * VS-202: how long a worker's `last_run_at` may go stale, with its ticket still open, no open
    * decision, no queued/claimed wakeup and no run in flight, before the supervisor flags it as
    * stalled. Deliberately its own field rather than reusing `spawnWaitWarnSec`: the five other
@@ -249,6 +263,9 @@ export const WorkspaceDefaultsSchema = z.object({
    * than only queuing for the next one. `false` returns every adapter to its pre-VS-99 spawn.
    */
   liveInput: z.boolean().default(true),
+}).refine((d) => d.handoverQuietMinutes < d.handoverAbandonTimeoutMinutes, {
+  message: 'handoverQuietMinutes must be smaller than handoverAbandonTimeoutMinutes',
+  path: ['handoverQuietMinutes'],
 });
 
 export const WorkspaceConfigSchema = z.object({

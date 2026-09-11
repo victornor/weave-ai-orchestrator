@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { BuiltCommand, McpServerConfig, TurnInput } from '@agent-conductor/runtime-sdk';
+import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, TurnInput } from '@agent-conductor/runtime-sdk';
 import { runTmpDir } from '@agent-conductor/runtime-sdk';
 import { asCodexSession } from './session.js';
 
@@ -127,4 +127,22 @@ export function buildArgs(input: TurnInput, opts: CodexBuildOpts = {}): CodexBui
   args.push('-');
 
   return { cmd: 'codex', args, stdin: input.prompt, env, files, threadId: prev?.threadId ?? null, mode, lastMessagePath };
+}
+
+/**
+ * VS-249: the bare interactive `codex resume <threadId>` invocation — distinct from `codex exec
+ * resume <id>` above, which is the headless, scripted form. Codex's own `exec resume`/`exec fork`
+ * inherit the spawned process's cwd rather than taking `-C` (see the comment on `mode === 'new'`
+ * above); the interactive form is assumed to do the same. Unlike Claude/Cursor/Gemini's flag-based
+ * `--resume`, Codex's resume is a subcommand — its exact interactive spelling could not be confirmed
+ * against the real CLI (forbidden from inside a ticket); this mirrors the one Codex subcommand shape
+ * already used for headless resume and should be treated as best-effort until the daemon's owner
+ * confirms it against a real `codex resume <id>`.
+ */
+export function resumeCommand(input: ResumeCommandInput): ResumeCommand {
+  const ref = asCodexSession(input.session);
+  const args: string[] = ['resume', ref?.threadId ?? ''];
+  const env: Record<string, string> = {};
+  if (input.configHome) env['CODEX_HOME'] = input.configHome;
+  return { cmd: 'codex', args, env };
 }

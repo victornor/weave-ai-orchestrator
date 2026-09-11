@@ -72,7 +72,7 @@ A daily schedule SHALL fire at that wall-clock time in the named timezone, inclu
 
 ### Requirement: Captain can list, add, pause, resume and remove routines
 
-A session-authenticated client SHALL list this workspace's routines and SHALL create, pause, resume, edit and remove them over HTTP. The `conductor` CLI SHALL expose the same operations as `routine list|show|add|pause|resume|rm`. The conductor SHALL have MCP tools to list, create, update and remove routines; a worker SHALL NOT. The web Settings page SHALL offer a Scheduled tasks section in the workspace area that lists this workspace's routines, lets captain add one, and lets them pause, resume or remove each.
+A session-authenticated client SHALL list this workspace's routines and SHALL create, pause, resume, edit and remove them over HTTP. The `conductor` CLI SHALL expose the same operations as `routine list|show|add|pause|resume|rm`. The conductor SHALL have MCP tools to list, create, update and remove routines; a worker SHALL NOT. The web Scheduled page SHALL list every workspace's routines, let captain add one on a named workspace, and let them pause, resume, edit or remove each. The workspace Settings SHALL NOT offer a Scheduled tasks section.
 
 Empty list SHALL be a normal empty state, not an error.
 
@@ -94,6 +94,6 @@ Empty list SHALL be a normal empty state, not an error.
 
 #### Scenario: Settings shows the workspace's routines
 
-- **WHEN** captain opens Settings → Scheduled tasks in this workspace
-- **THEN** they see this workspace's routines by name, schedule, enabled state and next due time
-- **AND** they can add, pause, resume or remove a routine from that section
+- **WHEN** captain opens the Scheduled page
+- **THEN** they see this workspace's routines by name, schedule, enabled state and next due time, each attributed to this workspace
+- **AND** they can add, pause, resume, edit or remove a routine from that page

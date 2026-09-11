@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented, Tabs } from '../components/Tabs';
 import { Button } from '../components/Button';
+import { Sheet } from '../components/Sheet';
 import { Badge } from '../components/StatusGlyph';
 import { DeviceRow } from '../components/DeviceRow';
 import { QR } from '../components/QR';
@@ -29,11 +30,13 @@ import {
   useMe,
   useModels,
   useModelsOptional,
+  useMoveProject,
   usePatchConfig,
   usePatchProject,
   usePresentation,
   usePresentationSurfaces,
   useProjects,
+  useRemoveProject,
   usePutPresentation,
   useRefreshDaemonUpdate,
   useRequestUpgrade,
@@ -45,6 +48,7 @@ import {
   useTelegramTokenStatus,
   useWorkspaceSummary,
   useWorkspaces,
+  useWorkers,
   useRoutines,
   useRoutineUsage,
   useCreateRoutine,
@@ -66,6 +70,7 @@ import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
 import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, runningVersionLabel, shortSha, updateEntry, updateEntryLabel } from '../lib/upgrade';
 import { cx } from '../lib/cx';
 import { workspaceYolo } from '../lib/yolo';
+import { isWorkerConflict, liveWorkerCount, liveWorkersReason, MoveProjectError } from '../lib/moveProject';
 import { SETTINGS_AREAS, sectionForRoute, sectionsOfArea } from '../lib/settings';
 import type { SettingsAreaKey } from '../lib/settings';
 import { disablePush, enablePush, subscriptionId } from '../lib/push';
@@ -421,9 +426,167 @@ function KnowledgeBudgetsSection({ config }: { config: Record<string, unknown> }
   );
 }
 
+function moveFailureCopy(err: MoveProjectError, destName: string): string {
+  if (err.kind === 'archive_failed') {
+    return `${destName} already has this project. Remove it from this workspace.`;
+  }
+  if (err.kind === 'add_failed') {
+    return `Could not add the project to ${destName}. It is still in this workspace — retry Move.`;
+  }
+  return err.message;
+}
+
+function RemoveProjectSheet({
+  project,
+  liveCount,
+  onClose,
+}: {
+  project: Project;
+  liveCount: number;
+  onClose: () => void;
+}): React.ReactElement {
+  const remove = useRemoveProject();
+  const [reason, setReason] = useState<string | null>(liveCount > 0 ? liveWorkersReason(project.slug, liveCount) : null);
+
+  return (
+    <Sheet
+      open
+      onClose={onClose}
+      title={`Remove ${project.slug}`}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="danger"
+            disabled={liveCount > 0 || remove.isPending}
+            onClick={() => {
+              void remove.mutateAsync({ id: project.id }).then(onClose).catch((err: unknown) => {
+                if (isWorkerConflict(err)) {
+                  setReason(err instanceof Error ? err.message : liveWorkersReason(project.slug, liveCount));
+                  return;
+                }
+                setReason(err instanceof Error ? err.message : 'Could not remove the project');
+              });
+            }}
+          >
+            Confirm
+          </Button>
+        </>
+      }
+    >
+      <p className="text-body text-text-2">
+        {project.slug} will be archived, not deleted. Tickets and knowledge stay in this workspace. The clone is left on disk.
+      </p>
+      {reason ? <p className="mt-3 text-micro text-failed">{reason}</p> : null}
+    </Sheet>
+  );
+}
+
+function MoveProjectSheet({
+  project,
+  destinations,
+  liveCount,
+  onClose,
+}: {
+  project: Project;
+  destinations: T.WorkspaceListItem[];
+  liveCount: number;
+  onClose: () => void;
+}): React.ReactElement {
+  const move = useMoveProject();
+  const [destId, setDestId] = useState('');
+  const destProjects = useProjects(destId);
+  const [reason, setReason] = useState<string | null>(liveCount > 0 ? liveWorkersReason(project.slug, liveCount) : null);
+  const dest = destinations.find((w) => w.id === destId);
+  const destName = dest?.name ?? 'the destination';
+  const destClash = destId ? (destProjects.data ?? []).some((p) => p.slug === project.slug) : false;
+  const clashReason = destClash ? `The destination already has a project named ${project.slug}` : null;
+  const shownReason = reason ?? clashReason;
+
+  return (
+    <Sheet
+      open
+      onClose={onClose}
+      title={`Move ${project.slug}`}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={!destId || liveCount > 0 || move.isPending}
+            onClick={() => {
+              void move.mutateAsync({ destWs: destId, project }).then(onClose).catch((err: unknown) => {
+                if (err instanceof MoveProjectError) {
+                  setReason(moveFailureCopy(err, destName));
+                  return;
+                }
+                if (isWorkerConflict(err)) {
+                  setReason(err instanceof Error ? err.message : liveWorkersReason(project.slug, liveCount));
+                  return;
+                }
+                setReason(err instanceof Error ? err.message : 'Could not move the project');
+              });
+            }}
+          >
+            Confirm
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <select
+          aria-label="Destination workspace"
+          className={cx(inputCx, 'ac-mono')}
+          value={destId}
+          onChange={(e) => {
+            setDestId(e.target.value);
+            setReason(null);
+          }}
+        >
+          <option value="">Choose a workspace</option>
+          {destinations.map((w) => (
+            <option key={w.id} value={w.id}>{w.name}</option>
+          ))}
+        </select>
+        {dest ? (
+          <p className="text-body text-text-2">
+            The repository and copied project settings go to {dest.name}. Tickets, knowledge, spec index, runs and usage stay in this workspace under the archived project. The clone on disk here is left; {dest.name} clones afresh.
+          </p>
+        ) : (
+          <p className="text-body text-text-2">Choose a workspace to see what travels and what stays.</p>
+        )}
+        {shownReason ? <p className="text-micro text-failed">{shownReason}</p> : null}
+      </div>
+    </Sheet>
+  );
+}
+
+function ArchivedProjectRow({ p }: { p: Project }): React.ReactElement {
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-3.5 py-3">
+      <span className="ac-mono text-meta text-text-1">{p.slug}</span>
+      <Badge>{p.status}</Badge>
+      <span className="ac-mono ac-truncate flex-1 text-micro text-text-3">{p.gitUrl}</span>
+    </div>
+  );
+}
+
 /** One project's row: its own `maxWorkers`/`landingBranch` commit state, independent of every other row. */
-function ProjectRow({ p, workspaceOn }: { p: Project; workspaceOn: boolean }): React.ReactElement {
+function ActiveProjectRow({
+  p,
+  workspaceOn,
+  liveCount,
+  destinations,
+}: {
+  p: Project;
+  workspaceOn: boolean;
+  liveCount: number;
+  destinations: T.WorkspaceListItem[];
+}): React.ReactElement {
   const patch = usePatchProject();
+  const [sheet, setSheet] = useState<null | 'remove' | 'move'>(null);
+  const blocked = liveCount > 0;
+  const blockReason = blocked ? liveWorkersReason(p.slug, liveCount) : null;
 
   const maxWorkers = useCommittableField({
     value: String(p.maxWorkers),
@@ -489,19 +652,51 @@ function ProjectRow({ p, workspaceOn }: { p: Project; workspaceOn: boolean }): R
           <option value="off">off</option>
         </select>
       </label>
+      <div className="flex flex-wrap items-center gap-2">
+        {blockReason ? <span className="text-micro text-text-3">{blockReason}</span> : null}
+        <Button size="sm" variant="ghost" disabled={blocked} onClick={() => setSheet('remove')}>Remove</Button>
+        {destinations.length > 0 ? (
+          <Button size="sm" variant="ghost" disabled={blocked} onClick={() => setSheet('move')}>Move</Button>
+        ) : null}
+      </div>
+      {sheet === 'remove' ? (
+        <RemoveProjectSheet project={p} liveCount={liveCount} onClose={() => setSheet(null)} />
+      ) : null}
+      {sheet === 'move' ? (
+        <MoveProjectSheet project={p} destinations={destinations} liveCount={liveCount} onClose={() => setSheet(null)} />
+      ) : null}
     </div>
   );
+}
+
+function ProjectRow({
+  p,
+  workspaceOn,
+  liveCount,
+  destinations,
+}: {
+  p: Project;
+  workspaceOn: boolean;
+  liveCount: number;
+  destinations: T.WorkspaceListItem[];
+}): React.ReactElement {
+  if (p.status === 'archived') return <ArchivedProjectRow p={p} />;
+  return <ActiveProjectRow p={p} workspaceOn={workspaceOn} liveCount={liveCount} destinations={destinations} />;
 }
 
 function ProjectsSection(): React.ReactElement {
   const projects = useProjects();
   const add = useAddProject();
+  const workers = useWorkers();
+  const workspaces = useWorkspaces();
+  const currentWs = useWs();
   const toast = useToast();
   const [url, setUrl] = useState('');
   const [maxWorkersText, setMaxWorkersText] = useState('2');
   const [setupCommand, setSetupCommand] = useState('');
   const [autoMergeDefault, setAutoMergeDefault] = useState(false);
   const workspaceOn = workspaceYolo(useWorkspaceSummary().data?.config ?? {});
+  const destinations = (workspaces.data ?? []).filter((w) => w.id !== currentWs);
 
   // Max workers checked against the shared project schema the route itself validates with (VS-212) —
   // the bounds stay derived, never restated here.
@@ -571,7 +766,13 @@ function ProjectsSection(): React.ReactElement {
       ) : (
         <div className="ac-card divide-y divide-line-1">
           {(projects.data ?? []).map((p) => (
-            <ProjectRow key={p.id} p={p} workspaceOn={workspaceOn} />
+            <ProjectRow
+              key={p.id}
+              p={p}
+              workspaceOn={workspaceOn}
+              liveCount={liveWorkerCount(workers.data ?? [], p.id)}
+              destinations={destinations}
+            />
           ))}
         </div>
       )}

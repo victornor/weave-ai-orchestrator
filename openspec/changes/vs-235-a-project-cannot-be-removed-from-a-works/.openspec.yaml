@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-11
+goal: A project cannot be removed from a workspace, or moved to the right one

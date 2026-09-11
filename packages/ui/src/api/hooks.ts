@@ -8,6 +8,7 @@ import { qk } from './keys';
 import { useHookWs, useWs } from './context';
 import type * as T from './types';
 import { upgradePollInterval } from '../lib/upgrade';
+import { moveProject } from '../lib/moveProject';
 
 /* ------------------------------------------------------------- shapes
  * The daemon answers in the shapes documented in docs/API.md (flat rows, `{ items, total }` pages,
@@ -398,6 +399,36 @@ export function usePatchProject(): UseMutationResult<Project, Error, { id: strin
   return useMutation({
     mutationFn: ({ id, patch }) => api.ws<Project>(ws, `/projects/${id}`, { method: 'PATCH', body: patch }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: qk.projects(ws) }),
+  });
+}
+
+export function useRemoveProject(): UseMutationResult<unknown, Error, { id: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }) => api.ws(ws, `/projects/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.projects(ws) }),
+  });
+}
+
+/**
+ * Add the project on `destWs` (existing POST, 202) then archive it here. Does not wait for the
+ * dest clone. Slug clash and dest-add failure leave the source untouched.
+ */
+export function useMoveProject(): UseMutationResult<void, Error, { destWs: string; project: Project }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ destWs, project }) => moveProject({
+      project,
+      listDestProjects: () => api.ws<Project[]>(destWs, '/projects'),
+      addToDest: (body) => api.ws(destWs, '/projects', { method: 'POST', body }),
+      archiveSource: () => api.ws(ws, `/projects/${project.id}`, { method: 'DELETE' }),
+    }),
+    onSuccess: (_void, { destWs }) => {
+      void qc.invalidateQueries({ queryKey: qk.projects(ws) });
+      void qc.invalidateQueries({ queryKey: qk.projects(destWs) });
+    },
   });
 }
 

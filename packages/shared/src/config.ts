@@ -112,7 +112,8 @@ export const WorkerModelOptionSchema = ModelSettingSchema.extend({
 });
 export type WorkerModelOption = z.infer<typeof WorkerModelOptionSchema>;
 
-const WorkerOptionsArraySchema = z.array(WorkerModelOptionSchema).max(16).superRefine((opts, ctx) => {
+/** The whole catalog as the daemon validates it — the editor validates against this too (VS-212). */
+export const WorkerOptionsArraySchema = z.array(WorkerModelOptionSchema).max(16).superRefine((opts, ctx) => {
   const seen = new Set<string>();
   for (let i = 0; i < opts.length; i++) {
     const id = opts[i]?.id;

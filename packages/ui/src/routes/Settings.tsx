@@ -12,6 +12,7 @@ import { ErrorState, EmptyState } from '../components/States';
 import { useToast } from '../components/Toast';
 import { CommitStatus } from '../components/CommitStatus';
 import { useCommittableField } from '../lib/commit-field';
+import { parseFieldIssues } from '../lib/schema-field';
 import {
   useAddProject,
   useApproveTelegramUser,
@@ -47,6 +48,7 @@ import {
 import { api, setToken } from '../api/client';
 import { qk } from '../api/keys';
 import type { PresentationBlock, Project } from '@agent-conductor/shared';
+import { ProjectConfigSchema, WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@agent-conductor/shared';
 import type * as T from '../api/types';
 import type { TotpSetup } from '../api/types';
 import { useWs } from '../api/context';
@@ -140,11 +142,12 @@ export function SettingsRoute(): React.ReactElement {
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): React.ReactElement {
+function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string; children: React.ReactNode }): React.ReactElement {
   return (
     <label className="flex flex-col gap-1.5 py-2.5">
       <span className="ac-label">{label}</span>
       {children}
+      {error ? <span className="text-micro text-failed">{error}</span> : null}
       {hint ? <span className="text-micro text-text-3">{hint}</span> : null}
     </label>
   );
@@ -439,10 +442,23 @@ function ProjectsSection(): React.ReactElement {
   const add = useAddProject();
   const toast = useToast();
   const [url, setUrl] = useState('');
-  const [maxWorkers, setMaxWorkers] = useState(2);
+  const [maxWorkersText, setMaxWorkersText] = useState('2');
   const [setupCommand, setSetupCommand] = useState('');
   const [autoMergeDefault, setAutoMergeDefault] = useState(false);
   const workspaceOn = workspaceYolo(useWorkspaceSummary().data?.config ?? {});
+
+  // Max workers checked against the shared project schema the route itself validates with (VS-212) —
+  // the bounds stay derived, never restated here.
+  const maxWorkersSchema = ProjectConfigSchema.shape.maxWorkers.removeDefault();
+  const maxWorkersIssues = parseFieldIssues(maxWorkersSchema, Number(maxWorkersText));
+  const maxWorkersValid = maxWorkersIssues.valid;
+  const maxWorkersError =
+    maxWorkersText.trim() && !maxWorkersValid
+      ? maxWorkersSchema.minValue != null && maxWorkersSchema.maxValue != null
+        ? `A whole number from ${maxWorkersSchema.minValue} to ${maxWorkersSchema.maxValue}.`
+        : maxWorkersIssues.byPath['']
+      : undefined;
+  const maxWorkers = Number(maxWorkersText);
 
   return (
     <div className="flex flex-col gap-5">
@@ -452,8 +468,15 @@ function ProjectsSection(): React.ReactElement {
           <input className={cx(inputCx, 'ac-mono')} placeholder="git@github.com:acme/api.git" value={url} onChange={(e) => setUrl(e.target.value)} />
         </Field>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Max workers">
-            <input type="number" min={1} max={16} className={cx(inputCx, 'ac-mono')} value={maxWorkers} onChange={(e) => setMaxWorkers(Number(e.target.value))} />
+          <Field label="Max workers" error={maxWorkersError}>
+            <input
+              type="number"
+              min={maxWorkersSchema.minValue ?? undefined}
+              max={maxWorkersSchema.maxValue ?? undefined}
+              className={cx(inputCx, 'ac-mono')}
+              value={maxWorkersText}
+              onChange={(e) => setMaxWorkersText(e.target.value)}
+            />
           </Field>
           <Field label="Auto-merge default">
             <select className={cx(inputCx, 'ac-mono')} value={autoMergeDefault ? 'on' : 'off'} onChange={(e) => setAutoMergeDefault(e.target.value === 'on')}>
@@ -467,7 +490,7 @@ function ProjectsSection(): React.ReactElement {
         </Field>
         <Button
           variant="primary"
-          disabled={!url || add.isPending}
+          disabled={!url || !maxWorkersValid || add.isPending}
           onClick={() =>
             add.mutate(
               { url, maxWorkers, ...(setupCommand ? { setupCommand } : {}), policies: { autoMergeDefault } },
@@ -670,15 +693,35 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
   const knownOptionModels = optionModels.data ?? [];
   const customModel = freeText || isCustomModel(model, knownOptionModels);
 
+  // The entry exactly as add() would store it, checked against the same schemas the daemon parses
+  // (VS-212) — the limits stay derived from shared, never restated here.
+  const candidate = {
+    id: id.trim(),
+    description: description.trim(),
+    runtime,
+    model: model?.trim() ? model.trim() : null,
+  };
+  const fieldIssues = parseFieldIssues(WorkerModelOptionSchema, candidate);
+  const listIssues = parseFieldIssues(WorkerOptionsArraySchema, [...options, candidate]);
+  const valid = fieldIssues.valid && listIssues.valid;
+  const descMax = WorkerModelOptionSchema.shape.description.maxLength;
+  const descriptionIssue = candidate.description
+    ? descMax != null && candidate.description.length > descMax
+      ? `At most ${descMax} characters — now ${candidate.description.length}.`
+      : fieldIssues.byPath.description
+    : undefined;
+  // The id field's error, in priority order: the entry's own slug rule (friendly copy, the limit
+  // is the schema's regex, not a number), then the catalog's duplicate rule, then its cap — which
+  // applies whatever the typed entry.
+  const idIssue = candidate.id
+    ? fieldIssues.byPath.id
+      ? 'Kebab-case — lowercase letters, digits and dashes.'
+      : (listIssues.byPath.id ?? listIssues.byPath[''])
+    : listIssues.byPath[''];
+
   const add = (): void => {
-    const trimmedId = id.trim();
-    const trimmedDesc = description.trim();
-    if (!trimmedId || !trimmedDesc) return;
-    const trimmedModel = model?.trim();
-    onSave({
-      ...current,
-      workerOptions: [...options, { id: trimmedId, description: trimmedDesc, runtime, model: trimmedModel ? trimmedModel : null }],
-    });
+    if (!valid) return;
+    onSave({ ...current, workerOptions: [...options, candidate] });
     setId('');
     setDescription('');
     setModel(null);
@@ -702,10 +745,10 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
           </Button>
         </div>
       ))}
-      <Field label="New option id">
+      <Field label="New option id" error={idIssue}>
         <input className={cx(inputCx, 'ac-mono')} aria-label="New worker option id" value={id} onChange={(e) => setId(e.target.value)} />
       </Field>
-      <Field label="When to use">
+      <Field label="When to use" error={descriptionIssue}>
         <input className={inputCx} aria-label="New worker option description" value={description} onChange={(e) => setDescription(e.target.value)} />
       </Field>
       <Field label="Runtime">
@@ -748,7 +791,8 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
           />
         </Field>
       ) : null}
-      <Button onClick={add} disabled={disabled}>Add worker option</Button>
+      <p className="text-micro text-text-3">An id and a when-to-use description are required; the id is kebab-case and unique in the catalog.</p>
+      <Button onClick={add} disabled={disabled || !valid}>Add worker option</Button>
     </div>
   );
 }

@@ -626,6 +626,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         } catch (e) { log.warn({ ticket: row.identifier, err: String(e) }, 'merge_approved wake failed'); }
       } else {
         try {
+          // VS-232: mergeDone treats this forge SHA as the trusted merge commit when verifying landing.
           await deps().tickets.mergeDone(SYSTEM, row.ticketId, { mergeCommit: pr.mergeCommit, method: 'forge' });
           log.info({ ticket: row.identifier, mergeCommit: pr.mergeCommit }, 'reconciliation completed a merge with no live worker');
         } catch (e) { log.warn({ ticket: row.identifier, err: String(e) }, 'reconciliation mergeDone failed'); }

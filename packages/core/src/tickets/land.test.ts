@@ -117,7 +117,84 @@ describe('landDelivery', () => {
     await multiCommitBranch();
     await commit(origin, 'other.ts', 'export const other = 1;\n', 'chore: unrelated');
 
-    await expect(landDelivery(config, project(), ticket(), BRANCH)).rejects.toMatchObject({ code: 'merge_unverified' });
+    await expect(landDelivery(config, project(), ticket(), BRANCH)).rejects.toMatchObject({
+      code: 'merge_unverified',
+      message: expect.stringContaining('merge the PR first'),
+      details: expect.objectContaining({
+        branch: BRANCH,
+        landing: expect.stringContaining('origin/'),
+        mergeCommitStatus: 'omitted',
+        strategies: expect.any(Array),
+      }),
+    });
+  });
+
+  describe('squash after another commit landed first (VS-232)', () => {
+    /**
+     * VS-227 topology: another commit lands on origin, then the ticket branch is squash-merged
+     * against that newer tip. Both sides edit `shared.ts` so the squash commit's context lines
+     * differ from `git diff <old-merge-base> <branch>` — that is why patch-id matching fails.
+     */
+    async function interveningSquash(): Promise<string> {
+      await commit(origin, 'shared.ts', 'alpha\n\nomega\n', 'shared');
+      await git(['fetch', 'origin'], clone);
+      await git(['merge', '--ff-only', 'origin/main'], clone);
+
+      await git(['checkout', '-b', BRANCH], clone);
+      await commit(clone, 'shared.ts', 'alpha-branch\n\nomega\n', 'feat: branch shared');
+      await commit(clone, 'a.ts', 'export const a = 1;\n', 'feat: a');
+      await commit(clone, 'b.ts', 'export const b = 2;\n', 'feat: b');
+      await git(['checkout', 'main'], clone);
+
+      await commit(origin, 'shared.ts', 'alpha\n\nomega-other\n', 'chore: another PR');
+      await squashMergeOnOrigin();
+      return head(origin);
+    }
+
+    it('verifies when given the squash commit', async () => {
+      const squashSha = await interveningSquash();
+
+      const r = await landDelivery(config, project(), ticket(), BRANCH, { mergeCommit: squashSha });
+      expect(r).toMatchObject({ mode: 'pr', landed: true });
+      expect(r.detail).toContain(squashSha.slice(0, 12));
+      expect(r.detail).toMatch(/contains merge commit/);
+    });
+
+    it('cannot prove the same topology from content strategies alone', async () => {
+      await interveningSquash();
+
+      await expect(landDelivery(config, project(), ticket(), BRANCH)).rejects.toMatchObject({
+        code: 'merge_unverified',
+        message: expect.stringContaining('merge the PR first'),
+        details: expect.objectContaining({
+          branch: BRANCH,
+          landing: expect.stringContaining('origin/'),
+          mergeCommitStatus: 'omitted',
+          strategies: expect.any(Array),
+        }),
+      });
+    });
+
+    it('does not tell the caller to merge the PR first when a named SHA is not on the landing branch', async () => {
+      await multiCommitBranch();
+      const branchHead = await head(clone, BRANCH);
+
+      const err = await landDelivery(config, project(), ticket(), BRANCH, { mergeCommit: branchHead }).then(
+        () => { throw new Error('expected merge_unverified'); },
+        (e: unknown) => e as Error & { code: string; details: Record<string, unknown> },
+      );
+      expect(err).toMatchObject({
+        code: 'merge_unverified',
+        details: expect.objectContaining({
+          branch: BRANCH,
+          landing: expect.stringContaining('origin/'),
+          mergeCommit: branchHead,
+          mergeCommitStatus: 'not_ancestor',
+        }),
+      });
+      expect(err.message).toContain(`does not contain merge commit ${branchHead}`);
+      expect(err.message).not.toContain('merge the PR first');
+    });
   });
 
   it('fast-forwards the primary clone in local-branch mode', async () => {
@@ -134,7 +211,7 @@ describe('landDelivery', () => {
     await commit(clone, 'diverged.ts', 'export const d = 1;\n', 'chore: diverge main');
 
     await expect(landDelivery(config, project({ policies: { deliveryMode: 'local-branch' } }), ticket(), BRANCH))
-      .rejects.toMatchObject({ code: 'merge_unverified' });
+      .rejects.toMatchObject({ code: 'merge_unverified', details: expect.objectContaining({ landing: 'main', branch: BRANCH }) });
   });
 
   describe('a project-declared landing branch distinct from the default branch (VS-119)', () => {

@@ -15,7 +15,10 @@ import {
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock,
 } from '@agent-conductor/shared';
-import { flattenWakes, INCIDENT_LIST_MAX, type Actor, type CoreServices, type IncidentsService } from '@agent-conductor/core';
+import {
+  flattenWakes, INCIDENT_LIST_MAX, ARTIFACT_KIT_CSS, ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks,
+  type Actor, type CoreServices, type IncidentsService,
+} from '@agent-conductor/core';
 import type { RunTokenClaims } from './runtoken.js';
 import type { WorkspaceRuntime } from './types.js';
 import { toOcError } from './http.js';
@@ -537,6 +540,16 @@ export const TOOLS: ToolDef[] = [
     name: 'ac_worktree_status', scope: 'all', input: z.object({}),
     description: 'Your worktree: path, branch, dirty flag and ahead/behind the default branch. Use this instead of guessing whether your work landed.',
     handler: (ctx) => worktreeStatus(ctx),
+  },
+  {
+    name: 'ac_artifact_kit', scope: 'all', input: z.object({}),
+    description: 'The AC Artifact Kit on demand: `{ css, tokens, components, playbooks }` — the drift-checked CSS for a self-contained HTML artifact, its parsed token set, the semantic component classes, and the agent-conductor-artifacts skill\'s playbook reference material. Call this instead of carrying the kit in every prompt.',
+    handler: (ctx) => ({
+      css: ARTIFACT_KIT_CSS,
+      tokens: artifactKitTokens(),
+      components: ARTIFACT_KIT_COMPONENTS,
+      playbooks: readArtifactPlaybooks(ctx.ws.ctx.skillsDir),
+    }),
   },
 
   // ---------- conductor ----------

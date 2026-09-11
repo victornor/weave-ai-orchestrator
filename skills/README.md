@@ -16,6 +16,7 @@ Always-loaded prompts live in `templates/` (`conductor.AGENTS.md.tmpl`, `worker.
 | `agent-conductor-planning` | conductor | Minimal ticket graphs, qualifying split reasons, acceptance criteria. |
 | `agent-conductor-briefing` | conductor | The four-section briefing, one decision at a time. |
 | `agent-conductor-knowledge` | all | Knowledge placement, entry rules, the curation procedure. |
+| `agent-conductor-artifacts` | all | When and how to publish a self-contained HTML artifact with the AC Artifact Kit; diagram, table, comparison, plan, code and change playbooks. |
 
 `manifest.json` is the machine-readable version of that table: `skills[].{name, audience, description}` where `audience` is `conductor`, `worker` or `all`, plus the per-runtime install paths.
 

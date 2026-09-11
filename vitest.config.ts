@@ -35,7 +35,7 @@ export default defineConfig({
   test: {
     include: ['packages/**/src/**/*.test.ts', 'packages/**/test/**/*.test.ts'],
     // packages/ui has its own jsdom-environment vitest.config.ts, run separately (`pnpm --filter
-    // @agent-conductor/ui test`, chained after this one in the root `test` script). Without this
+    // @agent-conductor/ui test`, always after this one in scripts/test.mjs). Without this
     // exclusion, a plain `.test.ts` file under packages/ui/src that touches `localStorage` or
     // `window` — anything not also matching `*.test.tsx` — gets collected a second time here under
     // plain `node`, where those globals do not exist, and fails for a reason that has nothing to do

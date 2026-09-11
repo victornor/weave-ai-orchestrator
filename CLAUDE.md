@@ -103,7 +103,7 @@ pnpm install
 pnpm build                                # tsc -b everywhere
 pnpm --filter @agent-conductor/ui build     # only when you touched the web app
 
-pnpm test                                 # vitest run, whole repo
+pnpm test                                 # core/server suite, then UI suite; fails if either is red
 pnpm vitest run packages/core             # one package
 pnpm lint                                 # boundary + console guards
 pnpm typecheck                            # tsc -b tsconfig.json, then the web app

@@ -21,6 +21,15 @@ import { runState } from './active.js';
 
 const tick = () => new Promise((r) => setImmediate(r));
 
+/** Wait for a condition the engine reaches, rather than guessing one `setImmediate` is enough (VS-214). */
+async function until(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('condition was never reached');
+    await tick();
+  }
+}
+
 function seedTicket(h: TestHarness, over: Record<string, unknown> = {}): string {
   const id = newId();
   const now = nowIso();
@@ -806,15 +815,20 @@ describe('run engine', () => {
         });
 
         it('stops resuming automatically on the third consecutive authentication failure, and parks for the human', async () => {
+          const authFails = (agentId: string) => h.db.all<{ id: string }>(
+            "SELECT id FROM runs WHERE agent_id = ? AND status = 'failed' AND error_family = 'auth'",
+            [agentId],
+          ).length;
           const { workerId, ticketId } = await failAuth();
+          await until(() => authFails(workerId) === 1);
           ungateRuntime(h.ctx, h.deps, 'fake');
           runtime.queue.push({ error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } } as never);
           await runOnce();
-          await tick();
+          await until(() => authFails(workerId) === 2);
           ungateRuntime(h.ctx, h.deps, 'fake');
           runtime.queue.push({ error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } } as never);
           await runOnce();
-          await tick();
+          await until(() => authFails(workerId) === 3);
 
           // Third in a row, no success in between: parked for the human like the retry ladder's own
           // exhaustion, not preserved-and-gated again.
@@ -843,12 +857,18 @@ describe('run engine', () => {
 
           runtime.queue.push({ structured: { state: 'done', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } } as never);
           await runOnce();
-          await tick();
+          await until(() => h.db.get<{ n: number }>(
+            "SELECT COUNT(*) AS n FROM runs WHERE agent_id = ? AND status = 'succeeded'",
+            [workerId],
+          )!.n === 1);
 
           h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'more work' });
           runtime.queue.push({ error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } } as never);
           await runOnce();
-          await tick();
+          await until(() => h.db.get<{ n: number }>(
+            "SELECT COUNT(*) AS n FROM runs WHERE agent_id = ? AND status = 'failed' AND error_family = 'auth'",
+            [workerId],
+          )!.n === 2);
 
           // Only one failure in a row, since the success in between reset the count: preserved and
           // gated again, not parked for the human.

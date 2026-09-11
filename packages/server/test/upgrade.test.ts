@@ -2,6 +2,9 @@
  * The deferred daemon upgrade (PLAN §20). Nothing here clones, builds, backs up, switches a symlink or
  * restarts anything: every one of those is a seam the service takes, and the tests hand it fakes.
  */
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Db, newId, nowIso } from '@agent-conductor/db';
 import { OcError, type Upgrade } from '@agent-conductor/shared';
@@ -15,6 +18,10 @@ import { createUpgradeService, type UpgradeDeps, type UpgradeService } from '../
 import type { WorkspaceRuntime } from '../src/types.js';
 
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+
+/** Fixture release paths. Each test owns a temp XDG data home whose `current` points at FROM, so rollback does not depend on a host daemon symlink (VS-214). */
+const FROM_RELEASE = '/rel/20260101-120000-aaaaaaaaaa';
+const TO_RELEASE = '/rel/20260202-120000-bbbbbbbbbb';
 
 /** Wait for a condition the background pipeline reaches, rather than sleeping a guessed interval. */
 async function until(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
@@ -78,10 +85,10 @@ function fixture(): Fixture {
       check: () => ({ configured: true, running: { version: '1.0.0', path: '/rel/a', sha: 'a'.repeat(40) }, source: '/src/agent-conductor', ref: 'main', targetSha: 'b'.repeat(40), updateAvailable: true, checkedAt: nowIso(), error: null }),
     },
     version: '1.0.0',
-    releaseRoot: '/rel/20260101-120000-aaaaaaaaaa',
-    build: () => ({ path: '/rel/20260202-120000-bbbbbbbbbb', sha: 'bbbbbbbbbb' }),
+    releaseRoot: FROM_RELEASE,
+    build: () => ({ path: TO_RELEASE, sha: 'bbbbbbbbbb' }),
     backup: () => ['/tmp/config/backups/x/daemon.sqlite'],
-    switchTo: () => ({ previous: '/rel/20260101-120000-aaaaaaaaaa' }),
+    switchTo: () => ({ previous: FROM_RELEASE }),
     prune: () => [],
     spawnRunner: () => undefined,
     ...over,
@@ -91,8 +98,23 @@ function fixture(): Fixture {
 }
 
 let fx: Fixture;
-beforeEach(() => { fx = fixture(); });
-afterEach(() => { fx.db.close(); });
+let dataRoot: string;
+let savedXdg: string | undefined;
+
+beforeEach(() => {
+  savedXdg = process.env['XDG_DATA_HOME'];
+  dataRoot = mkdtempSync(join(tmpdir(), 'ac-upgrade-xdg-'));
+  process.env['XDG_DATA_HOME'] = dataRoot;
+  mkdirSync(join(dataRoot, 'agent-conductor'), { recursive: true });
+  symlinkSync(FROM_RELEASE, join(dataRoot, 'agent-conductor', 'current'));
+  fx = fixture();
+});
+afterEach(() => {
+  fx.db.close();
+  if (savedXdg === undefined) delete process.env['XDG_DATA_HOME'];
+  else process.env['XDG_DATA_HOME'] = savedXdg;
+  rmSync(dataRoot, { recursive: true, force: true });
+});
 
 const state = (svc: UpgradeService): string | undefined => svc.status().upgrade?.state;
 const row = (svc: UpgradeService): Upgrade => svc.status().upgrade!;
@@ -399,8 +421,8 @@ describe('handing off the restart', () => {
     const svc = fx.service({ spawnRunner: (o) => { spawns.push(o); } });
     const created = svc.request({ requestedBy: 'op1' });
     await svc.settled();
-    expect(row(svc)).toMatchObject({ state: 'restarting', toRelease: '/rel/20260202-120000-bbbbbbbbbb', toSha: 'bbbbbbbbbb' });
-    expect(spawns).toEqual([{ upgradeId: created.id, release: '/rel/20260202-120000-bbbbbbbbbb' }]);
+    expect(row(svc)).toMatchObject({ state: 'restarting', toRelease: TO_RELEASE, toSha: 'bbbbbbbbbb' });
+    expect(spawns).toEqual([{ upgradeId: created.id, release: TO_RELEASE }]);
   });
 
   it('answers the request before the restart is handed off, and does not terminate answering it', async () => {
@@ -425,8 +447,7 @@ describe('handing off the restart', () => {
     await svc.settled();
     expect(row(svc)).toMatchObject({ state: 'failed', reason: 'restart_failed' });
     expect(row(svc).message).toContain('systemd-run: not found');
-    expect(switches).toHaveLength(2);
-    expect(switches[1]).not.toBe(switches[0]);
+    expect(switches).toEqual([TO_RELEASE, FROM_RELEASE]);
     expect(a.starts).toBe(1);
   });
 });

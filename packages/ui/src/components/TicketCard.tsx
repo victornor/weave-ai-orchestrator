@@ -34,6 +34,7 @@ export function outcomeOf(ticket: Ticket): { label: string; tone: 'accent' | 'do
   if (d.merged) return { label: 'merged', tone: 'done' };
   if (d.prUrl) return { label: `PR ${d.prState ?? 'open'}`, tone: 'accent' };
   if (ticket.kind === 'scout' || ticket.kind === 'question') return { label: ticket.kind === 'scout' ? 'report' : 'answered', tone: 'done' };
+  if (ticket.kind === 'operational') return { label: 'ran', tone: 'done' };
   return { label: 'done', tone: 'done' };
 }
 

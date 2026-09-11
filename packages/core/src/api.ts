@@ -50,7 +50,7 @@ export interface TicketsService {
   /** Liveness scan helper: tickets in active statuses without an action path. */
   livenessViolations(): S.Ticket[];
   /** A `proposed` change ticket or a non-`auto_merge` `in_review` ticket with no open approval gets a fresh one, raised as the daemon. Returns what it repaired. */
-  repairApprovals(): Promise<Array<{ id: string; identifier: string; kind: 'plan_approval' | 'merge_approval' }>>;
+  repairApprovals(): Promise<Array<{ id: string; identifier: string; kind: 'plan_approval' | 'merge_approval' | 'action_approval' }>>;
   /** Move `in_review` tickets with auto_merge on to `merging` once their delivery is ready (local-branch: immediately; pr: CI green or no CI). Returns how many advanced. */
   autoMergeSweep(): Promise<number>;
   nextIdentifier(): string;

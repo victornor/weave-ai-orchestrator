@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DECISION_KINDS } from '@agent-conductor/shared';
+import { DECISION_KINDS, TICKET_KINDS } from '@agent-conductor/shared';
 import { openDb } from './repos.js';
-import { Db } from './db.js';
+import { Db, migrationWantsForeignKeysOff } from './db.js';
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
 
@@ -25,11 +25,19 @@ function openDbAsOf(path: string, through: string): Db {
 }
 
 /** The `kind` CHECK as SQLite stored it, which is the only account of what the column really accepts. */
-function persistedDecisionKinds(db: Db): string[] {
-  const ddl = db.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'decisions'")!.sql;
+function persistedKindCheck(db: Db, table: string): string[] {
+  const ddl = db.get<{ sql: string }>(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, [table])!.sql;
   const clause = /kind\s+TEXT\s+NOT\s+NULL\s+CHECK\s*\(\s*kind\s+IN\s*\(([^)]*)\)\s*\)/i.exec(ddl);
   if (!clause) throw new Error(`no kind CHECK found in: ${ddl}`);
   return clause[1]!.split(',').map((v) => v.trim().replace(/^'|'$/g, ''));
+}
+
+function persistedDecisionKinds(db: Db): string[] {
+  return persistedKindCheck(db, 'decisions');
+}
+
+function persistedTicketKinds(db: Db): string[] {
+  return persistedKindCheck(db, 'tickets');
 }
 
 /** A ticket is the only row `decisions.ticket_id` will accept, and it needs a workspace. */
@@ -592,6 +600,143 @@ describe('migrations', () => {
       });
       const row = db.get<{ title: string; reporterKind: string; whatFailed: string }>('SELECT * FROM incidents WHERE id = ?', ['i1']);
       expect(row).toMatchObject({ title: 'MCP failed', reporterKind: 'worker', whatFailed: 'ac_ticket_get' });
+      db.close();
+    });
+  });
+
+  describe('0023_operational_ticket_kind', () => {
+    const TICKET_FK_CHILDREN = [
+      'ticket_relations', 'ticket_comments', 'ticket_documents', 'ticket_work_products',
+      'decisions', 'runs', 'knowledge_revisions',
+    ] as const;
+
+    function ticketsRefs(db: Db, table: string): string[] {
+      return db.all<{ from: string; table: string }>(`PRAGMA foreign_key_list(${table})`)
+        .filter((f) => f.table === 'tickets')
+        .map((f) => f.from)
+        .sort();
+    }
+
+    function seedReferencedRows(db: Db): void {
+      seedTicket(db, { workspace: 'w1', ticket: 't-parent' });
+      db.run(
+        `INSERT INTO tickets (id, workspace_id, number, identifier, kind, title, parent_id, created_by_kind, created_at, updated_at)
+         VALUES ('t-child', 'w1', 2, 'VS-2', 'task', 'Child', 't-parent', 'human', 't0', 't0')`);
+      db.run(
+        `INSERT INTO ticket_relations (ticket_id, related_ticket_id, kind) VALUES ('t-child', 't-parent', 'blocks')`);
+      db.run(
+        `INSERT INTO ticket_comments (id, ticket_id, author_kind, body, created_at)
+         VALUES ('c1', 't-parent', 'human', 'go', 't0')`);
+      db.run(
+        `INSERT INTO ticket_documents (id, ticket_id, key, current_revision) VALUES ('d1', 't-parent', 'report', 1)`);
+      db.run(
+        `INSERT INTO ticket_work_products (id, ticket_id, type, created_at, updated_at)
+         VALUES ('wp1', 't-parent', 'report', 't0', 't0')`);
+      db.insert('decisions', {
+        id: 'dec1', workspaceId: 'w1', ticketId: 't-parent', kind: 'plan_approval', owner: 'human',
+        title: 'Approve', status: 'open', createdAt: 't0',
+      });
+      db.run(
+        `INSERT INTO agents (id, workspace_id, kind, name, runtime_id, home_path, created_at, updated_at)
+         VALUES ('ag1', 'w1', 'worker', 'W', 'claude', '/tmp/h', 't0', 't0')`);
+      db.run(
+        `INSERT INTO runs (id, workspace_id, agent_id, ticket_id, wakeup_ids_json, runtime_id, turn_epoch, cwd, created_at)
+         VALUES ('run1', 'w1', 'ag1', 't-parent', '[]', 'claude', 1, '/tmp', 't0')`);
+      db.run(
+        `INSERT INTO knowledge_files (id, workspace_id, path, scope, budget_tokens, hash, updated_at)
+         VALUES ('kf1', 'w1', 'PROJECT.md', 'project', 10000, '', 't0')`);
+      db.run(
+        `INSERT INTO knowledge_revisions (id, file_id, revision, body, author_kind, reason, created_at, ticket_id)
+         VALUES ('kr1', 'kf1', 1, 'body', 'agent', 'note', 't0', 't-parent')`);
+    }
+
+    it('opts in only when the first non-empty line is the marker', () => {
+      expect(migrationWantsForeignKeysOff('-- ac:foreign_keys_off\nCREATE TABLE x (id TEXT);')).toBe(true);
+      expect(migrationWantsForeignKeysOff('\n  -- ac:foreign_keys_off\nCREATE TABLE x (id TEXT);')).toBe(true);
+      expect(migrationWantsForeignKeysOff('-- VS-216\n-- ac:foreign_keys_off\nCREATE TABLE x (id TEXT);')).toBe(false);
+      expect(migrationWantsForeignKeysOff(readFileSync(join(MIGRATIONS_DIR, '0010_decision_kinds.sql'), 'utf8'))).toBe(false);
+      expect(migrationWantsForeignKeysOff(readFileSync(join(MIGRATIONS_DIR, '0023_operational_ticket_kind.sql'), 'utf8'))).toBe(true);
+    });
+
+    it('rebuilds tickets and decisions while every FK child and parent_id pair survives', () => {
+      const path = join(dir, 'op-kind.sqlite');
+      const before = openDbAsOf(path, '0022_incidents.sql');
+      expect(persistedTicketKinds(before)).not.toContain('operational');
+      expect(persistedDecisionKinds(before)).not.toContain('action_approval');
+      seedReferencedRows(before);
+      before.close();
+
+      const db = openDb(path);
+      expect(db.get<{ parentId: string | null }>('SELECT parent_id FROM tickets WHERE id = ?', ['t-child'])!.parentId).toBe('t-parent');
+      expect(db.all<{ id: string }>('SELECT id FROM tickets ORDER BY id').map((r) => r.id)).toEqual(['t-child', 't-parent']);
+      expect(db.get('SELECT ticket_id FROM ticket_comments WHERE id = ?', ['c1'])).toMatchObject({ ticketId: 't-parent' });
+      expect(db.get('SELECT ticket_id FROM ticket_documents WHERE id = ?', ['d1'])).toMatchObject({ ticketId: 't-parent' });
+      expect(db.get('SELECT ticket_id FROM ticket_work_products WHERE id = ?', ['wp1'])).toMatchObject({ ticketId: 't-parent' });
+      expect(db.get('SELECT ticket_id FROM decisions WHERE id = ?', ['dec1'])).toMatchObject({ ticketId: 't-parent' });
+      expect(db.get('SELECT ticket_id FROM runs WHERE id = ?', ['run1'])).toMatchObject({ ticketId: 't-parent' });
+      expect(db.get('SELECT ticket_id FROM knowledge_revisions WHERE id = ?', ['kr1'])).toMatchObject({ ticketId: 't-parent' });
+      expect(db.get('SELECT ticket_id, related_ticket_id FROM ticket_relations')).toMatchObject({
+        ticketId: 't-child', relatedTicketId: 't-parent',
+      });
+
+      expect(ticketsRefs(db, 'tickets')).toEqual(['parent_id']);
+      expect(ticketsRefs(db, 'ticket_relations')).toEqual(['related_ticket_id', 'ticket_id']);
+      expect(ticketsRefs(db, 'ticket_comments')).toEqual(['ticket_id']);
+      expect(ticketsRefs(db, 'ticket_documents')).toEqual(['ticket_id']);
+      expect(ticketsRefs(db, 'ticket_work_products')).toEqual(['ticket_id']);
+      expect(ticketsRefs(db, 'decisions')).toEqual(['ticket_id']);
+      expect(ticketsRefs(db, 'runs')).toEqual(['ticket_id']);
+      expect(ticketsRefs(db, 'knowledge_revisions')).toEqual(['ticket_id']);
+      for (const table of TICKET_FK_CHILDREN) expect(ticketsRefs(db, table).length).toBeGreaterThan(0);
+      expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+
+      expect(db.all<{ name: string }>('PRAGMA index_list(tickets)').map((i) => i.name)).toEqual(
+        expect.arrayContaining(['tickets_origin_open', 'tickets_ws_status', 'tickets_project', 'tickets_merge_queue']),
+      );
+      expect(db.all<{ name: string }>('PRAGMA index_list(decisions)').map((i) => i.name)).toEqual(
+        expect.arrayContaining(['decisions_open_corr', 'decisions_ws_status', 'decisions_ws_project']),
+      );
+
+      db.run(
+        `INSERT INTO tickets (id, workspace_id, number, identifier, kind, title, created_by_kind, created_at, updated_at)
+         VALUES ('t-op', 'w1', 3, 'VS-3', 'operational', 'Restart', 'human', 't0', 't0')`);
+      expect(db.get<{ kind: string }>('SELECT kind FROM tickets WHERE id = ?', ['t-op'])!.kind).toBe('operational');
+      expect(() => db.run(
+        `INSERT INTO tickets (id, workspace_id, number, identifier, kind, title, created_by_kind, created_at, updated_at)
+         VALUES ('t-typo', 'w1', 4, 'VS-4', 'operatonal', 'Typo', 'human', 't0', 't0')`,
+      )).toThrow(/CHECK constraint failed/);
+
+      db.insert('decisions', {
+        id: 'dec-act', workspaceId: 'w1', ticketId: 't-op', kind: 'action_approval', owner: 'human',
+        title: 'Approve the action', status: 'open', createdAt: 't0',
+      });
+      expect(db.get<{ kind: string }>('SELECT kind FROM decisions WHERE id = ?', ['dec-act'])!.kind).toBe('action_approval');
+      expect(() => db.insert('decisions', {
+        id: 'dec-typo', workspaceId: 'w1', ticketId: 't-op', kind: 'action_aproval', owner: 'human',
+        title: 'Typo', status: 'open', createdAt: 't0',
+      })).toThrow(/CHECK constraint failed/);
+
+      expect(persistedTicketKinds(db).sort()).toEqual([...TICKET_KINDS].sort());
+      expect(persistedDecisionKinds(db).sort()).toEqual([...DECISION_KINDS].sort());
+      db.close();
+    });
+
+    it('keeps the persisted kind CHECKs equal to the TypeScript enums both ways', () => {
+      const db = openDb(join(dir, 'op-kinds-enum.sqlite'));
+      expect(persistedTicketKinds(db).sort()).toEqual([...TICKET_KINDS].sort());
+      expect(persistedDecisionKinds(db).sort()).toEqual([...DECISION_KINDS].sort());
+      db.close();
+    });
+
+    it('still cannot DROP TABLE tickets while a child row exists without the marker', () => {
+      const path = join(dir, 'op-unmarked.sqlite');
+      const db = openDbAsOf(path, '0022_incidents.sql');
+      seedTicket(db, { workspace: 'w1', ticket: 't1' });
+      db.run(
+        `INSERT INTO ticket_comments (id, ticket_id, author_kind, body, created_at)
+         VALUES ('c1', 't1', 'human', 'held', 't0')`);
+      expect(() => db.sqlite.exec('DROP TABLE tickets')).toThrow(/FOREIGN KEY constraint failed/);
+      expect(db.get('SELECT id FROM tickets WHERE id = ?', ['t1'])).toMatchObject({ id: 't1' });
       db.close();
     });
   });

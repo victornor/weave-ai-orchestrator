@@ -32,7 +32,7 @@ Your `AGENTS.md` is the contract. This is the procedure.
 Call `ac_worker_models` first when any named worker options exist, and pass the fitting `workerModelId`; omit it to use the workspace workers default.
 
 - **title** — imperative, ≤ 70 characters, no ticket id, no project name. "Add dark mode to the dashboard", not "Dark mode".
-- **kind** — `change` when code changes are implied (the default for real work); `task` for a chore with no spec consequence; `scout` when the request is diagnostic or the answer would change what to build; `question` when someone must answer but nothing changes.
+- **kind** — `change` when code changes are implied (the default for real work); `task` for a chore with no spec consequence; `scout` when the request is diagnostic or the answer would change what to build; `question` when someone must answer but nothing changes; `operational` when the work changes a running system (deploy, upgrade, restart) and has no diff to review — the worker gates with `action_approval` before acting.
 - **priority** — `critical` (production is broken or someone is blocked), `high` (this week), `medium` (default), `low` (whenever).
 - **summary** — one sentence, ≤ 200 characters, why the ticket exists. Shown on the plan-approval card so the human can decide without opening it. Always set it when you file a ticket; never derive it from the description later.
 - **description** — always these five headings:

@@ -57,6 +57,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       case 'concern':
         return askedByWorker(askedByAgentId) ? 'conductor' : 'human';
       case 'merge_approval':
+      case 'action_approval':
         return 'human';
       case 'hire_approval':
         return ctx.config.defaults.hireApproval === 'conductor' ? 'conductor' : 'human';
@@ -199,6 +200,24 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       await tickets.transition(actor, ticketId, { to: 'proposing', note: 'Revision requested; rework the plan.' });
     } else if (key === 'reject') {
       tickets.cancel(actor, ticketId, text ? `Plan rejected: ${text}` : 'Plan rejected.');
+    }
+  }
+
+  async function applyActionApproval(actor: Actor, d: Decision, key: string, text: string | null): Promise<void> {
+    const ticketId = ticketOf(d);
+    if (!ticketId) return;
+    const tickets = deps().tickets;
+    if (key === 'approve') {
+      // Stay `in_progress`. `answer()` already wakes `askedByAgentId`.
+      if (text) tickets.comment(actor, ticketId, `Action approved: ${text}`, 'comment', 'trusted');
+      return;
+    }
+    if (key === 'revise') {
+      if (text) tickets.comment(actor, ticketId, `Action revision requested: ${text}`, 'comment', 'trusted');
+      return;
+    }
+    if (key === 'reject') {
+      tickets.cancel(actor, ticketId, text ? `Action rejected: ${text}` : 'Action rejected.');
     }
   }
 
@@ -399,6 +418,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     try {
       switch (d.kind) {
         case 'plan_approval': await applyPlanApproval(actor, answered, effective, text); break;
+        case 'action_approval': await applyActionApproval(actor, answered, effective, text); break;
         case 'merge_approval': await applyMergeApproval(actor, answered, effective, text); break;
         case 'hire_approval': await applyHireApproval(actor, answered, effective); break;
         case 'retry_approval': await applyRetryApproval(actor, answered, effective); break;

@@ -29,6 +29,7 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 | `todo` (`task`) | Implement, test, then choose your ending (next section). | `in_review` with a work product — or `done`, ending stated in the note, when nothing needs landing |
 | `todo` (`scout`) | Investigate; write the report document. Load `agent-conductor-scout`. | `done` |
 | `todo` (`question`) | Answer as a ticket comment with evidence, then `ac_report` with `state: done` — that report closes a question ticket for you. | `done` |
+| `todo` (`operational`) | Write an `action` document (commands, host/service, expected outcome) and wait for human `action_approval` — YOLO does not grant it. After approval, execute, write a `report` of what actually happened, update the knowledge base. Repo docs are a follow-up `change`. Never finish with unlanded commits. | `done` |
 | `blocked` | Only if the blocker cleared. Otherwise idle. | the status the work resumes in |
 
 For `change` tickets also load `agent-conductor-openspec` — it holds the propose/apply mapping and what never to do.
@@ -39,6 +40,10 @@ For `change` tickets also load `agent-conductor-openspec` — it holds the propo
 - **You produced nothing that needs landing** (a config tweak, a cleanup, the answer is the ticket) → finish at `done`: state the ending and why in the transition note, `ac_ticket_transition(id, "done", {note: "ending: done — <why nothing needs landing>"})`. No PR, no merge approval.
 
 The daemon enforces the boundary rather than trusting the vibe: `done` is refused with `worktree_not_landed` while your branch carries commits its landing branch does not contain, and with `validation` when the note is missing. A rejection is information: `worktree_not_landed` means you produced a diff — deliver it through `in_review`.
+
+## An operational ticket gates before the action
+
+State what you will do — the concrete commands, against which host or service, and what you expect to happen — in an `action` document (`ac_ticket_document_put(id, "action", body)`). That write raises a human-owned `action_approval`. Do not execute until it is answered `approve`. YOLO and `proposalApproval: none` do not grant it. After you run it, write a `report` of what actually happened (including if it differed) and update the knowledge base where applicable. Repo documentation is a follow-up `change` ticket, never unlanded commits on this one.
 
 ## Ticket rules
 

@@ -311,7 +311,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
    * wake, the same as `knowledgeHealthPass` and the spawn-wait nudge.
    */
   async function approvalIntegrityScan(): Promise<void> {
-    let repaired: Array<{ id: string; identifier: string; kind: 'plan_approval' | 'merge_approval' }> = [];
+    let repaired: Array<{ id: string; identifier: string; kind: 'plan_approval' | 'merge_approval' | 'action_approval' }> = [];
     try { repaired = await deps().tickets.repairApprovals(); } catch (e) { log.error({ err: String(e) }, 'approval integrity scan failed'); return; }
     if (!repaired.length) return;
     for (const r of repaired) log.warn({ ticket: r.identifier, kind: r.kind }, 'ticket had no open approval though it was waiting on one; raised a fresh one');

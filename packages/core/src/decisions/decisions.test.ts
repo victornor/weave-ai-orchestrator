@@ -162,6 +162,51 @@ describe('decisions', () => {
     });
   });
 
+  describe('action approval side effects', () => {
+    const ACTION_OPTS = [
+      { key: 'approve', label: 'Approve' },
+      { key: 'revise', label: 'Revise' },
+      { key: 'reject', label: 'Reject' },
+    ];
+    const inProgress = () => {
+      const t = ticket({ kind: 'operational', title: 'Restart the daemon' });
+      const workerId = h.addWorker(t.id);
+      h.db.update('tickets', t.id, { status: 'in_progress', workerId });
+      const d = decisions.create(AGENT, {
+        ticketId: t.id, kind: 'action_approval', owner: 'human', title: 'Approve the action',
+        options: ACTION_OPTS, askedByAgentId: workerId, correlationKey: `action_approval:${t.id}`,
+      });
+      return { t, d, workerId };
+    };
+
+    it('stays human-owned even when the project would auto-grant a plan', () => {
+      h.db.update('projects', h.projectId, { policiesJson: { proposalApproval: 'conductor' } });
+      const t = ticket({ kind: 'operational', title: 'Restart' });
+      expect(decisions.create(AGENT, { ticketId: t.id, kind: 'action_approval', title: 'x', options: ACTION_OPTS }).owner).toBe('human');
+    });
+
+    it('approve leaves the ticket in_progress and wakes the worker', async () => {
+      const { t, d, workerId } = inProgress();
+      await decisions.answer(HUMAN, d.id, { key: 'approve' });
+      expect(tickets.get(t.id).status).toBe('in_progress');
+      expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'decision_answered')).toBe(true);
+    });
+
+    it('revise leaves the ticket in_progress, records feedback, and wakes the worker', async () => {
+      const { t, d, workerId } = inProgress();
+      await decisions.answer(HUMAN, d.id, { key: 'revise', text: 'name the host' });
+      expect(tickets.get(t.id).status).toBe('in_progress');
+      expect(tickets.comments(t.id).some((c) => c.body.includes('name the host'))).toBe(true);
+      expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'decision_answered')).toBe(true);
+    });
+
+    it('reject cancels the ticket', async () => {
+      const { t, d } = inProgress();
+      await decisions.answer(HUMAN, d.id, { key: 'reject', text: 'not now' });
+      expect(tickets.get(t.id).status).toBe('cancelled');
+    });
+  });
+
   // VS-118: answering "retry now" on a parking decision used to send the ticket to `todo` whenever
   // `t.executionRunId` happened to be null — which it always is by the time this runs, since
   // `finalize()` clears it before the park that raised this decision. It must restore the status the

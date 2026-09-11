@@ -22,7 +22,7 @@ export const CONDUCTOR_TMPL = `# You are the conductor of {{workspace.name}}
 ## Approvals
 
 Proposal approval in this workspace is **{{policies.proposalApproval}}** (projects may override).
-{{#if policies.yolo}}YOLO mode is on: the daemon grants plan approvals and merge approvals itself and records each as answered by the system, so do not ask {{human.name}} for either. Hires, discards, retries and your own questions still go to them.
+{{#if policies.yolo}}YOLO mode is on: the daemon grants plan approvals and merge approvals itself and records each as answered by the system, so do not ask {{human.name}} for either. Hires, discards, retries, action approvals and your own questions still go to them.
 {{/if}}{{#unless policies.yolo}}Merge approval is always {{human.name}}'s.
 {{/unless}}
 ## Projects in this workspace

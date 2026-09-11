@@ -60,10 +60,11 @@ interface Target {
 }
 
 /** Decisions with a purpose-built body and buttons; everything else takes the option-list path. */
-const NAMED_VARIANTS = ['plan_approval', 'merge_approval', 'hire_approval', 'discard_approval'];
+const NAMED_VARIANTS = ['plan_approval', 'merge_approval', 'hire_approval', 'discard_approval', 'action_approval'];
 
 const HEAD: Record<string, { label: string; status: UiStatus }> = {
   plan_approval: { label: 'Plan approval', status: 'needs-you' },
+  action_approval: { label: 'Action approval', status: 'needs-you' },
   merge_approval: { label: 'Merge approval', status: 'merging' },
   hire_approval: { label: 'Hire approval', status: 'needs-you' },
   discard_approval: { label: 'Discard worktree', status: 'failed' },
@@ -432,11 +433,11 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             className={section}
             rows={3}
             autoFocus
-            scope={<span>Revising the plan for {ticketIdentifier ?? 'this ticket'} — say what to change.</span>}
+            scope={<span>Revising the {decision.kind === 'action_approval' ? 'action' : 'plan'} for {ticketIdentifier ?? 'this ticket'} — say what to change.</span>}
             placeholder="What should change?"
             submitLabel="Send revision"
             onSubmit={(t) => {
-              onAnswer({ key: NAMED_CARD_OPTION_KEYS.plan_approval.revise, text: t });
+              onAnswer({ key: decision.kind === 'action_approval' ? NAMED_CARD_OPTION_KEYS.action_approval.revise : NAMED_CARD_OPTION_KEYS.plan_approval.revise, text: t });
               setRevising(false);
             }}
           />
@@ -457,15 +458,15 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
               <span className="font-medium text-needs-you">Auto-approved by YOLO mode</span>
               {decision.kind === 'merge_approval' ? ' — merging as soon as the PR\u2019s checks are green.' : ' — the worker is already implementing it.'}
             </p>
-          ) : inert ? null : decision.kind === 'plan_approval' ? (
+          ) : inert ? null : decision.kind === 'plan_approval' || decision.kind === 'action_approval' ? (
             <>
-              <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.plan_approval.approve)} kbd="⏎">
+              <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(decision.kind === 'action_approval' ? NAMED_CARD_OPTION_KEYS.action_approval.approve : NAMED_CARD_OPTION_KEYS.plan_approval.approve)} kbd="⏎">
                 Approve
               </Button>
               <Button variant="secondary" size="thumb" compact={compact} className="flex-1" disabled={busy} onClick={() => setRevising((v) => !v)}>
                 Revise…
               </Button>
-              <Button variant="ghost" size="thumb" compact={compact} className="w-12 border border-line-2" aria-label="Reject" disabled={busy} onClick={() => answer(NAMED_CARD_OPTION_KEYS.plan_approval.reject)}>
+              <Button variant="ghost" size="thumb" compact={compact} className="w-12 border border-line-2" aria-label="Reject" disabled={busy} onClick={() => answer(decision.kind === 'action_approval' ? NAMED_CARD_OPTION_KEYS.action_approval.reject : NAMED_CARD_OPTION_KEYS.plan_approval.reject)}>
                 ✕
               </Button>
             </>

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ProjectConfigSchema } from '@agent-conductor/shared';
 
 const state = vi.hoisted(() => ({
   patches: [] as Array<Record<string, unknown>>,
@@ -260,6 +261,44 @@ describe('Settings — add project Auto-merge default (VS-153)', () => {
     const body = state.addCalls[0]!;
     expect(body).not.toHaveProperty('autoMerge');
     expect(body['policies']).toEqual({ autoMergeDefault: true });
+  });
+});
+
+describe('Settings — add project Max workers follows the project schema (VS-212)', () => {
+  function openProjects(): void {
+    render(<SettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+  }
+
+  // The bounds are read off the schema the route itself validates with, so a schema change the
+  // form does not follow fails here.
+  const maxWorkersSchema = ProjectConfigSchema.shape.maxWorkers.removeDefault();
+  const min = maxWorkersSchema.minValue as number;
+  const max = maxWorkersSchema.maxValue as number;
+
+  it('flags an out-of-bounds value at the field while typing and disables Add', () => {
+    openProjects();
+    fireEvent.change(screen.getByPlaceholderText('git@github.com:acme/api.git'), { target: { value: 'git@github.com:acme/api.git' } });
+
+    const input = screen.getByLabelText('Max workers');
+    fireEvent.change(input, { target: { value: String(max + 1) } });
+    expect(screen.getByText(`A whole number from ${min} to ${max}.`)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add project' })).toBeDisabled();
+    expect(state.addCalls).toHaveLength(0);
+
+    fireEvent.change(input, { target: { value: String(min - 1) } });
+    expect(screen.getByText(`A whole number from ${min} to ${max}.`)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add project' })).toBeDisabled();
+  });
+
+  it('a whole number at the schema maximum submits', () => {
+    openProjects();
+    fireEvent.change(screen.getByPlaceholderText('git@github.com:acme/api.git'), { target: { value: 'git@github.com:acme/api.git' } });
+    fireEvent.change(screen.getByLabelText('Max workers'), { target: { value: String(max) } });
+    expect(screen.getByRole('button', { name: 'Add project' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Add project' }));
+    expect(state.addCalls).toHaveLength(1);
+    expect(state.addCalls[0]!['maxWorkers']).toBe(max);
   });
 });
 

@@ -4,6 +4,7 @@
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@agent-conductor/shared';
 import type { WorkspaceModels } from '../api/types';
 
 const state = vi.hoisted(() => ({
@@ -252,5 +253,63 @@ describe('Settings — the two model settings', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
     expect(screen.queryByLabelText('Runtime')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
+  });
+});
+
+describe('Settings — the add-option editor enforces the catalog rules before submit (VS-212)', () => {
+  function typeEntry(id: string, description: string): void {
+    fireEvent.change(screen.getByLabelText('New worker option id'), { target: { value: id } });
+    fireEvent.change(screen.getByLabelText('New worker option description'), { target: { value: description } });
+  }
+
+  it('flags an over-length description at the field while typing and disables Add, at the schema’s own limit', () => {
+    // The limit is read off the schema, so a schema change the editor does not follow fails here.
+    const max = WorkerModelOptionSchema.shape.description.maxLength;
+    expect(typeof max).toBe('number');
+    openModels();
+    typeEntry('cheap', 'x'.repeat((max as number) + 1));
+    expect(screen.getByText(`At most ${max} characters — now ${(max as number) + 1}.`)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add worker option' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('New worker option description'), { target: { value: 'x'.repeat(max as number) } });
+    expect(screen.queryByText(`At most ${max} characters — now ${(max as number) + 1}.`)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add worker option' })).toBeEnabled();
+  });
+
+  it('flags a duplicate id at the id field before any submit', () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'cheap', description: 'Scouts.', runtime: 'claude', model: null }] };
+    openModels();
+    typeEntry('cheap', 'Also scouts.');
+    expect(screen.getByText(/duplicate worker option id 'cheap'/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add worker option' })).toBeDisabled();
+    expect(state.saved).toHaveLength(0);
+  });
+
+  it('flags an id the slug rule rejects at the id field', () => {
+    openModels();
+    typeEntry('Cheap Model', 'Scouts.');
+    expect(screen.getByText('Kebab-case — lowercase letters, digits and dashes.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add worker option' })).toBeDisabled();
+  });
+
+  it('says the catalog cap and disables Add once the catalog is full, whatever the typed entry', () => {
+    // The fixture count is probed off the schema, so no restated literal can drift from it here.
+    const make = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `option-${i}`, description: `Number ${i}.`, runtime: 'claude', model: null }));
+    let cap = 0;
+    while (WorkerOptionsArraySchema.safeParse(make(cap + 1)).success) cap++;
+    state.models = { ...state.models, workerOptions: make(cap) };
+    openModels();
+    typeEntry('one-more', 'Still valid on its own.');
+    expect(screen.getByText(/at most/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add worker option' })).toBeDisabled();
+    expect(state.saved).toHaveLength(0);
+  });
+
+  it('keeps Add disabled on an untouched form, instead of no-oping on click', () => {
+    openModels();
+    expect(screen.getByRole('button', { name: 'Add worker option' })).toBeDisabled();
+    expect(screen.getByText('An id and a when-to-use description are required; the id is kebab-case and unique in the catalog.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add worker option' }));
+    expect(state.saved).toHaveLength(0);
   });
 });

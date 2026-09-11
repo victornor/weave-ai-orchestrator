@@ -197,7 +197,7 @@ describe('prompt rendering', () => {
       h.db.insert('tickets', {
         id: otherTicketId, workspaceId: h.workspaceId, projectId: h.projectId, number: 800, identifier: 'TST-800',
         kind: 'task', title: 'Curate project knowledge (api)', description: '', status: 'todo', priority: 'low',
-        assigneeRoleId: h.roleId, createdByKind: 'agent', createdAt: now, updatedAt: now,
+        assigneeRoleId: h.roleId, createdByKind: 'agent', originKind: 'curation', createdAt: now, updatedAt: now,
       });
       const id = h.addWorker(otherTicketId, over);
       return h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [id])!;
@@ -224,13 +224,31 @@ describe('prompt rendering', () => {
 
     it.runIf(existsSync(SHIPPED_TEMPLATES))('the shipped brief gives a no-worktree worker the curation block, not the worktree one', () => {
       h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const clonePath = h.db.get<{ clonePath: string }>('SELECT clone_path FROM projects WHERE id = ?', [h.projectId])!.clonePath;
       const brief = renderBrief(h.ctx, h.deps, freshWorker({ worktreePath: null, branch: null }));
       expect(brief).toContain('This is a curation ticket and has no worktree of its own');
-      expect(brief).toContain('`work/` is a read-only checkout of the project\'s landing branch');
+      expect(brief).toContain('`work/` is the project\'s primary clone, read-only');
+      // VS-256: the brief states the real, absolute clone path, not the unbacked literal `work/`.
+      expect(brief).toContain(`Its absolute path is \`${clonePath}\`.`);
       expect(brief).toContain('never write to it, never commit, never push');
       expect(brief).toContain('Load `agent-conductor-knowledge` and follow the curation procedure');
       expect(brief).not.toContain('Your worktree is');
       expect(brief).not.toContain('Before anything else, call `ac_worktree_status`');
+      expect(brief).not.toMatch(/\{\{[#/]?[a-z]/i);
+    });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('states the moment the checkout was verified fresh, when the engine recorded one (VS-256)', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      h.db.update('projects', h.projectId, { lastFetchedAt: '2026-09-11T21:30:00.000Z' });
+      const brief = renderBrief(h.ctx, h.deps, freshWorker({ worktreePath: null, branch: null }));
+      expect(brief).toContain('verified as of `2026-09-11T21:30:00.000Z`');
+      expect(brief).not.toMatch(/\{\{[#/]?[a-z]/i);
+    });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('says nothing about verification when the project has never been fetched', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const brief = renderBrief(h.ctx, h.deps, freshWorker({ worktreePath: null, branch: null }));
+      expect(brief).not.toContain('verified as of');
       expect(brief).not.toMatch(/\{\{[#/]?[a-z]/i);
     });
 

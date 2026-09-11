@@ -2,7 +2,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ulid } from 'ulid';
+import { monotonicFactory } from 'ulid';
 
 export type Row = Record<string, unknown>;
 export type Params = Record<string, SQLInputValue> | SQLInputValue[];
@@ -116,6 +116,7 @@ export function camel(row: Row): Row {
   return out;
 }
 function safeJson(s: string): unknown { try { return JSON.parse(s); } catch { return null; } }
-export const newId = (): string => ulid();
+const nextId = monotonicFactory();
+export const newId = (): string => nextId();
 export const nowIso = (): string => new Date().toISOString();
 export const bool = (v: unknown): boolean => v === 1 || v === true || v === '1';

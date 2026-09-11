@@ -97,6 +97,15 @@ describe('jobs', () => {
     expect(jobs.list({ entityId: 'other' })).toHaveLength(0);
   });
 
+  it('lists two jobs that share a start millisecond in creation order', () => {
+    const first = start();
+    const second = start();
+    const at = '2026-09-11T12:00:00.000Z';
+    h.db.run('UPDATE jobs SET started_at = ? WHERE id IN (?, ?)', [at, first, second]);
+    expect(jobs.list({ entityId: 'p1' }).map((j) => j.id)).toEqual([second, first]);
+    expect(jobs.list({ entityId: 'p1' }).map((j) => j.id)).toEqual([second, first]);
+  });
+
   it('fails a job left running by a previous process', () => {
     const id = start();
     jobs.step(id, 'clone', 'running');

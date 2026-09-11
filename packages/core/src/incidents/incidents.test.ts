@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { openDb, type Db } from '@agent-conductor/db';
+import { newId, openDb, type Db } from '@agent-conductor/db';
 import { OcError } from '@agent-conductor/shared';
 import { createIncidentsService } from './index.js';
 
@@ -103,6 +103,20 @@ describe('incident reads (VS-222)', () => {
     const page = incidents.list({ since: '2026-09-10T10:00:00Z', limit: 1 });
     expect(page.items.map((i) => i.id)).toEqual([t3.id]);
     expect(page.total).toBe(2);
+    close();
+  });
+
+  it('same-millisecond incidents list as a stable block and bookmark as a group', () => {
+    const { db, incidents, close } = service();
+    const at = '2026-09-11T12:00:00.000Z';
+    const earlier = newId();
+    const later = newId();
+    seedRow(db, { id: earlier, createdAt: at });
+    seedRow(db, { id: later, createdAt: at });
+    expect(later > earlier).toBe(true);
+    expect(incidents.list({ limit: 10 }).items.map((i) => i.id)).toEqual([later, earlier]);
+    expect(incidents.list({ limit: 10 }).items.map((i) => i.id)).toEqual([later, earlier]);
+    expect(incidents.list({ since: at }).items).toEqual([]);
     close();
   });
 

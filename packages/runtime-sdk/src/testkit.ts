@@ -15,6 +15,11 @@ export class FakeRuntime implements RuntimeAdapter {
   sentInputs: string[] = [];
   /** What `send()` reports next — scriptable per test, e.g. set to `'closed'` to exercise the queued fallback. */
   sendResult: InputDelivery | ((text: string) => InputDelivery) = 'delivered';
+  private handleWaiters: Array<(h: TurnHandle | undefined) => void> = [];
+  /** Resolves the next time `runTurn` invokes (or skips) `onHandle`. Register before `executeRun`. */
+  nextHandle(): Promise<TurnHandle | undefined> {
+    return new Promise((resolve) => { this.handleWaiters.push(resolve); });
+  }
   async detect() { return { status: 'available' as const, version: 'fake' }; }
   async listModels(): Promise<RuntimeModel[]> { return [{ id: 'fake-1', label: 'Fake 1', provider: 'fake', source: 'static' }]; }
   configSchema() { return { type: 'object', properties: {} }; }
@@ -24,16 +29,19 @@ export class FakeRuntime implements RuntimeAdapter {
   async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
     this.inputs.push(input);
     sink.onSpawn({ pid: process.pid, pgid: null });
-    if (this.streamingInput && onHandle) {
-      onHandle({
+    let handle: TurnHandle | undefined;
+    if (this.streamingInput) {
+      handle = {
         pid: process.pid,
         cancel: async () => { /* not exercised by fake turns */ },
         send: async (text: string): Promise<InputDelivery> => {
           this.sentInputs.push(text);
           return typeof this.sendResult === 'function' ? this.sendResult(text) : this.sendResult;
         },
-      });
+      };
+      onHandle?.(handle);
     }
+    for (const w of this.handleWaiters.splice(0)) w(handle);
     sink.onEvent({ ts: new Date().toISOString(), type: 'session.started', payload: {} });
     if (this.delayMs) await new Promise((r) => setTimeout(r, this.delayMs));
     const next = this.queue.shift();

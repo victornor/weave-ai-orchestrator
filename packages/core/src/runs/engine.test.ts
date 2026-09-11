@@ -21,14 +21,9 @@ import { runState } from './active.js';
 
 const tick = () => new Promise((r) => setImmediate(r));
 
-/** Wait for a condition the engine reaches, rather than guessing one `setImmediate` is enough (VS-214). */
-async function until(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error('condition was never reached');
-    await tick();
-  }
-}
+const IDLE_OTHER: Partial<TurnResult> = {
+  structured: { state: 'idle', summary: 'other agent', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } },
+};
 
 function seedTicket(h: TestHarness, over: Record<string, unknown> = {}): string {
   const id = newId();
@@ -59,10 +54,52 @@ describe('run engine', () => {
   });
   afterEach(async () => { await dispatcher.stop(); h.cleanup(); });
 
-  async function runOnce(): Promise<Run> {
+  /**
+   * VS-218: a conductor-owned gate_finding (VS-137) queues a conductor wake. After ungate, tick()
+   * starts that turn *and* the worker's, they share FakeRuntime.queue, and `ORDER BY created_at DESC`
+   * is non-deterministic on a millisecond tie. Return the run this test named, or fail if tick
+   * started nothing for it.
+   */
+  async function runOnce(agentId?: string): Promise<Run> {
+    const before = new Set(h.db.all<{ id: string }>('SELECT id FROM runs').map((r) => r.id));
     await dispatcher.tick();
+    const started = h.db.all<{ id: string; agentId: string }>('SELECT id, agent_id FROM runs').filter((r) => !before.has(r.id));
+    if (started.length === 0) {
+      const agents = h.db.all<{ id: string; status: string; runtimeId: string }>('SELECT id, status, runtime_id FROM agents');
+      const wakes = h.db.all<{ id: string; agentId: string; status: string }>('SELECT id, agent_id, status FROM wakeups');
+      throw new Error(
+        `dispatcher.tick() started no run; agents=${JSON.stringify(agents)}; wakes=${JSON.stringify(wakes)}; gated=${JSON.stringify(h.services.accounts?.gatedRuntimes?.() ?? 'no-accounts')}; stopping=${runState(h.ctx).stopping}; active=${runState(h.ctx).active.size}`,
+      );
+    }
     await dispatcher.drain();
-    return h.db.get<Run>('SELECT * FROM runs ORDER BY created_at DESC LIMIT 1')!;
+    const match = agentId ? started.filter((r) => r.agentId === agentId) : started;
+    if (match.length === 0) {
+      throw new Error(
+        `dispatcher.tick() started ${started.length} run(s) for ${JSON.stringify(started.map((s) => s.agentId))} but none for ${agentId}`,
+      );
+    }
+    if (!agentId && match.length !== 1) {
+      throw new Error(
+        `dispatcher.tick() started ${match.length} runs (${JSON.stringify(started.map((s) => s.agentId))}); pass the agentId this test is asserting`,
+      );
+    }
+    return h.db.get<Run>('SELECT * FROM runs WHERE id = ?', [match[0]!.id])!;
+  }
+
+  /** Script a result that a coincidental conductor turn (gate_finding wake) must not consume. */
+  function resultFor(
+    agentId: string,
+    result: Partial<TurnResult> | ((input: TurnInput) => Partial<TurnResult> | Promise<Partial<TurnResult>>),
+  ): (input: TurnInput) => Partial<TurnResult> | Promise<Partial<TurnResult>> {
+    const deliver = (input: TurnInput): Partial<TurnResult> | Promise<Partial<TurnResult>> => {
+      const owner = h.db.get<{ agentId: string }>('SELECT agent_id FROM runs WHERE id = ?', [input.runId])?.agentId;
+      if (owner !== agentId) {
+        runtime.queue.unshift(deliver);
+        return IDLE_OTHER;
+      }
+      return typeof result === 'function' ? result(input) : result;
+    };
+    return deliver;
   }
 
   it('runs a turn end to end: prompt file, events, usage, session, wake completion', async () => {
@@ -435,12 +472,18 @@ describe('run engine', () => {
       id: runId, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: [], runtimeId: 'fake',
       status: 'queued', turnEpoch: 1, cwd: h.ctx.paths.conductor, createdAt: nowIso(),
     });
+    const handleReady = runtime.nextHandle();
     const done = executeRun(h.ctx, h.deps, runId);
-    // The engine runs several async phases (home, worktree, prompt) before the runtime hands back
-    // its handle; poll rather than assume one microtask turn is enough to reach it.
-    let midFlight = runState(h.ctx).active.get(runId);
-    for (let i = 0; i < 50 && !midFlight?.send; i += 1) { await tick(); midFlight = runState(h.ctx).active.get(runId); }
-    expect(midFlight?.send).toBeTypeOf('function');
+    const handle = await Promise.race([
+      handleReady,
+      done.then((run) => {
+        throw new Error(
+          `executeRun finished without a live-input handle; status=${run.status} errorFamily=${run.errorFamily} errorCode=${run.errorCode}`,
+        );
+      }),
+    ]);
+    expect(handle?.send).toBeTypeOf('function');
+    const midFlight = runState(h.ctx).active.get(runId);
     await expect(midFlight!.send!('hello')).resolves.toBe('delivered');
     expect(runtime.sentInputs).toEqual(['hello']);
 
@@ -694,9 +737,9 @@ describe('run engine', () => {
     async function failOnce(result: Record<string, unknown> | ((input: TurnInput) => Record<string, unknown>), n = 1): Promise<{ ticketId: string; workerId: string }> {
       const ticketId = seedTicket(h, { status: 'in_progress', number: n, identifier: `TST-${n}` });
       const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
-      runtime.queue.push(result as never);
+      runtime.queue.push(resultFor(workerId, result as never));
       h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1: Add a README badge' });
-      await runOnce();
+      await runOnce(workerId);
       await tick();
       return { ticketId, workerId };
     }
@@ -743,7 +786,19 @@ describe('run engine', () => {
 
       it('raises one card however many workers fail', async () => {
         await failAuth(1);
-        await failAuth(2);
+        // The dispatcher will not start a second turn on a gated runtime; a worker already
+        // in flight (or started directly) is the only way a second auth failure meets the gate.
+        const ticketId = seedTicket(h, { status: 'in_progress', number: 2, identifier: 'TST-2' });
+        const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+        const runId = newId();
+        h.db.insert('runs', {
+          id: runId, workspaceId: h.workspaceId, agentId: workerId, ticketId, wakeupIdsJson: [],
+          runtimeId: 'fake', model: null, status: 'queued', turnEpoch: 1,
+          cwd: h.db.get<{ homePath: string }>('SELECT home_path FROM agents WHERE id = ?', [workerId])!.homePath,
+          createdAt: nowIso(),
+        });
+        runtime.queue.push({ error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } } as never);
+        await executeRun(h.ctx, h.deps, runId);
         const open = h.services.decisions!.list({ status: ['open'] }).filter((d) => d.correlationKey === loginCorrelationKey('fake'));
         expect(open).toHaveLength(1);
         expect(notified).toHaveLength(1);
@@ -792,6 +847,12 @@ describe('run engine', () => {
       // cannot resume unless it survives the pause — every other agent's still-queued wake already
       // does; this pins that the triggering agent's does too.
       describe('the triggering agent keeps its own work across the pause (VS-137)', () => {
+        const authError: Partial<TurnResult> = { error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } };
+        const authFails = (agentId: string) => h.db.all<{ id: string }>(
+          "SELECT id FROM runs WHERE agent_id = ? AND status = 'failed' AND error_family = 'auth'",
+          [agentId],
+        ).length;
+
         it('preserves the wake instead of failing it, with no new retry wake', async () => {
           const { workerId } = await failAuth();
           const wakeRow = h.db.get<Wakeup>("SELECT * FROM wakeups WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1", [workerId])!;
@@ -807,28 +868,28 @@ describe('run engine', () => {
           ungateRuntime(h.ctx, h.deps, 'fake');
           expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('active');
 
-          runtime.queue.push({ structured: { state: 'done', summary: 'resumed', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } } as never);
-          const run = await runOnce();
+          runtime.queue.push(resultFor(workerId, { structured: { state: 'done', summary: 'resumed', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } }));
+          const run = await runOnce(workerId);
           expect(run.status).toBe('succeeded');
           expect(run.agentId).toBe(workerId);
           expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('in_progress');
         });
 
         it('stops resuming automatically on the third consecutive authentication failure, and parks for the human', async () => {
-          const authFails = (agentId: string) => h.db.all<{ id: string }>(
-            "SELECT id FROM runs WHERE agent_id = ? AND status = 'failed' AND error_family = 'auth'",
-            [agentId],
-          ).length;
           const { workerId, ticketId } = await failAuth();
-          await until(() => authFails(workerId) === 1);
+          expect(authFails(workerId)).toBe(1);
           ungateRuntime(h.ctx, h.deps, 'fake');
-          runtime.queue.push({ error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } } as never);
-          await runOnce();
-          await until(() => authFails(workerId) === 2);
+          runtime.queue.push(resultFor(workerId, authError));
+          const second = await runOnce(workerId);
+          expect(second.status).toBe('failed');
+          expect(second.errorFamily).toBe('auth');
+          expect(authFails(workerId)).toBe(2);
           ungateRuntime(h.ctx, h.deps, 'fake');
-          runtime.queue.push({ error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } } as never);
-          await runOnce();
-          await until(() => authFails(workerId) === 3);
+          runtime.queue.push(resultFor(workerId, authError));
+          const third = await runOnce(workerId);
+          expect(third.status).toBe('failed');
+          expect(third.errorFamily).toBe('auth');
+          expect(authFails(workerId)).toBe(3);
 
           // Third in a row, no success in between: parked for the human like the retry ladder's own
           // exhaustion, not preserved-and-gated again.
@@ -840,12 +901,12 @@ describe('run engine', () => {
         });
 
         it('withdraws the per-ticket gate_finding once the ticket moves again', async () => {
-          const { ticketId } = await failAuth();
+          const { ticketId, workerId } = await failAuth();
           expect(openFor(ticketId).some((d) => d.kind === 'gate_finding' && d.owner === 'conductor')).toBe(true);
 
           ungateRuntime(h.ctx, h.deps, 'fake');
-          runtime.queue.push({ structured: { state: 'done', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } } as never);
-          await runOnce();
+          runtime.queue.push(resultFor(workerId, { structured: { state: 'done', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } }));
+          await runOnce(workerId);
           await tick();
 
           expect(openFor(ticketId).some((d) => d.kind === 'gate_finding' && d.owner === 'conductor')).toBe(false);
@@ -855,20 +916,20 @@ describe('run engine', () => {
           const { workerId, ticketId } = await failAuth();
           ungateRuntime(h.ctx, h.deps, 'fake');
 
-          runtime.queue.push({ structured: { state: 'done', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } } as never);
-          await runOnce();
-          await until(() => h.db.get<{ n: number }>(
+          runtime.queue.push(resultFor(workerId, { structured: { state: 'done', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } }));
+          const ok = await runOnce(workerId);
+          expect(ok.status).toBe('succeeded');
+          expect(h.db.get<{ n: number }>(
             "SELECT COUNT(*) AS n FROM runs WHERE agent_id = ? AND status = 'succeeded'",
             [workerId],
-          )!.n === 1);
+          )!.n).toBe(1);
 
           h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'more work' });
-          runtime.queue.push({ error: { code: 'oauth_expired', family: 'auth', message: 'OAuth session expired and could not be refreshed' } } as never);
-          await runOnce();
-          await until(() => h.db.get<{ n: number }>(
-            "SELECT COUNT(*) AS n FROM runs WHERE agent_id = ? AND status = 'failed' AND error_family = 'auth'",
-            [workerId],
-          )!.n === 2);
+          runtime.queue.push(resultFor(workerId, authError));
+          const again = await runOnce(workerId);
+          expect(again.status).toBe('failed');
+          expect(again.errorFamily).toBe('auth');
+          expect(authFails(workerId)).toBe(2);
 
           // Only one failure in a row, since the success in between reset the count: preserved and
           // gated again, not parked for the human.
@@ -1158,9 +1219,9 @@ describe('run engine', () => {
       expect(card.kind).toBe('retry_approval');
 
       h.db.update('agents', workerId, { status: 'active' });
-      runtime.queue.push({ structured: { state: 'working', summary: 'back on it', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      runtime.queue.push(resultFor(workerId, { structured: { state: 'working', summary: 'back on it', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } }));
       h.services.wake!.enqueue(workerId, { source: 'retry', reason: 'retry after boom' });
-      await runOnce();
+      await runOnce(workerId);
       await tick();
 
       expect(openFor(ticketId)).toHaveLength(0);
@@ -1207,8 +1268,12 @@ describe('run engine', () => {
 
     /** Runs one worker turn on `ticketId`, returning the finished run. */
     async function runWorkerTurn(workerId: string, ticketId: string, reason = 'go'): Promise<Run> {
+      if (runtime.queue.length > 0) {
+        const next = runtime.queue.shift()!;
+        runtime.queue.unshift(resultFor(workerId, next));
+      }
       h.services.wake!.enqueue(workerId, { source: 'ticket_comment', reason });
-      return runOnce();
+      return runOnce(workerId);
     }
 
     it('records a validly idle report as its own liveness, not empty (PLAN §9.4)', async () => {

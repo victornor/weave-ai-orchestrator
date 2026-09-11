@@ -5,15 +5,16 @@
  * `--ac-cell-rows` custom property (its row span normalized to GRANULARITY units) drives the
  * transcript's proportional max-height instead of a class name carrying the fraction.
  */
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Run, RunEvent, Ticket } from '@agent-conductor/shared';
+import type { Agent, Run, RunEvent, Ticket, WorkerModelOption } from '@agent-conductor/shared';
 import { agent, run as makeRun, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
   workers: undefined as Agent[] | undefined,
   workersError: false,
   tickets: [] as Ticket[],
+  workerOptions: undefined as WorkerModelOption[] | undefined,
   running: [] as Run[],
   queued: [] as Run[],
   persisted: [] as RunEvent[],
@@ -36,6 +37,7 @@ vi.mock('../api/hooks', () => ({
     refetch: vi.fn(),
   }),
   useTickets: () => ({ data: state.tickets, isLoading: false, isError: false }),
+  useModels: () => ({ data: state.workerOptions === undefined ? undefined : { workerOptions: state.workerOptions } }),
   useRuns: (params: { status?: string } = {}) => ({
     data: params.status === 'queued' ? state.queued : params.status === 'running' ? state.running : [...state.queued, ...state.running],
     isLoading: false,
@@ -43,7 +45,7 @@ vi.mock('../api/hooks', () => ({
   useRunEvents: (id: string) => ({ data: id ? state.persisted : [], isLoading: false }),
 }));
 
-const { LiveRoute } = await import('../routes/Live');
+const { LiveRoute, LiveCell } = await import('../routes/Live');
 
 class FakeEventSource {
   static open: FakeEventSource[] = [];
@@ -81,6 +83,7 @@ beforeEach(() => {
   state.workers = [];
   state.workersError = false;
   state.tickets = [];
+  state.workerOptions = undefined;
   state.running = [];
   state.queued = [];
   state.persisted = [];
@@ -259,6 +262,54 @@ describe('Live page streaming', () => {
     rerender(<LiveRoute />);
     expect(screen.queryByText('Frontend Engineer #7')).not.toBeInTheDocument();
     expect(screen.getByText('Nobody is working.')).toBeInTheDocument();
+  });
+});
+
+describe('Live page worker model tier tag (VS-217)', () => {
+  const opt = (id: string): WorkerModelOption => ({ id, description: `${id} tier`, runtime: 'claude', model: null });
+
+  it('shows the ticket\'s option id in the cell when several options are configured', () => {
+    state.workerOptions = [opt('quick'), opt('standard'), opt('deep')];
+    twoWorkers();
+    state.tickets = [
+      ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode', workerModelId: 'deep' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-7', title: 'Flaky test' }),
+    ];
+    render(<LiveRoute />);
+    expect(within(cellOf('Frontend Engineer #7')).getByText('deep')).toBeInTheDocument();
+    // A ticket on the workers default is labelled, not blank.
+    expect(within(cellOf('Backend Engineer #1')).getByText('default')).toBeInTheDocument();
+  });
+
+  it('hides the tag when one option is configured', () => {
+    state.workerOptions = [opt('quick')];
+    twoWorkers();
+    state.tickets = [
+      ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode', workerModelId: 'quick' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-7', title: 'Flaky test' }),
+    ];
+    render(<LiveRoute />);
+    expect(screen.queryByText('quick')).not.toBeInTheDocument();
+  });
+
+  it('keeps the tag, agent name, ticket link and status on the smallest cell', () => {
+    render(
+      <LiveCell
+        agent={agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'running' })}
+        ticket={ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode', workerModelId: 'deep' })}
+        run={null}
+        size={{ cols: 1, rows: 1 }}
+        colsMax={12}
+        desktop
+        onSize={() => undefined}
+        workerOptions={[opt('quick'), opt('deep')]}
+      />,
+    );
+    const cell = cellOf('Frontend Engineer #7');
+    expect(colSpan(cell)).toBe(1);
+    expect(within(cell).getByText('deep')).toBeInTheDocument();
+    expect(within(cell).getByRole('link', { name: /ACME-42/ })).toBeInTheDocument();
+    expect(within(cell).getByRole('img')).toBeInTheDocument();
   });
 });
 

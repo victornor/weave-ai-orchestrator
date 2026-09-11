@@ -1,11 +1,14 @@
-import type { Ticket } from '@agent-conductor/shared';
+import type { Ticket, WorkerModelOption } from '@agent-conductor/shared';
 import { StatusGlyph, Badge } from './StatusGlyph';
+import { WorkerModelTag } from './WorkerModelTag';
 import { isFolded, ticketBoardStatus } from '../lib/board';
 import { ago, cents, statusText, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
 
 export interface TicketCardProps {
   ticket: Ticket;
+  /** The workspace's effective worker model options (VS-217): two or more turn the tier tag on. */
+  workerOptions?: WorkerModelOption[];
   workerName?: string | null;
   /** Why this ticket's worker is paused, when it is — the board says why the work stopped without opening the worker. */
   workerPausedFor?: string | null;
@@ -40,7 +43,7 @@ export function OutcomeChip({ ticket }: { ticket: Ticket }): React.ReactElement 
   return <Badge tone={o.tone === 'accent' ? 'accent' : o.tone === 'done' ? 'added' : o.tone === 'failed' ? 'removed' : 'neutral'}>{o.label}</Badge>;
 }
 
-export function TicketCard({ ticket, workerName, workerPausedFor, workerPausedForFull, working, usage, needsYou, autoApproving, stalled, onOpen, selected, className }: TicketCardProps): React.ReactElement {
+export function TicketCard({ ticket, workerOptions, workerName, workerPausedFor, workerPausedForFull, working, usage, needsYou, autoApproving, stalled, onOpen, selected, className }: TicketCardProps): React.ReactElement {
   const ui = ticketBoardStatus(ticket.status, { live: working, needsYou, autoApproving, stalled });
   return (
     <button
@@ -71,6 +74,7 @@ export function TicketCard({ ticket, workerName, workerPausedFor, workerPausedFo
       ) : null}
       <div className="flex items-center gap-2">
         <Badge>{ticket.kind}</Badge>
+        <WorkerModelTag ticket={ticket} options={workerOptions} />
         {isFolded(ticket.status, { live: working }) ? <Badge tone="accent">{statusText(ticket.status)}</Badge> : null}
         {autoApproving ? <Badge tone="accent">auto-approving</Badge> : null}
         <OutcomeChip ticket={ticket} />
@@ -83,7 +87,7 @@ export function TicketCard({ ticket, workerName, workerPausedFor, workerPausedFo
 }
 
 /** Dense list row for the phone board and search results. */
-export function TicketRow({ ticket, workerName, workerPausedFor, working, needsYou, autoApproving, stalled, onOpen }: TicketCardProps): React.ReactElement {
+export function TicketRow({ ticket, workerOptions, workerName, workerPausedFor, working, needsYou, autoApproving, stalled, onOpen }: TicketCardProps): React.ReactElement {
   const ui = ticketBoardStatus(ticket.status, { live: working, needsYou, autoApproving, stalled });
   return (
     <button
@@ -96,6 +100,7 @@ export function TicketRow({ ticket, workerName, workerPausedFor, working, needsY
         <div className="mb-1 text-body leading-snug text-text-1">{ticket.title}</div>
         <div className="flex items-center gap-2">
           <span className="ac-mono text-micro text-text-3">{ticket.identifier}</span>
+          <WorkerModelTag ticket={ticket} options={workerOptions} />
           {isFolded(ticket.status, { live: working }) ? <span className="ac-mono text-micro text-text-3">{statusText(ticket.status)}</span> : null}
           {autoApproving ? <span className="ac-mono text-micro text-accent-link">auto-approving</span> : null}
           {workerName ? <span className="ac-truncate text-micro text-text-3">{workerName}</span> : null}

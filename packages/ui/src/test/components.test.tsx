@@ -1,7 +1,7 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { UI_STATUSES, NAMED_CARD_OPTION_KEYS } from '@agent-conductor/shared';
-import type { Decision } from '@agent-conductor/shared';
+import type { Decision, WorkerModelOption } from '@agent-conductor/shared';
 import { StatusGlyph, StatusBadge } from '../components/StatusGlyph';
 import { TicketCard } from '../components/TicketCard';
 import { WorkerCard } from '../components/WorkerCard';
@@ -129,6 +129,28 @@ describe('TicketCard — a paused worker', () => {
   it('falls back to the preview text as the tooltip when no fuller text is given', () => {
     render(<TicketCard ticket={ticket()} workerPausedFor="unknown · the CLI died" />);
     expect(screen.getByText(/paused ·/).getAttribute('title')).toBe('unknown · the CLI died');
+  });
+});
+
+describe('TicketCard — worker model tier tag (VS-217)', () => {
+  const opt = (id: string): WorkerModelOption => ({ id, description: `${id} tier`, runtime: 'claude', model: null });
+
+  it('shows the ticket\'s option id when several options are configured', () => {
+    render(<TicketCard ticket={ticket({ workerModelId: 'deep' })} workerOptions={[opt('quick'), opt('standard'), opt('deep')]} />);
+    expect(screen.getByText('deep')).toBeInTheDocument();
+    // Nothing else on the card moved: kind, title and age are all still there.
+    expect(screen.getByText('change')).toBeInTheDocument();
+    expect(screen.getByText('Dark mode for the dashboard')).toBeInTheDocument();
+  });
+
+  it('labels a ticket on the workers default', () => {
+    render(<TicketCard ticket={ticket()} workerOptions={[opt('quick'), opt('standard')]} />);
+    expect(screen.getByText('default')).toBeInTheDocument();
+  });
+
+  it('shows no tag with one configured option', () => {
+    render(<TicketCard ticket={ticket({ workerModelId: 'quick' })} workerOptions={[opt('quick')]} />);
+    expect(screen.queryByText('quick')).not.toBeInTheDocument();
   });
 });
 

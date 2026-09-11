@@ -5,13 +5,14 @@ import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, ticketUiStatus } from
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented } from '../components/Tabs';
 import { OutcomeChip, TicketCard, TicketRow } from '../components/TicketCard';
+import { WorkerModelTag } from '../components/WorkerModelTag';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Table } from '../components/Table';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
 import { MergeQueueStrip } from '../components/MergeQueue';
-import { useDecisions, useProjects, useRoles, useTickets, useWorkers, useWorkspaceSummary } from '../api/hooks';
+import { useDecisions, useModels, useProjects, useRoles, useTickets, useWorkers, useWorkspaceSummary } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import type { FinishedMode } from '../lib/board';
@@ -63,6 +64,11 @@ export function BoardRoute(): React.ReactElement {
   // A ticket whose open approval the daemon will grant is not waiting on the human (PLAN §15).
   const openDecisions = useDecisions({ status: 'open', owner: 'human' });
   const summary = useWorkspaceSummary();
+  // The worker model tier tag (VS-217) reads the effective catalog — daemon overlay included —
+  // so "configured" means the same thing here as it does to the validator that accepted the id.
+  const models = useModels();
+  const workerOptions = models.data?.workerOptions;
+  const showTags = (workerOptions?.length ?? 0) > 1;
   const autoApproving = useMemo(() => {
     const byId = new Map((tickets.data ?? []).map((t) => [t.id, t]));
     const ids = new Set<string>();
@@ -199,7 +205,7 @@ export function BoardRoute(): React.ReactElement {
             {/* phone list */}
             <div className="md:hidden">
               {filtered.map((t, i) => (
-                <TicketRow key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)?.summary ?? null} autoApproving={autoApproving.has(t.id)} selected={i === nav.index} onOpen={() => open(t)} />
+                <TicketRow key={t.id} ticket={t} workerOptions={workerOptions} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)?.summary ?? null} autoApproving={autoApproving.has(t.id)} selected={i === nav.index} onOpen={() => open(t)} />
               ))}
             </div>
 
@@ -228,7 +234,7 @@ export function BoardRoute(): React.ReactElement {
                       </header>
                       <div className="ac-scroll flex flex-col gap-2 px-2 pb-4">
                         {c.items.map((t) => (
-                          <TicketCard key={t.id} ticket={t} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)?.summary ?? null} workerPausedForFull={pausedFor(t.id)?.full ?? null} autoApproving={autoApproving.has(t.id)} onOpen={() => open(t)} />
+                          <TicketCard key={t.id} ticket={t} workerOptions={workerOptions} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)?.summary ?? null} workerPausedForFull={pausedFor(t.id)?.full ?? null} autoApproving={autoApproving.has(t.id)} onOpen={() => open(t)} />
                         ))}
                       </div>
                     </section>
@@ -254,7 +260,17 @@ export function BoardRoute(): React.ReactElement {
                     },
                     { key: 'id', header: 'Ticket', width: '7rem', mono: true, render: (t) => t.identifier },
                     { key: 'title', header: 'Title', render: (t) => <span className="text-text-1">{t.title}</span> },
-                    { key: 'kind', header: 'Kind', width: '6rem', render: (t) => <Badge>{t.kind}</Badge> },
+                    {
+                      key: 'kind',
+                      header: 'Kind',
+                      width: showTags ? '9rem' : '6rem',
+                      render: (t) => (
+                        <span className="flex items-center gap-1.5">
+                          <Badge>{t.kind}</Badge>
+                          <WorkerModelTag ticket={t} options={workerOptions} />
+                        </span>
+                      ),
+                    },
                     { key: 'priority', header: 'Priority', width: '6rem', mono: true, render: (t) => t.priority },
                     ...(hasFinished ? [{ key: 'outcome', header: 'Outcome', width: '9rem', render: (t: Ticket) => <OutcomeChip ticket={t} /> }] : []),
                     { key: 'age', header: 'Age', width: '5rem', align: 'right', mono: true, render: (t) => ago(t.updatedAt) },

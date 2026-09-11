@@ -130,6 +130,45 @@ describe('ChannelManager', () => {
     expect(text).toContain('/d dec_7');
   });
 
+  it('sends a text follow-up on a concerns review, never a second card, and stays quiet on looked (VS-223)', async () => {
+    const { h, adapter } = await boot();
+    h.runtime.services.threads.bindOrGet('test', 'chat1', 'u1');
+    const plan = decision({
+      id: 'dec_rev', kind: 'plan_approval', owner: 'human', status: 'open',
+      title: 'Approve the plan for ACME-42', conductorReviewStatus: 'unseen',
+    });
+    (h.impls.decisions!.get as unknown) = () => plan;
+    h.bus.emit('decision.created', 'decision', 'dec_rev', plan);
+    await new Promise((r) => setTimeout(r, 20));
+    await manager!.drain();
+    const afterCreate = adapter.sent.length;
+    expect(afterCreate).toBeGreaterThan(0);
+    expect(adapter.sent.at(-1)!.message.text).toContain('Approve the plan for ACME-42');
+
+    const looked = { ...plan, conductorReviewStatus: 'looked' as const, conductorReviewedAt: '2026-09-11T03:01:00.000Z' };
+    (h.impls.decisions!.get as unknown) = () => looked;
+    h.bus.emit('decision.updated', 'decision', 'dec_rev', looked);
+    await new Promise((r) => setTimeout(r, 20));
+    await manager!.drain();
+    expect(adapter.sent.length).toBe(afterCreate);
+
+    const concerns = {
+      ...plan,
+      conductorReviewStatus: 'concerns' as const,
+      conductorReviewedAt: '2026-09-11T03:02:00.000Z',
+      conductorReviewNote: 'the migration contradicts itself',
+    };
+    (h.impls.decisions!.get as unknown) = () => concerns;
+    h.bus.emit('decision.updated', 'decision', 'dec_rev', concerns);
+    await new Promise((r) => setTimeout(r, 20));
+    await manager!.drain();
+    expect(adapter.sent.length).toBe(afterCreate + 1);
+    const followUp = adapter.sent.at(-1)!.message.text;
+    expect(followUp).toContain('has concerns');
+    expect(followUp).toContain('the migration contradicts itself');
+    expect(followUp).not.toContain('/d dec_rev');
+  });
+
   it('retries a retryable failure and gives up after MAX_ATTEMPTS', async () => {
     const { h, adapter } = await boot();
     adapter.fail = true;

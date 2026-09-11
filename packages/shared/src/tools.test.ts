@@ -19,6 +19,13 @@ describe('CONDUCTOR_TOOLS (VS-220)', () => {
   });
 });
 
+describe('CONDUCTOR_TOOLS (VS-223)', () => {
+  it('lists ac_decision_review on the conductor and not on COMMON_TOOLS', () => {
+    expect(CONDUCTOR_TOOLS).toContain('ac_decision_review');
+    expect(COMMON_TOOLS).not.toContain('ac_decision_review');
+  });
+});
+
 describe('routine enums (VS-220)', () => {
   it('is active or paused, report or file_work', () => {
     expect(ROUTINE_STATUSES).toEqual(['active', 'paused']);

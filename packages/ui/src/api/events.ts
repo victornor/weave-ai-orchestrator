@@ -148,6 +148,7 @@ const TRACKED: EventType[] = [
   'decision.answered',
   'decision.expired',
   'decision.superseded',
+  'decision.updated',
   'wake.queued',
   'wake.skipped',
   'run.started',
@@ -274,6 +275,7 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
     case 'decision.answered':
     case 'decision.expired':
     case 'decision.superseded':
+    case 'decision.updated':
       patchDecisionCaches(qc, ws, evt.payload as Decision);
       inv(qk.decisions(ws));
       inv(qk.decision(ws, id));

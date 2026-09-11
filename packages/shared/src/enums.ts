@@ -60,6 +60,17 @@ export const DECISION_STATUSES = ['open', 'answered', 'expired', 'withdrawn', 's
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];
 
 /**
+ * Conductor review of a human-owned plan/merge/action card (VS-223). Asserted by
+ * `ac_decision_review`, never derived. Default is `unseen` — absence is not a fourth state.
+ */
+export const CONDUCTOR_REVIEW_STATUSES = ['unseen', 'looked', 'concerns'] as const;
+export type ConductorReviewStatus = (typeof CONDUCTOR_REVIEW_STATUSES)[number];
+
+/** The only decision kinds that carry conductor review. A mark against any other kind is `validation`. */
+export const CONDUCTOR_REVIEW_KINDS = ['plan_approval', 'merge_approval', 'action_approval'] as const;
+export type ConductorReviewKind = (typeof CONDUCTOR_REVIEW_KINDS)[number];
+
+/**
  * The option keys a "named variant" decision card (packages/ui's DecisionCard: `plan_approval`,
  * `merge_approval`, `hire_approval`, `discard_approval`, `action_approval`) is allowed to send with its hard-coded
  * buttons, keyed by name so a call site can cite `NAMED_CARD_OPTION_KEYS.merge_approval.approve`

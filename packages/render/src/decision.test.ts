@@ -9,7 +9,9 @@ function decision(over: Partial<Decision> & { kind: DecisionKind }): Decision {
     title: 'Approve the plan for the tokens refactor', context: 'Six requirements, two of them new.',
     options: [], inputs: [], recommendation: null, status: 'open', answerKey: null, answerText: null, answerInputs: null,
     answeredByKind: null, answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null,
-    createdAt: '2026-09-04T11:56:00.000Z', ...over,
+    createdAt: '2026-09-04T11:56:00.000Z',
+    conductorReviewStatus: 'unseen', conductorReviewedAt: null, conductorReviewNote: null, conductorReviewedByAgentId: null,
+    ...over,
   } as Decision;
 }
 const now = new Date('2026-09-04T12:00:00.000Z');
@@ -65,6 +67,7 @@ describe('decisionToCard', () => {
       { label: 'Diff', value: '+18 −2', format: 'diff' },
       { label: 'Files', value: '3 files', format: 'mono' },
       { label: 'Branch', value: 'ac/acme-42', format: 'mono' },
+      { label: 'Review', value: "Conductor hasn't looked yet", format: 'text' },
     ]);
   });
 
@@ -252,6 +255,45 @@ describe('decisionToCard', () => {
         answerInputs: { token: 'CF_READONLY_TOKEN' },
       }), { projectName: 'web', now });
       expect(card.answerElsewhere).toBe(false);
+    });
+  });
+
+  describe('conductor review body lines (VS-223)', () => {
+    it('shows the unseen line on plan, merge and action cards', () => {
+      for (const kind of ['plan_approval', 'merge_approval', 'action_approval'] as const) {
+        const card = decisionToCard(decision({ kind }), { now });
+        expect(card.body).toContainEqual({ label: 'Review', value: "Conductor hasn't looked yet", format: 'text' });
+      }
+    });
+
+    it('does not put a review line on a question card', () => {
+      const card = decisionToCard(decision({ kind: 'question' }), { now });
+      expect(card.body.some((l) => l.label === 'Review')).toBe(false);
+      expect(card.body.some((l) => /Conductor/.test(l.value))).toBe(false);
+    });
+
+    it('uses after-the-fact wording only when reviewedAt is strictly later than answeredAt', () => {
+      const prior = decisionToCard(decision({
+        kind: 'plan_approval', status: 'answered', answeredAt: '2026-09-11T03:02:00.000Z',
+        conductorReviewStatus: 'looked', conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+      }), { now });
+      expect(prior.body).toContainEqual({ label: 'Review', value: 'Conductor looked', format: 'text' });
+
+      const after = decisionToCard(decision({
+        kind: 'merge_approval', status: 'answered', answeredAt: '2026-09-11T03:01:00.000Z',
+        conductorReviewStatus: 'looked', conductorReviewedAt: '2026-09-11T03:02:00.000Z',
+      }), { now });
+      expect(after.body).toContainEqual({ label: 'Review', value: 'Conductor looked after you answered', format: 'text' });
+    });
+
+    it('includes the concern note as a following body line', () => {
+      const card = decisionToCard(decision({
+        kind: 'plan_approval', conductorReviewStatus: 'concerns',
+        conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+        conductorReviewNote: 'the migration contradicts itself',
+      }), { now });
+      expect(card.body).toContainEqual({ label: 'Review', value: 'Conductor looked — has concerns', format: 'text' });
+      expect(card.body).toContainEqual({ label: null, value: 'the migration contradicts itself', format: 'text' });
     });
   });
 });

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NAMED_CARD_OPTION_KEYS } from '@agent-conductor/shared';
+import { NAMED_CARD_OPTION_KEYS, conductorReviewCopy } from '@agent-conductor/shared';
 import type { Decision, DecisionAnswerInputs, DecisionInput, UiStatus } from '@agent-conductor/shared';
 import { A } from '../app/link';
 import { Button } from './Button';
@@ -82,6 +82,19 @@ const HEAD_TEXT: Partial<Record<UiStatus, string>> = {
   blocked: 'text-blocked',
   done: 'text-done',
 };
+
+/** VS-223: three states, three visible renderings. Quiet means dimmer type, not missing type. */
+export function ConductorReviewLine({ decision }: { decision: Decision }): React.ReactElement | null {
+  const copy = conductorReviewCopy(decision);
+  if (!copy) return null;
+  const toneClass = copy.tone === 'looked' || copy.tone === 'after' ? 'text-text-3' : 'text-blocked';
+  return (
+    <div className="mb-2" data-conductor-review={copy.tone}>
+      <p className={cx('text-micro', copy.tone === 'concerns' ? 'font-medium' : null, toneClass)}>{copy.line}</p>
+      {copy.note ? <p className="mt-1 whitespace-pre-wrap text-meta text-text-1">{copy.note}</p> : null}
+    </div>
+  );
+}
 
 function statusLabel(status: Decision['status']): string {
   return status === 'withdrawn' ? 'Withdrawn' : status === 'expired' ? 'Expired' : status === 'superseded' ? 'Superseded' : 'Closed';
@@ -450,6 +463,8 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
         ) : null}
 
         {queued ? <p className="mb-2 text-micro text-working">Queued — this answer is sent and re-validated when the connection returns.</p> : null}
+
+        <ConductorReviewLine decision={decision} />
 
         {/* primary action band, 44px, primary bottom-left. An answered card has none. */}
         <div className={cx('flex items-center gap-2', !inert && !auto && 'min-h-thumb')}>

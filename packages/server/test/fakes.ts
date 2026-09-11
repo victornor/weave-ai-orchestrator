@@ -58,6 +58,7 @@ export function decision(over: Partial<Decision> = {}): Decision {
     title: 'CSS variables or Tailwind?', context: 'Dark mode needs a token strategy.', options: [{ key: 'vars', label: 'CSS variables', recommended: true }, { key: 'tw', label: 'Tailwind' }],
     inputs: [], allowFreeText: true, recommendation: 'CSS variables', status: 'open', answerKey: null, answerText: null, answerInputs: null, answeredByKind: null,
     answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null, createdAt: '2026-09-01T00:00:00.000Z',
+    conductorReviewStatus: 'unseen', conductorReviewedAt: null, conductorReviewNote: null, conductorReviewedByAgentId: null,
     ...over,
   };
 }
@@ -237,6 +238,19 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       },
       answer: (_actor: Actor, id: string, answer: { key?: string; text?: string }) => {
         const d = { ...decisions.get(id)!, status: 'answered' as const, answerKey: answer.key ?? null, answerText: answer.text ?? null };
+        decisions.set(id, d);
+        return d;
+      },
+      review: (_actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string }) => {
+        const cur = decisions.get(id);
+        if (!cur) throw new OcError('not_found', `decision ${id} not found`);
+        const d = {
+          ...cur,
+          conductorReviewStatus: input.status,
+          conductorReviewedAt: new Date().toISOString(),
+          conductorReviewNote: input.status === 'concerns' ? (input.note ?? '').trim() || null : null,
+          conductorReviewedByAgentId: _actor.id,
+        };
         decisions.set(id, d);
         return d;
       },

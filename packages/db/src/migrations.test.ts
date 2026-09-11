@@ -771,4 +771,65 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0025_decision_conductor_review (VS-223)', () => {
+    const cols = (db: Db, table: string): string[] => db.all<{ name: string }>(`PRAGMA table_info(${table})`).map((c) => c.name);
+
+    it('a pre-migration row survives and reads unseen with null timestamp/note/agent', () => {
+      const path = join(dir, 'dcr.sqlite');
+      const before = openDbAsOf(path, '0024_routines_engine.sql');
+      expect(cols(before, 'decisions')).not.toContain('conductor_review_status');
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      before.run(
+        `INSERT INTO tickets (id, workspace_id, number, identifier, kind, title, created_by_kind, created_at, updated_at)
+         VALUES ('t1', 'w1', 1, 'VS-1', 'change', 'Add dark mode', 'human', 't0', 't0')`);
+      before.run(
+        `INSERT INTO decisions (id, workspace_id, ticket_id, kind, owner, title, status, created_at)
+         VALUES ('d1', 'w1', 't1', 'plan_approval', 'human', 'Approve the plan', 'open', 't1')`);
+      before.close();
+
+      const db = openDb(path);
+      expect(cols(db, 'decisions')).toEqual(expect.arrayContaining([
+        'conductor_review_status', 'conductor_reviewed_at', 'conductor_review_note', 'conductor_reviewed_by_agent_id',
+      ]));
+      expect(db.get('SELECT * FROM decisions WHERE id = ?', ['d1'])).toMatchObject({
+        conductorReviewStatus: 'unseen',
+        conductorReviewedAt: null,
+        conductorReviewNote: null,
+        conductorReviewedByAgentId: null,
+      });
+      expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+      db.close();
+    });
+
+    it('round-trips the four fields on each carrying kind', () => {
+      const db = openDb(join(dir, 'dcr2.sqlite'));
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      for (const [id, kind] of [
+        ['d_plan', 'plan_approval'],
+        ['d_merge', 'merge_approval'],
+        ['d_action', 'action_approval'],
+      ] as const) {
+        db.insert('decisions', {
+          id, workspaceId: 'w1', kind, owner: 'human', title: kind, status: 'open', createdAt: 't1',
+          conductorReviewStatus: 'concerns',
+          conductorReviewedAt: '2026-09-11T03:00:00.000Z',
+          conductorReviewNote: 'look at the migration',
+          conductorReviewedByAgentId: 'ag_conductor',
+        });
+        expect(db.get('SELECT * FROM decisions WHERE id = ?', [id])).toMatchObject({
+          kind,
+          conductorReviewStatus: 'concerns',
+          conductorReviewedAt: '2026-09-11T03:00:00.000Z',
+          conductorReviewNote: 'look at the migration',
+          conductorReviewedByAgentId: 'ag_conductor',
+        });
+      }
+      db.close();
+    });
+  });
 });

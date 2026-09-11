@@ -23,7 +23,7 @@ import type { AuthService, CoreServices } from '@agent-conductor/core';
 import type { ChannelAdapter, SurfaceAdapter } from '@agent-conductor/plugin-sdk';
 import type { RuntimeAdapter } from '@agent-conductor/runtime-sdk';
 import type { AgentConductorPlugin, PluginHost, AgentToolDefinition, WorktreeProvider, ForgeAdapter } from '@agent-conductor/plugin-sdk';
-import { OcError, type DaemonConfig, type EventType, type WorkspaceEvent } from '@agent-conductor/shared';
+import { OcError, SHUTDOWN_CANCEL_GRACE_MS, SHUTDOWN_DRAIN_GRACE_MS, type DaemonConfig, type EventType, type WorkspaceEvent } from '@agent-conductor/shared';
 import { createApp, type WorkspaceAdmin } from './app.js';
 import { createUpdateChecker, runningReleaseRoot } from './release-info.js';
 import { createUpgradeService } from './upgrade.js';
@@ -51,6 +51,12 @@ export interface StartOptions {
    * `daemon-isolation/dispatch-gate`.
    */
   shareHostCredentials?: boolean;
+  /**
+   * VS-262 test-only seam: override `shutdown()`'s natural-drain and post-cancel grace periods
+   * instead of the shipped `SHUTDOWN_DRAIN_GRACE_MS`/`SHUTDOWN_CANCEL_GRACE_MS` constants, so a test
+   * can exercise the bounded-then-cancel sequence without waiting real minutes for it.
+   */
+  shutdownGraceMs?: { drain: number; cancel: number };
 }
 
 export interface DaemonHandle {
@@ -151,15 +157,29 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   // and a channel that is slow to take it must not hold the boot.
   void upgrades.announce().catch((e: unknown) => log.error({ err: e }, 'upgrade announcement failed'));
 
+  const drainGraceMs = opts.shutdownGraceMs?.drain ?? SHUTDOWN_DRAIN_GRACE_MS;
+  const cancelGraceMs = opts.shutdownGraceMs?.cancel ?? SHUTDOWN_CANCEL_GRACE_MS;
+
   let stopping: Promise<void> | null = null;
   const stop = (reason = 'shutdown'): Promise<void> => (stopping ??= shutdown(reason));
 
   async function shutdown(reason: string): Promise<void> {
     log.info({ reason }, 'daemon shutting down');
-    for (const ws of new Set(workspaces.values())) {
+    // VS-262: one workspace at a time, sequentially, would multiply the bounded drain below by the
+    // number of registered workspaces — `SHUTDOWN_KILL_GRACE_MS` assumes the per-workspace bound is
+    // the *total* bound. Every workspace's own sequence still runs in its documented order; nothing
+    // between workspaces is ordered (the db.close() loop below is a separate pass that only starts
+    // once every workspace's own sequence has settled), so running them concurrently is safe.
+    await Promise.all([...new Set(workspaces.values())].map(async (ws) => {
       await ws.channels?.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'channel manager stop failed'));
       await ws.webhooks?.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'webhook dispatcher stop failed'));
-      await ws.services.dispatcher.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'dispatcher stop failed'));
+      let drained = await ws.services.dispatcher.stop(drainGraceMs).catch((e: unknown) => { log.warn({ err: e, ws: ws.id }, 'dispatcher stop failed'); return false; });
+      if (!drained) {
+        log.warn({ ws: ws.id }, 'drain grace period exhausted; cancelling running turns');
+        await cancelRunningRuns(ws);
+        drained = await ws.services.dispatcher.stop(cancelGraceMs).catch(() => false);
+        if (!drained) log.warn({ ws: ws.id }, 'a cancelled turn did not finish within the shutdown grace period; continuing to close anyway');
+      }
       // Before the db closes below: the ticket service's post-merge follow-up work reads it.
       await ws.services.tickets.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'ticket follow-up drain failed'));
       // Same reason: a running job's log tail is only in memory between flushes, and the timer that
@@ -167,7 +187,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
       await ws.services.jobs.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'job log drain failed'));
       try { ws.services.supervisor.stop(); } catch (e) { log.warn({ err: e, ws: ws.id }, 'supervisor stop failed'); }
       await cancelRunningRuns(ws);
-    }
+    }));
     await Promise.all([publicServer ? close(publicServer) : Promise.resolve(), close(loopback.server)]);
     for (const ws of new Set(workspaces.values())) { try { ws.ctx.db.close(); } catch (e) { log.warn({ err: e }, 'db close failed'); } }
     try { daemonDb.close(); } catch (e) { log.warn({ err: e }, 'daemon db close failed'); }
@@ -223,7 +243,8 @@ async function loadWorkspaceInto(
   return runtime;
 }
 
-async function cancelRunningRuns(ws: WorkspaceRuntime): Promise<void> {
+/** Exported for `routes/daemon.ts`'s `/api/daemon/drain` to reuse (VS-262) rather than re-implement. */
+export async function cancelRunningRuns(ws: WorkspaceRuntime): Promise<void> {
   let running: Array<{ id: string }> = [];
   try { running = ws.services.runs.list({ status: ['running', 'queued'] }).items; } catch { return; }
   for (const run of running) {

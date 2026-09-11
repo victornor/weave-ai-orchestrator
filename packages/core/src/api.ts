@@ -288,7 +288,12 @@ export interface RunsService {
   cancel(actor: Actor, id: string, mode?: 'interrupt' | 'kill', cause?: 'message'): Promise<void>;
   onEvent(handler: (runId: string, ev: S.RunEvent) => void): () => void;
 }
-export interface Dispatcher { tick(): Promise<void>; start(): void; stop(): Promise<void>; running(): number }
+/**
+ * `stop(timeoutMs)` (VS-262): with no argument, waits unboundedly for in-flight runs to drain
+ * (today's behavior). With a `timeoutMs`, races the drain against it and returns whether it actually
+ * drained in time — `false` means the timeout won and runs may still be in flight.
+ */
+export interface Dispatcher { tick(): Promise<void>; start(): void; stop(timeoutMs?: number): Promise<boolean>; running(): number }
 /** `running()` is the daemon's own health check: is the tick timer installed (VS-76)? */
 export interface Supervisor { tick(): Promise<void>; start(): void; stop(): void; running(): boolean }
 

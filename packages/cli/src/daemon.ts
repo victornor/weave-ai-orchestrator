@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } 
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
+import { SHUTDOWN_KILL_GRACE_MS } from '@agent-conductor/shared';
 import { stateHome, configHome } from './contexts.js';
 import { LAUNCHD_LABEL, SERVICE_NAME, currentLink } from './release.js';
 
@@ -77,7 +78,13 @@ export function startDaemon(options: StartOptions = {}): StartResult {
   return { pid: child.pid ?? null, bin, log: logFile(), foreground: false };
 }
 
-export async function stopDaemon(timeoutMs = 10_000): Promise<{ stopped: boolean; pid: number | null }> {
+/**
+ * VS-262: the default timeout is `SHUTDOWN_KILL_GRACE_MS`, not an arbitrary short number — it has to
+ * comfortably exceed `shutdown()`'s own bounded drain-then-cancel sequence
+ * (`packages/server/src/daemon.ts`), or `SIGKILL` arrives while the daemon is still shutting down
+ * gracefully on its own. See this ticket's design.md, Decision 2.
+ */
+export async function stopDaemon(timeoutMs = SHUTDOWN_KILL_GRACE_MS): Promise<{ stopped: boolean; pid: number | null }> {
   const pid = readPid();
   if (!isRunning(pid)) {
     rmSync(pidFile(), { force: true });
@@ -137,7 +144,9 @@ export function renderServiceUnit(bin: string): string {
     'Restart=on-failure',
     'RestartSec=3',
     'KillSignal=SIGTERM',
-    'TimeoutStopSec=30',
+    // VS-262: must comfortably exceed shutdown()'s own bounded drain-then-cancel sequence — see
+    // stopDaemon's default and this ticket's design.md, Decision 2.
+    `TimeoutStopSec=${Math.ceil(SHUTDOWN_KILL_GRACE_MS / 1000)}`,
     '',
     '[Install]',
     'WantedBy=default.target',

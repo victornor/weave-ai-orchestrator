@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@agent-conductor/shared';
 import { detectHostToolsCached, getLogger, workspaceLoader } from '@agent-conductor/core';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
+import { cancelRunningRuns } from '../daemon.js';
 import { body } from '../http.js';
 import { createVoxtypeProbe, resolveVoxtypeModel, type VoxtypeProbe } from '../voxtype.js';
 
@@ -161,12 +162,21 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
    * wait for in-flight ones, bounded. Nothing is persisted, so a restart comes back dispatching;
    * `undrain` is for the case where the restart never happens.
    */
+  /**
+   * VS-262: on timeout, cancel whatever is still running (through the same path a requested
+   * cancellation uses) rather than only reporting it and leaving the kill signal that follows to
+   * (fail to) interrupt it. `dispatcher.stop(timeoutMs)` is the one bounded primitive this and
+   * `shutdown()` (`packages/server/src/daemon.ts`) both use, replacing this route's own former
+   * `Promise.race`/`setTimeout`, which left the underlying unbounded `drain()` running in the
+   * background, uncancelled, after the response had already gone out.
+   */
   app.post('/daemon/drain', async (c) => {
     const { timeoutSec } = await body(c, z.object({ timeoutSec: z.number().int().min(0).max(3600).default(180) }));
     const all = uniqueWorkspaces(deps);
-    const deadline = Date.now() + timeoutSec * 1000;
-    const stops = all.map((w) => w.services.dispatcher.stop().catch(() => undefined));
-    await Promise.race([Promise.all(stops), new Promise((r) => setTimeout(r, Math.max(0, deadline - Date.now())))]);
+    await Promise.all(all.map(async (w) => {
+      const drained = await w.services.dispatcher.stop(timeoutSec * 1000).catch(() => false);
+      if (!drained) await cancelRunningRuns(w).catch(() => undefined);
+    }));
     const running = all.flatMap((w) => {
       try { return w.services.runs.list({ status: ['running', 'queued'] }).items.map((r) => ({ workspace: w.id, runId: r.id })); } catch { return []; }
     });

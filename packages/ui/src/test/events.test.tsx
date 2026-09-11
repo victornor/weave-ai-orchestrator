@@ -207,6 +207,7 @@ describe('routine events (VS-220)', () => {
       const keys = invalidated(event(type, { entityId: 'rt_1', entityType: 'routine' }));
       expect(keys).toContain(JSON.stringify(qk.routines('ws1')));
       expect(keys).toContain(JSON.stringify(qk.routine('ws1', 'rt_1')));
+      expect(keys).toContain(JSON.stringify(qk.routineFires('ws1', 'rt_1')));
     }
   });
 });

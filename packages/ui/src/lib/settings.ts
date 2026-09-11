@@ -27,7 +27,6 @@ export const SETTINGS_SECTIONS = [
   { key: 'models', label: 'Models', area: 'workspace' },
   { key: 'channels', label: 'Channels', area: 'workspace' },
   { key: 'presentation', label: 'Presentation', area: 'workspace' },
-  { key: 'scheduled', label: 'Scheduled tasks', area: 'workspace' },
   { key: 'updates', label: 'Updates', area: 'daemon' },
   { key: 'daemon-models', label: 'Models', area: 'daemon' },
   { key: 'dictation', label: 'Dictation', area: 'daemon' },
@@ -103,7 +102,9 @@ export type SettingsRedirect =
  * workspace section) moves, to the remembered workspace's settings: the default must stay, or a
  * bare `/settings` would redirect forever. With no workspace remembered there is nothing to show a
  * workspace section in, so the stale names are dropped and the daemon page's first section shows.
- * An unknown section never redirects — each route falls back to its own first section, as before.
+ * An unknown section never redirects — each route falls back to its own first section, as before
+ * — except a leftover `?section=scheduled` from before VS-231, which opens `/scheduled` with that
+ * workspace in the search (the key is no longer a known section).
  */
 export function redirectForSettingsRoute(
   route: SettingsRouteKind,
@@ -113,6 +114,11 @@ export function redirectForSettingsRoute(
   const rest: Record<string, string | undefined> = { ...search };
   delete rest.area;
   delete rest.section;
+
+  if (search.section === 'scheduled') {
+    const ws = rememberedWorkspace?.trim() || null;
+    return { type: 'redirect', to: '/scheduled', search: { ...rest, ...(ws ? { ws } : {}) } };
+  }
 
   const resolved = resolveSettingsLocation(search);
   if (route === 'workspace') {

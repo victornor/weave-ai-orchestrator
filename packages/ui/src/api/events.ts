@@ -375,6 +375,7 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
     case 'routine.fired':
       inv(qk.routines(ws));
       inv(qk.routine(ws, id));
+      inv(qk.routineFires(ws, id));
       break;
     case 'presentation.updated':
       inv(qk.presentation(ws));

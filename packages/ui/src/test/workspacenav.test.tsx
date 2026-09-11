@@ -325,16 +325,17 @@ describe('the Needs-you count', () => {
 });
 
 describe('the global section', () => {
-  it('sits above the workspace list with Needs you, Live, Chats, Incidents, Map and the daemon Settings', () => {
+  it('sits above the workspace list with Needs you, Live, Chats, Incidents, Map, Scheduled and the daemon Settings', () => {
     render(nav());
     const global = screen.getByRole('navigation', { name: 'Global' });
     const labels = within(global).getAllByRole('link').map((a) => a.textContent);
-    expect(labels).toEqual(['Needs you', 'Live', 'Chats', 'Incidents', 'Map', 'Settings']);
+    expect(labels).toEqual(['Needs you', 'Live', 'Chats', 'Incidents', 'Map', 'Scheduled', 'Settings']);
     expect(within(global).getByText('Live').closest('a')).toHaveAttribute('href', '/live');
     expect(within(global).getByText('Chats').closest('a')).toHaveAttribute('href', '/chats');
     expect(within(global).getByText('Needs you').closest('a')).toHaveAttribute('href', '/needs');
     expect(within(global).getByText('Incidents').closest('a')).toHaveAttribute('href', '/incidents');
     expect(within(global).getByText('Map').closest('a')).toHaveAttribute('href', '/map');
+    expect(within(global).getByText('Scheduled').closest('a')).toHaveAttribute('href', '/scheduled');
     // The daemon's settings have their own address above the workspaces (VS-230).
     expect(within(global).getByText('Settings').closest('a')).toHaveAttribute('href', '/settings');
   });

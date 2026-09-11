@@ -176,6 +176,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'PATCH', path: `${W}/routines/{id}`, tag: 'routines', summary: 'Update, pause or resume a scheduled task', auth: 'session', mutating: true },
   { method: 'DELETE', path: `${W}/routines/{id}`, tag: 'routines', summary: 'Remove a scheduled task', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/routines/{id}/usage`, tag: 'routines', summary: 'Spend attributable to a scheduled task; ?window=24h|7d', auth: 'session' },
+  { method: 'GET', path: `${W}/routines/{id}/fires`, tag: 'routines', summary: 'Kept fires of a scheduled task, newest first, joined to the conductor run', auth: 'session' },
 
   { method: 'GET', path: `${W}/agent/inbox`, tag: 'agent', summary: 'This run wakes, bundled', auth: 'run' },
   { method: 'GET', path: `${W}/agent/tools`, tag: 'agent', summary: 'Tools this agent may call, with JSON schemas', auth: 'run' },

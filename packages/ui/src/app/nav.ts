@@ -65,5 +65,6 @@ export const GLOBAL_NAV: NavItem[] = [
   { key: 'global-chats', label: 'Chats', to: '/chats', glyph: 'chat', hint: 'Every workspace\'s conductor chat, side by side' },
   { key: 'global-incidents', label: 'Incidents', to: '/incidents', glyph: 'failed', hint: 'System failures agents filed' },
   { key: 'global-map', label: 'Map', to: '/map', glyph: 'board', hint: 'Every workspace, project, role and ticket, as a graph' },
+  { key: 'global-scheduled', label: 'Scheduled', to: '/scheduled', glyph: 'queue', hint: 'Recurring conductor alarms, across every workspace' },
   { key: 'global-settings', label: 'Settings', to: '/settings', glyph: 'more', hint: 'This daemon — applies to every workspace' },
 ];

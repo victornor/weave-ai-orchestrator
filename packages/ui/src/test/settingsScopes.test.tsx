@@ -113,7 +113,7 @@ describe('the area model', () => {
 
   it('puts each setting in the area its data actually belongs to', () => {
     const areaOf = (key: string): string | undefined => SETTINGS_SECTIONS.find((s) => s.key === key)?.area;
-    for (const key of ['workspace', 'projects', 'models', 'channels', 'presentation', 'scheduled']) expect(areaOf(key)).toBe('workspace');
+    for (const key of ['workspace', 'projects', 'models', 'channels', 'presentation']) expect(areaOf(key)).toBe('workspace');
     for (const key of ['updates', 'dictation', 'security', 'device']) expect(areaOf(key)).toBe('daemon');
   });
 
@@ -163,6 +163,15 @@ describe('redirecting a link that names the other side (VS-230)', () => {
       expect(redirectForSettingsRoute('workspace', { section: 'nope', area: 'nope' })).toEqual({ type: 'stay' });
       expect(redirectForSettingsRoute('workspace', { area: 'workspace', section: 'models' })).toEqual({ type: 'stay' });
     });
+
+    it('sends a leftover scheduled-tasks section to the Scheduled page with that workspace (VS-231)', () => {
+      expect(redirectForSettingsRoute('workspace', { section: 'scheduled' }, 'ws9')).toEqual({
+        type: 'redirect', to: '/scheduled', search: { ws: 'ws9' },
+      });
+      expect(redirectForSettingsRoute('workspace', { keep: 'me', section: 'scheduled' }, 'alpha')).toEqual({
+        type: 'redirect', to: '/scheduled', search: { keep: 'me', ws: 'alpha' },
+      });
+    });
   });
 
   describe('from the daemon route', () => {
@@ -204,7 +213,7 @@ describe('redirecting a link that names the other side (VS-230)', () => {
 describe('the workspace settings page', () => {
   it('lists only the workspace sections, and offers no area switcher', () => {
     openWorkspaceSettings();
-    expect(tabNames()).toEqual(['Workspace', 'Projects', 'Models', 'Channels', 'Presentation', 'Scheduled tasks']);
+    expect(tabNames()).toEqual(['Workspace', 'Projects', 'Models', 'Channels', 'Presentation']);
     for (const label of SETTINGS_AREAS.map((a) => a.label)) {
       expect(screen.queryByRole('radio', { name: label })).not.toBeInTheDocument();
     }

@@ -158,7 +158,7 @@ describe('FanInStreams gating on global pages', () => {
   });
 
   it('is still rendered on the other global pages, the daemon settings included (VS-230)', () => {
-    for (const path of ['/needs', '/settings']) {
+    for (const path of ['/needs', '/settings', '/scheduled']) {
       fanIn.calls = [];
       state.path = path;
       state.workspaces = [listItem({ id: 'ws1' }), listItem({ id: 'ws2', name: 'Beta' })];

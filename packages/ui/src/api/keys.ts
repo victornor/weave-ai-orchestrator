@@ -107,6 +107,7 @@ export const qk = {
   routines: (ws: string) => ['w', ws, 'routines'] as const,
   routine: (ws: string, id: string) => ['w', ws, 'routines', id] as const,
   routineUsage: (ws: string, id: string, window: string) => ['w', ws, 'routines', id, 'usage', window] as const,
+  routineFires: (ws: string, id: string) => ['w', ws, 'routines', id, 'fires'] as const,
 
   presentation: (ws: string) => ['w', ws, 'presentation'] as const,
   presentationSurfaces: (ws: string) => ['w', ws, 'presentation', 'surfaces'] as const,

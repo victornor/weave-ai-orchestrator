@@ -569,12 +569,14 @@ export interface RoutinePatch {
 }
 
 export interface RoutinesService {
-  list(): S.Routine[];
+  list(): S.RoutineListItem[];
   get(id: string): S.Routine;
   create(actor: Actor, input: RoutineCreateInput): S.Routine;
   update(actor: Actor, id: string, patch: RoutinePatch): S.Routine;
   remove(actor: Actor, id: string): void;
   usage(id: string, window: S.RoutineUsageWindow, now?: Date): S.RoutineUsage;
+  /** Kept fires newest-first, joined to the conductor run (VS-231). Skipped enqueues are absent. */
+  fires(id: string): S.RoutineFire[];
   /** Supervisor tick: enqueue a due-now `routine` wake for each active row past `next_fire_at`. */
   fireDue(now?: string): S.Routine[];
   /** After a run ends: clear matching in-flight wakes and snap a still-past `next_fire_at` forward. */

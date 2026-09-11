@@ -49,15 +49,10 @@ import {
   useWorkspaceSummary,
   useWorkspaces,
   useWorkers,
-  useRoutines,
-  useRoutineUsage,
-  useCreateRoutine,
-  usePatchRoutine,
-  useRemoveRoutine,
 } from '../api/hooks';
 import { api, getWorkspaceId, setToken } from '../api/client';
 import { qk } from '../api/keys';
-import type { PresentationBlock, Project, Routine } from '@agent-conductor/shared';
+import type { PresentationBlock, Project } from '@agent-conductor/shared';
 import { ProjectConfigSchema, WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@agent-conductor/shared';
 import type * as T from '../api/types';
 import type { TotpSetup } from '../api/types';
@@ -74,7 +69,7 @@ import { isWorkerConflict, liveWorkerCount, liveWorkersReason, MoveProjectError 
 import { SETTINGS_AREAS, sectionForRoute, sectionsOfArea } from '../lib/settings';
 import type { SettingsAreaKey } from '../lib/settings';
 import { disablePush, enablePush, subscriptionId } from '../lib/push';
-import { ago, cents } from '../lib/format';
+import { ago } from '../lib/format';
 
 /** The scope line each settings page shows beside its title, so several workspaces cannot make
  * "Settings" ambiguous (VS-230). The labels are the areas table's own. */
@@ -151,7 +146,6 @@ export function WorkspaceSettingsRoute(): React.ReactElement {
           {section === 'models' ? <ModelsSection /> : null}
           {section === 'channels' ? <ChannelsSection /> : null}
           {section === 'presentation' ? <PresentationSection /> : null}
-          {section === 'scheduled' ? <ScheduledSection /> : null}
         </div>
       </PageBody>
     </Page>
@@ -1587,198 +1581,6 @@ function PresentationBlockRow({ label, block, fallback }: { label: string; block
         <span className="ac-mono text-micro text-text-2">{block?.surface ?? fallback}</span>
         {block?.surface ? null : <Badge tone="neutral">default</Badge>}
       </dd>
-    </div>
-  );
-}
-
-function scheduleLabel(r: Routine): string {
-  const t = r.trigger;
-  if ('daily' in t) {
-    const hh = String(t.daily.hour).padStart(2, '0');
-    const mm = String(t.daily.minute).padStart(2, '0');
-    return `daily ${hh}:${mm} ${t.timezone}`;
-  }
-  return `every ${t.everyMinutes}m ${t.timezone}`;
-}
-
-function dueLabel(iso: string | null): string {
-  if (!iso) return '—';
-  return iso.slice(0, 16).replace('T', ' ') + 'Z';
-}
-
-function ScheduledSection(): React.ReactElement {
-  const list = useRoutines();
-  const create = useCreateRoutine();
-  const toast = useToast();
-  const [name, setName] = useState('');
-  const [kind, setKind] = useState<'daily' | 'interval'>('daily');
-  const [daily, setDaily] = useState('07:00');
-  const [every, setEvery] = useState('60');
-  const [tz, setTz] = useState('');
-  const [instruction, setInstruction] = useState('');
-  const [action, setAction] = useState<Routine['template']['action']>('report');
-  const [maxTickets, setMaxTickets] = useState('');
-  const [projectId, setProjectId] = useState('');
-
-  const parsedDaily = /^(\d{1,2}):(\d{2})$/.exec(daily.trim());
-  const hour = parsedDaily ? Number(parsedDaily[1]) : NaN;
-  const minute = parsedDaily ? Number(parsedDaily[2]) : NaN;
-  const everyN = Number(every);
-  const trigger = ((): { kind: 'schedule'; timezone?: string; daily?: { hour: number; minute: number }; everyMinutes?: number } | null => {
-    if (kind === 'daily') {
-      if (!(Number.isInteger(hour) && hour <= 23 && Number.isInteger(minute) && minute <= 59)) return null;
-      return { kind: 'schedule', ...(tz.trim() ? { timezone: tz.trim() } : {}), daily: { hour, minute } };
-    }
-    if (!(Number.isInteger(everyN) && everyN >= 15)) return null;
-    return { kind: 'schedule', ...(tz.trim() ? { timezone: tz.trim() } : {}), everyMinutes: everyN };
-  })();
-  const canAdd = Boolean(name.trim() && instruction.trim() && trigger) && !create.isPending;
-
-  return (
-    <div className="flex flex-col gap-5">
-      <p className="text-meta leading-relaxed text-text-2">
-        Alarms that wake the conductor with an instruction. The default is a report to you, not new tickets.
-      </p>
-      <section className="ac-card p-3.5">
-        <div className="ac-label mb-2">Add a scheduled task</div>
-        <Field label="Name">
-          <input className={inputCx} value={name} onChange={(e) => setName(e.target.value)} placeholder="Morning review" />
-        </Field>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="When">
-            <select className={cx(inputCx, 'ac-mono')} value={kind} onChange={(e) => setKind(e.target.value as 'daily' | 'interval')}>
-              <option value="daily">every day at</option>
-              <option value="interval">every N minutes</option>
-            </select>
-          </Field>
-          {kind === 'daily' ? (
-            <Field label="Time" hint="HH:MM in the timezone below">
-              <input className={cx(inputCx, 'ac-mono')} value={daily} onChange={(e) => setDaily(e.target.value)} placeholder="07:00" />
-            </Field>
-          ) : (
-            <Field label="Minutes" hint="15 or more">
-              <input type="number" min={15} className={cx(inputCx, 'ac-mono')} value={every} onChange={(e) => setEvery(e.target.value)} />
-            </Field>
-          )}
-        </div>
-        <Field label="Timezone" hint="IANA zone. Leave blank for the daemon host's zone.">
-          <input className={cx(inputCx, 'ac-mono')} value={tz} onChange={(e) => setTz(e.target.value)} placeholder="Europe/Copenhagen" />
-        </Field>
-        <Field label="Instruction">
-          <textarea
-            className={cx(inputCx, 'h-24 py-2')}
-            value={instruction}
-            onChange={(e) => setInstruction(e.target.value)}
-            placeholder="Look at today's incidents and report anything cheap to fix."
-          />
-        </Field>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Action" hint="report looks, then replies. file_work is the only filing licence.">
-            <select className={cx(inputCx, 'ac-mono')} value={action} onChange={(e) => setAction(e.target.value as Routine['template']['action'])}>
-              <option value="report">report</option>
-              <option value="file_work">file_work</option>
-            </select>
-          </Field>
-          <Field label="Max tickets per fire" hint="Optional. Defaults 0 (report) or 3 (file_work); cap 8.">
-            <input type="number" min={0} max={8} className={cx(inputCx, 'ac-mono')} value={maxTickets} onChange={(e) => setMaxTickets(e.target.value)} />
-          </Field>
-        </div>
-        <Field label="Project" hint="Optional. Leave blank for the whole workspace.">
-          <input className={cx(inputCx, 'ac-mono')} value={projectId} onChange={(e) => setProjectId(e.target.value)} />
-        </Field>
-        <Button
-          variant="primary"
-          disabled={!canAdd}
-          onClick={() => {
-            if (!trigger) return;
-            const body: Parameters<typeof create.mutate>[0] = {
-              name: name.trim(),
-              trigger,
-              instruction: instruction.trim(),
-              action,
-            };
-            if (maxTickets.trim()) body.maxTicketsPerFire = Number(maxTickets);
-            if (projectId.trim()) body.projectId = projectId.trim();
-            create.mutate(body, {
-              onSuccess: () => {
-                toast.push({ title: 'Scheduled task added', detail: name.trim() });
-                setName('');
-                setInstruction('');
-              },
-              onError: (e) => toast.push({ title: 'Could not add the scheduled task', detail: e.message, status: 'failed' }),
-            });
-          }}
-        >
-          Add scheduled task
-        </Button>
-      </section>
-
-      {list.isLoading ? (
-        <SkeletonRows rows={3} />
-      ) : (list.data?.length ?? 0) === 0 ? (
-        <EmptyState
-          title="No scheduled tasks yet."
-          detail="Alarms that wake the conductor with an instruction. Add one above, or ask the conductor."
-        />
-      ) : (
-        <div className="ac-card divide-y divide-line-1">
-          {(list.data ?? []).map((r) => (
-            <ScheduledRow key={r.id} r={r} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ScheduledRow({ r }: { r: Routine }): React.ReactElement {
-  const usage = useRoutineUsage(r.id, '7d');
-  const patch = usePatchRoutine();
-  const remove = useRemoveRoutine();
-  const toast = useToast();
-  const spend = usage.data ? cents(usage.data.costCents) : (usage.isLoading ? '…' : cents(0));
-  const paused = r.status === 'paused';
-
-  return (
-    <div className="flex flex-col gap-2 px-3.5 py-3 sm:flex-row sm:items-center sm:gap-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-meta font-medium text-text-1">{r.name}</span>
-          <Badge tone={paused ? 'neutral' : 'accent'}>{r.status}</Badge>
-        </div>
-        <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-micro text-text-3">
-          <span className="ac-mono">{scheduleLabel(r)}</span>
-          <span>next {dueLabel(r.nextFireAt)}</span>
-          <span>7d {spend}</span>
-        </div>
-      </div>
-      <div className="flex flex-none items-center gap-2">
-        <Button
-          size="sm"
-          disabled={patch.isPending}
-          onClick={() =>
-            patch.mutate(
-              { id: r.id, patch: { status: paused ? 'active' : 'paused' } },
-              { onError: (e) => toast.push({ title: paused ? 'Could not resume' : 'Could not pause', detail: e.message, status: 'failed' }) },
-            )
-          }
-        >
-          {paused ? 'Resume' : 'Pause'}
-        </Button>
-        <Button
-          size="sm"
-          variant="danger"
-          disabled={remove.isPending}
-          onClick={() =>
-            remove.mutate(
-              { id: r.id },
-              { onError: (e) => toast.push({ title: 'Could not remove', detail: e.message, status: 'failed' }) },
-            )
-          }
-        >
-          Remove
-        </Button>
-      </div>
     </div>
   );
 }

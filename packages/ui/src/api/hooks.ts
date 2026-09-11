@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, Routine, RoutineUsage } from '@agent-conductor/shared';
+import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, Routine, RoutineFire, RoutineListItem, RoutineUsage } from '@agent-conductor/shared';
 import { dayKey } from '@agent-conductor/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -146,11 +146,21 @@ export function useWorkspaces(): UseQueryResult<T.WorkspaceListItem[]> {
   return useQuery({ queryKey: qk.workspaces(), queryFn: () => api.root<T.WorkspaceListItem[]>('/workspaces'), refetchInterval: 60_000 });
 }
 
-export function useRoutines(): UseQueryResult<Routine[]> {
+export function useRoutines(): UseQueryResult<RoutineListItem[]> {
   const ws = useWs();
   return useQuery({
     queryKey: qk.routines(ws),
-    queryFn: () => api.ws<{ items?: Routine[] } | Routine[]>(ws, '/routines').then((r) => listOf<Routine>(r, 'items')),
+    queryFn: () => api.ws<{ items?: RoutineListItem[] } | RoutineListItem[]>(ws, '/routines').then((r) => listOf<RoutineListItem>(r, 'items')),
+  });
+}
+
+/** Fan-out for the daemon-wide Scheduled page. Takes workspace ids; does not call `useWs()`. */
+export function useRoutinesMany(ids: readonly string[]): UseQueryResult<RoutineListItem[]>[] {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: qk.routines(id),
+      queryFn: () => api.ws<{ items?: RoutineListItem[] } | RoutineListItem[]>(id, '/routines').then((r) => listOf<RoutineListItem>(r, 'items')),
+    })),
   });
 }
 
@@ -160,6 +170,23 @@ export function useRoutineUsage(id: string | null | undefined, window: RoutineUs
     queryKey: qk.routineUsage(ws, id ?? '', window),
     queryFn: () => api.ws<RoutineUsage>(ws, `/routines/${id}/usage${qs({ window })}`),
     enabled: Boolean(id),
+  });
+}
+
+/** Per-workspace usage; `ws` is an argument, not the route context. */
+export function useRoutineUsageFor(ws: string, id: string | null | undefined, window: RoutineUsage['window'] = '7d'): UseQueryResult<RoutineUsage> {
+  return useQuery({
+    queryKey: qk.routineUsage(ws, id ?? '', window),
+    queryFn: () => api.ws<RoutineUsage>(ws, `/routines/${id}/usage${qs({ window })}`),
+    enabled: Boolean(ws && id),
+  });
+}
+
+export function useRoutineFires(ws: string, id: string | null | undefined, enabled = true): UseQueryResult<RoutineFire[]> {
+  return useQuery({
+    queryKey: qk.routineFires(ws, id ?? ''),
+    queryFn: () => api.ws<{ items?: RoutineFire[] } | RoutineFire[]>(ws, `/routines/${id}/fires`).then((r) => listOf<RoutineFire>(r, 'items')),
+    enabled: Boolean(ws && id && enabled),
   });
 }
 
@@ -181,6 +208,14 @@ export function useCreateRoutine(): UseMutationResult<Routine, Error, RoutineCre
   });
 }
 
+export function useCreateRoutineAt(): UseMutationResult<Routine, Error, RoutineCreateBody & { ws: string }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ws, ...body }) => api.ws<Routine>(ws, '/routines', { method: 'POST', body }),
+    onSuccess: (_row, { ws }) => { void qc.invalidateQueries({ queryKey: qk.routines(ws) }); },
+  });
+}
+
 export function usePatchRoutine(): UseMutationResult<Routine, Error, { id: string; patch: Record<string, unknown> }> {
   const ws = useWs();
   const qc = useQueryClient();
@@ -193,12 +228,32 @@ export function usePatchRoutine(): UseMutationResult<Routine, Error, { id: strin
   });
 }
 
+export function usePatchRoutineAt(): UseMutationResult<Routine, Error, { ws: string; id: string; patch: Record<string, unknown> }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ws, id, patch }) => api.ws<Routine>(ws, `/routines/${id}`, { method: 'PATCH', body: patch }),
+    onSuccess: (_row, { ws, id }) => {
+      void qc.invalidateQueries({ queryKey: qk.routines(ws) });
+      void qc.invalidateQueries({ queryKey: qk.routine(ws, id) });
+      void qc.invalidateQueries({ queryKey: qk.routineFires(ws, id) });
+    },
+  });
+}
+
 export function useRemoveRoutine(): UseMutationResult<unknown, Error, { id: string }> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id }) => api.ws(ws, `/routines/${id}`, { method: 'DELETE' }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: qk.routines(ws) }); },
+  });
+}
+
+export function useRemoveRoutineAt(): UseMutationResult<unknown, Error, { ws: string; id: string }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ws, id }) => api.ws(ws, `/routines/${id}`, { method: 'DELETE' }),
+    onSuccess: (_d, { ws }) => { void qc.invalidateQueries({ queryKey: qk.routines(ws) }); },
   });
 }
 

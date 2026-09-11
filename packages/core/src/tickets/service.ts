@@ -273,8 +273,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       ticketId: t.id, kind: 'action_approval', owner: 'human',
       title: `Approve the action for ${t.identifier}: ${t.title}`,
       context: repaired
-        ? `Review the action document. Approve to run it; revise to send feedback; reject to cancel. (Re-raised: the previous approval was lost.)`
-        : `Review the action document. Approve to run it; revise to send feedback; reject to cancel.`,
+        ? `Review the action document below — approve to run it; revise to send feedback; reject to cancel. (Re-raised: the previous approval was lost — this card is the one to answer.)`
+        : `Review the action document below — approve to run it; revise to send feedback; reject to cancel.`,
       options: actionApprovalOptions,
       allowFreeText: true,
       correlationKey: `action_approval:${t.id}`,
@@ -873,6 +873,22 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       const r = db.get<{ body: string; createdAt: string }>('SELECT body, created_at FROM ticket_document_revisions WHERE document_id = ? AND revision = ?', [doc.id, rev]);
       if (!r) return null;
       return { documentId: doc.id, revision: rev, body: r.body, createdAt: r.createdAt };
+    },
+
+    // VS-224: how a decision's document target is followed — the target carries the id, not the
+    // key, so decisions raised before any key was known (all of today's) stay readable. Joined
+    // against the ticket so one ticket's card can never read another ticket's document by id.
+    getDocumentById(id, documentId, revision) {
+      const t = get(id);
+      const doc = db.get<{ id: string; key: string; currentRevision: number }>(
+        'SELECT id, key, current_revision FROM ticket_documents WHERE ticket_id = ? AND id = ?',
+        [t.id, documentId],
+      );
+      if (!doc) return null;
+      const rev = revision ?? doc.currentRevision;
+      const r = db.get<{ body: string; createdAt: string }>('SELECT body, created_at FROM ticket_document_revisions WHERE document_id = ? AND revision = ?', [doc.id, rev]);
+      if (!r) return null;
+      return { key: doc.key, documentId: doc.id, revision: rev, currentRevision: doc.currentRevision, body: r.body, createdAt: r.createdAt };
     },
 
     documents(id) {

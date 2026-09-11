@@ -10,6 +10,7 @@ export * from './pricing.js';
 export * from './events.js';
 export * from './types.js';
 export * from './conductor-review.js';
+export * from './decision-target.js';
 export * from './push.js';
 export * from './channels.js';
 export * from './attachments.js';

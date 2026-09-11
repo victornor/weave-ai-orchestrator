@@ -136,6 +136,39 @@ describe('routes', () => {
     expect(h.bus.since(0).map((e) => e.type)).toContain('ticket.created');
   });
 
+  it('reads a ticket document by id, at HEAD or an earlier revision (VS-224)', async () => {
+    const { h, fetch } = app();
+    h.documents.set('tk_1\0action', ['v1', 'v2']);
+    const docId = encodeURIComponent('tk_1\0action');
+
+    const head = await fetch(`/api/w/ws1/tickets/tk_1/documents/by-id/${docId}`, { headers: authed() });
+    expect(head.status).toBe(200);
+    await expect(head.json()).resolves.toMatchObject({ key: 'action', documentId: 'tk_1\0action', revision: 2, currentRevision: 2, body: 'v2' });
+
+    const old = await fetch(`/api/w/ws1/tickets/tk_1/documents/by-id/${docId}?revision=1`, { headers: authed() });
+    expect(old.status).toBe(200);
+    await expect(old.json()).resolves.toMatchObject({ revision: 1, currentRevision: 2, body: 'v1' });
+  });
+
+  it('refuses by-id reads that name another ticket\'s document or an unknown id (VS-224)', async () => {
+    const { h, fetch } = app();
+    h.documents.set('tk_1\0action', ['v1']);
+    const docId = encodeURIComponent('tk_1\0action');
+
+    const other = await fetch(`/api/w/ws1/tickets/tk_2/documents/by-id/${docId}`, { headers: authed() });
+    expect(other.status).toBe(404);
+    expect((await other.json()).error.code).toBe('not_found');
+
+    const missing = await fetch(`/api/w/ws1/tickets/tk_1/documents/by-id/doc_nope`, { headers: authed() });
+    expect(missing.status).toBe(404);
+
+    // The plain key route still answers for ordinary keys.
+    h.documents.set('tk_1\0plan', ['the digest']);
+    const byKey = await fetch('/api/w/ws1/tickets/tk_1/documents/plan', { headers: authed() });
+    expect(byKey.status).toBe(200);
+    await expect(byKey.json()).resolves.toMatchObject({ body: 'the digest' });
+  });
+
   it('opens a nested capability whether the client encodes the slash or not', async () => {
     const { h, fetch } = app();
     const seen: string[] = [];

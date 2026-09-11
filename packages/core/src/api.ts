@@ -38,6 +38,8 @@ export interface TicketsService {
   /** `opts.system` is for the daemon's own internal write of the `plan` digest only — never set it from a tool or route handling external input; every other write to `key: 'plan'` is refused. */
   putDocument(actor: Actor, id: string, key: string, body: string, opts?: { system?: boolean }): { documentId: string; revision: number };
   getDocument(id: string, key: string, revision?: number): { documentId: string; revision: number; body: string; createdAt: string } | null;
+  /** Read one of the ticket's documents by its id (VS-224) — how a decision's document target is followed; scoped to the ticket. */
+  getDocumentById(id: string, documentId: string, revision?: number): { key: string; documentId: string; revision: number; currentRevision: number; body: string; createdAt: string } | null;
   documentRevisions(id: string, key: string): Array<{ revision: number; authorKind: string; createdAt: string }>;
   /** Every document on a ticket with its current revision — the catalogue an agent reads before asking for one by key. */
   documents(id: string): Array<{ key: string; revision: number; updatedAt: string }>;

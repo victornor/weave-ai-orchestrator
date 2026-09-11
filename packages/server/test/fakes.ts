@@ -199,6 +199,16 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
         if (body === undefined) return null;
         return { documentId: docKey, revision: rev, body, createdAt: '2026-09-01T00:00:00.000Z' };
       },
+      // Same ownership rule as the real one: the id must name a document that belongs to this ticket.
+      getDocumentById: (id: string, documentId: string, revision?: number) => {
+        const entry = [...documents.entries()].find(([k]) => k === documentId);
+        if (!entry || entry[0].split('\0')[0] !== getTicket(id).id || entry[1].length === 0) return null;
+        const [docKey, revisions] = entry;
+        const rev = revision ?? revisions.length;
+        const body = revisions[rev - 1];
+        if (body === undefined) return null;
+        return { key: docKey.split('\0')[1]!, documentId: docKey, revision: rev, currentRevision: revisions.length, body, createdAt: '2026-09-01T00:00:00.000Z' };
+      },
       documents: (id: string) => {
         const prefix = `${getTicket(id).id}\0`;
         return [...documents.entries()]

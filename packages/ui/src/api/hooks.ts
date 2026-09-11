@@ -858,6 +858,16 @@ export function useTicketDocument(id: string, key: string, revision?: number): U
   });
 }
 
+/** One of a ticket's documents by its id (VS-224) — how a decision's document target is followed. */
+export function useTicketDocumentById(id: string, documentId: string, revision?: number): UseQueryResult<T.TicketDocumentById> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: [...qk.ticketDocumentById(ws, id, documentId), revision ?? 'head'],
+    queryFn: () => api.ws<T.TicketDocumentById>(ws, `/tickets/${id}/documents/by-id/${documentId}${qs({ revision })}`),
+    enabled: Boolean(id && documentId),
+  });
+}
+
 export function useTicketDocumentRevisions(id: string, key: string): UseQueryResult<T.DocumentRevision[]> {
   const ws = useWs();
   return useQuery({

@@ -37,6 +37,7 @@ export const qk = {
   ticketComments: (ws: string, id: string) => ['w', ws, 'tickets', id, 'comments'] as const,
   ticketDocuments: (ws: string, id: string) => ['w', ws, 'tickets', id, 'documents'] as const,
   ticketDocument: (ws: string, id: string, key: string) => ['w', ws, 'tickets', id, 'documents', key] as const,
+  ticketDocumentById: (ws: string, id: string, documentId: string) => ['w', ws, 'tickets', id, 'documents', 'by-id', documentId] as const,
   ticketDocumentRevisions: (ws: string, id: string, key: string) => ['w', ws, 'tickets', id, 'documents', key, 'revisions'] as const,
   ticketWorkProducts: (ws: string, id: string) => ['w', ws, 'tickets', id, 'work-products'] as const,
   ticketRuns: (ws: string, id: string) => ['w', ws, 'tickets', id, 'runs'] as const,

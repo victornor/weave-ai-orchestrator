@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Decision, Ticket, TicketComment } from '@agent-conductor/shared';
+import type { WorkerMessageOutcome } from '../api/types';
 import { agent, decision, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -9,10 +10,10 @@ const state = vi.hoisted(() => ({
   worker: null as Agent | null,
   startSession: vi.fn(),
   decisions: [] as Decision[],
-  workerDetail: undefined as { input: { midTurn: boolean; reason?: string } } | undefined,
+  workerDetail: undefined as { input: { midTurn: boolean; interrupts?: boolean; reason?: string } } | undefined,
   search: {} as Record<string, string | undefined>,
   ticketStatus: 'in_progress' as string,
-  messageMutateAsync: vi.fn(async () => ({ delivery: 'queued', runId: null, wakeId: null })),
+  messageMutateAsync: vi.fn(async (): Promise<WorkerMessageOutcome> => ({ delivery: 'queued', runId: null, wakeId: null })),
   answerMutate: vi.fn(),
   knowledgeUsage: undefined as { hubTokens: number; documentTokens: number; totalTokens: number; documents: Array<{ scope: string; projectId: string | null; slug: string | null; tokens: number }> } | undefined,
 }));
@@ -74,6 +75,7 @@ beforeEach(() => {
   state.search = {};
   state.ticketStatus = 'in_progress';
   state.knowledgeUsage = undefined;
+  state.messageMutateAsync = vi.fn(async (): Promise<WorkerMessageOutcome> => ({ delivery: 'queued', runId: null, wakeId: null }));
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -148,6 +150,31 @@ describe("TicketRoute's Activity tab talks to the worker (VS-106)", () => {
     });
 
     expect(state.messageMutateAsync).toHaveBeenCalledWith({ id: 'a1', ticketId: 'tk_1', body: 'why did you do it that way?', live: true });
+  });
+
+  it('labels the reply box as interrupting the running turn on a non-streaming runtime (VS-254)', () => {
+    state.worker = agent({ status: 'active' });
+    state.workerDetail = { input: { midTurn: false, interrupts: true } };
+    render(<TicketRoute />);
+    openActivity();
+
+    expect(screen.getByText('Interrupts the running turn; the agent answers once its next turn starts.')).toBeInTheDocument();
+  });
+
+  it('shows the interrupted outcome after a live reply interrupts the running turn (VS-254)', async () => {
+    state.worker = agent({ status: 'active' });
+    state.workerDetail = { input: { midTurn: false, interrupts: true } };
+    state.messageMutateAsync = vi.fn(async (): Promise<WorkerMessageOutcome> => ({ delivery: 'interrupted', runId: 'run_1', wakeId: 'wk_1' }));
+    const { container } = render(<TicketRoute />);
+    openActivity();
+
+    const textarea = container.querySelector('textarea')!;
+    fireEvent.change(textarea, { target: { value: 'stop, wrong direction' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+
+    expect(screen.getByText('Interrupted the running turn; it will be answered once the next turn starts.')).toBeInTheDocument();
   });
 
   it('is read-only once the worker has retired, naming it', () => {

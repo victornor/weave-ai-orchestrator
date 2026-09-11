@@ -186,8 +186,12 @@ export interface RolesService {
 }
 /** Project-pooled spawn headroom (VS-156). `roleMax` is the stored field, not a spawn gate; `effective` is `projectMax`. */
 export interface RoleConcurrency { roleMax: number; projectMax: number; effective: number; live: number; projectLive: number; free: number }
-/** What happened to a message sent to a worker (VS-99): which delivery occurred, never both, never neither. */
-export interface WorkerMessageOutcome { delivery: 'mid_turn' | 'queued'; runId: string | null; wake: S.Wakeup | null }
+/**
+ * What happened to a message sent to a worker (VS-99): which delivery occurred, never more than one,
+ * never none. `'interrupted'` (VS-254) is a human's live send on a runtime that cannot take mid-turn
+ * input: the running turn was cancelled to deliver it, rather than queuing behind it.
+ */
+export interface WorkerMessageOutcome { delivery: 'mid_turn' | 'queued' | 'interrupted'; runId: string | null; wake: S.Wakeup | null }
 /**
  * A human taking a worker's session (VS-249): the copy-ready command (or the stated reason there is
  * none) plus the id of the hold this opened, so a later `endHandover` call can be matched to it —
@@ -275,7 +279,13 @@ export interface RunsService {
    * workspace are omitted. Oldest first; `limit` keeps the newest.
    */
   traces(filter: { ids?: readonly string[]; agentId?: string; since?: string; limit?: number }): S.RunTrace[];
-  cancel(actor: Actor, id: string, mode?: 'interrupt' | 'kill'): Promise<void>;
+  /**
+   * `cause` (VS-254) distinguishes why an `'interrupt'` was sent, purely for `finalize()`'s
+   * `errorCode`: `'message'` is a human's live message on a runtime that cannot take mid-turn input;
+   * omitted is everything else (daemon shutdown, `/runs/:id/cancel`), exactly as before this cause
+   * existed.
+   */
+  cancel(actor: Actor, id: string, mode?: 'interrupt' | 'kill', cause?: 'message'): Promise<void>;
   onEvent(handler: (runId: string, ev: S.RunEvent) => void): () => void;
 }
 export interface Dispatcher { tick(): Promise<void>; start(): void; stop(): Promise<void>; running(): number }

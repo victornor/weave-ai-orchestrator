@@ -5,7 +5,7 @@ import type { HandoverCommandResult, WorkerMessageOutcome } from '../api/types';
 import { agent, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
-  input: { midTurn: false, reason: 'no turn is currently running for this agent' } as { midTurn: boolean; reason?: string },
+  input: { midTurn: false, reason: 'no turn is currently running for this agent' } as { midTurn: boolean; interrupts?: boolean; reason?: string },
   messageOutcome: { delivery: 'queued', runId: 'run_1', wakeId: 'wk_1' } as WorkerMessageOutcome,
   sent: [] as Array<{ id: string; ticketId: string; body: string; live?: boolean }>,
   runEventsRequests: [] as string[],
@@ -122,6 +122,25 @@ describe('WorkerPage composer — mid-turn capability and delivery outcome (VS-9
     });
 
     expect(screen.getByText('Queued for the next turn.')).toBeInTheDocument();
+  });
+
+  it('labels the composer as interrupting the running turn when the runtime cannot take mid-turn input but a turn is running (VS-254)', () => {
+    state.input = { midTurn: false, interrupts: true };
+    render(<WorkerRoute />);
+    expect(screen.getByText('Interrupts the running turn; the agent answers once its next turn starts.')).toBeInTheDocument();
+  });
+
+  it('shows the interrupted outcome after sending interrupts the running turn (VS-254)', async () => {
+    state.input = { midTurn: false, interrupts: true };
+    state.messageOutcome = { delivery: 'interrupted', runId: 'run_1', wakeId: 'wk_3' };
+    render(<WorkerRoute />);
+
+    fireEvent.change(composerInput(), { target: { value: 'stop, wrong direction' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+
+    expect(screen.getByText('Interrupted the running turn; it will be answered once the next turn starts.')).toBeInTheDocument();
   });
 
   it('attaching (mount) and detaching (unmount) is a plain subscription: no mutation fires either way', () => {

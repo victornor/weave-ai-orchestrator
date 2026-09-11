@@ -408,7 +408,11 @@ function ActivityTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketI
 
   const ended = status === 'done' || status === 'cancelled';
   const steerLabel = canConverse && workerDetail.data
-    ? lastOutcome ?? (workerDetail.data.input.midTurn ? 'Reaches the running turn immediately.' : `Queued for the next turn${workerDetail.data.input.reason ? ` — ${workerDetail.data.input.reason}` : ''}.`)
+    ? lastOutcome ?? (workerDetail.data.input.midTurn
+        ? 'Reaches the running turn immediately.'
+        : workerDetail.data.input.interrupts
+          ? 'Interrupts the running turn; the agent answers once its next turn starts.'
+          : `Queued for the next turn${workerDetail.data.input.reason ? ` — ${workerDetail.data.input.reason}` : ''}.`)
     : undefined;
 
   return (
@@ -469,7 +473,11 @@ function ActivityTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketI
           onChange={(text) => patch({ text })}
           onSubmit={async (body) => {
             const outcome = await message.mutateAsync({ id: worker!.id, ticketId, body, live: true });
-            setLastOutcome(outcome.delivery === 'mid_turn' ? 'Delivered to the running turn.' : 'Queued for the next turn.');
+            setLastOutcome(
+              outcome.delivery === 'mid_turn' ? 'Delivered to the running turn.'
+              : outcome.delivery === 'interrupted' ? 'Interrupted the running turn; it will be answered once the next turn starts.'
+              : 'Queued for the next turn.',
+            );
           }}
         />
       ) : (
@@ -483,6 +491,15 @@ function ActivityTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketI
       )}
     </div>
   );
+}
+
+/**
+ * A friendly gloss for an `errorCode` next to an `interrupted` status (VS-254), so it reads as
+ * caused by the human, not as a crash. Anything else falls back to the raw code — this is not a
+ * general error-code copy table, just the one case that would otherwise look like a failure.
+ */
+function interruptedErrorCodeLabel(errorCode: string): string {
+  return errorCode === 'interrupted_by_message' ? 'you sent it a message' : errorCode;
 }
 
 /**
@@ -519,7 +536,7 @@ function RunTurn({ run }: { run: Run }): React.ReactElement {
           <span>·</span>
           <span className={cx(run.status === 'failed' && 'text-failed', run.status === 'interrupted' && 'text-text-2')}>
             {run.status}
-            {run.errorCode ? ` (${run.errorCode})` : ''}
+            {run.errorCode ? ` (${interruptedErrorCodeLabel(run.errorCode)})` : ''}
           </span>
           <span>·</span>
           <span className="ac-mono">{ago(at)}</span>

@@ -98,7 +98,11 @@ export function WorkerRoute(): React.ReactElement {
   const events = [...(persisted.data ?? []), ...live];
   // Before typing: whether a message would reach the running turn right now, and why not when it
   // wouldn't (VS-99). After sending: which of the two actually happened, until the next send.
-  const steerLabel = lastOutcome ?? (input.midTurn ? 'Reaches the running turn immediately.' : `Queued for the next turn${input.reason ? ` — ${input.reason}` : ''}.`);
+  const steerLabel = lastOutcome ?? (input.midTurn
+    ? 'Reaches the running turn immediately.'
+    : input.interrupts
+      ? 'Interrupts the running turn; the agent answers once its next turn starts.'
+      : `Queued for the next turn${input.reason ? ` — ${input.reason}` : ''}.`);
 
   return (
     <Page>
@@ -222,7 +226,11 @@ export function WorkerRoute(): React.ReactElement {
               onChange={(text) => patch({ text })}
               onSubmit={async (body) => {
                 const outcome = await message.mutateAsync({ id: workerId, ticketId: ticket.id, body, live: true });
-                setLastOutcome(outcome.delivery === 'mid_turn' ? 'Delivered to the running turn.' : 'Queued for the next turn.');
+                setLastOutcome(
+                  outcome.delivery === 'mid_turn' ? 'Delivered to the running turn.'
+                  : outcome.delivery === 'interrupted' ? 'Interrupted the running turn; it will be answered once the next turn starts.'
+                  : 'Queued for the next turn.',
+                );
               }}
             />
           </div>

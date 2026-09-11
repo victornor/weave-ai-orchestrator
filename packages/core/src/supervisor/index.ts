@@ -184,13 +184,13 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         supervisorEvent(run.id, hardTimedOut ? 'hard_timeout_interrupt' : 'silence_interrupt', { silentMs: now - lastEventAt });
         ctx.events.emit('worker.stalled', 'agent', run.agentId, { runId: run.id, reason: hardTimedOut ? 'hard timeout' : 'silence' });
         log.warn({ runId: run.id, agentId: run.agentId, hardTimedOut }, 'interrupting a stuck run');
-        try { if (entry) { entry.cancelled = 'interrupt'; await entry.cancel('interrupt'); } } catch { /* already gone */ }
+        try { if (entry) { entry.cancelled = { mode: 'interrupt' }; await entry.cancel('interrupt'); } } catch { /* already gone */ }
         continue;
       }
       if (now - firstAt < KILL_AFTER_INTERRUPT_MS) continue;
 
       supervisorEvent(run.id, 'kill', { afterMs: now - firstAt });
-      try { if (entry) { entry.cancelled = 'kill'; await entry.cancel('kill'); } } catch { /* already gone */ }
+      try { if (entry) { entry.cancelled = { mode: 'kill' }; await entry.cancel('kill'); } } catch { /* already gone */ }
       interrupted.delete(run.id);
       if (!entry) {
         // Nothing in this process owns the run: close it out here.

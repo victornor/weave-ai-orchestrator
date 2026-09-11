@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-11
+goal: VS-221's own tests assert against the host's environment and fail in a worker
+skip_specs: true

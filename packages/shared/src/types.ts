@@ -11,6 +11,21 @@ export interface Project { id: string; workspaceId: string; slug: string; name: 
 export function landingBranchOf(project: Pick<Project, 'defaultBranch' | 'landingBranch'>, ticket?: Pick<Ticket, 'landingBranch'> | null): string {
   return ticket?.landingBranch ?? project.landingBranch ?? project.defaultBranch;
 }
+/**
+ * Whether a finished ticket claims a merge but lacks the record merge-done writes (VS-250). A
+ * `done` ticket whose delivery has `prState: 'merged'` or `merged: true` without a non-empty
+ * `mergeCommit` is incomplete: the old `merging → done` bypass left rows like VS-227 reading as an
+ * ordinary success. Historical rows are only made visible, never rewritten. Any surface that shows
+ * a finished ticket's outcome (board, detail, CLI) reads this, so the gap cannot drift between them.
+ */
+export function incompleteDelivery(ticket: Pick<Ticket, 'status' | 'delivery'>): boolean {
+  if (ticket.status !== 'done') return false;
+  const d = ticket.delivery;
+  if (!d) return false;
+  if (d['merged'] !== true && d['prState'] !== 'merged') return false;
+  const sha = d['mergeCommit'];
+  return !(d['merged'] === true && typeof sha === 'string' && sha.trim() !== '');
+}
 export interface Role { id: string; workspaceId: string; projectId: string; slug: string; name: string; title: string | null; icon: string | null; charterSummary: string; scopeText: string; responsibilities: string[]; capabilities: string[]; rules: string[]; permission: Record<string, unknown>; sessionPolicy: E.SessionPolicy; maxWorkers: number; secrets: string[]; status: E.RoleStatus; pauseReason: string | null; specRevision: number; createdBy: string; createdAt: string; updatedAt: string }
 /** Why a paused worker stopped, when a failure paused it (VS-56). Every field is optional: a worker a human paused carries a `pauseReason` and no detail. */
 export interface AgentPauseDetail { family: E.RunErrorFamily | null; code: string | null; message: string | null; resetAt: string | null; runId: string | null }

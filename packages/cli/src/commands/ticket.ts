@@ -1,7 +1,7 @@
 /** `conductor ticket ...` — the same commands for a human and, with AC_RUN_TOKEN, for an agent (PLAN §9.5, §20). */
 import type { Command } from 'commander';
 import type { Ticket, TicketComment } from '@agent-conductor/shared';
-import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES } from '@agent-conductor/shared';
+import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, incompleteDelivery } from '@agent-conductor/shared';
 import { ticketToSummary, formatRelative, oneLine } from '@agent-conductor/render';
 import { ApiError } from '../api.js';
 import { emit, fields, heading, style, table, write } from '../output.js';
@@ -14,6 +14,21 @@ interface MergeQueue { projectId: string; concurrency: number; active: MergeQueu
 function ticketUrl(baseUrl: string, workspace: string | null, ticket: Record<string, unknown>): string {
   const id = String(ticket['identifier'] ?? ticket['id'] ?? '');
   return `${baseUrl}/w/${workspace ?? ''}/tickets/${encodeURIComponent(id)}`;
+}
+
+/**
+ * The `delivery` line `conductor ticket show` prints (VS-250). An incomplete delivery is named
+ * rather than omitted, so the VS-227 shape (a merged PR with no merge-done record) is visible from
+ * the CLI; a complete delivery prints its commit, and anything with nothing to report stays omitted.
+ */
+export function deliveryShowValue(ticket: Pick<Ticket, 'status' | 'delivery'>): string | undefined {
+  const d = ticket.delivery;
+  if (!d) return undefined;
+  if (incompleteDelivery(ticket)) {
+    return d['prUrl'] ? 'incomplete — merged PR, no mergeCommit' : 'incomplete — merged, no mergeCommit';
+  }
+  const sha = d['mergeCommit'];
+  return typeof sha === 'string' && sha.trim() !== '' ? sha : undefined;
 }
 
 export function register(program: Command): void {
@@ -146,6 +161,7 @@ export function register(program: Command): void {
           ['created', formatRelative(t.createdAt)],
           ['landing branch', t.landingBranch ? String(t.landingBranch) : undefined],
           ['openspec', t.openspecChangeName ? String(t.openspecChangeName) : undefined],
+          ['delivery', deliveryShowValue(t)],
           ['unblock', t.unblock ? `${t.unblock.owner}: ${t.unblock.action}` : undefined],
         ]);
         if (t.description) {

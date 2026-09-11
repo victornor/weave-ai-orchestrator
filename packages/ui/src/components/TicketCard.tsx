@@ -1,4 +1,4 @@
-import type { Ticket, WorkerModelOption } from '@agent-conductor/shared';
+import { incompleteDelivery, type Ticket, type WorkerModelOption } from '@agent-conductor/shared';
 import { StatusGlyph, Badge } from './StatusGlyph';
 import { WorkerModelTag } from './WorkerModelTag';
 import { isFolded, ticketBoardStatus } from '../lib/board';
@@ -30,6 +30,8 @@ export interface TicketCardProps {
 export function outcomeOf(ticket: Ticket): { label: string; tone: 'accent' | 'done' | 'neutral' | 'failed' } | null {
   if (ticket.status !== 'done' && ticket.status !== 'cancelled') return null;
   if (ticket.status === 'cancelled') return { label: 'cancelled', tone: 'failed' };
+  // VS-250: a claimed merge with no merge-done record must not read like an ordinary success.
+  if (incompleteDelivery(ticket)) return { label: 'delivery incomplete', tone: 'failed' };
   const d = (ticket.delivery ?? {}) as { merged?: boolean; prUrl?: string; prState?: string; mode?: string };
   if (d.merged) return { label: 'merged', tone: 'done' };
   if (d.prUrl) return { label: `PR ${d.prState ?? 'open'}`, tone: 'accent' };

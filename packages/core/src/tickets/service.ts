@@ -1,6 +1,6 @@
 import { newId, nowIso, ticketRow, type Db } from '@agent-conductor/db';
 import {
-  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, yoloEnabled,
+  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, landingBranchOf, yoloEnabled,
   type CommentKind, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
 } from '@agent-conductor/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
@@ -8,6 +8,7 @@ import type { Agent, Project } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { checkTransition, openspecChangeName, type GuardFacts } from './guards.js';
+import { unlandedCommitCount } from '../worktrees/landed.js';
 import { tx } from './tx.js';
 import { landDelivery, type LandResult } from './land.js';
 import { createMergeQueue } from './merge-queue.js';
@@ -281,7 +282,27 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       hasUnblockPath: !!input.unblock,
       hasWorkProduct: hasWorkProduct(t.id),
       mergeApproved: mergeApproved(t),
+      hasEndingNote: !!input.note?.trim(),
     };
+  }
+
+  /**
+   * Commits on the ticket's branch that its landing branch does not contain (VS-215) — 0 when there
+   * is no worktree, no project clone, or anything cannot be read: the gate refuses only what it can
+   * prove, and the landed-work test plus the discard rules still protect the tree itself.
+   */
+  async function unlandedCommitsFor(t: Ticket): Promise<number> {
+    try {
+      const wt = db.get<{ path: string; branch: string }>('SELECT path, branch FROM worktrees WHERE ticket_id = ? AND status != ? ORDER BY created_at DESC LIMIT 1', [t.id, 'removed']);
+      if (!wt) return 0;
+      let project: Project | null = null;
+      try { project = t.projectId ? deps().projects.get(t.projectId) : null; } catch { project = null; }
+      if (!project) return 0;
+      return await unlandedCommitCount({ repoPath: project.clonePath, worktreePath: wt.path, branch: wt.branch, landingBranch: landingBranchOf(project, t) }, log);
+    } catch (e) {
+      log.warn({ err: String(e), ticketId: t.id }, 'task-done unlanded-commit check failed; allowing');
+      return 0;
+    }
   }
 
   // ---------- documents ----------
@@ -337,6 +358,15 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     checkTransition(t.kind, t.status, to, facts(t, input));
 
     // Async gates run before the write transaction opens.
+    // VS-215: a task ticket finishes at `done` only when nothing it produced needs landing. Commits
+    // the landing branch does not contain must be delivered through `in_review` (or cancelled), and
+    // that holds for human actors too — it is the same protection the discard rules provide.
+    if (to === 'done' && t.kind === 'task') {
+      const commits = await unlandedCommitsFor(t);
+      if (commits > 0) {
+        throw new OcError('worktree_not_landed', `${t.identifier}'s branch carries ${commits} commit(s) not contained in its landing branch; deliver through in_review instead`, { commits });
+      }
+    }
     let planBody: string | null = null;
     if (to === 'proposed' && t.kind === 'change') {
       const res = await deps().openspec.validateForProposed(t.id);

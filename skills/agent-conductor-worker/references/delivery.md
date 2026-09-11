@@ -2,6 +2,16 @@
 
 Your project has one `deliveryMode`. Your brief names it. Do not switch modes on your own.
 
+## Nothing to land? (task tickets)
+
+If your ticket is a `task` and you produced no commits, there is nothing to deliver: state the ending and why in the transition note and finish at `done` — no push, no PR, no merge approval.
+
+```
+ac_ticket_transition(id, "done", {note: "ending: done — <what you did and why nothing needs landing>"})
+```
+
+A rejection here is information, not an obstacle: `worktree_not_landed` means your branch carries commits the landing branch does not contain — you produced a diff, so deliver through the mode below. `validation` means the note is missing. `change`, `scout` and `question` tickets never take this route.
+
 ## Mode `pr` (default)
 
 1. Work on your ticket branch inside `work/`. Commit as you go, one commit per task or logical group.

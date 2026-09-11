@@ -61,8 +61,8 @@ export function definitionOfDone(kind: S.TicketKind, deliveryMode: string): stri
       : 'planning artifacts complete and validated → `proposed`; after approval implement every task and commit → `in_review` with a branch work product; after approval merge into the default branch and call `ac_ticket_merge_done`.';
   }
   if (kind === 'task') return deliveryMode === 'pr'
-    ? 'do the work, commit, open a PR and record it as a work product → `in_review`; merge when the ticket reaches `merging`.'
-    : 'do the work, commit on the ticket branch → `in_review`; merge when the ticket reaches `merging`.';
+    ? 'choose the ending that matches what you produced: with a diff to land, commit, open a PR and record it as a work product → `in_review`, then merge when the ticket reaches `merging`; with nothing that needs landing, state the ending and why in the transition note → `done` (no PR, no merge approval — and `done` is refused while commits are unlanded).'
+    : 'choose the ending that matches what you produced: with a diff to land, commit on the ticket branch → `in_review` with a branch work product, then merge when the ticket reaches `merging`; with nothing that needs landing, state the ending and why in the transition note → `done` (no PR — and `done` is refused while commits are unlanded).';
   if (kind === 'scout') return 'write the findings as a `report` document (`ac_ticket_document_put`): what you did, what you found, evidence with file:line, recommendation. No code changes, no PR → `done`.';
   return 'answer on the ticket with `ac_ticket_comment`, then transition to `done`.';
 }

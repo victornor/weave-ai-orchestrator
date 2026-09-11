@@ -63,3 +63,32 @@ export async function landedWorkTest(input: LandedInput): Promise<LandedVerdict>
 
   return { landed: false, reason: 'no merged pull request and commits are not on any remote', evidence };
 }
+
+export interface UnlandedInput {
+  repoPath: string | null;
+  worktreePath: string | null;
+  branch: string | null;
+  landingBranch: string;
+}
+
+/**
+ * How many commits on the ticket branch are missing from the landing branch — the task-done gate's
+ * input (VS-215). "Landed" means ancestry (fast-forward or merge commit) or a patch-id equivalent
+ * (squash/rebase merge), the same rule landedWorkTest applies. Unreadable state counts 0: this gate
+ * may only refuse what it can prove, and a stranded worktree is still protected by the landed-work
+ * test and the discard rules.
+ */
+export async function unlandedCommitCount(input: UnlandedInput, log?: { warn: (obj: object, msg: string) => void }): Promise<number> {
+  const { repoPath, worktreePath, branch, landingBranch } = input;
+  if (!worktreePath || !branch || !existsSync(worktreePath)) return 0;
+  if (!repoPath || !existsSync(repoPath)) return 0;
+  const baseRef = (await resolveBaseRef(repoPath, landingBranch)) ?? landingBranch;
+  const ancestor = await git(['merge-base', '--is-ancestor', branch, baseRef], repoPath, 30_000);
+  if (ancestor.ok) return 0;
+  const cherry = await git(['cherry', baseRef, branch], repoPath, 60_000);
+  if (!cherry.ok) {
+    log?.warn({ branch, baseRef, err: cherry.stderr.trim().slice(0, 300) }, 'unlanded-commit check failed; allowing');
+    return 0;
+  }
+  return cherry.stdout.split('\n').filter((l) => l.trim().startsWith('+')).length;
+}

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { classifyError, spawnLines } from './process.js';
 
 const VS234_CAPTURE = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), '../../../openspec/changes/vs-238-a-worker-parked-on-an-exhausted-quota-ca/captures/vs-234-opencode.txt'),
+  join(dirname(fileURLToPath(import.meta.url)), 'fixtures/vs-234-opencode.txt'),
   'utf8',
 ).trim();
 

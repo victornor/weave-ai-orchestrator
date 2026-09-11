@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-11
+goal: "Three test files read fixtures from an OpenSpec change folder, so archiving the change broke main"
+skip_specs: true

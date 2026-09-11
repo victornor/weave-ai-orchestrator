@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { classifyError, spawnLines } from './process.js';
 
 const ECHO_SCRIPT = "process.stdin.setEncoding('utf8'); process.stdin.on('data', c => process.stdout.write(c.split('\\n').filter(Boolean).map(l => 'echo:' + l + '\\n').join(''))); process.stdin.on('end', () => process.exit(0));";
@@ -21,11 +21,10 @@ describe('spawnLines stdin modes', () => {
       cmd: process.execPath, args: ['-e', ECHO_SCRIPT], cwd: process.cwd(), env: process.env as Record<string, string>,
       stdinMode: 'open', timeoutMs: 5000, onLine: (s, l) => { if (s === 'stdout') lines.push(l); },
     });
-    run.write('first\n');
-    await new Promise((r) => setTimeout(r, 50));
-    run.write('second\n');
-    await new Promise((r) => setTimeout(r, 50));
-    expect(lines).toEqual(['echo:first', 'echo:second']);
+    expect(run.write('first\n')).toBe(true);
+    await vi.waitFor(() => { expect(lines).toEqual(['echo:first']); }, { timeout: 2000, interval: 10 });
+    expect(run.write('second\n')).toBe(true);
+    await vi.waitFor(() => { expect(lines).toEqual(['echo:first', 'echo:second']); }, { timeout: 2000, interval: 10 });
     run.endStdin();
     const outcome = await run.done;
     expect(outcome.exitCode).toBe(0);

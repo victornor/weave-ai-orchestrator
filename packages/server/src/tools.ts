@@ -483,11 +483,11 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
-    name: 'ac_knowledge_doc_put', scope: 'all', input: z.object({ slug: z.string().min(2), body: z.string().min(1), scope: z.enum(KNOWLEDGE_SCOPES).default('project'), projectId: z.string().optional() }),
-    description: 'Create or replace a linked knowledge document (kebab-case slug, `# Title` first line, within the workspace\'s configured document budget — 10000 tokens by default). Link related documents with [[slug]]; the result lists unresolved links and whether the document is an orphan — link it from PROJECT.md or another document so it can be found. Workers write project documents; shared/workspace documents are the conductor\'s.',
+    name: 'ac_knowledge_doc_put', scope: 'all', input: z.object({ slug: z.string().min(2), body: z.string().min(1), scope: z.enum(KNOWLEDGE_SCOPES).default('project'), projectId: z.string().optional(), folder: z.string().min(2).optional() }),
+    description: 'Create or replace a linked knowledge document (kebab-case slug, `# Title` first line, within the workspace\'s configured document budget — 10000 tokens by default). Pass `folder` (one or more kebab-case segments, e.g. "research/competitors") to file a *new* document there instead of flat; it is ignored on an existing slug — the document is found and updated wherever it already lives. Link related documents with [[slug]]; the result lists unresolved links and whether the document is an orphan — link it from PROJECT.md or another document so it can be found. Workers write project documents; shared/workspace documents are the conductor\'s.',
     handler: (ctx, i) => {
       if (!isConductor(ctx) && i.scope !== 'project') throw new OcError('forbidden', 'workers write project documents only');
-      return svc(ctx).knowledge.putDoc(ctx.actor, i.scope, i.slug, i.body, knowledgeScope(ctx, i.scope, i.projectId));
+      return svc(ctx).knowledge.putDoc(ctx.actor, i.scope, i.slug, i.body, knowledgeScope(ctx, i.scope, i.projectId), undefined, i.folder);
     },
   },
   {

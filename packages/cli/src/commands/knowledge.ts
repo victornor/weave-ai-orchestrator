@@ -163,6 +163,7 @@ export function register(program: Command): void {
         table(docs, [
           { header: 'SLUG', get: (d) => String(d['slug']) },
           { header: 'SCOPE', get: (d) => String(d['projectSlug'] ?? d['scope']) },
+          { header: 'FOLDER', get: (d) => (d['folder'] ? String(d['folder']) : style.dim('—')) },
           { header: 'TITLE', get: (d) => String(d['title']) },
           { header: 'LINKS', get: (d) => `${String(d['links'])}→ ←${String(d['backlinks'])}` },
           { header: 'TOKENS', get: (d) => `${String(d['tokenEstimate'])}/${String(d['budgetTokens'])}` },

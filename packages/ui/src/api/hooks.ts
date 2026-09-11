@@ -1232,6 +1232,47 @@ export function useKnowledgeDocMutation(): UseMutationResult<unknown, Error, { s
   });
 }
 
+/** Move an existing document to a different folder (or the scope root when `folder` is omitted) — VS-265. */
+export function useKnowledgeMoveDoc(): UseMutationResult<{ path: string }, Error, { scope: string; slug: string; project?: string; folder?: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ scope, slug, project, folder }) =>
+      api.ws<{ path: string }>(ws, `/knowledge/docs/${encodeURIComponent(scope)}/${encodeURIComponent(slug)}/move${qs({ project })}`, { method: 'POST', body: { folder } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.knowledge(ws) }),
+  });
+}
+
+/** The dated archive files a scope has accumulated, most recent first — read-only (VS-265). */
+export function useKnowledgeArchive(scope: string | null, project?: string): UseQueryResult<T.KnowledgeArchiveEntry[]> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: [...qk.knowledge(ws), 'archive', scope ?? '', project ?? ''],
+    queryFn: () => api.ws<unknown>(ws, `/knowledge/${scope}/archive${qs({ project })}`).then((r) => listOf<T.KnowledgeArchiveEntry>(r)),
+    enabled: Boolean(scope),
+  });
+}
+
+export function useKnowledgeArchiveFile(scope: string | null, path: string | null, project?: string): UseQueryResult<T.KnowledgeArchiveFile> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: [...qk.knowledge(ws), 'archive-file', scope ?? '', path ?? '', project ?? ''],
+    queryFn: () => api.ws<T.KnowledgeArchiveFile>(ws, `/knowledge/${scope}/archive/${path}${qs({ project })}`),
+    enabled: Boolean(scope && path),
+  });
+}
+
+/** One archive listing per requested (scope, project) root, in the same order — for the explorer's several roots at once. */
+export function useKnowledgeArchiveMany(roots: readonly { scope: string; project?: string }[]): UseQueryResult<T.KnowledgeArchiveEntry[]>[] {
+  const ws = useWs();
+  return useQueries({
+    queries: roots.map((r) => ({
+      queryKey: [...qk.knowledge(ws), 'archive', r.scope, r.project ?? ''],
+      queryFn: () => api.ws<unknown>(ws, `/knowledge/${r.scope}/archive${qs({ project: r.project })}`).then((res) => listOf<T.KnowledgeArchiveEntry>(res)),
+    })),
+  });
+}
+
 export function useKnowledgeDoc(scope: string, project?: string): UseQueryResult<T.KnowledgeDoc> {
   const ws = useWs();
   return useQuery({

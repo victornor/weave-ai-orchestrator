@@ -405,9 +405,12 @@ export interface KnowledgeIndex {
 }
 
 export interface KnowledgeDocSummary {
-  path: string; scope: string; projectId: string | null; projectSlug: string | null; slug: string; title: string; summary: string;
+  path: string; scope: string; projectId: string | null; projectSlug: string | null; slug: string; folder: string | null; title: string; summary: string;
   tokenEstimate: number; budgetTokens: number; links: number; backlinks: number; updatedAt: string;
 }
+
+export interface KnowledgeArchiveEntry { path: string; date: string }
+export interface KnowledgeArchiveFile { path: string; body: string }
 export interface KnowledgeDocDetail extends KnowledgeDocSummary {
   body: string; revision: number;
   linksTo: Array<{ slug: string; path: string | null; title: string | null }>;

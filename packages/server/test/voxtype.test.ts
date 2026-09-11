@@ -76,17 +76,54 @@ WARN Whisper retry also returned degenerate transcript "."; treating as empty
 INFO Transcription completed in 2.51s: ""
 `;
 
-function fakeBin(kind: 'models' | 'transcribe' | 'logs' | 'degenerate' | 'fail' | 'hang'): string {
+/** VS-219: verbatim stdout captured 2026-09-11 from the daemon host, voxtype 1.0.1,
+ *  `voxtype --model large-v3-turbo transcribe <2s 16kHz mono wav>`, stdout redirected (non-TTY).
+ *  The log lines begin with ISO-8601 timestamps and carry ANSI — the shape VS-186's `^`-anchored
+ *  filter never matched, which is how log lines reached the composer. A 2s tone transcribes
+ *  degenerate-empty, so the transcript paragraph is absent and stdout ends in two blank lines. */
+const TIMESTAMPED_STDOUT = `Loading audio file: "/tmp/opencode/vs219/tone.wav"
+Audio format: 16000 Hz, 1 channel(s), Int
+Processing 32000 samples (2.00s)...
+\x1B[2m2026-09-11T02:10:53.635895Z\x1B[0m \x1B[32m INFO\x1B[0m Using local whisper transcription mode
+\x1B[2m2026-09-11T02:10:53.635907Z\x1B[0m \x1B[32m INFO\x1B[0m Loading whisper model from "/home/user/.local/share/voxtype/models/ggml-large-v3-turbo.bin"
+\x1B[2m2026-09-11T02:10:53.936088Z\x1B[0m \x1B[32m INFO\x1B[0m Model loaded in 0.30s
+\x1B[2m2026-09-11T02:10:54.050790Z\x1B[0m \x1B[33m WARN\x1B[0m Whisper returned degenerate transcript "." for 2.00s audio; retrying with beam search
+\x1B[2m2026-09-11T02:10:54.166277Z\x1B[0m \x1B[33m WARN\x1B[0m Whisper retry also returned degenerate transcript "."; treating as empty
+\x1B[2m2026-09-11T02:10:54.166289Z\x1B[0m \x1B[32m INFO\x1B[0m Transcription completed in 0.23s: ""
+
+
+`;
+
+/** VS-219: verbatim stdout of the same capture run with `-q` (voxtype 1.0.1, 2026-09-11). The
+ *  timestamped log lines are gone; these three progress lines are what `-q` still prints. */
+const QUIET_STDOUT = `Loading audio file: "/tmp/opencode/vs219/tone.wav"
+Audio format: 16000 Hz, 1 channel(s), Int
+Processing 32000 samples (2.00s)...
+
+
+`;
+
+/** VS-219: the captain's 2026-09-11 incident paste, verbatim — the four lines that reached the
+ *  composer above the dictated words; the last quotes the transcript (truncated by the CLI). */
+const CAPTAIN_2026_09_11 = `2026-09-11T02:03:05.793763Z  INFO Using local whisper transcription mode
+2026-09-11T02:03:05.793780Z  INFO Loading whisper model from "/home/user/.local/share/voxtype/models/ggml-large-v3-turbo.bin"
+2026-09-11T02:03:06.384936Z  INFO Model loaded in 0.59s
+2026-09-11T02:03:07.595114Z  INFO Transcription completed in 1.21s: "I got another idea and I think it would be interes..."
+`;
+
+function fakeBin(kind: 'models' | 'transcribe' | 'logs' | 'degenerate' | 'fail' | 'hang' | 'argv' | 'quietTranscript'): string {
   const dir = mkdtempSync(join(tmpdir(), 'ac-fake-voxtype-'));
   dirs.push(dir);
   const path = join(dir, 'voxtype');
   const script = {
     models: `process.stdout.write(${JSON.stringify(MODELS_JSON)});`,
-    transcribe: `const a=process.argv.slice(2); if(a[0]==='--model'){process.stdout.write('ok:'+a[1]+'\\n'); process.exit(0)} process.exit(1);`,
+    transcribe: `const a=process.argv.slice(2); if(a[0]==='-q'&&a[1]==='--model'){process.stdout.write('ok:'+a[2]+'\\n'); process.exit(0)} process.exit(1);`,
     logs: `process.stdout.write(${JSON.stringify(CAPTAIN_STDOUT)});`,
     degenerate: `process.stdout.write(${JSON.stringify(DEGENERATE_STDOUT)});`,
     fail: `process.stderr.write('boom'); process.exit(2);`,
     hang: `setTimeout(()=>{}, 30000);`,
+    argv: `process.stdout.write(JSON.stringify(process.argv.slice(2)));`,
+    quietTranscript: `process.stdout.write(${JSON.stringify(QUIET_STDOUT + 'Hello there from dictation.\n')});`,
   }[kind];
   writeFileSync(path, `#!/usr/bin/env node\n${script}\n`);
   chmodSync(path, 0o755);
@@ -121,6 +158,23 @@ describe('extractVoxtypeTranscript', () => {
   it('drops ANSI-wrapped INFO lines', () => {
     const raw = `\x1B[32mINFO Using local whisper transcription mode\x1B[0m\n${CAPTAIN_TRANSCRIPT}\n`;
     expect(extractVoxtypeTranscript(raw)).toBe(CAPTAIN_TRANSCRIPT);
+  });
+
+  it('returns empty for the 2026-09-11 timestamped host capture — the shape that defeated VS-186 (VS-219)', () => {
+    const text = extractVoxtypeTranscript(TIMESTAMPED_STDOUT);
+    expect(text).toBe('');
+    expect(text).not.toMatch(/INFO|WARN|samples|Loading whisper/);
+    expect(text).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('returns empty for the 2026-09-11 `-q` capture whose three progress lines survive quiet mode (VS-219)', () => {
+    expect(extractVoxtypeTranscript(QUIET_STDOUT)).toBe('');
+  });
+
+  it('returns empty for the captain\u2019s verbatim 2026-09-11 incident paste (VS-219)', () => {
+    const text = extractVoxtypeTranscript(CAPTAIN_2026_09_11);
+    expect(text).toBe('');
+    expect(text).not.toContain('I got another idea');
   });
 });
 
@@ -200,6 +254,21 @@ describe('VoxtypeProbe', () => {
     expect(text).toBe('ok:base.en');
     const leftover = readdirSync(tmpdir()).filter((n) => n.startsWith('ac-voxtype-') && !before.has(n));
     expect(leftover.every((n) => !existsSync(join(tmpdir(), n)))).toBe(true);
+  });
+
+  it('spawns voxtype with -q before the subcommand, with and without a model (VS-219)', async () => {
+    const probe = createVoxtypeProbe({ binary: fakeBin('argv') });
+    const withModel = JSON.parse(await probe.transcribe(Buffer.from('RIFF'), 'base.en'));
+    expect(withModel).toEqual(['-q', '--model', 'base.en', 'transcribe', expect.stringContaining('dictation.wav')]);
+    const withoutModel = JSON.parse(await probe.transcribe(Buffer.from('RIFF'), undefined));
+    expect(withoutModel).toEqual(['-q', 'transcribe', expect.stringContaining('dictation.wav')]);
+  });
+
+  it('returns only the spoken paragraph from verbatim `-q` stdout plus one (VS-219)', async () => {
+    const wav = makeWav(new Array(1600).fill(0.5), { sampleRate: 16000 });
+    const text = await createVoxtypeProbe({ binary: fakeBin('quietTranscript') }).transcribe(wav, 'base.en');
+    expect(text).toBe('Hello there from dictation.');
+    expect(text).not.toMatch(/Loading audio file|Audio format|samples/);
   });
 
   it('returns only the spoken paragraph when the fake binary prints the captain fixture', async () => {

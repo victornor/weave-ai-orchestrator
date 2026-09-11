@@ -4,7 +4,7 @@
  * identical so the two never drift.
  */
 import type { Decision } from '@agent-conductor/shared';
-import { decisionUiStatus } from '@agent-conductor/shared';
+import { conductorReviewCopy, decisionUiStatus } from '@agent-conductor/shared';
 import { formatAge, formatDiffStat, joinMeta, oneLine } from './format.js';
 
 /** What a decision belonging to no project is called, on every surface. */
@@ -230,6 +230,12 @@ function body(variant: CardVariant, d: Decision, target: Record<string, unknown>
     // cap is the binding one for the TUI — raised enough that it isn't the tightest link in the
     // chain, while staying a static, non-paging card. oneLine's own ellipsis remains the marker.
     if (ctx && ctx !== rationale(d)) push(null, oneLine(ctx, 1200));
+  }
+
+  const review = conductorReviewCopy(d);
+  if (review) {
+    push('Review', review.line);
+    if (review.note) push(null, review.note);
   }
   return lines;
 }

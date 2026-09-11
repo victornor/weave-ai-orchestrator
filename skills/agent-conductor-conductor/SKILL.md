@@ -122,6 +122,10 @@ relay the resolution back with `ac_decision_answer` on the worker's own decision
 the answer the same way a direct answer would. None of this is authorisation: relaying an answer
 never grants a plan or merge approval the ticket still needs on its own.
 
+## Reviewing a plan, merge or action card
+
+When inbox or the digest names an open `plan_approval`, `merge_approval` or `action_approval`, read the plan or the PR, then `ac_decision_review`. `looked` is "I read it", not an endorsement; `concerns` needs a short note that appears on the card. Do not mark at turn start or in a batch. You still never `ac_decision_answer` those kinds.
+
 ## Relaying
 
 Never paste a worker's report, status line, or tool output into a human message. Read it as evidence; send the outcome, the consequence, and the next decision. Translation table and worked examples: `references/examples.md`.

@@ -38,6 +38,7 @@ describe('MCP endpoint', () => {
     expect(names).not.toContain('ac_role_hire');        // conductor only
     expect(names).not.toContain('ac_routine_create');
     expect(names).not.toContain('ac_human_send');
+    expect(names).not.toContain('ac_decision_review');
     expect(names).not.toContain('ac_run_inspect');      // no worker reads another worker's transcript
     expect(names).not.toContain('ac_run_list');
     expect(names).not.toContain('ac_worker_models');
@@ -50,6 +51,7 @@ describe('MCP endpoint', () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names).toContain('ac_role_hire');
     expect(names).toContain('ac_human_send');
+    expect(names).toContain('ac_decision_review');
     expect(names).toContain('ac_briefing');
     expect(names).toContain('ac_worker_models');
     expect(names).toContain('ac_run_inspect');
@@ -84,6 +86,34 @@ describe('MCP endpoint', () => {
     expect(payload.ok).toBe(false);
     expect(payload.error.code).toBe('forbidden');
     await client.close();
+  });
+
+  it('ac_decision_review succeeds for the conductor and 403s a worker with no row change (VS-223)', async () => {
+    const worker = await connect();
+    const before = worker.h.runtime.services.decisions.get('dec_1');
+    const refused = await worker.client.callTool({
+      name: 'ac_decision_review',
+      arguments: { decisionId: 'dec_1', status: 'looked' },
+    });
+    const refusedPayload = JSON.parse((refused.content as Array<{ text: string }>)[0]!.text);
+    expect(refusedPayload.ok).toBe(false);
+    expect(refusedPayload.error.code).toBe('forbidden');
+    expect(worker.h.runtime.services.decisions.get('dec_1')).toEqual(before);
+    await worker.client.close();
+
+    const conductor = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null, agentId: 'ag_conductor' });
+    const created = conductor.h.runtime.services.decisions.create(
+      { kind: 'agent', id: 'ag_conductor' },
+      { title: 'Approve the plan', kind: 'plan_approval' },
+    );
+    const okRes = await conductor.client.callTool({
+      name: 'ac_decision_review',
+      arguments: { decisionId: created.id, status: 'looked' },
+    });
+    const okPayload = JSON.parse((okRes.content as Array<{ text: string }>)[0]!.text);
+    expect(okPayload.ok).toBe(true);
+    expect(okPayload.data.conductorReviewStatus).toBe('looked');
+    await conductor.client.close();
   });
 
   it.each(['plan_approval', 'merge_approval', 'hire_approval', 'discard_approval', 'retry_approval', 'approval'])(

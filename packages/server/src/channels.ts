@@ -204,6 +204,7 @@ export class ChannelManager {
     if (this.stopped) return;
     if (ev.type === 'thread.message') { await this.drain(); return; }
     if (ev.type === 'decision.created') await this.pushDecisionCard(ev.entityId);
+    if (ev.type === 'decision.updated') await this.pushDecisionReviewFollowUp(ev.entityId);
     if (ev.type === 'workspace.updated') await this.reconcileChannels();
   }
 
@@ -233,6 +234,24 @@ export class ChannelManager {
       await this.services.threads.outbound(SYSTEM, thread.id, message.text, { parts: message.parts });
     } catch (e) {
       log.warn({ err: e, decisionId }, 'could not push a decision card');
+    }
+  }
+
+  /**
+   * A later concern on an already-pushed card is a text follow-up, never a second answerable card
+   * (VS-223). Unseen→looked is not worth a ping. `cardsSent` stays as it is.
+   */
+  private async pushDecisionReviewFollowUp(decisionId: string): Promise<void> {
+    try {
+      const decision = this.services.decisions.get(decisionId);
+      if (decision.status !== 'open' || decision.conductorReviewStatus !== 'concerns') return;
+      const thread = this.services.threads.primaryThread();
+      if (!thread) { log.debug({ decisionId }, 'no primary thread for the review follow-up'); return; }
+      const note = (decision.conductorReviewNote ?? '').trim() || 'has concerns';
+      const text = `Conductor looked at ${decision.title} — has concerns: ${note}`;
+      await this.services.threads.outbound(SYSTEM, thread.id, text);
+    } catch (e) {
+      log.warn({ err: e, decisionId }, 'could not push a decision review follow-up');
     }
   }
 

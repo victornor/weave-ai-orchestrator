@@ -90,6 +90,11 @@ export interface DecisionsService {
   list(filter?: { status?: S.DecisionStatus[]; owner?: S.DecisionOwner; ticketId?: string; limit?: number }): S.Decision[];
   /** Async: side effects drive ticket transitions and role activation. */
   answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean; inputs?: S.DecisionAnswerInputs }): Promise<S.Decision>;
+  /**
+   * Asserted conductor review of a plan/merge/action card (VS-223). Does not wake anyone and does
+   * not affect `answer()`. Actor must be the workspace conductor.
+   */
+  review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string }): S.Decision;
   withdraw(actor: Actor, id: string, reason: string): S.Decision;
   /** Withdraws every still-open decision scoped to this ticket (e.g. once it reaches a terminal status). Returns the count closed. */
   withdrawForTicket(actor: Actor, ticketId: string, reason: string): number;

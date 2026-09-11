@@ -92,6 +92,7 @@ describe('YOLO mode', () => {
       expect(d?.answerKey).toBe('approve');
       expect(d?.answeredByKind).toBe('system');
       expect(d?.answerText).toContain('YOLO mode');
+      expect(d?.conductorReviewStatus).toBe('unseen');
       expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'ticket_assigned')).toBe(true);
     });
 

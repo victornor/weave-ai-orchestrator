@@ -131,6 +131,10 @@ export function decision(over: Partial<Decision> = {}): Decision {
     target: { tasks: [{ text: 'Add semantic tokens' }, { text: 'ThemeProvider + OS fallback' }] },
     correlationKey: null,
     createdAt: '2026-09-01T09:00:00.000Z',
+    conductorReviewStatus: 'unseen',
+    conductorReviewedAt: null,
+    conductorReviewNote: null,
+    conductorReviewedByAgentId: null,
     ...over,
   };
 }

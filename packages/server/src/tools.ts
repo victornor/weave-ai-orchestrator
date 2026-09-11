@@ -611,6 +611,16 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'ac_decision_review', scope: 'conductor',
+    input: z.object({
+      decisionId: z.string().min(1),
+      status: z.enum(['looked', 'concerns']),
+      note: z.string().optional(),
+    }),
+    description: 'Mark that you have read a plan, merge or action approval. looked = you read it and have nothing to flag; concerns requires a short note shown on the card. Do not mark at turn start or in a batch. A clean look is not an endorsement. Never use this to answer those decisions.',
+    handler: (ctx, i) => svc(ctx).decisions.review(ctx.actor, i.decisionId, { status: i.status, note: i.note }),
+  },
+  {
     name: 'ac_human_send', scope: 'conductor',
     input: z.object({ threadId: z.string().optional(), body: z.string().min(1), replyToMessageId: z.string().nullable().optional() }),
     description: 'Send text to the human on the originating channel. This is the ONLY way your words reach them — plain assistant text is recorded as the run summary and never delivered. One decision per message; never batch unrelated asks. ' +

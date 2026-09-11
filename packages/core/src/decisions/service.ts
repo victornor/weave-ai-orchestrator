@@ -1,5 +1,5 @@
 import { decisionRow, newId, nowIso, type Db } from '@agent-conductor/db';
-import { OcError, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type TicketStatus } from '@agent-conductor/shared';
+import { OcError, CONDUCTOR_REVIEW_KINDS, CONDUCTOR_REVIEW_NOTE_MAX, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type TicketStatus } from '@agent-conductor/shared';
 import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -448,6 +448,48 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     return answered;
   }
 
+  /**
+   * Asserted conductor review (VS-223). The mark is a dedicated write, never inferred from a digest
+   * or a turn. `answer()` does not read these columns.
+   */
+  function review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string }): Decision {
+    const d = get(id);
+    const cid = conductorId();
+    if (actor.kind !== 'agent' || !actor.id || actor.id !== cid) {
+      throw new OcError('forbidden', 'only the workspace conductor can mark a decision reviewed');
+    }
+    if (!(CONDUCTOR_REVIEW_KINDS as readonly string[]).includes(d.kind)) {
+      throw new OcError('validation', `decision kind ${d.kind} does not carry conductor review`);
+    }
+    if (d.status !== 'open' && d.status !== 'answered') {
+      throw new OcError('wrong_status', `decision ${id} is ${d.status}`, { status: d.status });
+    }
+    if (input.status !== 'looked' && input.status !== 'concerns') {
+      throw new OcError('validation', 'review status must be looked or concerns');
+    }
+    let note: string | null = null;
+    if (input.status === 'concerns') {
+      const trimmed = (input.note ?? '').trim();
+      if (!trimmed) throw new OcError('validation', 'concerns requires a note');
+      if (trimmed.length > CONDUCTOR_REVIEW_NOTE_MAX) {
+        throw new OcError('validation', `review note is at most ${CONDUCTOR_REVIEW_NOTE_MAX} characters`);
+      }
+      note = trimmed;
+    }
+    return tx(db, () => {
+      db.update('decisions', d.id, {
+        conductorReviewStatus: input.status,
+        conductorReviewedAt: nowIso(),
+        conductorReviewNote: note,
+        conductorReviewedByAgentId: actor.id,
+      });
+      const next = get(d.id);
+      recordActivity(db, ws, actor, 'decision.review', 'decision', d.id, { status: input.status }, d.ticketId);
+      ctx.events.emit('decision.updated', 'decision', d.id, next);
+      return next;
+    });
+  }
+
   // ---------- service ----------
 
   return {
@@ -467,6 +509,8 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     },
 
     answer,
+
+    review,
 
     withdraw(actor, id, reason) {
       const d = get(id);

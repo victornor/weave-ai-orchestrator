@@ -421,6 +421,15 @@ describe('prompt rendering', () => {
     }
   });
 
+  it.runIf(existsSync(SHIPPED_TEMPLATES))('tells the conductor to mark plan/merge/action cards after reading them (VS-223)', () => {
+    h.ctx.templatesDir = SHIPPED_TEMPLATES;
+    const conductor = renderConductorInstructions(h.ctx, h.deps);
+    expect(conductor).toContain('ac_decision_review');
+    expect(conductor).toMatch(/Do not mark at the start of the turn/);
+    const worker0 = renderWorkerInstructions(h.ctx, h.deps, worker);
+    expect(worker0).not.toContain('ac_decision_review');
+  });
+
   it.runIf(existsSync(SHIPPED_TEMPLATES))('tells the conductor to ask with options when the answer is a closed set', () => {
     h.ctx.templatesDir = SHIPPED_TEMPLATES;
     const conductor = renderConductorInstructions(h.ctx, h.deps);

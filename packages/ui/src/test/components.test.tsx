@@ -541,6 +541,93 @@ describe('DecisionCard', () => {
     });
   });
 
+  describe('conductor review line (VS-223)', () => {
+    it('shows unseen on a plan card and still sends the real Approve/Revise/Reject keys', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={decision({ kind: 'plan_approval' })} onAnswer={onAnswer} />);
+      const line = screen.getByText("Conductor hasn't looked yet");
+      expect(line).toHaveClass('text-blocked');
+      fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+      expect(onAnswer.mock.calls.map((c) => c[0]?.key)).toEqual(['approve', 'reject']);
+    });
+
+    it('shows looked on a merge card as understated present text, still Approve merge', () => {
+      const onAnswer = vi.fn();
+      const { unmount } = render(
+        <DecisionCard
+          decision={decision({
+            kind: 'merge_approval',
+            conductorReviewStatus: 'looked',
+            conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+          })}
+          onAnswer={onAnswer}
+        />,
+      );
+      const looked = screen.getByText('Conductor looked');
+      expect(looked).toHaveClass('text-text-3');
+      expect(looked).not.toHaveClass('text-blocked');
+      expect(screen.queryByText("Conductor hasn't looked yet")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Approve merge' }));
+      expect(onAnswer).toHaveBeenCalledWith(expect.objectContaining({ key: 'approve' }));
+      unmount();
+
+      render(<DecisionCard decision={decision({ kind: 'merge_approval' })} onAnswer={() => undefined} />);
+      expect(screen.getByText("Conductor hasn't looked yet")).toBeInTheDocument();
+      expect(screen.queryByText('Conductor looked')).not.toBeInTheDocument();
+    });
+
+    it('shows the concern note as a text block, not a Badge, and approve still fires', () => {
+      const onAnswer = vi.fn();
+      const { container } = render(
+        <DecisionCard
+          decision={decision({
+            kind: 'plan_approval',
+            conductorReviewStatus: 'concerns',
+            conductorReviewedAt: '2026-09-11T03:01:00.000Z',
+            conductorReviewNote: 'the migration contradicts itself',
+          })}
+          onAnswer={onAnswer}
+        />,
+      );
+      expect(screen.getByText('Conductor looked — has concerns')).toBeInTheDocument();
+      const note = screen.getByText('the migration contradicts itself');
+      expect(note.tagName).toBe('P');
+      const review = container.querySelector('[data-conductor-review="concerns"]');
+      expect(review?.querySelector('[class*="uppercase"]')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
+      expect(onAnswer).toHaveBeenCalledWith(expect.objectContaining({ key: 'approve' }));
+    });
+
+    it('uses after-the-fact copy on an answered card', () => {
+      render(
+        <DecisionCard
+          decision={decision({
+            kind: 'plan_approval',
+            status: 'answered',
+            answerKey: 'approve',
+            answeredAt: '2026-09-11T03:01:00.000Z',
+            conductorReviewStatus: 'looked',
+            conductorReviewedAt: '2026-09-11T03:02:00.000Z',
+          })}
+          onAnswer={() => undefined}
+        />,
+      );
+      expect(screen.getByText('Conductor looked after you answered')).toBeInTheDocument();
+    });
+
+    it('puts no review line on a question card', () => {
+      render(<DecisionCard decision={question()} onAnswer={() => undefined} />);
+      expect(screen.queryByText(/Conductor/)).not.toBeInTheDocument();
+    });
+
+    it('still shows the line on a compact chat card, not behind an expander', () => {
+      render(<DecisionCard decision={decision({ kind: 'plan_approval' })} compact onAnswer={() => undefined} />);
+      expect(screen.getByText("Conductor hasn't looked yet")).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+    });
+  });
+
   // ---------- VS-92: the project label ----------
 
   it('names its project, and says Workspace when it belongs to none', () => {

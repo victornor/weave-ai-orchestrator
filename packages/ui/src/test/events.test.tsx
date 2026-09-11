@@ -13,7 +13,9 @@ const fakeDecision = (id: string, status: Decision['status'], over: Partial<Deci
   askedByAgentId: null, askedInRunId: null, title: 'Plan', context: 'ctx', options: [], inputs: [],
   allowFreeText: false, recommendation: null, status, answerKey: null, answerText: null,
   answerInputs: null, answeredByKind: null, answeredById: null, answeredAt: null, expiresAt: null,
-  target: null, correlationKey: `plan_approval:tk_1`, createdAt: '2026-09-05T10:00:00.000Z', ...over,
+  target: null, correlationKey: `plan_approval:tk_1`, createdAt: '2026-09-05T10:00:00.000Z',
+  conductorReviewStatus: 'unseen', conductorReviewedAt: null, conductorReviewNote: null, conductorReviewedByAgentId: null,
+  ...over,
 });
 
 /** The keys `invalidateQueries` was called with, as JSON so they compare by value. */
@@ -33,6 +35,14 @@ describe('decision events', () => {
 
   it('does the same when a decision is answered, so a cleared badge drops at once', () => {
     expect(invalidated(event('decision.answered'))).toContain(JSON.stringify(qk.workspaces()));
+  });
+
+  it('treats a conductor-review update the same as an answer (VS-223)', () => {
+    const keys = invalidated(event('decision.updated'));
+    expect(keys).toContain(JSON.stringify(qk.decisions('ws1')));
+    expect(keys).toContain(JSON.stringify(qk.decision('ws1', 'dec_1')));
+    expect(keys).toContain(JSON.stringify(qk.briefing('ws1')));
+    expect(keys).toContain(JSON.stringify(qk.workspaces()));
   });
 
   it('leaves the workspace list alone for events that cannot change a Needs-you count', () => {

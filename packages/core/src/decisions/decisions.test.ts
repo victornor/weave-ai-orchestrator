@@ -517,4 +517,153 @@ describe('decisions', () => {
       expect(h.services.secrets!.has('OPTIONAL_TOKEN')).toBe(false);
     });
   });
+
+  describe('conductor review (VS-223)', () => {
+    const conductor = (): Actor => ({ kind: 'agent', id: h.conductorId, runId: 'run-conductor' });
+
+    it('defaults a new plan/merge/action to unseen', () => {
+      const t = ticket();
+      for (const kind of ['plan_approval', 'merge_approval', 'action_approval'] as const) {
+        const d = decisions.create(AGENT, { ticketId: t.id, kind, title: kind, correlationKey: `${kind}:${t.id}` });
+        expect(d.conductorReviewStatus).toBe('unseen');
+        expect(d.conductorReviewedAt).toBeNull();
+        expect(d.conductorReviewNote).toBeNull();
+        expect(d.conductorReviewedByAgentId).toBeNull();
+      }
+    });
+
+    it('lets the conductor mark looked and concerns on plan, merge and action, open or answered', async () => {
+      const t = ticket();
+      const openPlan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      const looked = decisions.review(conductor(), openPlan.id, { status: 'looked' });
+      expect(looked.conductorReviewStatus).toBe('looked');
+      expect(looked.conductorReviewedAt).toBeTruthy();
+      expect(looked.conductorReviewNote).toBeNull();
+      expect(looked.conductorReviewedByAgentId).toBe(h.conductorId);
+
+      const merge = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Merge', correlationKey: `merge:${t.id}` });
+      const concerns = decisions.review(conductor(), merge.id, { status: 'concerns', note: '  CI is red  ' });
+      expect(concerns.conductorReviewStatus).toBe('concerns');
+      expect(concerns.conductorReviewNote).toBe('CI is red');
+
+      const action = decisions.create(AGENT, { ticketId: t.id, kind: 'action_approval', title: 'Action', correlationKey: `action:${t.id}` });
+      await decisions.answer(HUMAN, action.id, { key: 'approve' });
+      const after = decisions.review(conductor(), action.id, { status: 'looked' });
+      expect(after.conductorReviewStatus).toBe('looked');
+      expect(after.status).toBe('answered');
+    });
+
+    it('refuses concerns without a note and a note over 500 characters', () => {
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      expect(() => decisions.review(conductor(), d.id, { status: 'concerns' })).toThrow(/requires a note/);
+      expect(() => decisions.review(conductor(), d.id, { status: 'concerns', note: '   ' })).toThrow(/requires a note/);
+      expect(() => decisions.review(conductor(), d.id, { status: 'concerns', note: 'x'.repeat(501) })).toThrow(/500/);
+      expect(decisions.get(d.id).conductorReviewStatus).toBe('unseen');
+    });
+
+    it('refuses a worker actor and leaves the row unchanged', () => {
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      try {
+        decisions.review(AGENT, d.id, { status: 'looked' });
+        expect.unreachable('worker must be forbidden');
+      } catch (e) {
+        expect(e).toMatchObject({ code: 'forbidden' });
+      }
+      expect(decisions.get(d.id).conductorReviewStatus).toBe('unseen');
+      try {
+        decisions.review(HUMAN, d.id, { status: 'looked' });
+        expect.unreachable('human must be forbidden');
+      } catch (e) {
+        expect(e).toMatchObject({ code: 'forbidden' });
+      }
+    });
+
+    it('refuses excluded kinds and terminal statuses', async () => {
+      const t = ticket();
+      const q = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'Q?' });
+      try {
+        decisions.review(conductor(), q.id, { status: 'looked' });
+        expect.unreachable('question must be validation');
+      } catch (e) {
+        expect(e).toMatchObject({ code: 'validation' });
+      }
+
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan', correlationKey: `plan2:${t.id}` });
+      decisions.withdraw(HUMAN, plan.id, 'never mind');
+      try {
+        decisions.review(conductor(), plan.id, { status: 'looked' });
+        expect.unreachable('withdrawn must be wrong_status');
+      } catch (e) {
+        expect(e).toMatchObject({ code: 'wrong_status', details: { status: 'withdrawn' } });
+      }
+    });
+
+    it('looked clears a previous note and each mark sets a fresh reviewedAt', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-11T03:00:00.000Z'));
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      const first = decisions.review(conductor(), d.id, { status: 'concerns', note: 'split the migration' });
+      expect(first.conductorReviewNote).toBe('split the migration');
+      vi.setSystemTime(new Date('2026-09-11T03:00:01.000Z'));
+      const second = decisions.review(conductor(), d.id, { status: 'looked' });
+      expect(second.conductorReviewStatus).toBe('looked');
+      expect(second.conductorReviewNote).toBeNull();
+      expect(second.conductorReviewedAt! > first.conductorReviewedAt!).toBe(true);
+      vi.useRealTimers();
+    });
+
+    it('emits decision.updated with the full Decision and enqueues no wake', async () => {
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      const before = wake.calls.length;
+      const marked = decisions.review(conductor(), d.id, { status: 'looked' });
+      await new Promise((r) => setImmediate(r));
+      expect(h.events.some((e) => e.type === 'decision.updated' && (e.payload as { id: string }).id === marked.id)).toBe(true);
+      const ev = h.events.find((e) => e.type === 'decision.updated')!;
+      expect(ev.payload).toMatchObject({
+        id: marked.id,
+        conductorReviewStatus: 'looked',
+        conductorReviewedByAgentId: h.conductorId,
+      });
+      expect(wake.calls.length).toBe(before);
+    });
+
+    it('answers an unseen plan_approval and a concerns merge_approval on the same path', async () => {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      h.db.update('tickets', t.id, { status: 'proposed', workerId });
+      const plan = decisions.create(AGENT, {
+        ticketId: t.id, kind: 'plan_approval', title: 'Approve the plan', askedByAgentId: workerId,
+        options: [{ key: 'approve', label: 'Approve' }, { key: 'revise', label: 'Revise' }, { key: 'reject', label: 'Reject' }],
+      });
+      expect(plan.conductorReviewStatus).toBe('unseen');
+      await decisions.answer(HUMAN, plan.id, { key: 'approve' });
+      expect(tickets.get(t.id).status).toBe('approved');
+      expect(decisions.get(plan.id)).toMatchObject({
+        answerKey: 'approve',
+        conductorReviewStatus: 'unseen',
+        conductorReviewedAt: null,
+      });
+
+      const t2 = ticket({ title: 'Merge this' });
+      const worker2 = h.addWorker(t2.id);
+      tickets.addWorkProduct(AGENT, t2.id, { type: 'pull_request', url: 'https://example.com/pr/1' });
+      h.db.update('tickets', t2.id, { status: 'in_review', workerId: worker2 });
+      const merge = decisions.create(AGENT, {
+        ticketId: t2.id, kind: 'merge_approval', title: 'Merge?', askedByAgentId: worker2,
+        options: [{ key: 'approve', label: 'Approve' }, { key: 'changes', label: 'Changes' }],
+      });
+      const flagged = decisions.review(conductor(), merge.id, { status: 'concerns', note: 'screenshot is cropped' });
+      expect(flagged.conductorReviewStatus).toBe('concerns');
+      await decisions.answer(HUMAN, merge.id, { key: 'approve' });
+      const answered = decisions.get(merge.id);
+      expect(answered.answerKey).toBe('approve');
+      expect(answered.conductorReviewStatus).toBe('concerns');
+      expect(answered.conductorReviewNote).toBe('screenshot is cropped');
+      expect(tickets.get(t2.id).status).toBe('merging');
+    });
+  });
 });

@@ -1459,6 +1459,20 @@ describe('ChatRoute decision cards', () => {
     expect(within(humanCard).queryByText('Captain asked for this.')).toBeInTheDocument();
   });
 
+  it('shows the conductor-review line on an unseen plan card (VS-223)', () => {
+    state.messages = [message({ id: 'm1', body: 'Plan is ready.' })];
+    state.tickets = [ticket({ id: 'tk_1', identifier: 'VS-223' })];
+    state.decisions = [
+      decision({
+        id: 'd_plan', kind: 'plan_approval', ticketId: 'tk_1', title: 'Plan: review state on the card',
+        askedInRunId: 'run_1',
+      }),
+    ];
+    render(<ChatRoute />);
+    const card = screen.getByLabelText(/Plan: review state on the card/);
+    expect(within(card).getByText("Conductor hasn't looked yet")).toBeInTheDocument();
+  });
+
   it('shows no provenance tag on a card that concerns no ticket (VS-146)', () => {
     state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
     state.decisions = [asked({ ticketId: null })];

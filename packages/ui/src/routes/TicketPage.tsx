@@ -10,7 +10,7 @@ import { MergeQueueBadge } from '../components/MergeQueue';
 import { Skeleton, SkeletonRows } from '../components/Skeleton';
 import { ErrorState, EmptyState } from '../components/States';
 import { Markdown } from '../components/Markdown';
-import { DecisionCard } from '../components/DecisionCard';
+import { DecisionCard, ConductorReviewLine } from '../components/DecisionCard';
 import { Composer } from '../components/Composer';
 import { Button } from '../components/Button';
 import { Table } from '../components/Table';
@@ -281,17 +281,20 @@ function PlanTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdent
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
       {planDecision ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-r6 border border-accent-edge bg-accent-tint px-3.5 py-2.5">
-          <StatusGlyph status="needs-you" size="sm" />
-          <span className="flex-1 text-meta text-text-1">
-            {missing ? 'This plan is waiting on you — but its proposal is missing or empty.' : 'This plan is waiting on you.'}
-          </span>
-          <Button variant="primary" size="sm" onClick={() => answer.mutate({ id: planDecision.id, key: 'approve' })}>
-            Approve
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => setRevising((v) => !v)}>
-            Revise…
-          </Button>
+        <div className="rounded-r6 border border-accent-edge bg-accent-tint px-3.5 py-2.5">
+          <ConductorReviewLine decision={planDecision} />
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusGlyph status="needs-you" size="sm" />
+            <span className="flex-1 text-meta text-text-1">
+              {missing ? 'This plan is waiting on you — but its proposal is missing or empty.' : 'This plan is waiting on you.'}
+            </span>
+            <Button variant="primary" size="sm" onClick={() => answer.mutate({ id: planDecision.id, key: 'approve' })}>
+              Approve
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setRevising((v) => !v)}>
+              Revise…
+            </Button>
+          </div>
         </div>
       ) : null}
 
@@ -409,15 +412,18 @@ function ActivityTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketI
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
       {mergeDecision ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-r6 border border-accent-edge bg-accent-tint px-3.5 py-2.5">
-          <StatusGlyph status="needs-you" size="sm" />
-          <span className="flex-1 text-meta text-text-1">This merge is waiting on you.</span>
-          <Button variant="primary" size="sm" onClick={() => answer.mutate({ id: mergeDecision.id, key: 'approve' })}>
-            Approve merge
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => setRevising((v) => !v)}>
-            Ask for revisions…
-          </Button>
+        <div className="rounded-r6 border border-accent-edge bg-accent-tint px-3.5 py-2.5">
+          <ConductorReviewLine decision={mergeDecision} />
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusGlyph status="needs-you" size="sm" />
+            <span className="flex-1 text-meta text-text-1">This merge is waiting on you.</span>
+            <Button variant="primary" size="sm" onClick={() => answer.mutate({ id: mergeDecision.id, key: 'approve' })}>
+              Approve merge
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setRevising((v) => !v)}>
+              Ask for revisions…
+            </Button>
+          </div>
         </div>
       ) : null}
 

@@ -18,11 +18,25 @@ import { items, unwrap, type TuiClient } from '../client.js';
 import { useKeys, useStream, useTerminalSize } from '../hooks.js';
 import { setTerminalTitle } from '../terminal.js';
 
-interface WorkerDetail { agent?: Agent; ticket?: Record<string, unknown>; lastRun?: Run; usage?: Record<string, unknown> }
+interface WorkerDetail { agent?: Agent; ticket?: Record<string, unknown>; lastRun?: Run; usage?: Record<string, unknown>; input?: LiveInputStatus }
+
+/** `GET /workers/:id`'s `input` field (VS-99): whether the human's next message reaches a running turn. */
+export interface LiveInputStatus { midTurn: boolean; reason?: string }
 
 /** The notice line for `POST /workers/:id/message`'s outcome (VS-99) — never invents "delivered". */
 export function deliveryNotice(outcome: { delivery?: 'mid_turn' | 'queued' } | null | undefined): string {
   return outcome?.delivery === 'mid_turn' ? 'delivered to the running turn' : 'queued for the next turn';
+}
+
+/**
+ * The pre-send label for `conductor attach` (VS-253): whether the words about to be typed reach the
+ * running turn or queue for the next one, carrying the reason the API supplies. The wording is the
+ * web app's composer label (`WorkerPage.tsx`), and `null` while the detail fetch has not resolved, so
+ * an unresolved status implies neither delivery.
+ */
+export function preSendLabel(input: LiveInputStatus | null | undefined): string | null {
+  if (!input) return null;
+  return input.midTurn ? 'Reaches the running turn immediately.' : `Queued for the next turn${input.reason ? ` — ${input.reason}` : ''}.`;
 }
 
 export function Attach({ client, agentId }: { client: TuiClient; agentId: string }): React.ReactElement {
@@ -83,6 +97,9 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
       if (String(payload['agentId'] ?? '') !== String(detail?.agent?.id ?? agentId)) return;
       const started = String(payload['id'] ?? payload['runId'] ?? '');
       if (started) { setRunId(started); setEvents([]); }
+      // A turn starting changes the pre-send label (VS-253); refetch the detail. A turn ending
+      // already does via `run.finished`, and no interval exists, so the label only moves on events.
+      setNonce((n) => n + 1);
       return;
     }
     if (message.type === 'worker.status' || message.type === 'run.finished') setNonce((n) => n + 1);
@@ -107,6 +124,9 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
   }, [card]);
 
   const blocks: TranscriptBlock[] = useMemo(() => runEventsToTranscript(events), [events]);
+
+  // Before a message: whether it would reach the running turn or queue (VS-253); null until known.
+  const preSend = isConductor ? null : preSendLabel(detail?.input);
 
   const act = useCallback(async (label: string, fn: () => Promise<unknown>) => {
     try {
@@ -174,19 +194,20 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
     if (key === 'R') setNonce((n) => n + 1);
   }, { isActive: true });
 
-  const maxLines = Math.max(6, rows - 8);
+  const maxLines = Math.max(6, rows - 8 - (preSend ? 1 : 0));
 
   return (
     <Box flexDirection="column">
       {error ? <Text color="red">{error}</Text> : null}
       <TranscriptView blocks={blocks} maxLines={maxLines} />
       {notice ? <Text color="yellow">{notice}</Text> : null}
+      {preSend ? <Text dimColor>{preSend}</Text> : null}
       {mode === 'insert' ? (
         <TextInput
           value={input}
           onChange={setInput}
           onSubmit={(text) => { void submit(text); }}
-          placeholder={isConductor ? 'message the conductor' : 'steer the worker — reaches its running turn or queues for the next'}
+          placeholder={isConductor ? 'message the conductor' : 'steer the worker'}
           history={history}
           focus
         />

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-11
+goal: conductor attach doesn't say your words will queue, though the answer is
+  already on the wire

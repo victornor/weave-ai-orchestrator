@@ -44,11 +44,11 @@ export function MoreSheet({
   return (
     <Sheet open={open} onClose={onClose} title="More" swipeToClose>
       <div className="ac-safe-bottom flex flex-col gap-5">
-        {/* The same fact the rail carries in its own block and the More tab badges. */}
+        {/* The same fact the rail carries in its own block and the More tab badges — opening the
+            Updates section of the daemon's settings. */}
         {update ? (
           <A
-            to="/w/$ws/settings"
-            params={{ ws }}
+            to="/settings"
             search={{ section: 'updates' }}
             aria-label={updateEntryLabel(update)}
             onClick={onClose}

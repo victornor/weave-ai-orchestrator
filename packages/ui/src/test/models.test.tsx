@@ -27,6 +27,7 @@ vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
   useModels: () => ({ data: state.models, isLoading: false }),
+  useModelsOptional: () => ({ data: state.models, isLoading: false }),
   useSetModels: () => ({
     mutate: (v: WorkspaceModels) => state.saved.push(v),
     mutateAsync: async (v: WorkspaceModels) => {
@@ -65,7 +66,7 @@ vi.mock('../api/hooks', () => ({
   useRemoveRoutine: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-const { SettingsRoute } = await import('../routes/Settings');
+const { DaemonSettingsRoute, WorkspaceSettingsRoute } = await import('../routes/Settings');
 
 beforeEach(() => {
   state.models = { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } };
@@ -78,7 +79,12 @@ beforeEach(() => {
 });
 
 function openModels(): void {
-  render(<SettingsRoute />);
+  render(<WorkspaceSettingsRoute />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Models' }));
+}
+
+function openDaemonModels(): void {
+  render(<DaemonSettingsRoute />);
   fireEvent.click(screen.getByRole('tab', { name: 'Models' }));
 }
 
@@ -207,9 +213,9 @@ describe('Settings — the two model settings', () => {
     expect(state.saved.at(-1)?.workers.runtime).toBe('codex');
   });
 
-  it('opens daemon Models from This daemon inheriting by default, stating the workspace value inherited (VS-207)', () => {
+  it('opens daemon Models inheriting by default, stating the workspace value inherited (VS-207)', () => {
     state.search = { section: 'daemon-models' };
-    render(<SettingsRoute />);
+    openDaemonModels();
     const scope = screen.getByLabelText('Conductor scope');
     expect(scope).toHaveValue('inherit');
     expect(within(scope).getByRole('option', { name: 'Inherit — claude · claude-fable-5-1' })).toBeInTheDocument();
@@ -219,7 +225,7 @@ describe('Settings — the two model settings', () => {
 
   it('opening or changing an inheriting daemon row writes nothing (VS-207)', () => {
     state.search = { section: 'daemon-models' };
-    render(<SettingsRoute />);
+    openDaemonModels();
     fireEvent.change(screen.getByLabelText('Conductor runtime'), { target: { value: 'codex' } });
     fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: 'claude-opus-5' } });
     expect(state.daemonSaved).toEqual([]);
@@ -227,7 +233,7 @@ describe('Settings — the two model settings', () => {
 
   it('choosing Override is the deliberate act that creates the daemon overlay, seeded from the inherited value (VS-207)', () => {
     state.search = { section: 'daemon-models' };
-    render(<SettingsRoute />);
+    openDaemonModels();
     fireEvent.change(screen.getByLabelText('Conductor scope'), { target: { value: 'override' } });
     expect(state.daemonSaved.at(-1)).toEqual({ conductor: { runtime: 'claude', model: 'claude-fable-5-1' } });
   });
@@ -235,7 +241,7 @@ describe('Settings — the two model settings', () => {
   it('once overridden, the row is editable and edits write the overlay directly (VS-185)', () => {
     state.search = { section: 'daemon-models' };
     state.daemonModels = { ...state.daemonModels, conductor: { runtime: 'codex', model: null } };
-    render(<SettingsRoute />);
+    openDaemonModels();
     expect(screen.getByLabelText('Conductor scope')).toHaveValue('override');
     expect(screen.getByLabelText('Conductor runtime')).not.toBeDisabled();
     fireEvent.change(screen.getByLabelText('Conductor runtime'), { target: { value: 'claude' } });
@@ -245,14 +251,14 @@ describe('Settings — the two model settings', () => {
   it('choosing Inherit clears an overridden overlay through the scope select, with no separate button (VS-207)', () => {
     state.search = { section: 'daemon-models' };
     state.daemonModels = { ...state.daemonModels, conductor: { runtime: 'codex', model: 'gpt-5' } };
-    render(<SettingsRoute />);
+    openDaemonModels();
     expect(screen.queryByRole('button', { name: 'Clear Conductor overlay' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Conductor scope'), { target: { value: 'inherit' } });
     expect(state.daemonSaved.at(-1)).toEqual({ conductor: null });
   });
 
   it('is the only place Settings offers a runtime or a model', () => {
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     // The conductor section is gone: its only settings were these two.
     expect(screen.queryByRole('tab', { name: 'Conductor' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
@@ -348,7 +354,7 @@ describe('Settings — thinking level next to the model (VS-228)', () => {
       { id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: ['low', 'high'] },
       { id: 'claude-opus-5', label: 'Opus 5' },
     ];
-    render(<SettingsRoute />);
+    openDaemonModels();
     fireEvent.change(screen.getByLabelText('Conductor thinking level'), { target: { value: 'high' } });
     expect(state.daemonSaved).toEqual([]);
   });

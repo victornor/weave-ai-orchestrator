@@ -37,7 +37,7 @@ vi.mock('../api/hooks', () => ({
   useRemoveRoutine: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-const { SettingsRoute } = await import('../routes/Settings');
+const { WorkspaceSettingsRoute: SettingsRoute } = await import('../routes/Settings');
 
 /** Render Settings and switch to the Presentation tab, the way the operator gets there. */
 function openPresentation(): void {

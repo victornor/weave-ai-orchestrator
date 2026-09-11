@@ -28,6 +28,7 @@ import {
   useDisableTelegramAllowAll,
   useMe,
   useModels,
+  useModelsOptional,
   usePatchConfig,
   usePatchProject,
   usePresentation,
@@ -50,13 +51,13 @@ import {
   usePatchRoutine,
   useRemoveRoutine,
 } from '../api/hooks';
-import { api, setToken } from '../api/client';
+import { api, getWorkspaceId, setToken } from '../api/client';
 import { qk } from '../api/keys';
 import type { PresentationBlock, Project, Routine } from '@agent-conductor/shared';
 import { ProjectConfigSchema, WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@agent-conductor/shared';
 import type * as T from '../api/types';
 import type { TotpSetup } from '../api/types';
-import { useWs } from '../api/context';
+import { useHookWs, useWs } from '../api/context';
 import { useGo, useSearchParams } from '../app/link';
 import { useTheme } from '../lib/theme';
 import { readShowSilentTurns, writeShowSilentTurns } from '../lib/chatPrefs';
@@ -65,34 +66,111 @@ import { isRuntimeAvailable, runtimeStatusLabel } from '../lib/runtime';
 import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, runningVersionLabel, shortSha, updateEntry, updateEntryLabel } from '../lib/upgrade';
 import { cx } from '../lib/cx';
 import { workspaceYolo } from '../lib/yolo';
-import { SETTINGS_AREAS, firstSectionOf, resolveSettingsLocation, sectionsOfArea } from '../lib/settings';
+import { SETTINGS_AREAS, sectionForRoute, sectionsOfArea } from '../lib/settings';
+import type { SettingsAreaKey } from '../lib/settings';
 import { disablePush, enablePush, subscriptionId } from '../lib/push';
 import { ago, cents } from '../lib/format';
 
+/** The scope line each settings page shows beside its title, so several workspaces cannot make
+ * "Settings" ambiguous (VS-230). The labels are the areas table's own. */
+function areaLabel(key: SettingsAreaKey): string {
+  return SETTINGS_AREAS.find((a) => a.key === key)?.label ?? key;
+}
+
 /**
- * Settings is two areas: what belongs to this workspace, and what belongs to this daemon and so
- * reads the same from every workspace. The area and the section are both in the URL, and a link
- * naming only a section resolves its own area — see `resolveSettingsLocation`, which is what keeps
- * the rail's `?section=updates` entry working without naming an area.
+ * The phone-only announcement of a daemon update, shared by both settings pages. It opens the
+ * Updates section on the daemon settings, addressed by key, whether or not that is this page.
  */
-export function SettingsRoute(): React.ReactElement {
+function UpdateBanner({ entry, hidden, onOpen }: { entry: ReturnType<typeof updateEntry>; hidden: boolean; onOpen: () => void }): React.ReactElement | null {
+  if (!entry || hidden) return null;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={updateEntryLabel(entry)}
+      className="mb-4 flex w-full items-center gap-2.5 rounded-r6 border border-accent-edge bg-accent-tint px-3.5 py-2.5 text-left md:hidden"
+    >
+      <span className={cx('size-1.5 flex-none rounded-pill', entry.state === 'upgrading' ? 'bg-merging' : 'bg-needs-you')} aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="block text-meta font-medium text-text-1">{entry.title}</span>
+        <span className="ac-mono block truncate text-nano text-text-3">{entry.detail}</span>
+      </span>
+      <span className="flex-none text-micro font-medium text-accent-link">Open Updates</span>
+    </button>
+  );
+}
+
+/**
+ * The workspace's own settings: only the sections whose data belongs to this workspace, named as
+ * this workspace's. The daemon's settings live at their own address above the workspaces (VS-230) —
+ * a link naming them lands there, and nothing here offers them.
+ */
+export function WorkspaceSettingsRoute(): React.ReactElement {
   const ws = useWs();
   const go = useGo();
   const search = useSearchParams();
   // The URL is the entry point and the tabs write back to it, but the tab click stays local state so
   // the section switches on the click rather than a router round-trip. Same shape as the board filters.
-  // The area always follows the section, so one piece of state carries both.
-  const [section, setSection] = useState<string>(() => resolveSettingsLocation({ area: search['area'], section: search['section'] }).section);
+  const [section, setSection] = useState<string>(() => sectionForRoute('workspace', search));
   useEffect(() => {
-    setSection(resolveSettingsLocation({ area: search['area'], section: search['section'] }).section);
-  }, [search['area'], search['section']]);
-  const area = resolveSettingsLocation({ section }).area;
+    setSection(sectionForRoute('workspace', search));
+  }, [search['section']]);
 
-  // `replace`, so clicking through six sections leaves one history entry rather than six.
+  // `replace`, so clicking through six sections leaves one history entry rather than six. The URL
+  // carries the section alone — `area` is what the route says now, not a search param.
   const choose = (key: string): void => {
-    const next = resolveSettingsLocation({ section: key });
-    setSection(next.section);
-    go('/w/$ws/settings', { params: { ws }, search: { ...search, area: next.area, section: next.section }, replace: true });
+    setSection(key);
+    const { area: _droppedArea, section: _droppedSection, ...rest } = search;
+    go('/w/$ws/settings', { params: { ws }, search: { ...rest, section: key }, replace: true });
+  };
+
+  const summary = useWorkspaceSummary();
+  const update = useDaemonUpdate();
+  const upgrade = useDaemonUpgrade();
+  const entry = updateEntry(update.data, upgrade.data?.upgrade ?? null);
+
+  return (
+    <Page>
+      <PageHeader
+        title="Settings"
+        meta={<>{areaLabel('workspace')} · {summary.data?.workspace.name ?? ws}</>}
+        tabs={<Tabs items={sectionsOfArea('workspace')} active={section} onChange={choose} className="px-3 md:px-4" />}
+      />
+      <PageBody className="p-4 md:p-5">
+        <div className="mx-auto max-w-3xl">
+          {/* Phone only: the rail block carries this on desktop, and one fact gets one entry. It
+              opens the Updates section of the daemon settings. */}
+          <UpdateBanner entry={entry} hidden={false} onOpen={() => go('/settings', { search: { section: 'updates' }, replace: true })} />
+          {section === 'workspace' ? <WorkspaceSection /> : null}
+          {section === 'projects' ? <ProjectsSection /> : null}
+          {section === 'models' ? <ModelsSection /> : null}
+          {section === 'channels' ? <ChannelsSection /> : null}
+          {section === 'presentation' ? <PresentationSection /> : null}
+          {section === 'scheduled' ? <ScheduledSection /> : null}
+        </div>
+      </PageBody>
+    </Page>
+  );
+}
+
+/**
+ * The daemon's settings at their own address above the workspaces: only the sections that read the
+ * same from every workspace, headed as the daemon's (VS-230). No workspace is entered to reach it,
+ * and none is consulted — the two sections that once borrowed one have their own way (see
+ * `DaemonModelsSection` and `DeviceSection`).
+ */
+export function DaemonSettingsRoute(): React.ReactElement {
+  const go = useGo();
+  const search = useSearchParams();
+  const [section, setSection] = useState<string>(() => sectionForRoute('daemon', search));
+  useEffect(() => {
+    setSection(sectionForRoute('daemon', search));
+  }, [search['section']]);
+
+  const choose = (key: string): void => {
+    setSection(key);
+    const { area: _droppedArea, section: _droppedSection, ...rest } = search;
+    go('/settings', { search: { ...rest, section: key }, replace: true });
   };
 
   const update = useDaemonUpdate();
@@ -103,41 +181,13 @@ export function SettingsRoute(): React.ReactElement {
     <Page>
       <PageHeader
         title="Settings"
-        actions={
-          <Segmented
-            ariaLabel="Settings area"
-            options={SETTINGS_AREAS.map((a) => ({ value: a.key, label: a.label }))}
-            value={area}
-            onChange={(next) => choose(firstSectionOf(next))}
-          />
-        }
-        tabs={<Tabs items={sectionsOfArea(area)} active={section} onChange={choose} className="px-3 md:px-4" />}
+        meta={<>{areaLabel('daemon')} · applies to every workspace</>}
+        tabs={<Tabs items={sectionsOfArea('daemon')} active={section} onChange={choose} className="px-3 md:px-4" />}
       />
       <PageBody className="p-4 md:p-5">
         <div className="mx-auto max-w-3xl">
-          {/* Phone only: the rail block carries this on desktop, and one fact gets one entry. */}
-          {entry && section !== 'updates' ? (
-            <button
-              type="button"
-              onClick={() => choose('updates')}
-              aria-label={updateEntryLabel(entry)}
-              className="mb-4 flex w-full items-center gap-2.5 rounded-r6 border border-accent-edge bg-accent-tint px-3.5 py-2.5 text-left md:hidden"
-            >
-              <span className={cx('size-1.5 flex-none rounded-pill', entry.state === 'upgrading' ? 'bg-merging' : 'bg-needs-you')} aria-hidden />
-              <span className="min-w-0 flex-1">
-                <span className="block text-meta font-medium text-text-1">{entry.title}</span>
-                <span className="ac-mono block truncate text-nano text-text-3">{entry.detail}</span>
-              </span>
-              <span className="flex-none text-micro font-medium text-accent-link">Open Updates</span>
-            </button>
-          ) : null}
-          {section === 'workspace' ? <WorkspaceSection /> : null}
-          {section === 'projects' ? <ProjectsSection /> : null}
-          {section === 'models' ? <ModelsSection /> : null}
+          <UpdateBanner entry={entry} hidden={section === 'updates'} onOpen={() => choose('updates')} />
           {section === 'daemon-models' ? <DaemonModelsSection /> : null}
-          {section === 'channels' ? <ChannelsSection /> : null}
-          {section === 'presentation' ? <PresentationSection /> : null}
-          {section === 'scheduled' ? <ScheduledSection /> : null}
           {section === 'security' ? <SecuritySection /> : null}
           {section === 'device' ? <DeviceSection /> : null}
           {section === 'dictation' ? <DictationSection /> : null}
@@ -545,7 +595,7 @@ function ModelsSection(): React.ReactElement {
   const locked = current.locked ?? { conductor: false, workers: false, workerOptions: false };
   const set = (kind: 'conductor' | 'workers', next: T.ModelSetting): void => save.mutate({ ...current, [kind]: next });
   const commit = (kind: 'conductor' | 'workers', next: T.ModelSetting): Promise<void> => save.mutateAsync({ ...current, [kind]: next }).then(() => undefined);
-  const lockedHint = 'Set in This daemon → Models';
+  const lockedHint = 'Set in the daemon settings → Models';
 
   return (
     <div className="flex flex-col gap-5">
@@ -812,7 +862,7 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
   return (
     <div className="flex flex-col gap-2">
       <h3 className="ac-label text-text-1">Worker options</h3>
-      <p className="text-micro text-text-3">{disabled ? 'Set in This daemon → Models' : 'Named models the conductor can pick per ticket. The workers setting above is the default when a ticket names none.'}</p>
+      <p className="text-micro text-text-3">{disabled ? 'Set in the daemon settings → Models' : 'Named models the conductor can pick per ticket. The workers setting above is the default when a ticket names none.'}</p>
       {options.length === 0 ? <p className="text-micro text-text-3">None yet.</p> : null}
       {options.map((o) => (
         <div key={o.id} className="flex items-center gap-2">
@@ -914,7 +964,10 @@ function DaemonModelsSection(): React.ReactElement {
   const overlays = useDaemonModels();
   const save = useSetDaemonModels();
   const runtimes = useRuntimes();
-  const workspaceModels = useModels();
+  // This page is reached without entering a workspace (VS-230), so a workspace's models may not be
+  // readable here; where they are, they still seed an override preview (VS-207), otherwise the
+  // runtime default does.
+  const workspaceModels = useModelsOptional();
   const list = runtimes.data ?? [];
 
   if (overlays.isLoading || workspaceModels.isLoading) return <SkeletonRows rows={4} />;
@@ -923,14 +976,15 @@ function DaemonModelsSection(): React.ReactElement {
   const current = overlays.data;
   const emptyFallback = emptySetting(list);
   // While inheriting, a row previews and seeds an override from *this* workspace's own setting —
-  // the one concrete value on hand — not a hardcoded default (VS-207).
+  // the one concrete value on hand — not a hardcoded default (VS-207). With no workspace in
+  // context there is no concrete value, and the runtime default stands in.
   const conductorFallback = workspaceModels.data?.conductor ?? emptyFallback;
   const workersFallback = workspaceModels.data?.workers ?? emptyFallback;
 
   return (
     <div className="flex flex-col gap-5">
       <p className="text-micro leading-relaxed text-text-3">
-        Filled overlays apply to every workspace and disable the matching This workspace → Models fields. Empty means each workspace uses its own settings.
+        Filled overlays apply to every workspace and disable the matching workspace Models fields. Empty means each workspace uses its own settings.
       </p>
       <OverlaySetting
         label="Conductor"
@@ -974,7 +1028,7 @@ function OverlaySetting({ label, setting, fallback, runtimes, onFill, onClear }:
       hint={
         filled
           ? 'Overrides every workspace.'
-          : "Inheriting this workspace's own setting below; another workspace on this daemon may hold a different one."
+          : 'Inherits each workspace\u2019s own setting; another workspace may hold a different one.'
       }
       setting={setting ?? fallback}
       runtimes={runtimes}
@@ -1682,7 +1736,13 @@ function DictationSection(): React.ReactElement {
 }
 
 function DeviceSection(): React.ReactElement {
-  const ws = useWs();
+  // Push subscriptions are registered per workspace — the daemon's push routes live under
+  // `/api/w/:ws`, and the subscription id is remembered per workspace in localStorage — so the
+  // controls address the workspace this browser remembers, which is where an existing subscription
+  // already lives. The daemon settings page is reached without a workspace (VS-230), so the
+  // context may be empty.
+  const ctxWs = useHookWs();
+  const ws = ctxWs || getWorkspaceId() || '';
   const toast = useToast();
   const [theme, setTheme] = useTheme();
   const [state, setState] = useState<Record<string, boolean>>(() => {
@@ -1692,7 +1752,7 @@ function DeviceSection(): React.ReactElement {
       return Object.fromEntries(NOTIFS.map((n) => [n.key, n.def]));
     }
   });
-  const [enabled, setEnabled] = useState(() => subscriptionId(ws) !== null);
+  const [enabled, setEnabled] = useState(() => ws !== '' && subscriptionId(ws) !== null);
   const [busy, setBusy] = useState(false);
   // The chat reads this through `useShowSilentTurns`; the writer publishes, so a chat already
   // mounted behind this page follows without a reload.
@@ -1833,7 +1893,11 @@ function DeviceSection(): React.ReactElement {
             </label>
           ))}
         </div>
-        {enabled ? (
+        {ws === '' ? (
+          <p className="text-micro text-text-3">
+            Push is registered per workspace. Open a workspace of this daemon once, then return here to turn push on.
+          </p>
+        ) : enabled ? (
           <div className="flex items-center gap-3">
             <p className="min-w-0 flex-1 text-micro text-text-3">Push is on for this device.</p>
             <Button disabled={busy} onClick={() => run('off')}>

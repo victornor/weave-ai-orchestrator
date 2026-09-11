@@ -33,7 +33,7 @@ vi.mock('../api/hooks', () => ({
   useRemoveRoutine: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-const { SettingsRoute } = await import('../routes/Settings');
+const { WorkspaceSettingsRoute: SettingsRoute } = await import('../routes/Settings');
 
 const runtime = (id: string, detection: RuntimeInfo['detection']): RuntimeInfo => ({
   id, displayName: id, detection, capabilities: {},

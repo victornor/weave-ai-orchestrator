@@ -1,5 +1,5 @@
 /** The Updates section in Settings and the rail's update indicator (PLAN §20). */
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UpdateStatus, Upgrade, UpgradeState, WaitingRun } from '../api/types';
 import { upgradePollInterval } from '../lib/upgrade';
@@ -55,7 +55,7 @@ vi.mock('../api/hooks', () => ({
   useRemoveRoutine: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-const { SettingsRoute } = await import('../routes/Settings');
+const { DaemonSettingsRoute, WorkspaceSettingsRoute } = await import('../routes/Settings');
 
 const RUNNING = { version: 'aaaaaaaaaa', path: '/rel/20260101-120000-aaaaaaaaaa', sha: 'a'.repeat(40) };
 
@@ -71,11 +71,10 @@ const record = (over: Partial<Upgrade> = {}): Upgrade => ({
   log: [], backups: [], cameBackVersion: null, ...over,
 });
 
-/** Render Settings and reach the Updates tab, the way the operator gets there: the daemon area first. */
+/** Render the daemon settings, whose first section is Updates — where the section lives since
+ * VS-230 moved it to the daemon's own page. */
 function openUpdates(): void {
-  render(<SettingsRoute />);
-  fireEvent.click(screen.getByRole('radio', { name: 'This daemon' }));
-  fireEvent.click(screen.getByRole('tab', { name: 'Updates' }));
+  render(<DaemonSettingsRoute />);
 }
 
 beforeEach(() => {
@@ -208,68 +207,76 @@ describe('Updates: following an upgrade', () => {
 });
 
 describe('Settings: addressing a section by URL', () => {
-  it('opens the Updates section straight from the URL', () => {
-    state.search = { section: 'updates' };
-    render(<SettingsRoute />);
+  it('opens the Updates section straight from the URL, and by default', () => {
+    render(<DaemonSettingsRoute />);
     expect(screen.getByRole('tab', { name: 'Updates' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText(RUNNING.path)).toBeInTheDocument();
-  });
-
-  it('opens the first section when the URL names none, or names one that does not exist', () => {
-    render(<SettingsRoute />);
-    expect(screen.getByRole('tab', { name: 'Workspace' })).toHaveAttribute('aria-selected', 'true');
-    state.search = { section: 'nope' };
-    render(<SettingsRoute />);
-    expect(screen.getAllByRole('tab', { name: 'Workspace' })[1]).toHaveAttribute('aria-selected', 'true');
-  });
-
-  it('switches on a tab click and writes the section and its area back to the URL by key', () => {
-    render(<SettingsRoute />);
-    // Updates lives in the daemon area (VS-52), so the operator picks the area and then the section.
-    fireEvent.click(screen.getByRole('radio', { name: 'This daemon' }));
-    fireEvent.click(screen.getByRole('tab', { name: 'Updates' }));
+    cleanup();
+    state.search = { section: 'updates' };
+    render(<DaemonSettingsRoute />);
     expect(screen.getByRole('tab', { name: 'Updates' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('falls back to Updates when the URL names a section that is not this page’s, or none that exists', () => {
+    // A workspace section named on the daemon route is redirected by the router (settingsScopes
+    // pins the decider); the page itself still falls back rather than showing the wrong scope.
+    state.search = { section: 'channels' };
+    render(<DaemonSettingsRoute />);
+    expect(screen.getByRole('tab', { name: 'Updates' })).toHaveAttribute('aria-selected', 'true');
+    cleanup();
+    state.search = { section: 'nope' };
+    render(<DaemonSettingsRoute />);
+    expect(screen.getByRole('tab', { name: 'Updates' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('switches on a tab click and writes the section alone back to the URL by key', () => {
+    render(<DaemonSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Dictation' }));
+    expect(screen.getByRole('tab', { name: 'Dictation' })).toHaveAttribute('aria-selected', 'true');
     expect(state.went.at(-1)).toEqual({
-      to: '/w/$ws/settings',
-      opts: { params: { ws: 'ws1' }, search: { area: 'daemon', section: 'updates' }, replace: true },
+      to: '/settings',
+      opts: { search: { section: 'dictation' }, replace: true },
     });
   });
 
   it('keeps the rest of the search when it rewrites the section', () => {
     state.search = { keep: 'me' };
-    render(<SettingsRoute />);
-    fireEvent.click(screen.getByRole('radio', { name: 'This daemon' }));
-    expect(state.went.at(-1)?.opts).toMatchObject({ search: { keep: 'me', area: 'daemon', section: 'updates' } });
+    render(<DaemonSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Dictation' }));
+    expect(state.went.at(-1)?.opts).toMatchObject({ search: { keep: 'me', section: 'dictation' } });
   });
 });
 
 describe('Settings: the phone entry for an available update', () => {
   const entry = (): HTMLElement | null => screen.queryByLabelText('Daemon update available');
 
-  it('sits at the top of Settings and opens the Updates section', () => {
-    render(<SettingsRoute />);
+  it('sits at the top of the workspace settings and opens the daemon page\'s Updates section', () => {
+    render(<WorkspaceSettingsRoute />);
     const banner = entry() as HTMLElement;
     expect(banner).toHaveTextContent('Update available');
     expect(banner).toHaveTextContent('main · bbbbbbbbbb');
     fireEvent.click(banner);
-    expect(screen.getByRole('tab', { name: 'Updates' })).toHaveAttribute('aria-selected', 'true');
+    expect(state.went.at(-1)).toEqual({
+      to: '/settings',
+      opts: { search: { section: 'updates' }, replace: true },
+    });
   });
 
   it('is gone once the Updates section is the one being shown', () => {
     state.search = { section: 'updates' };
-    render(<SettingsRoute />);
+    render(<DaemonSettingsRoute />);
     expect(entry()).toBeNull();
   });
 
   it('is gone once the daemon is up to date', () => {
     state.update = status({ updateAvailable: false });
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     expect(entry()).toBeNull();
   });
 
   it('says the daemon is upgrading while one is in flight', () => {
     state.upgrade = record({ state: 'switching' });
-    render(<SettingsRoute />);
+    render(<WorkspaceSettingsRoute />);
     expect(entry()).toBeNull();
     expect(screen.getByLabelText('Daemon upgrade in progress')).toHaveTextContent('Backing up and switching');
   });

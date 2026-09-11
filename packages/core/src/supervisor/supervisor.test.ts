@@ -923,3 +923,96 @@ describe('stalled worker detection (VS-202)', () => {
     expect(wakes).toEqual([{ source: 'routine', agentId: h.conductorId }]);
   });
 });
+
+/**
+ * VS-245: a finished run's stored report summary reaches the conductor in its digest wake, capped,
+ * attributed to the agent, explicit when there is no report, and bounded across a burst of runs.
+ * See `worker-supervision/conductor-digest`.
+ */
+describe('conductor digest run summaries (VS-245)', () => {
+  let h: TestHarness;
+  let supervisor: Supervisor;
+  let wake: ReturnType<typeof fakeWake>;
+
+  beforeEach(() => {
+    h = makeHarness();
+    wake = fakeWake();
+    h.services.wake = wake as never;
+    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.tickets = { livenessViolations: () => [] } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
+    h.ctx.config.defaults.conductorDigestIntervalSec = 0;
+    supervisor = createSupervisor(h.ctx, h.deps);
+  });
+  afterEach(() => { supervisor.stop(); h.cleanup(); });
+
+  /**
+   * A finished run, its stored report and its `run.finished` event. `eventSummary` deliberately
+   * differs from `reportSummary`: the engine's event carries a fallback that conflates a report
+   * summary with a final-text excerpt and a failure message, so the digest must read the report.
+   */
+  function finishedRun(workerId: string, over: { reportSummary?: string; eventSummary?: string; resultJson?: Record<string, unknown> | null; liveness?: string } = {}): string {
+    const runId = newId();
+    const at = nowIso();
+    const resultJson = over.resultJson === undefined
+      ? { state: 'blocked', summary: over.reportSummary ?? 'the agent report', knowledge: { recorded: false, reason: 'none' } }
+      : over.resultJson;
+    h.db.insert('runs', {
+      id: runId, workspaceId: h.workspaceId, agentId: workerId, wakeupIdsJson: [], runtimeId: 'claude',
+      status: 'failed', turnEpoch: 1, cwd: h.ctx.paths.workers, startedAt: at, finishedAt: at, createdAt: at,
+      resultJson, summary: over.reportSummary ?? null,
+    });
+    h.ctx.events.emit('run.finished', 'run', runId, { agentId: workerId, liveness: over.liveness ?? 'blocked', summary: over.eventSummary ?? over.reportSummary });
+    return runId;
+  }
+
+  const digestEvents = (): Array<Record<string, unknown>> => {
+    const digest = wake.calls.find((c) => (c.input as { reason: string }).reason === 'digest');
+    return (digest!.input as { payload: { events: Array<Record<string, unknown>> } }).payload.events;
+  };
+  const entryFor = (runId: string): Record<string, unknown> => digestEvents().find((e) => e.entityId === runId)!;
+
+  it('carries the stored report summary, attributed to the agent, not the event fallback', async () => {
+    const workerId = h.addWorker(null);
+    const runId = finishedRun(workerId, { reportSummary: 'Fixed the flaky test and opened a PR.', eventSummary: 'event payload fallback text' });
+    await supervisor.tick();
+    expect(entryFor(runId).agentReportedSummary).toBe('Fixed the flaky test and opened a PR.');
+    expect(entryFor(runId).summaryOmitted).toBeUndefined();
+  });
+
+  it('says plainly when a run stored no report, including one that failed', async () => {
+    const workerId = h.addWorker(null);
+    const noReport = finishedRun(workerId, { resultJson: null, eventSummary: 'the runtime died' });
+    const failedNoReport = finishedRun(workerId, { resultJson: null, eventSummary: 'exit 1', liveness: 'failed' });
+    await supervisor.tick();
+    for (const id of [noReport, failedNoReport]) {
+      expect(entryFor(id).agentReportedSummary).toBeUndefined();
+      expect(entryFor(id).summaryOmitted).toBe('no_report');
+    }
+  });
+
+  it('caps a single long summary with a visible truncation marker', async () => {
+    const workerId = h.addWorker(null);
+    const long = 'x'.repeat(1_000);
+    const runId = finishedRun(workerId, { reportSummary: long });
+    await supervisor.tick();
+    const carried = entryFor(runId).agentReportedSummary as string;
+    expect(carried.length).toBeLessThanOrEqual(400);
+    expect(carried.length).toBeLessThan(long.length);
+    expect(carried.endsWith('…')).toBe(true);
+  });
+
+  it('bounds the total summary text when many runs finish between digests', async () => {
+    const workerId = h.addWorker(null);
+    for (let i = 0; i < 60; i += 1) finishedRun(workerId, { reportSummary: `summary ${i} `.padEnd(300, 'x') });
+    await supervisor.tick();
+    const events = digestEvents();
+    const carried = events.map((e) => e.agentReportedSummary).filter((s): s is string => typeof s === 'string');
+    expect(carried.length).toBeGreaterThan(0);
+    expect(carried.reduce((n, s) => n + s.length, 0)).toBeLessThanOrEqual(1_600);
+    expect(events.some((e) => e.summaryOmitted === 'digest_cap')).toBe(true);
+    expect(events.length).toBeLessThanOrEqual(30);
+  });
+});

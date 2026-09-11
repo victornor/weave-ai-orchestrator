@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-11
+goal: Approving an action approval re-raises it immediately, forever

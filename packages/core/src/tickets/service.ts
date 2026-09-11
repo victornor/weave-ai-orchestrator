@@ -237,6 +237,25 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     )?.id ?? null;
   }
 
+  /**
+   * Whether this `action` revision already has an `open` or `answered` `action_approval`. A
+   * missing `target` still counts as covering so a legacy/test row cannot re-enter the repair loop
+   * (VS-225). Plan and merge repairs do not use this: they terminate because answering changes the
+   * ticket's status (`proposed` → `approved`, `in_review` → `merging`). Operational approve/revise
+   * leave `in_progress` on purpose (VS-216), so status cannot be the filter here.
+   */
+  function actionApprovalCoversRevision(ticketId: string, documentId: string, revision: number): boolean {
+    const rows = db.all<{ status: string; target: { documentId?: string; revision?: number } | null }>(
+      "SELECT status, target_json FROM decisions WHERE ticket_id = ? AND kind = 'action_approval' AND status IN ('open', 'answered')",
+      [ticketId],
+    );
+    return rows.some((r) => {
+      const target = r.target;
+      if (!target || target.revision == null) return true;
+      return target.documentId === documentId && target.revision === revision;
+    });
+  }
+
   const actionApprovalOptions = [
     { key: NAMED_CARD_OPTION_KEYS.action_approval.approve, label: 'Approve', description: 'The worker runs the stated action.', recommended: true },
     { key: NAMED_CARD_OPTION_KEYS.action_approval.revise, label: 'Revise', description: 'Send it back with feedback.' },
@@ -1026,12 +1045,13 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     },
 
     /**
-     * A `proposed` change ticket, an `in_review` ticket without `auto_merge`, or an operational
-     * ticket that already wrote its `action` document, is always supposed to have an open decision
-     * — that decision is its action path, which is exactly why `livenessViolations` leaves those
-     * tickets alone. Whatever closed the decision without moving the ticket on (VS-104: an
-     * overloaded document key; conceivably something else in the future) raises a fresh one here,
-     * so the ticket is never left silently stranded. An operational repair is never YOLO-answered.
+     * A `proposed` change ticket or an `in_review` ticket without `auto_merge` is supposed to have
+     * an open decision — that decision is its action path, which is why `livenessViolations` leaves
+     * those tickets alone. Whatever closed the decision without moving the ticket on (VS-104: an
+     * overloaded document key) raises a fresh one here. An operational ticket is repaired only when
+     * the current `action` revision has no `open` or `answered` `action_approval` targeting it:
+     * answering leaves the ticket `in_progress` (VS-216), so this branch cannot terminate by status
+     * the way plan and merge do. An operational repair is never YOLO-answered.
      */
     async repairApprovals() {
       const SYSTEM: Actor = { kind: 'system', id: null };
@@ -1094,6 +1114,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         repaired.push({ id: t.id, identifier: t.identifier, kind: 'merge_approval' });
       }
 
+      // Plan/merge terminate because answering changes ticket status. Operational cannot.
       const operational = db
         .all<Record<string, unknown>>("SELECT * FROM tickets WHERE workspace_id = ? AND kind = 'operational' AND status NOT IN ('done','cancelled')", [ws])
         .map(row);
@@ -1101,6 +1122,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         if (openApproval(t.id, 'action_approval')) continue;
         const doc = db.get<{ id: string; currentRevision: number }>('SELECT id, current_revision FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, 'action']);
         if (!doc) continue;
+        if (actionApprovalCoversRevision(t.id, doc.id, doc.currentRevision)) continue;
         raiseActionApproval(SYSTEM, t, doc, true);
         repaired.push({ id: t.id, identifier: t.identifier, kind: 'action_approval' });
       }

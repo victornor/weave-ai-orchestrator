@@ -57,6 +57,7 @@ describe('brief helpers', () => {
     expect(definitionOfDone('question', 'pr')).toContain('ac_ticket_comment');
     expect(definitionOfDone('operational', 'pr')).toContain('action_approval');
     expect(definitionOfDone('operational', 'pr')).toContain('unlanded');
+    expect(definitionOfDone('operational', 'pr')).toContain('not a second authorisation');
     expect(definitionOfDone('operational', 'pr')).not.toContain('open a PR');
   });
 

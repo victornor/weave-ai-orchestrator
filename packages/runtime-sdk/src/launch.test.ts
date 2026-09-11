@@ -21,18 +21,28 @@ afterEach(() => { vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: tru
 describe('childEnv', () => {
   it('gives the child the daemon\'s own environment with the overlay on top', () => {
     vi.stubEnv('AC_LAUNCH_FIXTURE', 'from-the-daemon');
+    vi.stubEnv('PATH', '/ac-daemon-bin');
+    vi.stubEnv('MISE_DATA_DIR', '/daemon-mise/data');
+    vi.stubEnv('MISE_CONFIG_DIR', '/daemon-mise/config');
+    vi.stubEnv('MISE_CACHE_DIR', '/daemon-mise/cache');
     const env = childEnv({ CLAUDE_CONFIG_DIR: '/runtimes/claude', AC_LAUNCH_FIXTURE: 'from-the-overlay' });
-    expect(env['PATH']).toBe(process.env['PATH']);
+    expect(env['PATH']).toBe('/ac-daemon-bin');
     expect(env['CLAUDE_CONFIG_DIR']).toBe('/runtimes/claude');
     expect(env['AC_LAUNCH_FIXTURE']).toBe('from-the-overlay');
-    expect(env['MISE_DATA_DIR']).toBe(process.env['MISE_DATA_DIR']);
-    expect(env['MISE_CONFIG_DIR']).toBe(process.env['MISE_CONFIG_DIR']);
-    expect(env['MISE_CACHE_DIR']).toBe(process.env['MISE_CACHE_DIR']);
+    expect(env['MISE_DATA_DIR']).toBe('/daemon-mise/data');
+    expect(env['MISE_CONFIG_DIR']).toBe('/daemon-mise/config');
+    expect(env['MISE_CACHE_DIR']).toBe('/daemon-mise/cache');
   });
 
   it('pins host mise roots when the overlay redirects HOME and XDG (VS-221)', () => {
     const configHome = join(home, 'runtime');
     mkdirSync(configHome);
+    // Without HOME/XDG redirected there is no pin; the daemon's own MISE_* (the process running
+    // this test may carry them) would flow through and the derived values below would never be
+    // computed. Unset them so the derivation from the stubbed HOME/XDG is what is asserted.
+    vi.stubEnv('MISE_DATA_DIR', undefined);
+    vi.stubEnv('MISE_CONFIG_DIR', undefined);
+    vi.stubEnv('MISE_CACHE_DIR', undefined);
     vi.stubEnv('HOME', home);
     vi.stubEnv('XDG_DATA_HOME', join(home, '.local', 'share'));
     vi.stubEnv('XDG_CONFIG_HOME', join(home, '.config'));
@@ -50,9 +60,34 @@ describe('childEnv', () => {
     expect(env['MISE_CACHE_DIR']).toBe(join(home, '.cache', 'mise'));
   });
 
+  it('prefers the daemon\'s own MISE_* roots over derived ones when it has them (worker case, VS-226)', () => {
+    const configHome = join(home, 'runtime');
+    mkdirSync(configHome);
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('XDG_DATA_HOME', join(home, '.local', 'share'));
+    vi.stubEnv('XDG_CONFIG_HOME', join(home, '.config'));
+    vi.stubEnv('XDG_CACHE_HOME', join(home, '.cache'));
+    vi.stubEnv('MISE_DATA_DIR', '/daemon-mise/data');
+    vi.stubEnv('MISE_CONFIG_DIR', '/daemon-mise/config');
+    vi.stubEnv('MISE_CACHE_DIR', '/daemon-mise/cache');
+    const env = childEnv({
+      HOME: configHome,
+      XDG_DATA_HOME: configHome,
+      XDG_CONFIG_HOME: configHome,
+    });
+    expect(env['MISE_DATA_DIR']).toBe('/daemon-mise/data');
+    expect(env['MISE_CONFIG_DIR']).toBe('/daemon-mise/config');
+    expect(env['MISE_CACHE_DIR']).toBe('/daemon-mise/cache');
+  });
+
   it('keeps an explicit overlay MISE_DATA_DIR when HOME is redirected', () => {
     const configHome = join(home, 'runtime');
     mkdirSync(configHome);
+    // As above: the derived CONFIG/CACHE expectations below assume the daemon process has no
+    // MISE_* of its own, so make that true instead of hoping the host agrees.
+    vi.stubEnv('MISE_DATA_DIR', undefined);
+    vi.stubEnv('MISE_CONFIG_DIR', undefined);
+    vi.stubEnv('MISE_CACHE_DIR', undefined);
     vi.stubEnv('HOME', home);
     vi.stubEnv('XDG_DATA_HOME', join(home, '.local', 'share'));
     vi.stubEnv('XDG_CONFIG_HOME', join(home, '.config'));

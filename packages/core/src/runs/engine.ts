@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { nowIso } from '@agent-conductor/db';
 import {
   AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents, OcError,
+  isWorkerOptionConfigured,
   type Agent, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
   type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
 } from '@agent-conductor/shared';
@@ -19,7 +20,7 @@ import { recordUsage, ACCOUNT_PROBE_TIMEOUT_MS } from '../usage/index.js';
 import { ensureFreshCredential } from './credentialFreshness.js';
 import { git } from '../util/git.js';
 import { emitRunEvent, runState } from './active.js';
-import { modelSettingFor, modelsFor } from '../models/resolve.js';
+import { effectiveModels, modelSettingFor, modelsFor } from '../models/resolve.js';
 import { runTokenSecret, signRunToken } from './runtoken.js';
 
 /**
@@ -677,9 +678,13 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
     });
   });
 
-  let identifier: { identifier: string; status: string } | undefined;
+  let identifier: { identifier: string; status: string; workerModelId: string | null } | undefined;
   step('read the ticket', () => {
-    identifier = ticketId ? ctx.db.get<{ identifier: string; status: string }>('SELECT identifier, status FROM tickets WHERE id = ?', [ticketId]) : undefined;
+    identifier = ticketId
+      ? ctx.db.get<{ identifier: string; status: string; workerModelId: string | null }>(
+        'SELECT identifier, status, worker_model_id FROM tickets WHERE id = ?', [ticketId],
+      )
+      : undefined;
   });
 
   let raised = false;
@@ -708,6 +713,7 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
         resetAt
           ? { key: 'retry_at_reset', label: `Retry when the limit resets (${fmtUtc(resetAt)} UTC)`, recommended: true }
           : { key: 'retry_1h', label: 'Retry in an hour', recommended: quota },
+        ...quotaSwitchOptions(ctx, quota, identifier?.workerModelId ?? null),
         { key: 'cancel', label: 'Cancel the ticket' },
       ],
       recommendation: quota ? (resetAt ? 'retry_at_reset' : 'retry_1h') : 'retry',
@@ -736,8 +742,104 @@ function fmtUtc(at: Date): string {
   return at.toISOString().slice(0, 16).replace('T', ' ');
 }
 
-/** "resets at 3pm", "resets at 15:30", "reset in 2 hours", "try again in 45 minutes" → a Date, else null. */
+function quotaSwitchOptions(
+  ctx: WorkspaceContext,
+  quota: boolean,
+  currentId: string | null,
+): Array<{ key: string; label: string; description?: string }> {
+  if (!quota) return [];
+  const opts = effectiveModels(ctx.daemon, ctx.config).workerOptions ?? [];
+  return opts
+    .filter((o) => o.id !== currentId && isWorkerOptionConfigured(o))
+    .map((o) => ({
+      key: `switch:${o.id}`,
+      label: `Continue on ${o.id}`,
+      ...(o.description ? { description: o.description } : {}),
+    }));
+}
+
+const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+const WINDOW_SLACK_MS = 2 * 60 * 1000;
+const MONTHS: Record<string, number> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+};
+
+function namedWindowMs(message: string): number | null {
+  const m = message.toLowerCase();
+  const forN = /for\s+(\d+)\s*(hours?|hrs?|minutes?|mins?)\b/.exec(m);
+  const dash = /(\d+)\s*-\s*(hours?|hrs?)\b/.exec(m);
+  const hit = forN ?? dash;
+  if (!hit) return null;
+  const n = Number(hit[1]);
+  const unit = hit[2]!;
+  return unit.startsWith('h') ? n * 3_600_000 : n * 60_000;
+}
+
+function inBound(t: Date, now: Date, boundMs: number): boolean {
+  const ms = t.getTime();
+  return ms > now.getTime() && ms <= now.getTime() + boundMs;
+}
+
+function parseIsoWithOffset(message: string): Date | null {
+  const r = /(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2}))/.exec(message);
+  if (!r) return null;
+  const t = new Date(r[1]!.replace(' ', 'T'));
+  return Number.isNaN(t.getTime()) ? null : t;
+}
+
+function parseNaiveClock(message: string): { y: number; mo: number; d: number; h: number; min: number; sec: number } | null {
+  const r = /(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?!(?:\.\d+)?(?:Z|[+-]\d{2}))/.exec(message);
+  if (!r) return null;
+  return { y: Number(r[1]), mo: Number(r[2]), d: Number(r[3]), h: Number(r[4]), min: Number(r[5]), sec: Number(r[6] ?? 0) };
+}
+
+function earliestNaiveOffset(
+  clock: { y: number; mo: number; d: number; h: number; min: number; sec: number },
+  now: Date,
+  boundMs: number,
+): Date | null {
+  const asUtc = Date.UTC(clock.y, clock.mo - 1, clock.d, clock.h, clock.min, clock.sec);
+  let best: Date | null = null;
+  for (let off = -12; off <= 14; off += 1) {
+    const t = new Date(asUtc - off * 3_600_000);
+    if (!inBound(t, now, boundMs)) continue;
+    if (!best || t.getTime() < best.getTime()) best = t;
+  }
+  return best;
+}
+
+function parseClaudeOuDate(message: string, now: Date): Date | null {
+  const r = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2}),(?:\s+(\d{4}),)?\s+(\d{1,2}):(\d{2})\s*(am|pm)\b/i.exec(message);
+  if (!r) return null;
+  const mo = MONTHS[r[1]!.toLowerCase()];
+  if (mo === undefined) return null;
+  let h = Number(r[4]);
+  if (r[6]!.toLowerCase() === 'pm' && h < 12) h += 12;
+  if (r[6]!.toLowerCase() === 'am' && h === 12) h = 0;
+  const year = r[3] ? Number(r[3]) : now.getUTCFullYear();
+  const t = new Date(Date.UTC(year, mo, Number(r[2]), h, Number(r[5]), 0));
+  if (t.getTime() > now.getTime() || r[3]) return t;
+  return new Date(Date.UTC(year + 1, mo, Number(r[2]), h, Number(r[5]), 0));
+}
+
+/**
+ * Provider reset timestamps from captured stderr (VS-238). `now` is the failure instant
+ * (`parseResetTime` runs inside `parkForHuman`), not the start of the named window.
+ */
 export function parseResetTime(message: string, now = new Date()): Date | null {
+  const windowMs = namedWindowMs(message);
+  const boundMs = windowMs != null ? windowMs + WINDOW_SLACK_MS : FOURTEEN_DAYS_MS;
+
+  const iso = parseIsoWithOffset(message);
+  if (iso) return inBound(iso, now, boundMs) ? iso : null;
+
+  const naive = parseNaiveClock(message);
+  if (naive) return earliestNaiveOffset(naive, now, boundMs);
+
+  const ou = parseClaudeOuDate(message, now);
+  if (ou) return inBound(ou, now, boundMs) ? ou : null;
+
   const m = message.toLowerCase();
   let r = /(?:reset|resets|try again|available)\s+in\s+(\d+)\s*(hour|hr|minute|min|second|sec)/.exec(m);
   if (r) {
@@ -745,7 +847,9 @@ export function parseResetTime(message: string, now = new Date()): Date | null {
     const ms = unit.startsWith('h') ? n * 3_600_000 : unit.startsWith('m') ? n * 60_000 : n * 1000;
     return new Date(now.getTime() + ms);
   }
-  r = /resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/.exec(m);
+  // Require am/pm or `:mm` so `resets at 2026-…` cannot take hour 20 from the year.
+  r = /resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/.exec(m)
+    ?? /resets?\s+(?:at\s+)?(\d{1,2}):(\d{2})(?!\d)/.exec(m);
   if (r) {
     let h = Number(r[1]); const min = Number(r[2] ?? 0);
     if (r[3] === 'pm' && h < 12) h += 12;

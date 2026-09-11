@@ -229,6 +229,41 @@ describe('decisions', () => {
     expect(tickets.get(t.id).status).toBe('in_progress');
   });
 
+  it('answering switch:deep writes the option and resumes without booking a retry (VS-238)', async () => {
+    h.ctx.config.models.workerOptions = [
+      { id: 'standard', description: 'Specified work.', runtime: 'opencode', model: 'glm' },
+      { id: 'deep', description: 'Cause unknown.', runtime: 'claude', model: 'opus' },
+    ];
+    const t = ticket({ workerModelId: 'standard' });
+    const workerId = h.addWorker(t.id);
+    const path = h.db.get<{ worktreePath: string; branch: string }>('SELECT worktree_path, branch FROM agents WHERE id = ?', [workerId])!;
+    h.db.update('agents', workerId, { status: 'paused', pauseReason: 'rate_limit: waiting for a human', pauseDetailJson: { family: 'provider_quota' } });
+    h.db.update('tickets', t.id, { status: 'blocked', workerModelId: 'standard' });
+    const resume = vi.fn((actor: Actor, id: string) => {
+      h.db.update('agents', id, { status: 'active', pauseReason: null, pauseDetailJson: null });
+      return h.db.get('SELECT * FROM agents WHERE id = ?', [id]);
+    });
+    h.services.workers = { resume, relaunch: vi.fn(async () => undefined) } as never;
+    const d = decisions.create(SYSTEM, {
+      kind: 'retry_approval', owner: 'human', ticketId: t.id, title: 'usage limit',
+      options: [
+        { key: 'retry', label: 'Retry now' },
+        { key: 'retry_1h', label: 'Retry in an hour' },
+        { key: 'switch:deep', label: 'Continue on deep' },
+        { key: 'cancel', label: 'Cancel' },
+      ],
+      target: { agentId: workerId, ticketId: t.id },
+    });
+
+    await decisions.answer(HUMAN, d.id, { key: 'switch:deep' });
+
+    expect(tickets.get(t.id).workerModelId).toBe('deep');
+    expect(resume).toHaveBeenCalledWith(HUMAN, workerId);
+    expect(h.db.get<{ status: string; worktreePath: string; branch: string }>('SELECT status, worktree_path, branch FROM agents WHERE id = ?', [workerId]))
+      .toMatchObject({ status: 'active', worktreePath: path.worktreePath, branch: path.branch });
+    expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'retry')).toBe(false);
+  });
+
   it('merge approval approve moves the ticket to merging and wakes the worker', async () => {
     const t = ticket();
     const workerId = h.addWorker(t.id);

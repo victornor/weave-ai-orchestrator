@@ -289,6 +289,12 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       });
       return;
     }
+    if (key.startsWith('switch:')) {
+      if (!target.ticketId) return;
+      deps().tickets.setWorkerModelFromQuotaCard(actor, target.ticketId, key.slice('switch:'.length));
+      deps().workers.resume(actor, target.agentId);
+      return;
+    }
     await deps().workers.relaunch(actor, target.agentId, 'the human asked for a retry');
     if (target.ticketId) {
       const t = deps().tickets.get(target.ticketId);

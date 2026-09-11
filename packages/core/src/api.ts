@@ -20,6 +20,11 @@ export interface TicketsService {
   list(filter?: TicketFilter): Page<S.Ticket>;
   update(actor: Actor, id: string, patch: Partial<Pick<S.Ticket, 'title' | 'description' | 'summary' | 'priority' | 'autoMerge' | 'parentId' | 'projectId'>>): S.Ticket;
   assign(actor: Actor, id: string, roleId: string | null, workerModelId?: string | null): S.Ticket;
+  /**
+   * The one post-spawn write of `workerModelId`: answering a usage-limit retry card with a catalog
+   * option that was on that card (VS-238). Not on HTTP, MCP, create, or assign.
+   */
+  setWorkerModelFromQuotaCard(actor: Actor, id: string, optionId: string): S.Ticket;
   setBlockers(actor: Actor, id: string, blockedBy: string[]): S.Ticket;
   blockers(id: string): S.Ticket[];
   children(id: string): S.Ticket[];

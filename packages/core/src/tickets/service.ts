@@ -740,6 +740,18 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       });
     },
 
+    setWorkerModelFromQuotaCard(actor, id, optionId) {
+      const t = get(id);
+      const resolved = resolveWorkerModelId(optionId);
+      if (resolved == null) throw new OcError('validation', `unknown worker model option '${optionId}'`);
+      return tx(db, () => {
+        const next = touch(t.id, { workerModelId: resolved });
+        recordActivity(db, ws, actor, 'ticket.update', 'ticket', t.id, { workerModelId: resolved, from: 'quota_card' }, t.id);
+        ctx.events.emit('ticket.updated', 'ticket', t.id, next);
+        return next;
+      });
+    },
+
     setBlockers(actor, id, blockedBy) {
       const t = get(id);
       for (const b of blockedBy) if (!find(b)) throw new OcError('not_found', `blocker ${b} not found`);

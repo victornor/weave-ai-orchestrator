@@ -163,6 +163,12 @@ export interface UpgradeAnnouncement {
   runs: { drained: number; interrupted: number; resumed: number };
   /** Work that landed between the previous release being built and the new one being built. */
   tickets: Array<{ identifier: string; title: string; at: string }>;
+  /**
+   * Ticket-referencing commits in the release window with no matching entry in `tickets` (VS-239):
+   * `count` is the true total, `identifiers` a possibly-bounded list of them. Diagnostic only — never
+   * a second source for `tickets` itself, since a commit subject is not a delivery record.
+   */
+  undelivered: { count: number; identifiers: string[] };
   /** Migration files applied when this process opened the daemon and workspace databases. */
   migrations: string[];
   health: { ok: boolean; checks: UpgradeHealthCheck[] };

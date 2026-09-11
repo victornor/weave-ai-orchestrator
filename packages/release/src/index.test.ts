@@ -1,8 +1,11 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LAUNCHD_LABEL, SERVICE_NAME, inOwnScope, planRestart, releaseStamp, releaseVersion } from './index.js';
+import {
+  LAUNCHD_LABEL, SERVICE_NAME, commitSubjectsInRange, inOwnScope, planRestart, releaseStamp, releaseVersion,
+} from './index.js';
 
 const tmps: string[] = [];
 afterEach(() => { while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
@@ -45,6 +48,46 @@ describe('planRestart', () => {
       cmd: 'systemd-run',
       args: ['--user', '--scope', '--collect', '--unit=ac-upgrade-1', '--quiet', 'node', 'bin.js', 'x'],
     });
+  });
+});
+
+describe('commitSubjectsInRange', () => {
+  /** A real throwaway repo with one commit per subject, in order; returns each commit's sha. */
+  function repoWithCommits(subjects: string[]): { root: string; shas: string[] } {
+    const root = mkdtempSync(join(tmpdir(), 'ac-relgit-'));
+    tmps.push(root);
+    const git = (...args: string[]): string => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'user.name', 'Test');
+    const shas: string[] = [];
+    for (const subject of subjects) {
+      git('commit', '--allow-empty', '-q', '-m', subject);
+      shas.push(git('rev-parse', 'HEAD'));
+    }
+    return { root, shas };
+  }
+
+  it('reads commit subjects strictly after `from` up to and including `to`', () => {
+    const { root, shas } = repoWithCommits(['first', 'second', 'third', 'fourth']);
+    expect(commitSubjectsInRange(root, shas[0]!, shas[2]!)).toEqual(['second', 'third']);
+  });
+
+  it('is empty when either sha is null', () => {
+    const { root, shas } = repoWithCommits(['first', 'second']);
+    expect(commitSubjectsInRange(root, null, shas[1]!)).toEqual([]);
+    expect(commitSubjectsInRange(root, shas[0]!, null)).toEqual([]);
+  });
+
+  it('is empty for a directory with no readable .git, rather than throwing', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'ac-relgit-none-'));
+    tmps.push(bare);
+    expect(commitSubjectsInRange(bare, 'a'.repeat(40), 'b'.repeat(40))).toEqual([]);
+  });
+
+  it('is empty when the shas do not resolve in this clone, rather than throwing', () => {
+    const { root } = repoWithCommits(['only commit']);
+    expect(commitSubjectsInRange(root, 'a'.repeat(40), 'b'.repeat(40))).toEqual([]);
   });
 });
 

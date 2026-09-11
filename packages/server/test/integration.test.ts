@@ -269,6 +269,70 @@ describe('real core services over HTTP', () => {
     });
   });
 
+  describe('ac_thread_message_get', () => {
+    it('returns the full body of a message a wake payload truncated (VS-242)', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const thread = services.threads.bindOrGet('web', 'web-vs242', null, 'Victor');
+      const body = 'z'.repeat(9000);
+      const msg = await services.threads.inbound({ kind: 'human', id: null }, thread.id, body);
+      const wakes = services.wake.listForAgent(harness.conductorId, ['queued']).filter((w) => (w.payload as { messageId?: string }).messageId === msg.id);
+      expect((wakes[0]?.payload as { truncated?: boolean; bodyLength?: number }).truncated).toBe(true);
+      expect((wakes[0]?.payload as { truncated?: boolean; bodyLength?: number }).bodyLength).toBe(9000);
+
+      const token = await signRunToken(runTokenSecret(harness.ctx.db), {
+        workspaceId: harness.workspaceId, runId: 'run_msg', agentId: harness.conductorId, agentKind: 'conductor', projectId: null, ticketId: null, roleId: null,
+      });
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_thread_message_get`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { threadId: thread.id, messageId: msg.id } }),
+      }));
+      const payload = await res.json();
+      expect(payload.ok).toBe(true);
+      expect(payload.data.body).toBe(body);
+      expect(payload.data.body).toHaveLength(9000);
+    });
+
+    it('is not_found for a messageId belonging to another thread', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const other = services.threads.bindOrGet('web', 'web-vs242-other', null);
+      const elsewhere = await services.threads.inbound({ kind: 'human', id: null }, other.id, 'over here');
+      const t = services.threads.bindOrGet('web', 'web-vs242-here', null);
+
+      const token = await signRunToken(runTokenSecret(harness.ctx.db), {
+        workspaceId: harness.workspaceId, runId: 'run_msg2', agentId: harness.conductorId, agentKind: 'conductor', projectId: null, ticketId: null, roleId: null,
+      });
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_thread_message_get`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { threadId: t.id, messageId: elsewhere.id } }),
+      }));
+      const payload = await res.json();
+      expect(payload.ok).toBe(false);
+      expect(payload.error.code).toBe('not_found');
+    });
+
+    it('is refused for a worker run token (conductor-scoped)', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const thread = services.threads.bindOrGet('web', 'web-vs242-worker', null);
+      const msg = await services.threads.inbound({ kind: 'human', id: null }, thread.id, 'a message');
+      const workerId = harness.addWorker(null);
+
+      const token = await signRunToken(runTokenSecret(harness.ctx.db), {
+        workspaceId: harness.workspaceId, runId: 'run_msg3', agentId: workerId, agentKind: 'worker', projectId: harness.projectId, ticketId: null, roleId: harness.roleId,
+      });
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_thread_message_get`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { threadId: thread.id, messageId: msg.id } }),
+      }));
+      expect(res.status).toBe(403);
+    });
+  });
+
   it('changes a role max workers through the conductor tool, as a new revision', async () => {
     const { deps, harness } = boot();
     const app = createApp(deps);

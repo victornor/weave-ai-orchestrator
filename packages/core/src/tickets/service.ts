@@ -1132,7 +1132,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           ctx.events.emit('ticket.updated', 'ticket', t.id, get(t.id));
         });
         wake(conductorId(), 'system', `openspec archive failed for ${t.identifier}`, { ticketId: t.id, error: action });
-        throw new OcError('internal', action, { ticketId: t.id });
+        // VS-298: a refusal openspec itself explained (e.g. `openspec_archive_blocked`) carries a
+        // code and details worth keeping — flattening every archive failure to `internal` here is
+        // what threw that reason away for the agent that has to act on it.
+        throw e instanceof OcError ? new OcError(e.code, action, { ...(e.details ?? {}), ticketId: t.id }) : new OcError('internal', action, { ticketId: t.id });
       }
 
       const next = tx(db, () => {

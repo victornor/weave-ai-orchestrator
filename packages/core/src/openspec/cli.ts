@@ -243,14 +243,30 @@ export async function validate(o: OpenSpecCtx, changeName: string): Promise<Vali
  * `openspec archive <name> --yes --json` — the deterministic structural merge; never the skill form.
  *
  * A rejected archive (e.g. a MODIFIED requirement that would drop a scenario another change already
- * landed) exits non-zero with the real reason on stdout's `status` array and nothing on stderr, so
- * this reads `allowFailure` and extracts the reason from there — `run()`'s default `failed()` would
- * otherwise report an empty message.
+ * landed, or a retirement whose rebuilt spec still holds content the merge cannot account for) exits
+ * non-zero with the real reason on stdout's `status` array and nothing on stderr, so this reads
+ * `allowFailure` and extracts the reason from there — `run()`'s default `failed()` would otherwise
+ * report an empty message.
+ *
+ * Each `status[]` item is one of openspec's own diagnostics: `{ severity, code, message, fix? }`.
+ * `fix` is the half that says what to do about it (VS-298) — a refusal openspec explains this way is
+ * reported as `openspec_archive_blocked`, carrying both `message` and `fix`, rather than the generic
+ * `internal` a caller cannot act on. Only a response with no recognizable diagnostic at all (stdout
+ * wasn't structured JSON, or the array was empty) falls back to `internal`.
  */
 export async function archive(o: OpenSpecCtx, changeName: string): Promise<ArchiveResult> {
   const r = await run(o.cwd, ['archive', changeName, '--yes'], runOpts(o, { allowFailure: true }));
   if (!r.ok) {
     const items = firstArray(r.json, ['status', 'issues', 'items', 'results']);
+    const diagnostics = items
+      .map((i) => ({ code: str(get(i, 'code')), message: str(get(i, 'message')), fix: str(get(i, 'fix')) }))
+      .filter((d): d is { code: string; message: string; fix: string | null } => d.code !== null && d.message !== null);
+    if (diagnostics.length) {
+      const detail = diagnostics.map((d) => [d.message, d.fix].filter((s): s is string => s !== null && s.length > 0).join(' ')).join('; ');
+      throw new OcError('openspec_archive_blocked', `openspec archive ${changeName} blocked: ${detail}`, {
+        changeName, openspecCode: diagnostics[0]!.code, fix: diagnostics[0]!.fix, issues: diagnostics,
+      });
+    }
     const messages = items.map((i) => str(get(i, 'message'))).filter((m): m is string => m !== null && m.length > 0);
     const detail = messages.length ? messages.join('; ') : (r.stderr.trim().slice(0, 300) || `exited ${r.exitCode ?? '?'}`);
     throw new OcError('internal', `openspec archive ${changeName} failed: ${detail}`, { changeName, exitCode: r.exitCode, stderr: r.stderr.slice(0, 300), issues: items });

@@ -22,21 +22,18 @@ workspace they belong to.
 
 #### Scenario: A burst of spawns causes one refresh
 
-- **WHEN** several agents on the same runtime need to spawn a turn at the same moment, and the
-  runtime's credential needs refreshing
+- **WHEN** several agents on the same runtime need to spawn a turn at the same moment, and the runtime's credential needs refreshing
 - **THEN** exactly one refresh is performed for that runtime
 - **AND** every agent proceeds using that refresh's outcome rather than its own
 
 #### Scenario: Agents in different workspaces share the same wait
 
-- **WHEN** agents in two different workspaces on the same host need the same runtime's credential at
-  the same moment, and it needs refreshing
+- **WHEN** agents in two different workspaces on the same host need the same runtime's credential at the same moment, and it needs refreshing
 - **THEN** only one refresh is performed, and both agents' turns proceed from its outcome
 
 #### Scenario: No refresh is needed
 
-- **WHEN** an agent needs to spawn a turn and the runtime's credential is already valid for long
-  enough
+- **WHEN** an agent needs to spawn a turn and the runtime's credential is already valid for long enough
 - **THEN** no refresh is performed and the turn spawns without waiting on anything
 
 ### Requirement: A turn spawns only once its credential is confirmed to outlast it
@@ -51,10 +48,8 @@ way to check.
 
 #### Scenario: A near-expiry credential is refreshed before the turn starts
 
-- **WHEN** an agent is about to take a turn and its runtime's credential would expire before the
-  turn's timeout elapses
-- **THEN** the turn does not spawn until the credential has been confirmed valid for at least that
-  long
+- **WHEN** an agent is about to take a turn and its runtime's credential would expire before the turn's timeout elapses
+- **THEN** the turn does not spawn until the credential has been confirmed valid for at least that long
 
 #### Scenario: A runtime with no credential state is unaffected
 
@@ -81,25 +76,20 @@ billing statement.
 #### Scenario: A failed shared refresh gates the runtime once
 
 - **WHEN** the one refresh several waiting agents share cannot restore a working credential
-- **THEN** the runtime is gated exactly as it would be for a single agent's own authentication
-  failure, and no agent that was waiting spawns a turn
+- **THEN** the runtime is gated exactly as it would be for a single agent's own authentication failure, and no agent that was waiting spawns a turn
 
 #### Scenario: Waiting agents keep their work
 
 - **WHEN** agents are gated because the refresh they were waiting on failed
-- **THEN** the wake-ups they were woken for are preserved, unchanged from the system's existing
-  authentication-failure behavior
+- **THEN** the wake-ups they were woken for are preserved, unchanged from the system's existing authentication-failure behavior
 
 #### Scenario: A billing note is never recorded as the reason a refresh failed
 
-- **WHEN** the account can be described, the description reports how the account is billed with no
-  indication of a problem, and the local credential still cannot be confirmed valid
+- **WHEN** the account can be described, the description reports how the account is billed with no indication of a problem, and the local credential still cannot be confirmed valid
 - **THEN** the recorded message says the account was described and what the local credential showed
 - **AND** it does not repeat the description's billing note as the reason the refresh failed
 
 #### Scenario: An undescribable account still says so plainly
 
-- **WHEN** the account cannot be described at all — the probe fails, times out, or answers with
-  something the system cannot parse
-- **THEN** the recorded message says the account could not be described, using whatever detail the
-  probe itself reported
+- **WHEN** the account cannot be described at all — the probe fails, times out, or answers with something the system cannot parse
+- **THEN** the recorded message says the account could not be described, using whatever detail the probe itself reported

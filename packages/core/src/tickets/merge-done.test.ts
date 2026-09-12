@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
-import type { Project } from '@weave-ai/shared';
+import { OcError, type Project } from '@weave-ai/shared';
 import { makeHarness, fakeWake, fakeSpecs, type TestHarness } from '../testing/context.js';
 import { createTicketsService } from './service.js';
 import { git } from '../util/git.js';
@@ -197,5 +197,27 @@ describe('mergeDone forge-confirmed merge commit (VS-232)', () => {
     await expect(tickets.mergeDone(AGENT, ticketId, { mergeCommit: unrelatedAncestor, method: 'squash' }))
       .rejects.toMatchObject({ code: 'merge_unverified' });
     expect(tickets.get(ticketId).status).toBe('merging');
+  });
+
+  it('preserves a blocked archive\'s code and fix guidance instead of flattening it to internal (VS-298)', async () => {
+    const { ticketId, squashSha } = await squashMergedTicket();
+    h.ctx.registries.forges.set('github', {
+      id: 'github',
+      detect: async () => true,
+      prState: async () => ({ state: 'merged' as const, mergeCommit: squashSha }),
+      mergePr: async () => ({}),
+    });
+    const fix = "'runtime-credentials/serialized-refresh' declares retire_capabilities, but the spec holds content the merge cannot safely account for and deleting the file would take with it. Move it into `## Purpose` or a canonical requirement, or delete the spec by hand.";
+    (h.services.openspec as unknown as { archiveAfterMerge: ReturnType<typeof vi.fn> }).archiveAfterMerge =
+      vi.fn(async () => { throw new OcError('openspec_archive_blocked', `openspec archive tst-1-thing blocked: Rebuilt spec for 'runtime-credentials/serialized-refresh' failed validation. No files were changed. ${fix}`, { openspecCode: 'archive_spec_validation_failed', fix }); });
+
+    await expect(tickets.mergeDone(AGENT, ticketId, { mergeCommit: squashSha, method: 'squash' }))
+      .rejects.toMatchObject({ code: 'openspec_archive_blocked', details: expect.objectContaining({ openspecCode: 'archive_spec_validation_failed', fix, ticketId }) });
+
+    const t = tickets.get(ticketId);
+    expect(t.status).toBe('merging');
+    expect(t.unblock?.action).toContain(fix);
+    const comments = tickets.comments(ticketId);
+    expect(comments.some((c) => c.body.includes(fix))).toBe(true);
   });
 });

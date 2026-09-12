@@ -1240,6 +1240,89 @@ describe('Composer', () => {
     expect(screen.getByText(/At most 4 files per message/)).toBeInTheDocument();
   });
 
+  // ---------- VS-277: dropping files ----------
+
+  const dropZone = (): HTMLElement => screen.getByTestId('composer-drop-zone');
+
+  it('adds a dropped file to the same pending state paste produces', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const file = new File(['x'], 'dropped.png', { type: 'image/png' });
+    fireEvent.drop(dropZone(), { dataTransfer: { types: ['Files'], files: [file] } });
+    expect(screen.getByText('dropped.png')).toBeInTheDocument();
+  });
+
+  it('rejects a disallowed-type drop, attaching nothing and reporting it', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const file = new File(['x'], 'doc.pdf', { type: 'application/pdf' });
+    fireEvent.drop(dropZone(), { dataTransfer: { types: ['Files'], files: [file] } });
+    expect(screen.queryByText('doc.pdf')).not.toBeInTheDocument();
+    expect(screen.getByText(/Only images .* and plain text\/markdown/)).toBeInTheDocument();
+  });
+
+  it('attaches a mixed drop’s accepted files and reports the rest, as paste does', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const good = new File(['x'], 'shot.png', { type: 'image/png' });
+    const bad = new File(['x'], 'doc.pdf', { type: 'application/pdf' });
+    fireEvent.drop(dropZone(), { dataTransfer: { types: ['Files'], files: [good, bad] } });
+    expect(screen.getByText('shot.png')).toBeInTheDocument();
+    expect(screen.queryByText('doc.pdf')).not.toBeInTheDocument();
+    expect(screen.getByText(/Only images .* and plain text\/markdown/)).toBeInTheDocument();
+  });
+
+  it('caps a dropped batch at four and says so', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const files = Array.from({ length: 5 }, (_, i) => new File(['x'], `f${i}.txt`, { type: 'text/plain' }));
+    fireEvent.drop(dropZone(), { dataTransfer: { types: ['Files'], files } });
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.getByText(/At most 4 files per message/)).toBeInTheDocument();
+  });
+
+  it('highlights the composer while a file is dragged over it, and clears when it leaves', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const zone = dropZone();
+    expect(zone.className).not.toContain('border-accent');
+    fireEvent.dragEnter(zone, { dataTransfer: { types: ['Files'], files: [] } });
+    expect(zone.className).toContain('border-accent');
+    fireEvent.dragLeave(zone, { dataTransfer: { types: ['Files'], files: [] } });
+    expect(zone.className).not.toContain('border-accent');
+  });
+
+  it('ignores a non-file drag: no highlight, no attach, no preventDefault', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const zone = dropZone();
+    expect(fireEvent.dragEnter(zone, { dataTransfer: { types: ['text/plain'] } })).toBe(true);
+    expect(zone.className).not.toContain('border-accent');
+    expect(fireEvent.dragOver(zone, { dataTransfer: { types: ['text/plain'] } })).toBe(true);
+    expect(fireEvent.drop(zone, { dataTransfer: { types: ['text/plain'], files: [] } })).toBe(true);
+    expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+  });
+
+  it('does not highlight or attach a file dropped where attachments are not allowed', () => {
+    render(<Composer onSubmit={() => undefined} placeholder="Message the conductor…" />);
+    const zone = dropZone();
+    const file = new File(['x'], 'shot.png', { type: 'image/png' });
+    fireEvent.dragEnter(zone, { dataTransfer: { types: ['Files'], files: [file] } });
+    expect(zone.className).not.toContain('border-accent');
+    fireEvent.drop(zone, { dataTransfer: { types: ['Files'], files: [file] } });
+    expect(screen.queryByText('shot.png')).not.toBeInTheDocument();
+  });
+
+  it('refuses the browser default for a file drag so a drop cannot navigate away', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const file = new File(['x'], 'shot.png', { type: 'image/png' });
+    expect(fireEvent.dragOver(dropZone(), { dataTransfer: { types: ['Files'], files: [] } })).toBe(false);
+    expect(fireEvent.drop(dropZone(), { dataTransfer: { types: ['Files'], files: [file] } })).toBe(false);
+  });
+
+  it('refuses the browser default for a file dropped outside the composer, attaching nothing', () => {
+    render(<Composer onSubmit={() => undefined} allowAttachments placeholder="Message the conductor…" />);
+    const file = new File(['x'], 'outside.png', { type: 'image/png' });
+    // The window guard, not the composer: the drop zone is not in this event's path.
+    expect(fireEvent.dragOver(window, { dataTransfer: { types: ['Files'], files: [] } })).toBe(false);
+    expect(fireEvent.drop(window, { dataTransfer: { types: ['Files'], files: [file] } })).toBe(false);
+    expect(screen.queryByText('outside.png')).not.toBeInTheDocument();
+  });
+
   it('disables send and ignores a second tap while the first request is in flight', async () => {
     let resolve!: () => void;
     const onSubmit = vi.fn(() => new Promise<void>((r) => { resolve = r; }));

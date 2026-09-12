@@ -63,9 +63,8 @@ export function WorkspaceNav({
               key={item.key}
               to={item.to}
               aria-current={current ? 'page' : undefined}
-              className={cx('flex h-7 items-center gap-2.5 rounded-r4 px-2.5', current ? 'bg-bg-3 text-text-1' : 'text-text-3 hover:bg-bg-2')}
+              className={cx('flex h-7 items-center rounded-r4 pl-6.5 pr-2.5', current ? 'bg-bg-3 text-text-1' : 'text-text-3 hover:bg-bg-2')}
             >
-              <span className={cx('size-1.5 rounded-r4', current ? 'bg-needs-you' : 'bg-line-3')} aria-hidden />
               <span className="flex-1 text-meta">{item.label}</span>
             </A>
           );
@@ -98,9 +97,8 @@ export function WorkspaceNav({
                         key={item.key}
                         to={to}
                         aria-current={current ? 'page' : undefined}
-                        className={cx('flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5', current ? 'bg-bg-3 text-text-1' : 'text-text-3 hover:bg-bg-2')}
+                        className={cx('flex h-7 items-center gap-2.5 rounded-r4 pl-9 pr-2.5', current ? 'bg-bg-3 text-text-1' : 'text-text-3 hover:bg-bg-2')}
                       >
-                        <span className={cx('size-1.5 rounded-r4', current ? 'bg-needs-you' : 'bg-line-3')} aria-hidden />
                         <span className="flex-1 text-meta">{item.label}</span>
                         {item.key === 'needs' && count > 0 ? <span className="ac-mono text-nano text-needs-you">{count}</span> : null}
                         {/* The number keys reach the active workspace only, so only it is hinted. */}

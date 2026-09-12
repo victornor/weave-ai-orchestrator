@@ -6,8 +6,9 @@
  * strips unknown keys, so `defaults.runtime`, `conductor.model` and the rest are already gone by the
  * time a parsed config exists. The loader does the I/O; this decides.
  */
-import type { ModelSetting, WorkspaceModels } from '@weave-ai/shared';
+import type { DaemonModels, EffectiveModels, ModelSetting, WorkspaceModels } from '@weave-ai/shared';
 import { ModelSettingSchema } from '@weave-ai/shared';
+import { catalogFilled } from './resolve.js';
 
 /** A role as the derivation needs it: what that role was actually running on. */
 export interface RoleRuntimeRow { runtimeId: string | null; model: string | null; effort: string | null }
@@ -16,7 +17,7 @@ export interface RoleRuntimeRow { runtimeId: string | null; model: string | null
 export type WorkersRule = 'roles' | 'roles_mixed' | 'defaults' | 'weaver';
 
 export interface ModelMigration {
-  models: WorkspaceModels;
+  models: EffectiveModels;
   /** How many roles were on each runtime, most first. Empty when the workspace has hired none. */
   counts: Array<{ runtime: string; roles: number }>;
   rule: WorkersRule;
@@ -107,6 +108,42 @@ export function deriveModelSettings(raw: Record<string, unknown>, roles: RoleRun
 /** Whether this document has already been migrated. A `models` block is the marker. */
 export function hasModelSettings(raw: Record<string, unknown>): boolean {
   return blockOf(raw, 'models') !== undefined;
+}
+
+/** Which controls {@link demaskWorkspaceModels} cleared, so the caller can log and decide whether to write anything back. */
+export interface DemaskResult {
+  models: WorkspaceModels;
+  cleared: Partial<Record<'weaver' | 'workers' | 'workerOptions', true>>;
+}
+
+/**
+ * VS-284: a workspace's stored setting for a control the daemon currently overlays is cleared —
+ * once, at the moment the workspace first loads under the inverted precedence — because a value
+ * that could not have taken effect under the old (daemon-wins) precedence is not a deliberate
+ * choice worth keeping, and leaving it in place would let it silently start winning the moment the
+ * new precedence takes hold. A control the daemon does not overlay is left exactly as it was: it
+ * was already the effective value and remains so. Pure, like the rest of this file — the loader
+ * decides whether and when to call this and to write the result back.
+ */
+export function demaskWorkspaceModels(models: WorkspaceModels, daemon: { models?: DaemonModels } | null | undefined): DemaskResult {
+  const overlay = daemon?.models ?? {};
+  const cleared: DemaskResult['cleared'] = {};
+  const next: WorkspaceModels = { ...models };
+
+  if (models.weaver !== undefined && overlay.weaver != null) {
+    delete next.weaver;
+    cleared.weaver = true;
+  }
+  if (models.workers !== undefined && overlay.workers != null) {
+    delete next.workers;
+    cleared.workers = true;
+  }
+  if (catalogFilled(models.workerOptions) && catalogFilled(overlay.workerOptions)) {
+    next.workerOptions = [];
+    cleared.workerOptions = true;
+  }
+
+  return { models: next, cleared };
 }
 
 /** One line for the log, saying what was chosen and why. */

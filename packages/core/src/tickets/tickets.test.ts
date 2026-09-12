@@ -99,10 +99,20 @@ describe('tickets', () => {
     expect(tickets.list({}).items.some((t) => t.workerModelId === 'deep')).toBe(false);
   });
 
-  it('validates workerModelId against a filled daemon catalog (VS-185)', () => {
+  it('validates workerModelId against the workspace catalog even when a daemon catalog is also filled (VS-284)', () => {
     h.ctx.config.models.workerOptions = [
       { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },
     ];
+    h.ctx.daemon.models = {
+      workerOptions: [{ id: 'strong', description: 'Heavy.', runtime: 'claude', model: 'opus' }],
+    };
+    // The workspace's own non-empty catalog wins over the daemon's, whole-list.
+    expect(make({ workerModelId: 'cheap' }).workerModelId).toBe('cheap');
+    expect(() => make({ workerModelId: 'strong' })).toThrow(OcError);
+    h.ctx.daemon.models = {};
+  });
+
+  it('validates workerModelId against a filled daemon catalog when the workspace has none (VS-284)', () => {
     h.ctx.daemon.models = {
       workerOptions: [{ id: 'strong', description: 'Heavy.', runtime: 'claude', model: 'opus' }],
     };

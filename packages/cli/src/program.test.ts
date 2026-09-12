@@ -402,17 +402,16 @@ describe('running commands against a stubbed daemon', () => {
     expect(body).toMatchObject({ workerModelId: 'cheap' });
   });
 
-  it('refuses models set when the control is locked by a daemon overlay (VS-185)', async () => {
-    stubFetch({
-      '/api/w/acme/models': {
-        weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
-        workers: { runtime: 'claude', model: null },
-        locked: { weaver: true, workers: false, workerOptions: false },
-      },
-    });
+  it('models set always writes the workspace value, even while a daemon overlay is filled (VS-284)', async () => {
+    const models = { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } };
+    let put: unknown = null;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') { put = JSON.parse(String(init?.body)); return new Response(JSON.stringify(put), { status: 200 }); }
+      return new Response(JSON.stringify(models), { status: 200 });
+    }) as typeof fetch;
     await buildProgram().parseAsync([...base, 'models', 'set', 'conductor', '--model', 'claude-opus-5']);
-    expect(JSON.parse(written.join(''))).toMatchObject({ error: { code: 'conflict' } });
-    expect(process.exitCode).toBe(1);
+    expect(put).toEqual({ weaver: { runtime: 'claude', model: 'claude-opus-5' }, workers: { runtime: 'claude', model: null } });
+    expect(process.exitCode).not.toBe(1);
   });
 
   it('daemon models set sends the overlay (VS-185)', async () => {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MERGE_CONCURRENCY, DEFAULT_WORKER_TIERS, DaemonConfigSchema, DaemonModelsSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkerModelOptionSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, isWorkerOptionConfigured, mergeConcurrencyOf, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
+import { DEFAULT_MERGE_CONCURRENCY, DEFAULT_MODEL_SETTING, DEFAULT_WORKER_TIERS, DEFAULT_WORKSPACE_MODELS, DaemonConfigSchema, DaemonModelsSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkerModelOptionSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, isWorkerOptionConfigured, mergeConcurrencyOf, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
 
 describe('project config: landingBranch (VS-119)', () => {
   it('parses without a landing branch declared', () => {
@@ -212,22 +212,30 @@ describe('daemon config: upgrade', () => {
 describe('model selection: the two workspace settings', () => {
   const base = { version: 1 as const, id: 'acme', name: 'Acme', ticketPrefix: 'ACME' };
 
-  it('gives a workspace that names no models both settings on the default runtime', () => {
+  it('gives a workspace that names no models neither setting configured (VS-284)', () => {
     const cfg = WorkspaceConfigSchema.parse(base);
-    expect(cfg.models.weaver).toEqual({ runtime: 'claude', model: null });
-    expect(cfg.models.workers).toEqual({ runtime: 'claude', model: null });
+    expect(cfg.models.weaver).toBeUndefined();
+    expect(cfg.models.workers).toBeUndefined();
     expect(cfg.models.workerOptions).toEqual([]);
   });
 
   it('keeps effort, which is the only place it can still be set', () => {
     const cfg = WorkspaceConfigSchema.parse({ ...base, models: { workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' } } });
     expect(cfg.models.workers).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
-    // The setting the config did not name still exists, on the defaults.
-    expect(cfg.models.weaver).toEqual({ runtime: 'claude', model: null });
+    // The setting the config did not name stays unconfigured (VS-284) rather than acquiring the
+    // schema's own defaults, so it is distinguishable from a deliberate claude/no-model choice.
+    expect(cfg.models.weaver).toBeUndefined();
   });
 
   it('rejects a setting with an empty runtime', () => {
     expect(WorkspaceConfigSchema.safeParse({ ...base, models: { workers: { runtime: '' } } }).success).toBe(false);
+  });
+
+  it('a configured setting is a real ModelSetting, distinct from unconfigured (VS-284)', () => {
+    const cfg = WorkspaceConfigSchema.parse({ ...base, models: { weaver: { runtime: 'claude' } } });
+    // Explicitly choosing claude with no model pinned is a configured setting, not "unset".
+    expect(cfg.models.weaver).toEqual({ runtime: 'claude', model: null });
+    expect(cfg.models.workers).toBeUndefined();
   });
 
   it('ignores the layered runtime and model keys an older workspace.yaml carries', () => {
@@ -245,8 +253,8 @@ describe('model selection: the two workspace settings', () => {
     expect(cfg.weaver.humanName).toBe('captain');
     expect(cfg.projects[0]).not.toHaveProperty('runtime');
     expect(cfg.projects[0]).not.toHaveProperty('model');
-    // Nothing layered survives: the two settings are what a fresh parse produces.
-    expect(cfg.models).toEqual({ weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
+    // Nothing layered survives, and neither setting is configured by a fresh parse (VS-284).
+    expect(cfg.models).toEqual({ workerOptions: [] });
   });
 
   it('parses a worker-options catalog and rejects a duplicate id (VS-162)', () => {
@@ -271,6 +279,26 @@ describe('model selection: the two workspace settings', () => {
         ],
       },
     }).success).toBe(false);
+  });
+});
+
+describe('WorkspaceModelsSchema: unconfigured is representable (VS-284)', () => {
+  it('parses {} to neither setting configured', () => {
+    const models = WorkspaceModelsSchema.parse({});
+    expect(models).toEqual({ workerOptions: [] });
+    expect(models.weaver).toBeUndefined();
+    expect(models.workers).toBeUndefined();
+  });
+
+  it('configuring one setting leaves the other unconfigured', () => {
+    const models = WorkspaceModelsSchema.parse({ weaver: { runtime: 'codex' } });
+    expect(models.weaver).toEqual({ runtime: 'codex', model: null });
+    expect(models.workers).toBeUndefined();
+  });
+
+  it('DEFAULT_MODEL_SETTING and DEFAULT_WORKSPACE_MODELS are the last-resort default, not a stored value', () => {
+    expect(DEFAULT_MODEL_SETTING).toEqual({ runtime: 'claude', model: null });
+    expect(DEFAULT_WORKSPACE_MODELS).toEqual({ weaver: DEFAULT_MODEL_SETTING, workers: DEFAULT_MODEL_SETTING, workerOptions: [] });
   });
 });
 

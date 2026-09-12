@@ -585,9 +585,10 @@ describe('run engine', () => {
       expect(runtime.inputs.at(-1)).toMatchObject({ model: 'claude-opus-5', effort: 'high' });
     });
 
-    it('launches on a filled daemon overlay (VS-185)', async () => {
-      h.ctx.config.models.workers = { runtime: 'fake', model: 'workspace-workers' };
-      h.ctx.config.models.weaver = { runtime: 'fake', model: 'workspace-conductor' };
+    it('launches on a filled daemon overlay when the workspace has not configured that control (VS-284)', async () => {
+      // The outer beforeEach configures both workspace settings as this suite's baseline; clear
+      // them so this test can exercise the "workspace unconfigured" case.
+      h.ctx.config.models = { workerOptions: [] };
       h.ctx.daemon.models = {
         workers: { runtime: 'fake', model: 'daemon-workers' },
         weaver: { runtime: 'fake', model: 'daemon-conductor' },
@@ -600,6 +601,23 @@ describe('run engine', () => {
       h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
       await runOnce();
       expect(runtime.inputs.at(-1)).toMatchObject({ model: 'daemon-workers' });
+    });
+
+    it('launches on the workspace\'s own setting even when a daemon overlay is also filled (VS-284)', async () => {
+      h.ctx.config.models.workers = { runtime: 'fake', model: 'workspace-workers' };
+      h.ctx.config.models.weaver = { runtime: 'fake', model: 'workspace-conductor' };
+      h.ctx.daemon.models = {
+        workers: { runtime: 'fake', model: 'daemon-workers' },
+        weaver: { runtime: 'fake', model: 'daemon-conductor' },
+      };
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      await runOnce();
+      expect(runtime.inputs.at(-1)).toMatchObject({ model: 'workspace-conductor' });
+      const ticketId = seedTicket(h);
+      const workerId = h.addWorker(ticketId, { worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      await runOnce();
+      expect(runtime.inputs.at(-1)).toMatchObject({ model: 'workspace-workers' });
     });
 
     it('launches a worker on its ticket\'s catalog option (VS-162)', async () => {

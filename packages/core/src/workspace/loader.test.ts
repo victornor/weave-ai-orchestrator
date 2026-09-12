@@ -3,10 +3,11 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
-import { DaemonConfigSchema, type WorkspaceConfig } from '@weave-ai/shared';
+import { DaemonConfigSchema, WorkspaceConfigSchema, toLegacySpelling, type WorkspaceConfig } from '@weave-ai/shared';
 import { createRegistries, workspacePaths } from '../context.js';
 import { openDbAsOf } from '@weave-ai/db';
 import { createSecretStore } from '../secrets/store.js';
+import { effectiveModels } from '../models/index.js';
 import { loader, projectKnowledgeSkeleton } from './loader.js';
 
 describe('workspace loader', () => {
@@ -289,7 +290,8 @@ describe('workspace loader', () => {
       ]);
 
       const ctx = await load();
-      expect(ctx.config.models.workers.runtime).toBe('codex');
+      // The VS-77 derive migration always writes a concrete workers setting.
+      expect(ctx.config.models.workers!.runtime).toBe('codex');
       const settings = ctx.db.get<{ settings: Record<string, unknown> }>('SELECT settings_json FROM workspaces WHERE id = ?', [ctx.workspaceId])!.settings;
       expect(settings['modelsMigration']).toMatchObject({
         ambiguous: true, chosen: 'codex',
@@ -302,6 +304,115 @@ describe('workspace loader', () => {
       const ctx = await load();
       const settings = ctx.db.get<{ settings: Record<string, unknown> }>('SELECT settings_json FROM workspaces WHERE id = ?', [ctx.workspaceId])!.settings;
       expect(settings['modelsMigration']).toBeUndefined();
+    });
+  });
+
+  // VS-284: precedence inverted (daemon is the default, workspace overrides). A stored workspace
+  // value that a filled daemon overlay was already masking had no observable effect under the old
+  // precedence, so it is cleared once rather than silently starting to win.
+  describe('demasking a workspace setting a filled daemon overlay already governed', () => {
+    const loadWithDaemon = async (daemonModels: Record<string, unknown>) => {
+      const ctx = await loader.loadWorkspace(root, {
+        daemon: DaemonConfigSchema.parse({ models: daemonModels }), registries: createRegistries(),
+        loopbackUrl: 'http://127.0.0.1:7433', skillsDir: join(root, 'skills'), templatesDir: join(root, 'templates'),
+        daemonConfigDir: cfgDir, isolated: false,
+      });
+      opened.push(ctx.db);
+      return ctx;
+    };
+
+    /** A workspace.yaml shaped like a real install: both settings stored, whether or not a human ever chose them. */
+    async function withStoredModels(models: Record<string, unknown>): Promise<void> {
+      await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      const file = join(root, 'workspace.yaml');
+      const raw = YAML.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      writeFileSync(file, YAML.stringify({ ...raw, models }), 'utf8');
+    }
+
+    const yamlOf = (): Record<string, unknown> => YAML.parse(readFileSync(join(root, 'workspace.yaml'), 'utf8')) as Record<string, unknown>;
+
+    it('clears a masked control and keeps the daemon overlay in force, on this host\'s real shape', async () => {
+      // Straight from the conductor's review comment: workspace.yaml holds opus/sonnet,
+      // daemon.yaml overlays opus (weaver) and opencode/deepseek-flash (workers).
+      await withStoredModels({
+        conductor: { runtime: 'claude', model: 'opus' },
+        workers: { runtime: 'claude', model: 'sonnet' },
+        workerOptions: [],
+      });
+
+      const ctx = await loadWithDaemon({
+        conductor: { runtime: 'claude', model: 'opus', effort: 'high' },
+        workers: { runtime: 'opencode', model: 'deepseek-flash', effort: 'high' },
+      });
+
+      // Both stored settings are gone in memory and on disk...
+      expect(ctx.config.models.weaver).toBeUndefined();
+      expect(ctx.config.models.workers).toBeUndefined();
+      expect(yamlOf()['models']).not.toHaveProperty('conductor');
+      expect(yamlOf()['models']).not.toHaveProperty('workers');
+
+      // ...and the effective workers setting is exactly what the daemon was already providing —
+      // unchanged across the migration boundary, not flipped to the workspace's stale sonnet.
+      expect(effectiveModels(ctx.daemon, ctx.config).workers).toEqual({ runtime: 'opencode', model: 'deepseek-flash', effort: 'high' });
+      expect(effectiveModels(ctx.daemon, ctx.config).weaver).toEqual({ runtime: 'claude', model: 'opus', effort: 'high' });
+    });
+
+    it('leaves a control the daemon does not overlay untouched', async () => {
+      await withStoredModels({
+        conductor: { runtime: 'claude', model: 'opus' },
+        workers: { runtime: 'claude', model: 'sonnet' },
+        workerOptions: [],
+      });
+
+      const ctx = await loadWithDaemon({ workers: { runtime: 'opencode', model: 'deepseek-flash' } });
+
+      // weaver's overlay is empty, so the workspace's own stored value is untouched and governs.
+      expect(ctx.config.models.weaver).toEqual({ runtime: 'claude', model: 'opus' });
+      expect(effectiveModels(ctx.daemon, ctx.config).weaver).toEqual({ runtime: 'claude', model: 'opus' });
+      // workers is masked and cleared, so the overlay governs.
+      expect(ctx.config.models.workers).toBeUndefined();
+      expect(effectiveModels(ctx.daemon, ctx.config).workers).toEqual({ runtime: 'opencode', model: 'deepseek-flash' });
+    });
+
+    it('runs once: a later daemon overlay does not retroactively clear an unmasked setting', async () => {
+      await withStoredModels({
+        conductor: { runtime: 'claude', model: 'opus' },
+        workers: { runtime: 'claude', model: 'sonnet' },
+        workerOptions: [],
+      });
+
+      // First load: nothing overlaid, nothing cleared, migration marked done.
+      const first = await loadWithDaemon({});
+      expect(first.config.models.workers).toEqual({ runtime: 'claude', model: 'sonnet' });
+
+      // An operator now fills the daemon's workers overlay for the first time. A second load must
+      // not retroactively clear the workspace's setting: the migration already ran.
+      const second = await loadWithDaemon({ workers: { runtime: 'opencode', model: 'deepseek-flash' } });
+      expect(second.config.models.workers).toEqual({ runtime: 'claude', model: 'sonnet' });
+      expect(effectiveModels(second.daemon, second.config).workers).toEqual({ runtime: 'claude', model: 'sonnet' });
+    });
+
+    it('a fresh workspace with nothing stored has nothing to clear', async () => {
+      await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      const ctx = await loadWithDaemon({ workers: { runtime: 'opencode', model: 'deepseek-flash' } });
+      expect(ctx.config.models.weaver).toBeUndefined();
+      expect(ctx.config.models.workers).toBeUndefined();
+      expect(effectiveModels(ctx.daemon, ctx.config).workers).toEqual({ runtime: 'opencode', model: 'deepseek-flash' });
+    });
+
+    it('an unconfigured setting round-trips through toLegacySpelling/YAML with the key absent, not null', async () => {
+      await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      const ctx = await load();
+      // `ctx.config.models.weaver` is undefined: a fresh workspace, nothing stored.
+      expect(ctx.config.models.weaver).toBeUndefined();
+      const text = YAML.stringify(toLegacySpelling(ctx.config));
+      const raw = YAML.parse(text) as Record<string, unknown>;
+      const models = raw['models'] as Record<string, unknown>;
+      expect(models).not.toHaveProperty('conductor');
+      expect(models).not.toHaveProperty('weaver');
+      // Round-trips: a rollback (or this same daemon) reads it back cleanly, as unconfigured.
+      const reparsed = WorkspaceConfigSchema.parse(raw);
+      expect(reparsed.models.weaver).toBeUndefined();
     });
   });
 

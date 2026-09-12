@@ -777,6 +777,9 @@ function ProjectsSection(): React.ReactElement {
 /**
  * The whole of model selection (VS-77): two settings, each a runtime and a model. Nothing else in
  * the app offers a runtime or a model to choose, so this section is where an operator comes.
+ *
+ * VS-284: a daemon overlay can no longer disable a control here — the workspace's own setting
+ * always wins over it, so every control is always editable.
  */
 function ModelsSection(): React.ReactElement {
   const models = useModels();
@@ -787,35 +790,30 @@ function ModelsSection(): React.ReactElement {
   if (!models.data) return <ErrorState code="MODELS_UNREACHABLE" message="The workspace's model settings could not be read." />;
 
   const current = models.data;
-  const locked = current.locked ?? { weaver: false, workers: false, workerOptions: false };
   const set = (kind: 'weaver' | 'workers', next: T.ModelSetting): void => save.mutate({ ...current, [kind]: next });
   const commit = (kind: 'weaver' | 'workers', next: T.ModelSetting): Promise<void> => save.mutateAsync({ ...current, [kind]: next }).then(() => undefined);
-  const lockedHint = 'Set in the daemon settings → Models';
 
   return (
     <div className="flex flex-col gap-5">
       <ModelSettingFields
         label="Conductor"
-        hint={locked.weaver ? lockedHint : 'The agent you talk to. One per workspace.'}
+        hint="The agent you talk to. One per workspace."
         setting={current.weaver}
         runtimes={runtimes.data ?? []}
-        disabled={locked.weaver}
         onChange={(next) => set('weaver', next)}
         onCommit={(next) => commit('weaver', next)}
       />
       <ModelSettingFields
         label="Workers"
-        hint={locked.workers ? lockedHint : 'Every worker in this workspace whose ticket names no catalog option.'}
+        hint="Every worker in this workspace whose ticket names no catalog option."
         setting={current.workers}
         runtimes={runtimes.data ?? []}
-        disabled={locked.workers}
         onChange={(next) => set('workers', next)}
         onCommit={(next) => commit('workers', next)}
       />
       <WorkerOptionsEditor
         current={current}
         runtimes={runtimes.data ?? []}
-        disabled={locked.workerOptions}
         onSave={(next) => save.mutate(next)}
       />
       {save.error ? <ErrorState code="MODELS_NOT_SAVED" message={save.error.message} /> : null}
@@ -1310,7 +1308,7 @@ function DaemonModelsSection(): React.ReactElement {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-micro leading-relaxed text-text-3">
-        Filled overlays apply to every workspace and disable the matching workspace Models fields. Empty means each workspace uses its own settings.
+        Filled overlays set the default every workspace starts from until it configures its own (VS-284). Empty means the built-in default (claude, no model chosen) applies until either does.
       </p>
       <OverlaySetting
         label="Conductor"
@@ -1353,8 +1351,8 @@ function OverlaySetting({ label, setting, fallback, runtimes, onFill, onClear }:
       label={label}
       hint={
         filled
-          ? 'Overrides every workspace.'
-          : 'Inherits each workspace\u2019s own setting; another workspace may hold a different one.'
+          ? 'The default every workspace uses until it sets its own (VS-284).'
+          : 'No daemon default; each workspace\u2019s own setting is used, or claude with no model chosen if it has not set one either.'
       }
       setting={setting ?? fallback}
       runtimes={runtimes}
@@ -1373,7 +1371,7 @@ function OverlaySetting({ label, setting, fallback, runtimes, onFill, onClear }:
             }}
           >
             <option value="inherit">Inherit — {fallback.runtime} · {fallback.model ?? 'default'}</option>
-            <option value="override">Override for every workspace</option>
+            <option value="override">Set as the default for every workspace</option>
           </select>
         </Field>
       }

@@ -211,17 +211,16 @@ export const DaemonModelsPutSchema = withKeyAlias(z.object({
 }), 'conductor', 'weaver');
 export type DaemonModelsPut = z.infer<typeof DaemonModelsPutSchema>;
 
-export const ModelsLockedSchema = z.object({
-  weaver: z.boolean(),
-  workers: z.boolean(),
-  workerOptions: z.boolean(),
-});
-export type ModelsLocked = z.infer<typeof ModelsLockedSchema>;
-
-/** The whole of model selection for a workspace: two defaults, plus an optional worker-options catalog. */
+/**
+ * The whole of model selection **as a workspace stores it** (VS-284): `weaver`/`workers` are
+ * optional — absent means the workspace has not configured that control at all, distinct from a
+ * present `ModelSetting` (even one with `model: null`, which means "configured to let the runtime
+ * pick"). This is `WorkspaceConfig['models']`'s type; it is not the fully-resolved value a turn
+ * actually runs on — see `EffectiveModels` for that.
+ */
 export const WorkspaceModelsSchema = withKeyAlias(z.object({
-  weaver: ModelSettingSchema.default({}),
-  workers: ModelSettingSchema.default({}),
+  weaver: ModelSettingSchema.optional(),
+  workers: ModelSettingSchema.optional(),
   workerOptions: WorkerOptionsArraySchema.default([]),
 }), 'conductor', 'weaver');
 export type WorkspaceModels = z.infer<typeof WorkspaceModelsSchema>;
@@ -237,8 +236,26 @@ export const WorkspaceModelsPutSchema = withKeyAlias(z.object({
 }), 'conductor', 'weaver');
 export type WorkspaceModelsPut = z.infer<typeof WorkspaceModelsPutSchema>;
 
-/** The two settings in force when no workspace config is in play (seeds, fallbacks, tests). */
-export const DEFAULT_WORKSPACE_MODELS: WorkspaceModels = WorkspaceModelsSchema.parse({});
+/** The setting in force when nothing — neither a workspace nor a daemon overlay — has configured a control. */
+export const DEFAULT_MODEL_SETTING: ModelSetting = ModelSettingSchema.parse({});
+
+/**
+ * A workspace's model selection **fully resolved**: what `effectiveModels()` returns, what a turn
+ * actually runs on, and the `GET /models` wire shape. Always fully filled, unlike the stored
+ * `WorkspaceModels` above, whose `weaver`/`workers` may be absent.
+ */
+export interface EffectiveModels {
+  weaver: ModelSetting;
+  workers: ModelSetting;
+  workerOptions: WorkerModelOption[];
+}
+
+/** The two settings in force when no workspace or daemon config is in play (seeds, fallbacks, tests). */
+export const DEFAULT_WORKSPACE_MODELS: EffectiveModels = {
+  weaver: DEFAULT_MODEL_SETTING,
+  workers: DEFAULT_MODEL_SETTING,
+  workerOptions: [],
+};
 
 export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
   proposalApproval: legacyApprovalOwner.default('human'),

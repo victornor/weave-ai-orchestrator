@@ -525,9 +525,8 @@ describe('real core services over HTTP', () => {
     const app = createApp(deps);
     const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
 
-    const unlocked = { weaver: false, workers: false, workerOptions: false };
     const before = await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json();
-    expect(before).toEqual({ weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [], locked: unlocked });
+    expect(before).toEqual({ weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
 
     const next = {
       weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
@@ -535,8 +534,8 @@ describe('real core services over HTTP', () => {
     };
     const put = await app.fetch(new Request(`${base}/models`, { method: 'PUT', headers: H, body: JSON.stringify(next) }));
     expect(put.status).toBe(200);
-    expect(await put.json()).toEqual({ ...next, workerOptions: [], locked: unlocked });
-    expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json()).toEqual({ ...next, workerOptions: [], locked: unlocked });
+    expect(await put.json()).toEqual({ ...next, workerOptions: [] });
+    expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json()).toEqual({ ...next, workerOptions: [] });
   });
 
   it('accepts a legacy conductor-keyed body and responds with weaver (VS-263)', async () => {

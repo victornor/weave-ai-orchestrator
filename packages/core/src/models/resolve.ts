@@ -1,54 +1,48 @@
 /**
- * Which runtime, model and effort a turn runs on (VS-77, ADR 0011; VS-162, ADR 0012; VS-185, ADR 0013).
+ * Which runtime, model and effort a turn runs on (VS-77, ADR 0011; VS-162, ADR 0012; VS-185, ADR
+ * 0013; VS-284).
  *
- * There is one answer and one place it comes from: the effective model settings after a daemon
- * overlay (if filled) is applied to the workspace. The weaver runs on `models.weaver`. A
- * worker runs on the catalog option its ticket names, when that option still exists, otherwise on
- * `models.workers`. This function is the only reader — everything that used to layer
- * `agent.model ?? role.model ?? config.defaults.model` goes through it instead, so there is no
- * chain left for a stale row to enter.
+ * There is one answer and one place it comes from: the effective model settings after the
+ * workspace's own configured value (if any) is layered over a daemon overlay (if filled), which is
+ * itself the fallback for a workspace that has not configured a control. The weaver runs on
+ * `models.weaver`. A worker runs on the catalog option its ticket names, when that option still
+ * exists, otherwise on `models.workers`. This function is the only reader — everything that used
+ * to layer `agent.model ?? role.model ?? config.defaults.model` goes through it instead, so there
+ * is no chain left for a stale row to enter.
  */
-import type { AgentKind, DaemonModels, ModelSetting, ModelsLocked, WorkspaceConfig, WorkspaceModels } from '@weave-ai/shared';
+import type { AgentKind, DaemonModels, EffectiveModels, ModelSetting, WorkspaceConfig } from '@weave-ai/shared';
 import { DEFAULT_WORKSPACE_MODELS, OcError, isWorkerOptionConfigured } from '@weave-ai/shared';
 
-export function catalogOverlayFilled(opts: DaemonModels['workerOptions']): opts is NonNullable<DaemonModels['workerOptions']> {
+/** A worker-options list that is non-empty — the signal a side of the precedence is "filled". */
+export function catalogFilled<T>(opts: readonly T[] | null | undefined): opts is readonly T[] {
   return Array.isArray(opts) && opts.length > 0;
 }
 
 export function effectiveModels(
   daemon: { models?: DaemonModels } | null | undefined,
   workspace: Pick<WorkspaceConfig, 'models'>,
-): WorkspaceModels {
-  const stored = workspace.models ?? DEFAULT_WORKSPACE_MODELS;
+): EffectiveModels {
+  const stored = workspace.models;
   const overlay = daemon?.models ?? {};
   return {
-    weaver: overlay.weaver ?? stored.weaver,
-    workers: overlay.workers ?? stored.workers,
-    workerOptions: catalogOverlayFilled(overlay.workerOptions) ? overlay.workerOptions : (stored.workerOptions ?? []),
-  };
-}
-
-export function modelsLocked(daemon: { models?: DaemonModels } | null | undefined): ModelsLocked {
-  const overlay = daemon?.models ?? {};
-  return {
-    weaver: overlay.weaver != null,
-    workers: overlay.workers != null,
-    workerOptions: catalogOverlayFilled(overlay.workerOptions),
+    weaver: stored?.weaver ?? overlay.weaver ?? DEFAULT_WORKSPACE_MODELS.weaver,
+    workers: stored?.workers ?? overlay.workers ?? DEFAULT_WORKSPACE_MODELS.workers,
+    workerOptions: catalogFilled(stored?.workerOptions) ? stored.workerOptions : (catalogFilled(overlay.workerOptions) ? overlay.workerOptions : []),
   };
 }
 
 /** Workspace config whose `models` block is already the effective one. Pass this to `modelSettingFor`. */
-export function modelsFor(ctx: { daemon?: { models?: DaemonModels }; config: Pick<WorkspaceConfig, 'models'> }): Pick<WorkspaceConfig, 'models'> {
+export function modelsFor(ctx: { daemon?: { models?: DaemonModels }; config: Pick<WorkspaceConfig, 'models'> }): { models: EffectiveModels } {
   return { models: effectiveModels(ctx.daemon, ctx.config) };
 }
 
 /** The setting that governs an agent of this kind, optionally given a worker's ticket. */
 export function modelSettingFor(
-  config: Pick<WorkspaceConfig, 'models'>,
+  config: { models: EffectiveModels },
   kind: AgentKind,
   ticket?: { workerModelId?: string | null } | null,
 ): ModelSetting {
-  const models = config.models ?? DEFAULT_WORKSPACE_MODELS;
+  const models = config.models;
   if (kind === 'weaver') return models.weaver;
   const id = ticket?.workerModelId;
   if (id) {

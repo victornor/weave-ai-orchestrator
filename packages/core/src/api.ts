@@ -438,18 +438,18 @@ export interface UsageService {
 }
 
 /**
- * The workspace's two model settings (VS-77, ADR 0011): the whole of model selection. `reconcile` is
- * called once per workspace at startup and raises the card a mixed-runtime migration left owing.
+ * The workspace's two model settings (VS-77, ADR 0011; VS-284): the whole of model selection.
+ * `reconcile` is called once per workspace at startup and raises the card a mixed-runtime
+ * migration left owing.
  */
 export interface ModelsService {
-  /** Effective settings after a daemon overlay (VS-185). */
-  get(): S.WorkspaceModels;
-  locked(): S.ModelsLocked;
-  /** `workerOptions` omitted keeps the existing catalog; an explicit array (including `[]`) replaces it (VS-162). Locked controls are not written. */
-  set(actor: Actor, next: S.WorkspaceModelsPut | S.WorkspaceModels): Promise<S.WorkspaceModels>;
+  /** Effective settings: the workspace's own configured value, else a filled daemon overlay, else the schema default (VS-284). */
+  get(): S.EffectiveModels;
+  /** `workerOptions` omitted keeps the existing catalog; an explicit array (including `[]`) replaces it (VS-162). Always writes what was asked (VS-284: nothing can refuse it on the daemon's account). */
+  set(actor: Actor, next: S.WorkspaceModelsPut | S.EffectiveModels): Promise<S.EffectiveModels>;
   reconcile(): void;
   /** Answer the migration's question: write the workers runtime and close the matter for good. */
-  settleWorkersRuntime(actor: Actor, runtime: string): Promise<S.WorkspaceModels>;
+  settleWorkersRuntime(actor: Actor, runtime: string): Promise<S.EffectiveModels>;
 }
 
 /** The current runtime account snapshots (PLAN §16.2): billing mode and plan limit windows per runtime. */

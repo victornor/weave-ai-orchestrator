@@ -5,8 +5,8 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createDecisionsService } from '../decisions/index.js';
-import { createModelsService, deriveModelSettings, hasModelSettings, migrationSummary, recordPendingMigration, WORKERS_RUNTIME_CORRELATION } from './index.js';
-import { effectiveModels, modelSettingFor, modelsLocked } from './resolve.js';
+import { createModelsService, demaskWorkspaceModels, deriveModelSettings, hasModelSettings, migrationSummary, recordPendingMigration, WORKERS_RUNTIME_CORRELATION } from './index.js';
+import { effectiveModels, modelSettingFor } from './resolve.js';
 import type { ModelsService } from '../api.js';
 import { OcError, type Decision } from '@weave-ai/shared';
 
@@ -64,7 +64,7 @@ describe('modelSettingFor', () => {
   });
 });
 
-describe('effectiveModels (VS-185)', () => {
+describe('effectiveModels (VS-284: workspace wins, daemon overlay is the fallback)', () => {
   const workspace = {
     models: {
       weaver: { runtime: 'claude', model: 'ws-conductor' },
@@ -72,6 +72,7 @@ describe('effectiveModels (VS-185)', () => {
       workerOptions: [{ id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' }],
     },
   };
+  const unconfigured = { models: { workerOptions: [] } };
   const overlayConductor = { runtime: 'claude', model: 'daemon-conductor' };
   const overlayWorkers = { runtime: 'gemini', model: 'daemon-workers' };
   const overlayCatalog = [{ id: 'strong', description: 'Heavy.', runtime: 'claude', model: 'opus' }];
@@ -79,30 +80,47 @@ describe('effectiveModels (VS-185)', () => {
   it('returns workspace values when every overlay is empty', () => {
     expect(effectiveModels({}, workspace)).toEqual(workspace.models);
     expect(effectiveModels({ models: { workerOptions: [] } }, workspace)).toEqual(workspace.models);
-    expect(modelsLocked({})).toEqual({ weaver: false, workers: false, workerOptions: false });
   });
 
-  it('applies a weaver overlay independently', () => {
-    const daemon = { models: { weaver: overlayConductor } };
-    expect(effectiveModels(daemon, workspace).weaver).toEqual(overlayConductor);
-    expect(effectiveModels(daemon, workspace).workers).toEqual(workspace.models.workers);
-    expect(effectiveModels(daemon, workspace).workerOptions).toEqual(workspace.models.workerOptions);
-    expect(modelsLocked(daemon)).toEqual({ weaver: true, workers: false, workerOptions: false });
+  it('a workspace setting wins even when a daemon overlay is also filled for the same control', () => {
+    const daemon = { models: { weaver: overlayConductor, workers: overlayWorkers } };
+    const models = effectiveModels(daemon, workspace);
+    expect(models.weaver).toEqual(workspace.models.weaver);
+    expect(models.workers).toEqual(workspace.models.workers);
   });
 
-  it('hides the workspace catalog only when the daemon catalog is non-empty', () => {
-    expect(effectiveModels({ models: { workerOptions: overlayCatalog } }, workspace).workerOptions).toEqual(overlayCatalog);
-    expect(effectiveModels({ models: { workerOptions: [] } }, workspace).workerOptions).toEqual(workspace.models.workerOptions);
-    expect(modelsLocked({ models: { workerOptions: overlayCatalog } }).workerOptions).toBe(true);
-    expect(modelsLocked({ models: { workerOptions: [] } }).workerOptions).toBe(false);
+  it('a filled daemon overlay governs a control the workspace has not configured', () => {
+    const daemon = { models: { weaver: overlayConductor, workers: overlayWorkers } };
+    expect(effectiveModels(daemon, unconfigured).weaver).toEqual(overlayConductor);
+    expect(effectiveModels(daemon, unconfigured).workers).toEqual(overlayWorkers);
   });
 
-  it('resolves a worker through the overlay catalog', () => {
+  it('falls back to the schema default when neither the workspace nor the daemon has configured a control', () => {
+    expect(effectiveModels({}, unconfigured)).toEqual({ weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
+  });
+
+  it('the workspace catalog wins, whole-list, over a non-empty daemon catalog', () => {
+    expect(effectiveModels({ models: { workerOptions: overlayCatalog } }, workspace).workerOptions).toEqual(workspace.models.workerOptions);
+  });
+
+  it('a filled daemon catalog governs only when the workspace catalog is empty', () => {
+    expect(effectiveModels({ models: { workerOptions: overlayCatalog } }, unconfigured).workerOptions).toEqual(overlayCatalog);
+    expect(effectiveModels({ models: { workerOptions: [] } }, unconfigured).workerOptions).toEqual([]);
+  });
+
+  it('resolves a worker through the workspace catalog before the overlay catalog', () => {
     const daemon = { models: { workers: overlayWorkers, workerOptions: overlayCatalog } };
     const models = effectiveModels(daemon, workspace);
+    expect(modelSettingFor({ models }, 'worker')).toEqual(workspace.models.workers);
+    expect(modelSettingFor({ models }, 'worker', { workerModelId: 'cheap' })).toEqual({ runtime: 'opencode', model: 'glm-4.6' });
+    expect(modelSettingFor({ models }, 'worker', { workerModelId: 'strong' })).toEqual(workspace.models.workers);
+  });
+
+  it('resolves a worker through the overlay catalog when the workspace has none', () => {
+    const daemon = { models: { workers: overlayWorkers, workerOptions: overlayCatalog } };
+    const models = effectiveModels(daemon, unconfigured);
     expect(modelSettingFor({ models }, 'worker')).toEqual(overlayWorkers);
     expect(modelSettingFor({ models }, 'worker', { workerModelId: 'strong' })).toEqual({ runtime: 'claude', model: 'opus' });
-    expect(modelSettingFor({ models }, 'worker', { workerModelId: 'cheap' })).toEqual(overlayWorkers);
   });
 });
 
@@ -178,6 +196,63 @@ describe('deriveModelSettings', () => {
   it('knows a document that has already been migrated', () => {
     expect(hasModelSettings({ models: { conductor: {}, workers: {} } })).toBe(true);
     expect(hasModelSettings({ defaults: { runtime: 'claude' } })).toBe(false);
+  });
+});
+
+describe('demaskWorkspaceModels (VS-284)', () => {
+  it('clears only the control a filled daemon overlay masks', () => {
+    const models = { weaver: { runtime: 'claude' as const, model: 'opus' }, workers: { runtime: 'claude' as const, model: 'sonnet' }, workerOptions: [] };
+    const result = demaskWorkspaceModels(models, { models: { workers: { runtime: 'opencode', model: 'deepseek-flash' } } });
+    expect(result.cleared).toEqual({ workers: true });
+    expect(result.models.workers).toBeUndefined();
+    expect(result.models.weaver).toEqual({ runtime: 'claude', model: 'opus' });
+  });
+
+  it('leaves a control untouched when the daemon overlay for it is empty', () => {
+    const models = { weaver: { runtime: 'claude' as const, model: 'opus' }, workers: { runtime: 'claude' as const, model: 'sonnet' }, workerOptions: [] };
+    const result = demaskWorkspaceModels(models, {});
+    expect(result.cleared).toEqual({});
+    expect(result.models).toEqual(models);
+  });
+
+  it('clears a non-empty catalog only when the daemon catalog is also non-empty', () => {
+    const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
+    const strong = { id: 'strong', description: 'Heavy.', runtime: 'claude', model: 'opus' };
+    const masked = demaskWorkspaceModels({ workerOptions: [cheap] }, { models: { workerOptions: [strong] } });
+    expect(masked.cleared).toEqual({ workerOptions: true });
+    expect(masked.models.workerOptions).toEqual([]);
+
+    const unmasked = demaskWorkspaceModels({ workerOptions: [cheap] }, { models: { workerOptions: [] } });
+    expect(unmasked.cleared).toEqual({});
+    expect(unmasked.models.workerOptions).toEqual([cheap]);
+  });
+
+  it('does nothing to a control the workspace never configured', () => {
+    const result = demaskWorkspaceModels({ workerOptions: [] }, { models: { weaver: { runtime: 'claude', model: 'opus' }, workers: { runtime: 'opencode', model: 'deepseek-flash' } } });
+    expect(result.cleared).toEqual({});
+    expect(result.models).toEqual({ workerOptions: [] });
+  });
+
+  it('preserves the effective value already in force, on this codebase\'s own real shape', () => {
+    // Straight from the conductor's review comment: workspace.yaml holds opus/sonnet, daemon.yaml
+    // overlays opus (weaver) and opencode/deepseek-flash (workers).
+    const stored = { weaver: { runtime: 'claude' as const, model: 'opus' }, workers: { runtime: 'claude' as const, model: 'sonnet' }, workerOptions: [] };
+    const daemon = { models: { weaver: { runtime: 'claude', model: 'opus', effort: 'high' }, workers: { runtime: 'opencode', model: 'deepseek-flash', effort: 'high' } } };
+
+    // Before this change: the daemon overlay already wins for both, so `workers` resolves to
+    // opencode/deepseek-flash — the old, pre-VS-284 precedence, computed by hand here since the
+    // old effectiveModels() no longer exists to call.
+    const beforeWorkers = daemon.models.workers;
+    expect(beforeWorkers).toEqual({ runtime: 'opencode', model: 'deepseek-flash', effort: 'high' });
+
+    const { models: demasked, cleared } = demaskWorkspaceModels(stored, daemon);
+    expect(cleared).toEqual({ weaver: true, workers: true });
+
+    // After: the workspace's own (now-cleared) value cannot win, so the daemon overlay still does —
+    // the same value, unchanged across the migration boundary.
+    const afterWorkers = effectiveModels(daemon, { models: demasked }).workers;
+    expect(afterWorkers).toEqual(beforeWorkers);
+    expect(effectiveModels(daemon, { models: demasked }).weaver).toEqual(daemon.models.weaver);
   });
 });
 
@@ -265,21 +340,29 @@ describe('the models service', () => {
     expect(models.get().weaver).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
   });
 
-  it('get() returns a daemon overlay and set() does not write a locked control (VS-185)', async () => {
-    await models.set(HUMAN, { weaver: { runtime: 'claude', model: 'stored-conductor' }, workers: { runtime: 'claude', model: 'stored-workers' } });
+  it('get() returns the workspace value over a daemon overlay for the same control (VS-284)', () => {
+    h.ctx.daemon.models = { weaver: { runtime: 'claude', model: 'daemon-conductor' } };
+    // The workspace has not configured its own weaver, so the daemon overlay governs.
+    expect(models.get().weaver.model).toBe('daemon-conductor');
+  });
+
+  it('set() always writes the workspace value, even while a daemon overlay is filled for the same control (VS-284)', async () => {
     h.ctx.daemon.models = { weaver: { runtime: 'claude', model: 'daemon-conductor' } };
     expect(models.get().weaver.model).toBe('daemon-conductor');
-    expect(models.get().workers.model).toBe('stored-workers');
-    expect(models.locked()).toEqual({ weaver: true, workers: false, workerOptions: false });
 
     const after = await models.set(HUMAN, {
-      weaver: { runtime: 'codex', model: 'should-not-stick' },
+      weaver: { runtime: 'codex', model: 'now-configured' },
       workers: { runtime: 'codex', model: 'new-workers' },
     });
-    expect(after.weaver.model).toBe('daemon-conductor');
+    // Unlike pre-VS-284 ("locked"), the write is never refused or discarded on the daemon's
+    // account: the workspace's own value now wins.
+    expect(after.weaver.model).toBe('now-configured');
     expect(after.workers.model).toBe('new-workers');
+    expect(models.get().weaver.model).toBe('now-configured');
+
     h.ctx.daemon.models = {};
-    expect(models.get().weaver.model).toBe('stored-conductor');
+    // Clearing the (already-overridden) overlay changes nothing for this workspace.
+    expect(models.get().weaver.model).toBe('now-configured');
     expect(models.get().workers.model).toBe('new-workers');
   });
 });

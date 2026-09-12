@@ -34,6 +34,11 @@ describe('startDaemon', () => {
     // VS-143: a throwaway config dir is isolated by default — see daemon-isolation/credential-scope.
     expect(daemon.workspaces.get('smoke')!.ctx.isolated).toBe(true);
     expect(daemon.workspaces.get('smoke')!.ctx.daemonConfigDir).toBe(configDir);
+    // VS-295: every loaded workspace gets its own push dispatcher, listening for decision.created.
+    expect(daemon.workspaces.get('smoke')!.push).not.toBeNull();
+    // VS-295: a fresh daemon generates its own VAPID key pair before anything else loads.
+    expect(existsSync(join(configDir, 'push-vapid.enc'))).toBe(true);
+    expect(existsSync(join(configDir, 'push-vapid.key'))).toBe(true);
 
     const health = await fetch(new URL('/api/health', daemon.loopbackUrl));
     expect(health.status).toBe(200);

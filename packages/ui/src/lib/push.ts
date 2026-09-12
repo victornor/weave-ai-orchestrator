@@ -10,7 +10,7 @@
  * later DELETE needs, and it is per device by nature, so it belongs beside the browser's own
  * subscription rather than in the workspace database.
  */
-import { pushPath, type PushConfig } from '@weave-ai/shared';
+import { pushPath, DEFAULT_PUSH_CATEGORIES, type PushCategory, type PushConfig } from '@weave-ai/shared';
 import { api } from '../api/client';
 
 const PREFIX = 'conductor.push';
@@ -51,10 +51,12 @@ function supported(): boolean {
 }
 
 /**
- * Ask for permission, read the daemon's push config, subscribe and register the subscription.
+ * Ask for permission, read the daemon's push config, subscribe and register the subscription with
+ * `categories` (the caller's current toggle state — defaulting to Settings' own defaults so a
+ * subscription made before the toggles are ever touched still gets what they promise).
  * Throws with a message worth showing: nothing here is caught and turned into a generic failure.
  */
-export async function enablePush(ws: string): Promise<void> {
+export async function enablePush(ws: string, categories: PushCategory[] = DEFAULT_PUSH_CATEGORIES): Promise<void> {
   if (!supported()) throw new Error('This browser cannot receive push notifications.');
 
   const permission = await Notification.requestPermission();
@@ -70,7 +72,21 @@ export async function enablePush(ws: string): Promise<void> {
   const subscription =
     existing ?? (await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeVapidKey(config.vapidPublicKey) }));
 
-  const { id } = await api.ws<{ id: string }>(ws, pushPath.subscriptions, { method: 'POST', body: subscription.toJSON() });
+  const { id } = await api.ws<{ id: string }>(ws, pushPath.subscriptions, { method: 'POST', body: { ...subscription.toJSON(), categories } });
+  remember(ws, id);
+}
+
+/**
+ * Re-registers this device's existing browser subscription with a new category selection — no
+ * unsubscribe/resubscribe round trip, since `POST /push/subscriptions` is an upsert keyed on the
+ * endpoint. A no-op if this device is not currently subscribed.
+ */
+export async function updatePushCategories(ws: string, categories: PushCategory[]): Promise<void> {
+  if (!supported()) return;
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (!subscription) return;
+  const { id } = await api.ws<{ id: string }>(ws, pushPath.subscriptions, { method: 'POST', body: { ...subscription.toJSON(), categories } });
   remember(ws, id);
 }
 

@@ -65,4 +65,22 @@ describe('push routes', () => {
     await fetch(pushPath.subscription(id), { method: 'DELETE', headers: authed() });
     await expect((await fetch(pushPath.subscriptions, { headers: authed() })).json()).resolves.toEqual([]);
   });
+
+  it('stores the categories a subscription asks for', async () => {
+    const { fetch } = app();
+    const created = await fetch(pushPath.subscriptions, post({ ...subscription, categories: ['decisions'] }));
+    const { id } = (await created.json()) as { id: string };
+
+    const listed = (await (await fetch(pushPath.subscriptions, { headers: authed() })).json()) as Array<{ id: string; categories: string[] }>;
+    expect(listed.find((s) => s.id === id)?.categories).toEqual(['decisions']);
+  });
+
+  it('defaults categories to the Settings toggle defaults when omitted', async () => {
+    const { fetch } = app();
+    const created = await fetch(pushPath.subscriptions, post(subscription));
+    const { id } = (await created.json()) as { id: string };
+
+    const listed = (await (await fetch(pushPath.subscriptions, { headers: authed() })).json()) as Array<{ id: string; categories: string[] }>;
+    expect(listed.find((s) => s.id === id)?.categories).toEqual(['decisions', 'landed']);
+  });
 });

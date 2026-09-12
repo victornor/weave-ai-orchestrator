@@ -29,6 +29,8 @@ import { createUpdateChecker, runningReleaseRoot } from './release-info.js';
 import { createUpgradeService } from './upgrade.js';
 import { ChannelManager } from './channels.js';
 import { WebhookDispatcher } from './webhooks.js';
+import { PushDispatcher } from './pushDispatcher.js';
+import { ensurePushKeys, type PushKeys } from './vapid.js';
 import type { AppDeps, WorkspaceRuntime } from './types.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -85,6 +87,11 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const daemonCfg = withListen(workspaceLoader.ensureFreshDaemonConfig(configDir), opts.listen);
   initLogger(daemonCfg.logLevel);
 
+  // Generated once per installation, never written back to daemon.yaml — see vapid.ts and
+  // AppDeps.pushKeys for why the private half stays off DaemonConfigSchema entirely.
+  const pushKeys = ensurePushKeys(configDir);
+  if (pushKeys) daemonCfg.push.vapidPublicKey = pushKeys.publicKey;
+
   const daemonDb = openDb(join(configDir, 'daemon.sqlite'));
   const auth = createAuthService(daemonDb, daemonCfg);
   const registries = createRegistries();
@@ -109,15 +116,15 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const deps: AppDeps = {
     auth, daemon: daemonCfg, workspaces, registries, listener: 'public',
     publicUrl, version: VERSION, uiDir: opts.uiDir ?? defaultUiDir(),
-    updates, upgrades, incidents, daemonConfigDir: configDir,
+    updates, upgrades, incidents, daemonConfigDir: configDir, pushKeys,
     onOperatorConfigured: () => onOperatorConfigured?.(),
   };
   loopback.setDeps({ ...deps, listener: 'loopback' });
 
-  const admin = makeAdmin(configDir, isolated, daemonCfg, registries, workspaces, loopback.url, hooks);
+  const admin = makeAdmin(configDir, isolated, daemonCfg, registries, workspaces, loopback.url, hooks, pushKeys);
   const registry = workspaceLoader.readRegistry(configDir);
   for (const entry of registry.workspaces) {
-    try { await loadWorkspaceInto(workspaces, entry.path, { daemon: daemonCfg, registries, loopbackUrl: loopback.url, daemonConfigDir: configDir, isolated, ...dirs() }, hooks); }
+    try { await loadWorkspaceInto(workspaces, entry.path, { daemon: daemonCfg, registries, loopbackUrl: loopback.url, daemonConfigDir: configDir, isolated, pushKeys, ...dirs() }, hooks); }
     catch (e) { log.error({ err: e, workspace: entry.id, path: entry.path }, 'workspace failed to load'); }
   }
 
@@ -173,6 +180,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     await Promise.all([...new Set(workspaces.values())].map(async (ws) => {
       await ws.channels?.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'channel manager stop failed'));
       await ws.webhooks?.stop().catch((e: unknown) => log.warn({ err: e, ws: ws.id }, 'webhook dispatcher stop failed'));
+      try { ws.push?.stop(); } catch (e) { log.warn({ err: e, ws: ws.id }, 'push dispatcher stop failed'); }
       let drained = await ws.services.dispatcher.stop(drainGraceMs).catch((e: unknown) => { log.warn({ err: e, ws: ws.id }, 'dispatcher stop failed'); return false; });
       if (!drained) {
         log.warn({ ws: ws.id }, 'drain grace period exhausted; cancelling running turns');
@@ -206,13 +214,13 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
 async function loadWorkspaceInto(
   workspaces: Map<string, WorkspaceRuntime>,
   path: string,
-  opts: { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; daemonConfigDir: string; isolated: boolean },
+  opts: { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; daemonConfigDir: string; isolated: boolean; pushKeys: PushKeys | null },
   hooks: Array<{ events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }>,
 ): Promise<WorkspaceRuntime> {
   const ctx: WorkspaceContext = await workspaceLoader.loadWorkspace(path, opts);
   const services: CoreServices = createCore(ctx);
   // `:ws` in the API is the slug from workspace.yaml; the db id is a ULID. Both resolve.
-  const runtime: WorkspaceRuntime = { id: ctx.config.id, ctx, services, channels: null, webhooks: null };
+  const runtime: WorkspaceRuntime = { id: ctx.config.id, ctx, services, channels: null, webhooks: null, push: null };
   workspaces.set(ctx.config.id, runtime);
   if (ctx.workspaceId !== ctx.config.id) workspaces.set(ctx.workspaceId, runtime);
 
@@ -239,6 +247,11 @@ async function loadWorkspaceInto(
   const webhooks = new WebhookDispatcher(ctx);
   runtime.webhooks = webhooks;
   try { webhooks.start(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'webhook dispatcher failed to start'); }
+
+  const push = new PushDispatcher(ctx, services, () => opts.pushKeys);
+  runtime.push = push;
+  try { push.start(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'push dispatcher failed to start'); }
+
   log.info({ workspace: ctx.workspaceId, root: ctx.paths.root }, 'workspace loaded');
   return runtime;
 }
@@ -255,9 +268,9 @@ export async function cancelRunningRuns(ws: WorkspaceRuntime): Promise<void> {
 
 function makeAdmin(
   configDir: string, isolated: boolean, daemon: DaemonConfig, registries: Registries, workspaces: Map<string, WorkspaceRuntime>,
-  loopbackUrl: string, hooks: Array<{ events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }>,
+  loopbackUrl: string, hooks: Array<{ events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }>, pushKeys: PushKeys | null,
 ): WorkspaceAdmin {
-  const opts = () => ({ daemon, registries, loopbackUrl, daemonConfigDir: configDir, isolated, ...dirs() });
+  const opts = () => ({ daemon, registries, loopbackUrl, daemonConfigDir: configDir, isolated, pushKeys, ...dirs() });
   const remember = (id: string, path: string): void => {
     const registry = workspaceLoader.readRegistry(configDir);
     if (!registry.workspaces.some((w) => w.id === id)) registry.workspaces.push({ id, path });
@@ -297,6 +310,7 @@ function makeAdmin(
         try { ws.services.supervisor.stop(); } catch { /* ignore */ }
         try { await ws.channels?.stop(); } catch { /* ignore */ }
         try { await ws.webhooks?.stop(); } catch { /* ignore */ }
+        try { ws.push?.stop(); } catch { /* ignore */ }
         await ws.services.jobs.stop().catch(() => undefined);
         for (const [key, rt] of [...workspaces.entries()]) if (rt === ws) workspaces.delete(key);
         try { ws.ctx.db.close(); } catch { /* ignore */ }

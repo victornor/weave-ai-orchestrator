@@ -21,7 +21,7 @@ function boot(): { deps: AppDeps; runtime: WorkspaceRuntime; harness: ReturnType
   const harness = makeHarness();
   cleanup = harness.cleanup;
   const services = createCore(harness.ctx);
-  const runtime: WorkspaceRuntime = { id: harness.workspaceId, ctx: harness.ctx, services, channels: null, webhooks: null };
+  const runtime: WorkspaceRuntime = { id: harness.workspaceId, ctx: harness.ctx, services, channels: null, webhooks: null, push: null };
   const auth = { hasOperator: () => true, verify: () => ({ sessionId: 's1', operatorId: 'op1', kind: 'cli' as const }), totpEnabled: () => false } as unknown as AppDeps['auth'];
   const deps: AppDeps = {
     auth, daemon: DaemonConfigSchema.parse({}), workspaces: new Map([[harness.workspaceId, runtime]]),

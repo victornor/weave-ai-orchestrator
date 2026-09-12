@@ -310,4 +310,14 @@ export const CHANGELOG_MEASURE_KIND: ChangelogKind = 'landed';
 export const LOG_DOMAINS = ['daemon', 'wake', 'run', 'runtime', 'ticket', 'openspec', 'decision', 'channel', 'knowledge', 'usage', 'plugin', 'http', 'auth', 'worktree', 'surface', 'supervisor', 'routine'] as const;
 export type LogDomain = (typeof LOG_DOMAINS)[number];
 
+/**
+ * Web push notification categories (VS-295), matching Settings' three toggles. `decisions` is the
+ * only one any event source calls `sendPush` for today; a subscription still stores its choice for
+ * `landed`/`everything` so turning them on costs nothing and is forward-compatible.
+ */
+export const PUSH_CATEGORIES = ['decisions', 'landed', 'everything'] as const;
+export type PushCategory = (typeof PUSH_CATEGORIES)[number];
+/** What a subscription that has never touched the toggles gets, matching Settings' own defaults. */
+export const DEFAULT_PUSH_CATEGORIES: PushCategory[] = ['decisions', 'landed'];
+
 export { makeEnum };

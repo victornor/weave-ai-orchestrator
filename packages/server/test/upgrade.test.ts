@@ -69,7 +69,7 @@ function fixture(): Fixture {
       id,
       ctx: { workspaceId: id, db: wsDb },
       services: { dispatcher, runs: { list: () => ({ items: (opts.runIds ?? []).map((r) => ({ id: r })), total: (opts.runIds ?? []).length }) } },
-      channels: null, webhooks: null,
+      channels: null, webhooks: null, push: null,
     } as unknown as WorkspaceRuntime;
     workspaces.set(id, runtime);
     return dispatcher;
@@ -569,7 +569,7 @@ describe('the idle gate against a real dispatcher', () => {
     h.services.dispatcher = dispatcher;
 
     const workspaces = new Map<string, WorkspaceRuntime>([['test', {
-      id: 'test', ctx: h.ctx, services: h.deps(), channels: null, webhooks: null,
+      id: 'test', ctx: h.ctx, services: h.deps(), channels: null, webhooks: null, push: null,
     } as unknown as WorkspaceRuntime]]);
     svc = createUpgradeService({
       db: fx.db,

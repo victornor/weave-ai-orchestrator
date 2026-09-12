@@ -52,7 +52,7 @@ import {
 } from '../api/hooks';
 import { api, getWorkspaceId, setToken } from '../api/client';
 import { qk } from '../api/keys';
-import type { PresentationBlock, Project } from '@weave-ai/shared';
+import type { PresentationBlock, Project, PushCategory } from '@weave-ai/shared';
 import { ProjectConfigSchema, WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@weave-ai/shared';
 import type * as T from '../api/types';
 import type { TotpSetup } from '../api/types';
@@ -68,7 +68,7 @@ import { workspaceYolo } from '../lib/yolo';
 import { isWorkerConflict, liveWorkerCount, liveWorkersReason, MoveProjectError } from '../lib/moveProject';
 import { SETTINGS_AREAS, sectionForRoute, sectionsOfArea } from '../lib/settings';
 import type { SettingsAreaKey } from '../lib/settings';
-import { disablePush, enablePush, subscriptionId } from '../lib/push';
+import { disablePush, enablePush, subscriptionId, updatePushCategories } from '../lib/push';
 import { ago } from '../lib/format';
 
 /** The scope line each settings page shows beside its title, so several workspaces cannot make
@@ -1845,10 +1845,12 @@ function SecuritySection(): React.ReactElement {
  * is what keeps the page at two areas without filing per-device state under either of them.
  */
 
+/** `wired: false` means nothing calls `sendPush` for this category yet — the toggle still saves its
+ * state (so turning it on costs nothing and is forward-compatible), it just says so honestly. */
 const NOTIFS = [
-  { key: 'decisions', label: 'Decisions', detail: 'Plans, merges, hires, worker questions', def: true },
-  { key: 'landed', label: 'Landed work', detail: 'A PR merged, a ticket closed', def: true },
-  { key: 'everything', label: 'Everything else', detail: 'Status changes, run starts, curation', def: false },
+  { key: 'decisions', label: 'Decisions', detail: 'Plans, merges, hires, worker questions', def: true, wired: true },
+  { key: 'landed', label: 'Landed work', detail: 'A PR merged, a ticket closed', def: true, wired: false },
+  { key: 'everything', label: 'Everything else', detail: 'Status changes, run starts, curation', def: false, wired: false },
 ] as const;
 
 function DictationSection(): React.ReactElement {
@@ -1929,6 +1931,9 @@ function DeviceSection(): React.ReactElement {
   const [silentTurns, setSilentTurns] = useState(readShowSilentTurns);
   const dictationDiagnostics = useDictationDiagnosticsEnabled();
 
+  /** Every category currently toggled on, in the shape the subscription stores it. */
+  const activeCategories = (s: Record<string, boolean>): PushCategory[] => NOTIFS.filter((n) => s[n.key] ?? n.def).map((n) => n.key);
+
   const save = (key: string, on: boolean): void => {
     const next = { ...state, [key]: on };
     setState(next);
@@ -1937,12 +1942,15 @@ function DeviceSection(): React.ReactElement {
     } catch {
       /* private mode */
     }
+    // Already subscribed: push the new selection to the daemon so delivery is filtered by it —
+    // no unsubscribe/resubscribe round trip needed (`updatePushCategories` upserts in place).
+    if (enabled && ws !== '') void updatePushCategories(ws, activeCategories(next));
   };
 
   /** Whatever went wrong — a blocked permission, a daemon without VAPID keys — the human reads it. */
   const run = (what: 'on' | 'off'): void => {
     setBusy(true);
-    const done = what === 'on' ? enablePush(ws) : disablePush(ws);
+    const done = what === 'on' ? enablePush(ws, activeCategories(state)) : disablePush(ws);
     done
       .then(() => {
         setEnabled(what === 'on');
@@ -2045,7 +2053,10 @@ function DeviceSection(): React.ReactElement {
             <label key={n.key} className="flex items-center gap-3 px-3.5 py-3">
               <span className="min-w-0 flex-1">
                 <span className="block text-meta text-text-1">{n.label}</span>
-                <span className="block text-micro text-text-3">{n.detail}</span>
+                <span className="block text-micro text-text-3">
+                  {n.detail}
+                  {n.wired ? null : ' — not sent yet'}
+                </span>
               </span>
               <button
                 type="button"

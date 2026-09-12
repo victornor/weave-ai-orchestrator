@@ -12,6 +12,7 @@ export { createPullRequestsService, PR_CACHE_TTL_MS, PR_LIST_LIMIT, PR_WINDOW_DA
 export { createThreadsService, REPLY_EXCERPT_CHARS, resolveOutboundAttachments, type OutboundAttachmentInput, type ResolvedOutboundAttachment } from './threads/index.js';
 export { createHistoryReader, HISTORY_GIT_SUBCOMMANDS } from './projects/history.js';
 export { createAuthService, openDaemonDb, DAEMON_DB_FILE } from './auth/index.js';
+export { createSecretStore, type SecretStore } from './secrets/store.js';
 export {
   createIncidentsService, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX,
   type IncidentsService, type IncidentCreateInput, type IncidentListQuery, type IncidentGetScope, type IncidentResolveInput,

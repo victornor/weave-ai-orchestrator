@@ -14,6 +14,9 @@ function message(over: Partial<ThreadMessage> & Pick<ThreadMessage, 'id'>): Thre
 
 const dispatched = (over = {}) => ticket({ createdRunId: 'run_1', assigneeRoleId: 'r1', workerId: null, ...over });
 
+/** A decision card as it travels on a message's opaque `parts` array. */
+const cardPart = (id: string) => ({ type: 'card', title: 't', body: 'b', actions: [], ref: { kind: 'decision', id } });
+
 describe('dispatchStatus', () => {
   it('reads the worker while it is still live', () => {
     expect(dispatchStatus(ticket({ status: 'in_progress' }), agent({ status: 'running' }))).toBe('working');
@@ -113,10 +116,9 @@ describe('chatEntries — decisions', () => {
 
   it('anchors a decision to the message of the run that raised it', () => {
     const messages = [message({ id: 'm1' }), message({ id: 'm2', runId: 'run_2' })];
-    const { entries, unanchoredDecisions } = chatEntries(messages, [], [], [asked({ id: 'd1' })]);
+    const { entries } = chatEntries(messages, [], [], [asked({ id: 'd1' })]);
     expect(entries[0]!.decisions.map((d) => d.id)).toEqual(['d1']);
     expect(entries[1]!.decisions).toEqual([]);
-    expect(unanchoredDecisions).toEqual([]);
   });
 
   it('anchors to the last message of a run that sent several', () => {
@@ -126,13 +128,29 @@ describe('chatEntries — decisions', () => {
     expect(entries[1]!.decisions.map((d) => d.id)).toEqual(['d1']);
   });
 
-  it('leaves a decision with no matching run unanchored', () => {
+  it('anchors a decision to the message that carries its card, not the raising run', () => {
+    const messages = [
+      message({ id: 'm_run', runId: 'run_1' }),
+      message({ id: 'm_card', runId: null, parts: [cardPart('d1')] }),
+    ];
+    const { entries } = chatEntries(messages, [], [], [asked({ id: 'd1' })]);
+    expect(entries[0]!.decisions).toEqual([]);
+    expect(entries[1]!.decisions.map((d) => d.id)).toEqual(['d1']);
+  });
+
+  it('anchors a decision whose raising run left no message, by its card message', () => {
+    const messages = [message({ id: 'm_card', runId: null, parts: [cardPart('d1')] })];
+    const answered = asked({ id: 'd1', askedInRunId: 'run_worker', status: 'answered', answerKey: 'file' });
+    const { entries } = chatEntries(messages, [], [], [answered]);
+    expect(entries[0]!.decisions.map((d) => d.id)).toEqual(['d1']);
+  });
+
+  it('leaves a decision with neither a card nor a raising-run message out of the entries', () => {
     const messages = [message({ id: 'm1' })];
     const loose = asked({ id: 'd_worker', askedInRunId: 'run_worker' });
     const noRun = asked({ id: 'd_none', askedInRunId: null });
-    const { entries, unanchoredDecisions } = chatEntries(messages, [], [], [loose, noRun]);
+    const { entries } = chatEntries(messages, [], [], [loose, noRun]);
     expect(entries[0]!.decisions).toEqual([]);
-    expect(unanchoredDecisions.map((d) => d.id)).toEqual(['d_none', 'd_worker']);
   });
 
   it('keeps an answered decision anchored where it was asked', () => {
@@ -159,8 +177,7 @@ describe('chatEntries — decisions', () => {
   });
 
   it('defaults to no decisions when none are passed', () => {
-    const { entries, unanchoredDecisions } = chatEntries([message({ id: 'm1' })], [], []);
+    const { entries } = chatEntries([message({ id: 'm1' })], [], []);
     expect(entries[0]!.decisions).toEqual([]);
-    expect(unanchoredDecisions).toEqual([]);
   });
 });

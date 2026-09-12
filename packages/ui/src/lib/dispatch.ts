@@ -3,13 +3,18 @@
  * that turn produced: the work it filed (spec `conductor-chat/dispatch-labels`) and the decisions it
  * raised for the human (spec `human-decisions/option-cards`).
  *
- * Both anchor on a run. The conductor does not spawn workers — it files a ticket and the supervisor
- * spawns for it, outside any run — so a dispatch is attributed to the run that created its ticket; a
- * decision is attributed to the run that raised it. Either is matched against the run behind an
- * outbound message in the thread.
+ * A dispatch anchors on a run: the conductor does not spawn workers — it files a ticket and the
+ * supervisor spawns for it, outside any run — so a dispatch is attributed to the run that created
+ * its ticket, matched against the run behind an outbound message in the thread.
+ *
+ * A decision anchors on the message that carried its card, by the card part's `ref.id`, before the
+ * run that raised it (VS-309). The channel manager pushes every human-owned decision to the thread
+ * as a card message, and that message is the decision's own durable home; the raising run is only a
+ * fallback, because most decisions (every worker's) have no message of their own.
  */
 import type { Agent, AgentStatus, Decision, RunTrace, Ticket, ThreadMessage, UiStatus } from '@weave-ai/shared';
 import { agentUiStatus, isActiveRun, ticketUiStatus } from '@weave-ai/shared';
+import { decisionCardPartsOf } from '@weave-ai/render';
 
 /** A worker in one of these has stopped; the ticket is then the honest record of how the work ended. */
 const FINISHED: readonly AgentStatus[] = ['done', 'retired'];
@@ -33,8 +38,6 @@ export interface ChatEntries {
   entries: ChatEntry[];
   /** Live workers no message in the thread accounts for; they keep the row below the conversation. */
   unattributed: Agent[];
-  /** Decisions no message in the thread accounts for; an open one is pinned above the composer. */
-  unanchoredDecisions: Decision[];
 }
 
 /**
@@ -95,19 +98,24 @@ export function chatEntries(messages: ThreadMessage[], tickets: Ticket[], worker
     anchored.add(ticket.id);
   }
 
-  // A decision is anchored by the run that raised it, through the same map: once it is answered, the
-  // record of what was decided reads under the message that turn produced. While it is still open the
-  // chat pins it above the composer instead, so the anchor is where it lands, not where it waits.
+  // A decision's own message is the one whose card names it, by `ref.id`; the run that raised it is
+  // the fallback for a message shape with no card part. That is what lets an answered decision whose
+  // raising run left no message still read under the message it was pushed as. A decision with
+  // neither anchor is not part of the conversation: while it is open the chat pins it from the
+  // decisions query, and once answered it is not rendered.
+  const cardAnchors = new Map<string, string>();
+  for (const message of messages) {
+    for (const part of decisionCardPartsOf(message.parts)) {
+      if (!cardAnchors.has(part.ref.id)) cardAnchors.set(part.ref.id, message.id);
+    }
+  }
+
   const decisionsByMessage = new Map<string, Decision[]>();
-  const unanchoredDecisions: Decision[] = [];
   for (const decision of [...decisions].sort((a, b) =>
     a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt),
   )) {
-    const messageId = decision.askedInRunId ? byRun.get(decision.askedInRunId) : undefined;
-    if (!messageId) {
-      unanchoredDecisions.push(decision);
-      continue;
-    }
+    const messageId = cardAnchors.get(decision.id) ?? (decision.askedInRunId ? byRun.get(decision.askedInRunId) : undefined);
+    if (!messageId) continue;
     const list = decisionsByMessage.get(messageId) ?? [];
     list.push(decision);
     decisionsByMessage.set(messageId, list);
@@ -120,7 +128,6 @@ export function chatEntries(messages: ThreadMessage[], tickets: Ticket[], worker
       decisions: decisionsByMessage.get(message.id) ?? [],
     })),
     unattributed: workers.filter((w) => !FINISHED.includes(w.status) && !(w.ticketId && anchored.has(w.ticketId))),
-    unanchoredDecisions,
   };
 }
 

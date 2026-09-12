@@ -12,7 +12,7 @@ or later moved to.
 A worker home's skills SHALL be installed under the skill path of the runtime that is actually resolved
 for that agent at the time its home is rendered — never a runtime that was resolved on some earlier
 render and has since gone stale. Each shipped skill SHALL be installed only for the agent kinds its
-`skills/manifest.json` entry declares as its audience (`worker`, `conductor`, or `all` for both).
+`skills/manifest.json` entry declares as its audience (`worker`, `weaver`, or `all` for both).
 
 #### Scenario: A freshly rendered worker home gets skills at its resolved runtime's path
 
@@ -30,7 +30,7 @@ render and has since gone stale. Each shipped skill SHALL be installed only for 
 #### Scenario: A conductor-audience skill never lands in a worker home
 
 - **WHEN** a worker's home is rendered
-- **THEN** no skill whose `skills/manifest.json` audience is `conductor` is installed in that home
+- **THEN** no skill whose `skills/manifest.json` audience is `weaver` is installed in that home
 
 ### Requirement: A worker home re-installs skills when its resolved runtime changes after the home exists
 

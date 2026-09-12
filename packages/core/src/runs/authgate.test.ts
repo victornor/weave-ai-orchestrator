@@ -8,7 +8,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
-import type { Agent, Decision } from '@weave-ai/shared';
+import { DEFAULT_MODEL_SETTING, type Agent, type Decision } from '@weave-ai/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAccountsService } from '../usage/accounts.js';
 import { createDispatcher } from './dispatcher.js';
@@ -313,8 +313,8 @@ describe('a login pause outliving a runtime the workspace abandoned', () => {
       ...h.ctx.config,
       models: {
         ...h.ctx.config.models,
-        weaver: { ...h.ctx.config.models.weaver, runtime },
-        workers: { ...h.ctx.config.models.workers, runtime },
+        weaver: { ...(h.ctx.config.models.weaver ?? DEFAULT_MODEL_SETTING), runtime },
+        workers: { ...(h.ctx.config.models.workers ?? DEFAULT_MODEL_SETTING), runtime },
       },
     });
   };

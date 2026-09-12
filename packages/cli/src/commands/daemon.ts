@@ -410,7 +410,7 @@ when the daemon is not answering and has to be replaced from here.`)
       const result = await client.put<DaemonModelsView>('/api/daemon/models', { [field]: next });
       emit(result, () => write(`${style.ok('updated')} ${setting} overlay = ${describeSetting(result[field])}`));
     }));
-  const overlayOptions = daemonModels.command('options').description('named worker-model options that override every workspace catalog');
+  const overlayOptions = daemonModels.command('options').description('named worker-model options that are the default for a workspace with no catalog of its own (VS-284)');
   overlayOptions
     .command('add')
     .requiredOption('--id <id>', 'kebab-case id')

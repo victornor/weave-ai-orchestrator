@@ -2,7 +2,7 @@
  * The workspace's two model settings as a service (VS-77, ADR 0011): read them, change one, and
  * settle the question a mixed-runtime migration left open.
  */
-import { OcError, WorkspaceModelsSchema, type ModelsLocked, type WorkspaceModels, type WorkspaceModelsPut } from '@weave-ai/shared';
+import { DEFAULT_MODEL_SETTING, OcError, WorkspaceModelsSchema, type EffectiveModels, type WorkspaceModels, type WorkspaceModelsPut } from '@weave-ai/shared';
 import type { Db } from '@weave-ai/db';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, ModelsService } from '../api.js';
@@ -10,9 +10,9 @@ import { recordActivity } from '../events.js';
 import { releaseLoginPausesForAbandonedRuntimes } from '../runs/authgate.js';
 import { migrationSummary, type ModelMigration } from './migrate.js';
 
-export { effectiveModels, modelSettingFor, modelsFor, modelsLocked, workerOptionRuntimes } from './resolve.js';
-import { effectiveModels, modelsLocked } from './resolve.js';
-export { deriveModelSettings, hasModelSettings, migrationSummary, type ModelMigration, type RoleRuntimeRow, type WorkersRule } from './migrate.js';
+export { effectiveModels, modelSettingFor, modelsFor, workerOptionRuntimes } from './resolve.js';
+import { effectiveModels } from './resolve.js';
+export { demaskWorkspaceModels, deriveModelSettings, hasModelSettings, migrationSummary, type DemaskResult, type ModelMigration, type RoleRuntimeRow, type WorkersRule } from './migrate.js';
 
 /** The `meta` row migration 0012 leaves behind: what the roles were running on before it dropped the columns. */
 export const ROLE_RUNTIMES_META_KEY = 'vs77_role_runtimes';
@@ -51,25 +51,21 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
   const log = ctx.log('daemon');
 
   const service: ModelsService = {
-    get(): WorkspaceModels {
+    get(): EffectiveModels {
       return effectiveModels(ctx.daemon, ctx.config);
     },
 
-    locked(): ModelsLocked {
-      return modelsLocked(ctx.daemon);
-    },
-
-    async set(actor: Actor, next: WorkspaceModelsPut | WorkspaceModels): Promise<WorkspaceModels> {
-      const locked = modelsLocked(ctx.daemon);
+    async set(actor: Actor, next: WorkspaceModelsPut | EffectiveModels): Promise<EffectiveModels> {
+      // VS-284: a workspace's own setting always wins over a daemon overlay now, so a write here
+      // is never refused or silently discarded on the daemon's account — it always writes what
+      // was asked, exactly as any other workspace config write does.
       const stored = ctx.config.models;
-      const workerOptions = locked.workerOptions
-        ? (stored.workerOptions ?? [])
-        : ('workerOptions' in next && next.workerOptions !== undefined
-          ? next.workerOptions
-          : (stored.workerOptions ?? []));
+      const workerOptions = 'workerOptions' in next && next.workerOptions !== undefined
+        ? next.workerOptions
+        : (stored.workerOptions ?? []);
       const parsed = WorkspaceModelsSchema.safeParse({
-        weaver: locked.weaver ? stored.weaver : next.weaver,
-        workers: locked.workers ? stored.workers : next.workers,
+        weaver: next.weaver,
+        workers: next.workers,
         workerOptions,
       });
       if (!parsed.success) {
@@ -96,7 +92,7 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
       try { releaseLoginPausesForAbandonedRuntimes(ctx, deps); } catch (e) { log.error({ err: String(e) }, 'could not release login pauses for abandoned runtimes'); }
       const pending = readPending(ctx);
       if (!pending) return;
-      const chosen = pending.chosen ?? ctx.config.models.workers.runtime;
+      const chosen = pending.chosen ?? effectiveModels(ctx.daemon, ctx.config).workers.runtime;
       const counts = pending.counts ?? [];
       // One card per workspace, and a restart must not replace it with a fresh one: `create` would
       // supersede the open card and raise a second, so an existing one ends the turn here.
@@ -123,8 +119,13 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
       log.info({ chosen, counts }, 'asked which runtime the workers setting should hold');
     },
 
-    async settleWorkersRuntime(actor: Actor, runtime: string): Promise<WorkspaceModels> {
-      const models = await service.set(actor, { ...ctx.config.models, workers: { ...ctx.config.models.workers, runtime } });
+    async settleWorkersRuntime(actor: Actor, runtime: string): Promise<EffectiveModels> {
+      // This only runs to answer the "roles disagreed" migration card, so the workspace already
+      // has a concrete (if just-derived) workers setting in the normal case; the
+      // `DEFAULT_MODEL_SETTING` fallback covers the case where a VS-284 demasking pass cleared it
+      // because the daemon also held an overlay — the human is now making a deliberate choice,
+      // which is exactly what should win.
+      const models = await service.set(actor, { ...ctx.config.models, weaver: effectiveModels(ctx.daemon, ctx.config).weaver, workers: { ...(ctx.config.models.workers ?? DEFAULT_MODEL_SETTING), runtime } });
       writeSettings(ctx.db, ctx.workspaceId, (s) => { delete s[MIGRATION_SETTINGS_KEY]; });
       return models;
     },

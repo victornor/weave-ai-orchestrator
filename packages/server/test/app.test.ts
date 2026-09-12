@@ -989,7 +989,7 @@ describe('daemon model overlays (VS-185)', () => {
     await expect(res.json()).resolves.toEqual({ weaver: null, workers: null, workerOptions: null });
   });
 
-  it('PUTs conductor, persists, and GET /models is locked without rebuilding deps', async () => {
+  it('PUTs conductor, persists, and GET /models reflects it as the workspace default (VS-284)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ac-dm-'));
     writeFileSync(join(dir, 'daemon.yaml'), 'version: 1\n');
     const { h, fetch } = app({ daemonConfigDir: dir });
@@ -1006,7 +1006,8 @@ describe('daemon model overlays (VS-185)', () => {
     await expect(got.json()).resolves.toEqual({ weaver: setting, workers: null, workerOptions: null });
 
     const ws = await fetch('/api/w/ws1/models', { headers: authed() });
-    await expect(ws.json()).resolves.toMatchObject({ weaver: setting, locked: { weaver: true, workers: false, workerOptions: false } });
+    // The workspace has not configured its own conductor, so the daemon overlay governs.
+    await expect(ws.json()).resolves.toMatchObject({ weaver: setting });
     rmSync(dir, { recursive: true, force: true });
   });
 

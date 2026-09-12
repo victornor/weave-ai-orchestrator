@@ -221,14 +221,14 @@ describe('Settings — the two model settings', () => {
     ]);
   });
 
-  it('disables a locked weaver control (VS-185)', () => {
-    state.models = {
-      ...state.models,
-      locked: { weaver: true, workers: false, workerOptions: false },
-    };
+  it('a workspace control is never disabled, even while a daemon overlay is filled for it (VS-284)', () => {
+    // `useModels()` already returns the effective value; a filled daemon overlay for weaver would
+    // surface here as `current.weaver` reflecting the overlay, never as a `locked` flag.
     openModels();
-    expect(screen.getByLabelText('Conductor runtime')).toBeDisabled();
+    expect(screen.getByLabelText('Conductor runtime')).not.toBeDisabled();
     expect(screen.getByLabelText('Workers runtime')).not.toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Conductor runtime'), { target: { value: 'codex' } });
+    expect(state.saved.at(-1)?.weaver.runtime).toBe('codex');
     fireEvent.change(screen.getByLabelText('Workers runtime'), { target: { value: 'codex' } });
     expect(state.saved.at(-1)?.workers.runtime).toBe('codex');
   });

@@ -17,7 +17,7 @@ import { getLogger } from '../logger.js';
 import { registerBuiltinWorktreeProviders, writeWtConfig } from '../worktrees/index.js';
 import { registerBuiltinForges } from '../forge/index.js';
 import {
-  ROLE_RUNTIMES_META_KEY, deriveModelSettings, effectiveModels, hasModelSettings, migrationLogFields, migrationSummary,
+  ROLE_RUNTIMES_META_KEY, demaskWorkspaceModels, deriveModelSettings, effectiveModels, hasModelSettings, migrationLogFields, migrationSummary,
   recordPendingMigration, type RoleRuntimeRow,
 } from '../models/index.js';
 import { createSecretStore } from '../secrets/store.js';
@@ -283,6 +283,24 @@ class Loader implements WorkspaceLoader {
         log.info({ patch: plan.patch }, 'telegram allowlist migrated');
       }
       db.run('INSERT INTO meta (key, value) VALUES (?, ?)', ['telegram_allowlist_migrated', '1']);
+    }
+
+    // VS-284: precedence inverted — a workspace's own setting now wins over a filled daemon
+    // overlay, where the overlay used to win. A stored value that a filled overlay was already
+    // masking had no observable effect under the old precedence, so it is not a deliberate choice
+    // worth keeping; clear it once here so the overlay keeps governing across the upgrade instead
+    // of the workspace's previously-inert value silently starting to win. Runs once per workspace,
+    // after the VS-77 migration above (so it always sees the two-settings shape) and before
+    // `effectiveModels` is computed below.
+    const demaskMigrated = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'vs284_masked_settings_cleared'");
+    if (!demaskMigrated) {
+      const { models: demasked, cleared } = demaskWorkspaceModels(config.models, opts.daemon);
+      if (Object.keys(cleared).length > 0) {
+        config.models = demasked;
+        writeWorkspaceYaml(file, unresolveEnvRefs(config, envBack));
+        log.info({ cleared, daemonModels: opts.daemon?.models }, 'workspace model settings masked by a filled daemon overlay were cleared (VS-284)');
+      }
+      db.run('INSERT INTO meta (key, value) VALUES (?, ?)', ['vs284_masked_settings_cleared', '1']);
     }
 
     // Per-workspace runtime config homes (CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_CONFIG_HOME …).

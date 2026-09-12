@@ -21,7 +21,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       treeshake: {
-        // @agent-conductor/shared and /render are pure: constants, mappers, zod
+        // @weave-ai/shared and /render are pure: constants, mappers, zod
         // schemas and view-model functions the web app never touches. Declaring
         // them side-effect-free lets the unused halves (config/report schemas,
         // and zod with them) drop out.

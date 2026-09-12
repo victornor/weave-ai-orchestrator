@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Agent } from '@agent-conductor/shared';
-import { FakeRuntime, type RuntimeAdapter } from '@agent-conductor/runtime-sdk';
+import type { Agent } from '@weave-ai/shared';
+import { FakeRuntime, type RuntimeAdapter } from '@weave-ai/runtime-sdk';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { skillsFor, renderHome, ensureHomeCurrent } from './home.js';
 
@@ -102,7 +102,7 @@ describe('ensureHomeCurrent re-renders on a runtime change (VS-189)', () => {
     const result = await ensureHomeCurrent(h.ctx, h.deps, agent);
     expect(result.rerendered).toBe(true);
     expect(install).toHaveBeenCalledTimes(1);
-    expect(existsSync(join(agent.homePath, '.claude/skills', 'agent-conductor-worker', 'SKILL.md'))).toBe(false); // FakeRuntime install is a spy, not a real writer
+    expect(existsSync(join(agent.homePath, '.claude/skills', 'weave-ai-worker', 'SKILL.md'))).toBe(false); // FakeRuntime install is a spy, not a real writer
   });
 });
 

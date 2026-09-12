@@ -116,7 +116,7 @@ export function ProjectOverviewRoute(): React.ReactElement {
  * A project that is `in_sync` renders nothing (VS-131, criterion 4). `behind` is the routine case —
  * an ordinary merge landing on the remote before the next check catches it up — so it gets the same
  * unalarming tone as `project.status`'s `modified` badge above, plus the one action that resolves
- * it. `diverged` gets the alarm tone and says plainly that a human must act outside AgentConductor;
+ * it. `diverged` gets the alarm tone and says plainly that a human must act outside Weave AI;
  * it is never offered the Sync button, which cannot fix it.
  */
 function ProjectSyncStatus({ projectId }: { projectId: string }): React.ReactElement | null {
@@ -130,7 +130,7 @@ function ProjectSyncStatus({ projectId }: { projectId: string }): React.ReactEle
       <span className="inline-flex items-center gap-1.5">
         <Badge tone="removed">Diverged</Badge>
         <span className="text-micro text-text-2">
-          the clone holds history the remote no longer recognises — a human must resolve this outside AgentConductor
+          the clone holds history the remote no longer recognises — a human must resolve this outside Weave AI
         </span>
       </span>
     );

@@ -8,9 +8,9 @@
  * response (`five_hour`, `seven_day`, a long tail of codename-shaped keys, `spend`,
  * `extra_usage`, `behaviors`) is deliberately ignored: it is not a published contract.
  */
-import type { AccountDescription, AccountProbeInput } from '@agent-conductor/runtime-sdk';
-import { launchCommand, spawnLines } from '@agent-conductor/runtime-sdk';
-import { ACCOUNT_LIMIT_KINDS, type AccountLimitKind, type AccountLimitWindow } from '@agent-conductor/shared';
+import type { AccountDescription, AccountProbeInput } from '@weave-ai/runtime-sdk';
+import { launchCommand, spawnLines } from '@weave-ai/runtime-sdk';
+import { ACCOUNT_LIMIT_KINDS, type AccountLimitKind, type AccountLimitWindow } from '@weave-ai/shared';
 
 type Json = Record<string, unknown>;
 const obj = (v: unknown): Json | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Json) : null);

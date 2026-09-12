@@ -1,7 +1,7 @@
 import { WEAVER_REVIEW_KINDS, type WeaverReviewStatus, type DecisionKind } from './enums.js';
 import type { Decision } from './types.js';
 
-/** Cap on `weaverReviewNote` — the concern summary or the clean mark's reason (VS-223, VS-234) — so it fits a phone card. Longer argument is an `ac_ask`. */
+/** Cap on `weaverReviewNote` — the concern summary or the clean mark's reason (VS-223, VS-234) — so it fits a phone card. Longer argument is an `weave_ask`. */
 export const WEAVER_REVIEW_NOTE_MAX = 500;
 
 export type WeaverReviewCopy = {

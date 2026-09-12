@@ -1,6 +1,6 @@
 /** VS-176: instance Map membership and ownership edges. */
 import { describe, expect, it } from 'vitest';
-import type { Role } from '@agent-conductor/shared';
+import type { Role } from '@weave-ai/shared';
 import { buildMapModel, type MapWorkspaceInput } from '../lib/map/model';
 import { project, ticket } from './factories';
 

@@ -1,7 +1,7 @@
-/** `conductor project add|list|show|remove|fetch|set-policy` (PLAN §20). The runtime is the
- * workspace's workers model setting — `conductor models` (VS-77), not a per-project choice. */
+/** `weave project add|list|show|remove|fetch|set-policy` (PLAN §20). The runtime is the
+ * workspace's workers model setting — `weave models` (VS-77), not a per-project choice. */
 import type { Command } from 'commander';
-import type { Job } from '@agent-conductor/shared';
+import type { Job } from '@weave-ai/shared';
 import { ApiError } from '../api.js';
 import { emit, fields, isJson, style, table, write, writeErr } from '../output.js';
 import { elapsed, failureReport, followJob, formatMs } from '../jobs.js';
@@ -29,7 +29,7 @@ export function register(program: Command): void {
       if (opts['maxWorkers']) body['maxWorkers'] = Number(opts['maxWorkers']);
       if (opts['setup']) body['setupCommand'] = opts['setup'];
       const started = await client.write<Started>({
-        tool: 'ac_project_add', input: body,
+        tool: 'weave_project_add', input: body,
         http: { method: 'POST', path: client.w('/projects'), body },
       });
       await reportJob(client, started, opts['follow'] === false, 'add');
@@ -62,7 +62,7 @@ export function register(program: Command): void {
           { header: 'MAX', get: (r) => String(r['maxWorkers'] ?? ''), align: 'right' },
           { header: 'STATUS', get: (r) => String(r['status'] ?? '') },
           { header: 'FETCHED', get: (r) => String(r['lastFetchedAt'] ?? '') },
-        ], { empty: 'no projects — run `conductor project add <git-url>`' });
+        ], { empty: 'no projects — run `weave project add <git-url>`' });
       });
     }));
 
@@ -152,7 +152,7 @@ Keys:   proposalApproval=human|conductor|none   mergeMethod=squash|merge|rebase
         taskApproval=human|conductor|none       archiveCommit=push|pr|local
         requireCi=true|false                    mergeConcurrency=<1-8>
         yolo=true|false                         (YOLO mode for this project; unset inherits the workspace)
-Example: conductor project set-policy api deliveryMode=pr requireCi=false`)
+Example: weave project set-policy api deliveryMode=pr requireCi=false`)
     .action(async (id: string, assignments: string[], _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
       const patch: Record<string, unknown> = {};
@@ -200,7 +200,7 @@ async function reportJob(
   if (!jobId || noFollow) {
     emit(project, () => {
       write(`${style.ok(verb === 'add' ? 'project add started' : 'project retry started')} ${id}`);
-      fields([['status', String(project['status'] ?? '')], ['job', jobId ?? '(none)'], ['follow', jobId ? `conductor project show ${id}` : '']]);
+      fields([['status', String(project['status'] ?? '')], ['job', jobId ?? '(none)'], ['follow', jobId ? `weave project show ${id}` : '']]);
     });
     return;
   }
@@ -211,7 +211,7 @@ async function reportJob(
   if (job.state === 'failed') {
     if (!isJson()) {
       for (const line of failureReport(job)) writeErr(line);
-      writeErr(`retry with ${style.mono(`conductor project retry ${id}`)}`);
+      writeErr(`retry with ${style.mono(`weave project retry ${id}`)}`);
     }
     throw new ApiError('internal', `project ${verb} failed at ${job.failedStep ?? 'an unknown step'}: ${job.message ?? 'no detail'}`, 500, { jobId, failedStep: job.failedStep });
   }

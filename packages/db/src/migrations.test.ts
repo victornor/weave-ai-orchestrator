@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DECISION_KINDS, TICKET_KINDS } from '@agent-conductor/shared';
+import { DECISION_KINDS, TICKET_KINDS } from '@weave-ai/shared';
 import { openDb } from './repos.js';
 import { Db, migrationWantsForeignKeysOff } from './db.js';
 
@@ -596,12 +596,12 @@ describe('migrations', () => {
     it('round-trips an incident row', () => {
       const db = openDb(join(dir, 'incidents-row.sqlite'));
       db.insert('incidents', {
-        id: 'i1', reporterKind: 'worker', title: 'MCP failed', whatFailed: 'ac_ticket_get',
+        id: 'i1', reporterKind: 'worker', title: 'MCP failed', whatFailed: 'weave_ticket_get',
         tryingToDo: 'read the ticket', evidence: 'not_found', workspaceId: 'ws1',
         agentId: 'ag1', runId: 'run1', createdAt: '2026-09-10T00:00:00.000Z',
       });
       const row = db.get<{ title: string; reporterKind: string; whatFailed: string }>('SELECT * FROM incidents WHERE id = ?', ['i1']);
-      expect(row).toMatchObject({ title: 'MCP failed', reporterKind: 'worker', whatFailed: 'ac_ticket_get' });
+      expect(row).toMatchObject({ title: 'MCP failed', reporterKind: 'worker', whatFailed: 'weave_ticket_get' });
       db.close();
     });
   });
@@ -1024,11 +1024,11 @@ describe('migrations', () => {
       const path = join(dir, 'daemon-shaped.sqlite');
       const before = openDbAsOf(path, '0026_agent_handovers.sql');
       before.insert('incidents', {
-        id: 'i1', reporterKind: 'conductor', title: 'stuck', whatFailed: 'ac_ticket_get',
+        id: 'i1', reporterKind: 'conductor', title: 'stuck', whatFailed: 'weave_ticket_get',
         tryingToDo: 'read the ticket', agentId: 'ag1', runId: 'run1', createdAt: 't0',
       });
       before.insert('incidents', {
-        id: 'i2', reporterKind: 'worker', title: 'stuck too', whatFailed: 'ac_ticket_get',
+        id: 'i2', reporterKind: 'worker', title: 'stuck too', whatFailed: 'weave_ticket_get',
         tryingToDo: 'read the ticket', agentId: 'ag2', runId: 'run2', createdAt: 't0',
       });
       before.close();

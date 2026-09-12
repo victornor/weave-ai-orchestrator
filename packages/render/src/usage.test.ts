@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RuntimeAccount } from '@agent-conductor/shared';
+import type { RuntimeAccount } from '@weave-ai/shared';
 import { accountLimits, budgetMeter, contextStrip, contextTokens, costStatusFor, MIXED_BILLING_NOTE, mixedBillingNote, resolveModel, runtimeLimitStrip, showCost, usageRows, usageTotals } from './usage.js';
 
 const series = {

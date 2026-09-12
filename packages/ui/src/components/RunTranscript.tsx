@@ -14,7 +14,7 @@ import { Transcript } from './Transcript';
 import { ScrollToBottomButton } from './ScrollToBottom';
 import { useStickToBottom } from '../lib/stickToBottom';
 import { cx } from '../lib/cx';
-import type { RunEvent } from '@agent-conductor/shared';
+import type { RunEvent } from '@weave-ai/shared';
 
 export function RunTranscript({
   events,

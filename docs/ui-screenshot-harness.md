@@ -21,7 +21,7 @@ VS-81 shot the rail and bar this way.
   screenshot harness at `--port 5274` must be fetched as `http://[::1]:5274/...`.
 - A second root `*.html` file (this harness's `screenshot.html` alongside the app's own
   `index.html`) makes Vite's cold-start `optimizeDeps` scan crash on workspace package
-  resolution (`@agent-conductor/shared`, `@agent-conductor/render`) and the dev server dies.
+  resolution (`@weave-ai/shared`, `@weave-ai/render`) and the dev server dies.
   Start `vite` on the app's real `index.html` first to warm its dependency cache, *then* add
   `screenshot.html`/`screenshot.tsx` and request them through that already-running server —
   don't cold-start with both present.

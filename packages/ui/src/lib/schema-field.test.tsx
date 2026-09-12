@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@agent-conductor/shared';
+import { WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@weave-ai/shared';
 import { parseFieldIssues } from './schema-field';
 
 const option = (overrides: Partial<{ id: string; description: string; runtime: string }> = {}): unknown => ({

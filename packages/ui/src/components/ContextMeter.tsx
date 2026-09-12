@@ -1,13 +1,13 @@
 /**
  * How full the conductor's context window is, beside the plan meter in the chat header. Prop-driven
- * — the view model comes from `contextStrip()` in `@agent-conductor/render`, and both the window and
+ * — the view model comes from `contextStrip()` in `@weave-ai/render`, and both the window and
  * the compaction point come from the runtime's own model list and capabilities, so nothing about a
  * particular CLI is decided here.
  *
  * The number is the last finished turn's `inputTokens + cachedInputTokens`: the conductor's session
  * is resumed, so everything the conversation holds is re-sent or read back from cache each turn.
  */
-import type { ContextStripView } from '@agent-conductor/render';
+import type { ContextStripView } from '@weave-ai/render';
 import { cx } from '../lib/cx';
 
 /** Amber past 80 %, red past 95 % — the thresholds the plan meter beside it uses. */

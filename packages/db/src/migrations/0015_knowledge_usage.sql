@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS knowledge_usage_events (
   -- usage_events.project_id — this is what a "per project" rollup filters on, never doc_project_id.
   project_id TEXT,
   -- 'hub': rendered into the agent's bootstrap digest. 'document': returned by an explicit
-  -- ac_knowledge_get or ac_knowledge_doc_get call. The same scope can appear as both in one run.
+  -- weave_knowledge_get or weave_knowledge_doc_get call. The same scope can appear as both in one run.
   kind TEXT NOT NULL CHECK (kind IN ('hub','document')),
   scope TEXT NOT NULL CHECK (scope IN ('workspace','shared','decisions','project')),
   -- Which project this specific hub chunk or document belongs to, only set when scope = 'project'.

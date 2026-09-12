@@ -1,7 +1,7 @@
 /** VS-217: the worker model tier tag and its derived visibility gate. */
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { WorkerModelOption } from '@agent-conductor/shared';
+import type { WorkerModelOption } from '@weave-ai/shared';
 import { workerModelTagLabel, WorkerModelTag } from '../components/WorkerModelTag';
 
 const opt = (id: string): WorkerModelOption => ({ id, description: `${id} tier`, runtime: 'claude', model: null });

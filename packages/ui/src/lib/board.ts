@@ -1,5 +1,5 @@
-import type { Agent, AgentStatus, Ticket, TicketStatus, UiStatus } from '@agent-conductor/shared';
-import { TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
+import type { Agent, AgentStatus, Ticket, TicketStatus, UiStatus } from '@weave-ai/shared';
+import { TICKET_STATUSES, ticketUiStatus } from '@weave-ai/shared';
 
 /**
  * Six owner-naming columns for eleven statuses (DESIGN-CONTRACT §5, designer's

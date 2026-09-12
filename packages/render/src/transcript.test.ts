@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RunEvent, RunEventType } from '@agent-conductor/shared';
+import type { RunEvent, RunEventType } from '@weave-ai/shared';
 import { chatTranscript, runEventsToTranscript } from './transcript.js';
 import type { FileBlock, HumanInputBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock } from './types.js';
 
@@ -286,13 +286,13 @@ describe('chatTranscript', () => {
     reset();
     const blocks = chatTranscript([
       ev('assistant.text', { text: 'Checking who is free.' }),
-      ev('tool.call', { id: 'tu_1', name: 'ac_briefing', input: {} }),
-      ev('tool.result', { id: 'tu_1', name: 'ac_briefing', content: '3 workers running' }),
+      ev('tool.call', { id: 'tu_1', name: 'weave_briefing', input: {} }),
+      ev('tool.result', { id: 'tu_1', name: 'weave_briefing', content: '3 workers running' }),
     ]);
     expect(blocks.map((b) => b.kind)).toEqual(['text', 'tool']);
     expect((blocks[0] as TextBlock).text).toBe('Checking who is free.');
     const tool = blocks[1] as ToolBlock;
-    expect(tool.name).toBe('ac_briefing');
+    expect(tool.name).toBe('weave_briefing');
     expect(tool.status).toBe('ok');
     expect(tool.detail).toBe('3 workers running');
   });
@@ -302,22 +302,22 @@ describe('chatTranscript', () => {
     reset();
     const blocks = chatTranscript([
       ev('assistant.text', { text: 'Filed it.' }),
-      ev('tool.call', { id: 'tu_1', name: 'ac_human_send', input: { body: 'Filed it and put Ana on it.' } }),
-      ev('tool.result', { id: 'tu_1', name: 'ac_human_send', content: 'delivered' }),
+      ev('tool.call', { id: 'tu_1', name: 'weave_human_send', input: { body: 'Filed it and put Ana on it.' } }),
+      ev('tool.result', { id: 'tu_1', name: 'weave_human_send', content: 'delivered' }),
     ]);
     expect(blocks.map((b) => b.kind)).toEqual(['text']);
-    expect(JSON.stringify(blocks)).not.toContain('ac_human_send');
+    expect(JSON.stringify(blocks)).not.toContain('weave_human_send');
     expect(JSON.stringify(blocks)).not.toContain('put Ana on it');
   });
 
   it('keeps every other tool, and leaves a call with no result pending', () => {
     reset();
     const blocks = chatTranscript([
-      ev('tool.call', { id: 'tu_1', name: 'ac_human_send', input: { body: 'on it' } }),
-      ev('tool.call', { id: 'tu_2', name: 'ac_ticket_create', input: { title: 'Add dark mode' } }),
+      ev('tool.call', { id: 'tu_1', name: 'weave_human_send', input: { body: 'on it' } }),
+      ev('tool.call', { id: 'tu_2', name: 'weave_ticket_create', input: { title: 'Add dark mode' } }),
     ]);
     expect(blocks).toHaveLength(1);
-    expect(blocks[0]).toMatchObject({ kind: 'tool', name: 'ac_ticket_create', status: 'pending' });
+    expect(blocks[0]).toMatchObject({ kind: 'tool', name: 'weave_ticket_create', status: 'pending' });
   });
 
   it('tolerates empty and missing input', () => {

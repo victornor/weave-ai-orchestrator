@@ -1,7 +1,7 @@
 /** Which query keys one workspace event makes stale (`api/events.ts`). */
 import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
-import type { Decision, WorkspaceEvent } from '@agent-conductor/shared';
+import type { Decision, WorkspaceEvent } from '@weave-ai/shared';
 import { invalidateFor } from '../api/events';
 import { qk } from '../api/keys';
 

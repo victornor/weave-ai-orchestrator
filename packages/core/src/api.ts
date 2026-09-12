@@ -2,9 +2,9 @@
  * Core service interfaces. Server, MCP tools, CLI and tests code against these; implementations live in core/src/<module>/.
  * Every mutation writes an activity row and emits an event. Errors are OcError with a code from shared.
  */
-import type * as S from '@agent-conductor/shared';
-import type { ForgeChangedFile, ForgeCheck, ForgePullRequest } from '@agent-conductor/plugin-sdk';
-import type { DiffFileStatus, DiffHunk } from '@agent-conductor/render';
+import type * as S from '@weave-ai/shared';
+import type { ForgeChangedFile, ForgeCheck, ForgePullRequest } from '@weave-ai/plugin-sdk';
+import type { DiffFileStatus, DiffHunk } from '@weave-ai/render';
 
 export interface Actor { kind: 'human' | 'agent' | 'system'; id: string | null; runId?: string | null }
 export interface Page<T> { items: T[]; total: number }
@@ -50,7 +50,7 @@ export interface TicketsService {
   documents(id: string): Array<{ key: string; revision: number; updatedAt: string }>;
   addWorkProduct(actor: Actor, id: string, wp: { type: S.WorkProductType; url?: string; title?: string; state?: string; provider?: string; externalId?: string; isPrimary?: boolean; metadata?: Record<string, unknown> }): { id: string };
   workProducts(id: string): Array<Record<string, unknown>>;
-  /** Publishes (or, called again with the same `key`, updates) the one `type: 'artifact'` work product for that key, keyed by `externalId === key` — used only by `ac_ticket_artifact_put`, never by the general work-product tool. */
+  /** Publishes (or, called again with the same `key`, updates) the one `type: 'artifact'` work product for that key, keyed by `externalId === key` — used only by `weave_ticket_artifact_put`, never by the general work-product tool. */
   putArtifactWorkProduct(actor: Actor, id: string, key: string, wp: { url: string; title?: string; kind?: string }): { id: string };
   /** Every published artifact across the given project's tickets (every ticket when `projectId` is
    * null), most-recently-updated first, joined with its own ticket's identifier/title — VS-270's

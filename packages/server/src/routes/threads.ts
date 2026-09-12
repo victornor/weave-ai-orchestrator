@@ -4,7 +4,7 @@ import { z } from 'zod';
 import {
   ATTACHMENT_MAX_PER_MESSAGE, OcError, attachmentMaxBytes, isAttachmentImageType, sniffImageType,
   type AttachmentMediaType,
-} from '@agent-conductor/shared';
+} from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body, query } from '../http.js';
 

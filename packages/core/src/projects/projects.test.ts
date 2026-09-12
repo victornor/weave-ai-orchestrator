@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Job, Project, ProjectConfig, WorkspaceConfig } from '@agent-conductor/shared';
+import type { Job, Project, ProjectConfig, WorkspaceConfig } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createProjectsService } from './index.js';
 import { createJobsService } from '../jobs/index.js';

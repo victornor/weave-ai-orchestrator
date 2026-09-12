@@ -1,7 +1,7 @@
-/** `conductor runs list|show|tail|cancel` (PLAN §16.1, §20). */
+/** `weave runs list|show|tail|cancel` (PLAN §16.1, §20). */
 import type { Command } from 'commander';
-import type { Run, RunEvent } from '@agent-conductor/shared';
-import { formatCost, formatDuration, formatTokens, runEventsToTranscript, type TranscriptBlock } from '@agent-conductor/render';
+import type { Run, RunEvent } from '@weave-ai/shared';
+import { formatCost, formatDuration, formatTokens, runEventsToTranscript, type TranscriptBlock } from '@weave-ai/render';
 import { emit, fields, heading, style, table, write } from '../output.js';
 import { items, run as guard, session, unwrap } from './util.js';
 

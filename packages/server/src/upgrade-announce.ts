@@ -12,7 +12,7 @@
  */
 import type {
   Upgrade, UpgradeAnnouncement, UpgradeHealthCheck, UpgradeRelease,
-} from '@agent-conductor/shared';
+} from '@weave-ai/shared';
 
 /** At most this many landed tickets travel in one announcement; the changelog holds the rest. */
 export const ANNOUNCED_TICKETS = 20;
@@ -45,7 +45,7 @@ export interface AnnouncementFacts {
 }
 
 /**
- * A release directory is `<stamp>-<sha>` with `<stamp>` in local time (see `@agent-conductor/release`),
+ * A release directory is `<stamp>-<sha>` with `<stamp>` in local time (see `@weave-ai/release`),
  * which is the only timestamp a release carries. Read back as an ISO instant so it can be compared with
  * the `created_at` of an activity row.
  */

@@ -32,7 +32,7 @@ models:
   workers:   { runtime: claude, model: claude-opus-5, effort: high }
 ```
 
-The conductor runs on `models.conductor`; every worker in the workspace runs on `models.workers`,
+The weave runs on `models.conductor`; every worker in the workspace runs on `models.workers`,
 whatever its role or project. `modelSettingFor(config, kind)` is the only reader, and there is no
 fallback behind it other than letting the runtime choose when `model` is null.
 
@@ -70,7 +70,7 @@ A workspace whose roles used more than one runtime gets the most used of them, s
 run, plus one `question` decision owned by the human asking which runtime the workers setting should
 hold. `models.reconcile()` raises it at startup, correlated so a restart cannot raise a second.
 
-The column drops are one-way. `conductor daemon upgrade` takes a database backup before migrating,
+The column drops are one-way. `weave daemon upgrade` takes a database backup before migrating,
 so a rollback to an earlier release restores from it (`docs/OPERATIONS.md`).
 
 ## Why not

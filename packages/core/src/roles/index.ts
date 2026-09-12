@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
-import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, RoleSpecSchema, NAMED_CARD_OPTION_KEYS, toLegacyRoleSpec, type Role, type RoleSpec, type Project } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { OcError, RoleSpecSchema, NAMED_CARD_OPTION_KEYS, toLegacyRoleSpec, type Role, type RoleSpec, type Project } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, RoleConcurrency, RolesService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -290,7 +290,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
       const projectMax = ctx.db.get<{ maxWorkers: number }>('SELECT max_workers FROM projects WHERE id = ?', [role.projectId])?.maxWorkers ?? role.maxWorkers;
       const live = liveWorkers(id);
       const projectLive = liveInProject(role.projectId);
-      // roleMax is the stored field (hire / ac_role_set_max_workers); it is not a spawn gate.
+      // roleMax is the stored field (hire / weave_role_set_max_workers); it is not a spawn gate.
       // Spawn and freeSlots honour only the project cap (VS-156).
       return {
         roleMax: role.maxWorkers, projectMax, effective: projectMax, live, projectLive,

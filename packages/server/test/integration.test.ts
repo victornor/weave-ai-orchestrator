@@ -5,8 +5,8 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createCore, initLogger } from '@agent-conductor/core';
-import { DaemonConfigSchema } from '@agent-conductor/shared';
+import { createCore, initLogger } from '@weave-ai/core';
+import { DaemonConfigSchema } from '@weave-ai/shared';
 import { makeHarness } from '../../core/src/testing/context.js';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
@@ -211,7 +211,7 @@ describe('real core services over HTTP', () => {
     const token = await signRunToken(runTokenSecret(harness.ctx.db), {
       workspaceId: harness.workspaceId, runId: 'run_1', agentId, agentKind: 'worker', projectId: harness.projectId, ticketId: ticket.id, roleId: harness.roleId,
     });
-    const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_ticket_comment`, {
+    const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_ticket_comment`, {
       method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ input: { id: ticket.identifier, body: 'checked out and working' } }),
     }));
@@ -220,7 +220,7 @@ describe('real core services over HTTP', () => {
     expect(services.tickets.comments(ticket.id).at(-1)?.body).toBe('checked out and working');
   });
 
-  describe('ac_human_send reply targets', () => {
+  describe('weave_human_send reply targets', () => {
     /** Raises a real human_message wake for the conductor and binds it to a run, the way a dispatched turn would. */
     async function turnWokenBy(
       harness: ReturnType<typeof makeHarness>,
@@ -252,7 +252,7 @@ describe('real core services over HTTP', () => {
       const services = deps.workspaces.get(harness.workspaceId)!.services;
       const { threadId, token, messageIds } = await turnWokenBy(harness, services, ['are you still there?']);
 
-      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_human_send`, {
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_human_send`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ input: { body: 'yes, still here' } }),
       }));
@@ -270,7 +270,7 @@ describe('real core services over HTTP', () => {
       const services = deps.workspaces.get(harness.workspaceId)!.services;
       const { threadId, token } = await turnWokenBy(harness, services, ['are you still there?']);
 
-      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_human_send`, {
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_human_send`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ input: { body: 'unrelated: a ticket just landed', replyToMessageId: null } }),
       }));
@@ -287,7 +287,7 @@ describe('real core services over HTTP', () => {
       const services = deps.workspaces.get(harness.workspaceId)!.services;
       const { threadId, token } = await turnWokenBy(harness, services, ['first question', 'second question']);
 
-      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_human_send`, {
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_human_send`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ input: { body: 'answering both' } }),
       }));
@@ -298,7 +298,7 @@ describe('real core services over HTTP', () => {
     });
   });
 
-  describe('ac_human_send attachments (VS-273)', () => {
+  describe('weave_human_send attachments (VS-273)', () => {
     async function weaverToken(harness: ReturnType<typeof makeHarness>): Promise<string> {
       return signRunToken(runTokenSecret(harness.ctx.db), {
         workspaceId: harness.workspaceId, runId: 'run_attach', agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
@@ -319,7 +319,7 @@ describe('real core services over HTTP', () => {
       writeFileSync(contractPath, 'the design contract');
       writeFileSync(briefPath, 'the first brief');
 
-      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_human_send`, {
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_human_send`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({
           input: {
@@ -344,7 +344,7 @@ describe('real core services over HTTP', () => {
       const thread = services.threads.bindOrGet('web', 'web-attach2', null, 'Victor');
       const token = await weaverToken(harness);
 
-      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_human_send`, {
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_human_send`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ input: { threadId: thread.id, body: 'oops', attachments: [{ path: harness.ctx.paths.secretsFile }] } }),
       }));
@@ -355,7 +355,7 @@ describe('real core services over HTTP', () => {
     });
   });
 
-  describe('ac_thread_message_get', () => {
+  describe('weave_thread_message_get', () => {
     it('returns the full body of a message a wake payload truncated (VS-242)', async () => {
       const { deps, harness } = boot();
       const app = createApp(deps);
@@ -370,7 +370,7 @@ describe('real core services over HTTP', () => {
       const token = await signRunToken(runTokenSecret(harness.ctx.db), {
         workspaceId: harness.workspaceId, runId: 'run_msg', agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
       });
-      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_thread_message_get`, {
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_thread_message_get`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ input: { threadId: thread.id, messageId: msg.id } }),
       }));
@@ -391,7 +391,7 @@ describe('real core services over HTTP', () => {
       const token = await signRunToken(runTokenSecret(harness.ctx.db), {
         workspaceId: harness.workspaceId, runId: 'run_msg2', agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
       });
-      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_thread_message_get`, {
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_thread_message_get`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ input: { threadId: t.id, messageId: elsewhere.id } }),
       }));
@@ -411,7 +411,7 @@ describe('real core services over HTTP', () => {
       const token = await signRunToken(runTokenSecret(harness.ctx.db), {
         workspaceId: harness.workspaceId, runId: 'run_msg3', agentId: workerId, agentKind: 'worker', projectId: harness.projectId, ticketId: null, roleId: harness.roleId,
       });
-      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_thread_message_get`, {
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_thread_message_get`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ input: { threadId: thread.id, messageId: msg.id } }),
       }));
@@ -436,7 +436,7 @@ describe('real core services over HTTP', () => {
     const token = await signRunToken(runTokenSecret(harness.ctx.db), {
       workspaceId: harness.workspaceId, runId: 'run_c', agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
     });
-    const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_role_set_max_workers`, {
+    const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_role_set_max_workers`, {
       method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ input: { id: role.id, maxWorkers: 6, reason: 'the queue is backing up' } }),
     }));
@@ -647,7 +647,7 @@ describe('real core services over HTTP', () => {
       const { harness, app, services, ticket, agentId } = bootWithWorkerTicket();
       const token = await workerToken(harness, agentId, ticket.id);
 
-      const first = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: SAMPLE_HTML, title: 'Overview', kind: 'diagram' });
+      const first = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: SAMPLE_HTML, title: 'Overview', kind: 'diagram' });
       expect(first.ok).toBe(true);
       expect(first.data.revision).toBe(1);
       expect(first.data.url).toBe(`/api/w/${harness.workspaceId}/tickets/${ticket.id}/artifacts/overview/raw`);
@@ -657,7 +657,7 @@ describe('real core services over HTTP', () => {
       expect(products[0]).toMatchObject({ type: 'artifact', externalId: 'overview', url: first.data.url, title: 'Overview' });
 
       // Republishing under the same key updates the one row rather than adding another.
-      const second = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: SAMPLE_HTML, title: 'Overview v2' });
+      const second = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: SAMPLE_HTML, title: 'Overview v2' });
       expect(second.ok).toBe(true);
       expect(second.data.revision).toBe(2);
       expect(services.tickets.workProducts(ticket.id)).toHaveLength(1);
@@ -672,53 +672,53 @@ describe('real core services over HTTP', () => {
       const { harness, app, ticket, agentId } = bootWithWorkerTicket();
       const token = await workerToken(harness, agentId, ticket.id);
 
-      const empty = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'a', html: '   ' });
+      const empty = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'a', html: '   ' });
       expect(empty.ok).toBe(false);
       expect(empty.error.message).toMatch(/empty/);
 
-      const notHtml = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'b', html: 'just some text' });
+      const notHtml = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'b', html: 'just some text' });
       expect(notHtml.ok).toBe(false);
       expect(notHtml.error.message).toMatch(/does not look like an HTML document/);
 
-      const oversized = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'c', html: `<html>${'x'.repeat(2_000_001)}</html>` });
+      const oversized = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'c', html: `<html>${'x'.repeat(2_000_001)}</html>` });
       expect(oversized.ok).toBe(false);
       expect(oversized.error.message).toMatch(/over the 2,000,000-character cap|over the 2000000-character cap/);
 
-      const accepted = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'd', html: SAMPLE_HTML });
+      const accepted = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'd', html: SAMPLE_HTML });
       expect(accepted.ok).toBe(true);
     });
 
     it('never lets an agent read an artifact body back through the ordinary document tool', async () => {
       const { harness, app, ticket, agentId } = bootWithWorkerTicket();
       const token = await workerToken(harness, agentId, ticket.id);
-      await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'secret-ish', html: SAMPLE_HTML });
-      await callTool(app, harness.workspaceId, token, 'ac_ticket_document_put', { id: ticket.identifier, key: 'report', body: 'plain notes' });
+      await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'secret-ish', html: SAMPLE_HTML });
+      await callTool(app, harness.workspaceId, token, 'weave_ticket_document_put', { id: ticket.identifier, key: 'report', body: 'plain notes' });
 
-      const readAttempt = await callTool(app, harness.workspaceId, token, 'ac_ticket_document_get', { id: ticket.identifier, key: 'artifact:secret-ish' });
+      const readAttempt = await callTool(app, harness.workspaceId, token, 'weave_ticket_document_get', { id: ticket.identifier, key: 'artifact:secret-ish' });
       expect(readAttempt.ok).toBe(false);
       expect(readAttempt.error.message).toMatch(/not readable by agents/);
       expect(readAttempt.error.message).not.toContain('<html');
 
       // The author of the artifact gets refused identically to anyone else, in the same run.
-      const authorReadAttempt = await callTool(app, harness.workspaceId, token, 'ac_ticket_document_get', { id: ticket.identifier, key: 'artifact:secret-ish' });
+      const authorReadAttempt = await callTool(app, harness.workspaceId, token, 'weave_ticket_document_get', { id: ticket.identifier, key: 'artifact:secret-ish' });
       expect(authorReadAttempt.ok).toBe(false);
 
       // A wrong-key guess must not leak the artifact's key as a hint, but a plain document's key is fine.
-      const guess = await callTool(app, harness.workspaceId, token, 'ac_ticket_document_get', { id: ticket.identifier, key: 'nonexistent' });
+      const guess = await callTool(app, harness.workspaceId, token, 'weave_ticket_document_get', { id: ticket.identifier, key: 'nonexistent' });
       expect(guess.ok).toBe(false);
       expect(guess.error.details.availableKeys).toContain('report');
       expect(guess.error.details.availableKeys).not.toContain('artifact:secret-ish');
 
       // Writing an artifact-shaped key through the general document tool is refused too.
-      const directWrite = await callTool(app, harness.workspaceId, token, 'ac_ticket_document_put', { id: ticket.identifier, key: 'artifact:sneaky', body: SAMPLE_HTML });
+      const directWrite = await callTool(app, harness.workspaceId, token, 'weave_ticket_document_put', { id: ticket.identifier, key: 'artifact:sneaky', body: SAMPLE_HTML });
       expect(directWrite.ok).toBe(false);
-      expect(directWrite.error.message).toMatch(/ac_ticket_artifact_put/);
+      expect(directWrite.error.message).toMatch(/weave_ticket_artifact_put/);
     });
 
     it('serves the raw artifact over HTTP with the mandated sandbox CSP, verbatim bytes, for a human session only', async () => {
       const { harness, app, ticket, agentId } = bootWithWorkerTicket();
       const token = await workerToken(harness, agentId, ticket.id);
-      const published = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'view', html: SAMPLE_HTML });
+      const published = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'view', html: SAMPLE_HTML });
       expect(published.ok).toBe(true);
 
       const res = await app.fetch(new Request(`http://127.0.0.1${published.data.url}`, { headers: H }));
@@ -739,8 +739,8 @@ describe('real core services over HTTP', () => {
       const { harness, app, ticket, agentId } = bootWithWorkerTicket();
       const token = await workerToken(harness, agentId, ticket.id);
       const HTML_V2 = '<!doctype html><html><body><h1>v2</h1></body></html>';
-      const first = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'view', html: SAMPLE_HTML });
-      await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'view', html: HTML_V2 });
+      const first = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'view', html: SAMPLE_HTML });
+      await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'view', html: HTML_V2 });
 
       const current = await app.fetch(new Request(`http://127.0.0.1${first.data.url}`, { headers: H }));
       expect(await current.text()).toBe(HTML_V2);
@@ -751,7 +751,7 @@ describe('real core services over HTTP', () => {
 
     it('serves the AC Artifact Kit CSS verbatim at a stable asset path', async () => {
       const { harness, app } = bootWithWorkerTicket();
-      const { ARTIFACT_KIT_CSS } = await import('@agent-conductor/core');
+      const { ARTIFACT_KIT_CSS } = await import('@weave-ai/core');
       const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/artifacts/kit.css`, { headers: H }));
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toBe('text/css; charset=utf-8');
@@ -765,7 +765,7 @@ describe('real core services over HTTP', () => {
     it('lists a published artifact across the project, and its listed URL still serves the mandated sandbox CSP', async () => {
       const { harness, app, ticket, agentId } = bootWithWorkerTicket();
       const token = await workerToken(harness, agentId, ticket.id);
-      const published = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: SAMPLE_HTML, title: 'Overview', kind: 'diagram' });
+      const published = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: SAMPLE_HTML, title: 'Overview', kind: 'diagram' });
       expect(published.ok).toBe(true);
 
       const listed = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/knowledge/artifacts?project=${harness.projectId}`, { headers: H }))).json();

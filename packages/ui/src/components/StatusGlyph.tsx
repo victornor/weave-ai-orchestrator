@@ -1,4 +1,4 @@
-import type { UiStatus } from '@agent-conductor/shared';
+import type { UiStatus } from '@weave-ai/shared';
 import { STATUS_GLYPH, STATUS_LABEL, STATUS_TEXT, STATUS_VAR } from '../lib/status';
 import { cx } from '../lib/cx';
 

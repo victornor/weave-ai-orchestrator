@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId, nowIso } from '@agent-conductor/db';
-import type { Run, Ticket } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import type { Run, Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createSupervisor } from './index.js';
 import { createKnowledgeService } from '../knowledge/service.js';
@@ -446,7 +446,7 @@ describe('supervisor scheduled passes', () => {
       const woken = wake.calls.find((c) => c.agentId === workerId && (c.input as { source: string }).source === 'merge_approved');
       expect(woken).toBeDefined();
       expect((woken!.input as { payload: { mergedOnForge: boolean; mergeCommit: string } }).payload).toMatchObject({ mergedOnForge: true, mergeCommit: 'deadbeefcafe' });
-      expect(String((woken!.input as { reason: string }).reason)).toContain('ac_ticket_merge_done');
+      expect(String((woken!.input as { reason: string }).reason)).toContain('weave_ticket_merge_done');
       expect(mergeDone).not.toHaveBeenCalled();
     });
 

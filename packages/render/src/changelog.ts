@@ -8,7 +8,7 @@
  * Every detail field is treated as absent-until-proven-present. An old row whose service has since
  * changed what it records degrades to a plainer line rather than to an empty or a broken one.
  */
-import { CHANGELOG_SOURCES, type ChangelogEntry, type ChangelogKind } from '@agent-conductor/shared';
+import { CHANGELOG_SOURCES, type ChangelogEntry, type ChangelogKind } from '@weave-ai/shared';
 import { oneLine } from './format.js';
 
 /** An activity row as the changelog reads it, with `details_json` already decoded. */

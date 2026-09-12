@@ -2,9 +2,9 @@ import { readFileSync, rmSync } from 'node:fs';
 import type {
   AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
   RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
-} from '@agent-conductor/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, runTmpDir, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
-import { extractReport } from '@agent-conductor/shared';
+} from '@weave-ai/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, runTmpDir, spawnLines, writeFiles } from '@weave-ai/runtime-sdk';
+import { extractReport } from '@weave-ai/shared';
 import { describeCodexAccount } from './account.js';
 import { buildArgs, mcpConfigToml, resumeCommand } from './args.js';
 import { createCodexParser } from './events.js';

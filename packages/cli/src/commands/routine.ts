@@ -1,6 +1,6 @@
-/** `conductor routine list|show|add|pause|resume|rm` — scheduled tasks (VS-220). */
+/** `weave routine list|show|add|pause|resume|rm` — scheduled tasks (VS-220). */
 import type { Command } from 'commander';
-import { OcError, type Routine } from '@agent-conductor/shared';
+import { OcError, type Routine } from '@weave-ai/shared';
 import { emit, fields, table } from '../output.js';
 import { items, run, session, unwrap } from './util.js';
 

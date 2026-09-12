@@ -16,7 +16,7 @@ const CONDUCTOR: RunTokenClaims = { ...WORKER, agentKind: 'weaver', ticketId: nu
 
 const FILE = {
   title: 'MCP call failed',
-  whatFailed: 'ac_ticket_get returned not_found',
+  whatFailed: 'weave_ticket_get returned not_found',
   tryingToDo: 'read the bound ticket',
   evidence: 'OcError not_found',
 };
@@ -24,14 +24,14 @@ const FILE = {
 async function fileViaAgent(h: Harness, claims: RunTokenClaims, input: Record<string, unknown>) {
   const app = createApp(h.deps);
   const token = await signRunToken(runTokenSecret(h.runtime.ctx.db), claims);
-  return app.fetch(new Request(`http://127.0.0.1/api/w/${claims.workspaceId}/agent/tools/ac_incident`, {
+  return app.fetch(new Request(`http://127.0.0.1/api/w/${claims.workspaceId}/agent/tools/weave_incident`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ input }),
   }));
 }
 
-describe('ac_incident', () => {
+describe('weave_incident', () => {
   it('lets a worker file, storing reporterKind worker and run context', async () => {
     harness = makeHarness({ listener: 'loopback' });
     const res = await fileViaAgent(harness, WORKER, FILE);
@@ -125,7 +125,7 @@ describe('GET /api/incidents', () => {
 
 type ToolEnvelope = { ok: boolean; data?: Record<string, unknown>; error?: { code: string } };
 
-describe('ac_incident_list / ac_incident_get (VS-222)', () => {
+describe('weave_incident_list / weave_incident_get (VS-222)', () => {
   async function callTool(h: Harness, claims: RunTokenClaims, tool: string, input: Record<string, unknown>) {
     const app = createApp(h.deps);
     const token = await signRunToken(runTokenSecret(h.runtime.ctx.db), claims);
@@ -140,8 +140,8 @@ describe('ac_incident_list / ac_incident_get (VS-222)', () => {
     harness = makeHarness({ listener: 'loopback' });
     const filed = await fileViaAgent(harness, WORKER, FILE);
     expect(((await filed.json()) as { ok: boolean }).ok).toBe(true);
-    for (const tool of ['ac_incident_list', 'ac_incident_get']) {
-      const res = await callTool(harness, WORKER, tool, tool === 'ac_incident_get' ? { id: 'inc_any' } : {});
+    for (const tool of ['weave_incident_list', 'weave_incident_get']) {
+      const res = await callTool(harness, WORKER, tool, tool === 'weave_incident_get' ? { id: 'inc_any' } : {});
       const body = (await res.json()) as ToolEnvelope;
       expect(res.status).toBe(403);
       expect(body.ok === false || body.ok === undefined).toBe(true);
@@ -150,7 +150,7 @@ describe('ac_incident_list / ac_incident_get (VS-222)', () => {
     expect(harness.deps.incidents.list().total).toBe(1);
   });
 
-  it('lists the conductor workspace plus workspace-less rows, never another workspace', async () => {
+  it('lists the weave workspace plus workspace-less rows, never another workspace', async () => {
     harness = makeHarness({ listener: 'loopback' });
     await fileViaAgent(harness, CONDUCTOR, { ...FILE, title: 'alpha conductor' });
     await fileViaAgent(harness, WORKER, { ...FILE, title: 'alpha worker' });
@@ -164,7 +164,7 @@ describe('ac_incident_list / ac_incident_get (VS-222)', () => {
     });
     expect(beta.workspaceId).toBe('ws2');
 
-    const body = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', {})).json()) as {
+    const body = (await (await callTool(harness, CONDUCTOR, 'weave_incident_list', {})).json()) as {
       ok: boolean; data: { items: Array<{ title: string }>; total: number };
     };
     expect(body.ok).toBe(true);
@@ -178,20 +178,20 @@ describe('ac_incident_list / ac_incident_get (VS-222)', () => {
     harness = makeHarness({ listener: 'loopback' });
     await fileViaAgent(harness, WORKER, FILE);
 
-    const lean = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', {})).json()) as {
+    const lean = (await (await callTool(harness, CONDUCTOR, 'weave_incident_list', {})).json()) as {
       ok: boolean; data: { items: Array<Record<string, unknown>> };
     };
     expect(lean.ok).toBe(true);
     expect(lean.data.items).toHaveLength(1);
     expect(lean.data.items[0]).not.toHaveProperty('evidence');
 
-    const withEvidence = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', { includeEvidence: true })).json()) as {
+    const withEvidence = (await (await callTool(harness, CONDUCTOR, 'weave_incident_list', { includeEvidence: true })).json()) as {
       data: { items: Array<Record<string, unknown>> };
     };
     expect(withEvidence.data.items[0]).toHaveProperty('evidence', FILE.evidence);
 
     const id = (lean.data.items[0] as { id: string }).id;
-    const got = (await (await callTool(harness, CONDUCTOR, 'ac_incident_get', { id })).json()) as {
+    const got = (await (await callTool(harness, CONDUCTOR, 'weave_incident_get', { id })).json()) as {
       ok: boolean; data: { title: string; evidence: string | null; reporterKind: string };
     };
     expect(got.ok).toBe(true);
@@ -205,11 +205,11 @@ describe('ac_incident_list / ac_incident_get (VS-222)', () => {
       agentId: 'ag_2', runId: 'run_2', workspaceId: 'ws2',
     });
 
-    const unknown = (await (await callTool(harness, CONDUCTOR, 'ac_incident_get', { id: 'inc_nope' })).json()) as ToolEnvelope;
+    const unknown = (await (await callTool(harness, CONDUCTOR, 'weave_incident_get', { id: 'inc_nope' })).json()) as ToolEnvelope;
     expect(unknown.ok).toBe(false);
     expect(unknown.error?.code).toBe('not_found');
 
-    const cross = (await (await callTool(harness, CONDUCTOR, 'ac_incident_get', { id: beta.id })).json()) as ToolEnvelope;
+    const cross = (await (await callTool(harness, CONDUCTOR, 'weave_incident_get', { id: beta.id })).json()) as ToolEnvelope;
     expect(cross.ok).toBe(false);
     expect(cross.error?.code).toBe('forbidden');
   });
@@ -218,29 +218,29 @@ describe('ac_incident_list / ac_incident_get (VS-222)', () => {
     harness = makeHarness({ listener: 'loopback' });
     await fileViaAgent(harness, CONDUCTOR, FILE);
 
-    const all = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', { since: '2000-01-01T00:00:00Z' })).json()) as { data: { total: number } };
+    const all = (await (await callTool(harness, CONDUCTOR, 'weave_incident_list', { since: '2000-01-01T00:00:00Z' })).json()) as { data: { total: number } };
     expect(all.data.total).toBe(1);
-    const none = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', { since: '2099-01-01T00:00:00Z' })).json()) as { data: { items: unknown[]; total: number } };
+    const none = (await (await callTool(harness, CONDUCTOR, 'weave_incident_list', { since: '2099-01-01T00:00:00Z' })).json()) as { data: { items: unknown[]; total: number } };
     expect(none.data.items).toEqual([]);
     expect(none.data.total).toBe(0);
-    const bad = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', { since: 'yesterday' })).json()) as ToolEnvelope;
+    const bad = (await (await callTool(harness, CONDUCTOR, 'weave_incident_list', { since: 'yesterday' })).json()) as ToolEnvelope;
     expect(bad.ok).toBe(false);
     expect(bad.error?.code).toBe('validation');
   });
 
-  it('caps ac_incident_list at the MCP list limit and never caps the get', () => {
+  it('caps weave_incident_list at the MCP list limit and never caps the get', () => {
     const bigRow = { id: 'inc_big', title: 'x'.repeat(70_000) };
-    const capped = JSON.parse(encodeMcpToolResult('ac_incident_list', { ok: true, data: { items: [bigRow], total: 1 } }));
+    const capped = JSON.parse(encodeMcpToolResult('weave_incident_list', { ok: true, data: { items: [bigRow], total: 1 } }));
     expect(capped.data.truncated).toBe(true);
     expect(JSON.stringify(capped).length).toBeLessThanOrEqual(64 * 1024);
 
-    const got = JSON.parse(encodeMcpToolResult('ac_incident_get', { ok: true, data: bigRow }));
+    const got = JSON.parse(encodeMcpToolResult('weave_incident_get', { ok: true, data: bigRow }));
     expect(got.data.title).toBe(bigRow.title);
     expect(JSON.stringify(got).length).toBeGreaterThan(64 * 1024);
   });
 });
 
-describe('ac_incident_resolve (VS-271)', () => {
+describe('weave_incident_resolve (VS-271)', () => {
   async function callTool(h: Harness, claims: RunTokenClaims, tool: string, input: Record<string, unknown>) {
     const app = createApp(h.deps);
     const token = await signRunToken(runTokenSecret(h.runtime.ctx.db), claims);
@@ -251,12 +251,12 @@ describe('ac_incident_resolve (VS-271)', () => {
     }));
   }
 
-  it('a conductor resolves an incident, and it round-trips through ac_incident_get', async () => {
+  it('a conductor resolves an incident, and it round-trips through weave_incident_get', async () => {
     harness = makeHarness({ listener: 'loopback' });
     const filed = await fileViaAgent(harness, WORKER, FILE);
     const { data } = await filed.json() as { data: { id: string } };
 
-    const res = await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: data.id, resolution: 'fixed by VS-232', ticketId: 'VS-232' });
+    const res = await callTool(harness, CONDUCTOR, 'weave_incident_resolve', { id: data.id, resolution: 'fixed by VS-232', ticketId: 'VS-232' });
     const payload = await res.json() as { ok: boolean; data: { resolvedAt: string | null; resolvedByAgentId: string; resolution: string; resolutionTicketId: string } };
     expect(payload.ok).toBe(true);
     expect(payload.data.resolvedAt).not.toBeNull();
@@ -264,7 +264,7 @@ describe('ac_incident_resolve (VS-271)', () => {
     expect(payload.data.resolution).toBe('fixed by VS-232');
     expect(payload.data.resolutionTicketId).toBe('VS-232');
 
-    const got = (await (await callTool(harness, CONDUCTOR, 'ac_incident_get', { id: data.id })).json()) as {
+    const got = (await (await callTool(harness, CONDUCTOR, 'weave_incident_get', { id: data.id })).json()) as {
       data: { resolvedAt: string | null; resolution: string };
     };
     expect(got.data.resolvedAt).toBe(payload.data.resolvedAt);
@@ -275,7 +275,7 @@ describe('ac_incident_resolve (VS-271)', () => {
     harness = makeHarness({ listener: 'loopback' });
     const filed = await fileViaAgent(harness, WORKER, FILE);
     const { data } = await filed.json() as { data: { id: string } };
-    const res = await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: data.id, resolution: 'x', ticketId: 'NOPE-999' });
+    const res = await callTool(harness, CONDUCTOR, 'weave_incident_resolve', { id: data.id, resolution: 'x', ticketId: 'NOPE-999' });
     const payload = await res.json() as { data: { resolutionTicketId: string } };
     expect(payload.data.resolutionTicketId).toBe('NOPE-999');
   });
@@ -284,7 +284,7 @@ describe('ac_incident_resolve (VS-271)', () => {
     harness = makeHarness({ listener: 'loopback' });
     const filed = await fileViaAgent(harness, WORKER, FILE);
     const { data } = await filed.json() as { data: { id: string } };
-    const res = await callTool(harness, WORKER, 'ac_incident_resolve', { id: data.id, resolution: 'x' });
+    const res = await callTool(harness, WORKER, 'weave_incident_resolve', { id: data.id, resolution: 'x' });
     const payload = await res.json() as ToolEnvelope;
     expect(res.status).toBe(403);
     expect(payload.error?.code).toBe('forbidden');
@@ -295,8 +295,8 @@ describe('ac_incident_resolve (VS-271)', () => {
     harness = makeHarness({ listener: 'loopback' });
     const filed = await fileViaAgent(harness, WORKER, FILE);
     const { data } = await filed.json() as { data: { id: string } };
-    await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: data.id, resolution: 'first' });
-    const res = await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: data.id, resolution: 'second' });
+    await callTool(harness, CONDUCTOR, 'weave_incident_resolve', { id: data.id, resolution: 'first' });
+    const res = await callTool(harness, CONDUCTOR, 'weave_incident_resolve', { id: data.id, resolution: 'second' });
     const payload = await res.json() as ToolEnvelope;
     expect(payload.ok).toBe(false);
     expect(payload.error?.code).toBe('wrong_status');
@@ -310,11 +310,11 @@ describe('ac_incident_resolve (VS-271)', () => {
       agentId: 'ag_2', runId: 'run_2', workspaceId: 'ws2',
     });
 
-    const unknown = (await (await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: 'inc_nope', resolution: 'x' })).json()) as ToolEnvelope;
+    const unknown = (await (await callTool(harness, CONDUCTOR, 'weave_incident_resolve', { id: 'inc_nope', resolution: 'x' })).json()) as ToolEnvelope;
     expect(unknown.ok).toBe(false);
     expect(unknown.error?.code).toBe('not_found');
 
-    const cross = (await (await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: beta.id, resolution: 'x' })).json()) as ToolEnvelope;
+    const cross = (await (await callTool(harness, CONDUCTOR, 'weave_incident_resolve', { id: beta.id, resolution: 'x' })).json()) as ToolEnvelope;
     expect(cross.ok).toBe(false);
     expect(cross.error?.code).toBe('forbidden');
     expect(harness.deps.incidents.get(beta.id).resolvedAt).toBeNull();
@@ -325,22 +325,22 @@ describe('ac_incident_resolve (VS-271)', () => {
     await fileViaAgent(harness, WORKER, { ...FILE, title: 'one' });
     await fileViaAgent(harness, WORKER, { ...FILE, title: 'two' });
 
-    const first = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', {})).json()) as {
+    const first = (await (await callTool(harness, CONDUCTOR, 'weave_incident_list', {})).json()) as {
       data: { items: Array<{ id: string }> };
     };
     expect(first.data.items).toHaveLength(2);
     for (const item of first.data.items) {
-      await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: item.id, resolution: 'swept' });
+      await callTool(harness, CONDUCTOR, 'weave_incident_resolve', { id: item.id, resolution: 'swept' });
     }
 
-    const second = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', {})).json()) as {
+    const second = (await (await callTool(harness, CONDUCTOR, 'weave_incident_list', {})).json()) as {
       data: { items: unknown[]; total: number };
     };
     expect(second.data.items).toEqual([]);
     expect(second.data.total).toBe(0);
 
     // status: 'all' still shows them.
-    const all = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', { status: 'all' })).json()) as {
+    const all = (await (await callTool(harness, CONDUCTOR, 'weave_incident_list', { status: 'all' })).json()) as {
       data: { items: unknown[]; total: number };
     };
     expect(all.data.total).toBe(2);

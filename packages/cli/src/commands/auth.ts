@@ -1,4 +1,4 @@
-/** `conductor login` / `logout` / `context` / `devices` — remote access (PLAN §4.4). */
+/** `weave login` / `logout` / `context` / `devices` — remote access (PLAN §4.4). */
 import type { Command } from 'commander';
 import { ApiClient, ApiError } from '../api.js';
 import { currentContext, loadContexts, putContext, removeContext, suggestContextName, useContext } from '../contexts.js';
@@ -110,7 +110,7 @@ export function register(program: Command): void {
 
   context
     .command('list', { isDefault: true })
-    .description('list contexts from ~/.config/agent-conductor/contexts.yaml')
+    .description('list contexts from ~/.config/weave/contexts.yaml')
     .action(async (_opts: unknown, command: Command) => run(async () => {
       const file = loadContexts();
       const rows = Object.entries(file.contexts).map(([name, entry]) => ({
@@ -129,7 +129,7 @@ export function register(program: Command): void {
           { header: 'WORKSPACE', get: (r) => r.workspace },
           { header: 'AUTH', get: (r) => r.auth },
           { header: 'PINNED', get: (r) => r.pinned },
-        ], { empty: 'no contexts yet — run `conductor login <url>`' });
+        ], { empty: 'no contexts yet — run `weave login <url>`' });
       });
     }));
 

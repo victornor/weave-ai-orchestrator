@@ -1,5 +1,5 @@
 import { useParams } from '@tanstack/react-router';
-import { isActiveRun } from '@agent-conductor/shared';
+import { isActiveRun } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { RunTranscript } from '../components/RunTranscript';
 import { SkeletonRows } from '../components/Skeleton';

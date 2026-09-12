@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, OcError } from '@agent-conductor/shared';
+import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, OcError } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
 import { requireOperator } from '../auth.js';

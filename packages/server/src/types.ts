@@ -1,5 +1,5 @@
-import type { CoreServices, WorkspaceContext, AuthService, Actor, Registries, IncidentsService } from '@agent-conductor/core';
-import type { DaemonConfig } from '@agent-conductor/shared';
+import type { CoreServices, WorkspaceContext, AuthService, Actor, Registries, IncidentsService } from '@weave-ai/core';
+import type { DaemonConfig } from '@weave-ai/shared';
 import type { RunTokenClaims } from './runtoken.js';
 import type { UpdateChecker } from './release-info.js';
 import type { UpgradeService } from './upgrade.js';
@@ -33,7 +33,7 @@ export interface AppDeps {
   updates: UpdateChecker;
   /** The deferred upgrade: request one, watch it, cancel it (PLAN §20). */
   upgrades: UpgradeService;
-  /** Daemon-level system incidents agents file through `ac_incident` (VS-174). */
+  /** Daemon-level system incidents agents file through `weave_incident` (VS-174). */
   incidents: IncidentsService;
   /** Directory holding daemon.yaml; PUT /api/daemon/transcription writes here. */
   daemonConfigDir?: string;

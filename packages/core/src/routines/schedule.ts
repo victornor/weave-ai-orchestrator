@@ -2,7 +2,7 @@
  * Pure schedule math for routines (VS-220). Daily fires are wall-clock in an IANA zone
  * (DST-aware); interval fires are `fromInstant + N minutes`.
  */
-import { OcError, ROUTINE_MIN_INTERVAL_MINUTES, type RoutineTrigger } from '@agent-conductor/shared';
+import { OcError, ROUTINE_MIN_INTERVAL_MINUTES, type RoutineTrigger } from '@weave-ai/shared';
 
 export function hostTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';

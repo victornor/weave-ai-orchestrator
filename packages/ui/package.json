@@ -1,5 +1,5 @@
 {
-  "name": "@agent-conductor/ui",
+  "name": "@weave-ai/ui",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
@@ -12,8 +12,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@agent-conductor/render": "workspace:*",
-    "@agent-conductor/shared": "workspace:*",
+    "@weave-ai/render": "workspace:*",
+    "@weave-ai/shared": "workspace:*",
     "@tanstack/react-query": "^5.62.0",
     "@tanstack/react-router": "^1.95.0",
     "@xyflow/react": "^12.11.6",

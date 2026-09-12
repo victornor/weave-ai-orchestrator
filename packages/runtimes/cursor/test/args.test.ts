@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TurnInput } from '@agent-conductor/runtime-sdk';
+import type { TurnInput } from '@weave-ai/runtime-sdk';
 import { buildArgs, MAX_ARGV_PROMPT, resumeCommand } from '../src/args.js';
 
 function input(over: Partial<TurnInput> = {}): TurnInput {
@@ -65,11 +65,11 @@ describe('cursor buildArgs — argv print mode', () => {
 
   it('writes MCP servers into .cursor/mcp.json and passes --approve-mcps', () => {
     const b = buildArgs(input({
-      mcpServers: { agentconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } },
+      mcpServers: { 'weave-ai': { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } },
     }));
     expect(b.args).toContain('--approve-mcps');
     const f = b.files.find((x) => x.path === '/home/agent/.cursor/mcp.json')!;
-    expect(JSON.parse(f.content).mcpServers.agentconductor).toEqual({
+    expect(JSON.parse(f.content).mcpServers['weave-ai']).toEqual({
       url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' },
     });
   });

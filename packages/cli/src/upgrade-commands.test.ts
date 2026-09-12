@@ -1,4 +1,4 @@
-/** `conductor daemon update|update apply|update cancel` against a stub daemon. */
+/** `weave daemon update|update apply|update cancel` against a stub daemon. */
 import { createServer, type Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildProgram } from './program.js';
@@ -60,7 +60,7 @@ const upgrade = (over: Record<string, unknown> = {}) => ({
   log: [], backups: [], cameBackVersion: null, ...over,
 });
 
-describe('conductor daemon update', () => {
+describe('weave daemon update', () => {
   it('reports the running release, the target and that an update is available', async () => {
     routes['GET /api/daemon/update'] = () => ({ body: {
       configured: true, running: runningRelease, source: '/src/agent-conductor', ref: 'main',
@@ -95,7 +95,7 @@ describe('conductor daemon update', () => {
   });
 });
 
-describe('conductor daemon update apply', () => {
+describe('weave daemon update apply', () => {
   it('queues the upgrade with the ref and --test it was given', async () => {
     routes['POST /api/daemon/upgrade'] = (body) => ({ status: 202, body: upgrade({ ...(body as object) }) });
     const out = await cli('daemon', 'update', 'apply', '--ref', 'release', '--test', '--no-follow');
@@ -143,7 +143,7 @@ describe('conductor daemon update apply', () => {
   }, 20_000);
 });
 
-describe('conductor daemon status', () => {
+describe('weave daemon status', () => {
   it('prints the git sha as version, not v0.1.0', async () => {
     routes['GET /api/health'] = () => ({ body: {
       ok: true, version: 'abc1234def',
@@ -157,7 +157,7 @@ describe('conductor daemon status', () => {
   });
 });
 
-describe('conductor daemon update cancel', () => {
+describe('weave daemon update cancel', () => {
   it('cancels and says dispatch resumed', async () => {
     routes['POST /api/daemon/upgrade/cancel'] = () => ({ body: upgrade({ state: 'cancelled', finishedAt: '2026-09-05T10:01:00.000Z' }) });
     const out = await cli('daemon', 'update', 'cancel');

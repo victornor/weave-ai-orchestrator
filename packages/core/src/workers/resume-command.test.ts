@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { FakeRuntime, type ResumeCommand, type ResumeCommandInput } from '@agent-conductor/runtime-sdk';
-import type { Agent } from '@agent-conductor/shared';
+import { FakeRuntime, type ResumeCommand, type ResumeCommandInput } from '@weave-ai/runtime-sdk';
+import type { Agent } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import type { SessionRow } from '../sessions/index.js';
 import { buildHandoverCommand } from './resume-command.js';

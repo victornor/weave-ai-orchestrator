@@ -1,4 +1,4 @@
-# AgentConductor daemon. See docs/DOCKER.md.
+# Weave AI daemon. See docs/DOCKER.md.
 #
 # Stage 1 builds the monorepo (tsc -b for every package plus the Vite web app); stage 2 is a slim
 # runtime carrying only what the daemon needs at run time: node 22, git, gh, openspec, the built
@@ -25,7 +25,7 @@ COPY skills/ skills/
 COPY templates/ templates/
 
 RUN pnpm build \
- && pnpm --filter @agent-conductor/ui build \
+ && pnpm --filter @weave-ai/ui build \
  && pnpm prune --prod
 
 # ---------- runtime ----------

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { OcError, type Wakeup } from '@agent-conductor/shared';
+import { OcError, type Wakeup } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createWakeService } from '../wake/index.js';
 import { createRoutinesService } from './index.js';

@@ -1,4 +1,4 @@
-import type { UsageGrain, UsageWindow } from '@agent-conductor/shared';
+import type { UsageGrain, UsageWindow } from '@weave-ai/shared';
 import { Segmented } from './Tabs';
 import { cx } from '../lib/cx';
 

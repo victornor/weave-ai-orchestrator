@@ -1,10 +1,10 @@
 /**
  * `transcriptToLines` — a `TranscriptBlock[]` flattened into one short line per block, for a reader
- * that has no renderer (VS-61: the conductor's `ac_run_inspect`).
+ * that has no renderer (VS-61: the conductor's `weave_run_inspect`).
  *
  * The folding, the tool-target extraction and the redaction all happened in `runEventsToTranscript`
  * already; this only decides how much of each block survives and what the line reads like, so an
- * agent inspecting a run sees the same transcript the run page and `conductor attach` show.
+ * agent inspecting a run sees the same transcript the run page and `weave attach` show.
  */
 import { oneLine } from './format.js';
 import type { ErrorBlock, FileBlock, HumanInputBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock, TranscriptBlock, TranscriptBlockKind } from './types.js';

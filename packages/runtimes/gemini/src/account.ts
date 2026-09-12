@@ -6,7 +6,7 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AccountDescription, AccountProbeInput } from '@agent-conductor/runtime-sdk';
+import type { AccountDescription, AccountProbeInput } from '@weave-ai/runtime-sdk';
 
 const NO_LIMITS = 'gemini: the CLI keeps its quota in memory and does not expose limit windows to a non-interactive run';
 

@@ -7,7 +7,7 @@
  * to that one file, and the page, its order and every other section stay as they are.
  */
 import { useState } from 'react';
-import type { Project } from '@agent-conductor/shared';
+import type { Project } from '@weave-ai/shared';
 import { cx } from '../../lib/cx';
 import { NeedsYouSection } from './NeedsYouSection';
 import { WorkSection } from './WorkSection';

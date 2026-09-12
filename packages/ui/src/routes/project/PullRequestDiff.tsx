@@ -8,7 +8,7 @@
  * card's, and the pull request's description/checks panel above this, exactly as VS-97 left them.
  */
 import { useEffect, useState } from 'react';
-import type { DiffHunk, DiffLine } from '@agent-conductor/render';
+import type { DiffHunk, DiffLine } from '@weave-ai/render';
 import { highlightLine, languageForPath, useHighlighter } from '../../lib/highlight';
 import { usePullRequestDiffContext, usePullRequestDiffFile, usePullRequestDiffFiles } from '../../api/hooks';
 import { Badge } from '../../components/StatusGlyph';

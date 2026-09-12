@@ -1,7 +1,7 @@
 /** Turns global flags + environment + contexts file into a ready `ApiClient`. */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AC_ENV } from '@agent-conductor/shared';
+import { AC_ENV } from '@weave-ai/shared';
 import { ApiClient, ApiError } from './api.js';
 import { configHome, currentContext, resolveWorkspaceId, DEFAULT_URL, type ContextEntry } from './contexts.js';
 import { applyCertPin } from './tls.js';
@@ -26,7 +26,7 @@ export interface Session {
 export interface ResolveOptions {
   /** Resolve (and require) a workspace id. Daemon-level commands pass false. */
   workspace?: 'required' | 'optional' | 'none';
-  /** Skip the contexts file entirely (used by `conductor login`). */
+  /** Skip the contexts file entirely (used by `weave login`). */
   anonymous?: boolean;
 }
 
@@ -89,7 +89,7 @@ async function soleWorkspace(client: ApiClient): Promise<string | null> {
 
 /**
  * No context, no `--url`: talk to the daemon started on this machine over its loopback listener
- * (`daemon.json`), which is what makes `conductor daemon set-password` and `conductor daemon status` work before
+ * (`daemon.json`), which is what makes `weave daemon set-password` and `weave daemon status` work before
  * the first login — and while the public listener is held for lack of an operator password.
  */
 function localDaemonUrl(): string | null {

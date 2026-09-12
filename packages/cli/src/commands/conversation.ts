@@ -1,17 +1,17 @@
-/** `conductor chat|say|briefing|attach|top|specs explore` — the human-facing front door (PLAN §21.2). */
+/** `weave chat|say|briefing|attach|top|specs explore` — the human-facing front door (PLAN §21.2). */
 import type { Command } from 'commander';
-import type { Briefing, ChannelThread, ThreadMessage } from '@agent-conductor/shared';
-import { briefingToSections, oneLine } from '@agent-conductor/render';
+import type { Briefing, ChannelThread, ThreadMessage } from '@weave-ai/shared';
+import { briefingToSections, oneLine } from '@weave-ai/render';
 import { ApiError, type ApiClient } from '../api.js';
 import { emit, heading, style, write } from '../output.js';
 import { first, items, run, session } from './util.js';
 
-/** The TUI is loaded lazily: `conductor ticket list` must not pay for Ink and React. */
-async function tui(): Promise<typeof import('@agent-conductor/tui')> {
+/** The TUI is loaded lazily: `weave ticket list` must not pay for Ink and React. */
+async function tui(): Promise<typeof import('@weave-ai/tui')> {
   try {
-    return await import('@agent-conductor/tui');
+    return await import('@weave-ai/tui');
   } catch (cause) {
-    throw new ApiError('internal', `the terminal UI is not installed (${(cause as Error).message}); install @agent-conductor/tui or run with --json`, 500);
+    throw new ApiError('internal', `the terminal UI is not installed (${(cause as Error).message}); install @weave-ai/tui or run with --json`, 500);
   }
 }
 
@@ -104,7 +104,7 @@ export function register(program: Command): void {
 
       emit(reply ?? { reply: null, timedOut: true }, () => {
         if (!reply) {
-          write(style.warn(`no reply within ${Number(opts['timeout'] ?? 180)}s — it may still arrive; see \`conductor chat\``));
+          write(style.warn(`no reply within ${Number(opts['timeout'] ?? 180)}s — it may still arrive; see \`weave chat\``));
           process.exitCode = 2;
           return;
         }

@@ -1,7 +1,7 @@
 /** VS-168: daemon-wide Live page. */
 import { render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Run, Ticket, WorkerModelOption } from '@agent-conductor/shared';
+import type { Agent, Run, Ticket, WorkerModelOption } from '@weave-ai/shared';
 import { agent, run as makeRun, ticket } from './factories';
 
 const state = vi.hoisted(() => ({

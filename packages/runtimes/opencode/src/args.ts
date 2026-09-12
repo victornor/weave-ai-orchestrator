@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, TurnInput } from '@agent-conductor/runtime-sdk';
+import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, TurnInput } from '@weave-ai/runtime-sdk';
 import { asOpenCodeSession } from './session.js';
 
 export const CONFIG_RELATIVE_PATH = '.opencode/opencode.json';
@@ -72,7 +72,7 @@ export function buildArgs(input: TurnInput): OpenCodeBuiltCommand {
  * and should be treated as best-effort until the daemon's owner confirms it against a real
  * `opencode -s <id>`. The caller (the core command-construction module, not this function) is
  * responsible for pinning `MISE_*` back to the daemon's own roots when it builds a human's resume
- * command, per `pinHostMiseRoots` (`@agent-conductor/runtime-sdk`) — this function only sets the
+ * command, per `pinHostMiseRoots` (`@weave-ai/runtime-sdk`) — this function only sets the
  * overlay `HOME`/`XDG_*` values themselves, exactly as `buildArgs` above does.
  */
 export function resumeCommand(input: ResumeCommandInput): ResumeCommand {

@@ -5,8 +5,8 @@
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { OcError, TELEGRAM_BOT_TOKEN_ENV_VAR_NAME, TELEGRAM_BOT_TOKEN_SECRET_NAME } from '@agent-conductor/shared';
-import { TelegramClient } from '@agent-conductor/channel-telegram';
+import { OcError, TELEGRAM_BOT_TOKEN_ENV_VAR_NAME, TELEGRAM_BOT_TOKEN_SECRET_NAME } from '@weave-ai/shared';
+import { TelegramClient } from '@weave-ai/channel-telegram';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
 import { resolveTelegramToken } from '../channels.js';

@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type {
   AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
   RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
-} from '@agent-conductor/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
-import { extractReport } from '@agent-conductor/shared';
+} from '@weave-ai/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, spawnLines, writeFiles } from '@weave-ai/runtime-sdk';
+import { extractReport } from '@weave-ai/shared';
 import { describeGeminiAccount } from './account.js';
 import { buildArgs, geminiSettings, resumeCommand, SETTINGS_RELATIVE_PATH } from './args.js';
 import { createGeminiParser } from './events.js';

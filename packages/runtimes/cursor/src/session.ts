@@ -1,4 +1,4 @@
-import type { SessionRef } from '@agent-conductor/runtime-sdk';
+import type { SessionRef } from '@weave-ai/runtime-sdk';
 
 /** Cursor print-mode sessions are ids the CLI reports in `session_id`. */
 export interface CursorSessionRef { sessionId: string }

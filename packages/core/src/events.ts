@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
-import type { Db } from '@agent-conductor/db';
-import { newId, nowIso } from '@agent-conductor/db';
-import type { EventType, WorkspaceEvent } from '@agent-conductor/shared';
+import type { Db } from '@weave-ai/db';
+import { newId, nowIso } from '@weave-ai/db';
+import type { EventType, WorkspaceEvent } from '@weave-ai/shared';
 
 /** Durable outbox + in-process bus. Every domain change appends here; SSE/hooks/webhooks consume by seq. */
 export class EventBus {

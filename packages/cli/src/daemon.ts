@@ -1,11 +1,11 @@
-/** Local daemon lifecycle (PLAN §20 `conductor daemon`). Everything here is host-local, never remote. */
+/** Local daemon lifecycle (PLAN §20 `weave daemon`). Everything here is host-local, never remote. */
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
-import { SHUTDOWN_KILL_GRACE_MS } from '@agent-conductor/shared';
+import { SHUTDOWN_KILL_GRACE_MS } from '@weave-ai/shared';
 import { stateHome, configHome } from './contexts.js';
 import { LAUNCHD_LABEL, SERVICE_NAME, currentLink } from './release.js';
 
@@ -13,8 +13,8 @@ export function pidFile(): string { return join(stateHome(), 'daemon.pid'); }
 export function logFile(): string { return join(stateHome(), 'daemon.log'); }
 
 /**
- * The server bin. `@agent-conductor/server` is expected to export `./bin` →
- * `dist/bin.js`; the repo-relative fallbacks keep `conductor daemon start` working from a source checkout
+ * The server bin. `@weave-ai/server` is expected to export `./bin` →
+ * `dist/bin.js`; the repo-relative fallbacks keep `weave daemon start` working from a source checkout
  * before the package is linked.
  */
 export function resolveServerBin(): string {
@@ -22,7 +22,7 @@ export function resolveServerBin(): string {
   const current = currentLink();
   if (existsSync(join(current, 'packages', 'server', 'dist', 'bin.js'))) return join(current, 'packages', 'server', 'dist', 'bin.js');
   const req = createRequire(import.meta.url);
-  for (const specifier of ['@agent-conductor/server/bin', '@agent-conductor/server/dist/bin.js']) {
+  for (const specifier of ['@weave-ai/server/bin', '@weave-ai/server/dist/bin.js']) {
     try { return req.resolve(specifier); } catch { /* try the next one */ }
   }
   const here = dirname(fileURLToPath(import.meta.url));
@@ -32,7 +32,7 @@ export function resolveServerBin(): string {
     resolve(process.cwd(), 'packages/server/dist/bin.js'),
   ];
   for (const candidate of candidates) if (existsSync(candidate)) return candidate;
-  throw new Error('cannot find the AgentConductor server: install @agent-conductor/server, or build it with `pnpm -r build`');
+  throw new Error('cannot find the Weave AI server: install @weave-ai/server, or build it with `pnpm -r build`');
 }
 
 export function readPid(): number | null {
@@ -133,7 +133,7 @@ export function serviceUnitPath(): string {
 export function renderServiceUnit(bin: string): string {
   return [
     '[Unit]',
-    'Description=AgentConductor daemon',
+    'Description=Weave AI daemon',
     'After=network-online.target',
     'Wants=network-online.target',
     '',
@@ -197,7 +197,7 @@ export function renderLaunchdPlist(bin: string): string {
 }
 
 /**
- * Write `~/Library/LaunchAgents/com.agentconductor.daemon.plist`. On anything but macOS the plist is
+ * Write `~/Library/LaunchAgents/com.weave-ai.daemon.plist`. On anything but macOS the plist is
  * only rendered (`written: false`) so it can be copied to a Mac by hand.
  */
 export function installLaunchdAgent(): { path: string; plist: string; commands: string[]; written: boolean } {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { degrade, textMessage, type CanonicalMessage } from '@agent-conductor/channel-sdk';
+import { degrade, textMessage, type CanonicalMessage } from '@weave-ai/channel-sdk';
 import { chunkText, escapeMarkdownV2, quoteMarkdownV2, toMarkdownV2 } from '../src/markdown.js';
 import { buildCalls, buildKeyboard } from '../src/render.js';
 import { CallbackCodec, CALLBACK_MAX_BYTES, byteLength } from '../src/callbacks.js';
@@ -18,7 +18,7 @@ describe('markdown v2', () => {
   });
 
   it('leaves code spans intact', () => {
-    expect(toMarkdownV2('run `conductor attach w-1` now')).toBe('run `conductor attach w-1` now');
+    expect(toMarkdownV2('run `weave attach w-1` now')).toBe('run `weave attach w-1` now');
     expect(toMarkdownV2('```\nconst a = 1.0;\n```')).toBe('```\nconst a = 1.0;\n```');
   });
 

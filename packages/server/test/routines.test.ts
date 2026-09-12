@@ -1,6 +1,6 @@
 /** HTTP scheduled tasks (`/routines`) — session auth, CRUD, pause, usage, fires (VS-220, VS-231). */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Routine, RoutineFire, RoutineListItem, RoutineUsage } from '@agent-conductor/shared';
+import type { Routine, RoutineFire, RoutineListItem, RoutineUsage } from '@weave-ai/shared';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import type { RunTokenClaims } from '../src/runtoken.js';

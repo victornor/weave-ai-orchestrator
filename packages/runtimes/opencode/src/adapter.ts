@@ -3,9 +3,9 @@ import { promisify } from 'node:util';
 import type {
   AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
   RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
-} from '@agent-conductor/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, which, writeFiles } from '@agent-conductor/runtime-sdk';
-import { extractReport } from '@agent-conductor/shared';
+} from '@weave-ai/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, which, writeFiles } from '@weave-ai/runtime-sdk';
+import { extractReport } from '@weave-ai/shared';
 import { describeOpenCodeAccount } from './account.js';
 import { buildArgs, CONFIG_RELATIVE_PATH, opencodeConfig, resumeCommand } from './args.js';
 import { createOpenCodeParser } from './events.js';

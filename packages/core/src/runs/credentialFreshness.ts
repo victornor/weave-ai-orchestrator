@@ -10,7 +10,7 @@
  * workspace), and that every other caller waits on and reuses that one outcome instead of causing its
  * own. See `design.md` Decision 1 for the alternatives this was chosen over.
  */
-import type { AccountDescription, AccountProbeInput, CredentialFacts, RuntimeAdapter } from '@agent-conductor/runtime-sdk';
+import type { AccountDescription, AccountProbeInput, CredentialFacts, RuntimeAdapter } from '@weave-ai/runtime-sdk';
 
 export interface EnsureFreshCredentialInput {
   runtimeId: string;

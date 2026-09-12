@@ -1,5 +1,5 @@
 /**
- * VS-262: `conductor daemon stop` requests the same bounded drain over HTTP `daemon
+ * VS-262: `weave daemon stop` requests the same bounded drain over HTTP `daemon
  * restart`/`upgrade`/`rollback` already do, before signalling the process.
  */
 import { createServer, type Server } from 'node:http';
@@ -65,7 +65,7 @@ async function cli(...argv: string[]): Promise<string> {
   return out;
 }
 
-describe('conductor daemon stop', () => {
+describe('weave daemon stop', () => {
   it('drains before stopping, with the default 180s budget', async () => {
     routes['POST /api/daemon/drain'] = () => ({ body: { drained: true, running: [], workspaces: ['ws1'] } });
     const out = await cli('daemon', 'stop');

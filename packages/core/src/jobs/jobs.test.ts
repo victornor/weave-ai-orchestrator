@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Job } from '@agent-conductor/shared';
+import type { Job } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import type { WorkspaceContext } from '../context.js';
 import { createJobsService, JOB_LOG_FLUSH_MS, JOB_LOG_LINES } from './index.js';

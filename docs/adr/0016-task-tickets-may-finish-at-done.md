@@ -36,7 +36,7 @@ never be refused by this gate. `change`, `scout` and `question` behaviour is unc
 ## Consequences
 
 - Chores, cleanups and config tweaks stop costing the human a merge approval.
-- The note requirement touches the CLI's `conductor ticket transition --to done` (pass `--note`) and
+- The note requirement touches the CLI's `weave ticket transition --to done` (pass `--note`) and
   any daemon-internal task→done path; the error message names the two endings.
 - Unlanded commits keep today's protections: a refused `done` leaves the ticket's status intact, and
   a worktree with uncommitted changes is still handled by the landed-work test and `ticket discard`.

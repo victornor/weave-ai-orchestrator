@@ -54,7 +54,7 @@ describe('brief helpers', () => {
   it('states a definition of done per kind and delivery mode', () => {
     expect(definitionOfDone('change', 'pr')).toContain('open a PR');
     expect(definitionOfDone('scout', 'pr')).toContain('report');
-    expect(definitionOfDone('question', 'pr')).toContain('ac_ticket_comment');
+    expect(definitionOfDone('question', 'pr')).toContain('weave_ticket_comment');
     expect(definitionOfDone('operational', 'pr')).toContain('action_approval');
     expect(definitionOfDone('operational', 'pr')).toContain('unlanded');
     expect(definitionOfDone('operational', 'pr')).toContain('not a second authorisation');

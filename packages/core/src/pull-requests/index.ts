@@ -12,10 +12,10 @@
  * there is no member here that writes anything, to the forge or to the database.
  */
 import { existsSync } from 'node:fs';
-import type { ForgeAdapter, ForgePullRequest, ForgePullRequestDetail } from '@agent-conductor/plugin-sdk';
-import { nowIso } from '@agent-conductor/db';
-import type { EventType, Project, TicketStatus, WorkspaceEvent } from '@agent-conductor/shared';
-import { parseUnifiedDiff, type ParsedDiffFile } from '@agent-conductor/render';
+import type { ForgeAdapter, ForgePullRequest, ForgePullRequestDetail } from '@weave-ai/plugin-sdk';
+import { nowIso } from '@weave-ai/db';
+import type { EventType, Project, TicketStatus, WorkspaceEvent } from '@weave-ai/shared';
+import { parseUnifiedDiff, type ParsedDiffFile } from '@weave-ai/render';
 import type {
   CoreServices, DiffFileSummary, ProjectPullRequest, ProjectPullRequestDetail, ProjectPullRequests,
   PullRequestDetailResult, PullRequestDiffContextResult, PullRequestDiffFileResult,

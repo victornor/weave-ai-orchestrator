@@ -7,12 +7,12 @@
  * It is deliberately not a knowledge file: no budget, no curation, no place in any agent's context.
  * Nothing here writes, and no route or tool exposes a write, which is what makes it append-only.
  */
-import type { Db } from '@agent-conductor/db';
+import type { Db } from '@weave-ai/db';
 import {
   CHANGELOG_KINDS, CHANGELOG_MEASURE_KIND, CHANGELOG_SOURCES, OcError,
   type ChangelogDay, type ChangelogHeatmap, type ChangelogKind, type ChangelogPage,
-} from '@agent-conductor/shared';
-import { changelogEntry, dayKey, type ActivityRow } from '@agent-conductor/render';
+} from '@weave-ai/shared';
+import { changelogEntry, dayKey, type ActivityRow } from '@weave-ai/render';
 import type { ChangelogHeatmapQuery, ChangelogQuery, ChangelogService, CoreServices } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 

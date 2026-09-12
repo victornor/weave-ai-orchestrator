@@ -5,7 +5,7 @@
 import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { JobStep } from '@agent-conductor/shared';
+import type { JobStep } from '@weave-ai/shared';
 
 const state = vi.hoisted(() => ({
   posts: [] as Array<{ workspace: string; path: string; body: unknown }>,

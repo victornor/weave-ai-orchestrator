@@ -1,5 +1,5 @@
 {
-  "name": "@agent-conductor/tui",
+  "name": "@weave-ai/tui",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -15,8 +15,8 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@agent-conductor/shared": "workspace:*",
-    "@agent-conductor/render": "workspace:*",
+    "@weave-ai/shared": "workspace:*",
+    "@weave-ai/render": "workspace:*",
     "ink": "^6.3.0",
     "react": "^19.1.1",
     "ws": "^8.18.3",

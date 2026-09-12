@@ -1,6 +1,6 @@
 import { join } from 'node:path';
-import type { BuiltCommand, ResumeCommand, ResumeCommandInput, TurnInput } from '@agent-conductor/runtime-sdk';
-import { runTmpDir } from '@agent-conductor/runtime-sdk';
+import type { BuiltCommand, ResumeCommand, ResumeCommandInput, TurnInput } from '@weave-ai/runtime-sdk';
+import { runTmpDir } from '@weave-ai/runtime-sdk';
 import { asClaudeSession, isUuid } from './session.js';
 
 /** Tools left available in `restricted` posture (no command/code execution, no network fetch). */
@@ -12,7 +12,7 @@ export const MAX_ARGV_PROMPT = 96_000;
 export interface ClaudeBuildOpts {
   /** UUID to use when this turn starts a new session. Caller generates it (keeps buildArgs pure). */
   newSessionId: string;
-  /** Scratch dir for mcp-config / system-prompt files. Defaults to os.tmpdir()/agent-conductor-<runId>. */
+  /** Scratch dir for mcp-config / system-prompt files. Defaults to os.tmpdir()/weave-ai-<runId>. */
   tmpDir?: string;
 }
 
@@ -92,7 +92,7 @@ export function buildArgs(input: TurnInput, opts: ClaudeBuildOpts): ClaudeBuiltC
       args.push('--permission-mode', 'auto');
   }
   // `dontAsk` denies anything not explicitly allowed, MCP tools included — so the
-  // control-plane server must be allowlisted or the agent cannot call ac_* at all
+  // control-plane server must be allowlisted or the agent cannot call weave_* at all
   // (verified against claude 2.1.258).
   const allowed = [...(input.permission.allowedTools ?? [])];
   if (input.permission.mode === 'restricted') {

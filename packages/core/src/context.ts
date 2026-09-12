@@ -1,10 +1,10 @@
-import type { Db } from '@agent-conductor/db';
-import { OcError, type WorkspaceConfig, type DaemonConfig } from '@agent-conductor/shared';
-import { resolveWorkspaceStateDir, type WorkspaceInstallStatus } from '@agent-conductor/release';
-import type { RuntimeAdapter } from '@agent-conductor/runtime-sdk';
-import type { ChannelAdapter } from '@agent-conductor/channel-sdk';
-import type { SurfaceAdapter } from '@agent-conductor/surface-sdk';
-import type { WorktreeProvider, ForgeAdapter, AgentToolDefinition, Logger as PluginLogger } from '@agent-conductor/plugin-sdk';
+import type { Db } from '@weave-ai/db';
+import { OcError, type WorkspaceConfig, type DaemonConfig } from '@weave-ai/shared';
+import { resolveWorkspaceStateDir, type WorkspaceInstallStatus } from '@weave-ai/release';
+import type { RuntimeAdapter } from '@weave-ai/runtime-sdk';
+import type { ChannelAdapter } from '@weave-ai/channel-sdk';
+import type { SurfaceAdapter } from '@weave-ai/surface-sdk';
+import type { WorktreeProvider, ForgeAdapter, AgentToolDefinition, Logger as PluginLogger } from '@weave-ai/plugin-sdk';
 import type { EventBus } from './events.js';
 import type { Logger } from './logger.js';
 
@@ -29,7 +29,7 @@ export interface WorkspacePaths {
 /**
  * VS-258: the per-workspace state directory (`.agent-conductor/` or `.weave/`) and the conductor
  * agent's home (`conductor/` or `weaver/`) resolve together, from one decision, so a workspace can
- * never end up with mismatched halves — see `resolveWorkspaceStateDir` (`@agent-conductor/release`)
+ * never end up with mismatched halves — see `resolveWorkspaceStateDir` (`@weave-ai/release`)
  * and this change's design.md Decision 3. An ambiguous installation (both names' `db.sqlite` exist)
  * is a loud `OcError`, never a silent pick.
  */

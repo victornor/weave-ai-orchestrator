@@ -3,8 +3,8 @@
  * and real decisions, because the point of the mode is what ends up in the `decisions` table.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId, nowIso } from '@agent-conductor/db';
-import type { Ticket } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import type { Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createTicketsService } from './service.js';
 import { createDecisionsService } from '../decisions/service.js';

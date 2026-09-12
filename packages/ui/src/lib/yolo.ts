@@ -3,7 +3,7 @@
  * from `defaults.yolo` and a project's `policies.yolo`; both surfaces read it, neither stores it,
  * so a card can never claim a decision will be auto-approved when the daemon would not grant it.
  */
-import { yoloEnabled, type Decision, type Project } from '@agent-conductor/shared';
+import { yoloEnabled, type Decision, type Project } from '@weave-ai/shared';
 
 /** The workspace default, from the config `GET /api/w/:ws` already returns. */
 export function workspaceYolo(config: Record<string, unknown> | undefined): boolean {

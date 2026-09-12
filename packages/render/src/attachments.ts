@@ -1,5 +1,5 @@
 /** A `ThreadMessage`'s `attachment` parts, turned into what a transcript renders (VS-133). */
-import { isAttachmentImageType, isAttachmentTextType, type AttachmentPart } from '@agent-conductor/shared';
+import { isAttachmentImageType, isAttachmentTextType, type AttachmentPart } from '@weave-ai/shared';
 import { formatBytes } from './format.js';
 
 export interface AttachmentView {

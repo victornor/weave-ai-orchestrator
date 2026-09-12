@@ -1,9 +1,9 @@
 import type {
   ChannelAdapter, ChannelCapabilities, ChannelContext, JsonSchema, OutboundMessage, RunningChannel, SendResult,
-} from '@agent-conductor/channel-sdk';
+} from '@weave-ai/channel-sdk';
 
 /**
- * The cli channel is a no-op transport: `conductor chat` / `conductor attach` read and write threads
+ * The cli channel is a no-op transport: `weave chat` / `weave attach` read and write threads
  * over the HTTP API. The adapter exists so the channel can be registered, capability-
  * checked and config-validated like any other channel.
  */

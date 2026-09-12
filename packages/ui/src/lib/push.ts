@@ -1,7 +1,7 @@
 /**
  * Turning web push on and off for this device.
  *
- * The paths come from `@agent-conductor/shared`, the same constants the daemon registers its push
+ * The paths come from `@weave-ai/shared`, the same constants the daemon registers its push
  * routes with, so the two cannot drift apart again — the web app used to post a subscription to
  * `/push/subscribe`, a route the daemon has never served, and the 404 was swallowed into "push is
  * not available". Every failure here keeps its message so the toggle can say what actually broke.
@@ -10,7 +10,7 @@
  * later DELETE needs, and it is per device by nature, so it belongs beside the browser's own
  * subscription rather than in the workspace database.
  */
-import { pushPath, type PushConfig } from '@agent-conductor/shared';
+import { pushPath, type PushConfig } from '@weave-ai/shared';
 import { api } from '../api/client';
 
 const PREFIX = 'conductor.push';

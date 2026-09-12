@@ -5,8 +5,8 @@
  * raised for one, not only when a human explicitly asks for it.
  */
 import { join } from 'node:path';
-import { daemonEnv, launchCommand, pinHostMiseRoots } from '@agent-conductor/runtime-sdk';
-import type { Agent } from '@agent-conductor/shared';
+import { daemonEnv, launchCommand, pinHostMiseRoots } from '@weave-ai/runtime-sdk';
+import type { Agent } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { SessionRow } from '../sessions/index.js';
 

@@ -1,4 +1,4 @@
-export const PACKAGE = '@agent-conductor/server';
+export const PACKAGE = '@weave-ai/server';
 export { createApp, type WorkspaceAdmin } from './app.js';
 export { startDaemon, pluginSpecifier, VERSION, type DaemonHandle, type StartOptions } from './daemon.js';
 export { ChannelManager, decisionCard, HELP_TEXT } from './channels.js';

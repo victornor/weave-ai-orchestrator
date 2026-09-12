@@ -1,7 +1,7 @@
 import type {
   ForgeAdapter, ForgeCheck, ForgeCheckState, ForgeChangedFile, ForgePullRequest, ForgePullRequestDetail,
-} from '@agent-conductor/plugin-sdk';
-import { OcError } from '@agent-conductor/shared';
+} from '@weave-ai/plugin-sdk';
+import { OcError } from '@weave-ai/shared';
 import { sh } from '../util/exec.js';
 
 interface GhCheck { name?: string; context?: string; workflowName?: string; state?: string; conclusion?: string; status?: string; detailsUrl?: string; targetUrl?: string }

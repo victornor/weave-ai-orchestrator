@@ -1,10 +1,10 @@
-import type { UiStatus } from '@agent-conductor/shared';
+import type { UiStatus } from '@weave-ai/shared';
 import { StatusGlyph } from './StatusGlyph';
 import { STATUS_LABEL, STATUS_TEXT } from '../lib/status';
 import { cx } from '../lib/cx';
 
 /**
- * One dispatch in the conductor chat: work the conductor filed in the turn above it. Unlike the
+ * One dispatch in the weave chat: work the conductor filed in the turn above it. Unlike the
  * worker chip it stands for, it stays where it is once the work ends and reports how it ended
  * (spec `conductor-chat/dispatch-labels`).
  */

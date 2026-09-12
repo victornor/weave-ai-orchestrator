@@ -1,4 +1,4 @@
-import type { UiStatus } from '@agent-conductor/shared';
+import type { UiStatus } from '@weave-ai/shared';
 
 export interface NavItem {
   key: string;
@@ -62,7 +62,7 @@ export function href(item: NavItem, ws: string): string {
 export const GLOBAL_NAV: NavItem[] = [
   { key: 'global-needs', label: 'Needs you', to: '/needs', glyph: 'needs-you', hint: 'Everything waiting across every workspace' },
   { key: 'global-live', label: 'Live', to: '/live', glyph: 'working', hint: 'Who is working, in every workspace' },
-  { key: 'global-chats', label: 'Chats', to: '/chats', glyph: 'chat', hint: 'Every workspace\'s conductor chat, side by side' },
+  { key: 'global-chats', label: 'Chats', to: '/chats', glyph: 'chat', hint: 'Every workspace\'s weave chat, side by side' },
   { key: 'global-incidents', label: 'Incidents', to: '/incidents', glyph: 'failed', hint: 'System failures agents filed' },
   { key: 'global-map', label: 'Map', to: '/map', glyph: 'board', hint: 'Every workspace, project, role and ticket, as a graph' },
   { key: 'global-scheduled', label: 'Scheduled', to: '/scheduled', glyph: 'queue', hint: 'Recurring conductor alarms, across every workspace' },

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import type { RunEvent } from '@agent-conductor/shared';
-import { agentUiStatus, heldByHuman } from '@agent-conductor/shared';
-import { workerPauseReason } from '@agent-conductor/render';
+import type { RunEvent } from '@weave-ai/shared';
+import { agentUiStatus, heldByHuman } from '@weave-ai/shared';
+import { workerPauseReason } from '@weave-ai/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
 import { Transcript } from '../components/Transcript';

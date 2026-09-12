@@ -1,4 +1,4 @@
-import type { Decision } from '@agent-conductor/shared';
+import type { Decision } from '@weave-ai/shared';
 
 /**
  * A card carrying a secret input goes to the daemon directly and is never held in any client-side

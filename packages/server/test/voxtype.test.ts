@@ -2,11 +2,11 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OcError } from '@agent-conductor/shared';
+import { OcError } from '@weave-ai/shared';
 
 const logSpy = { info: vi.fn(), warn: vi.fn() };
-vi.mock('@agent-conductor/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@agent-conductor/core')>();
+vi.mock('@weave-ai/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@weave-ai/core')>();
   return { ...actual, getLogger: () => logSpy };
 });
 

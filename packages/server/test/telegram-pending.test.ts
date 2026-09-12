@@ -4,7 +4,7 @@
  * unrecognised Telegram sender's identity and letting captain approve one without typing a user id.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ChannelAdapter, SendResult } from '@agent-conductor/channel-sdk';
+import type { ChannelAdapter, SendResult } from '@weave-ai/channel-sdk';
 import { createApp } from '../src/app.js';
 import { ChannelManager } from '../src/channels.js';
 import { authed, makeHarness, type Harness } from './fakes.js';

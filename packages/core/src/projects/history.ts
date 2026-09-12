@@ -10,9 +10,9 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { OcError, type Project } from '@agent-conductor/shared';
+import { OcError, type Project } from '@weave-ai/shared';
 import { git } from '../util/git.js';
-import type { Db } from '@agent-conductor/db';
+import type { Db } from '@weave-ai/db';
 import type { CommitDetail, CommitFile, HistoryCommit, HistoryPage, HistoryQuery, ProjectRef } from '../api.js';
 
 /** The only git subcommands this module ever runs. Named so the allowlist test can assert against it directly. */

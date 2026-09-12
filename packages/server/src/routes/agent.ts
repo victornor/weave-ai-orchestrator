@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { OcError } from '@agent-conductor/shared';
+import { OcError } from '@weave-ai/shared';
 import type { AppDeps, AppEnv } from '../types.js';
 import { body } from '../http.js';
 import { runTool, toolNamesFor, toolsFor, jsonSchemaFor, type ToolCtx } from '../tools.js';
@@ -20,7 +20,7 @@ export function agentRoutes(deps: AppDeps): Hono<AppEnv> {
     return { ws, claims: principal.claims, actor: c.get('actor') as unknown as ToolCtx['actor'], incidents: deps.incidents };
   };
 
-  app.get('/inbox', async (c) => c.json(await runTool('ac_inbox', toolCtx(c as never), {})));
+  app.get('/inbox', async (c) => c.json(await runTool('weave_inbox', toolCtx(c as never), {})));
 
   app.get('/tools', (c) => {
     const ctx = toolCtx(c as never);

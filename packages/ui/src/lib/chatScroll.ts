@@ -1,5 +1,5 @@
 /**
- * Where each workspace's conductor chat was left, so switching workspace and coming back does not
+ * Where each workspace's weave chat was left, so switching workspace and coming back does not
  * throw away the reading position.
  *
  * Module scope, not storage: this is worth keeping while the tab is open and worth forgetting when

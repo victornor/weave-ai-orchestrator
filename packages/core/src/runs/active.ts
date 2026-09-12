@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
-import type { InputDelivery } from '@agent-conductor/runtime-sdk';
-import { nowIso } from '@agent-conductor/db';
-import type { Agent, AuthorKind, RunEvent } from '@agent-conductor/shared';
+import type { InputDelivery } from '@weave-ai/runtime-sdk';
+import { nowIso } from '@weave-ai/db';
+import type { Agent, AuthorKind, RunEvent } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 
 export interface ActiveRun {

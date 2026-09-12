@@ -23,13 +23,13 @@ importers:
 
   examples/plugins/echo-channel:
     dependencies:
-      '@agent-conductor/plugin-sdk':
+      '@weave-ai/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
 
   packages/channel-sdk:
     dependencies:
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../shared
       zod:
@@ -38,19 +38,19 @@ importers:
 
   packages/channels/cli:
     dependencies:
-      '@agent-conductor/channel-sdk':
+      '@weave-ai/channel-sdk':
         specifier: workspace:*
         version: link:../../channel-sdk
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
 
   packages/channels/telegram:
     dependencies:
-      '@agent-conductor/channel-sdk':
+      '@weave-ai/channel-sdk':
         specifier: workspace:*
         version: link:../../channel-sdk
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
       zod:
@@ -59,31 +59,31 @@ importers:
 
   packages/channels/web:
     dependencies:
-      '@agent-conductor/channel-sdk':
+      '@weave-ai/channel-sdk':
         specifier: workspace:*
         version: link:../../channel-sdk
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
 
   packages/cli:
     dependencies:
-      '@agent-conductor/db':
+      '@weave-ai/db':
         specifier: workspace:*
         version: link:../db
-      '@agent-conductor/presenter':
+      '@weave-ai/presenter':
         specifier: workspace:*
         version: link:../presenter
-      '@agent-conductor/release':
+      '@weave-ai/release':
         specifier: workspace:*
         version: link:../release
-      '@agent-conductor/render':
+      '@weave-ai/render':
         specifier: workspace:*
         version: link:../render
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../shared
-      '@agent-conductor/tui':
+      '@weave-ai/tui':
         specifier: workspace:*
         version: link:../tui
       chalk:
@@ -104,33 +104,33 @@ importers:
 
   packages/core:
     dependencies:
-      '@agent-conductor/channel-sdk':
-        specifier: workspace:*
-        version: link:../channel-sdk
-      '@agent-conductor/db':
-        specifier: workspace:*
-        version: link:../db
-      '@agent-conductor/plugin-sdk':
-        specifier: workspace:*
-        version: link:../plugin-sdk
-      '@agent-conductor/release':
-        specifier: workspace:*
-        version: link:../release
-      '@agent-conductor/render':
-        specifier: workspace:*
-        version: link:../render
-      '@agent-conductor/runtime-sdk':
-        specifier: workspace:*
-        version: link:../runtime-sdk
-      '@agent-conductor/shared':
-        specifier: workspace:*
-        version: link:../shared
-      '@agent-conductor/surface-sdk':
-        specifier: workspace:*
-        version: link:../surface-sdk
       '@node-rs/argon2':
         specifier: ^2.0.2
         version: 2.2.0
+      '@weave-ai/channel-sdk':
+        specifier: workspace:*
+        version: link:../channel-sdk
+      '@weave-ai/db':
+        specifier: workspace:*
+        version: link:../db
+      '@weave-ai/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
+      '@weave-ai/release':
+        specifier: workspace:*
+        version: link:../release
+      '@weave-ai/render':
+        specifier: workspace:*
+        version: link:../render
+      '@weave-ai/runtime-sdk':
+        specifier: workspace:*
+        version: link:../runtime-sdk
+      '@weave-ai/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@weave-ai/surface-sdk':
+        specifier: workspace:*
+        version: link:../surface-sdk
       execa:
         specifier: ^9.6.0
         version: 9.6.1
@@ -155,7 +155,7 @@ importers:
 
   packages/db:
     dependencies:
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../shared
       ulid:
@@ -164,37 +164,37 @@ importers:
 
   packages/plugin-sdk:
     dependencies:
-      '@agent-conductor/channel-sdk':
+      '@weave-ai/channel-sdk':
         specifier: workspace:*
         version: link:../channel-sdk
-      '@agent-conductor/runtime-sdk':
+      '@weave-ai/runtime-sdk':
         specifier: workspace:*
         version: link:../runtime-sdk
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../shared
-      '@agent-conductor/surface-sdk':
+      '@weave-ai/surface-sdk':
         specifier: workspace:*
         version: link:../surface-sdk
 
   packages/presenter:
     dependencies:
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../shared
-      '@agent-conductor/surface-headless':
+      '@weave-ai/surface-headless':
         specifier: workspace:*
         version: link:../surfaces/headless
-      '@agent-conductor/surface-herdr':
+      '@weave-ai/surface-herdr':
         specifier: workspace:*
         version: link:../surfaces/herdr
-      '@agent-conductor/surface-hyprland':
+      '@weave-ai/surface-hyprland':
         specifier: workspace:*
         version: link:../surfaces/hyprland
-      '@agent-conductor/surface-sdk':
+      '@weave-ai/surface-sdk':
         specifier: workspace:*
         version: link:../surface-sdk
-      '@agent-conductor/surface-tmux':
+      '@weave-ai/surface-tmux':
         specifier: workspace:*
         version: link:../surfaces/tmux
       eventsource:
@@ -205,13 +205,13 @@ importers:
 
   packages/render:
     dependencies:
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../shared
 
   packages/runtime-sdk:
     dependencies:
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../shared
       execa:
@@ -223,10 +223,10 @@ importers:
 
   packages/runtimes/claude:
     dependencies:
-      '@agent-conductor/runtime-sdk':
+      '@weave-ai/runtime-sdk':
         specifier: workspace:*
         version: link:../../runtime-sdk
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
       execa:
@@ -235,10 +235,10 @@ importers:
 
   packages/runtimes/codex:
     dependencies:
-      '@agent-conductor/runtime-sdk':
+      '@weave-ai/runtime-sdk':
         specifier: workspace:*
         version: link:../../runtime-sdk
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
       execa:
@@ -247,10 +247,10 @@ importers:
 
   packages/runtimes/cursor:
     dependencies:
-      '@agent-conductor/runtime-sdk':
+      '@weave-ai/runtime-sdk':
         specifier: workspace:*
         version: link:../../runtime-sdk
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
       execa:
@@ -259,10 +259,10 @@ importers:
 
   packages/runtimes/gemini:
     dependencies:
-      '@agent-conductor/runtime-sdk':
+      '@weave-ai/runtime-sdk':
         specifier: workspace:*
         version: link:../../runtime-sdk
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
       execa:
@@ -271,10 +271,10 @@ importers:
 
   packages/runtimes/opencode:
     dependencies:
-      '@agent-conductor/runtime-sdk':
+      '@weave-ai/runtime-sdk':
         specifier: workspace:*
         version: link:../../runtime-sdk
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
       execa:
@@ -283,75 +283,75 @@ importers:
 
   packages/server:
     dependencies:
-      '@agent-conductor/channel-cli':
-        specifier: workspace:*
-        version: link:../channels/cli
-      '@agent-conductor/channel-sdk':
-        specifier: workspace:*
-        version: link:../channel-sdk
-      '@agent-conductor/channel-telegram':
-        specifier: workspace:*
-        version: link:../channels/telegram
-      '@agent-conductor/channel-web':
-        specifier: workspace:*
-        version: link:../channels/web
-      '@agent-conductor/core':
-        specifier: workspace:*
-        version: link:../core
-      '@agent-conductor/db':
-        specifier: workspace:*
-        version: link:../db
-      '@agent-conductor/plugin-sdk':
-        specifier: workspace:*
-        version: link:../plugin-sdk
-      '@agent-conductor/release':
-        specifier: workspace:*
-        version: link:../release
-      '@agent-conductor/render':
-        specifier: workspace:*
-        version: link:../render
-      '@agent-conductor/runtime-claude':
-        specifier: workspace:*
-        version: link:../runtimes/claude
-      '@agent-conductor/runtime-codex':
-        specifier: workspace:*
-        version: link:../runtimes/codex
-      '@agent-conductor/runtime-cursor':
-        specifier: workspace:*
-        version: link:../runtimes/cursor
-      '@agent-conductor/runtime-gemini':
-        specifier: workspace:*
-        version: link:../runtimes/gemini
-      '@agent-conductor/runtime-opencode':
-        specifier: workspace:*
-        version: link:../runtimes/opencode
-      '@agent-conductor/runtime-sdk':
-        specifier: workspace:*
-        version: link:../runtime-sdk
-      '@agent-conductor/shared':
-        specifier: workspace:*
-        version: link:../shared
-      '@agent-conductor/surface-headless':
-        specifier: workspace:*
-        version: link:../surfaces/headless
-      '@agent-conductor/surface-herdr':
-        specifier: workspace:*
-        version: link:../surfaces/herdr
-      '@agent-conductor/surface-hyprland':
-        specifier: workspace:*
-        version: link:../surfaces/hyprland
-      '@agent-conductor/surface-sdk':
-        specifier: workspace:*
-        version: link:../surface-sdk
-      '@agent-conductor/surface-tmux':
-        specifier: workspace:*
-        version: link:../surfaces/tmux
       '@hono/node-server':
         specifier: ^1.19.1
         version: 1.19.17(hono@4.13.5)
       '@modelcontextprotocol/sdk':
         specifier: ^1.18.1
         version: 1.30.0(zod@3.25.76)
+      '@weave-ai/channel-cli':
+        specifier: workspace:*
+        version: link:../channels/cli
+      '@weave-ai/channel-sdk':
+        specifier: workspace:*
+        version: link:../channel-sdk
+      '@weave-ai/channel-telegram':
+        specifier: workspace:*
+        version: link:../channels/telegram
+      '@weave-ai/channel-web':
+        specifier: workspace:*
+        version: link:../channels/web
+      '@weave-ai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@weave-ai/db':
+        specifier: workspace:*
+        version: link:../db
+      '@weave-ai/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
+      '@weave-ai/release':
+        specifier: workspace:*
+        version: link:../release
+      '@weave-ai/render':
+        specifier: workspace:*
+        version: link:../render
+      '@weave-ai/runtime-claude':
+        specifier: workspace:*
+        version: link:../runtimes/claude
+      '@weave-ai/runtime-codex':
+        specifier: workspace:*
+        version: link:../runtimes/codex
+      '@weave-ai/runtime-cursor':
+        specifier: workspace:*
+        version: link:../runtimes/cursor
+      '@weave-ai/runtime-gemini':
+        specifier: workspace:*
+        version: link:../runtimes/gemini
+      '@weave-ai/runtime-opencode':
+        specifier: workspace:*
+        version: link:../runtimes/opencode
+      '@weave-ai/runtime-sdk':
+        specifier: workspace:*
+        version: link:../runtime-sdk
+      '@weave-ai/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@weave-ai/surface-headless':
+        specifier: workspace:*
+        version: link:../surfaces/headless
+      '@weave-ai/surface-herdr':
+        specifier: workspace:*
+        version: link:../surfaces/herdr
+      '@weave-ai/surface-hyprland':
+        specifier: workspace:*
+        version: link:../surfaces/hyprland
+      '@weave-ai/surface-sdk':
+        specifier: workspace:*
+        version: link:../surface-sdk
+      '@weave-ai/surface-tmux':
+        specifier: workspace:*
+        version: link:../surfaces/tmux
       hono:
         specifier: ^4.9.6
         version: 4.13.5
@@ -392,7 +392,7 @@ importers:
 
   packages/surface-sdk:
     dependencies:
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../shared
       zod:
@@ -401,19 +401,19 @@ importers:
 
   packages/surfaces/headless:
     dependencies:
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
-      '@agent-conductor/surface-sdk':
+      '@weave-ai/surface-sdk':
         specifier: workspace:*
         version: link:../../surface-sdk
 
   packages/surfaces/herdr:
     dependencies:
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
-      '@agent-conductor/surface-sdk':
+      '@weave-ai/surface-sdk':
         specifier: workspace:*
         version: link:../../surface-sdk
       execa:
@@ -422,10 +422,10 @@ importers:
 
   packages/surfaces/hyprland:
     dependencies:
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
-      '@agent-conductor/surface-sdk':
+      '@weave-ai/surface-sdk':
         specifier: workspace:*
         version: link:../../surface-sdk
       execa:
@@ -434,10 +434,10 @@ importers:
 
   packages/surfaces/tmux:
     dependencies:
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../../shared
-      '@agent-conductor/surface-sdk':
+      '@weave-ai/surface-sdk':
         specifier: workspace:*
         version: link:../../surface-sdk
       execa:
@@ -446,10 +446,10 @@ importers:
 
   packages/tui:
     dependencies:
-      '@agent-conductor/render':
+      '@weave-ai/render':
         specifier: workspace:*
         version: link:../render
-      '@agent-conductor/shared':
+      '@weave-ai/shared':
         specifier: workspace:*
         version: link:../shared
       eventsource:
@@ -474,18 +474,18 @@ importers:
 
   packages/ui:
     dependencies:
-      '@agent-conductor/render':
-        specifier: workspace:*
-        version: link:../render
-      '@agent-conductor/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.102.8(react@19.2.8)
       '@tanstack/react-router':
         specifier: ^1.95.0
         version: 1.170.32(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@weave-ai/render':
+        specifier: workspace:*
+        version: link:../render
+      '@weave-ai/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@xyflow/react':
         specifier: ^12.11.6
         version: 12.11.6(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)

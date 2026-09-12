@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentView } from '@agent-conductor/surface-sdk';
+import type { AgentView } from '@weave-ai/surface-sdk';
 import {
   findWindow, hasSessionArgs, killWindowArgs, listWindowsArgs, newSessionArgs, newWindowArgs, parseListWindows,
   renameWindowArgs, sessionName, shellQuote, statusGlyph, windowName,
@@ -23,21 +23,21 @@ describe('tmux command building', () => {
   });
 
   it('quotes the attach command for the shell', () => {
-    expect(shellQuote(['conductor', 'attach', 'w-1', '--url', 'http://127.0.0.1:7433'])).toBe('conductor attach w-1 --url http://127.0.0.1:7433');
-    expect(shellQuote(['conductor', 'say', "it's fine"])).toBe("conductor say 'it'\\''s fine'");
+    expect(shellQuote(['weave', 'attach', 'w-1', '--url', 'http://127.0.0.1:7433'])).toBe('weave attach w-1 --url http://127.0.0.1:7433');
+    expect(shellQuote(['weave', 'say', "it's fine"])).toBe("weave say 'it'\\''s fine'");
   });
 
   it('creates the session with the weaver in window 0', () => {
-    const args = newSessionArgs('ac-acme', 'weaver', ['conductor', 'chat'], { AC_TOKEN: 't' });
+    const args = newSessionArgs('ac-acme', 'weaver', ['weave', 'chat'], { AC_TOKEN: 't' });
     expect(args.slice(0, 6)).toEqual(['new-session', '-d', '-s', 'ac-acme', '-n', 'weaver']);
     expect(args).toContain('-e');
     expect(args).toContain('AC_TOKEN=t');
-    expect(args.at(-1)).toBe('conductor chat');
+    expect(args.at(-1)).toBe('weave chat');
   });
 
   it('creates a worker window that prints its id', () => {
-    const args = newWindowArgs('ac-acme', 'x ACME-42', ['conductor', 'attach', 'w-1']);
-    expect(args).toEqual(['new-window', '-d', '-t', 'ac-acme:', '-n', 'x ACME-42', '-P', '-F', '#{window_id}', 'conductor attach w-1']);
+    const args = newWindowArgs('ac-acme', 'x ACME-42', ['weave', 'attach', 'w-1']);
+    expect(args).toEqual(['new-window', '-d', '-t', 'ac-acme:', '-n', 'x ACME-42', '-P', '-F', '#{window_id}', 'weave attach w-1']);
   });
 
   it('targets sessions and windows exactly', () => {

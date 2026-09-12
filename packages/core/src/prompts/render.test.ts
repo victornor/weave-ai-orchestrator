@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId, nowIso } from '@agent-conductor/db';
-import type { Agent, RoleSpec } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import type { Agent, RoleSpec } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { buildTurnPrompt, humanName, renderBrief, renderCharter, renderConductorInstructions, renderWorkerInstructions } from './index.js';
 
@@ -231,9 +231,9 @@ describe('prompt rendering', () => {
       // VS-256: the brief states the real, absolute clone path, not the unbacked literal `work/`.
       expect(brief).toContain(`Its absolute path is \`${clonePath}\`.`);
       expect(brief).toContain('never write to it, never commit, never push');
-      expect(brief).toContain('Load `agent-conductor-knowledge` and follow the curation procedure');
+      expect(brief).toContain('Load `weave-ai-knowledge` and follow the curation procedure');
       expect(brief).not.toContain('Your worktree is');
-      expect(brief).not.toContain('Before anything else, call `ac_worktree_status`');
+      expect(brief).not.toContain('Before anything else, call `weave_worktree_status`');
       expect(brief).not.toMatch(/\{\{[#/]?[a-z]/i);
     });
 
@@ -256,7 +256,7 @@ describe('prompt rendering', () => {
       h.ctx.templatesDir = SHIPPED_TEMPLATES;
       const brief = renderBrief(h.ctx, h.deps, freshWorker({ worktreePath: '/tmp/ac-tst-800/work', branch: 'ac/tst-800-curate' }));
       expect(brief).toContain('Your worktree is');
-      expect(brief).toContain('Before anything else, call `ac_worktree_status`');
+      expect(brief).toContain('Before anything else, call `weave_worktree_status`');
       expect(brief).not.toContain('This is a curation ticket');
       expect(brief).not.toMatch(/\{\{[#/]?[a-z]/i);
     });
@@ -365,7 +365,7 @@ describe('prompt rendering', () => {
     h.db.update('tickets', ticketId, { interactiveSession: true });
 
     const first = await promptAt(0);
-    expect(first).toContain('post exactly one `ac_ticket_comment`');
+    expect(first).toContain('post exactly one `weave_ticket_comment`');
     expect(first).toContain("wait for the human's first message");
     expect(first).not.toContain('do the phase your ticket status asks for');
 
@@ -374,7 +374,7 @@ describe('prompt rendering', () => {
       expect(later).toContain('conversation with the human');
       expect(later).toContain('complete success');
       expect(later).not.toContain('do the phase your ticket status asks for');
-      expect(later).not.toContain('post exactly one `ac_ticket_comment`');
+      expect(later).not.toContain('post exactly one `weave_ticket_comment`');
     }
   });
 
@@ -475,7 +475,7 @@ describe('prompt rendering', () => {
     const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
     expect(prompt).toContain('You hold the merge slot for this project');
     expect(prompt).toContain('sync `work/` with `main`');
-    expect(prompt).toContain('ac_ticket_merge_done');
+    expect(prompt).toContain('weave_ticket_merge_done');
   });
 
   it("re-syncs with the project's declared landing branch, not the default branch (VS-119)", async () => {
@@ -586,21 +586,21 @@ describe('prompt rendering', () => {
   it.runIf(existsSync(SHIPPED_TEMPLATES))('tells the weaver to mark plan/merge/action cards after reading them (VS-223)', () => {
     h.ctx.templatesDir = SHIPPED_TEMPLATES;
     const conductor = renderConductorInstructions(h.ctx, h.deps);
-    expect(conductor).toContain('ac_decision_review');
+    expect(conductor).toContain('weave_decision_review');
     expect(conductor).toMatch(/Do not mark at the start of the turn/);
     const worker0 = renderWorkerInstructions(h.ctx, h.deps, worker);
-    expect(worker0).not.toContain('ac_decision_review');
+    expect(worker0).not.toContain('weave_decision_review');
   });
 
   it.runIf(existsSync(SHIPPED_TEMPLATES))('tells the weaver to ask with options when the answer is a closed set', () => {
     h.ctx.templatesDir = SHIPPED_TEMPLATES;
     const conductor = renderConductorInstructions(h.ctx, h.deps);
     expect(conductor).toContain('Ask with options when the answer is a closed set');
-    expect(conductor).toContain('`ac_ask`');
+    expect(conductor).toContain('`weave_ask`');
     // The rule adds a form, it does not replace the ordinary reply path.
-    expect(conductor).toContain('Reply with `ac_human_send`');
+    expect(conductor).toContain('Reply with `weave_human_send`');
     expect(conductor).toContain('[short label](https://url)');
-    expect(conductor).toContain('One logical reply is one `ac_human_send`');
+    expect(conductor).toContain('One logical reply is one `weave_human_send`');
   });
 
   it.runIf(existsSync(SHIPPED_TEMPLATES))('tells conductor and worker to use GH_TOKEN when gh auth status looks logged-out (VS-169)', () => {

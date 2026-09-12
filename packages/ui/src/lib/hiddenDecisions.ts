@@ -1,5 +1,5 @@
 /**
- * Which open decisions this device has hidden from the conductor chat's pinned area (VS-72).
+ * Which open decisions this device has hidden from the weave chat's pinned area (VS-72).
  *
  * Hiding is a view preference, not an answer: the decision stays open, stays in Needs you, and the
  * daemon is never told. So it lives in `localStorage` rather than in the workspace — one phone can
@@ -13,7 +13,7 @@
  * no trigger — a superseded decision is not open, and its replacement is a different id that was
  * never hidden.
  */
-import type { Decision } from '@agent-conductor/shared';
+import type { Decision } from '@weave-ai/shared';
 import { useCallback, useEffect, useState } from 'react';
 
 const PREFIX = 'conductor.decisions.hidden';

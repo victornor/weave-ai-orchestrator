@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { agentUiStatus } from '@agent-conductor/shared';
+import { agentUiStatus } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { WorkerCard } from '../components/WorkerCard';
 import { SkeletonRows } from '../components/Skeleton';

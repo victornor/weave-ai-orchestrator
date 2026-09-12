@@ -1,7 +1,7 @@
 import { rmSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { RuntimeEvent, TurnHandle, TurnInput } from '@agent-conductor/runtime-sdk';
-import { RUN_REPORT_JSON_SCHEMA } from '@agent-conductor/shared';
+import type { RuntimeEvent, TurnHandle, TurnInput } from '@weave-ai/runtime-sdk';
+import { RUN_REPORT_JSON_SCHEMA } from '@weave-ai/shared';
 import { adapter } from '../src/adapter.js';
 import { writeFakeClaudeCli } from './fakeCli.js';
 

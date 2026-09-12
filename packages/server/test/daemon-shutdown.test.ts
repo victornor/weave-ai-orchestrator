@@ -6,11 +6,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { FakeRuntime } from '@agent-conductor/runtime-sdk';
-import type { TurnHandle, TurnInput, TurnSink } from '@agent-conductor/runtime-sdk';
-import type { Run } from '@agent-conductor/shared';
-import { workspaceLoader, initLogger } from '@agent-conductor/core';
-import { openDb } from '@agent-conductor/db';
+import { FakeRuntime } from '@weave-ai/runtime-sdk';
+import type { TurnHandle, TurnInput, TurnSink } from '@weave-ai/runtime-sdk';
+import type { Run } from '@weave-ai/shared';
+import { workspaceLoader, initLogger } from '@weave-ai/core';
+import { openDb } from '@weave-ai/db';
 import { startDaemon, type DaemonHandle } from '../src/daemon.js';
 
 initLogger(process.env.AC_LOG_LEVEL ?? 'silent');

@@ -1,8 +1,8 @@
-/** `conductor top` — one screen, every worker, grouped by project and role (PLAN §14b.1). */
+/** `weave top` — one screen, every worker, grouped by project and role (PLAN §14b.1). */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
-import type { Agent } from '@agent-conductor/shared';
-import { statusRank, workerToCard, type WorkerCardModel } from '@agent-conductor/render';
+import type { Agent } from '@weave-ai/shared';
+import { statusRank, workerToCard, type WorkerCardModel } from '@weave-ai/render';
 import { StatusBar } from '../components/StatusBar.js';
 import { items, type TuiClient } from '../client.js';
 import { useKeys, useStream, useTerminalSize } from '../hooks.js';

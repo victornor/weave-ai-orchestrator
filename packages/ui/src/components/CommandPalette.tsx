@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
-import type { UiStatus } from '@agent-conductor/shared';
+import type { UiStatus } from '@weave-ai/shared';
 
 export interface Command {
   id: string;

@@ -1,5 +1,5 @@
-import type { RuntimeEvent } from '@agent-conductor/runtime-sdk';
-import { truncate } from '@agent-conductor/runtime-sdk';
+import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
+import { truncate } from '@weave-ai/runtime-sdk';
 
 export interface OpenCodeParseState {
   sessionId: string | null;

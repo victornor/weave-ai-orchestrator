@@ -7,7 +7,7 @@
  */
 import type { ApiClient } from './api.js';
 import { ApiError } from './api.js';
-import type { Job, JobLogLine, JobStep } from '@agent-conductor/shared';
+import type { Job, JobLogLine, JobStep } from '@weave-ai/shared';
 import { style, writeErr } from './output.js';
 
 export type JobStreamItem =
@@ -22,7 +22,7 @@ export interface FollowOptions { quiet?: boolean }
 
 /**
  * Print a job's progress until it ends, and resolve with the finished record. Progress goes to
- * stderr so `conductor project add ... > file` still captures only the result.
+ * stderr so `weave project add ... > file` still captures only the result.
  */
 export async function followJob(client: ApiClient, jobId: string, opts: FollowOptions = {}): Promise<Job> {
   const quiet = opts.quiet === true;

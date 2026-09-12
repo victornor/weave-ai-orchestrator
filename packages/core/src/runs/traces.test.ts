@@ -3,8 +3,8 @@
  * collapsed "what it did" line.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { newId, nowIso } from '@agent-conductor/db';
-import type { RunEventType } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import type { RunEventType } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createRunsService } from './index.js';
 

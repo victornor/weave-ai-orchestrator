@@ -4,9 +4,9 @@
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { newId, nowIso, type Db } from '@agent-conductor/db';
-import { getLogger } from '@agent-conductor/core';
-import { PUSH_ROUTES, type PushConfig } from '@agent-conductor/shared';
+import { newId, nowIso, type Db } from '@weave-ai/db';
+import { getLogger } from '@weave-ai/core';
+import { PUSH_ROUTES, type PushConfig } from '@weave-ai/shared';
 import type { AppDeps, AppEnv } from './types.js';
 import { body } from './http.js';
 

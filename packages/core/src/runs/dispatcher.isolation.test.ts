@@ -8,9 +8,9 @@
  * daemon's config directory (`--share-host-credentials`) is `resolveIsolation()`, pinned in
  * `packages/server/test/daemon.test.ts`.
  */
-import { newId, nowIso } from '@agent-conductor/db';
-import { FakeRuntime } from '@agent-conductor/runtime-sdk';
-import type { Run, Wakeup } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { FakeRuntime } from '@weave-ai/runtime-sdk';
+import type { Run, Wakeup } from '@weave-ai/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createWakeService } from '../wake/index.js';

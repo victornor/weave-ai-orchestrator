@@ -3,9 +3,9 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
-import { DaemonConfigSchema, type WorkspaceConfig } from '@agent-conductor/shared';
+import { DaemonConfigSchema, type WorkspaceConfig } from '@weave-ai/shared';
 import { createRegistries, workspacePaths } from '../context.js';
-import { openDbAsOf } from '@agent-conductor/db';
+import { openDbAsOf } from '@weave-ai/db';
 import { createSecretStore } from '../secrets/store.js';
 import { loader, projectKnowledgeSkeleton } from './loader.js';
 

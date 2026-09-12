@@ -1,8 +1,8 @@
 /**
- * Daemon-wide Incidents (VS-174): system reports agents filed through ac_incident.
+ * Daemon-wide Incidents (VS-174): system reports agents filed through weave_incident.
  */
 import { useState } from 'react';
-import type { Incident, IncidentReporterKind } from '@agent-conductor/shared';
+import type { Incident, IncidentReporterKind } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Badge } from '../components/StatusGlyph';
 import { SkeletonRows } from '../components/Skeleton';
@@ -110,7 +110,7 @@ export function GlobalIncidentsRoute(): React.ReactElement {
         ) : list.data === undefined ? (
           <SkeletonRows className="mx-auto max-w-2xl" />
         ) : items.length === 0 ? (
-          <EmptyState className="m-4 mx-auto max-w-2xl" title={emptyTitle} detail="Agents file these with ac_incident when AgentConductor itself fails." />
+          <EmptyState className="m-4 mx-auto max-w-2xl" title={emptyTitle} detail="Agents file these with weave_incident when Weave AI itself fails." />
         ) : (
           <div className="mx-auto max-w-2xl">
             {items.map((incident) => (

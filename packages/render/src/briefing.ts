@@ -2,7 +2,7 @@
  * `briefingToSections` — the four-section briefing (PLAN §10.5). All four sections are always
  * present, in this order, each with an empty-state line, so the layout never jumps between renders.
  */
-import type { Briefing } from '@agent-conductor/shared';
+import type { Briefing } from '@weave-ai/shared';
 import { formatRelative, joinMeta, oneLine } from './format.js';
 import { redact } from './redact.js';
 import { statusGlyph } from './status.js';

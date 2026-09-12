@@ -1,13 +1,13 @@
 /**
  * Plan consumption for a subscription account (PLAN §16.3): what replaces the dollar figure when
  * every token in the window was billed to a subscription. Prop-driven — the view model comes from
- * `accountLimits()` in `@agent-conductor/render`, so the web app and `conductor usage` agree.
+ * `accountLimits()` in `@weave-ai/render`, so the web app and `weave usage` agree.
  *
  * Both surfaces that show plan limits render this block: the usage page, and the sheet behind the
- * conductor chat's header meter. The on-demand sync (VS-84) therefore lives here once, driven by
+ * weave chat's header meter. The on-demand sync (VS-84) therefore lives here once, driven by
  * whatever `sync` its caller hands down, and is simply absent when a caller hands down none.
  */
-import type { AccountLimitsView } from '@agent-conductor/render';
+import type { AccountLimitsView } from '@weave-ai/render';
 import { cx } from '../lib/cx';
 
 /**

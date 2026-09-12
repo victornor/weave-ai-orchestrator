@@ -1,11 +1,11 @@
-/** `conductor knowledge show|edit|note|lint|curate|revert` (PLAN §13, §20). */
+/** `weave knowledge show|edit|note|lint|curate|revert` (PLAN §13, §20). */
 import type { Command } from 'commander';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KNOWLEDGE_SCOPES } from '@agent-conductor/shared';
-import { budgetMeter, formatRelative, formatTokens } from '@agent-conductor/render';
+import { KNOWLEDGE_SCOPES } from '@weave-ai/shared';
+import { budgetMeter, formatRelative, formatTokens } from '@weave-ai/render';
 import { ApiError } from '../api.js';
 import { emit, fields, style, table, write } from '../output.js';
 import { items, run, session } from './util.js';
@@ -102,7 +102,7 @@ export function register(program: Command): void {
       const { client } = await session(command);
       const body = { section, text: text.join(' '), ...(opts['doc'] ? { doc: opts['doc'] } : {}) };
       const result = await client.write({
-        tool: 'ac_knowledge_note', input: { scope, projectId: opts['project'], ...body },
+        tool: 'weave_knowledge_note', input: { scope, projectId: opts['project'], ...body },
         http: { method: 'POST', path: client.w(`/knowledge/${encodeURIComponent(scope)}/note`), body, query: { project: opts['project'] } },
       });
       emit(result, () => write(`${style.ok('noted')} in ${scope}/${section}`));
@@ -159,7 +159,7 @@ export function register(program: Command): void {
       const { client } = await session(command);
       const docs = items<Record<string, unknown>>(await client.wget('/knowledge/docs', { ...(opts['project'] ? { project: opts['project'] } : {}), ...(opts['scope'] ? { scope: opts['scope'] } : {}) }));
       emit(docs, () => {
-        if (!docs.length) { write(style.dim('no documents yet — agents write them with ac_knowledge_doc_put')); return; }
+        if (!docs.length) { write(style.dim('no documents yet — agents write them with weave_knowledge_doc_put')); return; }
         table(docs, [
           { header: 'SLUG', get: (d) => String(d['slug']) },
           { header: 'SCOPE', get: (d) => String(d['projectSlug'] ?? d['scope']) },

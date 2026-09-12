@@ -1,6 +1,6 @@
 /**
  * The on-demand plan-limit sync (VS-84), as both surfaces that show plan limits drive it: the usage
- * page and the sheet behind the conductor chat's header meter. One hook so the two can never
+ * page and the sheet behind the weave chat's header meter. One hook so the two can never
  * disagree about what "too soon" or "that failed" looks like.
  *
  * The daemon never refuses a sync it made too soon — it answers with the current snapshot and when

@@ -1,6 +1,6 @@
 /** Ticket and worker view models (design contract §4 "Ticket card" / "Worker card"). */
-import type { Agent, CostStatus, Ticket } from '@agent-conductor/shared';
-import { agentUiStatus, ticketUiStatus, waitingOnRuntimeLogin } from '@agent-conductor/shared';
+import type { Agent, CostStatus, Ticket } from '@weave-ai/shared';
+import { agentUiStatus, ticketUiStatus, waitingOnRuntimeLogin } from '@weave-ai/shared';
 import { formatAge, formatCost, formatTokens, initials, joinMeta, oneLine } from './format.js';
 import { redact } from './redact.js';
 import { statusGlyph, statusLabel } from './status.js';

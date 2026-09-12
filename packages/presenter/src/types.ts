@@ -1,5 +1,5 @@
-import type { WorkspaceEvent } from '@agent-conductor/shared';
-import type { AgentView, SurfaceHandle } from '@agent-conductor/surface-sdk';
+import type { WorkspaceEvent } from '@weave-ai/shared';
+import type { AgentView, SurfaceHandle } from '@weave-ai/surface-sdk';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type LogFn = (level: LogLevel, msg: string, data?: Record<string, unknown>) => void;

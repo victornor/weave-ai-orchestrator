@@ -4,10 +4,10 @@
  * This service is that writer, and the encrypted file beside it (`store.ts`) is where the values go.
  *
  * `value()` is the whole reason the rest exists, and is deliberately reachable from nowhere but the
- * daemon's own `roleSecretsEnv`: no route, no `ac_*` tool and no event returns a value.
+ * daemon's own `roleSecretsEnv`: no route, no `weave_*` tool and no event returns a value.
  */
-import { newId, type Db } from '@agent-conductor/db';
-import { OcError, type WorkspaceSecret } from '@agent-conductor/shared';
+import { newId, type Db } from '@weave-ai/db';
+import { OcError, type WorkspaceSecret } from '@weave-ai/shared';
 import type { Actor, SecretsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';

@@ -1,4 +1,4 @@
-export const PACKAGE = '@agent-conductor/cli';
+export const PACKAGE = '@weave-ai/cli';
 
 export { ApiClient, ApiError, type ApiClientOptions, type RequestOptions, type SseMessage, type StreamOptions, type Subscription, type WriteSpec, type FetchLike } from './api.js';
 export { buildProgram, VERSION } from './program.js';

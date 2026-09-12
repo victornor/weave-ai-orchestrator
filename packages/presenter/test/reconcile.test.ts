@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { WorkspaceEvent } from '@agent-conductor/shared';
-import type { AgentPresence, AgentView, SurfaceAdapter, SurfaceHandle } from '@agent-conductor/surface-sdk';
+import type { WorkspaceEvent } from '@weave-ai/shared';
+import type { AgentPresence, AgentView, SurfaceAdapter, SurfaceHandle } from '@weave-ai/surface-sdk';
 import { buildSurfaceContext, createReconciler, pickSurfaceKind, presenceOf, startPresenter } from '../src/index.js';
 import { createMemoryHandleStore } from '../src/store.js';
 import { toAgentView } from '../src/views.js';
@@ -73,8 +73,8 @@ const ctxOf = (log = vi.fn()) =>
 describe('surface context', () => {
   it('points attach and chat at this daemon and carries the env for spawned terminals', () => {
     const ctx = ctxOf();
-    expect(ctx.attachCommand('w-1')).toEqual(['conductor', 'attach', 'w-1', '--workspace', 'acme', '--url', 'http://127.0.0.1:7433']);
-    expect(ctx.chatCommand()).toEqual(['conductor', 'chat', '--workspace', 'acme', '--url', 'http://127.0.0.1:7433']);
+    expect(ctx.attachCommand('w-1')).toEqual(['weave', 'attach', 'w-1', '--workspace', 'acme', '--url', 'http://127.0.0.1:7433']);
+    expect(ctx.chatCommand()).toEqual(['weave', 'chat', '--workspace', 'acme', '--url', 'http://127.0.0.1:7433']);
     expect(ctx.env).toEqual({ AC_API_URL: 'http://127.0.0.1:7433', AC_TOKEN: 'tok', AC_WORKSPACE: 'acme' });
     expect(ctx.terminal()).toMatchObject({ cmd: 'foot', classFlag: '-a', execFlag: '-e' });
   });

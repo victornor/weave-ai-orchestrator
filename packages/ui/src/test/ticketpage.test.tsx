@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Decision, Ticket, TicketComment } from '@agent-conductor/shared';
+import type { Agent, Decision, Ticket, TicketComment } from '@weave-ai/shared';
 import type { WorkerMessageOutcome, WorkProduct } from '../api/types';
 import { agent, decision, ticket, workProduct } from './factories';
 

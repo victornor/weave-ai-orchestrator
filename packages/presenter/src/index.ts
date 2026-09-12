@@ -1,10 +1,10 @@
 import { hostname } from 'node:os';
-import type { WorkspaceEvent } from '@agent-conductor/shared';
-import type { SurfaceAdapter, SurfaceContext } from '@agent-conductor/surface-sdk';
-import headless from '@agent-conductor/surface-headless';
-import tmux from '@agent-conductor/surface-tmux';
-import herdr from '@agent-conductor/surface-herdr';
-import hyprland from '@agent-conductor/surface-hyprland';
+import type { WorkspaceEvent } from '@weave-ai/shared';
+import type { SurfaceAdapter, SurfaceContext } from '@weave-ai/surface-sdk';
+import headless from '@weave-ai/surface-headless';
+import tmux from '@weave-ai/surface-tmux';
+import herdr from '@weave-ai/surface-herdr';
+import hyprland from '@weave-ai/surface-hyprland';
 import { createHttpPresenterApi } from './api.js';
 import { createReconciler, DEFAULT_KEEP_CLOSED_FOR_MS, type Reconciler } from './reconcile.js';
 import { createFileHandleStore, defaultHandleStorePath } from './store.js';
@@ -31,7 +31,7 @@ export interface StartPresenterOptions {
   /** Override the surface from the workspace config. */
   surface?: string;
   presenterId?: string;
-  /** How to invoke the conductor CLI on this machine (default ['conductor']); the CLI passes its own executable so source checkouts work. */
+  /** How to invoke the weave CLI on this machine (default ['weave']); the CLI passes its own executable so source checkouts work. */
   ocCommand?: string[];
   log: LogFn;
   keepClosedForMs?: number;
@@ -82,14 +82,14 @@ export function buildSurfaceContext(opts: BuildContextOptions): SurfaceContext &
   const configured = typeof opts.block.terminal === 'string' ? opts.block.terminal : null;
   const terminal = opts.terminal !== undefined ? opts.terminal : resolveTerminal({ configured });
   const env = { AC_API_URL: opts.apiUrl, AC_TOKEN: opts.token, AC_WORKSPACE: opts.workspaceId };
-  const conductor = opts.ocCommand && opts.ocCommand.length ? opts.ocCommand : ['conductor'];
-  const base = (agentId: string): string[] => [...conductor, 'attach', agentId, '--workspace', opts.workspaceId, '--url', opts.apiUrl];
+  const cli = opts.ocCommand && opts.ocCommand.length ? opts.ocCommand : ['weave'];
+  const base = (agentId: string): string[] => [...cli, 'attach', agentId, '--workspace', opts.workspaceId, '--url', opts.apiUrl];
   return {
     workspaceId: opts.workspaceId,
     daemonUrl: opts.apiUrl,
     env,
     attachCommand: (agentId: string) => base(agentId),
-    chatCommand: () => [...conductor, 'chat', '--workspace', opts.workspaceId, '--url', opts.apiUrl],
+    chatCommand: () => [...cli, 'chat', '--workspace', opts.workspaceId, '--url', opts.apiUrl],
     terminal: () => terminal,
     log: opts.log,
   };

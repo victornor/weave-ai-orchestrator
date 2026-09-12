@@ -3,7 +3,7 @@
  * `MapNode`, never counted among the graph's nodes or edges, and does not affect layout — see
  * design.md §6 and the "A live worker draws a fading beam to its ticket" requirement.
  */
-import type { Agent } from '@agent-conductor/shared';
+import type { Agent } from '@weave-ai/shared';
 import type { MapModel } from './model';
 
 export interface Beam {

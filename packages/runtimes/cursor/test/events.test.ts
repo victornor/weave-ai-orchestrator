@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { RuntimeEvent } from '@agent-conductor/runtime-sdk';
+import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
 import { createCursorParser } from '../src/events.js';
 
 // SYNTHETIC fixtures transcribed from Cursor CLI docs (2026-09-09 output-format page).

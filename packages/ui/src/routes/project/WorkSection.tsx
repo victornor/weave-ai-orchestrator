@@ -10,7 +10,7 @@ import { SkeletonRows } from '../../components/Skeleton';
 import { filterTickets, foldBoard, liveWorkersByTicket, pausedWorkersByTicket, ticketBoardStatus } from '../../lib/board';
 import { lastLinesByAgent } from '../../lib/projectOverview';
 import { ago, statusText } from '../../lib/format';
-import { workerPauseReason } from '@agent-conductor/render';
+import { workerPauseReason } from '@weave-ai/render';
 import type { ProjectSectionProps } from './sections';
 
 export function WorkSection({ project, ws }: ProjectSectionProps): React.ReactElement {

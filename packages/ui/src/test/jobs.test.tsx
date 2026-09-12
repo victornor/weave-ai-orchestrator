@@ -2,7 +2,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Job, JobLogLine, JobStep } from '@agent-conductor/shared';
+import type { Job, JobLogLine, JobStep } from '@weave-ai/shared';
 import { JobProgress } from '../components/JobProgress';
 import { useJobStream } from '../api/jobStream';
 

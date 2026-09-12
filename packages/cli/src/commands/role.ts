@@ -1,7 +1,7 @@
-/** `conductor role ...` — roles are templates; workers are the things that run (PLAN §11, §20). */
+/** `weave role ...` — roles are templates; workers are the things that run (PLAN §11, §20). */
 import type { Command } from 'commander';
 import { emit, fields, heading, style, table, write } from '../output.js';
-import { statusGlyph } from '@agent-conductor/render';
+import { statusGlyph } from '@weave-ai/render';
 import { items, run, session } from './util.js';
 import { ApiError } from '../api.js';
 
@@ -107,7 +107,7 @@ export function register(program: Command): void {
       const { client } = await session(command);
       const reason = opts['reason'] ?? `set max workers to ${maxWorkers}`;
       const result = await client.write({
-        tool: 'ac_role_set_max_workers', input: { id, maxWorkers, reason },
+        tool: 'weave_role_set_max_workers', input: { id, maxWorkers, reason },
         http: { method: 'PATCH', path: client.w(`/roles/${encodeURIComponent(id)}`), body: { patch: { maxWorkers }, reason } },
       });
       emit(result, () => write(`${style.ok('updated')} ${id}: max workers = ${maxWorkers}`));
@@ -121,7 +121,7 @@ export function register(program: Command): void {
       .description(`${verb} a role`)
       .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
         const { client } = await session(command);
-        const tool = verb === 'pause' ? 'ac_role_pause' : verb === 'resume' ? 'ac_role_resume' : 'ac_role_retire';
+        const tool = verb === 'pause' ? 'weave_role_pause' : verb === 'resume' ? 'weave_role_resume' : 'weave_role_retire';
         const result = await client.write({
           tool, input: { roleId: id, reason: opts['reason'] ?? '' },
           http: { method: 'POST', path: client.w(`/roles/${encodeURIComponent(id)}/${verb}`), body: { reason: opts['reason'] ?? '' } },

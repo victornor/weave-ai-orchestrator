@@ -4,7 +4,7 @@
  * whether run tokens are honoured).
  */
 import { Hono } from 'hono';
-import { OcError, PUSH_BASE } from '@agent-conductor/shared';
+import { OcError, PUSH_BASE } from '@weave-ai/shared';
 import type { AppDeps, AppEnv } from './types.js';
 import { authMiddleware } from './auth.js';
 import { onError } from './http.js';

@@ -4,10 +4,10 @@
  * envelopes, workspace-scoped routes under `/api/w/:ws`, SSE with `id:` sequence resume.
  *
  * Agent mode: when `AC_RUN_TOKEN` is set the same client authenticates with the run token and routes
- * writes through `POST /api/w/:ws/agent/tools/:tool` (PLAN §9.5), so `conductor ticket comment` works
+ * writes through `POST /api/w/:ws/agent/tools/:tool` (PLAN §9.5), so `weave ticket comment` works
  * identically for a human and for an agent inside a run.
  */
-import type { ErrorCode, ToolResult } from '@agent-conductor/shared';
+import type { ErrorCode, ToolResult } from '@weave-ai/shared';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 

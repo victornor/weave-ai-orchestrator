@@ -31,4 +31,4 @@ Live lookup: editing an option applies on the next turn of tickets that name it,
 
 - **Replacing `models.workers` with `{ default, options }`.** Breaks every two-setting client and test.
 - **Snapshotting runtime/model onto the ticket.** A second source `modelSettingFor` is not allowed to have.
-- **Injecting the catalog into bootstrap.** VS-159; the conductor lists via `ac_worker_models` when filing.
+- **Injecting the catalog into bootstrap.** VS-159; the conductor lists via `weave_worker_models` when filing.

@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { WorktreeProvider, WorktreeInfo } from '@agent-conductor/plugin-sdk';
+import type { WorktreeProvider, WorktreeInfo } from '@weave-ai/plugin-sdk';
 import { git, resolveBaseRef, branchExists, worktreeState } from '../util/git.js';
 import { sh, shell } from '../util/exec.js';
-import { OcError } from '@agent-conductor/shared';
+import { OcError } from '@weave-ai/shared';
 
 /** Built-in fallback provider: plain `git worktree` plus rsync warm-up and the project's setup command. */
 export class GitWorktreeProvider implements WorktreeProvider {

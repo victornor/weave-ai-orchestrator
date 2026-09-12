@@ -1,6 +1,6 @@
 /** The project overview's folding rules (VS-95), `lib/projectOverview.ts`. */
 import { describe, expect, it } from 'vitest';
-import type { ChangelogEntry } from '@agent-conductor/shared';
+import type { ChangelogEntry } from '@weave-ai/shared';
 import {
   currentFocus,
   decisionsForProject,

@@ -1,10 +1,10 @@
 /**
- * `conductor specs explore` — capability list, capability page, neighbours list. Phone and TUI show the
+ * `weave specs explore` — capability list, capability page, neighbours list. Phone and TUI show the
  * graph the same way: the selected node, then its neighbours, one hop at a time (design contract §7.4).
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
-import { oneLine } from '@agent-conductor/render';
+import { oneLine } from '@weave-ai/render';
 import { StatusBar } from '../components/StatusBar.js';
 import { items, type TuiClient } from '../client.js';
 import { useKeys, useTerminalSize } from '../hooks.js';

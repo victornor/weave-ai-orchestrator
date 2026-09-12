@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { DecisionAnswerInputs } from '@agent-conductor/shared';
+import type { DecisionAnswerInputs } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { DecisionCard } from '../components/DecisionCard';
 import { PlanPreview } from '../components/PlanPreview';
@@ -30,7 +30,7 @@ export function NeedsYouRoute(): React.ReactElement {
   const summary = useWorkspaceSummary();
   const answer = useAnswerDecision();
   const queue = useQueue();
-  // Hiding a card from the conductor chat never takes it off this page — this is where a decision
+  // Hiding a card from the weave chat never takes it off this page — this is where a decision
   // put off until later is still waiting — but the page says which ones were hidden and offers each
   // of them back, so the chat's pinned area is never a mystery from here (VS-72).
   const { hidden, show } = useHiddenDecisions(ws);

@@ -1,5 +1,5 @@
-import type { ReportState, RunEvent, RunReport, UiStatus } from '@agent-conductor/shared';
-import { extractReport } from '@agent-conductor/shared';
+import type { ReportState, RunEvent, RunReport, UiStatus } from '@weave-ai/shared';
+import { extractReport } from '@weave-ai/shared';
 
 export type TranscriptBlock =
   | { id: string; type: 'text'; text: string; thinking?: boolean }

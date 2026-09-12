@@ -52,8 +52,8 @@ import {
 } from '../api/hooks';
 import { api, getWorkspaceId, setToken } from '../api/client';
 import { qk } from '../api/keys';
-import type { PresentationBlock, Project } from '@agent-conductor/shared';
-import { ProjectConfigSchema, WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@agent-conductor/shared';
+import type { PresentationBlock, Project } from '@weave-ai/shared';
+import { ProjectConfigSchema, WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@weave-ai/shared';
 import type * as T from '../api/types';
 import type { TotpSetup } from '../api/types';
 import { useHookWs, useWs } from '../api/context';

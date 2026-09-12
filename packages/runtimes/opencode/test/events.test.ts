@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { RuntimeEvent } from '@agent-conductor/runtime-sdk';
+import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
 import { createOpenCodeParser } from '../src/events.js';
 import { parseModels } from '../src/adapter.js';
 

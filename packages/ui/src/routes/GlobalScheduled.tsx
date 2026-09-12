@@ -2,7 +2,7 @@
  * Daemon-wide Scheduled page (VS-231): every workspace's routines, with per-fire history.
  */
 import { useMemo, useState } from 'react';
-import type { Routine, RoutineFire, RoutineListItem } from '@agent-conductor/shared';
+import type { Routine, RoutineFire, RoutineListItem } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Button } from '../components/Button';
 import { Badge } from '../components/StatusGlyph';

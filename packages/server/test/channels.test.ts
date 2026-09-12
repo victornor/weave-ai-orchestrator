@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ChannelAdapter, ChannelContext, InboundMessage, OutboundMessage, RejectedContact, SendResult } from '@agent-conductor/channel-sdk';
-import { newId, nowIso } from '@agent-conductor/db';
+import type { ChannelAdapter, ChannelContext, InboundMessage, OutboundMessage, RejectedContact, SendResult } from '@weave-ai/channel-sdk';
+import { newId, nowIso } from '@weave-ai/db';
 import { ChannelManager } from '../src/channels.js';
 import { makeHarness, decision, type Harness } from './fakes.js';
 

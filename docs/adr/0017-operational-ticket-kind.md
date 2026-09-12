@@ -20,7 +20,7 @@ A new ticket kind `operational` reuses the scout transition table. No `proposing
 
 The pre-action gate is a new decision kind `action_approval` (`approve` / `revise` / `reject`),
 always human-owned. Writing the `action` document on an operational ticket supersedes and raises it.
-YOLO and `proposalApproval: none` do not grant it. `ac_ask` cannot construct it. Approve and revise
+YOLO and `proposalApproval: none` do not grant it. `weave_ask` cannot construct it. Approve and revise
 leave the ticket `in_progress` and wake the worker (revise records feedback); reject cancels.
 
 After the action: a `report` of what actually happened, and knowledge-base docs where applicable.

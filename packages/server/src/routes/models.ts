@@ -7,7 +7,7 @@
  * (including `[]`) replaces it. Locked controls are not written to workspace yaml.
  */
 import { Hono } from 'hono';
-import { WorkspaceModelsPutSchema } from '@agent-conductor/shared';
+import { WorkspaceModelsPutSchema } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
 

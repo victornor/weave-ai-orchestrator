@@ -1,10 +1,10 @@
 /**
- * `conductor ticket show`'s delivery line (VS-250). The VS-227 shape — a merged pull request with
+ * `weave ticket show`'s delivery line (VS-250). The VS-227 shape — a merged pull request with
  * no merge-done record — used to be invisible from the CLI because `delivery` was never printed;
  * this formatter names the gap, prints a complete merge's commit, and omits anything else.
  */
 import { describe, expect, it } from 'vitest';
-import type { Ticket } from '@agent-conductor/shared';
+import type { Ticket } from '@weave-ai/shared';
 import { deliveryShowValue } from './ticket.js';
 
 const done = (delivery: Ticket['delivery']): Pick<Ticket, 'status' | 'delivery'> => ({ status: 'done', delivery });

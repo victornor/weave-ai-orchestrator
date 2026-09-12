@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearch } from '@tanstack/react-router';
-import type { Ticket, TicketStatus } from '@agent-conductor/shared';
-import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
+import type { Ticket, TicketStatus } from '@weave-ai/shared';
+import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, ticketUiStatus } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented } from '../components/Tabs';
 import { OutcomeChip, TicketCard, TicketRow } from '../components/TicketCard';
@@ -32,7 +32,7 @@ import { useListNav } from '../lib/hotkeys';
 import { ago, statusText } from '../lib/format';
 import { cx } from '../lib/cx';
 import { isAutoApproving } from '../lib/yolo';
-import { workerPauseDetail } from '@agent-conductor/render';
+import { workerPauseDetail } from '@weave-ai/render';
 
 type View = 'kanban' | 'table';
 

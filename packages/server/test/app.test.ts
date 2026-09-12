@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
-import { OcError, type Agent } from '@agent-conductor/shared';
+import { OcError, type Agent } from '@weave-ai/shared';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import { authed, makeHarness, ticket, type Harness } from './fakes.js';
@@ -335,7 +335,7 @@ describe('routes', () => {
     expect(doc.openapi).toBe('3.1.0');
     expect(Object.keys(doc.paths)).toContain('/api/w/{ws}/tickets');
     const txt = await (await fetch('/llms/api.txt')).text();
-    expect(txt).toContain('ac_inbox');
+    expect(txt).toContain('weave_inbox');
     expect(txt).toContain('/api/w/{ws}/events');
   });
 

@@ -1,4 +1,4 @@
-import type { SessionRef } from '@agent-conductor/runtime-sdk';
+import type { SessionRef } from '@weave-ai/runtime-sdk';
 
 /** OpenCode session ids look like `ses_...` and are only reported by the CLI (never chosen). */
 export interface OpenCodeSessionRef { sessionId: string; fork?: boolean }

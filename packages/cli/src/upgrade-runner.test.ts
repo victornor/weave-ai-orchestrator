@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Db, nowIso } from '@agent-conductor/db';
+import { Db, nowIso } from '@weave-ai/db';
 import { HEALTH_DEADLINE_MS, driveRestart, recordVerdict, type HealthProbe, type RunnerIo, type RunnerVerdict } from './upgrade-runner.js';
 
 const TARGET = { release: '/rel/20260202-120000-bbbbbbbbbb', sha: 'b'.repeat(40) };

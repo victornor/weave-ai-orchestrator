@@ -1,5 +1,5 @@
 /**
- * The accepted-type/size policy for a conductor chat attachment (VS-133), chosen from evidence read
+ * The accepted-type/size policy for a weave chat attachment (VS-133), chosen from evidence read
  * out of the installed `claude` CLI's own strings rather than picked arbitrarily: the image cap
  * matches the CLI's own paste-image feature (`maxBase64Size: 5242880`); the text cap bounds how much
  * of the conductor's context one inlined document can spend. See openspec design.md — Decision 2.

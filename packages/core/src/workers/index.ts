@@ -1,10 +1,10 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { newId, nowIso } from '@agent-conductor/db';
+import { newId, nowIso } from '@weave-ai/db';
 import {
   HANDOVER_PAUSE_CODE, OcError, heldByHuman, landingBranchOf, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type TicketStatus,
-} from '@agent-conductor/shared';
-import type { WorktreeProvider } from '@agent-conductor/plugin-sdk';
+} from '@weave-ai/shared';
+import type { WorktreeProvider } from '@weave-ai/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, HandoverEndResult, HandoverStartResult, WorkerMessageOutcome, WorkersService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -234,7 +234,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       if (!role) throw new OcError('wrong_status', `project ${project.slug} has no active role to curate its knowledge`);
       const ticket = deps().tickets.create(actor, {
         projectId, kind: 'task', title: `Curate project knowledge (${project.slug})`,
-        description: 'Curate this project\'s knowledge base: merge duplicates, fold learnings that became conventions, archive stale entries, keep every section within budget. Never invent facts. Submit with `ac_knowledge_replace`.',
+        description: 'Curate this project\'s knowledge base: merge duplicates, fold learnings that became conventions, archive stale entries, keep every section within budget. Never invent facts. Submit with `weave_knowledge_replace`.',
         priority: 'low', assigneeRoleId: role.id, originKind: 'curation', originFingerprint: `curation:${projectId}`,
       });
       return spawn(actor, ticket.id, { noWorktree: true, spawnReason: 'knowledge curation' });
@@ -272,7 +272,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         throw new OcError('wrong_status', `${agent.name} has retired; reply on the ticket to reopen it instead`);
       }
       const ticket = ticketOf(agent.ticketId);
-      // The conductor already has a live path to any worker (`ac_worker_message`) — an interactive
+      // The conductor already has a live path to any worker (`weave_worker_message`) — an interactive
       // session is the human's own conversation, so the conductor is refused here, not given a
       // narrower tool list (VS-101). A human actor is never affected by this check.
       if (actor.kind === 'agent' && ticket.interactiveSession) {
@@ -294,7 +294,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
           } else if (actor.kind === 'human') {
             // The runtime cannot take mid-turn input, but a human explicitly asked for live
             // delivery: interrupt the running turn and deliver via the next one instead of queuing
-            // behind it (VS-254). A live send on the conductor's behalf (`ac_worker_message`) leaves
+            // behind it (VS-254). A live send on the conductor's behalf (`weave_worker_message`) leaves
             // the turn alone, exactly as before this change — see design.md Decision 1.
             runId = active.runId;
             delivery = 'interrupted';
@@ -314,10 +314,10 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       let wake: ReturnType<CoreServices['wake']['enqueue']> | null = null;
       if (delivery === 'interrupted') {
         const wb = liveInterruptWakeBody(body);
-        // Naming `ac_ticket_comments` as the full-text pointer is safe here specifically: the
+        // Naming `weave_ticket_comments` as the full-text pointer is safe here specifically: the
         // `tickets.comment(...)` call above already recorded the untruncated `body` as a ticket
         // comment before any delivery was attempted, regardless of how this send turns out.
-        const reason = wb.truncated ? `${wb.body} (truncated; full message via ac_ticket_comments)` : wb.body;
+        const reason = wb.truncated ? `${wb.body} (truncated; full message via weave_ticket_comments)` : wb.body;
         wake = deps().wake.enqueue(workerId, {
           source: 'live_interrupt', reason,
           payload: { ticketId: agent.ticketId, message: wb.body, ...(wb.truncated ? { truncated: true as const, bodyLength: wb.bodyLength } : {}), interruptedRunId: runId },
@@ -464,7 +464,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         ctx.db.update('worktrees', wt.id, { status: 'removed', removedAt: nowIso(), lastVerifiedAt: nowIso(), landedEvidenceJson: verdict.evidence });
       }
 
-      // Archive the home (brief, notes, final report); run logs stay under .agent-conductor/runs.
+      // Archive the home (brief, notes, final report); run logs stay under .weave/runs.
       const archive = join(ctx.paths.archive, workerId);
       try {
         if (existsSync(agent.homePath)) {

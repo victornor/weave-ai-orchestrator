@@ -2,15 +2,15 @@ import { credentialReaderFor, reconcileRuntimeCredential } from '../workspace/lo
 import { gateRuntimeForLogin, ungateRuntime } from './authgate.js';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { nowIso } from '@agent-conductor/db';
+import { nowIso } from '@weave-ai/db';
 import {
   AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents, OcError, landingBranchOf,
-  isWorkerOptionConfigured,
+  isWorkerOptionConfigured, MCP_SERVER_NAME,
   type Agent, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
   type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
-} from '@agent-conductor/shared';
-import type { McpServerConfig, RuntimeEvent, TurnHandle, TurnInput, TurnResult } from '@agent-conductor/runtime-sdk';
-import { truncate } from '@agent-conductor/runtime-sdk';
+} from '@weave-ai/shared';
+import type { McpServerConfig, RuntimeEvent, TurnHandle, TurnInput, TurnResult } from '@weave-ai/runtime-sdk';
+import { truncate } from '@weave-ai/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { createSessions, type SessionsService } from '../sessions/index.js';
@@ -26,10 +26,10 @@ import { runTokenSecret, signRunToken } from './runtoken.js';
 /**
  * An interactive session's agent's first turn (VS-101): read the ticket and its context, post one
  * comment, nothing else. Enforced by the runtime's own `--allowedTools`, not by prompt wording —
- * `ac_ticket_comment` is included because the requirement is not silence, it is stating what the
+ * `weave_ticket_comment` is included because the requirement is not silence, it is stating what the
  * agent understands and is ready to do.
  */
-export const FIRST_TURN_ALLOWLIST = ['ac_inbox', 'ac_ticket_get', 'ac_ticket_comments', 'ac_ticket_comment', 'ac_ticket_document_get', 'ac_worktree_status', 'Read', 'Grep', 'Glob'];
+export const FIRST_TURN_ALLOWLIST = ['weave_inbox', 'weave_ticket_get', 'weave_ticket_comments', 'weave_ticket_comment', 'weave_ticket_document_get', 'weave_worktree_status', 'Read', 'Grep', 'Glob'];
 
 const PAYLOAD_LIMIT = 8 * 1024;
 const RETRY_BACKOFF_MS = [30_000, 120_000, 600_000];
@@ -331,7 +331,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     // 4. run token + MCP config + env
     const token = await mintRunToken(ctx, { agentId: agent.id, runId, ticketId: agent.ticketId, kind: agent.kind, projectId: agent.projectId, roleId: agent.roleId });
     const mcpServers: Record<string, McpServerConfig> = {
-      agentconductor: { type: 'http', url: `${ctx.loopbackUrl.replace(/\/$/, '')}/mcp/runs/${runId}`, headers: { Authorization: `Bearer ${token}` } },
+      [MCP_SERVER_NAME]: { type: 'http', url: `${ctx.loopbackUrl.replace(/\/$/, '')}/mcp/runs/${runId}`, headers: { Authorization: `Bearer ${token}` } },
     };
     writeFileSync(join(runDir, 'mcp.json'), JSON.stringify({ mcpServers }, null, 2), 'utf8');
 
@@ -396,7 +396,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       options: { liveInput: ctx.config.defaults.liveInput },
       limits: { timeoutMs: turnTimeoutMs },
       permission: {
-        // VS-171: Claude auto-mode can classify away ac_*; skip-permissions is only on for bypass.
+        // VS-171: Claude auto-mode can classify away weave_*; skip-permissions is only on for bypass.
         mode: agent.kind === 'weaver' ? 'bypass' : (permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto'),
         allowedTools,
         deniedTools: permission.denied,

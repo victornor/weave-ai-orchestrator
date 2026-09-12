@@ -4,8 +4,8 @@
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { PresentationConfigSchema, agentUiStatus } from '@agent-conductor/shared';
-import { nowIso } from '@agent-conductor/db';
+import { PresentationConfigSchema, agentUiStatus } from '@weave-ai/shared';
+import { nowIso } from '@weave-ai/db';
 import type { AppDeps, AppEnv } from './types.js';
 import { body } from './http.js';
 

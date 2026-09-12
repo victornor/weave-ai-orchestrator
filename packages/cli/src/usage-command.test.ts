@@ -1,4 +1,4 @@
-/** `conductor usage` against a stub daemon: plan limits on a subscription, cost on a metered window. */
+/** `weave usage` against a stub daemon: plan limits on a subscription, cost on a metered window. */
 import { createServer, type Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildProgram } from './program.js';
@@ -66,7 +66,7 @@ const subscription = {
   note: null, capturedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
 };
 
-describe('conductor usage', () => {
+describe('weave usage', () => {
   it('prints the plan windows and no cost line for an all-subscription window', async () => {
     seedSeries({ subscription: 1000, metered: 0, unknown: 0 });
     routes['/api/w/ws1/usage/accounts'] = [subscription];

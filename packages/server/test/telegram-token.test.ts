@@ -4,7 +4,7 @@
  * injection point through the route, and nothing here ever calls the real Telegram API.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChannelAdapter, SendResult } from '@agent-conductor/channel-sdk';
+import type { ChannelAdapter, SendResult } from '@weave-ai/channel-sdk';
 import { createApp } from '../src/app.js';
 import { ChannelManager } from '../src/channels.js';
 import { authed, makeHarness, type Harness } from './fakes.js';

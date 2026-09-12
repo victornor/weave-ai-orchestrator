@@ -1,4 +1,4 @@
-import type { SessionRef } from '@agent-conductor/runtime-sdk';
+import type { SessionRef } from '@weave-ai/runtime-sdk';
 
 /** Codex calls its conversation handle a thread; the id is reported in `thread.started`. */
 export interface CodexSessionRef { threadId: string; fork?: boolean }

@@ -3,7 +3,7 @@
  * queries the board, the merge queue, the changelog and the knowledge area already use, and these
  * narrow them to one project. Kept out of the components so each rule has a test of its own.
  */
-import type { ChangelogEntry, Decision, Project, Run, Ticket } from '@agent-conductor/shared';
+import type { ChangelogEntry, Decision, Project, Run, Ticket } from '@weave-ai/shared';
 
 /**
  * The project an address names. `GET /projects/:id` resolves `id = ? OR slug = ?`, so both forms

@@ -1,6 +1,6 @@
-import { newId, nowIso } from '@agent-conductor/db';
-import type { AgentKind, SessionPolicy } from '@agent-conductor/shared';
-import type { SessionRef } from '@agent-conductor/runtime-sdk';
+import { newId, nowIso } from '@weave-ai/db';
+import type { AgentKind, SessionPolicy } from '@weave-ai/shared';
+import type { SessionRef } from '@weave-ai/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
 import { modelSettingFor, modelsFor } from '../models/resolve.js';
 

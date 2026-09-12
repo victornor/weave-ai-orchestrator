@@ -2,7 +2,7 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command, Option } from 'commander';
-import { releaseVersion } from '@agent-conductor/release';
+import { releaseVersion } from '@weave-ai/release';
 import { configureOutput } from './output.js';
 import * as agent from './commands/agent.js';
 import * as auth from './commands/auth.js';
@@ -35,8 +35,8 @@ export function buildProgram(): Command {
   const program = new Command();
 
   program
-    .name('conductor')
-    .description('AgentConductor — talk to the conductor, watch the fleet, ship work')
+    .name('weave')
+    .description('Weave AI — talk to the weaver, watch the fleet, ship work')
     .version(VERSION, '-v, --version')
 
     .showHelpAfterError()

@@ -1,7 +1,7 @@
 /** VS-231: daemon-wide Scheduled page — fan-out list, fire history, mixed-turn label. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RoutineFire, RoutineListItem, RoutineUsage } from '@agent-conductor/shared';
+import type { RoutineFire, RoutineListItem, RoutineUsage } from '@weave-ai/shared';
 
 const state = vi.hoisted(() => ({
   workspaces: [] as Array<{ id: string; name: string }>,

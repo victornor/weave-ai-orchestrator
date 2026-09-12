@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYPES } from '@agent-conductor/shared';
+import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYPES } from '@weave-ai/shared';
 import { useDictation } from '../lib/dictation';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
@@ -32,7 +32,7 @@ export interface ComposerProps {
   rows?: number;
   submitLabel?: string;
   className?: string;
-  /** Browse + paste, conductor chat only (VS-133) — ticket comments, decision notes and revise-plan notes carry none. */
+  /** Browse + paste, weave chat only (VS-133) — ticket comments, decision notes and revise-plan notes carry none. */
   allowAttachments?: boolean;
   /** Controlled, like `value`/`onChange`: the parent clears it on a confirmed send and leaves it alone on a failed one. */
   attachments?: File[];

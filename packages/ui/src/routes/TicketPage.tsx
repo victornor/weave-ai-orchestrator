@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import type { Run } from '@agent-conductor/shared';
-import { isActiveRun, ticketUiStatus } from '@agent-conductor/shared';
-import { workerPauseDetail } from '@agent-conductor/render';
+import type { Run } from '@weave-ai/shared';
+import { isActiveRun, ticketUiStatus } from '@weave-ai/shared';
+import { workerPauseDetail } from '@weave-ai/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';

@@ -187,6 +187,6 @@ export const ROUTES: RouteRow[] = [
 
   { method: 'GET', path: `${W}/agent/inbox`, tag: 'agent', summary: 'This run wakes, bundled', auth: 'run' },
   { method: 'GET', path: `${W}/agent/tools`, tag: 'agent', summary: 'Tools this agent may call, with JSON schemas', auth: 'run' },
-  { method: 'POST', path: `${W}/agent/tools/{tool}`, tag: 'agent', summary: 'Call one ac_* tool; returns ToolResult', auth: 'run', mutating: true },
+  { method: 'POST', path: `${W}/agent/tools/{tool}`, tag: 'agent', summary: 'Call one weave_* tool; returns ToolResult', auth: 'run', mutating: true },
   { method: 'POST', path: '/mcp/runs/{runId}', tag: 'agent', summary: 'Streamable HTTP MCP endpoint for one run', auth: 'run', mutating: true },
 ];

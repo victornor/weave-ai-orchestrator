@@ -1,5 +1,5 @@
 /** View models produced by this package. The web widget layer and the TUI widget layer render these and nothing else. */
-import type { AuthorKind, BillingType, DecisionKind, DecisionStatus, TicketKind, TicketPriority, TicketStatus, UiStatus, AgentStatus, CostStatus } from '@agent-conductor/shared';
+import type { AuthorKind, BillingType, DecisionKind, DecisionStatus, TicketKind, TicketPriority, TicketStatus, UiStatus, AgentStatus, CostStatus } from '@weave-ai/shared';
 
 // ---------------------------------------------------------------- transcript
 
@@ -220,7 +220,7 @@ export interface BriefingItem {
   primary: string;
   secondary: string | null;
   meta: string | null;
-  /** Ticket identifier or decision id, for `conductor decision show <ref>` style follow-ups. */
+  /** Ticket identifier or decision id, for `weave decision show <ref>` style follow-ups. */
   ref: string | null;
 }
 

@@ -3,7 +3,7 @@
  * Implemented by the engine module owner; signatures fixed here.
  */
 import type { WorkspaceContext, Registries } from '../context.js';
-import type { DaemonConfig, WorkspaceConfig, WorkspaceRegistry } from '@agent-conductor/shared';
+import type { DaemonConfig, WorkspaceConfig, WorkspaceRegistry } from '@weave-ai/shared';
 export interface LoadOptions {
   daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; stateDir?: string;
   /** VS-143: the daemon's own resolved config directory and whether it is isolated from the host. See `daemon-isolation`. */

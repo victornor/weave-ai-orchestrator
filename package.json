@@ -1,5 +1,5 @@
 {
-  "name": "agent-conductor",
+  "name": "weave-ai",
   "private": true,
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
@@ -10,11 +10,11 @@
   },
   "scripts": {
     "build": "pnpm -r --filter './packages/**' run build",
-    "typecheck": "tsc -b tsconfig.json && pnpm --filter @agent-conductor/ui typecheck",
+    "typecheck": "tsc -b tsconfig.json && pnpm --filter @weave-ai/ui typecheck",
     "test": "node scripts/test.mjs",
     "lint": "node scripts/guard-boundaries.mjs && node scripts/guard-console.mjs && node scripts/guard-test-fixtures.mjs",
-    "dev": "pnpm --filter @agent-conductor/server run dev",
-    "conductor": "node packages/cli/dist/bin.js"
+    "dev": "pnpm --filter @weave-ai/server run dev",
+    "weave": "node packages/cli/dist/bin.js"
   },
   "devDependencies": {
     "typescript": "^5.9.2",

@@ -1,6 +1,6 @@
 /**
  * The deferred daemon upgrade, as the web app reads it (PLAN §20). The lifecycle and its two
- * predicates mirror `UPGRADE_STATES` in `@agent-conductor/shared`; they are restated here because the
+ * predicates mirror `UPGRADE_STATES` in `@weave-ai/shared`; they are restated here because the
  * web app must not import the daemon's enums module into the browser bundle.
  */
 import type { UpgradeState, Upgrade, UpdateStatus } from '../api/types';

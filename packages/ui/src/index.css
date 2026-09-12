@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 
 /* ------------------------------------------------------------------ *
- * AgentConductor design tokens — DESIGN-CONTRACT.md §2
+ * Weave AI design tokens — DESIGN-CONTRACT.md §2
  * Dark is the designed theme. Light is authored, not inverted:
  * surfaces get warmer and flatter, borders darker relative to their
  * surface, status hues drop in lightness to hold contrast on white.
@@ -536,7 +536,7 @@
   to { opacity: 1; transform: none; }
 }
 
-/* VS-163: titled https markdown links in conductor chat are compact buttons, not
+/* VS-163: titled https markdown links in weave chat are compact buttons, not
    underlined URLs. Scoped to `.ac-chat-prose` so ticket comments, knowledge and
    decision cards keep today's inline links. Ticket chips (`#ticket:`) and
    doc-links (`#doc:`) do not match this selector. */

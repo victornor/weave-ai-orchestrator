@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, PROJECT_ADD_STEPS, ProjectConfigSchema, landingBranchOf, type Project, type ProjectAddStepId, type ProjectConfig, type ProjectPolicies, type ProjectSyncState } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { OcError, PROJECT_ADD_STEPS, ProjectConfigSchema, landingBranchOf, type Project, type ProjectAddStepId, type ProjectConfig, type ProjectPolicies, type ProjectSyncState } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CommitDetail, CoreServices, HistoryPage, HistoryQuery, ProjectsService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -106,7 +106,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       const add = await git(['add', '-A', '--', ...generated], project.clonePath, 30_000);
       if (!add.ok) log.warn({ project: project.slug, stderr: add.stderr.slice(0, 200) }, 'could not stage the OpenSpec init');
       else {
-        const commit = await git(['-c', 'user.name=AgentConductor', '-c', 'user.email=agent-conductor@localhost', 'commit', '-q', '-m', 'chore: adopt OpenSpec'], project.clonePath, 30_000);
+        const commit = await git(['-c', 'user.name=Weave AI', '-c', 'user.email=weave-ai@localhost', 'commit', '-q', '-m', 'chore: adopt OpenSpec'], project.clonePath, 30_000);
         if (!commit.ok && !/nothing to commit/.test(commit.stderr + commit.stdout)) log.warn({ project: project.slug, stderr: commit.stderr.slice(0, 200) }, 'could not commit the OpenSpec init');
         else if (commit.ok) {
           const push = await git(['push'], project.clonePath, 120_000, undefined, onLine);
@@ -256,7 +256,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
     try {
       deps().tickets.create(actor, {
         projectId: id, kind: 'scout', title: `Describe project ${slug}`,
-        description: `Investigate the \`${slug}\` repository and write the project knowledge base: overview, stack and commands (run, test, lint, build), conventions the repo docs do not state, current focus, landmines. For each major subsystem, integration or runbook worth more than a few lines, write a linked knowledge document (ac_knowledge_doc_put) and link it from PROJECT.md's Documents section with [[slug]].\n\n## Acceptance criteria\n- \`knowledge/projects/${slug}/PROJECT.md\` filled in through \`ac_knowledge_note\`\n- a \`report\` document on this ticket summarising what you found`,
+        description: `Investigate the \`${slug}\` repository and write the project knowledge base: overview, stack and commands (run, test, lint, build), conventions the repo docs do not state, current focus, landmines. For each major subsystem, integration or runbook worth more than a few lines, write a linked knowledge document (weave_knowledge_doc_put) and link it from PROJECT.md's Documents section with [[slug]].\n\n## Acceptance criteria\n- \`knowledge/projects/${slug}/PROJECT.md\` filled in through \`weave_knowledge_note\`\n- a \`report\` document on this ticket summarising what you found`,
         priority: 'medium', originKind: 'project_describe', originFingerprint: `project_describe:${slug}`,
       });
       // A new project is news the conductor must act on now (hire a role, assign the scout), not at the next digest.

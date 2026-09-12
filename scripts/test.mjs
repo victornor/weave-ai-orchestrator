@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 
 const suites = [
   { name: 'core/server', command: 'pnpm', args: ['exec', 'vitest', 'run'] },
-  { name: 'ui', command: 'pnpm', args: ['--filter', '@agent-conductor/ui', 'test'] },
+  { name: 'ui', command: 'pnpm', args: ['--filter', '@weave-ai/ui', 'test'] },
 ];
 
 const failed = [];

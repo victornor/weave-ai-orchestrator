@@ -56,11 +56,11 @@ describe('WebhookDispatcher', () => {
     const last = h.bus.emit('ticket.comment', 'ticket', 'tk_1', { body: 'hi' });
     await d.pump();
 
-    expect(rec.deliveries.map((x) => x.headers['X-AgentConductor-Event'])).toEqual(['ticket.status', 'ticket.comment']);
+    expect(rec.deliveries.map((x) => x.headers['X-WeaveAI-Event'])).toEqual(['ticket.status', 'ticket.comment']);
     const first = rec.deliveries[0]!;
     expect(first.url).toBe('https://hooks.test/a');
     expect(first.headers['content-type']).toBe('application/json');
-    expect(first.headers['X-AgentConductor-Signature']).toBe(`sha256=${createHmac('sha256', 'shhh').update(first.body).digest('hex')}`);
+    expect(first.headers['X-WeaveAI-Signature']).toBe(`sha256=${createHmac('sha256', 'shhh').update(first.body).digest('hex')}`);
     expect(JSON.parse(first.body)).toMatchObject({ type: 'ticket.status', entityId: 'tk_1', payload: { status: 'done' } });
 
     const cursor = h.db.get<{ lastSeq: number }>('SELECT last_seq FROM webhook_cursors WHERE webhook_url = ?', ['https://hooks.test/a']);
@@ -86,7 +86,7 @@ describe('WebhookDispatcher', () => {
     d.start();
     h.bus.emit('ticket.status', 'ticket', 'tk_1', {});
     await d.pump();
-    expect(rec.deliveries[0]!.headers['X-AgentConductor-Signature']).toBeUndefined();
+    expect(rec.deliveries[0]!.headers['X-WeaveAI-Signature']).toBeUndefined();
   });
 
   it('keeps the cursor on a network failure and redelivers the same event (at-least-once)', async () => {

@@ -1,4 +1,4 @@
--- Files/images attached to a conductor chat message (VS-133). Always written in the same
+-- Files/images attached to a weave chat message (VS-133). Always written in the same
 -- transaction as the message that owns them; there is no message_id-less row and therefore no
 -- orphan to garbage-collect. storage_key is server-generated, never derived from the client's
 -- filename, which is kept only as a display column.

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { A, useGo } from './link';
-import { TICKET_STATUSES, ticketUiStatus } from '@agent-conductor/shared';
+import { TICKET_STATUSES, ticketUiStatus } from '@weave-ai/shared';
 import { RAIL, TABS, href } from './nav';
 import { WorkspaceNav } from './WorkspaceNav';
 import { MoreSheet } from './MoreSheet';
@@ -136,7 +136,7 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
       });
     }
     // Everything is asked for in one place, so this goes where the board's empty state goes.
-    cmds.push({ id: 'create', label: 'Create ticket', sub: scope ? `in ${scope}` : 'in the conductor chat', kbd: 'C', run: () => go('/w/$ws/chat', { params: { ws: chromeWs } }) });
+    cmds.push({ id: 'create', label: 'Create ticket', sub: scope ? `in ${scope}` : 'in the weave chat', kbd: 'C', run: () => go('/w/$ws/chat', { params: { ws: chromeWs } }) });
     const first = tickets.data?.[0];
     if (first) {
       for (const s of TICKET_STATUSES) {

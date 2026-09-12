@@ -91,26 +91,26 @@ describe('ApiClient agent mode', () => {
     const client = new ApiClient({ baseUrl: 'http://x', runToken: 'rt_abc', workspace: 'ws', fetchImpl });
 
     const result = await client.write<{ id: string }>({
-      tool: 'ac_ticket_comment', input: { ticketId: 'ACME-42', body: 'hi' },
+      tool: 'weave_ticket_comment', input: { ticketId: 'ACME-42', body: 'hi' },
       http: { method: 'POST', path: '/api/w/ws/tickets/ACME-42/comments', body: { body: 'hi' } },
     });
 
     expect(result).toEqual({ id: 'tkt_1' });
-    expect(calls[0]!.url).toBe('http://x/api/w/ws/agent/tools/ac_ticket_comment');
+    expect(calls[0]!.url).toBe('http://x/api/w/ws/agent/tools/weave_ticket_comment');
     expect(JSON.parse(String(calls[0]!.init!.body))).toEqual({ input: { ticketId: 'ACME-42', body: 'hi' } });
   });
 
   it('raises a typed error from a failed ToolResult', async () => {
     const { fetchImpl } = recorder(() => jsonResponse({ ok: false, error: { code: 'not_checked_out', message: 'check the ticket out first', retryable: false } }));
     const client = new ApiClient({ baseUrl: 'http://x', runToken: 'rt', workspace: 'ws', fetchImpl });
-    await expect(client.tool('ac_ticket_comment', {})).rejects.toMatchObject({ code: 'not_checked_out' });
+    await expect(client.tool('weave_ticket_comment', {})).rejects.toMatchObject({ code: 'not_checked_out' });
   });
 
   it('uses http when there is no run token, even for tool-backed writes', async () => {
     const { calls, fetchImpl } = recorder(() => jsonResponse({ id: 'tkt_1' }));
     const client = new ApiClient({ baseUrl: 'http://x', token: 'tok', workspace: 'ws', fetchImpl });
     await client.write({
-      tool: 'ac_ticket_comment', input: { ticketId: 'x' },
+      tool: 'weave_ticket_comment', input: { ticketId: 'x' },
       http: { method: 'POST', path: '/api/w/ws/tickets/x/comments', body: { body: 'hi' } },
     });
     expect(calls[0]!.url).toBe('http://x/api/w/ws/tickets/x/comments');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Agent, Ticket } from '@agent-conductor/shared';
+import type { Agent, Ticket } from '@weave-ai/shared';
 import { ticketToSummary, workerPauseDetail, workerToCard } from './entities.js';
 
 const now = new Date('2026-09-04T12:00:00.000Z');

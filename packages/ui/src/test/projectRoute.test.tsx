@@ -5,7 +5,7 @@
  */
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Decision, Project, Run, Ticket } from '@agent-conductor/shared';
+import type { Agent, Decision, Project, Run, Ticket } from '@weave-ai/shared';
 import type { ChangelogEntry, ChangelogHeatmap, KnowledgeDoc, KnowledgeDocSummary, KnowledgeHealth, MergeQueue, ProjectPullRequests } from '../api/types';
 import { agent, decision, project as projectOf, run, ticket } from './factories';
 

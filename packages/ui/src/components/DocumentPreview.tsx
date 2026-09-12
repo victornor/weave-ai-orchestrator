@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { documentTarget } from '@agent-conductor/shared';
-import type { Decision } from '@agent-conductor/shared';
+import { documentTarget } from '@weave-ai/shared';
+import type { Decision } from '@weave-ai/shared';
 import { Markdown } from './Markdown';
 import { SkeletonRows } from './Skeleton';
 import { useTicketDocumentById } from '../api/hooks';

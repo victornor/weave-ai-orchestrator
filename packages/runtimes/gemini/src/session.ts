@@ -1,4 +1,4 @@
-import type { SessionRef } from '@agent-conductor/runtime-sdk';
+import type { SessionRef } from '@weave-ai/runtime-sdk';
 
 /** Gemini sessions are UUIDs the caller may choose with `--session-id`. */
 export interface GeminiSessionRef { sessionId: string }

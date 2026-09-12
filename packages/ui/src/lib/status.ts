@@ -1,4 +1,4 @@
-import type { UiStatus } from '@agent-conductor/shared';
+import type { UiStatus } from '@weave-ai/shared';
 
 export const STATUS_LABEL: Record<UiStatus, string> = {
   idle: 'idle',

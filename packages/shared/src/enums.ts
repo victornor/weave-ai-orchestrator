@@ -11,7 +11,7 @@ export type AgentKind = (typeof AGENT_KINDS)[number];
 export const INCIDENT_REPORTER_KINDS = ['weaver', 'worker'] as const;
 export type IncidentReporterKind = (typeof INCIDENT_REPORTER_KINDS)[number];
 
-/** `ac_incident_list`'s `status` filter (VS-271); `list()` itself applies no default. */
+/** `weave_incident_list`'s `status` filter (VS-271); `list()` itself applies no default. */
 export const INCIDENT_STATUS_FILTERS = ['open', 'resolved', 'all'] as const;
 export type IncidentStatusFilter = (typeof INCIDENT_STATUS_FILTERS)[number];
 
@@ -48,10 +48,10 @@ export const DECISION_KINDS = ['approval', 'question', 'concern', 'gate_finding'
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 
 /**
- * What the general-purpose ask tool (`ac_ask`) may construct (VS-127): `question`, `concern` and
+ * What the general-purpose ask tool (`weave_ask`) may construct (VS-127): `question`, `concern` and
  * `gate_finding` only. `plan_approval`, `merge_approval`, `hire_approval`, `discard_approval`,
  * `retry_approval`, `action_approval` and the generic `approval` stay exclusively system-raised — each of those already
- * sets its own owner directly (tickets, roles, the run engine) — so a caller of `ac_ask` can never
+ * sets its own owner directly (tickets, roles, the run engine) — so a caller of `weave_ask` can never
  * construct one and collide its correlation key with a real approval's.
  */
 export const ASKABLE_DECISION_KINDS = ['question', 'concern', 'gate_finding'] as const;
@@ -65,7 +65,7 @@ export type DecisionStatus = (typeof DECISION_STATUSES)[number];
 
 /**
  * Weaver review of a human-owned plan/merge/action card (VS-223). Asserted by
- * `ac_decision_review`, never derived. Default is `unseen` — absence is not a fourth state.
+ * `weave_decision_review`, never derived. Default is `unseen` — absence is not a fourth state.
  */
 export const WEAVER_REVIEW_STATUSES = ['unseen', 'looked', 'concerns'] as const;
 export type WeaverReviewStatus = (typeof WEAVER_REVIEW_STATUSES)[number];
@@ -231,7 +231,7 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
 export const UI_STATUSES = ['idle', 'working', 'blocked', 'needs-you', 'merging', 'done', 'failed', 'paused', 'stalled'] as const;
 export type UiStatus = (typeof UI_STATUSES)[number];
 
-/** `conductor daemon update apply`: the deferred upgrade's lifecycle (PLAN §20). Forward-only. */
+/** `weave daemon update apply`: the deferred upgrade's lifecycle (PLAN §20). Forward-only. */
 export const UPGRADE_STATES = ['queued', 'waiting', 'building', 'switching', 'restarting', 'completed', 'failed', 'cancelled'] as const;
 export type UpgradeState = (typeof UPGRADE_STATES)[number];
 export const TERMINAL_UPGRADE_STATES: readonly UpgradeState[] = ['completed', 'failed', 'cancelled'];

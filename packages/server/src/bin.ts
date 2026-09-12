@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-/** Daemon entry point. `conductor daemon start` execs this. */
-import { getLogger } from '@agent-conductor/core';
+/** Daemon entry point. `weave daemon start` execs this. */
+import { getLogger } from '@weave-ai/core';
 import { startDaemon } from './daemon.js';
 
 const args = process.argv.slice(2);

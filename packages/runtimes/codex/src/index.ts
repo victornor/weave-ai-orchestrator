@@ -1,4 +1,4 @@
-export const PACKAGE = '@agent-conductor/runtime-codex';
+export const PACKAGE = '@weave-ai/runtime-codex';
 export { adapter, capabilities, default } from './adapter.js';
 export { describeCodexAccount } from './account.js';
 export { buildArgs, mcpConfigToml, mcpOverrides, type CodexBuiltCommand, type CodexBuildOpts } from './args.js';

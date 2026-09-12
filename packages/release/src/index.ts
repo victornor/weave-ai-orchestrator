@@ -1,14 +1,14 @@
 /**
- * Release directories for `conductor daemon upgrade|releases|rollback` (PLAN §20).
+ * Release directories for `weave daemon upgrade|releases|rollback` (PLAN §20).
  *
  * The daemon never runs from a checkout that anyone edits. Each upgrade clones the source at a ref
- * into `<data>/agent-conductor/releases/<stamp>-<sha>/`, builds it there, backs the databases up,
+ * into `<data>/weave/releases/<stamp>-<sha>/`, builds it there, backs the databases up,
  * drains the running daemon, switches the `current` symlink and restarts the service. `previous`
  * always points at the release before that, so `rollback` is a symlink swap plus a restart.
  * Host-local, never remote: everything here runs on the daemon host.
  *
- * Shared by the CLI (`conductor daemon upgrade|releases|rollback`) and by the daemon's own deferred
- * upgrade, so both agree on the layout. A leaf package: it imports nothing from `@agent-conductor/*`.
+ * Shared by the CLI (`weave daemon upgrade|releases|rollback`) and by the daemon's own deferred
+ * upgrade, so both agree on the layout. A leaf package: it imports nothing from `@weave-ai/*`.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
@@ -241,9 +241,9 @@ export function cliBinIn(release: string): string { return join(release, 'packag
 
 // ---------- restarting the daemon after a switch ----------
 
-/** The systemd user unit and the launchd label `conductor daemon install-service` writes. */
-export const SERVICE_NAME = 'agent-conductor.service';
-export const LAUNCHD_LABEL = 'com.agentconductor.daemon';
+/** The systemd user unit and the launchd label `weave daemon install-service` writes. */
+export const SERVICE_NAME = 'weave-ai.service';
+export const LAUNCHD_LABEL = 'com.weave-ai.daemon';
 
 export interface RestartEnvironment {
   platform: NodeJS.Platform;

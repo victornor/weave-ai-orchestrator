@@ -7,8 +7,8 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { newId, nowIso } from '@agent-conductor/db';
-import type { Agent, Decision } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import type { Agent, Decision } from '@weave-ai/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAccountsService } from '../usage/accounts.js';
 import { createDispatcher } from './dispatcher.js';

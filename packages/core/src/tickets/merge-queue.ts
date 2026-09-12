@@ -7,8 +7,8 @@
  * admitted. Waiting = merging with no start; active = merging with one. A position is derived from
  * the join time, never stored, so a ticket leaving the queue cannot renumber anyone incorrectly.
  */
-import { nowIso, ticketRow, type Db } from '@agent-conductor/db';
-import { mergeConcurrencyOf, type Ticket } from '@agent-conductor/shared';
+import { nowIso, ticketRow, type Db } from '@weave-ai/db';
+import { mergeConcurrencyOf, type Ticket } from '@weave-ai/shared';
 import type { Actor, CoreServices, MergeQueueService, MergeQueueEntry, MergeQueueOutcome, MergeQueueView } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 

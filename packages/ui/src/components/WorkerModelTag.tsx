@@ -1,4 +1,4 @@
-import type { Ticket, WorkerModelOption } from '@agent-conductor/shared';
+import type { Ticket, WorkerModelOption } from '@weave-ai/shared';
 import { Badge } from './StatusGlyph';
 
 /**

@@ -8,7 +8,7 @@
  * rather than literal Tailwind classes, since the granularity is too fine to enumerate as classes.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { agentUiStatus, isActiveRun, type Agent, type Run, type Ticket, type WorkerModelOption } from '@agent-conductor/shared';
+import { agentUiStatus, isActiveRun, type Agent, type Run, type Ticket, type WorkerModelOption } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { RunTranscript } from '../components/RunTranscript';
 import { StreamStatusNotice } from '../components/StreamStatus';

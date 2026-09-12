@@ -1,4 +1,4 @@
-/** `conductor runtime login` against a stub daemon (VS-258: the configHome fix). */
+/** `weave runtime login` against a stub daemon (VS-258: the configHome fix). */
 import { createServer, type Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildProgram } from '../program.js';
@@ -50,7 +50,7 @@ async function cli(...argv: string[]): Promise<string> {
   return out;
 }
 
-describe('conductor runtime login (VS-258)', () => {
+describe('weave runtime login (VS-258)', () => {
   it('builds the config home under the workspace\'s resolved new name, not a hardcoded literal', async () => {
     routes['GET /api/runtimes'] = () => ({ body: { runtimes: [{ id: 'claude', displayName: 'Claude Code' }] } });
     routes['GET /api/w/acme'] = () => ({ body: { rootPath: '/does/not/exist/on/disk' } });

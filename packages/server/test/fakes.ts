@@ -3,14 +3,14 @@
  * push exercise real SQL) with hand-written service fakes in front of them.
  */
 import { tmpdir } from 'node:os';
-import { Db } from '@agent-conductor/db';
-import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, createRoutinesService, getLogger, initLogger } from '@agent-conductor/core';
-import type { Actor, CoreServices, HistoryQuery, WorkspaceContext } from '@agent-conductor/core';
-import type { AuthService } from '@agent-conductor/core';
+import { Db } from '@weave-ai/db';
+import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, createRoutinesService, getLogger, initLogger } from '@weave-ai/core';
+import type { Actor, CoreServices, HistoryQuery, WorkspaceContext } from '@weave-ai/core';
+import type { AuthService } from '@weave-ai/core';
 import {
   DaemonConfigSchema, OcError, WorkspaceConfigSchema,
   type AccountSyncFailure, type AccountSyncThrottle, type Briefing, type Decision, type Project, type RuntimeAccount, type RuntimeCredential, type Ticket, type TicketComment, type Wakeup,
-} from '@agent-conductor/shared';
+} from '@weave-ai/shared';
 import type { AppDeps, WorkspaceRuntime } from '../src/types.js';
 import { createUpdateChecker } from '../src/release-info.js';
 import { createUpgradeService, type UpgradeDeps } from '../src/upgrade.js';
@@ -85,9 +85,9 @@ export interface Harness {
   tokens: Map<string, { sessionId: string; operatorId: string; kind: 'web' | 'cli' | 'presenter' }>;
   /** Live method tables behind the service proxies: mutate to stub a method mid-test. */
   impls: Record<string, Record<string, unknown>>;
-  /** Every `decisions.create` input verbatim, so a test can assert what `ac_ask` forwarded (VS-92). */
+  /** Every `decisions.create` input verbatim, so a test can assert what `weave_ask` forwarded (VS-92). */
   decisionInputs: Array<Record<string, unknown>>;
-  /** Registered secret names, by role, as `ac_role_set_secrets` set them. Never a value. */
+  /** Registered secret names, by role, as `weave_role_set_secrets` set them. Never a value. */
   roleSecrets: Map<string, string[]>;
   /** Drains the real jobs service before closing the db: a pending log flush must not fire against it. */
   close(): Promise<void>;
@@ -144,7 +144,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   const decisions = new Map<string, Decision>([['dec_1', decision()]]);
   /** Registered secret names, never real values: this fake exists so a test can prove a name was recorded and a value was not. */
   const secretValues = new Map<string, string>();
-  /** Every `decisions.create` input verbatim, so a tool test can assert what ac_ask forwarded. */
+  /** Every `decisions.create` input verbatim, so a tool test can assert what weave_ask forwarded. */
   const decisionInputs: Array<Record<string, unknown>> = [];
   const roleSecrets = new Map<string, string[]>();
 

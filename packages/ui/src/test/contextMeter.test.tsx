@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { contextStrip } from '@agent-conductor/render';
+import { contextStrip } from '@weave-ai/render';
 import { ContextMeter } from '../components/ContextMeter';
 
 const usage = { inputTokens: 320_119, cachedInputTokens: 667_671, outputTokens: 1_022, contextTokens: 82_000 };

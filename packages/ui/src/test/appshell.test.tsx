@@ -359,10 +359,10 @@ describe('asking for work goes through the chat', () => {
     expect(hotkeys.current.find((k) => k.key === 'Space')).toBeUndefined();
   });
 
-  it('sends the palette’s Create ticket to the conductor chat', () => {
+  it('sends the palette’s Create ticket to the weave chat', () => {
     render(<AppShell />);
     const create = palette.commands.find((c) => c.id === 'create');
-    expect(create?.sub).toBe('in the conductor chat');
+    expect(create?.sub).toBe('in the weave chat');
     (create as unknown as { run: () => void }).run();
     expect(went.calls).toContain('/w/ws1/chat');
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RunEvent, RunEventType } from '@agent-conductor/shared';
+import type { RunEvent, RunEventType } from '@weave-ai/shared';
 import { transcriptToLines } from './inspect.js';
 import { runEventsToTranscript } from './transcript.js';
 

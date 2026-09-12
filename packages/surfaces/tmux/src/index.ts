@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import type { AgentPresence, AgentView, JsonSchema, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@agent-conductor/surface-sdk';
+import type { AgentPresence, AgentView, JsonSchema, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@weave-ai/surface-sdk';
 import {
   CONDUCTOR_AGENT_ID, CONDUCTOR_WINDOW_NAME, findWindow, hasSessionArgs, killWindowArgs, listWindowsArgs,
   newSessionArgs, newWindowArgs, parseListWindows, renameWindowArgs, selectLayoutArgs, selectWindowArgs,
@@ -44,7 +44,7 @@ export function createTmuxSurface(): SurfaceAdapter {
         if (/duplicate session/.test(created.stderr)) return session;
         throw new Error(`tmux: could not create session ${session}: ${created.stderr.trim()}`);
       }
-      // Keep panes open after their command exits so a failed `conductor attach` stays readable instead of collapsing the session.
+      // Keep panes open after their command exits so a failed `weave attach` stays readable instead of collapsing the session.
       await tmux(['set-option', '-t', session, 'remain-on-exit', 'on']);
       const windows = await listWindows(session);
       const first = windows[0];

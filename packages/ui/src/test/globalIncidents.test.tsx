@@ -1,7 +1,7 @@
 /** VS-174: daemon-wide Incidents page. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Incident } from '@agent-conductor/shared';
+import type { Incident } from '@weave-ai/shared';
 
 const state = vi.hoisted(() => ({
   search: {} as Record<string, string | undefined>,
@@ -33,7 +33,7 @@ const incident = (over: Partial<Incident> = {}): Incident => ({
   id: 'i1',
   reporterKind: 'worker',
   title: 'MCP call failed',
-  whatFailed: 'ac_ticket_get returned not_found',
+  whatFailed: 'weave_ticket_get returned not_found',
   tryingToDo: 'read the bound ticket',
   evidence: 'OcError not_found',
   workspaceId: 'alpha',
@@ -119,9 +119,9 @@ describe('GlobalIncidentsRoute', () => {
   it('expands a row to show whatFailed, tryingToDo and evidence', () => {
     state.items = [incident()];
     render(<GlobalIncidentsRoute />);
-    expect(screen.queryByText(/ac_ticket_get returned not_found/)).toBeNull();
+    expect(screen.queryByText(/weave_ticket_get returned not_found/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /MCP call failed/ }));
-    expect(screen.getByText(/ac_ticket_get returned not_found/)).toBeInTheDocument();
+    expect(screen.getByText(/weave_ticket_get returned not_found/)).toBeInTheDocument();
     expect(screen.getByText(/read the bound ticket/)).toBeInTheDocument();
     expect(screen.getByText('OcError not_found')).toBeInTheDocument();
   });

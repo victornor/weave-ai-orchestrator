@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId, nowIso } from '@agent-conductor/db';
+import { newId, nowIso } from '@weave-ai/db';
 import YAML from 'yaml';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { exportWorkspace, importTickets, parseTicketFile, stageWorkspaceImport } from './portable.js';
@@ -164,7 +164,7 @@ describe('stageWorkspaceImport', () => {
   });
 
   it('refuses a directory that is not an export', () => {
-    expect(() => stageWorkspaceImport(target.root, join(target.root, 'x'))).toThrow(/not an AgentConductor export/);
+    expect(() => stageWorkspaceImport(target.root, join(target.root, 'x'))).toThrow(/not an Weave AI export/);
   });
 });
 

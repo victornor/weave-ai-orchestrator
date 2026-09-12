@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { newId } from '@agent-conductor/db';
-import { CHANGELOG_KINDS } from '@agent-conductor/shared';
+import { newId } from '@weave-ai/db';
+import { CHANGELOG_KINDS } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createChangelogService } from './index.js';
 import type { ChangelogService } from '../api.js';

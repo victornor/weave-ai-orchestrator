@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { newId, nowIso } from '@agent-conductor/db';
+import { newId, nowIso } from '@weave-ai/db';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { writeFakeOpenspec, type FakeCase } from '../openspec/fakeBin.js';
 import { createSpecsService, deltaKindOf, ftsQuery, parseDeltaRequirements, parseTasks, readArchivedChanges } from './index.js';

@@ -1,4 +1,4 @@
-export const PACKAGE = '@agent-conductor/runtime-cursor';
+export const PACKAGE = '@weave-ai/runtime-cursor';
 export { adapter, capabilities, default } from './adapter.js';
 export { describeCursorAccount } from './account.js';
 export { readCredential, credentialExpiry, jwtExpiry, CREDENTIAL_FILE } from './credential.js';

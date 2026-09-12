@@ -4,9 +4,9 @@
  * `paused` exclusion (`IDLE_AGENT_STATUSES`); this test makes that exclusion explicit for a
  * `startHandover`-held worker rather than relying on it by accident (`session-handover/lease`).
  */
-import { newId, nowIso } from '@agent-conductor/db';
-import { FakeRuntime } from '@agent-conductor/runtime-sdk';
-import type { Run, Wakeup } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { FakeRuntime } from '@weave-ai/runtime-sdk';
+import type { Run, Wakeup } from '@weave-ai/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createWakeService } from '../wake/index.js';

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { NAMED_CARD_OPTION_KEYS, weaverReviewCopy, documentTarget } from '@agent-conductor/shared';
-import type { Decision, DecisionAnswerInputs, DecisionInput, UiStatus } from '@agent-conductor/shared';
+import { NAMED_CARD_OPTION_KEYS, weaverReviewCopy, documentTarget } from '@weave-ai/shared';
+import type { Decision, DecisionAnswerInputs, DecisionInput, UiStatus } from '@weave-ai/shared';
 import { A } from '../app/link';
 import { Button } from './Button';
 import { Composer } from './Composer';
@@ -33,7 +33,7 @@ export interface DecisionCardProps {
   autoApproving?: boolean;
   /**
    * Take this card off the surface it is pinned to without answering it (VS-72). Only the
-   * conductor chat passes one; a card that is a record rather than a prompt never offers it.
+   * weave chat passes one; a card that is a record rather than a prompt never offers it.
    */
   onHide?: () => void;
   /** VS-146: the ticket was filed by the conductor, not the human. Chat only. */

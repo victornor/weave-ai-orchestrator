@@ -4,7 +4,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CredentialFacts, CredentialProbeInput } from '@agent-conductor/runtime-sdk';
+import type { CredentialFacts, CredentialProbeInput } from '@weave-ai/runtime-sdk';
 
 export const CREDENTIAL_FILE = 'auth.json';
 

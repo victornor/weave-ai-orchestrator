@@ -1,22 +1,25 @@
+/** The MCP server's own registered name; also the key a run's MCP config uses. */
+export const MCP_SERVER_NAME = 'weave-ai';
+
 /** MCP tool names exposed to agents (PLAN §9.2). Stable API. */
 export const COMMON_TOOLS = [
-  'ac_inbox', 'ac_ticket_get', 'ac_ticket_list', 'ac_ticket_comments', 'ac_ticket_checkout', 'ac_ticket_release', 'ac_ticket_comment',
-  'ac_ticket_document_put', 'ac_ticket_document_get', 'ac_ticket_transition', 'ac_ticket_work_product', 'ac_ask', 'ac_report', 'ac_incident', 'ac_knowledge_get', 'ac_knowledge_note',
-  'ac_knowledge_replace', 'ac_knowledge_docs', 'ac_knowledge_doc_get', 'ac_knowledge_doc_put', 'ac_knowledge_search', 'ac_openspec_status', 'ac_spec_list', 'ac_spec_get', 'ac_spec_search', 'ac_spec_change_get', 'ac_ticket_merge_done', 'ac_worktree_status', 'ac_artifact_kit', 'ac_ticket_artifact_put',
+  'weave_inbox', 'weave_ticket_get', 'weave_ticket_list', 'weave_ticket_comments', 'weave_ticket_checkout', 'weave_ticket_release', 'weave_ticket_comment',
+  'weave_ticket_document_put', 'weave_ticket_document_get', 'weave_ticket_transition', 'weave_ticket_work_product', 'weave_ask', 'weave_report', 'weave_incident', 'weave_knowledge_get', 'weave_knowledge_note',
+  'weave_knowledge_replace', 'weave_knowledge_docs', 'weave_knowledge_doc_get', 'weave_knowledge_doc_put', 'weave_knowledge_search', 'weave_openspec_status', 'weave_spec_list', 'weave_spec_get', 'weave_spec_search', 'weave_spec_change_get', 'weave_ticket_merge_done', 'weave_worktree_status', 'weave_artifact_kit', 'weave_ticket_artifact_put',
 ] as const;
 export const WEAVER_TOOLS = [
-  'ac_ticket_create', 'ac_ticket_assign', 'ac_ticket_set_priority', 'ac_role_list', 'ac_role_get', 'ac_role_hire', 'ac_role_update_charter', 'ac_role_set_secrets',
-  'ac_role_set_max_workers', 'ac_role_pause', 'ac_role_resume', 'ac_role_retire', 'ac_worker_list', 'ac_worker_get', 'ac_worker_message', 'ac_worker_relaunch', 'ac_worker_cancel',
-  'ac_decision_answer', 'ac_decision_review', 'ac_human_send', 'ac_thread_message_get', 'ac_briefing', 'ac_project_list', 'ac_project_add', 'ac_usage',
-  'ac_run_inspect', 'ac_run_list', 'ac_worker_models',
-  'ac_routine_list', 'ac_routine_create', 'ac_routine_update', 'ac_routine_remove',
-  'ac_incident_list', 'ac_incident_get', 'ac_incident_resolve',
+  'weave_ticket_create', 'weave_ticket_assign', 'weave_ticket_set_priority', 'weave_role_list', 'weave_role_get', 'weave_role_hire', 'weave_role_update_charter', 'weave_role_set_secrets',
+  'weave_role_set_max_workers', 'weave_role_pause', 'weave_role_resume', 'weave_role_retire', 'weave_worker_list', 'weave_worker_get', 'weave_worker_message', 'weave_worker_relaunch', 'weave_worker_cancel',
+  'weave_decision_answer', 'weave_decision_review', 'weave_human_send', 'weave_thread_message_get', 'weave_briefing', 'weave_project_list', 'weave_project_add', 'weave_usage',
+  'weave_run_inspect', 'weave_run_list', 'weave_worker_models',
+  'weave_routine_list', 'weave_routine_create', 'weave_routine_update', 'weave_routine_remove',
+  'weave_incident_list', 'weave_incident_get', 'weave_incident_resolve',
 ] as const;
-export const WORKER_ONLY_TOOLS = ['ac_ticket_create'] as const; // project-scoped creation for workers
+export const WORKER_ONLY_TOOLS = ['weave_ticket_create'] as const; // project-scoped creation for workers
 export type ToolName = (typeof COMMON_TOOLS)[number] | (typeof WEAVER_TOOLS)[number];
 
 /** The only tool whose words reach the human; its body is the reply itself. */
-export const HUMAN_REPLY_TOOL = 'ac_human_send' satisfies ToolName;
+export const HUMAN_REPLY_TOOL = 'weave_human_send' satisfies ToolName;
 
 /** The payload keys the runtime adapters use for a tool's name — they do not agree. */
 const TOOL_NAME_KEYS = ['name', 'tool', 'toolName'] as const;

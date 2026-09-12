@@ -1,8 +1,8 @@
-import type { JsonSchema, SurfaceAdapter, SurfaceHandle } from '@agent-conductor/surface-sdk';
+import type { JsonSchema, SurfaceAdapter, SurfaceHandle } from '@weave-ai/surface-sdk';
 
 export interface HeadlessHandle extends SurfaceHandle { kind: 'headless'; agentId: string }
 
-/** The default surface: nothing is shown; monitoring happens in the web UI or ad-hoc `conductor attach`. */
+/** The default surface: nothing is shown; monitoring happens in the web UI or ad-hoc `weave attach`. */
 export function createHeadlessSurface(): SurfaceAdapter {
   return {
     kind: 'headless',

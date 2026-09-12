@@ -3,12 +3,12 @@
  *
  * Read-only: resolves a ticket, worker or run reference to a run, derives which phase it is in,
  * and renders a bounded slice of its transcript. Everything it shows already exists — the run
- * engine recorded it and `@agent-conductor/render` folds and redacts it, the same way the run page
- * and `conductor attach` do, so an inspected transcript cannot disagree with the one a human sees.
+ * engine recorded it and `@weave-ai/render` folds and redacts it, the same way the run page
+ * and `weave attach` do, so an inspected transcript cannot disagree with the one a human sees.
  */
-import { RECORDED_RUN_PHASES, OcError, type Agent, type Run, type RunEvent, type RunPhase, type Ticket } from '@agent-conductor/shared';
-import { formatDuration, runEventsToTranscript, transcriptToLines, type InspectionLine } from '@agent-conductor/render';
-import type { CoreServices } from '@agent-conductor/core';
+import { RECORDED_RUN_PHASES, OcError, type Agent, type Run, type RunEvent, type RunPhase, type Ticket } from '@weave-ai/shared';
+import { formatDuration, runEventsToTranscript, transcriptToLines, type InspectionLine } from '@weave-ai/render';
+import type { CoreServices } from '@weave-ai/core';
 
 /** Transcript events read per call. The tool caps the caller's request at `MAX_EVENTS`. */
 export const DEFAULT_EVENTS = 40;

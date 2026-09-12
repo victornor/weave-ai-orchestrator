@@ -2,8 +2,8 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEq
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { hash as argonHash, verify as argonVerify, type Algorithm } from '@node-rs/argon2';
-import { newId, nowIso, openDb, type Db } from '@agent-conductor/db';
-import { OcError, type AuthSessionKind, type DaemonConfig } from '@agent-conductor/shared';
+import { newId, nowIso, openDb, type Db } from '@weave-ai/db';
+import { OcError, type AuthSessionKind, type DaemonConfig } from '@weave-ai/shared';
 import type { AuthService } from '../api.js';
 
 const require = createRequire(import.meta.url);
@@ -157,7 +157,7 @@ export function createAuthService(db: Db, cfg: DaemonConfig): AuthService {
       });
       // Not enabled until totpEnable() confirms a code from the authenticator app.
       db.run('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', ['auth_totp_pending', '1']);
-      return { secret, otpauthUrl: authenticator.keyuri(op.username, 'AgentConductor', secret), recoveryCodes };
+      return { secret, otpauthUrl: authenticator.keyuri(op.username, 'Weave AI', secret), recoveryCodes };
     },
 
     async totpEnable(code: string): Promise<void> {

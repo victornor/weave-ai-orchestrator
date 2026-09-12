@@ -7,7 +7,7 @@ import { Badge } from '../components/StatusGlyph';
 import { updateEntryLabel } from '../lib/upgrade';
 import type { UpdateEntry } from '../lib/upgrade';
 import type { WorkspaceListItem } from '../api/types';
-import type { Project } from '@agent-conductor/shared';
+import type { Project } from '@weave-ai/shared';
 import { cx } from '../lib/cx';
 
 export interface MoreSheetProps {

@@ -1,5 +1,5 @@
 /** Formatting helpers shared by the web UI and the TUI (design contract §2 "mono/12" values). */
-import type { CostStatus } from '@agent-conductor/shared';
+import type { CostStatus } from '@weave-ai/shared';
 
 /** 940 · 18.4k · 1.2M · 0 — never scientific notation, always short enough for a status bar. */
 export function formatTokens(n: number | null | undefined): string {

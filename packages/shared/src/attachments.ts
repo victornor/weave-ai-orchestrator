@@ -53,3 +53,38 @@ export function sniffImageType(bytes: Uint8Array): AttachmentImageType | null {
   if (isWebp(bytes)) return 'image/webp';
   return null;
 }
+
+/**
+ * Outbound-only (VS-273, openspec design.md — Decision 6): a weaver reply attaches a file it already
+ * read off disk, not one an untrusted client uploaded, so this deliberately does not reuse
+ * `attachmentMaxBytes()`/`ATTACHMENT_MAX_IMAGE_BYTES`/`ATTACHMENT_MAX_TEXT_BYTES` above — those exist
+ * for a different reason (a paste-image limit and a context-budget bound) that does not apply here,
+ * and reusing them would leave the inbound multipart route's own behavior for these values unchanged
+ * only by accident. Keeping them separate is what keeps that route's accepted-type policy untouched.
+ */
+export const ATTACHMENT_MAX_OUTBOUND_FILE_BYTES = 10 * 1024 * 1024;
+/** Cap on the combined input to one zip bundle, before the `store`-method container's small per-entry overhead. */
+export const ATTACHMENT_MAX_ZIP_INPUT_BYTES = 40 * 1024 * 1024;
+/** The only media type a zip attachment ever carries; never accepted on the inbound route. */
+export const ATTACHMENT_ZIP_MEDIA_TYPE = 'application/zip';
+
+/**
+ * Extension -> media type for a single outbound file, whose type the weaver never declares (unlike
+ * the inbound route, where the human's browser does and the server verifies it against the file's own
+ * bytes). Deliberately reuses the same four image and two text types `packages/render` already
+ * classifies specially, so a `.png` read from `knowledge/` renders as an inline thumbnail exactly like
+ * an inbound one — no new rendering rule to maintain. Anything else, including every zip, falls back to
+ * `application/octet-stream`, which renders as the existing filename+size download chip.
+ */
+const OUTBOUND_EXTENSION_MEDIA_TYPES: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+  txt: 'text/plain', md: 'text/markdown',
+};
+
+/** Guesses a media type for an outbound single-file attachment from its filename's extension. */
+export function guessOutboundMediaType(filename: string): string {
+  const dot = filename.lastIndexOf('.');
+  if (dot < 0 || dot === filename.length - 1) return 'application/octet-stream';
+  const ext = filename.slice(dot + 1).toLowerCase();
+  return OUTBOUND_EXTENSION_MEDIA_TYPES[ext] ?? 'application/octet-stream';
+}

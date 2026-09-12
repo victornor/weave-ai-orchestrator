@@ -385,6 +385,41 @@ describe('threads', () => {
       const msg = await threads.inbound(HUMAN, t.id, 'plain text');
       expect(msg.parts).toEqual([]);
     });
+
+    it('stores an outbound attachment the same way, readable through the existing attachment() path (VS-273)', async () => {
+      const t = threads.bindOrGet('web', 'web-att4', null, 'Victor');
+      const bytes = Buffer.from('the design contract, allegedly');
+      const msg = await threads.outbound(CONDUCTOR, t.id, 'here is the file', {
+        attachments: [{ filename: 'design-contract.md', mediaType: 'text/markdown', bytes }],
+      });
+
+      expect(msg.parts).toEqual([
+        expect.objectContaining({ type: 'attachment', filename: 'design-contract.md', mediaType: 'text/markdown', byteSize: bytes.byteLength }),
+      ]);
+      const stored = threads.messages(t.id)[0];
+      expect(stored?.parts).toEqual(msg.parts);
+      const attachmentId = (msg.parts[0] as { id: string }).id;
+      const read = threads.attachment(t.id, attachmentId);
+      expect(read.bytes).toEqual(bytes);
+      expect(read.attachment.mediaType).toBe('text/markdown');
+    });
+
+    it('stores an outbound zip attachment, whose media type is never one of the inbound-accepted types', async () => {
+      const t = threads.bindOrGet('web', 'web-att5', null, 'Victor');
+      const bytes = Buffer.from('PK\x03\x04fake-zip-bytes-for-this-test');
+      const msg = await threads.outbound(CONDUCTOR, t.id, 'here is the bundle', {
+        attachments: [{ filename: 'weaver-attachments-20260101T000000Z.zip', mediaType: 'application/zip', bytes }],
+      });
+      expect(msg.parts).toEqual([
+        expect.objectContaining({ type: 'attachment', mediaType: 'application/zip' }),
+      ]);
+    });
+
+    it('an outbound message sent with no attachments behaves exactly as before this capability existed', async () => {
+      const t = threads.bindOrGet('web', 'web-att6', null);
+      const msg = await threads.outbound(CONDUCTOR, t.id, 'plain reply');
+      expect(msg.parts).toEqual([]);
+    });
   });
 
   describe('idempotency', () => {

@@ -1048,6 +1048,23 @@ describe('ChatRoute attachments (VS-133)', () => {
     expect(chip).toHaveAttribute('href', '/api/w/ws1/threads/th_1/attachments/att2');
     expect(chip).toHaveAttribute('download', 'notes.txt');
   });
+
+  it('shows an outbound zip attachment as a download chip, never inline, with no code change needed (VS-273)', () => {
+    state.messages = [
+      message({
+        id: 'm3', body: 'here is the handoff', direction: 'outbound',
+        parts: [{ type: 'attachment', id: 'att3', filename: 'weaver-attachments-20260912T000000Z.zip', mediaType: 'application/zip', byteSize: 51200 }],
+      }),
+    ];
+    render(<ChatRoute />);
+
+    const around = messageAround('here is the handoff');
+    expect(around.querySelector('img')).toBeNull(); // never rendered as an image
+    const chip = within(around).getByText('weaver-attachments-20260912T000000Z.zip').closest('a');
+    expect(chip).toHaveAttribute('href', '/api/w/ws1/threads/th_1/attachments/att3');
+    expect(chip).toHaveAttribute('download', 'weaver-attachments-20260912T000000Z.zip');
+    expect(within(around).getByText('50KB')).toBeInTheDocument();
+  });
 });
 
 describe('ChatRoute reply reference', () => {

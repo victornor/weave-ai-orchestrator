@@ -11,12 +11,13 @@ import {
   COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
-  ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS,
+  ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS, ATTACHMENT_MAX_PER_MESSAGE,
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock,
 } from '@agent-conductor/shared';
 import {
   flattenWakes, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX, ARTIFACT_KIT_CSS, ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks,
+  resolveOutboundAttachments, type OutboundAttachmentInput,
   type Actor, type CoreServices, type IncidentsService,
 } from '@agent-conductor/core';
 import type { RunTokenClaims } from './runtoken.js';
@@ -721,16 +722,26 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'ac_human_send', scope: 'weaver',
-    input: z.object({ threadId: z.string().optional(), body: z.string().min(1), replyToMessageId: z.string().nullable().optional() }),
+    input: z.object({
+      threadId: z.string().optional(), body: z.string().min(1), replyToMessageId: z.string().nullable().optional(),
+      attachments: z.array(z.union([
+        z.object({ path: z.string().min(1) }),
+        z.object({ paths: z.array(z.string().min(1)).min(1), zipName: z.string().min(1).optional() }),
+      ])).min(1).max(ATTACHMENT_MAX_PER_MESSAGE).optional(),
+    }),
     description: 'Send text to the human on the originating channel. This is the ONLY way your words reach them — plain assistant text is recorded as the run summary and never delivered. One decision per message; never batch unrelated asks. ' +
       'A single logical reply goes in one call, including long markdown with fences or tables; do not split across several sends. ' +
       'Titled links go in body as `[label](https://url)` and render as compact buttons in chat. ' +
-      'replyToMessageId marks this message as answering one specific earlier human message, shown in the chat as a compact quote: omit it to default to the message that woke this turn, when exactly one did; pass null explicitly to send with no target regardless (use this for anything unrelated to what woke the turn, e.g. relaying a landed ticket in the same turn as answering a question). An id naming no message of the thread, or one from another thread, is rejected.',
+      'replyToMessageId marks this message as answering one specific earlier human message, shown in the chat as a compact quote: omit it to default to the message that woke this turn, when exactly one did; pass null explicitly to send with no target regardless (use this for anything unrelated to what woke the turn, e.g. relaying a landed ticket in the same turn as answering a question). An id naming no message of the thread, or one from another thread, is rejected. ' +
+      `attachments (up to ${ATTACHMENT_MAX_PER_MESSAGE}) hand the human a real file: { path } attaches one file as itself; { paths, zipName? } bundles several into one named zip (a sensible default name is used if you omit one). A path must resolve inside the workspace's knowledge/ tree, a project's clone, or a worker's own worktree — never a .git directory inside one, and never anything else, including the workspace's own state directory. A path outside that allowlist, or exceeding its size cap, fails the whole call before anything is sent; the error names the specific path.`,
     handler: async (ctx, i) => {
       const threadId = i.threadId ?? originThreadId(ctx);
       const replyToMessageId = i.replyToMessageId === undefined ? defaultReplyToMessageId(ctx) : i.replyToMessageId;
-      if (threadId) return svc(ctx).threads.outbound(ctx.actor, threadId, i.body, { runId: ctx.claims.runId, replyToMessageId });
-      await svc(ctx).threads.notifyHuman(ctx.actor, { text: i.body });
+      const attachments = i.attachments?.length
+        ? resolveOutboundAttachments(ctx.ws.ctx, i.attachments as OutboundAttachmentInput[])
+        : undefined;
+      if (threadId) return svc(ctx).threads.outbound(ctx.actor, threadId, i.body, { runId: ctx.claims.runId, replyToMessageId, attachments });
+      await svc(ctx).threads.notifyHuman(ctx.actor, { text: i.body, attachments });
       return { delivered: 'primary-thread' };
     },
   },

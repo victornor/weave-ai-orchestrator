@@ -742,6 +742,87 @@ describe('tickets', () => {
       expect(tickets.comments(t.id)).toHaveLength(2);
     });
 
+    // VS-275: a decision held under the weaver's concern (VS-266) is answered by the worker's fix,
+    // which arrives as an ordinary comment. Every wake below is a notification only — resolving the
+    // concern stays the weaver's judgement through ac_decision_review.
+    const seedDecision = (ticketId: string, over: Record<string, unknown> = {}): string => {
+      const id = newId();
+      h.db.insert('decisions', {
+        id, workspaceId: h.workspaceId, ticketId, kind: 'merge_approval', owner: 'human', title: 'Merge?',
+        context: '', optionsJson: [], allowFreeText: 1, status: 'open',
+        weaverReviewStatus: 'concerns', weaverReviewedAt: nowIso(), weaverReviewNote: 'split the migration',
+        createdAt: nowIso(), ...over,
+      });
+      return id;
+    };
+    const weaverCommentWakes = () => wake.calls.filter((c) => c.agentId === h.conductorId && c.input.source === 'ticket_comment');
+
+    it('wakes the weaver when a worker comments on a ticket whose decision is marked concerns', () => {
+      const t = make();
+      const decisionId = seedDecision(t.id);
+      tickets.comment(AGENT, t.id, 'fixed in abc123, please re-read');
+      const call = weaverCommentWakes();
+      expect(call).toHaveLength(1);
+      expect(call[0]!.input.reason).toContain(t.identifier);
+      expect(call[0]!.input.payload).toMatchObject({ ticketId: t.id, decisionId });
+      // Notification only: the hold is not moved automatically.
+      expect(h.db.get('SELECT * FROM decisions WHERE id = ?', [decisionId])).toMatchObject({
+        status: 'open', weaverReviewStatus: 'concerns', weaverReviewNote: 'split the migration',
+      });
+    });
+
+    it('wakes the weaver for a worker status comment on a held ticket', () => {
+      const t = make();
+      const decisionId = seedDecision(t.id);
+      tickets.comment(AGENT, t.id, 'fix pushed: abc123', 'status');
+      expect(weaverCommentWakes()[0]!.input.payload).toMatchObject({ decisionId });
+    });
+
+    it('enqueues one wake per comment however many decisions are marked concerns', () => {
+      const t = make();
+      seedDecision(t.id);
+      seedDecision(t.id);
+      tickets.comment(AGENT, t.id, 'both addressed');
+      expect(weaverCommentWakes()).toHaveLength(1);
+    });
+
+    it('does not wake the weaver when no decision is marked concerns', () => {
+      const t = make();
+      seedDecision(t.id, { weaverReviewStatus: 'unseen', weaverReviewNote: null, weaverReviewedAt: null });
+      tickets.comment(AGENT, t.id, 'still working', 'status');
+      expect(weaverCommentWakes()).toHaveLength(0);
+    });
+
+    it('does not wake the weaver for a looked mark or an answered concerns decision', () => {
+      const looked = make();
+      seedDecision(looked.id, { weaverReviewStatus: 'looked', weaverReviewNote: 'plan is clean' });
+      tickets.comment(AGENT, looked.id, 'nudge');
+      expect(weaverCommentWakes()).toHaveLength(0);
+
+      const answered = make({ title: 'Answered' });
+      seedDecision(answered.id, { status: 'answered', answerKey: 'approve', answeredAt: nowIso() });
+      tickets.comment(AGENT, answered.id, 'already handled');
+      expect(weaverCommentWakes()).toHaveLength(0);
+    });
+
+    it('never wakes the weaver for the weaver own comment', () => {
+      const t = make();
+      seedDecision(t.id);
+      tickets.comment({ kind: 'agent', id: h.conductorId, runId: 'run-weaver' }, t.id, 're-reading now');
+      expect(weaverCommentWakes()).toHaveLength(0);
+    });
+
+    it('leaves human comment routing unchanged when a decision is held', () => {
+      const t = make();
+      const workerId = h.addWorker(t.id);
+      seedDecision(t.id);
+      tickets.comment(HUMAN, t.id, 'any update?');
+      expect(wake.calls).toEqual([
+        expect.objectContaining({ agentId: workerId, input: expect.objectContaining({ source: 'ticket_comment' }) }),
+      ]);
+      expect(wake.calls.some((c) => c.agentId === h.conductorId)).toBe(false);
+    });
+
     // VS-246: a comment over the bound used to be sliced silently into the wake payload. Every
     // payload site now carries VS-242's `truncated`/`bodyLength` marker, and a reader is pointed at
     // `ac_ticket_comments` for the full body.

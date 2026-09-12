@@ -12,7 +12,7 @@ import type * as S from '@weave-ai/shared';
 import { nowIso } from '@weave-ai/db';
 import type { AccountsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
-import { credentialReaderFor, reconcileRuntimeCredential } from '../workspace/loader.js';
+import { credentialReaderFor } from '../workspace/loader.js';
 import { redactSecrets } from '../util/redact.js';
 import { effectiveModels } from '../models/resolve.js';
 
@@ -94,10 +94,8 @@ export function createAccountsService(ctx: WorkspaceContext): AccountsService {
     if (!adapter?.describeAccount) return { account: null, error: `the ${runtimeId} runtime does not describe its account` };
     const configHome = join(ctx.paths.runtimesHome, runtimeId);
     try {
-      reconcileRuntimeCredential(runtimeId, configHome, {
-        readCredential: credentialReaderFor(ctx.registries, runtimeId),
-        isolated: ctx.isolated, daemonConfigDir: ctx.daemonConfigDir,
-      });
+      // VS-285: a billing/plan read has no business repairing a credential — that stays on the
+      // turn-spawn path (`engine.ts`), which still does it on every spawn as it always has.
       const d = await adapter.describeAccount({ configHome, env: {}, timeoutMs: ACCOUNT_PROBE_TIMEOUT_MS });
       const row = {
         workspaceId: ctx.workspaceId,

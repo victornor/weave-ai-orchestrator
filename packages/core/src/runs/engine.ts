@@ -16,8 +16,7 @@ import type { CoreServices } from '../api.js';
 import { createSessions, type SessionsService } from '../sessions/index.js';
 import { buildTurnPrompt, type TurnPromptOptions } from '../prompts/index.js';
 import { ensureHomeCurrent } from '../workers/home.js';
-import { recordUsage, ACCOUNT_PROBE_TIMEOUT_MS } from '../usage/index.js';
-import { ensureFreshCredential } from './credentialFreshness.js';
+import { recordUsage } from '../usage/index.js';
 import { git } from '../util/git.js';
 import { emitRunEvent, runState } from './active.js';
 import { effectiveModels, modelSettingFor, modelsFor } from '../models/resolve.js';
@@ -408,13 +407,11 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
 
     // 5. spawn + stream
     result = await phase('turn', async () => {
-      // VS-105: a burst of simultaneous spawns must not become a burst of independent credential
-      // refreshes. This is a no-op for a runtime whose adapter cannot report credential facts.
-      const fresh = await ensureFreshCredential({
-        runtimeId: setting.runtime, configHome, adapter: runtime,
-        minValidMs: turnTimeoutMs, probeTimeoutMs: ACCOUNT_PROBE_TIMEOUT_MS, reconcile: reconcileCredential,
-      });
-      if (!fresh.ok) throw Object.assign(new Error(fresh.message), { ocFamily: 'auth' as RunErrorFamily, ocCode: 'credential_refresh_failed' });
+      // VS-285: the daemon never provokes a refresh of its own — that would rotate a token that
+      // rotates-on-use out from under every other holder, including the owner's own CLI. The turn
+      // simply spawns; the runtime's own CLI refreshes on its own terms if it needs to, and reports
+      // its own authentication failure (classified `family: 'auth'` by runtime-sdk's process output
+      // parser) if that genuinely fails, which routes through the existing login-outage gate below.
       return runtime.runTurn(
         input,
         {

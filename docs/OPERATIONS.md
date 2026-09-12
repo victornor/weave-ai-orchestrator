@@ -394,22 +394,24 @@ copy and re-took it whenever the host's file had a newer mtime, which could over
 credential with a *dead* one. On 2026-09-07 that stopped every agent in the workspace at once.
 
 **Repair.** If a CLI writes its credential by renaming a temp file over the path, it replaces the
-symlink rather than following it, and the credential forks again. Before and after every turn, and
-after every account probe, the daemon reconciles: it compares the expiry the two credentials assert
-about *themselves* and keeps the one that expires later, then restores the link. Modification time
-is never the criterion — a copy resets it, and it says nothing about which token is live. The host's
-credential is replaced only when the workspace's is provably newer (both expiries readable, the
-workspace's later), so a credential whose expiry cannot be read is never clobbered.
+symlink rather than following it, and the credential forks again. Once per turn spawn, the daemon
+reconciles: it compares the expiry the two credentials assert about *themselves* and keeps the one
+that expires later, then restores the link. Modification time is never the criterion — a copy resets
+it, and it says nothing about which token is live. The host's credential is replaced only when the
+workspace's is provably newer (both expiries readable, the workspace's later), so a credential whose
+expiry cannot be read is never clobbered. When nothing has forked — the common case — this check
+costs one filesystem stat and writes nothing; it is not run as part of an account/usage probe, only a
+turn spawn.
 
-**Serialized refresh (VS-105).** Before spawning a turn on a runtime that can report its own
-credential state, the daemon confirms the credential is valid for at least that turn's own timeout;
-if it is not, it runs one lightweight account probe to let the CLI refresh on its own terms, and
-every other agent that needed the same runtime at that same moment waits on and reuses that single
-probe's outcome rather than causing its own. This is process-wide, not per workspace, because the
-credential it protects is already shared per host. The daemon still never performs the OAuth
-exchange itself — the probe is the same call the usage panel already makes. A probe that cannot
-restore a working credential is handled by exactly the gate described in "When a login expires"
-below: one decision, no per-agent spam.
+**No forced refresh (VS-285).** The daemon never spawns anything for the purpose of causing a
+runtime's CLI to refresh its own credential. VS-105 briefly did — a pre-spawn probe that ran whenever
+a credential looked like it might not outlast the turn — but forcing that exchange is exactly what
+invalidates every other holder of the refresh token it rotates, including the machine owner's own
+already-running CLI, whether or not any daemon-spawned turn was involved. A turn now simply spawns;
+the runtime's CLI refreshes on its own terms if it needs to, precisely as it would for the owner's own
+interactive use, and reports its own authentication failure if that genuinely fails — handled by
+exactly the gate described in "When a login expires" below. A failed turn is cheap; a forced rotation
+is not undoable.
 
 **Upgrading.** The first workspace load after the upgrade finds a regular file where the symlink
 belongs and reconciles once. A workspace that had its own separate login keeps whichever credential

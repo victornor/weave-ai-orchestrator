@@ -4,6 +4,10 @@ import type { Decision } from '@weave-ai/shared';
 import { decision } from './factories';
 import { clearHiddenCache, decisionFingerprint, readHidden, writeHidden } from '../lib/hiddenDecisions';
 
+/** VS-281: a card the weaver has reviewed — an unreviewed one withholds its approve action. */
+const reviewed = (over: Partial<Decision> = {}): Decision =>
+  decision({ weaverReviewStatus: 'looked', weaverReviewedAt: '2026-09-11T03:01:00.000Z', weaverReviewNote: 'reviewed', ...over });
+
 const state = vi.hoisted(() => ({
   planDoc: null as { key: string; revision: number; body: string; createdAt: string } | null,
   decisions: [] as Decision[],
@@ -93,11 +97,13 @@ describe('NeedsYouRoute', () => {
     expect(screen.getByText('1 waiting')).toBeInTheDocument();
   });
 
-  it('shows the weaver-review line on an unseen plan card (VS-223)', () => {
+  it('shows the weaver-review line on an unseen plan card and withholds Approve (VS-223, VS-281)', () => {
     state.decisions = [decision({ kind: 'plan_approval', title: 'Approve the plan for ACME-42' })];
     render(<NeedsYouRoute />);
     expect(screen.getByText("Weaver hasn't reviewed yet")).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Approve/ })).toBeInTheDocument();
+    expect(screen.getByText('Approval waits on the weaver’s review — you can override it.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Approve/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Override & approve/ })).toBeInTheDocument();
   });
 
   it('answers with the option that was selected and sent', () => {
@@ -151,7 +157,7 @@ describe('NeedsYouRoute', () => {
 
   it('puts the plan one tap from the approval, and says so when there is none', () => {
     state.planDoc = { key: 'plan', revision: 1, body: '# Plan for dark-mode\n\nSemantic tokens first.', createdAt: '' };
-    state.decisions = [decision()];
+    state.decisions = [reviewed()];
     const { unmount } = render(<NeedsYouRoute />);
     fireEvent.click(screen.getByRole('button', { name: /Read the plan/ }));
     expect(screen.getByText('Semantic tokens first.')).toBeInTheDocument();
@@ -218,11 +224,15 @@ describe('NeedsYou — decisions hidden from the chat', () => {
 });
 
 describe('NeedsYou — YOLO mode', () => {
-  /** A decision on a ticket in a project, so the mode can be resolved for it. */
+  /**
+   * A decision on a ticket in a project, so the mode can be resolved for it. Reviewed by default
+   * (VS-281), so the human-kept cases still offer their approve action; the auto-approved cases do
+   * not depend on the review state.
+   */
   const onTicket = (over: Partial<Decision>): Decision => {
     state.tickets = [{ id: 't1', identifier: 'ACME-42', projectId: 'p1' }];
     state.projects = [{ id: 'p1', slug: 'api', policies: {} }];
-    return decision({ id: 'd1', ticketId: 't1', ...over } as Partial<Decision>);
+    return decision({ id: 'd1', ticketId: 't1', weaverReviewStatus: 'looked', weaverReviewedAt: '2026-09-11T03:01:00.000Z', weaverReviewNote: 'reviewed', ...over } as Partial<Decision>);
   };
 
   it('offers no approve action for a merge approval the daemon will grant', () => {
@@ -359,7 +369,7 @@ describe('NeedsYou — YOLO mode', () => {
 
   it('does not compact the card or show a conductor-filed tag (VS-146)', () => {
     state.tickets = [{ id: 'tk_1', identifier: 'VS-145', createdByKind: 'agent', summary: 'Filed after a false alarm.' }];
-    state.decisions = [decision({ ticketId: 'tk_1' })];
+    state.decisions = [reviewed({ ticketId: 'tk_1' })];
     render(<NeedsYouRoute />);
     expect(screen.queryByText('Filed by conductor')).not.toBeInTheDocument();
     expect(screen.queryByText('Filed after a false alarm.')).not.toBeInTheDocument();

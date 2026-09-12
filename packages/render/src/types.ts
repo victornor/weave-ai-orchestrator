@@ -148,6 +148,8 @@ export interface CardModel {
   answerElsewhere: boolean;
   /** VS-266: the weaver has concerns and this decision is still open — its approving option is refused without a deliberate override. False for every other decision, including one that does not carry a weaver review at all. */
   held: boolean;
+  /** VS-281: the weaver has not reviewed this open decision yet — the approving option is withheld and refused without a deliberate override. False for every other decision, including a `looked` or `concerns` one. */
+  awaitsReview: boolean;
 }
 
 // ---------------------------------------------------------------- tickets / workers

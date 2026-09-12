@@ -101,6 +101,8 @@ export function ConductorReviewLine({ decision }: { decision: Decision }): React
       {copy.note ? <p className="mt-1 whitespace-pre-wrap text-meta text-text-1">{copy.note}</p> : null}
       {/* VS-266: in addition to the concern line and note, not a replacement for either. */}
       {copy.held ? <p className="mt-1 text-micro font-medium text-blocked">Approval is held until this is revised, or you override it.</p> : null}
+      {/* VS-281: the unreviewed hold, distinct from the concern hold above. */}
+      {copy.awaitsReview ? <p className="mt-1 text-micro font-medium text-blocked">Approval waits on the weaver’s review — you can override it.</p> : null}
     </div>
   );
 }
@@ -256,6 +258,10 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
   // VS-266: the weaver has concerns on this open decision — its approving option is refused
   // server-side without a deliberate override, so the button reflects the rule rather than being it.
   const held = weaverReviewCopy(decision)?.held ?? false;
+  // VS-281: the weaver has not reviewed this open decision yet — the approving option is withheld
+  // (not merely disabled) and only a deliberate override offers it.
+  const awaitsReview = weaverReviewCopy(decision)?.awaitsReview ?? false;
+  const overrideWhy = awaitsReview ? "without waiting for the weaver's review" : 'without a revision';
   const why = decision.kind === 'plan_approval' ? ticketSummary?.trim() : '';
   const section = compact ? 'mb-2' : 'mb-3';
   // The plan itself, so nothing is approved unread. Doubles as the document-preview suppression
@@ -493,7 +499,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             className={section}
             rows={2}
             autoFocus
-            scope={<span>Overriding the hold on {ticketIdentifier ?? 'this ticket'} — say why this approves without a revision.</span>}
+            scope={<span>Overriding the hold on {ticketIdentifier ?? 'this ticket'} — say why this approves {overrideWhy}.</span>}
             placeholder="Why override the hold?"
             submitLabel="Override & approve"
             onSubmit={(t) => {
@@ -525,16 +531,20 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
             </p>
           ) : inert ? null : decision.kind === 'plan_approval' || decision.kind === 'action_approval' ? (
             <>
-              <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0 || held} onClick={() => answer(decision.kind === 'action_approval' ? NAMED_CARD_OPTION_KEYS.action_approval.approve : NAMED_CARD_OPTION_KEYS.plan_approval.approve)} kbd="⏎">
-                Approve
-              </Button>
+              {/* VS-281: while unreviewed the approving action is not offered at all — only the
+                  deliberate override is. The other actions are never withheld. */}
+              {awaitsReview ? null : (
+                <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0 || held} onClick={() => answer(decision.kind === 'action_approval' ? NAMED_CARD_OPTION_KEYS.action_approval.approve : NAMED_CARD_OPTION_KEYS.plan_approval.approve)} kbd="⏎">
+                  Approve
+                </Button>
+              )}
               <Button variant="secondary" size="thumb" compact={compact} className="flex-1" disabled={busy} onClick={() => setRevising((v) => !v)}>
                 Revise…
               </Button>
               <Button variant="ghost" size="thumb" compact={compact} className="w-12 border border-line-2" aria-label="Reject" disabled={busy} onClick={() => answer(decision.kind === 'action_approval' ? NAMED_CARD_OPTION_KEYS.action_approval.reject : NAMED_CARD_OPTION_KEYS.plan_approval.reject)}>
                 ✕
               </Button>
-              {held ? (
+              {held || awaitsReview ? (
                 <Button variant="ghost" size="thumb" compact={compact} className="flex-1 border border-line-2" disabled={busy} onClick={() => setOverriding((v) => !v)}>
                   Override & approve…
                 </Button>
@@ -543,11 +553,14 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
           ) : decision.kind === 'merge_approval' ? (
             <>
               {/* No Hold: hiding the card (VS-72) already covers "not now" without answering, and a
-                  merge approval has only `approve`/`changes` to answer with (VS-111). */}
-              <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0 || held} onClick={() => answer(NAMED_CARD_OPTION_KEYS.merge_approval.approve)}>
-                Approve merge
-              </Button>
-              {held ? (
+                  merge approval has only `approve`/`changes` to answer with (VS-111). VS-281
+                  withholds the approving action while the weaver has not reviewed it. */}
+              {awaitsReview ? null : (
+                <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0 || held} onClick={() => answer(NAMED_CARD_OPTION_KEYS.merge_approval.approve)}>
+                  Approve merge
+                </Button>
+              )}
+              {held || awaitsReview ? (
                 <Button variant="ghost" size="thumb" compact={compact} className="flex-1 border border-line-2" disabled={busy} onClick={() => setOverriding((v) => !v)}>
                   Override & approve…
                 </Button>

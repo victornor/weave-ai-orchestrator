@@ -29,13 +29,14 @@ export function printCard(card: CardModel): void {
 }
 
 /**
- * `--override-hold <reason>` (VS-266): a distinct, deliberate pair, meaningful only on a decision
- * the card model itself reports as held — never a no-op flag that silently does nothing, and never
+ * `--override-hold <reason>` (VS-266, VS-281): a distinct, deliberate pair, meaningful only on a
+ * decision the card model itself reports as held — either the concerns hold (`held`) or the
+ * unreviewed hold (`awaitsReview`). Never a no-op flag that silently does nothing, and never
  * satisfiable by resubmitting the same key the hold already refused.
  */
-export function resolveOverrideHold(card: Pick<CardModel, 'held' | 'id'>, reason: string | undefined): { overrideHold: true; overrideReason: string } | undefined {
+export function resolveOverrideHold(card: Pick<CardModel, 'held' | 'awaitsReview' | 'id'>, reason: string | undefined): { overrideHold: true; overrideReason: string } | undefined {
   if (reason === undefined) return undefined;
-  if (!card.held) throw new ApiError('validation', `${card.id} is not held by a weaver concern; --override-hold does not apply here`, 400);
+  if (!card.held && !card.awaitsReview) throw new ApiError('validation', `${card.id} is not held (no pending weaver review or concern); --override-hold does not apply here`, 400);
   return { overrideHold: true, overrideReason: reason };
 }
 

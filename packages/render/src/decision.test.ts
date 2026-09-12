@@ -68,6 +68,7 @@ describe('decisionToCard', () => {
       { label: 'Files', value: '3 files', format: 'mono' },
       { label: 'Branch', value: 'ac/acme-42', format: 'mono' },
       { label: 'Review', value: "Weaver hasn't reviewed yet", format: 'text' },
+      { label: null, value: 'Approval waits on the weaver\u2019s review — you can override it.', format: 'text' },
     ]);
   });
 
@@ -321,6 +322,33 @@ describe('decisionToCard', () => {
     it('is never held for a kind that does not carry conductor review', () => {
       const card = decisionToCard(decision({ kind: 'question', status: 'open' }), { now });
       expect(card.held).toBe(false);
+    });
+
+    it('marks the card awaiting review and adds the waiting sentence for an open unseen card (VS-281)', () => {
+      for (const kind of ['plan_approval', 'merge_approval', 'action_approval'] as const) {
+        const card = decisionToCard(decision({ kind, status: 'open', weaverReviewStatus: 'unseen' }), { now });
+        expect(card.awaitsReview, kind).toBe(true);
+        expect(card.held, kind).toBe(false);
+        expect(card.body).toContainEqual({ label: null, value: 'Approval waits on the weaver\u2019s review — you can override it.', format: 'text' });
+      }
+    });
+
+    it('is not awaiting review once the unseen decision is answered, or once it is looked/concerns', () => {
+      const answered = decisionToCard(decision({ kind: 'plan_approval', status: 'answered', answeredAt: '2026-09-11T03:02:00.000Z' }), { now });
+      expect(answered.awaitsReview).toBe(false);
+      expect(answered.body.some((l) => l.value.includes('waits on the weaver'))).toBe(false);
+
+      const looked = decisionToCard(decision({
+        kind: 'plan_approval', status: 'open', weaverReviewStatus: 'looked',
+        weaverReviewedAt: '2026-09-11T03:01:00.000Z', weaverReviewNote: 'clean',
+      }), { now });
+      expect(looked.awaitsReview).toBe(false);
+
+      const concerns = decisionToCard(decision({
+        kind: 'plan_approval', status: 'open', weaverReviewStatus: 'concerns',
+        weaverReviewedAt: '2026-09-11T03:01:00.000Z', weaverReviewNote: 'needs work',
+      }), { now });
+      expect(concerns.awaitsReview).toBe(false);
     });
 
     it('shows a clean mark with its note, and a legacy mark as the line alone (VS-234)', () => {

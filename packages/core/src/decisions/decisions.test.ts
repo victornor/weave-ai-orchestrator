@@ -38,6 +38,12 @@ describe('decisions', () => {
 
   const ticket = (over = {}) => tickets.create(HUMAN, { kind: 'change', title: 'Add dark mode', projectId: h.projectId, assigneeRoleId: h.roleId, ...over });
 
+  // VS-281: the weaver must now mark a review-carrying decision `looked` before its approving
+  // answer is accepted. Tests whose subject is not the review state mark it here, which is also the
+  // normal production path.
+  const conductor = (): Actor => ({ kind: 'agent', id: h.conductorId, runId: 'run-conductor' });
+  const markLooked = (id: string, note = 'reviewed the work') => decisions.review(conductor(), id, { status: 'looked', note });
+
   it('keeps one open decision per ticket and correlation key, superseding the older one', async () => {
     const t = ticket();
     const first = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'v1', correlationKey: `plan_approval:${t.id}` });
@@ -138,6 +144,7 @@ describe('decisions', () => {
       const workerId = h.addWorker(t.id);
       h.db.update('tickets', t.id, { status: 'proposed' });
       const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Approve the plan', askedByAgentId: workerId });
+      markLooked(d.id);
       return { t, d, workerId };
     };
 
@@ -176,6 +183,7 @@ describe('decisions', () => {
         ticketId: t.id, kind: 'action_approval', owner: 'human', title: 'Approve the action',
         options: ACTION_OPTS, askedByAgentId: workerId, correlationKey: `action_approval:${t.id}`,
       });
+      markLooked(d.id);
       return { t, d, workerId };
     };
 
@@ -270,6 +278,7 @@ describe('decisions', () => {
     tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'https://example.com/pr/1' });
     h.db.update('tickets', t.id, { status: 'in_review' });
     const d = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Merge?', askedByAgentId: workerId });
+    markLooked(d.id);
     await decisions.answer(HUMAN, d.id, { key: 'approve' });
     expect(tickets.get(t.id).status).toBe('merging');
     expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'merge_approved')).toBe(true);
@@ -582,6 +591,7 @@ describe('decisions', () => {
       expect(concerns.weaverReviewNote).toBe('CI is red');
 
       const action = decisions.create(AGENT, { ticketId: t.id, kind: 'action_approval', title: 'Action', correlationKey: `action:${t.id}` });
+      markLooked(action.id, 'ran the action steps');
       await decisions.answer(HUMAN, action.id, { key: 'approve' });
       const after = decisions.review(conductor(), action.id, { status: 'looked', note: 'ran the action steps' });
       expect(after.weaverReviewStatus).toBe('looked');
@@ -676,7 +686,7 @@ describe('decisions', () => {
       expect(wake.calls.length).toBe(before);
     });
 
-    it('answers an unseen plan_approval and a concerns merge_approval on the same path', async () => {
+    it('answers a looked plan_approval and a concerns merge_approval on the same path', async () => {
       const t = ticket();
       const workerId = h.addWorker(t.id);
       h.db.update('tickets', t.id, { status: 'proposed', workerId });
@@ -684,13 +694,15 @@ describe('decisions', () => {
         ticketId: t.id, kind: 'plan_approval', title: 'Approve the plan', askedByAgentId: workerId,
         options: [{ key: 'approve', label: 'Approve' }, { key: 'revise', label: 'Revise' }, { key: 'reject', label: 'Reject' }],
       });
+      // VS-281: an unseen plan is held, so the normal path marks it looked first.
       expect(plan.weaverReviewStatus).toBe('unseen');
+      markLooked(plan.id, 'plan matches the ticket');
       await decisions.answer(HUMAN, plan.id, { key: 'approve' });
       expect(tickets.get(t.id).status).toBe('approved');
       expect(decisions.get(plan.id)).toMatchObject({
         answerKey: 'approve',
-        weaverReviewStatus: 'unseen',
-        weaverReviewedAt: null,
+        weaverReviewStatus: 'looked',
+        weaverReviewNote: 'plan matches the ticket',
       });
 
       const t2 = ticket({ title: 'Merge this' });
@@ -796,6 +808,8 @@ describe('decisions', () => {
       const t = ticket();
       h.db.update('tickets', t.id, { status: 'proposed' });
       const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      // VS-281: a `looked` card is genuinely not held, which is the case this test is about.
+      markLooked(plan.id, 'clean');
       await decisions.answer(HUMAN, plan.id, { key: 'approve', overrideHold: true, overrideReason: 'not needed here' });
       expect(tickets.get(t.id).status).toBe('approved');
       expect(h.db.all("SELECT id FROM activity WHERE action = 'decision.hold_overridden'")).toHaveLength(0);
@@ -828,7 +842,10 @@ describe('decisions', () => {
       await tickets.transition(AGENT, t.id, { to: 'proposed' });
       const secondPlan = decisions.list({ ticketId: t.id, status: ['open'] }).find((d) => d.kind === 'plan_approval')!;
       expect(secondPlan.id).not.toBe(firstPlan.id);
+      // VS-281: the fresh decision is unseen, so it now carries the unreviewed hold too; marking it
+      // looked is the normal path and still proves the prior concern no longer holds it.
       expect(secondPlan.weaverReviewStatus).toBe('unseen');
+      markLooked(secondPlan.id, 'second pass is clean');
       await decisions.answer(HUMAN, secondPlan.id, { key: 'approve' });
       expect(tickets.get(t.id).status).toBe('approved');
     });
@@ -850,6 +867,7 @@ describe('decisions', () => {
       const secondMerge = decisions.list({ ticketId: t.id, status: ['open'] }).find((d) => d.kind === 'merge_approval')!;
       expect(secondMerge.id).not.toBe(firstMerge.id);
       expect(secondMerge.weaverReviewStatus).toBe('unseen');
+      markLooked(secondMerge.id, 'debug log is gone');
       await decisions.answer(HUMAN, secondMerge.id, { key: 'approve' });
       expect(tickets.get(t.id).status).toBe('merging');
     });
@@ -861,6 +879,157 @@ describe('decisions', () => {
       decisions.review(conductor(), plan.id, { status: 'concerns', note: 'still not right' });
       await expect(decisions.answer(HUMAN, plan.id, { key: 'approve' })).rejects.toMatchObject({ code: 'revision_pending' });
       expect(decisions.get(plan.id).status).toBe('open');
+    });
+  });
+
+  describe('holding approval before the weaver reviews (VS-281)', () => {
+    it('refuses an approving answer on an open unseen plan, merge and action approval, naming the pending review', async () => {
+      const t = ticket();
+      h.db.update('tickets', t.id, { status: 'proposed' });
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      await expect(decisions.answer(HUMAN, plan.id, { key: 'approve' })).rejects.toMatchObject({
+        code: 'revision_pending', details: { weaverReviewStatus: 'unseen' },
+      });
+      expect(decisions.get(plan.id).status).toBe('open');
+      expect(tickets.get(t.id).status).toBe('proposed');
+
+      const t2 = ticket({ title: 'Merge?' });
+      h.db.update('tickets', t2.id, { status: 'in_review' });
+      const merge = decisions.create(AGENT, {
+        ticketId: t2.id, kind: 'merge_approval', title: 'Merge?',
+        options: [{ key: 'approve', label: 'Approve merge' }, { key: 'changes', label: 'Request changes' }],
+      });
+      await expect(decisions.answer(HUMAN, merge.id, { key: 'approve' })).rejects.toMatchObject({
+        code: 'revision_pending', details: { weaverReviewStatus: 'unseen' },
+      });
+      expect(decisions.get(merge.id).status).toBe('open');
+      expect(tickets.get(t2.id).status).toBe('in_review');
+
+      const t3 = ticket({ kind: 'operational', title: 'Restart the daemon' });
+      h.db.update('tickets', t3.id, { status: 'in_progress' });
+      const action = decisions.create(AGENT, {
+        ticketId: t3.id, kind: 'action_approval', owner: 'human', title: 'Action',
+        options: [{ key: 'approve', label: 'Approve' }, { key: 'revise', label: 'Revise' }, { key: 'reject', label: 'Reject' }],
+      });
+      await expect(decisions.answer(HUMAN, action.id, { key: 'approve' })).rejects.toMatchObject({
+        code: 'revision_pending', details: { weaverReviewStatus: 'unseen' },
+      });
+      expect(decisions.get(action.id).status).toBe('open');
+      expect(tickets.get(t3.id).status).toBe('in_progress');
+    });
+
+    it('keeps the concern hold, and lets a looked card approve freely (VS-266 unchanged)', async () => {
+      const t = ticket();
+      h.db.update('tickets', t.id, { status: 'proposed' });
+      const flagged = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Flagged' });
+      decisions.review(conductor(), flagged.id, { status: 'concerns', note: 'split the migration' });
+      await expect(decisions.answer(HUMAN, flagged.id, { key: 'approve' })).rejects.toMatchObject({
+        code: 'revision_pending', details: { weaverReviewStatus: 'concerns', weaverReviewNote: 'split the migration' },
+      });
+      expect(decisions.get(flagged.id).status).toBe('open');
+
+      const t2 = ticket({ title: 'Clean' });
+      h.db.update('tickets', t2.id, { status: 'proposed' });
+      const clean = decisions.create(AGENT, { ticketId: t2.id, kind: 'plan_approval', title: 'Clean' });
+      markLooked(clean.id, 'plan matches the ticket');
+      await decisions.answer(HUMAN, clean.id, { key: 'approve' });
+      expect(tickets.get(t2.id).status).toBe('approved');
+    });
+
+    it('does not hold the system actor on an unseen card, so YOLO still grants', async () => {
+      const t = ticket();
+      h.db.update('tickets', t.id, { status: 'proposed' });
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      await decisions.answer(SYSTEM, plan.id, { key: 'approve', text: 'Auto-approved by YOLO mode' });
+      expect(tickets.get(t.id).status).toBe('approved');
+
+      const t2 = ticket({ title: 'Merge?' });
+      h.db.update('tickets', t2.id, { status: 'in_review' });
+      const merge = decisions.create(AGENT, {
+        ticketId: t2.id, kind: 'merge_approval', title: 'Merge?',
+        options: [{ key: 'approve', label: 'Approve merge' }, { key: 'changes', label: 'Request changes' }],
+      });
+      await decisions.answer(SYSTEM, merge.id, { key: 'approve', text: 'Auto-approved by YOLO mode' });
+      expect(tickets.get(t2.id).status).toBe('merging');
+    });
+
+    it('never refuses a non-approving answer, for unseen, looked and concerns', async () => {
+      for (const state of ['unseen', 'looked', 'concerns'] as const) {
+        const t = ticket({ title: `Plan ${state}` });
+        h.db.update('tickets', t.id, { status: 'proposed' });
+        const plan = decisions.create(AGENT, {
+          ticketId: t.id, kind: 'plan_approval', title: 'Plan',
+          options: [{ key: 'approve', label: 'Approve' }, { key: 'revise', label: 'Revise' }, { key: 'reject', label: 'Reject' }],
+        });
+        if (state === 'looked') markLooked(plan.id, 'clean');
+        if (state === 'concerns') decisions.review(conductor(), plan.id, { status: 'concerns', note: 'nope' });
+        await decisions.answer(HUMAN, plan.id, { key: 'revise', text: 'again' });
+        expect(decisions.get(plan.id).status, state).toBe('answered');
+      }
+
+      const ta = ticket({ kind: 'operational', title: 'Action reject' });
+      h.db.update('tickets', ta.id, { status: 'in_progress' });
+      const action = decisions.create(AGENT, {
+        ticketId: ta.id, kind: 'action_approval', owner: 'human', title: 'Action',
+        options: [{ key: 'approve', label: 'Approve' }, { key: 'revise', label: 'Revise' }, { key: 'reject', label: 'Reject' }],
+      });
+      await decisions.answer(HUMAN, action.id, { key: 'reject', text: 'no' });
+      expect(tickets.get(ta.id).status).toBe('cancelled');
+
+      const tm = ticket({ title: 'Merge changes' });
+      h.db.update('tickets', tm.id, { status: 'in_review' });
+      const merge = decisions.create(AGENT, {
+        ticketId: tm.id, kind: 'merge_approval', title: 'Merge?',
+        options: [{ key: 'approve', label: 'Approve merge' }, { key: 'changes', label: 'Request changes' }],
+      });
+      await decisions.answer(HUMAN, merge.id, { key: 'changes', text: 'please fix' });
+      expect(tickets.get(tm.id).status).toBe('in_progress');
+    });
+
+    it('lets a human override the unreviewed hold, recording the reason and the pending review', async () => {
+      const t = ticket();
+      h.db.update('tickets', t.id, { status: 'proposed' });
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      await decisions.answer(HUMAN, plan.id, { key: 'approve', overrideHold: true, overrideReason: 'read it myself, ship it' });
+      expect(tickets.get(t.id).status).toBe('approved');
+
+      const rows = h.db.all<{ actorId: string; actorKind: string; details: Record<string, unknown> }>(
+        "SELECT actor_id, actor_kind, details_json FROM activity WHERE action = 'decision.hold_overridden'",
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ actorId: 'victor', actorKind: 'human', details: { reason: 'read it myself, ship it', weaverReviewStatus: 'unseen' } });
+      expect(tickets.comments(t.id).some((c) => c.body.includes('pending review') && c.body.includes('read it myself, ship it'))).toBe(true);
+    });
+
+    it('still refuses the unreviewed override without a stated reason', async () => {
+      const t = ticket();
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      await expect(decisions.answer(HUMAN, plan.id, { key: 'approve', overrideReason: 'no flag set' })).rejects.toMatchObject({ code: 'revision_pending' });
+      await expect(decisions.answer(HUMAN, plan.id, { key: 'approve', overrideHold: true, overrideReason: '   ' })).rejects.toMatchObject({ code: 'revision_pending' });
+      expect(decisions.get(plan.id).status).toBe('open');
+      expect(h.db.all("SELECT id FROM activity WHERE action = 'decision.hold_overridden'")).toHaveLength(0);
+    });
+
+    it('lifts the unreviewed hold when the weaver marks the card looked', async () => {
+      const t = ticket();
+      h.db.update('tickets', t.id, { status: 'proposed' });
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      await expect(decisions.answer(HUMAN, plan.id, { key: 'approve' })).rejects.toMatchObject({ code: 'revision_pending' });
+      markLooked(plan.id, 'reviewed the plan');
+      await decisions.answer(HUMAN, plan.id, { key: 'approve' });
+      expect(tickets.get(t.id).status).toBe('approved');
+      expect(decisions.get(plan.id).weaverReviewStatus).toBe('looked');
+    });
+
+    it('lets the human override with the weaver paused and the worker retired', async () => {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      h.db.update('tickets', t.id, { status: 'proposed', workerId });
+      h.db.update('agents', workerId, { status: 'retired' });
+      h.db.update('agents', h.conductorId, { status: 'paused', pauseReason: 'provider_quota: waiting for reset' });
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan', askedByAgentId: workerId });
+      await decisions.answer(HUMAN, plan.id, { key: 'approve', overrideHold: true, overrideReason: 'weaver is out, proceeding' });
+      expect(tickets.get(t.id).status).toBe('approved');
     });
   });
 });

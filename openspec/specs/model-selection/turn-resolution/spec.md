@@ -11,12 +11,12 @@ Before a turn is launched the system SHALL resolve the runtime, the model and th
 use from exactly one source: the effective conductor setting for a turn of the conductor; for a
 turn of a worker, the worker option named by that worker's ticket when that option still exists in
 the effective catalog and has a runtime chosen, otherwise the effective workers setting. The
-effective setting or catalog SHALL be the daemon overlay when that overlay is filled, otherwise
-the workspace's stored value. It SHALL NOT read a runtime, a model or an effort from the role, the
-project or the agent row to make that choice, and there SHALL be no fallback chain behind that
-source other than letting the runtime choose the model when the resolved setting names none, and
-falling back to the effective workers setting when the ticket names an option that is no longer in
-the effective catalog.
+effective setting or catalog SHALL be the workspace's own stored value when it has configured one,
+otherwise the daemon overlay when that overlay is filled, otherwise the schema's built-in default.
+It SHALL NOT read a runtime, a model or an effort from the role, the project or the agent row to
+make that choice, and there SHALL be no fallback chain behind that source other than letting the
+runtime choose the model when the resolved setting names none, and falling back to the effective
+workers setting when the ticket names an option that is no longer in the effective catalog.
 
 A named option that still exists but has no runtime SHALL NOT fall back to the workers setting
 and SHALL NOT launch any runtime. That turn SHALL fail as specified in
@@ -58,6 +58,12 @@ another one.
 
 - **WHEN** a turn resolves a runtime that is not registered on this daemon
 - **THEN** the turn fails naming that runtime, and no other runtime is used in its place
+
+#### Scenario: A workspace's own setting wins over a filled daemon overlay
+
+- **WHEN** a workspace has configured its own conductor or workers setting and a daemon overlay is
+  also filled for that same control
+- **THEN** the turn resolves to the workspace's own setting, not the daemon overlay
 
 ### Requirement: Changing the runtime starts a new session
 

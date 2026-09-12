@@ -211,13 +211,13 @@ async function transcriptionHealth(deps: AppDeps): Promise<{ configured: boolean
 }
 
 function daemonModelsView(models: DaemonModels | undefined): {
-  conductor: ModelSetting | null;
+  weaver: ModelSetting | null;
   workers: ModelSetting | null;
   workerOptions: WorkerModelOption[] | null;
 } {
   const m = models ?? {};
   return {
-    conductor: m.conductor ?? null,
+    weaver: m.weaver ?? null,
     workers: m.workers ?? null,
     workerOptions: m.workerOptions && m.workerOptions.length > 0 ? [...m.workerOptions] : null,
   };
@@ -225,8 +225,8 @@ function daemonModelsView(models: DaemonModels | undefined): {
 
 function persistDaemonModels(deps: AppDeps, next: DaemonModels): void {
   const target = deps.daemon.models ?? (deps.daemon.models = {});
-  if (next.conductor) target.conductor = next.conductor;
-  else delete target.conductor;
+  if (next.weaver) target.weaver = next.weaver;
+  else delete target.weaver;
   if (next.workers) target.workers = next.workers;
   else delete target.workers;
   if (next.workerOptions && next.workerOptions.length > 0) target.workerOptions = next.workerOptions;
@@ -253,13 +253,13 @@ async function modelsPut(
 ): Promise<Response> {
   const input = await body(c as never, DaemonModelsPutSchema);
   const current = daemonModelsView(deps.daemon.models);
-  if (input.conductor !== undefined) current.conductor = input.conductor;
+  if (input.weaver !== undefined) current.weaver = input.weaver;
   if (input.workers !== undefined) current.workers = input.workers;
   if (input.workerOptions !== undefined) {
     current.workerOptions = input.workerOptions && input.workerOptions.length > 0 ? input.workerOptions : null;
   }
   persistDaemonModels(deps, {
-    conductor: current.conductor ?? undefined,
+    weaver: current.weaver ?? undefined,
     workers: current.workers ?? undefined,
     workerOptions: current.workerOptions ?? undefined,
   });

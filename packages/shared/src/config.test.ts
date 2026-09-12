@@ -1,5 +1,6 @@
+import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MERGE_CONCURRENCY, DEFAULT_WORKER_TIERS, DaemonConfigSchema, ModelSettingSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkerModelOptionSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, isWorkerOptionConfigured, mergeConcurrencyOf, yoloEnabled } from './config.js';
+import { DEFAULT_MERGE_CONCURRENCY, DEFAULT_WORKER_TIERS, DaemonConfigSchema, DaemonModelsSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkerModelOptionSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, isWorkerOptionConfigured, mergeConcurrencyOf, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
 
 describe('project config: landingBranch (VS-119)', () => {
   it('parses without a landing branch declared', () => {
@@ -117,16 +118,16 @@ describe('daemon config: transcription', () => {
 describe('daemon config: models overlays (VS-185)', () => {
   it('defaults to no filled overlays', () => {
     const cfg = DaemonConfigSchema.parse({});
-    expect(cfg.models.conductor).toBeUndefined();
+    expect(cfg.models.weaver).toBeUndefined();
     expect(cfg.models.workers).toBeUndefined();
     expect(cfg.models.workerOptions).toBeUndefined();
   });
 
-  it('fills conductor independently', () => {
+  it('fills weaver independently', () => {
     const cfg = DaemonConfigSchema.parse({
-      models: { conductor: { runtime: 'claude', model: 'claude-fable-5-1' } },
+      models: { weaver: { runtime: 'claude', model: 'claude-fable-5-1' } },
     });
-    expect(cfg.models.conductor).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
+    expect(cfg.models.weaver).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
     expect(cfg.models.workers).toBeUndefined();
     expect(cfg.models.workerOptions).toBeUndefined();
   });
@@ -159,10 +160,10 @@ describe('worker option runtime unset (VS-236)', () => {
     expect(isWorkerOptionConfigured({ id: 'quick', description: 'x', runtime: null, model: null })).toBe(false);
   });
 
-  it('does not change conductor/workers defaults or empty daemon overlays', () => {
+  it('does not change weaver/workers defaults or empty daemon overlays', () => {
     expect(ModelSettingSchema.parse({})).toEqual({ runtime: 'claude', model: null });
     const cfg = DaemonConfigSchema.parse({});
-    expect(cfg.models.conductor).toBeUndefined();
+    expect(cfg.models.weaver).toBeUndefined();
     expect(cfg.models.workers).toBeUndefined();
     expect(cfg.models.workerOptions).toBeUndefined();
   });
@@ -213,7 +214,7 @@ describe('model selection: the two workspace settings', () => {
 
   it('gives a workspace that names no models both settings on the default runtime', () => {
     const cfg = WorkspaceConfigSchema.parse(base);
-    expect(cfg.models.conductor).toEqual({ runtime: 'claude', model: null });
+    expect(cfg.models.weaver).toEqual({ runtime: 'claude', model: null });
     expect(cfg.models.workers).toEqual({ runtime: 'claude', model: null });
     expect(cfg.models.workerOptions).toEqual([]);
   });
@@ -222,7 +223,7 @@ describe('model selection: the two workspace settings', () => {
     const cfg = WorkspaceConfigSchema.parse({ ...base, models: { workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' } } });
     expect(cfg.models.workers).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
     // The setting the config did not name still exists, on the defaults.
-    expect(cfg.models.conductor).toEqual({ runtime: 'claude', model: null });
+    expect(cfg.models.weaver).toEqual({ runtime: 'claude', model: null });
   });
 
   it('rejects a setting with an empty runtime', () => {
@@ -233,19 +234,19 @@ describe('model selection: the two workspace settings', () => {
     const cfg = WorkspaceConfigSchema.parse({
       ...base,
       defaults: { runtime: 'codex', model: 'gpt-5' },
-      conductor: { runtime: 'opencode', model: 'grok', effort: 'low', humanName: 'captain' },
+      weaver: { runtime: 'opencode', model: 'grok', effort: 'low', humanName: 'captain' },
       projects: [{ id: 'api', url: 'git@example.com:acme/api.git', runtime: 'gemini', model: 'flash' }],
     });
     expect(cfg.defaults).not.toHaveProperty('runtime');
     expect(cfg.defaults).not.toHaveProperty('model');
-    expect(cfg.conductor).not.toHaveProperty('runtime');
-    expect(cfg.conductor).not.toHaveProperty('model');
-    expect(cfg.conductor).not.toHaveProperty('effort');
-    expect(cfg.conductor.humanName).toBe('captain');
+    expect(cfg.weaver).not.toHaveProperty('runtime');
+    expect(cfg.weaver).not.toHaveProperty('model');
+    expect(cfg.weaver).not.toHaveProperty('effort');
+    expect(cfg.weaver.humanName).toBe('captain');
     expect(cfg.projects[0]).not.toHaveProperty('runtime');
     expect(cfg.projects[0]).not.toHaveProperty('model');
     // Nothing layered survives: the two settings are what a fresh parse produces.
-    expect(cfg.models).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
+    expect(cfg.models).toEqual({ weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
   });
 
   it('parses a worker-options catalog and rejects a duplicate id (VS-162)', () => {
@@ -290,5 +291,177 @@ describe('model selection: a role carries no runtime', () => {
     for (const key of ['runtime', 'model', 'effort']) {
       expect(RoleSpecSchema.partial().strict().safeParse({ [key]: 'claude' }).success).toBe(false);
     }
+  });
+});
+
+describe('withKeyAlias (VS-263)', () => {
+  const inner = z.object({ weaver: z.string().default('x'), other: z.number().default(1) });
+  const aliased = withKeyAlias(inner, 'conductor', 'weaver');
+
+  it('resolves the old key to the new one', () => {
+    expect(aliased.parse({ conductor: 'foo' })).toEqual({ weaver: 'foo', other: 1 });
+  });
+
+  it('resolves the new key as given', () => {
+    expect(aliased.parse({ weaver: 'bar' })).toEqual({ weaver: 'bar', other: 1 });
+  });
+
+  it('falls back to the default when neither is present', () => {
+    expect(aliased.parse({})).toEqual({ weaver: 'x', other: 1 });
+  });
+
+  it('refuses both spellings present at once, naming both', () => {
+    const result = aliased.safeParse({ conductor: 'foo', weaver: 'bar' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toContain('conductor');
+      expect(result.error.issues[0]?.message).toContain('weaver');
+    }
+  });
+});
+
+describe('config key rename: conductor -> weaver (VS-263)', () => {
+  const base = { version: 1 as const, id: 'acme', name: 'Acme', ticketPrefix: 'ACME' };
+
+  it('WorkspaceModelsSchema accepts either spelling for the same value', () => {
+    const viaOld = WorkspaceModelsSchema.parse({ conductor: { runtime: 'codex', model: 'gpt-5' } });
+    const viaNew = WorkspaceModelsSchema.parse({ weaver: { runtime: 'codex', model: 'gpt-5' } });
+    expect(viaOld.weaver).toEqual({ runtime: 'codex', model: 'gpt-5' });
+    expect(viaNew.weaver).toEqual({ runtime: 'codex', model: 'gpt-5' });
+  });
+
+  it('WorkspaceModelsSchema refuses both spellings at once', () => {
+    expect(WorkspaceModelsSchema.safeParse({
+      conductor: { runtime: 'codex' }, weaver: { runtime: 'claude' },
+    }).success).toBe(false);
+  });
+
+  it('DaemonModelsSchema accepts the legacy key', () => {
+    const cfg = DaemonModelsSchema.parse({ conductor: { runtime: 'claude', model: 'claude-fable-5-1' } });
+    expect(cfg.weaver).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
+  });
+
+  it('WorkspaceConfigSchema accepts the legacy top-level block and refuses both', () => {
+    const cfg = WorkspaceConfigSchema.parse({ ...base, conductor: { humanName: 'captain' } });
+    expect(cfg.weaver.humanName).toBe('captain');
+    expect(WorkspaceConfigSchema.safeParse({
+      ...base, conductor: { humanName: 'a' }, weaver: { humanName: 'b' },
+    }).success).toBe(false);
+  });
+
+  it('WorkspaceDefaultsSchema accepts the legacy digest-interval key', () => {
+    expect(WorkspaceDefaultsSchema.parse({ conductorDigestIntervalSec: 5 }).weaverDigestIntervalSec).toBe(5);
+    expect(WorkspaceDefaultsSchema.parse({ weaverDigestIntervalSec: 5 }).weaverDigestIntervalSec).toBe(5);
+    expect(WorkspaceDefaultsSchema.safeParse({
+      conductorDigestIntervalSec: 5, weaverDigestIntervalSec: 9,
+    }).success).toBe(false);
+  });
+
+  it('WorkspaceDefaultsSchema still enforces the handover-minutes refine after the alias wrap', () => {
+    expect(WorkspaceDefaultsSchema.safeParse({
+      handoverQuietMinutes: 500, handoverAbandonTimeoutMinutes: 10,
+    }).success).toBe(false);
+  });
+
+  it('PresentationConfigSchema accepts the legacy conductor block', () => {
+    const cfg = PresentationConfigSchema.parse({ conductor: { surface: 'tmux' } });
+    expect(cfg.weaver).toEqual({ surface: 'tmux' });
+  });
+
+  it('RoleSpecSchema.createdBy accepts the legacy value and defaults to the new one', () => {
+    expect(RoleSpecSchema.parse({
+      id: 'backend', name: 'Backend', project: 'api', charterSummary: 'x', scope: 'y', createdBy: 'conductor',
+    }).createdBy).toBe('weaver');
+    expect(RoleSpecSchema.parse({
+      id: 'backend', name: 'Backend', project: 'api', charterSummary: 'x', scope: 'y',
+    }).createdBy).toBe('weaver');
+  });
+
+  it('ProjectPoliciesSchema and WorkspaceDefaultsSchema accept the legacy APPROVAL_OWNERS value', () => {
+    expect(ProjectPoliciesSchema.parse({ proposalApproval: 'conductor' }).proposalApproval).toBe('weaver');
+    expect(ProjectPoliciesSchema.parse({ taskApproval: 'conductor' }).taskApproval).toBe('weaver');
+    expect(WorkspaceDefaultsSchema.parse({ proposalApproval: 'conductor' }).proposalApproval).toBe('weaver');
+    expect(WorkspaceDefaultsSchema.parse({ hireApproval: 'conductor' }).hireApproval).toBe('weaver');
+  });
+
+  it('recovers every setting from a workspace.yaml shaped like this workspace\'s real one (acceptance criterion 5)', () => {
+    // Modeled on this ticket's own description of the live workspace.yaml's shape (a worker cannot
+    // read the actual live file — outside the worktree, and against this project's own rules — so
+    // this is built from what the ticket's filing quoted, not a hand-simplified object).
+    const legacyWorkspaceYaml = {
+      version: 1 as const,
+      id: 'fern-services',
+      name: 'V Services',
+      ticketPrefix: 'VS',
+      defaults: {
+        proposalApproval: 'human',
+        hireApproval: 'human',
+      },
+      models: {
+        conductor: { runtime: 'claude', model: 'claude-opus-5' },
+        workers: { runtime: 'claude', model: 'claude-sonnet-5' },
+      },
+      conductor: {
+        channels: ['web', 'cli'],
+        heartbeatIntervalSec: 300,
+        humanName: 'captain',
+      },
+      projects: [{ id: 'agent-conductor', url: 'git@example.com:acme/agent-conductor.git' }],
+    };
+    const cfg = WorkspaceConfigSchema.parse(legacyWorkspaceYaml);
+    expect(cfg.models.weaver).toEqual({ runtime: 'claude', model: 'claude-opus-5' });
+    expect(cfg.models.workers).toEqual({ runtime: 'claude', model: 'claude-sonnet-5' });
+    expect(cfg.weaver.humanName).toBe('captain');
+    expect(cfg.weaver.heartbeatIntervalSec).toBe(300);
+    expect(cfg.weaver.channels).toEqual(['web', 'cli']);
+    expect(cfg.projects[0]?.id).toBe('agent-conductor');
+  });
+});
+
+describe('toLegacySpelling / daemonConfigToLegacySpelling (VS-263 Decision 6)', () => {
+  const base = { version: 1 as const, id: 'acme', name: 'Acme', ticketPrefix: 'ACME' };
+
+  it('reverts every governed workspace.yaml field to its old spelling', () => {
+    const cfg = WorkspaceConfigSchema.parse({
+      ...base,
+      weaver: { humanName: 'captain', channels: ['web'] },
+      models: { weaver: { runtime: 'codex', model: 'gpt-5' } },
+      defaults: { weaverDigestIntervalSec: 5, proposalApproval: 'weaver', hireApproval: 'weaver' },
+      presentation: { weaver: { surface: 'tmux' } },
+    });
+    const legacy = toLegacySpelling(cfg) as Record<string, unknown>;
+    expect(legacy).not.toHaveProperty('weaver');
+    expect(legacy['conductor']).toEqual({ humanName: 'captain', channels: ['web'] });
+    expect((legacy['models'] as Record<string, unknown>)['conductor']).toEqual({ runtime: 'codex', model: 'gpt-5' });
+    expect((legacy['models'] as Record<string, unknown>)).not.toHaveProperty('weaver');
+    const defaults = legacy['defaults'] as Record<string, unknown>;
+    expect(defaults['conductorDigestIntervalSec']).toBe(5);
+    expect(defaults['proposalApproval']).toBe('conductor');
+    expect(defaults['hireApproval']).toBe('conductor');
+    expect(defaults).not.toHaveProperty('weaverDigestIntervalSec');
+    expect((legacy['presentation'] as Record<string, unknown>)['conductor']).toEqual({ surface: 'tmux' });
+  });
+
+  it('a value round-tripped through toLegacySpelling parses back to the same in-memory config', () => {
+    const cfg = WorkspaceConfigSchema.parse({ ...base, weaver: { humanName: 'captain' } });
+    const reparsed = WorkspaceConfigSchema.parse(toLegacySpelling(cfg));
+    expect(reparsed).toEqual(cfg);
+  });
+
+  it('reverts daemon.yaml models.weaver to models.conductor', () => {
+    const cfg = DaemonConfigSchema.parse({ models: { weaver: { runtime: 'claude', model: 'x' } } });
+    const legacy = daemonConfigToLegacySpelling(cfg) as { models: Record<string, unknown> };
+    expect(legacy.models['conductor']).toEqual({ runtime: 'claude', model: 'x' });
+    expect(legacy.models).not.toHaveProperty('weaver');
+  });
+
+  it('reverts a role file\'s createdBy to the legacy value, and round-trips through RoleSpecSchema', () => {
+    const spec = RoleSpecSchema.parse({
+      id: 'backend', name: 'Backend', project: 'api', charterSummary: 'x', scope: 'y', createdBy: 'weaver',
+    });
+    const legacy = toLegacyRoleSpec(spec) as Record<string, unknown>;
+    expect(legacy['createdBy']).toBe('conductor');
+    const reparsed = RoleSpecSchema.parse(legacy);
+    expect(reparsed.createdBy).toBe('weaver');
   });
 });

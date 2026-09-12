@@ -12,8 +12,8 @@ const state = vi.hoisted(() => ({
   saved: [] as WorkspaceModels[],
   saveError: null as Error | null,
   runtimeModels: [] as Array<{ id: string; label: string; efforts?: string[] }>,
-  daemonModels: { conductor: null, workers: null, workerOptions: null } as {
-    conductor: WorkspaceModels['conductor'] | null;
+  daemonModels: { weaver: null, workers: null, workerOptions: null } as {
+    weaver: WorkspaceModels['weaver'] | null;
     workers: WorkspaceModels['workers'] | null;
     workerOptions: NonNullable<WorkspaceModels['workerOptions']> | null;
   },
@@ -72,11 +72,11 @@ vi.mock('../api/hooks', () => ({
 const { DaemonSettingsRoute, WorkspaceSettingsRoute } = await import('../routes/Settings');
 
 beforeEach(() => {
-  state.models = { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } };
+  state.models = { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } };
   state.saved = [];
   state.saveError = null;
   state.runtimeModels = [{ id: 'claude-fable-5-1', label: 'Fable 5.1' }, { id: 'claude-opus-5', label: 'Opus 5' }];
-  state.daemonModels = { conductor: null, workers: null, workerOptions: null };
+  state.daemonModels = { weaver: null, workers: null, workerOptions: null };
   state.daemonSaved = [];
   state.search = { section: 'models' };
 });
@@ -106,22 +106,22 @@ describe('Settings — the two model settings', () => {
     openModels();
     fireEvent.change(screen.getByLabelText('Workers runtime'), { target: { value: 'codex' } });
     expect(state.saved).toEqual([{
-      conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+      weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
       workers: { runtime: 'codex', model: null },
     }]);
   });
 
-  it('changes the conductor without touching the workers', () => {
+  it('changes the weaver without touching the workers', () => {
     openModels();
     fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: 'claude-opus-5' } });
-    expect(state.saved[0]!.conductor.model).toBe('claude-opus-5');
+    expect(state.saved[0]!.weaver.model).toBe('claude-opus-5');
     expect(state.saved[0]!.workers).toEqual({ runtime: 'claude', model: null });
   });
 
   it('clears a model back to the runtime default with null, not an empty string', () => {
     openModels();
     fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: '' } });
-    expect(state.saved[0]!.conductor.model).toBeNull();
+    expect(state.saved[0]!.weaver.model).toBeNull();
   });
 
   it('takes a model the runtime does not list', async () => {
@@ -163,7 +163,7 @@ describe('Settings — the two model settings', () => {
     fireEvent.change(screen.getByLabelText('New worker option model id'), { target: { value: 'gpt-5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add worker option' }));
     expect(state.saved.at(-1)).toEqual({
-      conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+      weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
       workers: { runtime: 'claude', model: null },
       workerOptions: [{ id: 'cheap', description: 'Scouts and low complexity.', runtime: 'codex', model: 'gpt-5' }],
     });
@@ -191,7 +191,7 @@ describe('Settings — the two model settings', () => {
     expect(state.saved.at(-1)!.workerOptions).toEqual([{ id: 'cheap', description: 'Scouts.', runtime: 'claude', model: null }]);
   });
 
-  it('removes a worker option and preserves the catalog when the conductor setting changes (VS-162)', () => {
+  it('removes a worker option and preserves the catalog when the weaver setting changes (VS-162)', () => {
     const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
     state.models = { ...state.models, workerOptions: [cheap] };
     openModels();
@@ -221,10 +221,10 @@ describe('Settings — the two model settings', () => {
     ]);
   });
 
-  it('disables a locked conductor control (VS-185)', () => {
+  it('disables a locked weaver control (VS-185)', () => {
     state.models = {
       ...state.models,
-      locked: { conductor: true, workers: false, workerOptions: false },
+      locked: { weaver: true, workers: false, workerOptions: false },
     };
     openModels();
     expect(screen.getByLabelText('Conductor runtime')).toBeDisabled();
@@ -255,31 +255,31 @@ describe('Settings — the two model settings', () => {
     state.search = { section: 'daemon-models' };
     openDaemonModels();
     fireEvent.change(screen.getByLabelText('Conductor scope'), { target: { value: 'override' } });
-    expect(state.daemonSaved.at(-1)).toEqual({ conductor: { runtime: 'claude', model: 'claude-fable-5-1' } });
+    expect(state.daemonSaved.at(-1)).toEqual({ weaver: { runtime: 'claude', model: 'claude-fable-5-1' } });
   });
 
   it('once overridden, the row is editable and edits write the overlay directly (VS-185)', () => {
     state.search = { section: 'daemon-models' };
-    state.daemonModels = { ...state.daemonModels, conductor: { runtime: 'codex', model: null } };
+    state.daemonModels = { ...state.daemonModels, weaver: { runtime: 'codex', model: null } };
     openDaemonModels();
     expect(screen.getByLabelText('Conductor scope')).toHaveValue('override');
     expect(screen.getByLabelText('Conductor runtime')).not.toBeDisabled();
     fireEvent.change(screen.getByLabelText('Conductor runtime'), { target: { value: 'claude' } });
-    expect(state.daemonSaved.at(-1)).toMatchObject({ conductor: { runtime: 'claude' } });
+    expect(state.daemonSaved.at(-1)).toMatchObject({ weaver: { runtime: 'claude' } });
   });
 
   it('choosing Inherit clears an overridden overlay through the scope select, with no separate button (VS-207)', () => {
     state.search = { section: 'daemon-models' };
-    state.daemonModels = { ...state.daemonModels, conductor: { runtime: 'codex', model: 'gpt-5' } };
+    state.daemonModels = { ...state.daemonModels, weaver: { runtime: 'codex', model: 'gpt-5' } };
     openDaemonModels();
     expect(screen.queryByRole('button', { name: 'Clear Conductor overlay' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Conductor scope'), { target: { value: 'inherit' } });
-    expect(state.daemonSaved.at(-1)).toEqual({ conductor: null });
+    expect(state.daemonSaved.at(-1)).toEqual({ weaver: null });
   });
 
   it('is the only place Settings offers a runtime or a model', () => {
     render(<WorkspaceSettingsRoute />);
-    // The conductor section is gone: its only settings were these two.
+    // The weaver section is gone: its only settings were these two.
     expect(screen.queryByRole('tab', { name: 'Conductor' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
     expect(screen.queryByLabelText('Runtime')).not.toBeInTheDocument();
@@ -299,9 +299,9 @@ describe('Settings — thinking level next to the model (VS-228)', () => {
     expect(within(select).getByRole('option', { name: 'default (unset)' })).toBeInTheDocument();
     expect(within(select).getByRole('option', { name: 'high' })).toBeInTheDocument();
     fireEvent.change(select, { target: { value: 'high' } });
-    expect(state.saved.at(-1)!.conductor.effort).toBe('high');
+    expect(state.saved.at(-1)!.weaver.effort).toBe('high');
     fireEvent.change(select, { target: { value: '' } });
-    expect(state.saved.at(-1)!.conductor.effort).toBeUndefined();
+    expect(state.saved.at(-1)!.weaver.effort).toBeUndefined();
   });
 
   it('hides thinking level when the model reports none', () => {
@@ -319,18 +319,18 @@ describe('Settings — thinking level next to the model (VS-228)', () => {
   });
 
   it('clears a stale effort when the model changes to one that does not list it', () => {
-    state.models = { ...state.models, conductor: { runtime: 'claude', model: 'claude-fable-5-1', effort: 'high' } };
+    state.models = { ...state.models, weaver: { runtime: 'claude', model: 'claude-fable-5-1', effort: 'high' } };
     state.runtimeModels = [
       { id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: ['low', 'medium', 'high'] },
       { id: 'claude-opus-5', label: 'Opus 5', efforts: ['low'] },
     ];
     openModels();
     fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: 'claude-opus-5' } });
-    expect(state.saved.at(-1)!.conductor).toEqual({ runtime: 'claude', model: 'claude-opus-5', effort: undefined });
+    expect(state.saved.at(-1)!.weaver).toEqual({ runtime: 'claude', model: 'claude-opus-5', effort: undefined });
   });
 
   it('shows a stale stored effort as free text rather than dropping it', () => {
-    state.models = { ...state.models, conductor: { runtime: 'claude', model: 'claude-fable-5-1', effort: 'ultra' } };
+    state.models = { ...state.models, weaver: { runtime: 'claude', model: 'claude-fable-5-1', effort: 'ultra' } };
     state.runtimeModels = [
       { id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: ['low', 'medium', 'high'] },
       { id: 'claude-opus-5', label: 'Opus 5' },

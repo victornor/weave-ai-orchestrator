@@ -787,21 +787,21 @@ function ModelsSection(): React.ReactElement {
   if (!models.data) return <ErrorState code="MODELS_UNREACHABLE" message="The workspace's model settings could not be read." />;
 
   const current = models.data;
-  const locked = current.locked ?? { conductor: false, workers: false, workerOptions: false };
-  const set = (kind: 'conductor' | 'workers', next: T.ModelSetting): void => save.mutate({ ...current, [kind]: next });
-  const commit = (kind: 'conductor' | 'workers', next: T.ModelSetting): Promise<void> => save.mutateAsync({ ...current, [kind]: next }).then(() => undefined);
+  const locked = current.locked ?? { weaver: false, workers: false, workerOptions: false };
+  const set = (kind: 'weaver' | 'workers', next: T.ModelSetting): void => save.mutate({ ...current, [kind]: next });
+  const commit = (kind: 'weaver' | 'workers', next: T.ModelSetting): Promise<void> => save.mutateAsync({ ...current, [kind]: next }).then(() => undefined);
   const lockedHint = 'Set in the daemon settings → Models';
 
   return (
     <div className="flex flex-col gap-5">
       <ModelSettingFields
         label="Conductor"
-        hint={locked.conductor ? lockedHint : 'The agent you talk to. One per workspace.'}
-        setting={current.conductor}
+        hint={locked.weaver ? lockedHint : 'The agent you talk to. One per workspace.'}
+        setting={current.weaver}
         runtimes={runtimes.data ?? []}
-        disabled={locked.conductor}
-        onChange={(next) => set('conductor', next)}
-        onCommit={(next) => commit('conductor', next)}
+        disabled={locked.weaver}
+        onChange={(next) => set('weaver', next)}
+        onCommit={(next) => commit('weaver', next)}
       />
       <ModelSettingFields
         label="Workers"
@@ -1304,7 +1304,7 @@ function DaemonModelsSection(): React.ReactElement {
   // While inheriting, a row previews and seeds an override from *this* workspace's own setting —
   // the one concrete value on hand — not a hardcoded default (VS-207). With no workspace in
   // context there is no concrete value, and the runtime default stands in.
-  const conductorFallback = workspaceModels.data?.conductor ?? emptyFallback;
+  const conductorFallback = workspaceModels.data?.weaver ?? emptyFallback;
   const workersFallback = workspaceModels.data?.workers ?? emptyFallback;
 
   return (
@@ -1314,11 +1314,11 @@ function DaemonModelsSection(): React.ReactElement {
       </p>
       <OverlaySetting
         label="Conductor"
-        setting={current.conductor}
+        setting={current.weaver}
         fallback={conductorFallback}
         runtimes={list}
-        onFill={(next) => save.mutate({ conductor: next })}
-        onClear={() => save.mutate({ conductor: null })}
+        onFill={(next) => save.mutate({ weaver: next })}
+        onClear={() => save.mutate({ weaver: null })}
       />
       <OverlaySetting
         label="Workers"
@@ -1390,7 +1390,7 @@ function DaemonWorkerOptions({ options, runtimes, fallback, onSave }: {
   const list = options ?? [];
   return (
     <WorkerOptionsEditor
-      current={{ conductor: fallback, workers: fallback, workerOptions: list }}
+      current={{ weaver: fallback, workers: fallback, workerOptions: list }}
       runtimes={runtimes}
       onSave={(next) => onSave(next.workerOptions && next.workerOptions.length > 0 ? next.workerOptions : null)}
     />
@@ -1606,7 +1606,7 @@ function PresentationSection(): React.ReactElement {
         </select>
       </Field>
       <dl className="ac-card divide-y divide-line-1">
-        <PresentationBlockRow label="Conductor" block={config.conductor} fallback={config.default} />
+        <PresentationBlockRow label="Conductor" block={config.weaver} fallback={config.default} />
         <PresentationBlockRow label="Workers" block={config.workers} fallback={config.default} />
       </dl>
     </div>

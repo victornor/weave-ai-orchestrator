@@ -1063,7 +1063,7 @@ describe('conductor digest run summaries (VS-245)', () => {
     h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
-    h.ctx.config.defaults.conductorDigestIntervalSec = 0;
+    h.ctx.config.defaults.weaverDigestIntervalSec = 0;
     supervisor = createSupervisor(h.ctx, h.deps);
   });
   afterEach(() => { supervisor.stop(); h.cleanup(); });

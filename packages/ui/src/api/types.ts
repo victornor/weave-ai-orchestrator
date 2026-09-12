@@ -113,9 +113,9 @@ export interface RuntimeModel { id: string; label: string; provider?: string; so
 /** One of the two model settings a workspace holds (VS-77): `GET`/`PUT /models`. */
 export interface ModelSetting { runtime: string; model: string | null; effort?: string }
 export interface WorkerModelOption { id: string; description: string; runtime: string | null; model: string | null; effort?: string }
-export interface ModelsLocked { conductor: boolean; workers: boolean; workerOptions: boolean }
-export interface WorkspaceModels { conductor: ModelSetting; workers: ModelSetting; workerOptions?: WorkerModelOption[]; locked?: ModelsLocked }
-export interface DaemonModels { conductor: ModelSetting | null; workers: ModelSetting | null; workerOptions: WorkerModelOption[] | null }
+export interface ModelsLocked { weaver: boolean; workers: boolean; workerOptions: boolean }
+export interface WorkspaceModels { weaver: ModelSetting; workers: ModelSetting; workerOptions?: WorkerModelOption[]; locked?: ModelsLocked }
+export interface DaemonModels { weaver: ModelSetting | null; workers: ModelSetting | null; workerOptions: WorkerModelOption[] | null }
 
 export interface LoginResponse {
   token?: string;

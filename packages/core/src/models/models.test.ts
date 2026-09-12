@@ -16,13 +16,13 @@ const role = (runtimeId: string, model: string | null = null, effort: string | n
 describe('modelSettingFor', () => {
   const config = {
     models: {
-      conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+      weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
       workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' },
       workerOptions: [],
     },
   };
 
-  it('gives the conductor its own setting and every worker the other', () => {
+  it('gives the weaver its own setting and every worker the other', () => {
     expect(modelSettingFor(config, 'weaver')).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
     expect(modelSettingFor(config, 'worker')).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
   });
@@ -30,7 +30,7 @@ describe('modelSettingFor', () => {
   it('uses a ticket\'s catalog option when it still exists (VS-162)', () => {
     const withOpts = {
       models: {
-        conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+        weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
         workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' },
         workerOptions: [
           { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },
@@ -46,7 +46,7 @@ describe('modelSettingFor', () => {
   it('refuses an unconfigured catalog option rather than falling back to claude (VS-236)', () => {
     const withOpts = {
       models: {
-        conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+        weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
         workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' },
         workerOptions: [
           { id: 'deep', description: 'Cause unknown.', runtime: null, model: null },
@@ -67,7 +67,7 @@ describe('modelSettingFor', () => {
 describe('effectiveModels (VS-185)', () => {
   const workspace = {
     models: {
-      conductor: { runtime: 'claude', model: 'ws-conductor' },
+      weaver: { runtime: 'claude', model: 'ws-conductor' },
       workers: { runtime: 'codex', model: 'ws-workers' },
       workerOptions: [{ id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' }],
     },
@@ -79,15 +79,15 @@ describe('effectiveModels (VS-185)', () => {
   it('returns workspace values when every overlay is empty', () => {
     expect(effectiveModels({}, workspace)).toEqual(workspace.models);
     expect(effectiveModels({ models: { workerOptions: [] } }, workspace)).toEqual(workspace.models);
-    expect(modelsLocked({})).toEqual({ conductor: false, workers: false, workerOptions: false });
+    expect(modelsLocked({})).toEqual({ weaver: false, workers: false, workerOptions: false });
   });
 
-  it('applies a conductor overlay independently', () => {
-    const daemon = { models: { conductor: overlayConductor } };
-    expect(effectiveModels(daemon, workspace).conductor).toEqual(overlayConductor);
+  it('applies a weaver overlay independently', () => {
+    const daemon = { models: { weaver: overlayConductor } };
+    expect(effectiveModels(daemon, workspace).weaver).toEqual(overlayConductor);
     expect(effectiveModels(daemon, workspace).workers).toEqual(workspace.models.workers);
     expect(effectiveModels(daemon, workspace).workerOptions).toEqual(workspace.models.workerOptions);
-    expect(modelsLocked(daemon)).toEqual({ conductor: true, workers: false, workerOptions: false });
+    expect(modelsLocked(daemon)).toEqual({ weaver: true, workers: false, workerOptions: false });
   });
 
   it('hides the workspace catalog only when the daemon catalog is non-empty', () => {
@@ -107,14 +107,14 @@ describe('effectiveModels (VS-185)', () => {
 });
 
 describe('deriveModelSettings', () => {
-  it('takes the conductor from its own block', () => {
+  it('takes the weaver from the raw conductor block (the on-disk spelling, VS-263 Decision 6)', () => {
     const m = deriveModelSettings({ conductor: { runtime: 'claude', model: 'claude-fable-5-1', effort: 'low' } }, []);
-    expect(m.models.conductor).toEqual({ runtime: 'claude', model: 'claude-fable-5-1', effort: 'low' });
+    expect(m.models.weaver).toEqual({ runtime: 'claude', model: 'claude-fable-5-1', effort: 'low' });
   });
 
   it('falls back to the workspace default for a conductor block that names nothing', () => {
     const m = deriveModelSettings({ defaults: { runtime: 'codex', model: 'gpt-5' }, conductor: { channels: ['web'] } }, []);
-    expect(m.models.conductor).toEqual({ runtime: 'codex', model: 'gpt-5' });
+    expect(m.models.weaver).toEqual({ runtime: 'codex', model: 'gpt-5' });
   });
 
   it('reads the workers setting off the roles, which is what they were really running on', () => {
@@ -159,16 +159,16 @@ describe('deriveModelSettings', () => {
     expect(m.ambiguous).toBe(false);
   });
 
-  it('follows the conductor when nothing else names a runtime at all', () => {
+  it('follows the weaver when nothing else names a runtime at all', () => {
     const m = deriveModelSettings({ conductor: { runtime: 'opencode', model: 'grok' } }, []);
-    // The conductor's model is its own; the workers setting takes only the runtime.
+    // The weaver's model is its own; the workers setting takes only the runtime.
     expect(m.models.workers).toEqual({ runtime: 'opencode', model: null });
-    expect(m.rule).toBe('conductor');
+    expect(m.rule).toBe('weaver');
   });
 
   it('lands on the schema defaults for an empty document', () => {
     const m = deriveModelSettings({}, []);
-    expect(m.models).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
+    expect(m.models).toEqual({ weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
   });
 
   it('explains itself in one line', () => {
@@ -199,8 +199,8 @@ describe('the models service', () => {
   const open = (): Decision[] => h.deps().decisions.list({ status: ['open'] });
 
   it('reads and replaces both settings', async () => {
-    expect(models.get()).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
-    const next = await models.set(HUMAN, { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' } });
+    expect(models.get()).toEqual({ weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
+    const next = await models.set(HUMAN, { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' } });
     expect(next.workers).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
     expect(next.workerOptions).toEqual([]);
     expect(models.get()).toEqual(next);
@@ -208,17 +208,17 @@ describe('the models service', () => {
 
   it('keeps workerOptions when PUT omits them and replaces when they are sent (VS-162)', async () => {
     const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
-    await models.set(HUMAN, { conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [cheap] });
-    const kept = await models.set(HUMAN, { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } });
+    await models.set(HUMAN, { weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [cheap] });
+    const kept = await models.set(HUMAN, { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } });
     expect(kept.workerOptions).toEqual([cheap]);
-    const cleared = await models.set(HUMAN, { conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
+    const cleared = await models.set(HUMAN, { weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
     expect(cleared.workerOptions).toEqual([]);
   });
 
   it('refuses a setting with no runtime rather than storing it', async () => {
-    await expect(models.set(HUMAN, { conductor: { runtime: '', model: null }, workers: { runtime: 'claude', model: null } } as never))
+    await expect(models.set(HUMAN, { weaver: { runtime: '', model: null }, workers: { runtime: 'claude', model: null } } as never))
       .rejects.toMatchObject({ code: 'validation' });
-    expect(models.get().conductor.runtime).toBe('claude');
+    expect(models.get().weaver.runtime).toBe('claude');
   });
 
   it('asks which runtime the workers should use when the migration could not settle it', () => {
@@ -257,29 +257,29 @@ describe('the models service', () => {
     expect(open()).toHaveLength(0);
   });
 
-  it('leaves the conductor setting alone when the workers question is answered', async () => {
-    await models.set(HUMAN, { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } });
+  it('leaves the weaver setting alone when the workers question is answered', async () => {
+    await models.set(HUMAN, { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } });
     recordPendingMigration(h.db, h.workspaceId, deriveModelSettings({}, [role('claude'), role('codex')]));
     models.reconcile();
     await h.deps().decisions.answer(HUMAN, open()[0]!.id, { key: 'runtime:codex' });
-    expect(models.get().conductor).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
+    expect(models.get().weaver).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
   });
 
   it('get() returns a daemon overlay and set() does not write a locked control (VS-185)', async () => {
-    await models.set(HUMAN, { conductor: { runtime: 'claude', model: 'stored-conductor' }, workers: { runtime: 'claude', model: 'stored-workers' } });
-    h.ctx.daemon.models = { conductor: { runtime: 'claude', model: 'daemon-conductor' } };
-    expect(models.get().conductor.model).toBe('daemon-conductor');
+    await models.set(HUMAN, { weaver: { runtime: 'claude', model: 'stored-conductor' }, workers: { runtime: 'claude', model: 'stored-workers' } });
+    h.ctx.daemon.models = { weaver: { runtime: 'claude', model: 'daemon-conductor' } };
+    expect(models.get().weaver.model).toBe('daemon-conductor');
     expect(models.get().workers.model).toBe('stored-workers');
-    expect(models.locked()).toEqual({ conductor: true, workers: false, workerOptions: false });
+    expect(models.locked()).toEqual({ weaver: true, workers: false, workerOptions: false });
 
     const after = await models.set(HUMAN, {
-      conductor: { runtime: 'codex', model: 'should-not-stick' },
+      weaver: { runtime: 'codex', model: 'should-not-stick' },
       workers: { runtime: 'codex', model: 'new-workers' },
     });
-    expect(after.conductor.model).toBe('daemon-conductor');
+    expect(after.weaver.model).toBe('daemon-conductor');
     expect(after.workers.model).toBe('new-workers');
     h.ctx.daemon.models = {};
-    expect(models.get().conductor.model).toBe('stored-conductor');
+    expect(models.get().weaver.model).toBe('stored-conductor');
     expect(models.get().workers.model).toBe('new-workers');
   });
 });

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+goal: Rename the conductor config key and API field to weaver, without breaking
+  existing config files

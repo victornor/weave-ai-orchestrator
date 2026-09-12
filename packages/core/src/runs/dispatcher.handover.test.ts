@@ -25,7 +25,7 @@ function setup(): void {
   h = makeHarness();
   runtime = new FakeRuntime();
   h.ctx.registries.runtimes.set('fake', runtime);
-  h.ctx.config.models = { conductor: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null }, workerOptions: [] };
+  h.ctx.config.models = { weaver: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null }, workerOptions: [] };
   h.services.wake = createWakeService(h.ctx, h.deps);
   h.services.runs = createRunsService(h.ctx, h.deps);
   h.services.tickets = { comment: () => ({ id: 'c1' }) } as never;

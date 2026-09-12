@@ -12,7 +12,7 @@ export { renderTemplate, truthy } from './template.js';
 
 /** How the agents address the human (PLAN §23 #9). */
 export function humanName(ctx: WorkspaceContext): string {
-  return ctx.config.conductor?.humanName ?? 'captain';
+  return ctx.config.weaver?.humanName ?? 'captain';
 }
 
 export function loadTemplate(ctx: WorkspaceContext, name: string, fallback: string): string {

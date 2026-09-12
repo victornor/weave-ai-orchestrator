@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, RoleSpecSchema, NAMED_CARD_OPTION_KEYS, type Role, type RoleSpec, type Project } from '@agent-conductor/shared';
+import { OcError, RoleSpecSchema, NAMED_CARD_OPTION_KEYS, toLegacyRoleSpec, type Role, type RoleSpec, type Project } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, RoleConcurrency, RolesService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -22,7 +22,10 @@ export function readRoleSpec(ctx: WorkspaceContext, id: string): RoleSpec | null
 function writeRoleFiles(ctx: WorkspaceContext, spec: RoleSpec, charter?: string): void {
   const dir = roleDir(ctx, spec.id);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'role.yaml'), YAML.stringify(spec, { lineWidth: 0 }), 'utf8');
+  // VS-263 Decision 6: role.yaml is a persisted artifact a rolled-back pre-VS-263 daemon must still
+  // be able to parse, so `createdBy` keeps its legacy spelling on disk for now — do not remove this
+  // without checking whether rollback-to-pre-VS-263 is still an operational concern (see design.md).
+  writeFileSync(join(dir, 'role.yaml'), YAML.stringify(toLegacyRoleSpec(spec), { lineWidth: 0 }), 'utf8');
   const charterPath = join(dir, 'CHARTER.md');
   if (charter !== undefined) writeFileSync(charterPath, charter, 'utf8');
   else if (!existsSync(charterPath)) writeFileSync(charterPath, renderCharter(ctx, spec), 'utf8');

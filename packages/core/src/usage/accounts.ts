@@ -73,7 +73,7 @@ export function createAccountsService(ctx: WorkspaceContext): AccountsService {
     );
     const models = effectiveModels(ctx.daemon, ctx.config);
     const ids = new Set<string>([
-      models.conductor.runtime,
+      models.weaver.runtime,
       models.workers.runtime,
       ...models.workerOptions.map((o) => o.runtime).filter((id): id is string => id != null),
     ]);

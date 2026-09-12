@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, PROJECT_ADD_STEPS, ProjectConfigSchema, landingBranchOf, type Project, type ProjectAddStepId, type ProjectConfig, type ProjectSyncState } from '@agent-conductor/shared';
+import { OcError, PROJECT_ADD_STEPS, ProjectConfigSchema, landingBranchOf, type Project, type ProjectAddStepId, type ProjectConfig, type ProjectPolicies, type ProjectSyncState } from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CommitDetail, CoreServices, HistoryPage, HistoryQuery, ProjectsService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -10,6 +10,21 @@ import { git, githubSshRemote } from '../util/git.js';
 import { projectKnowledgeSkeleton } from '../workspace/loader.js';
 import { modelSettingFor, modelsFor } from '../models/resolve.js';
 import { createHistoryReader } from './history.js';
+
+/**
+ * VS-263 Decision 6: `policies_json` keeps writing the legacy `'conductor'` spelling for now, on the
+ * same rollback-safety terms as `workspace.yaml`/`daemon.yaml`/role files — `proposalApproval`/
+ * `taskApproval` are always schema-normalized to `'weaver'` in-process (`ProjectPoliciesSchema`), but
+ * that is not what lands in the DB.
+ */
+function toLegacyPolicies(policies: ProjectPolicies): unknown {
+  const revert = (v: ProjectPolicies['proposalApproval']): unknown => (v === 'weaver' ? 'conductor' : v);
+  return {
+    ...policies,
+    ...(policies.proposalApproval !== undefined ? { proposalApproval: revert(policies.proposalApproval) } : {}),
+    ...(policies.taskApproval !== undefined ? { taskApproval: revert(policies.taskApproval) } : {}),
+  };
+}
 
 /**
  * The prefix `fetch()` and `checkSync()` share (VS-131): resolve the landing branch, then
@@ -157,7 +172,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       id, workspaceId: ctx.workspaceId, slug: cfg.id, name: cfg.name ?? cfg.id, gitUrl: cfg.url, defaultBranch: cfg.defaultBranch,
       landingBranch: cfg.landingBranch ?? null,
       clonePath: join(ctx.paths.projects, cfg.id), maxWorkers: cfg.maxWorkers, setupCommand: cfg.setupCommand ?? null, warmPathsJson: cfg.warmPaths,
-      worktreeProvider: cfg.worktrees ?? ctx.config.defaults.worktrees, openspecEnabled: cfg.openspec.enabled, policiesJson: cfg.policies,
+      worktreeProvider: cfg.worktrees ?? ctx.config.defaults.worktrees, openspecEnabled: cfg.openspec.enabled, policiesJson: toLegacyPolicies(cfg.policies),
       status: 'cloning', createdAt: now, updatedAt: now,
     });
     const job = deps().jobs.start('project_add', { type: 'project', id }, actor);
@@ -311,7 +326,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
         name: merged.name ?? project.name, defaultBranch: merged.defaultBranch, landingBranch: merged.landingBranch ?? null, maxWorkers: merged.maxWorkers,
         setupCommand: merged.setupCommand ?? null, warmPathsJson: merged.warmPaths, worktreeProvider: merged.worktrees ?? project.worktreeProvider,
         openspecEnabled: merged.openspec.enabled,
-        policiesJson: merged.policies, updatedAt: nowIso(),
+        policiesJson: toLegacyPolicies(merged.policies), updatedAt: nowIso(),
       });
       await upsertConfigBlock(merged);
       recordActivity(ctx.db, ctx.workspaceId, actor, 'project.update', 'project', project.id, { patch: Object.keys(patch) });

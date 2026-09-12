@@ -5,7 +5,7 @@ import YAML from 'yaml';
 import { FakeRuntime } from '@agent-conductor/runtime-sdk';
 import { NAMED_CARD_OPTION_KEYS, type RoleSpec } from '@agent-conductor/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
-import { createRolesService } from './index.js';
+import { createRolesService, readRoleSpec } from './index.js';
 import type { Actor, RolesService } from '../api.js';
 
 const CONDUCTOR: Actor = { kind: 'agent', id: 'conductor', runId: 'run-1' };
@@ -60,6 +60,14 @@ describe('roles', () => {
     // "approve, but run on codex" to offer.
     expect(options).toEqual(Object.values(NAMED_CARD_OPTION_KEYS.hire_approval));
     expect(h.db.get<{ n: number }>('SELECT COUNT(*) n FROM role_revisions WHERE role_id = ?', ['api-backend'])!.n).toBe(1);
+  });
+
+  it('writes role.yaml under the legacy createdBy spelling, and reads it back as weaver (VS-263 Decision 6)', async () => {
+    await roles.hire(CONDUCTOR, spec({ createdBy: 'weaver' }));
+    const raw = readFileSync(join(h.ctx.paths.roles, 'api-backend', 'role.yaml'), 'utf8');
+    expect(raw).toContain('createdBy: conductor');
+    expect(raw).not.toContain('createdBy: weaver');
+    expect(readRoleSpec(h.ctx, 'api-backend')?.createdBy).toBe('weaver');
   });
 
   it('activates immediately when hireApproval is none', async () => {

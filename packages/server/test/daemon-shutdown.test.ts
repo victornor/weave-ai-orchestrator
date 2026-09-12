@@ -60,7 +60,7 @@ async function workspaceWithStuckTurn(
   const runtime = new CancelableRuntime();
   handle.registries.runtimes.set(runtimeId, runtime);
   const ws = handle.workspaces.get(id)!;
-  ws.ctx.config.models = { conductor: { runtime: runtimeId, model: null }, workers: { runtime: runtimeId, model: null }, workerOptions: [] };
+  ws.ctx.config.models = { weaver: { runtime: runtimeId, model: null }, workers: { runtime: runtimeId, model: null }, workerOptions: [] };
   const conductorId = ws.services.workers.conductor().id;
   // A throwaway config dir is isolated by default (VS-143): the dispatcher only picks up a
   // human-requested wake, so this has to be marked as one explicitly or it never dispatches.

@@ -4,12 +4,45 @@ import { DELIVERY_MODES, MERGE_METHODS, APPROVAL_OWNERS, SESSION_POLICIES, PERMI
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'kebab-case slug');
 const envRef = z.string().regex(/^\$\{[A-Z0-9_]+\}$/, 'must be an ${ENV_VAR} reference, never a literal secret');
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * VS-263: lets an object schema accept a field under an old key name or a new one, resolving both to
+ * the new name. Both keys present at once is a refused, loud ambiguity (`path-compatibility`/VS-258's
+ * policy, extended to config keys) rather than a silent pick. Built from `superRefine` + `transform` +
+ * `pipe`, not a throwing `preprocess` — a thrown error inside `preprocess` propagates past
+ * `safeParse` uncaught, which would break every `if (!parsed.success) ...` call site silently.
+ */
+export function withKeyAlias<S extends z.ZodTypeAny>(schema: S, oldKey: string, newKey: string): z.ZodType<z.infer<S>, z.ZodTypeDef, unknown> {
+  return z.any().superRefine((raw, ctx) => {
+    if (isPlainObject(raw) && oldKey in raw && newKey in raw) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `both '${oldKey}' and '${newKey}' are present; keep only one` });
+    }
+  }).transform((raw) => {
+    if (isPlainObject(raw) && oldKey in raw && !(newKey in raw)) {
+      const { [oldKey]: v, ...rest } = raw;
+      return { ...rest, [newKey]: v };
+    }
+    return raw;
+  }).pipe(schema);
+}
+
+/**
+ * VS-263: value-level aliases, for a field whose legacy spelling is a fixed value rather than a key
+ * name (`createdBy`, `APPROVAL_OWNERS`) — a single field can't hold two values at once, so there is no
+ * "both present" ambiguity to refuse, unlike `withKeyAlias`.
+ */
+const legacyApprovalOwner = z.preprocess((v) => (v === 'conductor' ? 'weaver' : v), z.enum(APPROVAL_OWNERS));
+const legacyCreatedBy = z.preprocess((v) => (v === 'conductor' ? 'weaver' : v), z.enum(['human', 'weaver'] as const));
+
 export const ProjectPoliciesSchema = z.object({
-  proposalApproval: z.enum(APPROVAL_OWNERS).default('human'),
+  proposalApproval: legacyApprovalOwner.default('human'),
   mergeMethod: z.enum(MERGE_METHODS).default('squash'),
   deliveryMode: z.enum(DELIVERY_MODES).default('pr'),
   autoMergeDefault: z.boolean().default(false),
-  taskApproval: z.enum(APPROVAL_OWNERS).default('none'),
+  taskApproval: legacyApprovalOwner.default('none'),
   archiveCommit: z.enum(['push', 'pr', 'local']).default('push'),
   requireCi: z.boolean().default(true),
   /** How many of this project's tickets may be in the active merge step at once (PLAN §11.4). */
@@ -71,11 +104,11 @@ export const PresentationBlockSchema = z.object({
 export type PresentationBlock = z.infer<typeof PresentationBlockSchema>;
 
 /** The stored desired presentation: what `GET /presentation` returns and `PUT /presentation` accepts. */
-export const PresentationConfigSchema = z.object({
+export const PresentationConfigSchema = withKeyAlias(z.object({
   default: z.string().default('headless'),
-  conductor: PresentationBlockSchema.optional(),
+  weaver: PresentationBlockSchema.optional(),
   workers: PresentationBlockSchema.optional(),
-});
+}), 'conductor', 'weaver');
 export type PresentationConfig = z.infer<typeof PresentationConfigSchema>;
 
 /** Token budget per knowledge file (PLAN §13.1): one per hub file, one shared by every linked document. */
@@ -163,53 +196,53 @@ export const DEFAULT_WORKER_TIERS: WorkerModelOption[] = WorkerOptionsArraySchem
  * `workerOptions` list) means no overlay for that control; a present setting or a non-empty catalog
  * is filled and governs every workspace.
  */
-export const DaemonModelsSchema = z.object({
-  conductor: ModelSettingSchema.nullish(),
+export const DaemonModelsSchema = withKeyAlias(z.object({
+  weaver: ModelSettingSchema.nullish(),
   workers: ModelSettingSchema.nullish(),
   workerOptions: WorkerOptionsArraySchema.nullish(),
-});
+}), 'conductor', 'weaver');
 export type DaemonModels = z.infer<typeof DaemonModelsSchema>;
 
 /** `PUT /api/daemon/models`: omitted key leaves that overlay; `null` (or `workerOptions: []`) clears. */
-export const DaemonModelsPutSchema = z.object({
-  conductor: ModelSettingSchema.nullable().optional(),
+export const DaemonModelsPutSchema = withKeyAlias(z.object({
+  weaver: ModelSettingSchema.nullable().optional(),
   workers: ModelSettingSchema.nullable().optional(),
   workerOptions: WorkerOptionsArraySchema.nullable().optional(),
-});
+}), 'conductor', 'weaver');
 export type DaemonModelsPut = z.infer<typeof DaemonModelsPutSchema>;
 
 export const ModelsLockedSchema = z.object({
-  conductor: z.boolean(),
+  weaver: z.boolean(),
   workers: z.boolean(),
   workerOptions: z.boolean(),
 });
 export type ModelsLocked = z.infer<typeof ModelsLockedSchema>;
 
 /** The whole of model selection for a workspace: two defaults, plus an optional worker-options catalog. */
-export const WorkspaceModelsSchema = z.object({
-  conductor: ModelSettingSchema.default({}),
+export const WorkspaceModelsSchema = withKeyAlias(z.object({
+  weaver: ModelSettingSchema.default({}),
   workers: ModelSettingSchema.default({}),
   workerOptions: WorkerOptionsArraySchema.default([]),
-});
+}), 'conductor', 'weaver');
 export type WorkspaceModels = z.infer<typeof WorkspaceModelsSchema>;
 
 /**
  * `PUT /models` body: `workerOptions` omitted means keep the existing catalog; an explicit array
  * (including `[]`) replaces it. Conductor and workers are still required, matching the two-setting PUT.
  */
-export const WorkspaceModelsPutSchema = z.object({
-  conductor: ModelSettingSchema,
+export const WorkspaceModelsPutSchema = withKeyAlias(z.object({
+  weaver: ModelSettingSchema,
   workers: ModelSettingSchema,
   workerOptions: WorkerOptionsArraySchema.optional(),
-});
+}), 'conductor', 'weaver');
 export type WorkspaceModelsPut = z.infer<typeof WorkspaceModelsPutSchema>;
 
 /** The two settings in force when no workspace config is in play (seeds, fallbacks, tests). */
 export const DEFAULT_WORKSPACE_MODELS: WorkspaceModels = WorkspaceModelsSchema.parse({});
 
-export const WorkspaceDefaultsSchema = z.object({
-  proposalApproval: z.enum(APPROVAL_OWNERS).default('human'),
-  hireApproval: z.enum(APPROVAL_OWNERS).default('human'),
+export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
+  proposalApproval: legacyApprovalOwner.default('human'),
+  hireApproval: legacyApprovalOwner.default('human'),
   deliveryMode: z.enum(DELIVERY_MODES).default('pr'),
   autoMerge: z.boolean().default(false),
   /** YOLO mode: the daemon grants plan and merge approvals itself (PLAN §15). Off unless asked for. */
@@ -219,7 +252,7 @@ export const WorkspaceDefaultsSchema = z.object({
   turnTimeoutSec: z.number().int().min(60).default(2700),
   silenceTimeoutSec: z.number().int().min(60).default(600),
   spawnWaitWarnSec: z.number().int().default(600),
-  conductorDigestIntervalSec: z.number().int().default(120),
+  weaverDigestIntervalSec: z.number().int().default(120),
   sessionMaxIdleDays: z.number().int().default(14),
   /**
    * How long an interactive session's ticket (VS-101) may go with no human message and no turn
@@ -266,9 +299,9 @@ export const WorkspaceDefaultsSchema = z.object({
 }).refine((d) => d.handoverQuietMinutes < d.handoverAbandonTimeoutMinutes, {
   message: 'handoverQuietMinutes must be smaller than handoverAbandonTimeoutMinutes',
   path: ['handoverQuietMinutes'],
-});
+}), 'conductorDigestIntervalSec', 'weaverDigestIntervalSec');
 
-export const WorkspaceConfigSchema = z.object({
+export const WorkspaceConfigSchema = withKeyAlias(z.object({
   version: z.literal(1),
   id: slug,
   name: z.string().min(1),
@@ -277,7 +310,7 @@ export const WorkspaceConfigSchema = z.object({
   /** Model selection, whole and entire: nothing else in this file names a runtime or a model. */
   models: WorkspaceModelsSchema.default({}),
   projects: z.array(ProjectConfigSchema).default([]),
-  conductor: z.object({
+  weaver: z.object({
     channels: z.array(z.string()).default(['web', 'cli']),
     heartbeatIntervalSec: z.number().int().optional(),
     humanName: z.string().optional(),
@@ -287,8 +320,33 @@ export const WorkspaceConfigSchema = z.object({
   webhooks: z.array(z.object({ url: z.string().url(), events: z.array(z.string()).default(['*']), secret: envRef.optional() })).default([]),
   pricingOverrides: z.record(z.string(), z.object({ inputPerMTok: z.number(), outputPerMTok: z.number(), cachedInputPerMTok: z.number().optional() })).default({}),
   plugins: z.array(z.union([z.string(), z.object({ name: z.string(), config: z.record(z.string(), z.unknown()).optional() })])).default([]),
-});
+}), 'conductor', 'weaver');
 export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
+
+/**
+ * VS-263 Decision 6: the inverse of `withKeyAlias`'s read-side rename, applied only at the point a
+ * `workspace.yaml` is actually serialized (`writeYamlFile`) — never to the in-memory config, and
+ * never to a wire response. A rollback to a pre-VS-263 daemon reads back exactly the spelling it
+ * always knew, so nothing here needs a corresponding change on the read side.
+ */
+export function toLegacySpelling(config: WorkspaceConfig): unknown {
+  const { weaver, ...rest } = config;
+  const { weaver: modelsWeaver, ...restModels } = config.models;
+  const { weaverDigestIntervalSec, proposalApproval, hireApproval, ...restDefaults } = config.defaults;
+  const { weaver: presentationWeaver, ...restPresentation } = config.presentation;
+  return {
+    ...rest,
+    conductor: weaver,
+    models: { ...restModels, conductor: modelsWeaver },
+    defaults: {
+      ...restDefaults,
+      conductorDigestIntervalSec: weaverDigestIntervalSec,
+      proposalApproval: proposalApproval === 'weaver' ? 'conductor' : proposalApproval,
+      hireApproval: hireApproval === 'weaver' ? 'conductor' : hireApproval,
+    },
+    presentation: { ...restPresentation, conductor: presentationWeaver },
+  };
+}
 
 export const RoleSpecSchema = z.object({
   id: slug,
@@ -307,10 +365,20 @@ export const RoleSpecSchema = z.object({
   permission: z.object({ mode: z.enum(PERMISSION_MODES).default('auto'), allowed: z.array(z.string()).default([]), denied: z.array(z.string()).default([]) }).default({}),
   secrets: z.array(z.string()).default([]),
   notes: z.string().optional(),
-  createdBy: z.enum(['human', 'conductor']).default('conductor'),
+  createdBy: legacyCreatedBy.default('weaver'),
   createdAt: z.string().optional(),
 });
 export type RoleSpec = z.infer<typeof RoleSpecSchema>;
+
+/**
+ * VS-263 Decision 6: `createdBy`'s counterpart to `toLegacySpelling` — a role file is a persisted
+ * artifact a rolled-back pre-VS-263 daemon must still be able to parse. That daemon's `RoleSpecSchema`
+ * only knows `z.enum(['human', 'conductor'])`; a stored `'weaver'` fails its `safeParse` and
+ * `readRoleSpec` returns `null` there, which silently deletes the role rather than erroring.
+ */
+export function toLegacyRoleSpec(spec: RoleSpec): unknown {
+  return { ...spec, createdBy: spec.createdBy === 'weaver' ? 'conductor' : spec.createdBy };
+}
 
 export const DaemonConfigSchema = z.object({
   version: z.literal(1).default(1),
@@ -374,6 +442,12 @@ export const DaemonConfigSchema = z.object({
   otlpEndpoint: z.string().optional(),
 });
 export type DaemonConfig = z.infer<typeof DaemonConfigSchema>;
+
+/** VS-263 Decision 6: `toLegacySpelling`'s counterpart for `daemon.yaml`. */
+export function daemonConfigToLegacySpelling(config: DaemonConfig): unknown {
+  const { weaver, ...restModels } = config.models;
+  return { ...config, models: { ...restModels, conductor: weaver } };
+}
 
 export const WorkspaceRegistrySchema = z.object({ workspaces: z.array(z.object({ id: slug, path: z.string() })).default([]) });
 export type WorkspaceRegistry = z.infer<typeof WorkspaceRegistrySchema>;

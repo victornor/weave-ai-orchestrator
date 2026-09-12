@@ -1,6 +1,8 @@
 /**
  * `conductor models [show] | models set conductor|workers | models options …` — model selection
- * (VS-77, ADR 0011; VS-162, ADR 0012).
+ * (VS-77, ADR 0011; VS-162, ADR 0012). The CLI's own argument vocabulary (`conductor`/`workers`) is
+ * unchanged for now (VS-260's job); the wire field it reads and writes is `weaver` (VS-263) —
+ * `wireField()` is the one place that translates between them.
  */
 import type { Command } from 'commander';
 import { ApiError } from '../api.js';
@@ -10,20 +12,26 @@ import { run, session } from './util.js';
 interface ModelSetting { runtime?: string; model?: string | null; effort?: string }
 interface WorkerModelOption extends ModelSetting { id?: string; description?: string }
 interface WorkspaceModels {
-  conductor?: ModelSetting;
+  weaver?: ModelSetting;
   workers?: ModelSetting;
   workerOptions?: WorkerModelOption[];
-  locked?: { conductor?: boolean; workers?: boolean; workerOptions?: boolean };
-}
-
-function assertUnlocked(current: WorkspaceModels, control: 'conductor' | 'workers' | 'workerOptions'): void {
-  if (current.locked?.[control]) {
-    throw new ApiError('conflict', `${control} is set on the daemon; use \`conductor daemon models\` to change it`, 409);
-  }
+  locked?: { weaver?: boolean; workers?: boolean; workerOptions?: boolean };
 }
 
 const KINDS = ['conductor', 'workers'] as const;
 type Kind = (typeof KINDS)[number];
+
+/** The CLI's own argument spelling ('conductor'/'workers') to the wire field it reads/writes. */
+function wireField(kind: Kind): 'weaver' | 'workers' {
+  return kind === 'conductor' ? 'weaver' : 'workers';
+}
+
+function assertUnlocked(current: WorkspaceModels, control: 'conductor' | 'workers' | 'workerOptions'): void {
+  const field = control === 'workerOptions' ? 'workerOptions' : wireField(control);
+  if (current.locked?.[field]) {
+    throw new ApiError('conflict', `${control} is set on the daemon; use \`conductor daemon models\` to change it`, 409);
+  }
+}
 
 function describe(s: ModelSetting | undefined): string {
   const parts = [s?.runtime ?? '(unset)', s?.model ?? '(runtime default)'];
@@ -49,9 +57,9 @@ export function register(program: Command): void {
       const current = await client.wget<WorkspaceModels>('/models');
       emit(current, () => {
         const mark = (control: 'conductor' | 'workers', label: string): string =>
-          current.locked?.[control] ? `${label} (daemon)` : label;
+          current.locked?.[wireField(control)] ? `${label} (daemon)` : label;
         fields([
-          [mark('conductor', 'conductor'), describe(current.conductor)],
+          [mark('conductor', 'conductor'), describe(current.weaver)],
           [mark('workers', 'workers'), describe(current.workers)],
           ...((current.workerOptions ?? []).map((o) => [current.locked?.workerOptions ? 'option (daemon)' : 'option', describeOption(o)] as [string, string])),
         ]);
@@ -68,21 +76,22 @@ export function register(program: Command): void {
     .action(async (setting: string, opts: Record<string, string | undefined>, command: Command) => run(async () => {
       if (!KINDS.includes(setting as Kind)) throw new Error(`unknown setting ${setting}: expected ${KINDS.join(' or ')}`);
       const kind = setting as Kind;
+      const field = wireField(kind);
       if (!opts['runtime'] && opts['model'] === undefined && opts['effort'] === undefined) {
         throw new Error('nothing to change: pass --runtime, --model or --effort');
       }
       const { client } = await session(command);
       const current = await client.wget<WorkspaceModels>('/models');
       assertUnlocked(current, kind);
-      const next: ModelSetting = { ...(current[kind] ?? {}) };
+      const next: ModelSetting = { ...(current[field] ?? {}) };
       if (opts['runtime']) next.runtime = opts['runtime'];
       if (opts['model'] !== undefined) next.model = opts['model'] === 'default' ? null : opts['model'];
       if (opts['effort'] !== undefined) {
         if (opts['effort'] === 'default') delete next.effort;
         else next.effort = opts['effort'];
       }
-      const result = await client.put<WorkspaceModels>(client.w('/models'), { ...current, [kind]: next });
-      emit(result, () => write(`${style.ok('updated')} ${kind} = ${describe(result[kind])}`));
+      const result = await client.put<WorkspaceModels>(client.w('/models'), { ...current, [field]: next });
+      emit(result, () => write(`${style.ok('updated')} ${kind} = ${describe(result[field])}`));
     }));
 
   const options = models.command('options').description('named worker-model options a ticket may pick (VS-162)');

@@ -111,7 +111,7 @@ export async function startPresenter(opts: StartPresenterOptions): Promise<Runni
   const presenterId = opts.presenterId ?? defaultPresenterId(surfaceKind);
   const store = opts.store ?? createFileHandleStore(defaultHandleStorePath(opts.workspaceId, presenterId));
 
-  const block: PresentationBlockView = desired.config.workers ?? desired.config.conductor ?? {};
+  const block: PresentationBlockView = desired.config.workers ?? desired.config.weaver ?? {};
   const ctx = buildSurfaceContext({ workspaceId: opts.workspaceId, apiUrl: opts.apiUrl, token: opts.token, block, log, ocCommand: opts.ocCommand });
   if (!ctx.terminal() && (surfaceKind === 'hyprland' || block.terminal)) {
     log('warn', 'no terminal emulator resolved; set presentation.<block>.terminal, $TERMINAL, or install xdg-terminal-exec', { surface: surfaceKind });

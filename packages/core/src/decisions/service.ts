@@ -60,19 +60,23 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       case 'action_approval':
         return 'human';
       case 'hire_approval':
-        // `hireApproval` is `APPROVAL_OWNERS` (still 'conductor' — VS-263's deferred config-key
-        // surface); translated to `DECISION_OWNERS` here, at the one point it becomes a decision.
-        return ctx.config.defaults.hireApproval === 'conductor' ? 'weaver' : 'human';
+        // `hireApproval` is `APPROVAL_OWNERS`, not `DecisionOwner`; translated here, at the one point
+        // it becomes a decision. `ctx.config` is always schema-normalized (VS-263: the schema accepts
+        // the on-disk legacy `'conductor'` spelling but resolves it to `'weaver'` at parse time), so
+        // this reads the current value, not the legacy one.
+        return ctx.config.defaults.hireApproval === 'weaver' ? 'weaver' : 'human';
       case 'plan_approval': {
-        // Same translation: `proposalApproval` is `APPROVAL_OWNERS`, not `DecisionOwner` — the type
-        // here was wrong before this rename (it happened to share values with DecisionOwner; it no
-        // longer does), so it is spelled out rather than reusing a type that has since diverged.
+        // Same translation, but `owner` may come from either of two sources with different
+        // normalization: `ctx.config.defaults.proposalApproval` is always schema-normalized (never
+        // the legacy spelling); `p.policies_json` is a raw DB column VS-263 deliberately keeps
+        // writing under the legacy `'conductor'` spelling (Decision 6 — rollback safety), so it can
+        // still be that literal value here. Accept either.
         const p = ticketId
-          ? db.get<{ policies: { proposalApproval?: 'human' | 'conductor' | 'none' } | null }>(
+          ? db.get<{ policies: { proposalApproval?: 'human' | 'conductor' | 'weaver' | 'none' } | null }>(
               'SELECT p.policies_json FROM tickets t JOIN projects p ON p.id = t.project_id WHERE t.id = ?', [ticketId])
           : null;
         const owner = p?.policies?.proposalApproval ?? ctx.config.defaults.proposalApproval;
-        return owner === 'conductor' ? 'weaver' : 'human';
+        return owner === 'conductor' || owner === 'weaver' ? 'weaver' : 'human';
       }
       default:
         return 'human';

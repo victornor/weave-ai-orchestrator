@@ -16,7 +16,7 @@ export interface PresentationBlockView {
 
 export interface PresentationConfigView {
   default?: string;
-  conductor?: PresentationBlockView;
+  weaver?: PresentationBlockView;
   workers?: PresentationBlockView;
   [key: string]: unknown;
 }

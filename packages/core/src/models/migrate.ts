@@ -13,7 +13,7 @@ import { ModelSettingSchema } from '@agent-conductor/shared';
 export interface RoleRuntimeRow { runtimeId: string | null; model: string | null; effort: string | null }
 
 /** Which rule produced the workers setting, for the log line and for the card. */
-export type WorkersRule = 'roles' | 'roles_mixed' | 'defaults' | 'conductor';
+export type WorkersRule = 'roles' | 'roles_mixed' | 'defaults' | 'weaver';
 
 export interface ModelMigration {
   models: WorkspaceModels;
@@ -48,9 +48,9 @@ function setting(runtime: string | undefined, model: string | null | undefined, 
 /**
  * Derive the two settings from a raw `workspace.yaml` and the workspace's roles.
  *
- * - conductor ← the raw `conductor` block, then the raw `defaults`, then the schema defaults.
+ * - weaver ← the raw `conductor` block, then the raw `defaults`, then the schema defaults.
  * - workers ← the runtime and model the roles actually used (the live value; `defaults.runtime` was
- *   only what a *new* project inherited), then the raw `defaults`, then the conductor's runtime with
+ *   only what a *new* project inherited), then the raw `defaults`, then the weaver's runtime with
  *   no model.
  *
  * Roles are counted by runtime. A tie or a disagreement is `ambiguous`: the most used runtime is
@@ -60,7 +60,7 @@ export function deriveModelSettings(raw: Record<string, unknown>, roles: RoleRun
   const rawDefaults = blockOf(raw, 'defaults');
   const rawConductor = blockOf(raw, 'conductor');
 
-  const conductor = setting(
+  const weaver = setting(
     str(rawConductor?.['runtime']) ?? str(rawDefaults?.['runtime']),
     modelOf(rawConductor) ?? modelOf(rawDefaults),
     str(rawConductor?.['effort']),
@@ -97,11 +97,11 @@ export function deriveModelSettings(raw: Record<string, unknown>, roles: RoleRun
     workers = setting(str(rawDefaults?.['runtime']), modelOf(rawDefaults), undefined);
     rule = 'defaults';
   } else {
-    workers = setting(conductor.runtime, null, undefined);
-    rule = 'conductor';
+    workers = setting(weaver.runtime, null, undefined);
+    rule = 'weaver';
   }
 
-  return { models: { conductor, workers, workerOptions: [] }, counts, rule, ambiguous: rule === 'roles_mixed' };
+  return { models: { weaver, workers, workerOptions: [] }, counts, rule, ambiguous: rule === 'roles_mixed' };
 }
 
 /** Whether this document has already been migrated. A `models` block is the marker. */
@@ -115,7 +115,7 @@ export function migrationSummary(m: ModelMigration): string {
     roles: 'every role used it',
     roles_mixed: 'the most of its roles used it, and the rest disagreed',
     defaults: 'the workspace default said so and no role had been hired',
-    conductor: 'nothing else named one, so it follows the conductor',
+    weaver: 'nothing else named one, so it follows the weaver',
   }[m.rule];
   return `workers on ${m.models.workers.runtime} because ${why}`;
 }

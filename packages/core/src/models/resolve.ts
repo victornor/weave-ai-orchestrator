@@ -2,7 +2,7 @@
  * Which runtime, model and effort a turn runs on (VS-77, ADR 0011; VS-162, ADR 0012; VS-185, ADR 0013).
  *
  * There is one answer and one place it comes from: the effective model settings after a daemon
- * overlay (if filled) is applied to the workspace. The conductor runs on `models.conductor`. A
+ * overlay (if filled) is applied to the workspace. The weaver runs on `models.weaver`. A
  * worker runs on the catalog option its ticket names, when that option still exists, otherwise on
  * `models.workers`. This function is the only reader — everything that used to layer
  * `agent.model ?? role.model ?? config.defaults.model` goes through it instead, so there is no
@@ -22,7 +22,7 @@ export function effectiveModels(
   const stored = workspace.models ?? DEFAULT_WORKSPACE_MODELS;
   const overlay = daemon?.models ?? {};
   return {
-    conductor: overlay.conductor ?? stored.conductor,
+    weaver: overlay.weaver ?? stored.weaver,
     workers: overlay.workers ?? stored.workers,
     workerOptions: catalogOverlayFilled(overlay.workerOptions) ? overlay.workerOptions : (stored.workerOptions ?? []),
   };
@@ -31,7 +31,7 @@ export function effectiveModels(
 export function modelsLocked(daemon: { models?: DaemonModels } | null | undefined): ModelsLocked {
   const overlay = daemon?.models ?? {};
   return {
-    conductor: overlay.conductor != null,
+    weaver: overlay.weaver != null,
     workers: overlay.workers != null,
     workerOptions: catalogOverlayFilled(overlay.workerOptions),
   };
@@ -49,7 +49,7 @@ export function modelSettingFor(
   ticket?: { workerModelId?: string | null } | null,
 ): ModelSetting {
   const models = config.models ?? DEFAULT_WORKSPACE_MODELS;
-  if (kind === 'weaver') return models.conductor;
+  if (kind === 'weaver') return models.weaver;
   const id = ticket?.workerModelId;
   if (id) {
     const opt = (models.workerOptions ?? []).find((o) => o.id === id);
@@ -72,7 +72,7 @@ export function workerOptionRuntimes(
   const overlay = daemon?.models;
   return [...new Set([
     ...models.workerOptions.map((o) => o.runtime),
-    overlay?.conductor?.runtime,
+    overlay?.weaver?.runtime,
     overlay?.workers?.runtime,
   ].filter((id): id is string => Boolean(id)))];
 }

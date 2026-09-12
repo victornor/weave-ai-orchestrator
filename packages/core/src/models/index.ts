@@ -68,7 +68,7 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
           ? next.workerOptions
           : (stored.workerOptions ?? []));
       const parsed = WorkspaceModelsSchema.safeParse({
-        conductor: locked.conductor ? stored.conductor : next.conductor,
+        weaver: locked.weaver ? stored.weaver : next.weaver,
         workers: locked.workers ? stored.workers : next.workers,
         workerOptions,
       });
@@ -134,5 +134,5 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
 
 /** The structured half of the log line the loader writes once it has derived the two settings. */
 export function migrationLogFields(m: ModelMigration): Record<string, unknown> {
-  return { conductor: m.models.conductor, workers: m.models.workers, roleRuntimes: m.counts, rule: m.rule };
+  return { weaver: m.models.weaver, workers: m.models.workers, roleRuntimes: m.counts, rule: m.rule };
 }

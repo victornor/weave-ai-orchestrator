@@ -62,7 +62,11 @@ credential to the host's file at all, unless it was explicitly told to share it.
 
 A runtime's CLI may replace the shared credential with a file of its own rather than writing through
 to it. When the system finds that the workspace's credential path and the host's have become two
-distinct files, it SHALL reconcile them back to one.
+distinct files, it SHALL reconcile them back to one. Spawning a turn SHALL continue to check for and
+repair this, exactly as it does today.
+
+The system SHALL NOT perform this reconciliation as a step of an account or usage probe. Reading a
+runtime's billing or plan state SHALL NOT open a runtime's credential file for writing.
 
 Reconciliation SHALL choose between the two by the expiry the credentials themselves carry, keeping
 the one that expires later. It SHALL NOT choose by file modification time. It SHALL NOT replace a
@@ -72,12 +76,15 @@ failure to authenticate.
 When neither credential's expiry can be read, the system SHALL keep the host's and SHALL NOT
 overwrite it.
 
+An intact, unforked credential SHALL be left untouched by this check: reconciliation SHALL NOT open
+either credential path for writing when the workspace's path is already the single shared credential.
+
 Reconciliation SHALL leave exactly one live credential behind, and SHALL be safe to run repeatedly.
 
 #### Scenario: The CLI replaced the shared credential with its own
 
-- **WHEN** a turn leaves the workspace's credential path as a separate file that expires later than
-  the host's
+- **WHEN** the system reconciles a workspace's runtime config home, and that workspace's credential
+  path is a separate file that expires later than the host's
 - **THEN** the host's credential is updated to that newer one
 - **AND** the workspace's path is once again the same single credential as the host's
 
@@ -102,6 +109,24 @@ Reconciliation SHALL leave exactly one live credential behind, and SHALL be safe
 
 - **WHEN** reconciliation runs a second time with nothing having changed in between
 - **THEN** the credential is unchanged and still shared
+
+#### Scenario: Spawning a turn still repairs a real fork
+
+- **WHEN** an agent's turn is spawned and the workspace's credential path has diverged from the
+  host's into a separate, newer-expiring file
+- **THEN** the host's credential is updated to that newer one before the turn proceeds, exactly as it
+  is today
+
+#### Scenario: Spawning a turn against an intact credential writes nothing
+
+- **WHEN** an agent's turn is spawned and the workspace's credential path is already the single
+  shared credential
+- **THEN** nothing about spawning that turn opens either credential path for writing
+
+#### Scenario: Probing an account never reconciles
+
+- **WHEN** the system probes a runtime's account for billing or plan reporting
+- **THEN** nothing about that probe opens either credential path for writing
 
 ### Requirement: An authentication failure never rewrites the credential
 

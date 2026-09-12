@@ -14,6 +14,10 @@ When an agent's turn fails because the runtime could not authenticate, the syste
 runtime's credential as needing a login, and SHALL stop starting turns for every agent on that
 runtime in that workspace.
 
+An agent's own turn reporting that it could not authenticate is the only trigger for this behavior.
+The system SHALL NOT perform any check or probe of its own, ahead of or separate from a turn, in
+order to decide whether a runtime needs a login.
+
 It SHALL do so on the first such failure. It SHALL NOT retry the turn automatically and SHALL NOT
 wait for further agents to fail before stopping.
 
@@ -53,6 +57,13 @@ Agents on other runtimes SHALL be unaffected and SHALL keep running.
 
 - **WHEN** one runtime needs a login and an agent on a different runtime has work waiting
 - **THEN** that agent takes its turn normally
+
+#### Scenario: A credential that has not yet been used this turn is not pre-judged
+
+- **WHEN** an agent's turn is about to be spawned on a runtime whose credential file, read on disk,
+  would not be confirmed valid for the turn's full expected duration
+- **THEN** the turn spawns anyway, exactly as it would if the credential were fresh
+- **AND** the runtime is only gated if that turn's own attempt then fails to authenticate
 
 ### Requirement: One outage raises exactly one decision
 

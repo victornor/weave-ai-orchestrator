@@ -1010,8 +1010,8 @@ export function usePostComment(): UseMutationResult<TicketComment, Error, { id: 
   });
 }
 
-export function useTicketDocument(id: string, key: string, revision?: number): UseQueryResult<T.TicketDocument> {
-  const ws = useWs();
+export function useTicketDocument(id: string, key: string, revision?: number, wsOverride?: string): UseQueryResult<T.TicketDocument> {
+  const ws = useHookWs(wsOverride);
   return useQuery({
     queryKey: [...qk.ticketDocument(ws, id, key), revision ?? 'head'],
     queryFn: () => api.ws<T.TicketDocument>(ws, `/tickets/${id}/documents/${key}${qs({ revision })}`),
@@ -1020,8 +1020,8 @@ export function useTicketDocument(id: string, key: string, revision?: number): U
 }
 
 /** One of a ticket's documents by its id (VS-224) — how a decision's document target is followed. */
-export function useTicketDocumentById(id: string, documentId: string, revision?: number): UseQueryResult<T.TicketDocumentById> {
-  const ws = useWs();
+export function useTicketDocumentById(id: string, documentId: string, revision?: number, wsOverride?: string): UseQueryResult<T.TicketDocumentById> {
+  const ws = useHookWs(wsOverride);
   return useQuery({
     queryKey: [...qk.ticketDocumentById(ws, id, documentId), revision ?? 'head'],
     queryFn: () => api.ws<T.TicketDocumentById>(ws, `/tickets/${id}/documents/by-id/${documentId}${qs({ revision })}`),

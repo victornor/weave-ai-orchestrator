@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+goal: "Fix the daemon-wide Needs you page crash: PlanPreview and DocumentPreview
+  reach for the workspace provider that global routes do not have"

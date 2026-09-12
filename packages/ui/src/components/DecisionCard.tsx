@@ -343,7 +343,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
 
         {/* the document a decision target points at (VS-224) — any kind whose card does not already
             render it through a purpose-built slot */}
-        {docTarget && !planSlot ? <DocumentPreview decision={decision} /> : null}
+        {docTarget && !planSlot ? <DocumentPreview decision={decision} ws={ws ?? undefined} /> : null}
 
         {/* merge approval — CI and diff stats */}
         {decision.kind === 'merge_approval' ? (

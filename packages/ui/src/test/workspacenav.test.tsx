@@ -324,6 +324,19 @@ describe('the Needs-you count', () => {
   });
 });
 
+// VS-274: a destination row's active state is carried by its background and text colour alone; the
+// dot it used to lead with restated that and diluted the project sync markers, the only dots in the
+// sidebar that mean anything.
+describe('no decorative dot on a destination row (VS-274)', () => {
+  it('renders no dot beside a global or a section label', () => {
+    render(nav({ expanded: ['beta'] }));
+    expect(screen.getByRole('navigation', { name: 'Global' }).querySelectorAll('span[aria-hidden]')).toHaveLength(0);
+    for (const [ws, label] of [['Alpha', 'Chat'], ['Beta', 'Board']] as const) {
+      expect(within(group(ws)).getByText(label).closest('a')!.querySelector('span[aria-hidden]')).toBeNull();
+    }
+  });
+});
+
 describe('the global section', () => {
   it('sits above the workspace list with Needs you, Live, Chats, Incidents, Map, Scheduled and the daemon Settings', () => {
     render(nav());

@@ -11,6 +11,7 @@ import { api, ApiError, setWorkspaceId } from '../api/client';
 import { useHealth, useInitWorkspace, useMe, useRuntimeModels, useRuntimes } from '../api/hooks';
 import { Button } from '../components/Button';
 import { JobProgress } from '../components/JobProgress';
+import { WeaveMark } from '../components/WeaveMark';
 import { Skeleton } from '../components/Skeleton';
 import { StreamStatusNotice } from '../components/StreamStatus';
 import { useJobStream } from '../api/jobStream';
@@ -517,13 +518,9 @@ function Frame({ children }: { children: React.ReactNode }): React.ReactElement 
   return (
     <div className="flex min-h-dvh items-start justify-center bg-bg-0 p-6 md:items-center">
       <div className="w-full max-w-lg">
-        <div className="mb-7 flex items-center gap-2.5">
-          <span className="flex size-7 items-center justify-center rounded-r6 bg-accent">
-            <svg viewBox="0 0 12 12" className="size-3" aria-hidden>
-              <path d="M6 0.3 L11.7 6 L6 11.7 L0.3 6 Z" fill="var(--accent-on)" />
-            </svg>
-          </span>
-          <h1 className="text-title font-semibold tracking-title text-text-strong">Weave AI</h1>
+        <div className="mb-7 flex flex-wrap items-center gap-x-3.5 gap-y-2 text-text-strong">
+          <WeaveMark className="h-7 w-auto flex-none" />
+          <h1 className="text-title font-semibold tracking-title">Weave AI</h1>
         </div>
         {children}
       </div>

@@ -6,6 +6,7 @@ import { useHealth, useMe } from '../api/hooks';
 import { qk } from '../api/keys';
 import { Button } from '../components/Button';
 import { TOTPInput } from '../components/TOTPInput';
+import { WeaveMark } from '../components/WeaveMark';
 import { UnreachableScreen } from '../components/ConnectionBanner';
 import { Skeleton } from '../components/Skeleton';
 import { useGo } from '../app/link';
@@ -162,13 +163,9 @@ export function LoginRoute(): React.ReactElement {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-bg-0 p-6">
       <div className="w-full max-w-sm">
-        <div className="mb-7 flex items-center gap-2.5">
-          <span className="flex size-7 items-center justify-center rounded-r6 bg-accent">
-            <svg viewBox="0 0 12 12" className="size-3" aria-hidden>
-              <path d="M6 0.3 L11.7 6 L6 11.7 L0.3 6 Z" fill="var(--accent-on)" />
-            </svg>
-          </span>
-          <h1 className="text-title font-semibold tracking-title text-text-strong">Weave AI</h1>
+        <div className="mb-7 flex flex-wrap items-center gap-x-3.5 gap-y-2 text-text-strong">
+          <WeaveMark className="h-7 w-auto flex-none" />
+          <h1 className="text-title font-semibold tracking-title">Weave AI</h1>
         </div>
 
         {health.isLoading ? (

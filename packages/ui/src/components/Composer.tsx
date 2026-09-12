@@ -363,6 +363,11 @@ export function Composer({
   // non-streaming backend it is the one control that finishes the dictation (VS-282), so it stays
   // available throughout and is disabled only while a send is pending or in flight.
   const canSend = Boolean(text.trim()) || locked;
+  // Derived, not read off `pendingSend` alone: `pendingSend` only clears once the effect above runs
+  // after `dictation.transcribing` flips false, one render later. Gating the banner on both means it
+  // disappears in the same commit the failure/empty alert appears in, instead of lagging behind it
+  // for a frame — the gap a `waitFor` on the alert could otherwise catch (VS-294).
+  const waitingForTranscript = pendingSend && dictation.transcribing;
 
   return (
     <div className={cx('flex flex-col gap-1.5', className)}>
@@ -543,7 +548,7 @@ export function Composer({
           {dictation.error}
         </p>
       ) : null}
-      {pendingSend ? (
+      {waitingForTranscript ? (
         <p className="flex items-center gap-2 text-micro text-text-2" role="status" aria-live="polite">
           <span className="size-2.5 animate-spin rounded-pill border border-current border-t-transparent" aria-hidden />
           Waiting for the transcript — this sends as soon as it lands.

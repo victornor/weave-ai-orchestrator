@@ -44,6 +44,10 @@ export type MergeMethod = (typeof MERGE_METHODS)[number];
 export const APPROVAL_OWNERS = ['human', 'weaver', 'none'] as const;
 export type ApprovalOwner = (typeof APPROVAL_OWNERS)[number];
 
+/** Where a project's own OpenSpec change is committed when it archives (VS-303). */
+export const ARCHIVE_COMMITS = ['push', 'pr', 'local'] as const;
+export type ArchiveCommit = (typeof ARCHIVE_COMMITS)[number];
+
 export const DECISION_KINDS = ['approval', 'question', 'concern', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval', 'retry_approval', 'action_approval'] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 

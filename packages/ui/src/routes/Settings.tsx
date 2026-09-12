@@ -53,7 +53,7 @@ import {
 import { api, getWorkspaceId, setToken } from '../api/client';
 import { qk } from '../api/keys';
 import type { PresentationBlock, Project, PushCategory } from '@weave-ai/shared';
-import { ProjectConfigSchema, WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@weave-ai/shared';
+import { ProjectConfigSchema, ProjectPoliciesSchema, WorkerModelOptionSchema, WorkerOptionsArraySchema, APPROVAL_OWNERS, ARCHIVE_COMMITS, DELIVERY_MODES, MERGE_METHODS } from '@weave-ai/shared';
 import type * as T from '../api/types';
 import type { TotpSetup } from '../api/types';
 import { useHookWs, useWs } from '../api/context';
@@ -210,16 +210,82 @@ function Field({ label, hint, error, children }: { label: string; hint?: string;
 
 const inputCx = 'h-9 w-full rounded-r6 border border-line-2 bg-bg-input px-3 text-body text-text-1 outline-none';
 
-/** A project's YOLO override as the select's value: unset means it follows the workspace. */
-function yoloOverrideOf(policies: Record<string, unknown> | undefined): 'inherit' | 'on' | 'off' {
-  const raw = policies?.['yolo'];
+/** A project's raw policy value, or undefined when it is unset and so follows the workspace. */
+function policyOf(policies: Record<string, unknown> | undefined, key: string): unknown {
+  const raw = policies?.[key];
+  return raw === undefined || raw === null ? undefined : raw;
+}
+
+/**
+ * The project's policies with `key` set, or with the key gone when the value is undefined. The
+ * project PATCH replaces `policies` wholesale, so every caller spreads the existing record rather
+ * than rebuilding it — dropping the key is what returns a policy to inheriting the workspace.
+ */
+function withPolicy(policies: Record<string, unknown> | undefined, key: string, value: unknown): Record<string, unknown> {
+  const { [key]: _dropped, ...rest } = policies ?? {};
+  return value === undefined ? rest : { ...rest, [key]: value };
+}
+
+/** An enum policy as its select value: absent means it follows the workspace. */
+function enumPolicyValue(policies: Record<string, unknown> | undefined, key: string): string {
+  const raw = policyOf(policies, key);
+  return raw === undefined ? 'inherit' : String(raw);
+}
+
+/** An approval-owner policy as its select value, showing the row's legacy `conductor` as `weaver` (VS-263). */
+function approvalOwnerValue(policies: Record<string, unknown> | undefined, key: string): string {
+  const raw = enumPolicyValue(policies, key);
+  return raw === 'conductor' ? 'weaver' : raw;
+}
+
+/** A boolean policy as its select value: absent means it follows the workspace. */
+function booleanPolicyValue(policies: Record<string, unknown> | undefined, key: string): 'inherit' | 'on' | 'off' {
+  const raw = policyOf(policies, key);
   return raw === true ? 'on' : raw === false ? 'off' : 'inherit';
 }
 
-/** The project's policies with the override set, or with the key gone when it goes back to inherit. */
-function withYolo(policies: Record<string, unknown> | undefined, choice: string): Record<string, unknown> {
-  const { yolo: _dropped, ...rest } = policies ?? {};
-  return choice === 'inherit' ? rest : { ...rest, yolo: choice === 'on' };
+/** The `inherit` option's label, naming the workspace's value where it actually has one (VS-303). */
+function inheritLabel(workspaceValue: string | undefined): string {
+  return workspaceValue === undefined ? 'inherit' : `inherit (${workspaceValue})`;
+}
+
+/** One policy's select in a project's Delivery & setup panel. `value` is an option value or `inherit`. */
+function PolicySelect({
+  p,
+  policyKey,
+  label,
+  options,
+  value,
+  workspaceValue,
+  toValue = (raw: string) => raw,
+  onSelect,
+}: {
+  p: Project;
+  policyKey: string;
+  label: string;
+  options: readonly string[];
+  value: string;
+  workspaceValue?: string;
+  /** How an option value becomes the stored policy value; booleans map `on`/`off` to `true`/`false`. */
+  toValue?: (raw: string) => unknown;
+  onSelect: (key: string, value: unknown) => void;
+}): React.ReactElement {
+  return (
+    <label className="flex items-center justify-between gap-2">
+      <span className="ac-label">{label}</span>
+      <select
+        aria-label={`${label} for ${p.slug}`}
+        className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+        value={value}
+        onChange={(e) => onSelect(policyKey, e.target.value === 'inherit' ? undefined : toValue(e.target.value))}
+      >
+        <option value="inherit">{inheritLabel(workspaceValue)}</option>
+        {options.map((o) => (
+          <option key={o} value={o}>{o}</option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 function WorkspaceSection(): React.ReactElement {
@@ -565,20 +631,33 @@ function ArchivedProjectRow({ p }: { p: Project }): React.ReactElement {
   );
 }
 
-/** One project's row: its own `maxWorkers`/`landingBranch` commit state, independent of every other row. */
+/** A workspace's values for the two policies it can set a default for; the rest inherit the schema. */
+type WorkspacePolicyDefaults = { proposalApproval?: string; deliveryMode?: string };
+
+/** The workspace defaults that a project policy can fall back to, from `GET /api/w/:ws`'s config. */
+function workspacePolicyDefaults(config: Record<string, unknown>): WorkspacePolicyDefaults {
+  const defaults = (config['defaults'] ?? {}) as Record<string, unknown>;
+  const pick = (key: string): string | undefined => (typeof defaults[key] === 'string' ? (defaults[key] as string) : undefined);
+  return { proposalApproval: pick('proposalApproval'), deliveryMode: pick('deliveryMode') };
+}
+
+/** One project's row: its own `maxWorkers`/`landingBranch`/policy commit state, independent of every other row. */
 function ActiveProjectRow({
   p,
   workspaceOn,
+  workspaceDefaults,
   liveCount,
   destinations,
 }: {
   p: Project;
   workspaceOn: boolean;
+  workspaceDefaults: WorkspacePolicyDefaults;
   liveCount: number;
   destinations: T.WorkspaceListItem[];
 }): React.ReactElement {
   const patch = usePatchProject();
   const [sheet, setSheet] = useState<null | 'remove' | 'move'>(null);
+  const [open, setOpen] = useState(false);
   const blocked = liveCount > 0;
   const blockReason = blocked ? liveWorkersReason(p.slug, liveCount) : null;
 
@@ -598,61 +677,202 @@ function ActiveProjectRow({
     },
   });
 
+  // The number policy's bounds come from the schema the route validates with (VS-303), not a literal.
+  const mergeConcurrencySchema = ProjectPoliciesSchema.shape.mergeConcurrency.unwrap().removeDefault();
+  const mergeConcurrency = useCommittableField({
+    value: policyOf(p.policies, 'mergeConcurrency') === undefined ? '' : String(policyOf(p.policies, 'mergeConcurrency')),
+    onCommit: async (raw) => {
+      const trimmed = raw.trim();
+      if (trimmed === '') {
+        await patch.mutateAsync({ id: p.id, patch: { policies: withPolicy(p.policies, 'mergeConcurrency', undefined) } });
+        return;
+      }
+      const n = Number(trimmed);
+      const issues = parseFieldIssues(mergeConcurrencySchema, n);
+      if (!issues.valid) {
+        const { minValue, maxValue } = mergeConcurrencySchema;
+        throw new Error(
+          minValue != null && maxValue != null
+            ? `A whole number from ${minValue} to ${maxValue}.`
+            : 'Enter a whole number within the allowed range.',
+        );
+      }
+      await patch.mutateAsync({ id: p.id, patch: { policies: withPolicy(p.policies, 'mergeConcurrency', n) } });
+    },
+  });
+
+  const setupCommand = useCommittableField({
+    value: p.setupCommand ?? '',
+    onCommit: async (raw) => {
+      await patch.mutateAsync({ id: p.id, patch: { setupCommand: raw.trim() } });
+    },
+  });
+
+  const setPolicy = (key: string, value: unknown): void => {
+    patch.mutate({ id: p.id, patch: { policies: withPolicy(p.policies, key, value) } });
+  };
+
   return (
-    <div className="flex flex-wrap items-center gap-3 px-3.5 py-3">
-      <span className="ac-mono text-meta text-text-1">{p.slug}</span>
-      <Badge>{p.status}</Badge>
-      <span className="ac-mono ac-truncate flex-1 text-micro text-text-3">{p.gitUrl}</span>
-      <label className="flex flex-wrap items-center gap-1.5">
-        <span className="ac-label">workers</span>
-        <input
-          type="number"
-          min={1}
-          value={maxWorkers.draft}
-          onChange={(e) => maxWorkers.onChange(e.target.value)}
-          onBlur={maxWorkers.onBlur}
-          onKeyDown={maxWorkers.onKeyDown}
-          className="ac-mono h-7 w-14 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
-        />
-        <CommitStatus status={maxWorkers.status} error={maxWorkers.error} onSave={maxWorkers.commitNow} />
-      </label>
-      <label className="flex flex-wrap items-center gap-1.5">
-        <span className="ac-label">landing branch</span>
-        <input
-          aria-label={`landing branch for ${p.slug}`}
-          placeholder={p.defaultBranch}
-          value={landingBranch.draft}
-          onChange={(e) => landingBranch.onChange(e.target.value)}
-          onBlur={landingBranch.onBlur}
-          onKeyDown={landingBranch.onKeyDown}
-          className="ac-mono h-7 w-28 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
-        />
-        <CommitStatus status={landingBranch.status} error={landingBranch.error} onSave={landingBranch.commitNow} />
-      </label>
-      <label className="flex items-center gap-1.5">
-        <span className="ac-label">yolo</span>
-        <select
-          aria-label={`YOLO mode for ${p.slug}`}
-          className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
-          value={yoloOverrideOf(p.policies)}
-          onChange={(e) =>
-            // `policies` is replaced wholesale, so dropping the key is what clears the
-            // override and puts the project back on the workspace setting.
-            patch.mutate({ id: p.id, patch: { policies: withYolo(p.policies, e.target.value) } })
-          }
-        >
-          <option value="inherit">{workspaceOn ? 'inherit (on)' : 'inherit (off)'}</option>
-          <option value="on">on</option>
-          <option value="off">off</option>
-        </select>
-      </label>
-      <div className="flex flex-wrap items-center gap-2">
-        {blockReason ? <span className="text-micro text-text-3">{blockReason}</span> : null}
-        <Button size="sm" variant="ghost" disabled={blocked} onClick={() => setSheet('remove')}>Remove</Button>
-        {destinations.length > 0 ? (
-          <Button size="sm" variant="ghost" disabled={blocked} onClick={() => setSheet('move')}>Move</Button>
-        ) : null}
+    <div className="px-3.5 py-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="ac-mono text-meta text-text-1">{p.slug}</span>
+        <Badge>{p.status}</Badge>
+        <span className="ac-mono ac-truncate flex-1 text-micro text-text-3">{p.gitUrl}</span>
+        <label className="flex flex-wrap items-center gap-1.5">
+          <span className="ac-label">workers</span>
+          <input
+            type="number"
+            min={1}
+            value={maxWorkers.draft}
+            onChange={(e) => maxWorkers.onChange(e.target.value)}
+            onBlur={maxWorkers.onBlur}
+            onKeyDown={maxWorkers.onKeyDown}
+            className="ac-mono h-7 w-14 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+          />
+          <CommitStatus status={maxWorkers.status} error={maxWorkers.error} onSave={maxWorkers.commitNow} />
+        </label>
+        <label className="flex flex-wrap items-center gap-1.5">
+          <span className="ac-label">landing branch</span>
+          <input
+            aria-label={`landing branch for ${p.slug}`}
+            placeholder={p.defaultBranch}
+            value={landingBranch.draft}
+            onChange={(e) => landingBranch.onChange(e.target.value)}
+            onBlur={landingBranch.onBlur}
+            onKeyDown={landingBranch.onKeyDown}
+            className="ac-mono h-7 w-28 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+          />
+          <CommitStatus status={landingBranch.status} error={landingBranch.error} onSave={landingBranch.commitNow} />
+        </label>
+        <label className="flex items-center gap-1.5">
+          <span className="ac-label">yolo</span>
+          <select
+            aria-label={`YOLO mode for ${p.slug}`}
+            className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+            value={booleanPolicyValue(p.policies, 'yolo')}
+            onChange={(e) => setPolicy('yolo', e.target.value === 'inherit' ? undefined : e.target.value === 'on')}
+          >
+            <option value="inherit">{inheritLabel(workspaceOn ? 'on' : 'off')}</option>
+            <option value="on">on</option>
+            <option value="off">off</option>
+          </select>
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          {blockReason ? <span className="text-micro text-text-3">{blockReason}</span> : null}
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={open}
+            aria-label={`Delivery and setup for ${p.slug}`}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? 'Hide delivery & setup' : 'Delivery & setup'}
+          </Button>
+          <Button size="sm" variant="ghost" disabled={blocked} onClick={() => setSheet('remove')}>Remove</Button>
+          {destinations.length > 0 ? (
+            <Button size="sm" variant="ghost" disabled={blocked} onClick={() => setSheet('move')}>Move</Button>
+          ) : null}
+        </div>
       </div>
+      {open ? (
+        <div className="mt-3 grid gap-x-4 gap-y-2.5 border-t border-line-1 pt-3 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <Field
+              label="Setup command"
+              hint="Runs shell in the project clone before each new worktree's first turn. Also set in the add form above."
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  aria-label={`setup command for ${p.slug}`}
+                  className={cx(inputCx, 'ac-mono')}
+                  placeholder="pnpm install"
+                  value={setupCommand.draft}
+                  onChange={(e) => setupCommand.onChange(e.target.value)}
+                  onBlur={setupCommand.onBlur}
+                  onKeyDown={setupCommand.onKeyDown}
+                />
+                <CommitStatus status={setupCommand.status} error={setupCommand.error} onSave={setupCommand.commitNow} />
+              </div>
+            </Field>
+          </div>
+          <PolicySelect
+            p={p}
+            policyKey="proposalApproval"
+            label="proposal approval"
+            options={APPROVAL_OWNERS}
+            value={approvalOwnerValue(p.policies, 'proposalApproval')}
+            workspaceValue={workspaceDefaults.proposalApproval}
+            onSelect={setPolicy}
+          />
+          <PolicySelect
+            p={p}
+            policyKey="taskApproval"
+            label="task approval"
+            options={APPROVAL_OWNERS}
+            value={approvalOwnerValue(p.policies, 'taskApproval')}
+            onSelect={setPolicy}
+          />
+          <PolicySelect
+            p={p}
+            policyKey="mergeMethod"
+            label="merge method"
+            options={MERGE_METHODS}
+            value={enumPolicyValue(p.policies, 'mergeMethod')}
+            onSelect={setPolicy}
+          />
+          <PolicySelect
+            p={p}
+            policyKey="deliveryMode"
+            label="delivery mode"
+            options={DELIVERY_MODES}
+            value={enumPolicyValue(p.policies, 'deliveryMode')}
+            workspaceValue={workspaceDefaults.deliveryMode}
+            onSelect={setPolicy}
+          />
+          <PolicySelect
+            p={p}
+            policyKey="archiveCommit"
+            label="archive commit"
+            options={ARCHIVE_COMMITS}
+            value={enumPolicyValue(p.policies, 'archiveCommit')}
+            onSelect={setPolicy}
+          />
+          <PolicySelect
+            p={p}
+            policyKey="requireCi"
+            label="require CI"
+            options={['on', 'off']}
+            value={booleanPolicyValue(p.policies, 'requireCi')}
+            toValue={(raw) => raw === 'on'}
+            onSelect={setPolicy}
+          />
+          <PolicySelect
+            p={p}
+            policyKey="autoMergeDefault"
+            label="auto-merge default"
+            options={['on', 'off']}
+            value={booleanPolicyValue(p.policies, 'autoMergeDefault')}
+            toValue={(raw) => raw === 'on'}
+            onSelect={setPolicy}
+          />
+          <Field label="Merge concurrency" hint="How many of this project's tickets may be in the active merge step at once.">
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={mergeConcurrencySchema.minValue ?? undefined}
+                max={mergeConcurrencySchema.maxValue ?? undefined}
+                aria-label={`merge concurrency for ${p.slug}`}
+                className={cx(inputCx, 'ac-mono')}
+                value={mergeConcurrency.draft}
+                onChange={(e) => mergeConcurrency.onChange(e.target.value)}
+                onBlur={mergeConcurrency.onBlur}
+                onKeyDown={mergeConcurrency.onKeyDown}
+              />
+              <CommitStatus status={mergeConcurrency.status} error={mergeConcurrency.error} onSave={mergeConcurrency.commitNow} />
+            </div>
+          </Field>
+        </div>
+      ) : null}
       {sheet === 'remove' ? (
         <RemoveProjectSheet project={p} liveCount={liveCount} onClose={() => setSheet(null)} />
       ) : null}
@@ -666,16 +886,18 @@ function ActiveProjectRow({
 function ProjectRow({
   p,
   workspaceOn,
+  workspaceDefaults,
   liveCount,
   destinations,
 }: {
   p: Project;
   workspaceOn: boolean;
+  workspaceDefaults: WorkspacePolicyDefaults;
   liveCount: number;
   destinations: T.WorkspaceListItem[];
 }): React.ReactElement {
   if (p.status === 'archived') return <ArchivedProjectRow p={p} />;
-  return <ActiveProjectRow p={p} workspaceOn={workspaceOn} liveCount={liveCount} destinations={destinations} />;
+  return <ActiveProjectRow p={p} workspaceOn={workspaceOn} workspaceDefaults={workspaceDefaults} liveCount={liveCount} destinations={destinations} />;
 }
 
 function ProjectsSection(): React.ReactElement {
@@ -689,7 +911,9 @@ function ProjectsSection(): React.ReactElement {
   const [maxWorkersText, setMaxWorkersText] = useState('2');
   const [setupCommand, setSetupCommand] = useState('');
   const [autoMergeDefault, setAutoMergeDefault] = useState(false);
-  const workspaceOn = workspaceYolo(useWorkspaceSummary().data?.config ?? {});
+  const config = useWorkspaceSummary().data?.config ?? {};
+  const workspaceOn = workspaceYolo(config);
+  const workspaceDefaults = workspacePolicyDefaults(config);
   const destinations = (workspaces.data ?? []).filter((w) => w.id !== currentWs);
 
   // Max workers checked against the shared project schema the route itself validates with (VS-212) —
@@ -764,6 +988,7 @@ function ProjectsSection(): React.ReactElement {
               key={p.id}
               p={p}
               workspaceOn={workspaceOn}
+              workspaceDefaults={workspaceDefaults}
               liveCount={liveWorkerCount(workers.data ?? [], p.id)}
               destinations={destinations}
             />

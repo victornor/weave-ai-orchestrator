@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProjectConfigSchema } from '@weave-ai/shared';
+import { ProjectConfigSchema, ProjectPoliciesSchema, APPROVAL_OWNERS, ARCHIVE_COMMITS, DELIVERY_MODES, MERGE_METHODS } from '@weave-ai/shared';
 import { ApiError } from '../api/client';
 
 const state = vi.hoisted(() => ({
@@ -438,6 +438,123 @@ describe('Settings — a project landing branch (VS-122)', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
 
     await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { landingBranch: 'edge' } }));
+  });
+});
+
+describe('Settings — a project delivery policies and setup command (VS-303)', () => {
+  const project = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'p1', slug: 'api', status: 'ready', gitUrl: 'g', maxWorkers: 2, defaultBranch: 'main', landingBranch: 'edge', setupCommand: 'pnpm install', policies: { requireCi: true }, ...over,
+  });
+
+  function openPolicies(): void {
+    render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delivery and setup for api' }));
+  }
+
+  it('stays collapsed until asked, and opening it writes nothing', () => {
+    state.projects = [project({ policies: {} })];
+    render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+    expect(screen.queryByLabelText('proposal approval for api')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delivery and setup for api' }));
+    expect(screen.getByLabelText('proposal approval for api')).toBeInTheDocument();
+    expect(state.projectPatches).toEqual([]);
+  });
+
+  it('reads an unset policy as inherited, naming the workspace value where it has one', () => {
+    state.config = { defaults: { proposalApproval: 'human', deliveryMode: 'local-branch' } };
+    state.projects = [project({ policies: {} })];
+    openPolicies();
+
+    const proposal = screen.getByLabelText('proposal approval for api') as HTMLSelectElement;
+    expect(proposal).toHaveValue('inherit');
+    expect(proposal.options[0]!.textContent).toBe('inherit (human)');
+    expect((screen.getByLabelText('delivery mode for api') as HTMLSelectElement).options[0]!.textContent).toBe('inherit (local-branch)');
+    expect((screen.getByLabelText('merge method for api') as HTMLSelectElement).options[0]!.textContent).toBe('inherit');
+  });
+
+  it('offers exactly the schema values plus inherit', () => {
+    state.projects = [project({ policies: {} })];
+    openPolicies();
+    const values = (label: string): string[] =>
+      [...(screen.getByLabelText(label) as HTMLSelectElement).options].map((o) => o.value);
+    expect(values('proposal approval for api')).toEqual(['inherit', ...APPROVAL_OWNERS]);
+    expect(values('task approval for api')).toEqual(['inherit', ...APPROVAL_OWNERS]);
+    expect(values('merge method for api')).toEqual(['inherit', ...MERGE_METHODS]);
+    expect(values('delivery mode for api')).toEqual(['inherit', ...DELIVERY_MODES]);
+    expect(values('archive commit for api')).toEqual(['inherit', ...ARCHIVE_COMMITS]);
+    expect(values('require CI for api')).toEqual(['inherit', 'on', 'off']);
+    expect(values('auto-merge default for api')).toEqual(['inherit', 'on', 'off']);
+  });
+
+  it('changing one policy spreads the existing policies and drops the key on inherit', () => {
+    state.projects = [project({ policies: { requireCi: true, mergeMethod: 'rebase' } })];
+    openPolicies();
+
+    fireEvent.change(screen.getByLabelText('delivery mode for api'), { target: { value: 'local-branch' } });
+    expect(state.projectPatches.at(-1)).toEqual({
+      id: 'p1',
+      patch: { policies: { requireCi: true, mergeMethod: 'rebase', deliveryMode: 'local-branch' } },
+    });
+
+    fireEvent.change(screen.getByLabelText('merge method for api'), { target: { value: 'inherit' } });
+    expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { policies: { requireCi: true } } });
+  });
+
+  it('changing a policy does not restate setupCommand, maxWorkers or landingBranch', () => {
+    state.projects = [project()];
+    openPolicies();
+
+    fireEvent.change(screen.getByLabelText('require CI for api'), { target: { value: 'off' } });
+    const body = state.projectPatches.at(-1)!;
+    expect(body.patch).toEqual({ policies: { requireCi: false } });
+    expect(body.patch).not.toHaveProperty('setupCommand');
+    expect(body.patch).not.toHaveProperty('maxWorkers');
+    expect(body.patch).not.toHaveProperty('landingBranch');
+  });
+
+  it('refuses an out-of-range merge concurrency before the PATCH, showing the range', async () => {
+    state.projects = [project({ policies: {} })];
+    openPolicies();
+    const schema = ProjectPoliciesSchema.shape.mergeConcurrency.unwrap().removeDefault();
+    const field = screen.getByLabelText('merge concurrency for api');
+    fireEvent.change(field, { target: { value: String((schema.maxValue ?? 8) + 1) } });
+    fireEvent.blur(field);
+
+    await waitFor(() => expect(screen.getByText(`A whole number from ${schema.minValue} to ${schema.maxValue}.`)).toBeInTheDocument());
+    expect(state.projectPatches).toEqual([]);
+  });
+
+  it('sends a valid merge concurrency and clears it when emptied', async () => {
+    state.projects = [project({ policies: { mergeConcurrency: 3 } })];
+    openPolicies();
+    const field = screen.getByLabelText('merge concurrency for api');
+    expect(field).toHaveValue(3);
+
+    fireEvent.change(field, { target: { value: '4' } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { policies: { mergeConcurrency: 4 } } }));
+
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { policies: {} } }));
+  });
+
+  it('commits the setup command and clears it when emptied', async () => {
+    state.projects = [project({ setupCommand: 'pnpm install' })];
+    openPolicies();
+    const field = screen.getByLabelText('setup command for api');
+    expect(field).toHaveValue('pnpm install');
+
+    fireEvent.change(field, { target: { value: 'pnpm i --frozen-lockfile' } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { setupCommand: 'pnpm i --frozen-lockfile' } }));
+
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { setupCommand: '' } }));
   });
 });
 

@@ -1,11 +1,15 @@
 /**
- * A file-explorer style view over the knowledge base (VS-265): a folder tree built client-side
- * from the same document catalogue and hub list the flat "Knowledge" tab already fetches, with
- * hub files shown as a distinguished node rather than a folder, and each scope's dated archive
- * files reachable but collapsed out of the way. Opening a document or a hub reuses the existing
- * `DocPanel`/`KnowledgeDocPanel` — this view adds no new read/write UI of its own.
+ * A file-explorer style view over the knowledge base (VS-265, VS-279): a full-width two-pane
+ * browser. The left pane is a folder tree built client-side from the same document catalogue and
+ * hub list the flat "Knowledge" tab already fetches, with hub files shown as a distinguished node
+ * rather than a folder and each scope's dated archive files collapsed out of the way. The right
+ * pane shows the selected entry's content inline, reusing the existing `DocPanel`,
+ * `KnowledgeDocPanel`, `ArchivePanel` and `ArtifactPanel` — this view adds no renderer of its own.
+ *
+ * Layout: `PageBody` already has a definite height, so the root is `h-full min-h-0` and each pane
+ * owns its scrolling (`min-h-0 ac-scroll`). On a phone (`< md`) only one pane shows at a time.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../components/Button';
 import { Badge } from '../components/StatusGlyph';
 import { SkeletonRows } from '../components/Skeleton';
@@ -18,24 +22,67 @@ import {
 } from '../api/hooks';
 import { useWs } from '../api/context';
 import type { TicketArtifactSummary } from '../api/types';
-import { buildExplorerTree, type ExplorerHub, type ExplorerNode } from '../lib/knowledgeExplorer';
+import {
+  buildExplorerTree, clampTreeWidth, parseDocParam, serializeDocParam, TREE_WIDTH_DEFAULT, TREE_WIDTH_MAX,
+  TREE_WIDTH_MIN, type ExplorerHub, type ExplorerNode,
+} from '../lib/knowledgeExplorer';
 import { DocPanel, KnowledgeDocPanel, type DocRef } from './KnowledgeDocs';
 import { cx } from '../lib/cx';
 import { ago } from '../lib/format';
+import { useGo, useSearchParams } from '../app/link';
 
 interface HubOpen { scope: string; project?: string }
 
+/** What the content pane shows. `null` means "nothing explicitly selected" — the default applies. */
+type Selection =
+  | { kind: 'doc'; ref: DocRef }
+  | { kind: 'hub'; scope: string; project?: string }
+  | { kind: 'archive'; scope: string; project?: string; path: string }
+  | { kind: 'artifact'; artifact: TicketArtifactSummary };
+
+/** A media query as a boolean that follows changes (same local-hook pattern as KnowledgeGraph). */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => (typeof window !== 'undefined' ? window.matchMedia(query).matches : false));
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = (): void => setMatches(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [query]);
+  return matches;
+}
+
 export function KnowledgeExplorer({ project }: { project?: string }): React.ReactElement {
   const ws = useWs();
+  const url = useSearchParams();
+  const go = useGo();
   const docs = useKnowledgeDocs(project);
   const index = useKnowledgeIndex();
   const projects = useProjects();
   const artifacts = useProjectArtifacts(project);
+  const narrow = useMediaQuery('(max-width: 767px)');
+  const rootRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const [openDoc, setOpenDoc] = useState<DocRef | null>(null);
-  const [openHub, setOpenHub] = useState<HubOpen | null>(null);
-  const [openArchive, setOpenArchive] = useState<{ scope: string; project?: string; path: string } | null>(null);
-  const [openArtifact, setOpenArtifact] = useState<TicketArtifactSummary | null>(null);
+  const [treeWidth, setTreeWidth] = useState(TREE_WIDTH_DEFAULT);
+  const [dragging, setDragging] = useState(false);
+  const [selection, setSelection] = useState<Selection | null>(() => {
+    const ref = parseDocParam(url['doc'], project);
+    return ref ? { kind: 'doc', ref } : null;
+  });
+
+  // Adopt a `?doc=` from outside (a pasted link, back/forward) without fighting our own writes.
+  const urlDoc = url['doc'];
+  useEffect(() => {
+    const parsed = parseDocParam(urlDoc, project);
+    setSelection((prev) => {
+      const current = prev?.kind === 'doc' ? serializeDocParam(prev.ref) : null;
+      const next = parsed ? serializeDocParam(parsed) : null;
+      if (current === next) return prev;
+      if (parsed) return { kind: 'doc', ref: parsed };
+      return prev?.kind === 'doc' ? null : prev;
+    });
+  }, [urlDoc, project]);
 
   const hubs: ExplorerHub[] = useMemo(
     () =>
@@ -70,6 +117,57 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
     });
   };
 
+  const writeUrl = (doc: string | null, projectId?: string): void => {
+    const search: Record<string, unknown> = { tab: 'explorer' };
+    const proj = projectId ?? url['project'];
+    if (proj) search['project'] = proj;
+    if (doc) search['doc'] = doc;
+    go('/w/$ws/knowledge', { params: { ws }, search, replace: true });
+  };
+
+  const openDoc = (ref: DocRef): void => {
+    setSelection({ kind: 'doc', ref });
+    writeUrl(serializeDocParam(ref), ref.scope === 'project' ? ref.project : undefined);
+  };
+  const openHub = (hub: HubOpen): void => { setSelection({ kind: 'hub', ...hub }); writeUrl(null); };
+  const openArchive = (scope: string, projectId: string | undefined, path: string): void => {
+    setSelection({ kind: 'archive', scope, ...(projectId ? { project: projectId } : {}), path });
+    writeUrl(null);
+  };
+  const openArtifact = (artifact: TicketArtifactSummary): void => { setSelection({ kind: 'artifact', artifact }); writeUrl(null); };
+  const clearSelection = (): void => { setSelection(null); writeUrl(null); };
+
+  // The content pane is never empty on desktop: with no explicit selection it shows the project's
+  // PROJECT.md (falling back to the first project when "all" is selected). Computed rather than
+  // stored, so a phone at rest still has `selection === null` and stays on the tree.
+  const effectiveProject = project || projects.data?.[0]?.id;
+  const shown: Selection | null = selection ?? (effectiveProject ? { kind: 'hub', scope: 'project', project: effectiveProject } : null);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const node = rootRef.current;
+    if (!node) return;
+    const move = (e: PointerEvent): void => {
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      setTreeWidth(clampTreeWidth(((e.clientX - rect.left) / rect.width) * 100));
+    };
+    const end = (): void => setDragging(false);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+  }, [dragging]);
+
+  const onDividerKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); setTreeWidth((w) => clampTreeWidth(w - 2)); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); setTreeWidth((w) => clampTreeWidth(w + 2)); }
+  };
+
   const artifactRows = artifacts.data ?? [];
 
   if (docs.isLoading || index.isLoading) return <SkeletonRows rows={5} />;
@@ -80,68 +178,104 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
     return <EmptyState title="Nothing to browse yet." detail="A knowledge base and its documents are created as soon as a worker or the conductor writes to them." />;
   }
 
-  return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
-      <div className="ac-card divide-y divide-line-1">
-        {tree.map((root) => {
-          const archiveIdx = archiveRoots.findIndex((r) => r.rootId === root.id);
-          const archive = archiveIdx >= 0 ? archiveResults[archiveIdx] : undefined;
-          const archiveRoot = archiveIdx >= 0 ? archiveRoots[archiveIdx] : undefined;
-          return (
-            <RootSection
-              key={root.id}
-              root={root}
-              expanded={expanded}
-              onToggle={toggle}
-              onOpenDoc={(ref) => { setOpenHub(null); setOpenArchive(null); setOpenArtifact(null); setOpenDoc(ref); }}
-              onOpenHub={(hub) => { setOpenDoc(null); setOpenArchive(null); setOpenArtifact(null); setOpenHub(hub); }}
-              archiveEntries={archive?.data}
-              archiveLoading={archive?.isLoading ?? false}
-              onOpenArchive={archiveRoot ? (path) => { setOpenDoc(null); setOpenHub(null); setOpenArtifact(null); setOpenArchive({ scope: archiveRoot.scope, project: archiveRoot.project, path }); } : undefined}
-            />
-          );
-        })}
-        {/* Flat, recency-ordered, not grouped by ticket or kind (design.md Decision 1) — omitted
-            entirely, not shown empty, when the scope has no artifacts. */}
-        {artifactRows.length ? (
-          <ArtifactsSection
-            artifacts={artifactRows}
-            openId={openArtifact?.id ?? null}
-            onOpen={(a) => { setOpenDoc(null); setOpenHub(null); setOpenArchive(null); setOpenArtifact(a); }}
-          />
-        ) : null}
-      </div>
+  const activeNode = (node: ExplorerNode): boolean => {
+    if (!selection) return false;
+    if (node.kind === 'doc' && selection.kind === 'doc') {
+      return node.doc!.scope === selection.ref.scope && node.doc!.slug === selection.ref.slug;
+    }
+    if (node.kind === 'hub' && selection.kind === 'hub') {
+      return node.hub!.scope === selection.scope && node.hub!.project === selection.project;
+    }
+    return false;
+  };
 
-      {openDoc ? (
-        <DocPanel
-          doc={openDoc}
-          projects={projects.data ?? []}
-          onOpen={(ref) => { setOpenHub(null); setOpenArchive(null); setOpenArtifact(null); setOpenDoc(ref); }}
-          onClose={() => setOpenDoc(null)}
+  const showTree = !narrow || selection === null;
+  const showContent = !narrow || selection !== null;
+
+  return (
+    <div ref={rootRef} className="flex h-full min-h-0" style={{ '--tree-w': `${treeWidth}%` } as React.CSSProperties}>
+      {showTree ? (
+        <div className={cx('min-w-0 min-h-0 ac-scroll', narrow ? 'flex-1' : 'w-[var(--tree-w)] flex-none')}>
+          <div className="ac-card divide-y divide-line-1">
+            {tree.map((root) => {
+              const archiveIdx = archiveRoots.findIndex((r) => r.rootId === root.id);
+              const archive = archiveIdx >= 0 ? archiveResults[archiveIdx] : undefined;
+              const archiveRoot = archiveIdx >= 0 ? archiveRoots[archiveIdx] : undefined;
+              return (
+                <RootSection
+                  key={root.id}
+                  root={root}
+                  expanded={expanded}
+                  onToggle={toggle}
+                  onOpenDoc={openDoc}
+                  onOpenHub={openHub}
+                  isActive={activeNode}
+                  archiveEntries={archive?.data}
+                  archiveLoading={archive?.isLoading ?? false}
+                  onOpenArchive={archiveRoot ? (path) => openArchive(archiveRoot.scope, archiveRoot.project, path) : undefined}
+                />
+              );
+            })}
+            {/* Flat, recency-ordered, not grouped by ticket or kind (design.md Decision 1) — omitted
+                entirely, not shown empty, when the scope has no artifacts. */}
+            {artifactRows.length ? (
+              <ArtifactsSection artifacts={artifactRows} openId={selection?.kind === 'artifact' ? selection.artifact.id : null} onOpen={openArtifact} />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {!narrow ? (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize tree pane"
+          aria-valuenow={Math.round(treeWidth)}
+          aria-valuemin={TREE_WIDTH_MIN}
+          aria-valuemax={TREE_WIDTH_MAX}
+          tabIndex={0}
+          onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); setDragging(true); }}
+          onKeyDown={onDividerKeyDown}
+          onDoubleClick={() => setTreeWidth(TREE_WIDTH_DEFAULT)}
+          className="mx-1.5 w-1 flex-none cursor-col-resize touch-none select-none bg-line-1 hover:bg-accent"
         />
       ) : null}
-      {openHub ? (
-        <KnowledgeDocPanel
-          scope={openHub.scope}
-          project={openHub.project}
-          onClose={() => setOpenHub(null)}
-          onOpenDoc={(ref) => { setOpenHub(null); setOpenDoc(ref); }}
-        />
+
+      {showContent ? (
+        <div className="min-w-0 min-h-0 flex-1 ac-scroll">
+          {narrow && selection !== null ? (
+            <button type="button" onClick={clearSelection} className="mb-2 flex items-center gap-1.5 px-0.5 text-meta text-text-2 hover:text-text-1">
+              ← tree
+            </button>
+          ) : null}
+          {shown ? (
+            shown.kind === 'doc' ? (
+              <DocPanel doc={shown.ref} projects={projects.data ?? []} onOpen={openDoc} onClose={clearSelection} />
+            ) : shown.kind === 'hub' ? (
+              <KnowledgeDocPanel scope={shown.scope} project={shown.project} onClose={clearSelection} onOpenDoc={openDoc} />
+            ) : shown.kind === 'archive' ? (
+              <ArchivePanel scope={shown.scope} project={shown.project} path={shown.path} onClose={clearSelection} />
+            ) : (
+              <ArtifactPanel ws={ws} artifact={shown.artifact} onClose={clearSelection} />
+            )
+          ) : (
+            <div className="ac-card p-3.5 text-meta text-text-3">Select a document from the tree to read it here.</div>
+          )}
+        </div>
       ) : null}
-      {openArchive ? <ArchivePanel scope={openArchive.scope} project={openArchive.project} path={openArchive.path} onClose={() => setOpenArchive(null)} /> : null}
-      {openArtifact ? <ArtifactPanel ws={ws} artifact={openArtifact} onClose={() => setOpenArtifact(null)} /> : null}
     </div>
   );
 }
 
 function RootSection({
-  root, expanded, onToggle, onOpenDoc, onOpenHub, archiveEntries, archiveLoading, onOpenArchive,
+  root, expanded, onToggle, onOpenDoc, onOpenHub, isActive, archiveEntries, archiveLoading, onOpenArchive,
 }: {
   root: ExplorerNode;
   expanded: Set<string>;
   onToggle: (id: string) => void;
   onOpenDoc: (ref: DocRef) => void;
   onOpenHub: (hub: HubOpen) => void;
+  isActive: (node: ExplorerNode) => boolean;
   archiveEntries: Array<{ path: string; date: string }> | undefined;
   archiveLoading: boolean;
   onOpenArchive?: (path: string) => void;
@@ -153,7 +287,7 @@ function RootSection({
       </div>
       <div>
         {root.children.map((child) => (
-          <TreeRow key={child.id} node={child} depth={0} expanded={expanded} onToggle={onToggle} onOpenDoc={onOpenDoc} onOpenHub={onOpenHub} />
+          <TreeRow key={child.id} node={child} depth={0} expanded={expanded} onToggle={onToggle} onOpenDoc={onOpenDoc} onOpenHub={onOpenHub} isActive={isActive} />
         ))}
         {archiveEntries?.length ? (
           <ArchiveRow entries={archiveEntries} loading={archiveLoading} expanded={expanded} onToggle={onToggle} rootId={root.id} onOpen={onOpenArchive} />
@@ -164,7 +298,7 @@ function RootSection({
 }
 
 function TreeRow({
-  node, depth, expanded, onToggle, onOpenDoc, onOpenHub,
+  node, depth, expanded, onToggle, onOpenDoc, onOpenHub, isActive,
 }: {
   node: ExplorerNode;
   depth: number;
@@ -172,8 +306,10 @@ function TreeRow({
   onToggle: (id: string) => void;
   onOpenDoc: (ref: DocRef) => void;
   onOpenHub: (hub: HubOpen) => void;
+  isActive: (node: ExplorerNode) => boolean;
 }): React.ReactElement {
   const pad = { paddingLeft: `${0.875 + depth * 1.25}rem` };
+  const active = isActive(node);
 
   if (node.kind === 'hub') {
     return (
@@ -181,7 +317,8 @@ function TreeRow({
         type="button"
         style={pad}
         onClick={() => onOpenHub(node.hub!)}
-        className="flex w-full items-center gap-2 py-1.5 pr-3.5 text-left hover:bg-bg-2"
+        aria-current={active ? 'true' : undefined}
+        className={cx('flex w-full items-center gap-2 py-1.5 pr-3.5 text-left hover:bg-bg-2', active && 'bg-accent-tint')}
       >
         <HubGlyph />
         <span className="text-meta font-medium text-text-1">{node.label}</span>
@@ -206,7 +343,7 @@ function TreeRow({
           <span className="ac-mono text-meta text-text-2">{node.label}</span>
           <span className="text-nano text-text-4">{node.children.length}</span>
         </button>
-        {open ? node.children.map((c) => <TreeRow key={c.id} node={c} depth={depth + 1} expanded={expanded} onToggle={onToggle} onOpenDoc={onOpenDoc} onOpenHub={onOpenHub} />) : null}
+        {open ? node.children.map((c) => <TreeRow key={c.id} node={c} depth={depth + 1} expanded={expanded} onToggle={onToggle} onOpenDoc={onOpenDoc} onOpenHub={onOpenHub} isActive={isActive} />) : null}
       </div>
     );
   }
@@ -217,7 +354,8 @@ function TreeRow({
       type="button"
       style={pad}
       onClick={() => onOpenDoc({ scope: d.scope, slug: d.slug, ...(d.projectId ? { project: d.projectId } : {}) })}
-      className="flex w-full items-center gap-2.5 py-1.5 pr-3.5 text-left hover:bg-bg-2"
+      aria-current={active ? 'true' : undefined}
+      className={cx('flex w-full items-center gap-2.5 py-1.5 pr-3.5 text-left hover:bg-bg-2', active && 'bg-accent-tint')}
     >
       <DocGlyph />
       <span className="min-w-0 flex-1 truncate text-meta text-text-1">{node.label}</span>

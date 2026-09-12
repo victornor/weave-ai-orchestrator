@@ -27,8 +27,14 @@ const state = vi.hoisted(() => ({
   artifactsLoading: false,
 }));
 
+const linkState = vi.hoisted(() => ({ search: {} as Record<string, string | undefined>, go: vi.fn() }));
+
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
-vi.mock('../app/link', () => ({ A: ({ to, children }: { to: string; children?: React.ReactNode }) => <a href={to}>{children}</a> }));
+vi.mock('../app/link', () => ({
+  A: ({ to, children }: { to: string; children?: React.ReactNode }) => <a href={to}>{children}</a>,
+  useSearchParams: () => linkState.search,
+  useGo: () => linkState.go,
+}));
 
 vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: [{ id: 'p1', slug: 'api' }] }),
@@ -49,6 +55,21 @@ vi.mock('../api/hooks', () => ({
 
 const { KnowledgeExplorer } = await import('../routes/KnowledgeExplorer');
 
+/** Render with `matchMedia` forced to a narrow viewport, restoring it afterwards. */
+function renderNarrow(ui: React.ReactElement): ReturnType<typeof render> {
+  const real = window.matchMedia;
+  window.matchMedia = ((q: string) => ({
+    matches: true, media: q, onchange: null,
+    addEventListener: () => undefined, removeEventListener: () => undefined,
+    addListener: () => undefined, removeListener: () => undefined, dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+  try {
+    return render(ui);
+  } finally {
+    window.matchMedia = real;
+  }
+}
+
 beforeEach(() => {
   state.docs = [];
   state.hubFiles = [];
@@ -56,6 +77,8 @@ beforeEach(() => {
   state.archiveLoading = false;
   state.artifacts = [];
   state.artifactsLoading = false;
+  linkState.search = {};
+  linkState.go.mockClear();
 });
 
 describe('KnowledgeExplorer', () => {
@@ -166,5 +189,101 @@ describe('KnowledgeExplorer artifacts entry (VS-270)', () => {
     state.artifacts = [];
     render(<KnowledgeExplorer project="p1" />);
     expect(screen.getByText('Nothing to browse yet.')).toBeInTheDocument();
+  });
+});
+
+const PROJECT_HUB = { id: 'h1', path: 'projects/api/PROJECT.md', scope: 'project', projectId: 'p1', projectSlug: 'api', kind: 'hub' as const };
+
+describe('KnowledgeExplorer two-pane browser (VS-279)', () => {
+  it('fills the page with a tree pane and a content pane, defaulting to PROJECT.md', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.docs = [DOC_FLAT];
+    render(<KnowledgeExplorer project="p1" />);
+
+    expect(screen.getByText('The run engine')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'api' })).toBeInTheDocument();
+    expect(screen.getByRole('separator', { name: 'Resize tree pane' })).toBeInTheDocument();
+  });
+
+  it('renders a selected document in the content pane without leaving the explorer', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.docs = [DOC_FLAT];
+    render(<KnowledgeExplorer project="p1" />);
+
+    fireEvent.click(screen.getByText('The run engine'));
+    expect(screen.getByRole('heading', { name: 'Retry policy' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'api' })).toBeNull();
+    expect(screen.getByText('The run engine')).toBeInTheDocument();
+    expect(screen.getByRole('separator', { name: 'Resize tree pane' })).toBeInTheDocument();
+  });
+
+  it("defaults to the first project's PROJECT.md when no project is selected", () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.docs = [DOC_FLAT];
+    render(<KnowledgeExplorer />);
+
+    expect(screen.getByRole('heading', { name: 'api' })).toBeInTheDocument();
+  });
+
+  it('shows only the tree at a narrow viewport until something is selected', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.docs = [DOC_FLAT];
+    renderNarrow(<KnowledgeExplorer project="p1" />);
+
+    expect(screen.getByText('The run engine')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'api' })).toBeNull();
+    expect(screen.queryByRole('separator')).toBeNull();
+  });
+
+  it('replaces the tree with the selected content on a narrow viewport and offers a way back', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.docs = [DOC_FLAT];
+    renderNarrow(<KnowledgeExplorer project="p1" />);
+
+    fireEvent.click(screen.getByText('The run engine'));
+    expect(screen.queryByText('The run engine')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Retry policy' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('← tree'));
+    expect(screen.getByText('The run engine')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Retry policy' })).toBeNull();
+  });
+
+  it('reflects the selected document in the URL', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.docs = [DOC_FLAT];
+    render(<KnowledgeExplorer project="p1" />);
+
+    fireEvent.click(screen.getByText('The run engine'));
+    const call = linkState.go.mock.calls.at(-1);
+    expect(call?.[0]).toBe('/w/$ws/knowledge');
+    expect(call?.[1]).toMatchObject({ search: { tab: 'explorer', project: 'p1', doc: 'project:run-engine' } });
+  });
+
+  it('opens with the document named in the URL already selected', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.docs = [DOC_NESTED];
+    linkState.search = { tab: 'explorer', project: 'p1', doc: 'project:retry-policy' };
+    render(<KnowledgeExplorer project="p1" />);
+
+    expect(screen.getByRole('heading', { name: 'Retry policy' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'api' })).toBeNull();
+  });
+
+  it('marks the selected document row and clears the mark when it changes', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.docs = [DOC_FLAT];
+    render(<KnowledgeExplorer project="p1" />);
+
+    const flatRow = (): HTMLElement => screen.getByText('The run engine').closest('button')!;
+    const hubRow = (): HTMLElement => screen.getByText('PROJECT.md').closest('button')!;
+    expect(flatRow().getAttribute('aria-current')).toBeNull();
+
+    fireEvent.click(flatRow());
+    expect(flatRow().getAttribute('aria-current')).toBe('true');
+
+    fireEvent.click(hubRow());
+    expect(hubRow().getAttribute('aria-current')).toBe('true');
+    expect(flatRow().getAttribute('aria-current')).toBeNull();
   });
 });

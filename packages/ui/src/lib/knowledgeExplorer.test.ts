@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildExplorerTree, hubFileName, type ExplorerHub } from './knowledgeExplorer';
+import {
+  buildExplorerTree, clampTreeWidth, hubFileName, parseDocParam, serializeDocParam, TREE_WIDTH_DEFAULT,
+  type ExplorerHub,
+} from './knowledgeExplorer';
 import type { KnowledgeDocSummary } from '../api/types';
 
 function doc(over: Partial<KnowledgeDocSummary>): KnowledgeDocSummary {
@@ -84,5 +87,38 @@ describe('hubFileName', () => {
     expect(hubFileName('shared')).toBe('SHARED.md');
     expect(hubFileName('decisions')).toBe('decisions.md');
     expect(hubFileName('workspace')).toBe('WORKSPACE.md');
+  });
+});
+
+describe('document URL parameter', () => {
+  it('round-trips every selectable scope', () => {
+    expect(serializeDocParam({ scope: 'project', slug: 'run-engine' })).toBe('project:run-engine');
+    expect(parseDocParam('project:run-engine', 'p1')).toEqual({ scope: 'project', slug: 'run-engine', project: 'p1' });
+    expect(parseDocParam('shared:onboarding')).toEqual({ scope: 'shared', slug: 'onboarding' });
+    expect(parseDocParam('workspace:release-notes')).toEqual({ scope: 'workspace', slug: 'release-notes' });
+  });
+
+  it('a project document takes its project id from the caller, not the parameter', () => {
+    expect(parseDocParam('project:run-engine')).toEqual({ scope: 'project', slug: 'run-engine' });
+    expect(parseDocParam('project:run-engine', 'p9')).toEqual({ scope: 'project', slug: 'run-engine', project: 'p9' });
+  });
+
+  it('rejects malformed input without throwing', () => {
+    expect(parseDocParam(undefined)).toBeNull();
+    expect(parseDocParam('')).toBeNull();
+    expect(parseDocParam('run-engine')).toBeNull();
+    expect(parseDocParam(':run-engine')).toBeNull();
+    expect(parseDocParam('project:')).toBeNull();
+    expect(parseDocParam('decisions:log')).toBeNull();
+    expect(parseDocParam('project:a:b')).toBeNull();
+  });
+});
+
+describe('clampTreeWidth', () => {
+  it('keeps a drag within the pane bounds and resets nonsense to the default', () => {
+    expect(clampTreeWidth(20)).toBe(20);
+    expect(clampTreeWidth(5)).toBe(15);
+    expect(clampTreeWidth(90)).toBe(40);
+    expect(clampTreeWidth(Number.NaN)).toBe(TREE_WIDTH_DEFAULT);
   });
 });

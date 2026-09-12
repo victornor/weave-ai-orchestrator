@@ -77,14 +77,37 @@ describe('openspec cli wrapper', () => {
     expect(bin.calls().at(-1)!.argv).toEqual(['new', 'change', 'tst-1-x', '--goal', 'goal', '--json']);
   });
 
-  it('surfaces the real reason when archive rejects a change, even with nothing on stderr', async () => {
+  it('surfaces the real reason and the code when archive rejects a change, even with nothing on stderr', async () => {
     const { clone, bin } = setup([
       { match: ['archive'], exit: 1, json: { archive: null, status: [{ severity: 'error', code: 'archive_spec_update_failed', message: 'conductor-chat/turn-work-trace MODIFIED failed: omits scenario(s) the current spec still has: "A scenario"', fix: 'Fix the change delta specs and rerun. No files were changed.' }] } },
     ]);
     const err = await cli.archive({ cwd: clone, bin: bin.path }, 'c').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(OcError);
+    expect((err as OcError).code).toBe('openspec_archive_blocked');
     expect((err as OcError).message).toContain('omits scenario(s) the current spec still has');
     expect((err as OcError).message).not.toMatch(/failed: *$/);
+  });
+
+  it('surfaces a retirement refusal\'s fix guidance, not only its headline message (VS-298)', async () => {
+    // The exact diagnostic shape the installed @fission-ai/openspec@1.12.0 prints for a declared
+    // retirement whose rebuilt spec still holds content the merge cannot account for.
+    const { clone, bin } = setup([
+      { match: ['archive'], exit: 1, json: { archive: null, status: [{
+        severity: 'error',
+        code: 'archive_spec_validation_failed',
+        message: "Rebuilt spec for 'runtime-credentials/serialized-refresh' failed validation. No files were changed.",
+        fix: "'runtime-credentials/serialized-refresh' declares retire_capabilities, but the spec holds content the merge cannot safely account for and deleting the file would take with it: \"runtime's credential needs refreshing\". Move it into `## Purpose` or a canonical requirement, or delete the spec by hand.",
+      }] } },
+    ]);
+    const err = await cli.archive({ cwd: clone, bin: bin.path }, 'c').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OcError);
+    const oc = err as OcError;
+    expect(oc.code).toBe('openspec_archive_blocked');
+    expect(oc.retryable).toBe(false);
+    expect(oc.message).toContain("Rebuilt spec for 'runtime-credentials/serialized-refresh' failed validation");
+    expect(oc.message).toContain('declares retire_capabilities, but the spec holds content the merge cannot safely account for');
+    expect(oc.details).toMatchObject({ openspecCode: 'archive_spec_validation_failed' });
+    expect((oc.details as { fix: string }).fix).toContain('Move it into `## Purpose` or a canonical requirement, or delete the spec by hand.');
   });
 
   it('falls back to stderr when archive rejects with no structured issues', async () => {

@@ -11,3 +11,14 @@ describe('revision_pending (VS-266)', () => {
     expect(OcError.status('revision_pending')).toBe(OcError.status('wrong_status'));
   });
 });
+
+describe('openspec_archive_blocked (VS-298)', () => {
+  it('is a known error code', () => {
+    expect(ERROR_CODES).toContain('openspec_archive_blocked');
+  });
+
+  it('maps to 422, alongside openspec_validation_failed', () => {
+    expect(OcError.status('openspec_archive_blocked')).toBe(422);
+    expect(OcError.status('openspec_archive_blocked')).toBe(OcError.status('openspec_validation_failed'));
+  });
+});

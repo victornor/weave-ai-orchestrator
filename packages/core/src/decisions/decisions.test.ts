@@ -394,6 +394,110 @@ describe('decisions', () => {
     expect(decisions.get(d.id).correlationKey).toBe('approval:workspace');
     expect(newId()).toBeTruthy();
   });
+
+  // ---------- VS-306: a decision named at a ticket that is already terminal ----------
+
+  it('creates a follow-up question detached when its ticket has already finished', async () => {
+    const t = ticket({ kind: 'task' });
+    await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+    await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' });
+
+    const d = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'What did you learn?' });
+
+    expect(d.status).toBe('open');
+    expect(d.ticketId).toBeNull();
+    expect(d.projectId).toBe(h.projectId);
+    expect(d.correlationKey).toBe(`question:${t.id}`);
+    // The ask stays legitimate: it is answerable, not refused.
+    expect((await decisions.answer(HUMAN, d.id, { text: 'the thing' })).status).toBe('answered');
+  });
+
+  it('keeps the ticket attachment when the ticket is not terminal', () => {
+    const t = ticket();
+    const d = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'Which store?' });
+    expect(d.ticketId).toBe(t.id);
+    expect(d.correlationKey).toBe(`question:${t.id}`);
+  });
+
+  it('a detached follow-up neither supersedes nor is superseded by a workspace-level question', async () => {
+    const t = ticket({ kind: 'task' });
+    await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+    await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' });
+
+    const workspaceQ = decisions.create(HUMAN, { kind: 'question', title: 'workspace question' });
+    const detached = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'follow-up on the finished ticket' });
+    expect(detached.ticketId).toBeNull();
+    expect(detached.correlationKey).toBe(`question:${t.id}`);
+    // Occupying its own bucket, the detached card must not have killed the workspace question.
+    expect(decisions.get(workspaceQ.id).status).toBe('open');
+
+    // Nor may the next workspace-level question kill the detached one.
+    const workspaceQ2 = decisions.create(HUMAN, { kind: 'question', title: 'another workspace question' });
+    expect(decisions.get(detached.id).status).toBe('open');
+    expect(decisions.get(workspaceQ.id).status).toBe('superseded');
+    expect(workspaceQ2.status).toBe('open');
+  });
+
+  describe('the stale-terminal sweep', () => {
+    const DAY = 24 * 3600e3;
+    const stale = () => new Date(Date.now() - 48 * 3600e3).toISOString();
+
+    it('withdraws an old open decision on a terminal ticket and leaves a fresh one', async () => {
+      const t = ticket({ kind: 'task' });
+      await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+      await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' });
+      // The historical shape the guard cannot reach: rows already attached to a finished ticket.
+      const oldId = newId();
+      const freshId = newId();
+      for (const [id, title, createdAt] of [[oldId, 'stale', stale()], [freshId, 'fresh', new Date().toISOString()]] as const) {
+        h.db.insert('decisions', {
+          id, workspaceId: h.workspaceId, ticketId: t.id, projectId: h.projectId, kind: 'question', owner: 'human',
+          title, context: '', optionsJson: [], allowFreeText: 1, status: 'open', correlationKey: `question:${t.id}-${title}`, createdAt,
+        });
+      }
+
+      expect(decisions.sweepTerminalTickets(SYSTEM, DAY)).toBe(1);
+      expect(decisions.get(oldId)).toMatchObject({ status: 'withdrawn' });
+      expect(decisions.get(oldId).answerText).toContain(t.identifier);
+      expect(decisions.get(freshId).status).toBe('open');
+    });
+
+    it('does not touch an old decision on a live ticket', async () => {
+      const t = ticket({ kind: 'task' });
+      await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+      const id = newId();
+      h.db.insert('decisions', {
+        id, workspaceId: h.workspaceId, ticketId: t.id, projectId: h.projectId, kind: 'question', owner: 'human',
+        title: 'live', context: '', optionsJson: [], allowFreeText: 1, status: 'open', correlationKey: `question:${t.id}`, createdAt: stale(),
+      });
+
+      expect(decisions.sweepTerminalTickets(SYSTEM, DAY)).toBe(0);
+      expect(decisions.get(id).status).toBe('open');
+    });
+
+    it('never closes an approval gate on a live ticket, however old', () => {
+      const t = ticket();
+      const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Approve the plan' });
+      h.db.update('tickets', t.id, { status: 'proposed' });
+      h.db.update('decisions', plan.id, { createdAt: stale() });
+
+      expect(decisions.sweepTerminalTickets(SYSTEM, DAY)).toBe(0);
+      expect(decisions.get(plan.id).status).toBe('open');
+    });
+
+    it('does not touch an approval the repair scan re-raised for a non-terminal ticket', async () => {
+      const t = ticket();
+      h.db.update('tickets', t.id, { status: 'proposed' });
+      const repaired = await tickets.repairApprovals();
+      expect(repaired.some((r) => r.id === t.id)).toBe(true);
+      const open = decisions.list({ ticketId: t.id, status: ['open'] });
+      expect(open).toHaveLength(1);
+      h.db.update('decisions', open[0]!.id, { createdAt: stale() });
+
+      expect(decisions.sweepTerminalTickets(SYSTEM, DAY)).toBe(0);
+      expect(decisions.get(open[0]!.id).status).toBe('open');
+    });
+  });
   // ---------- VS-92: the project a card names ----------
 
   describe('the project a decision belongs to', () => {

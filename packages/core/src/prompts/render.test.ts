@@ -522,7 +522,18 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('## Open work');
     expect(prompt).toContain('TST-42 [approved] Add dark mode');
     expect(prompt).toContain('## Open decisions');
-    expect(prompt).toContain('Merge TST-42?');
+    // VS-306: each line carries the ticket's identifier and status, and the decision's age last.
+    expect(prompt).toMatch(/- d2 \[merge_approval, owner human, TST-42 approved, \d+[smhdw]\] Merge TST-42\?/);
+  });
+
+  it('shows the age of a ticketless open decision without a ticket segment (VS-306)', async () => {
+    const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
+    h.db.insert('decisions', {
+      id: 'd3', workspaceId: h.workspaceId, ticketId: null, kind: 'question', owner: 'human', title: 'Workspace question?',
+      context: '', optionsJson: [], allowFreeText: 1, status: 'open', createdAt: nowIso(),
+    });
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [{ id: 'w5', source: 'system', reason: 'digest', payload: {} } as never], {});
+    expect(prompt).toMatch(/- d3 \[question, owner human, \d+[smhdw]\] Workspace question\?/);
   });
 
   // A worker parked after a failure is waiting on the human, not stalled: the weaver must not

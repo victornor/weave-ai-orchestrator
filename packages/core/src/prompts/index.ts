@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { landingBranchOf, yoloEnabled } from '@weave-ai/shared';
+import { formatAge } from '@weave-ai/render';
 import type * as S from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
@@ -323,10 +324,20 @@ export async function buildTurnPrompt(
       const w = workers.find((x) => x.ticketId === t.id);
       return `- ${t.identifier} [${t.status}] ${t.title}${w ? ` — ${w.name} (${workerStatusLine(w)})` : ''}`;
     }, 'call `weave_ticket_list`'));
-    const pending = ctx.db.all<S.Decision>("SELECT * FROM decisions WHERE workspace_id = ? AND status = 'open' ORDER BY created_at", [ctx.workspaceId]);
+    // VS-306: age and ticket identity/status on each line, so a card that outlived its ticket is
+    // distinguishable from one raised a minute ago. The age stays last, where the eye lands.
+    const pending = ctx.db.all<S.Decision & { ticketIdentifier: string | null; ticketStatus: string | null }>(
+      `SELECT d.*, t.identifier AS ticket_identifier, t.status AS ticket_status
+         FROM decisions d LEFT JOIN tickets t ON t.id = d.ticket_id
+        WHERE d.workspace_id = ? AND d.status = 'open' ORDER BY d.created_at`,
+      [ctx.workspaceId],
+    );
     if (pending.length) {
       parts.push('\n## Open decisions');
-      parts.push(bounded(pending, 8, (d) => `- ${d.id} [${d.kind}, owner ${d.owner}] ${d.title}`, 'call `weave_briefing`'));
+      parts.push(bounded(pending, 8, (d) => {
+        const scope = d.ticketIdentifier ? `, ${d.ticketIdentifier} ${d.ticketStatus}` : '';
+        return `- ${d.id} [${d.kind}, owner ${d.owner}${scope}, ${formatAge(d.createdAt)}] ${d.title}`;
+      }, 'call `weave_briefing`'));
     }
   }
 

@@ -136,6 +136,12 @@ export interface DecisionsService {
   withdraw(actor: Actor, id: string, reason: string): S.Decision;
   /** Withdraws every still-open decision scoped to this ticket (e.g. once it reaches a terminal status). Returns the count closed. */
   withdrawForTicket(actor: Actor, ticketId: string, reason: string): number;
+  /**
+   * VS-306 backstop: withdraws open decisions attached to a ticket that is already terminal and
+   * older than `olderThanMs`, through the same closure path as a terminal transition. Never touches
+   * a live ticket or an approval gate. Returns the count withdrawn.
+   */
+  sweepTerminalTickets(actor: Actor, olderThanMs: number): number;
   supersedeForTarget(actor: Actor, ticketId: string, correlationKey: string): number;
   expireDue(): Promise<S.Decision[]>;
 }

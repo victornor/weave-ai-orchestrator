@@ -1,4 +1,5 @@
 import type { Agent, Decision, Project, Run, Ticket } from '@agent-conductor/shared';
+import type { WorkProduct } from '../api/types';
 
 export function ticket(over: Partial<Ticket> = {}): Ticket {
   return {
@@ -168,6 +169,25 @@ export function run(over: Partial<Run> = {}): Run {
     logPath: null,
     summary: null,
     createdAt: '2026-09-01T09:00:00.000Z',
+    ...over,
+  };
+}
+
+export function workProduct(over: Partial<WorkProduct> = {}): WorkProduct {
+  return {
+    id: 'wp_1',
+    ticketId: 'tk_1',
+    runId: null,
+    type: 'artifact',
+    provider: null,
+    externalId: 'overview',
+    url: '/api/w/ws1/tickets/tk_1/artifacts/overview/raw',
+    title: 'Overview',
+    state: null,
+    isPrimary: false,
+    metadata: { kind: 'diagram' },
+    createdAt: '2026-09-01T09:00:00.000Z',
+    updatedAt: '2026-09-01T09:00:00.000Z',
     ...over,
   };
 }

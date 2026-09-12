@@ -511,6 +511,43 @@ describe('tickets', () => {
       expect(tickets.getDocument(t.id, 'plan')?.body).toBe('the daemon digest');
     });
 
+    it('refuses an external write to an artifact:-prefixed key (VS-269)', () => {
+      const t = make();
+      tickets.putDocument(AGENT, t.id, 'artifact:overview', '<html>hi</html>', { system: true });
+      expect(() => tickets.putDocument(AGENT, t.id, 'artifact:overview', '<html>sneaky</html>')).toThrow(expect.objectContaining({ code: 'forbidden' }));
+      expect(() => tickets.putDocument(AGENT, t.id, 'artifact:brand-new', '<html>sneaky</html>')).toThrow(expect.objectContaining({ code: 'forbidden' }));
+      expect(tickets.getDocument(t.id, 'artifact:overview')?.revision).toBe(1);
+      expect(tickets.getDocument(t.id, 'artifact:overview')?.body).toBe('<html>hi</html>');
+    });
+
+    describe('putArtifactWorkProduct (VS-269)', () => {
+      it('inserts one artifact work product on first publish, keyed by the artifact key', () => {
+        const t = make();
+        const { id } = tickets.putArtifactWorkProduct(AGENT, t.id, 'overview', { url: '/raw/1', title: 'Overview', kind: 'diagram' });
+        const products = tickets.workProducts(t.id);
+        expect(products).toHaveLength(1);
+        expect(products[0]).toMatchObject({ id, type: 'artifact', externalId: 'overview', url: '/raw/1', title: 'Overview' });
+        expect((products[0]!.metadata as { kind?: string }).kind).toBe('diagram');
+      });
+
+      it('updates the same row in place on a second publish under the same key', () => {
+        const t = make();
+        const first = tickets.putArtifactWorkProduct(AGENT, t.id, 'overview', { url: '/raw/1', title: 'v1' });
+        const second = tickets.putArtifactWorkProduct(AGENT, t.id, 'overview', { url: '/raw/2', title: 'v2' });
+        expect(second.id).toBe(first.id);
+        const products = tickets.workProducts(t.id);
+        expect(products).toHaveLength(1);
+        expect(products[0]).toMatchObject({ url: '/raw/2', title: 'v2' });
+      });
+
+      it('keeps two artifacts under different keys as two independent work products', () => {
+        const t = make();
+        tickets.putArtifactWorkProduct(AGENT, t.id, 'overview', { url: '/raw/overview' });
+        tickets.putArtifactWorkProduct(AGENT, t.id, 'sequence', { url: '/raw/sequence' });
+        expect(tickets.workProducts(t.id).map((p) => p.externalId).sort()).toEqual(['overview', 'sequence']);
+      });
+    });
+
     it('lists the documents on a ticket with their current revision', () => {
       const t = make();
       tickets.putDocument(AGENT, t.id, 'report', 'r1');

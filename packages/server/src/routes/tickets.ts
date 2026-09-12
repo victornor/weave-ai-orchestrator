@@ -3,6 +3,13 @@ import { z } from 'zod';
 import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, OcError } from '@agent-conductor/shared';
 import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
+import { requireOperator } from '../auth.js';
+
+/**
+ * VS-269: an artifact is served in an opaque, sandboxed origin so agent-authored HTML can never read
+ * the `ac_session` cookie or call back into the API — not negotiable, per captain's specification.
+ */
+const ARTIFACT_CSP = "sandbox allow-scripts allow-forms allow-popups allow-downloads; default-src 'none'; style-src 'self' 'unsafe-inline'; img-src data: 'self'; font-src data:; connect-src 'none'";
 
 const CreateSchema = z.object({
   projectId: z.string().nullish(), kind: z.enum(TICKET_KINDS), title: z.string().min(1), description: z.string().default(''),
@@ -117,6 +124,21 @@ export function ticketRoutes(): Hono<AppEnv> {
 
   app.get('/:id/documents/:key/revisions', (c) => c.json(c.get('ws').services.tickets.documentRevisions(c.req.param('id'), c.req.param('key'))));
   app.get('/:id/work-products', (c) => c.json(c.get('ws').services.tickets.workProducts(c.req.param('id'))));
+
+  // VS-269: an artifact's raw HTML, verbatim, behind a sandboxing CSP. Human web session only —
+  // `/tickets/**` is already excluded from RUN_TOKEN_PATHS (auth.ts), and `requireOperator` here is
+  // explicit defense-in-depth for a route that serves attacker-shaped content by design.
+  app.get('/:id/artifacts/:key/raw', (c) => {
+    requireOperator(c);
+    const rev = c.req.query('revision');
+    const doc = c.get('ws').services.tickets.getDocument(c.req.param('id'), `artifact:${c.req.param('key')}`, rev ? Number(rev) : undefined);
+    if (!doc) throw new OcError('not_found', `artifact ${c.req.param('key')} not found`);
+    return c.text(doc.body, 200, {
+      'content-type': 'text/html; charset=utf-8',
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': ARTIFACT_CSP,
+    });
+  });
 
   app.get('/:id/runs', (c) => {
     const s = c.get('ws').services;

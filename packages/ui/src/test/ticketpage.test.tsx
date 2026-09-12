@@ -1,13 +1,15 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Decision, Ticket, TicketComment } from '@agent-conductor/shared';
-import type { WorkerMessageOutcome } from '../api/types';
-import { agent, decision, ticket } from './factories';
+import type { WorkerMessageOutcome, WorkProduct } from '../api/types';
+import { agent, decision, ticket, workProduct } from './factories';
 
 const state = vi.hoisted(() => ({
   comments: [] as TicketComment[],
   ticketOverrides: {} as Partial<Ticket>,
   worker: null as Agent | null,
+  workProducts: [] as WorkProduct[],
+  documentRevisions: [] as Array<{ revision: number; createdAt: string; authorKind: string; reason: string | null }>,
   startSession: vi.fn(),
   decisions: [] as Decision[],
   workerDetail: undefined as { input: { midTurn: boolean; interrupts?: boolean; reason?: string } } | undefined,
@@ -30,7 +32,7 @@ vi.mock('../api/hooks', () => ({
     data: {
       ticket: ticket({ description: 'A description\nwrapped onto two lines.', status: state.ticketStatus as never, ...state.ticketOverrides }),
       project: null, worker: state.worker, role: null, blockers: [], children: [], documents: [],
-      workProducts: [], openspecState: null, mergeQueue: { position: null, concurrency: 1 },
+      workProducts: state.workProducts, openspecState: null, mergeQueue: { position: null, concurrency: 1 },
     },
     isLoading: false,
     isError: false,
@@ -41,8 +43,8 @@ vi.mock('../api/hooks', () => ({
   usePostComment: () => ({ mutate: vi.fn(), isPending: false }),
   useTicketComments: () => list(state.comments),
   useTicketDocument: () => empty,
-  useTicketDocumentRevisions: () => list([]),
-  useTicketWorkProducts: () => list([]),
+  useTicketDocumentRevisions: () => list(state.documentRevisions),
+  useTicketWorkProducts: () => list(state.workProducts),
   useTicketRuns: () => list([]),
   useTicketUsage: () => empty,
   useTicketKnowledgeUsage: () => ({ data: state.knowledgeUsage, isLoading: false, isError: false }),
@@ -55,6 +57,18 @@ vi.mock('../api/hooks', () => ({
   useStartHandoverFor: () => ({ mutate: vi.fn() }),
 }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(() => 'id'), dismiss: vi.fn() }) }));
+vi.mock('../api/client', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('../api/client');
+  return {
+    ...actual,
+    api: {
+      ws: (_workspace: string, path: string) => {
+        if (path.endsWith('/kit.css')) return Promise.resolve(':root { --accent: #fff; }');
+        return Promise.resolve('<!doctype html><html><head></head><body>artifact</body></html>');
+      },
+    },
+  };
+});
 
 const { TicketRoute } = await import('../routes/TicketPage');
 
@@ -75,6 +89,8 @@ beforeEach(() => {
   state.search = {};
   state.ticketStatus = 'in_progress';
   state.knowledgeUsage = undefined;
+  state.workProducts = [];
+  state.documentRevisions = [];
   state.messageMutateAsync = vi.fn(async (): Promise<WorkerMessageOutcome> => ({ delivery: 'queued', runId: null, wakeId: null }));
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -333,5 +349,83 @@ describe('TicketRoute header names an incomplete delivery (VS-250)', () => {
     render(<TicketRoute />);
     expect(screen.getByText('merged')).toBeInTheDocument();
     expect(screen.queryByText('delivery incomplete')).not.toBeInTheDocument();
+  });
+});
+
+describe('TicketRoute Artifacts tab (VS-269)', () => {
+  it('shows no Artifacts tab when the ticket has no artifacts', () => {
+    state.workProducts = [];
+    render(<TicketRoute />);
+    expect(screen.queryByRole('tab', { name: 'Artifacts' })).not.toBeInTheDocument();
+  });
+
+  it('shows the Artifacts tab once the ticket has one, and lists it with title, kind and a sandboxed frame', () => {
+    state.workProducts = [workProduct()];
+    render(<TicketRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
+    expect(screen.getByRole('button', { name: /Overview/ })).toBeInTheDocument();
+    expect(screen.getByText(/diagram/)).toBeInTheDocument();
+    const frame = document.querySelector('iframe');
+    expect(frame).toBeTruthy();
+    expect(frame?.getAttribute('src')).toBe('/api/w/ws1/tickets/tk_1/artifacts/overview/raw');
+    expect(frame?.getAttribute('sandbox')).toBe('allow-scripts allow-forms allow-popups allow-downloads');
+  });
+
+  it('lists two artifacts independently and switches the frame when a different one is picked', () => {
+    state.workProducts = [
+      workProduct({ id: 'wp_1', externalId: 'overview', title: 'Overview' }),
+      workProduct({ id: 'wp_2', externalId: 'sequence', title: 'Sequence diagram', url: '/api/w/ws1/tickets/tk_1/artifacts/sequence/raw' }),
+    ];
+    render(<TicketRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
+    expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/api/w/ws1/tickets/tk_1/artifacts/overview/raw');
+    fireEvent.click(screen.getByText('Sequence diagram'));
+    expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/api/w/ws1/tickets/tk_1/artifacts/sequence/raw');
+  });
+
+  it('offers a revision picker only when more than one revision exists, and selecting one updates the frame src', () => {
+    state.workProducts = [workProduct()];
+    state.documentRevisions = [
+      { revision: 1, createdAt: '2026-09-01T09:00:00.000Z', authorKind: 'agent', reason: null },
+      { revision: 2, createdAt: '2026-09-01T10:00:00.000Z', authorKind: 'agent', reason: null },
+    ];
+    render(<TicketRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
+    expect(screen.getByText('Revisions')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('r1'));
+    expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/api/w/ws1/tickets/tk_1/artifacts/overview/raw?revision=1');
+  });
+
+  it('does not offer a revision picker with only one revision', () => {
+    state.workProducts = [workProduct()];
+    state.documentRevisions = [{ revision: 1, createdAt: '2026-09-01T09:00:00.000Z', authorKind: 'agent', reason: null }];
+    render(<TicketRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
+    expect(screen.queryByText('Revisions')).not.toBeInTheDocument();
+  });
+
+  it('the open-in-new-tab link points straight at the artifact URL', () => {
+    state.workProducts = [workProduct()];
+    render(<TicketRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
+    const link = screen.getByText('Open in new tab ↗');
+    expect(link.getAttribute('href')).toBe('/api/w/ws1/tickets/tk_1/artifacts/overview/raw');
+  });
+
+  it('downloads without throwing even when the fetched HTML does not embed the kit', async () => {
+    // jsdom has no object-URL implementation; stub it the way a real browser provides it.
+    const createObjectURL = vi.fn(() => 'blob:mock');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+    state.workProducts = [workProduct()];
+    render(<TicketRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    });
+    expect(screen.queryByText('Downloading…')).not.toBeInTheDocument();
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock');
+    vi.unstubAllGlobals();
   });
 });

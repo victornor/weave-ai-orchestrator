@@ -1,0 +1,47 @@
+## Purpose
+Lets an agent publish a self-contained HTML artifact to its ticket with one tool call, storing it as
+a revisioned ticket document and recording it as a work product the existing Work surface already
+renders, without any new database schema.
+
+## ADDED Requirements
+
+### Requirement: An agent publishes an artifact with one tool call
+A tool SHALL let an agent store a single HTML document against a ticket under a caller-chosen key,
+returning a stable URL and the resulting revision number, with no further action required for the
+artifact to appear on the ticket's Work surface.
+
+#### Scenario: First publish under a new key
+- **WHEN** an agent publishes an HTML document under a key that has never been used on that ticket
+- **THEN** the call succeeds, returns a serve URL and revision `1`, and the ticket's work products
+  include one entry of type `artifact` for that key with that URL.
+
+#### Scenario: Publishing again under the same key
+- **WHEN** an agent publishes a new HTML document under a key that already has a stored artifact
+- **THEN** the call succeeds, returns the same serve URL and an incremented revision number, the
+  ticket still has exactly one `artifact` work product for that key, and the document's earlier
+  revision remains stored and retrievable by explicit revision number.
+
+### Requirement: The stored body must be a single HTML document under a size cap
+The tool SHALL reject a body that is empty, is not recognizable as an HTML document, or exceeds a
+stated maximum size, with an error naming which condition failed.
+
+#### Scenario: Empty or non-HTML body
+- **WHEN** an agent submits an empty string, or a string with no HTML document markers
+- **THEN** the call fails with a validation error describing the requirement, and no document or work
+  product is created or modified.
+
+#### Scenario: Oversized body
+- **WHEN** an agent submits an HTML document larger than the stated size cap
+- **THEN** the call fails with a validation error naming the cap, and no document or work product is
+  created or modified.
+
+### Requirement: Artifact storage is reserved to the artifact-publishing path
+The key space used to store artifact bodies SHALL be reserved so that only the artifact-publishing
+tool can create or modify a document within it; the general-purpose ticket document write path SHALL
+reject an attempt to use it.
+
+#### Scenario: Writing an artifact-shaped key through the general document tool
+- **WHEN** an agent calls the general-purpose ticket document write tool with a key in the space
+  reserved for artifacts
+- **THEN** the call fails with an error naming the dedicated artifact tool as the correct path, and no
+  document is created or modified.

@@ -114,6 +114,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'PUT', path: `${W}/tickets/{id}/documents/{key}`, tag: 'tickets', summary: 'Write a ticket document revision', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/tickets/{id}/documents/{key}/revisions`, tag: 'tickets', summary: 'Document revision list', auth: 'session' },
   { method: 'GET', path: `${W}/tickets/{id}/work-products`, tag: 'tickets', summary: 'Work products', auth: 'session' },
+  { method: 'GET', path: `${W}/tickets/{id}/artifacts/{key}/raw`, tag: 'tickets', summary: 'A published artifact\'s raw HTML, verbatim, behind a sandboxing CSP (VS-269); ?revision=N for an earlier revision', auth: 'session' },
   { method: 'GET', path: `${W}/tickets/{id}/runs`, tag: 'tickets', summary: 'Runs against this ticket', auth: 'session' },
   { method: 'GET', path: `${W}/tickets/{id}/usage`, tag: 'tickets', summary: 'Usage for this ticket and its subtree', auth: 'session' },
   { method: 'POST', path: `${W}/tickets/{id}/discard`, tag: 'tickets', summary: 'Discard unlanded work (creates a discard_approval unless already approved)', auth: 'session', mutating: true },
@@ -180,6 +181,8 @@ export const ROUTES: RouteRow[] = [
   { method: 'DELETE', path: `${W}/routines/{id}`, tag: 'routines', summary: 'Remove a scheduled task', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/routines/{id}/usage`, tag: 'routines', summary: 'Spend attributable to a scheduled task; ?window=24h|7d', auth: 'session' },
   { method: 'GET', path: `${W}/routines/{id}/fires`, tag: 'routines', summary: 'Kept fires of a scheduled task, newest first, joined to the conductor run', auth: 'session' },
+
+  { method: 'GET', path: `${W}/artifacts/kit.css`, tag: 'artifacts', summary: 'The AC Artifact Kit\'s CSS, verbatim, for inlining into a downloaded artifact (VS-269)', auth: 'session' },
 
   { method: 'GET', path: `${W}/agent/inbox`, tag: 'agent', summary: 'This run wakes, bundled', auth: 'run' },
   { method: 'GET', path: `${W}/agent/tools`, tag: 'agent', summary: 'Tools this agent may call, with JSON schemas', auth: 'run' },

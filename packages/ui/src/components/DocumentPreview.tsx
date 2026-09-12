@@ -9,6 +9,7 @@ import { cx } from '../lib/cx';
 export interface DocumentPreviewProps {
   decision: Decision;
   className?: string;
+  ws?: string;
 }
 
 /**
@@ -20,12 +21,12 @@ export interface DocumentPreviewProps {
  * is. Renders nothing when the decision carries no document target, so a call site can pass it
  * unconditionally.
  */
-export function DocumentPreview({ decision, className }: DocumentPreviewProps): React.ReactElement | null {
+export function DocumentPreview({ decision, className, ws }: DocumentPreviewProps): React.ReactElement | null {
   const target = documentTarget(decision);
   const [open, setOpen] = useState<boolean | null>(null);
   const expanded = open ?? decision.status === 'open';
 
-  const doc = useTicketDocumentById(decision.ticketId ?? '', target?.documentId ?? '');
+  const doc = useTicketDocumentById(decision.ticketId ?? '', target?.documentId ?? '', undefined, ws);
   // Only fetched when the document has moved past the revision the decision names; when current,
   // this is the HEAD key again and hits the same cache entry — one request in the normal case.
   const current = doc.data?.currentRevision;
@@ -34,7 +35,7 @@ export function DocumentPreview({ decision, className }: DocumentPreviewProps): 
   // A revision ahead of the document's own — named, never written, or the document recreated.
   // HEAD content must not pass for it.
   const revisionMissing = current !== undefined && asked !== undefined && asked > current;
-  const named = useTicketDocumentById(decision.ticketId ?? '', target?.documentId ?? '', stale ? asked : undefined);
+  const named = useTicketDocumentById(decision.ticketId ?? '', target?.documentId ?? '', stale ? asked : undefined, ws);
 
   if (!target) return null;
   const badge = asked !== undefined ? `r${asked}` : doc.data ? `r${doc.data.revision}` : null;

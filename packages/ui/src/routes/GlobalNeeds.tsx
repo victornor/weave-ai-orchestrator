@@ -135,7 +135,7 @@ function WorkspaceNeeds({
               askedBy={d.askedByAgentId}
               busy={answer.isPending}
               queued={isQueued}
-              plan={<PlanPreview decision={d} />}
+              plan={<PlanPreview decision={d} ws={ws} />}
               autoApproving={isAutoApproving(d, summary.data?.config, projects.data?.find((p) => p.id === t?.projectId))}
               onAnswer={(a) => onAnswer(d.id, a)}
             />

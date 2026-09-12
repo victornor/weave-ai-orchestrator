@@ -8,6 +8,7 @@ import { cx } from '../lib/cx';
 export interface PlanPreviewProps {
   decision: Decision;
   className?: string;
+  ws?: string;
 }
 
 /**
@@ -17,10 +18,10 @@ export interface PlanPreviewProps {
  *
  * Renders nothing for any other decision kind, so a call site can pass it unconditionally.
  */
-export function PlanPreview({ decision, className }: PlanPreviewProps): React.ReactElement | null {
+export function PlanPreview({ decision, className, ws }: PlanPreviewProps): React.ReactElement | null {
   const [open, setOpen] = useState(false);
   const ticketId = decision.kind === 'plan_approval' ? decision.ticketId : null;
-  const doc = useTicketDocument(ticketId ?? '', 'plan');
+  const doc = useTicketDocument(ticketId ?? '', 'plan', undefined, ws);
 
   if (!ticketId) return null;
 

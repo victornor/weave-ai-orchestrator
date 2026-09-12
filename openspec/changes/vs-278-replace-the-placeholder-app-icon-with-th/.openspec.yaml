@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+goal: Replace the placeholder app icon with the chosen weave knot mark
+skip_specs: true

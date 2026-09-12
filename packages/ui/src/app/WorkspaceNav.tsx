@@ -1,6 +1,7 @@
 import { A } from './link';
 import { GLOBAL_NAV, RAIL, href } from './nav';
 import { PlusGlyph } from './PlusGlyph';
+import { WeaveMark } from '../components/WeaveMark';
 import { Skeleton } from '../components/Skeleton';
 import type { WorkspaceListItem } from '../api/types';
 import type { WorkspaceProjectsState } from '../api/hooks';
@@ -55,6 +56,12 @@ export function WorkspaceNav({
 }: WorkspaceNavProps): React.ReactElement {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* The rail's brand block (VS-291). The mark stands alone: at 28px tall it is ~126px across,
+          and the rail has ~188px of usable width, so a wordmark beside it would not fit. `flex-none`
+          keeps it out of the scroll area's sizing. */}
+      <div className="mb-3.5 flex flex-none items-center px-2.5 text-text-strong">
+        <WeaveMark className="h-7 w-auto flex-none" title="Weave" />
+      </div>
       <nav className="mb-3 flex flex-col gap-px" aria-label="Global">
         {GLOBAL_NAV.map((item) => {
           const current = activePath === item.to || activePath.startsWith(`${item.to}/`);

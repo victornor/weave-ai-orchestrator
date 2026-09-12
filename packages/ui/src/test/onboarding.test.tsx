@@ -148,3 +148,14 @@ describe('Onboarding create step', () => {
     expect(screen.getByText(/^Open/)).toBeInTheDocument();
   });
 });
+
+describe('Onboarding brand mark', () => {
+  it('shows the mark beside the wordmark, hidden because the heading names it', () => {
+    const { container } = render(<OnboardingRoute />);
+    const mark = container.querySelector('svg[aria-hidden="true"]');
+    expect(mark).not.toBeNull();
+    expect(mark!.querySelectorAll('path')).toHaveLength(4);
+    expect(screen.getByRole('heading', { name: 'Weave AI' })).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Weave' })).not.toBeInTheDocument();
+  });
+});

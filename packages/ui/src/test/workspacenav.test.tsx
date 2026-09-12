@@ -60,6 +60,17 @@ function nav(over: Partial<React.ComponentProps<typeof WorkspaceNav>> = {}): Rea
 
 const group = (name: string): HTMLElement => screen.getByLabelText(`${name} sections`);
 
+describe('brand mark', () => {
+  it('puts the mark above the global nav, named for a screen reader', () => {
+    render(nav());
+    const mark = screen.getByRole('img', { name: 'Weave' });
+    expect(mark.tagName.toLowerCase()).toBe('svg');
+    expect(mark.querySelectorAll('path')).toHaveLength(4);
+    const globalNav = screen.getByLabelText('Global');
+    expect(globalNav.compareDocumentPosition(mark) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+});
+
 describe('listing workspaces', () => {
   it('shows every workspace the daemon reports', () => {
     render(nav());

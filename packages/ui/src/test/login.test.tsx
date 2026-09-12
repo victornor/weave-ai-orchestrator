@@ -16,6 +16,17 @@ vi.mock('../api/hooks', () => ({
 
 const { LoginRoute } = await import('../routes/Login');
 
+describe('Login brand mark', () => {
+  it('shows the mark beside the wordmark, hidden because the heading names it', () => {
+    const { container } = render(<LoginRoute />);
+    const mark = container.querySelector('svg[aria-hidden="true"]');
+    expect(mark).not.toBeNull();
+    expect(mark!.querySelectorAll('path')).toHaveLength(4);
+    expect(screen.getByRole('heading', { name: 'Weave AI' })).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Weave' })).not.toBeInTheDocument();
+  });
+});
+
 describe('Login footer', () => {
   it('shows the git sha, not v0.1.0', () => {
     render(<LoginRoute />);

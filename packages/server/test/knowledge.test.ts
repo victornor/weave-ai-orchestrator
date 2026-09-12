@@ -35,6 +35,37 @@ describe('GET /knowledge/health', () => {
   });
 });
 
+describe('GET /knowledge/artifacts (VS-270)', () => {
+  it('passes the optional project through to tickets.artifacts and returns its rows', async () => {
+    const { fetch } = app();
+    let received: string | null | undefined;
+    harness!.impls.tickets!['artifacts'] = (projectId: string | null) => {
+      received = projectId;
+      return [{ id: 'wp_1', ticketId: 'tk_1', ticketIdentifier: 'ACME-42', ticketTitle: 'Add dark mode', key: 'overview', title: 'Overview', metadata: { kind: 'diagram' }, url: '/api/w/ws1/tickets/tk_1/artifacts/overview/raw', updatedAt: '2026-09-12T00:00:00.000Z' }];
+    };
+    const res = await fetch('/api/w/ws1/knowledge/artifacts?project=proj1');
+    expect(res.status).toBe(200);
+    expect(received).toBe('proj1');
+    const body = await res.json();
+    expect(body).toEqual([{ id: 'wp_1', ticketId: 'tk_1', ticketIdentifier: 'ACME-42', ticketTitle: 'Add dark mode', key: 'overview', title: 'Overview', metadata: { kind: 'diagram' }, url: '/api/w/ws1/tickets/tk_1/artifacts/overview/raw', updatedAt: '2026-09-12T00:00:00.000Z' }]);
+  });
+
+  it('passes null when no project is named, matching the sibling /docs and /graph routes', async () => {
+    const { fetch } = app();
+    let received: string | null | undefined = 'not-called';
+    harness!.impls.tickets!['artifacts'] = (projectId: string | null) => { received = projectId; return []; };
+    const res = await fetch('/api/w/ws1/knowledge/artifacts');
+    expect(res.status).toBe(200);
+    expect(received).toBeNull();
+  });
+
+  it('is registered ahead of the /:scope route so "artifacts" is never read as a scope', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/knowledge/artifacts');
+    expect(res.status).not.toBe(400);
+  });
+});
+
 describe('POST /knowledge/:scope/note', () => {
   it('passes an optional doc slug through to the service', async () => {
     const { fetch } = app();

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { KnowledgeDocDetail, KnowledgeDocSummary } from '../api/types';
+import type { KnowledgeDocDetail, KnowledgeDocSummary, TicketArtifactSummary } from '../api/types';
 
 const DOC_NESTED: KnowledgeDocSummary = {
   path: 'projects/api/docs/runbooks/incidents/retry-policy.md', scope: 'project', projectId: 'p1', projectSlug: 'api',
@@ -23,6 +23,8 @@ const state = vi.hoisted(() => ({
   hubFiles: [] as Array<{ id: string; path: string; scope: string; projectId: string | null; projectSlug: string | null; kind: 'hub' | 'doc' }>,
   archive: [] as Array<{ path: string; date: string }>,
   archiveLoading: false,
+  artifacts: [] as TicketArtifactSummary[],
+  artifactsLoading: false,
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
@@ -41,6 +43,8 @@ vi.mock('../api/hooks', () => ({
   useKnowledgeArchiveMany: (roots: Array<{ scope: string; project?: string }>) =>
     roots.map(() => ({ data: state.archive, isLoading: state.archiveLoading })),
   useKnowledgeArchiveFile: () => ({ data: { path: 'a', body: '# Archived\n' }, isLoading: false }),
+  useProjectArtifacts: () => ({ data: state.artifacts, isLoading: state.artifactsLoading }),
+  useTicketDocumentRevisions: () => ({ data: [] }),
 }));
 
 const { KnowledgeExplorer } = await import('../routes/KnowledgeExplorer');
@@ -50,6 +54,8 @@ beforeEach(() => {
   state.hubFiles = [];
   state.archive = [];
   state.archiveLoading = false;
+  state.artifacts = [];
+  state.artifactsLoading = false;
 });
 
 describe('KnowledgeExplorer', () => {
@@ -100,5 +106,65 @@ describe('KnowledgeExplorer', () => {
 
     fireEvent.click(date);
     expect(screen.getByText('Archived')).toBeInTheDocument();
+  });
+});
+
+const ARTIFACT: TicketArtifactSummary = {
+  id: 'wp_1', ticketId: 'tk_1', ticketIdentifier: 'ACME-42', ticketTitle: 'Add dark mode',
+  key: 'overview', title: 'Overview', metadata: { kind: 'diagram' }, url: '/api/w/ws1/tickets/tk_1/artifacts/overview/raw',
+  updatedAt: '2026-09-12T00:00:00Z',
+};
+
+describe('KnowledgeExplorer artifacts entry (VS-270)', () => {
+  it('shows no Artifacts entry for a project with none', () => {
+    state.hubFiles = [{ id: 'h1', path: 'projects/api/PROJECT.md', scope: 'project', projectId: 'p1', projectSlug: 'api', kind: 'hub' }];
+    state.artifacts = [];
+    render(<KnowledgeExplorer project="p1" />);
+    expect(screen.queryByText('Artifacts')).toBeNull();
+  });
+
+  it('lists an artifact with its ticket identifier and opens it', () => {
+    state.hubFiles = [{ id: 'h1', path: 'projects/api/PROJECT.md', scope: 'project', projectId: 'p1', projectSlug: 'api', kind: 'hub' }];
+    state.artifacts = [ARTIFACT];
+    render(<KnowledgeExplorer project="p1" />);
+
+    expect(screen.getByText('Artifacts')).toBeInTheDocument();
+    const row = screen.getByText('Overview').closest('button')!;
+    expect(within(row).getByText('ACME-42')).toBeInTheDocument();
+
+    fireEvent.click(row);
+    expect(screen.getByTitle('Overview').tagName).toBe('IFRAME');
+  });
+
+  it('lists artifacts from two different tickets, each correctly attributed', () => {
+    state.hubFiles = [{ id: 'h1', path: 'projects/api/PROJECT.md', scope: 'project', projectId: 'p1', projectSlug: 'api', kind: 'hub' }];
+    const other: TicketArtifactSummary = { ...ARTIFACT, id: 'wp_2', ticketId: 'tk_2', ticketIdentifier: 'ACME-43', ticketTitle: 'Second ticket', key: 'sequence', title: 'Sequence diagram' };
+    state.artifacts = [ARTIFACT, other];
+    render(<KnowledgeExplorer project="p1" />);
+
+    const rowA = screen.getByText('Overview').closest('button')!;
+    const rowB = screen.getByText('Sequence diagram').closest('button')!;
+    expect(within(rowA).getByText('ACME-42')).toBeInTheDocument();
+    expect(within(rowB).getByText('ACME-43')).toBeInTheDocument();
+
+    fireEvent.click(rowB);
+    expect(screen.getByTitle('Sequence diagram').tagName).toBe('IFRAME');
+  });
+
+  it('shows the Artifacts entry even when the project has no documents or hubs to browse', () => {
+    state.docs = [];
+    state.hubFiles = [];
+    state.artifacts = [ARTIFACT];
+    render(<KnowledgeExplorer project="p1" />);
+    expect(screen.getByText('Artifacts')).toBeInTheDocument();
+    expect(screen.queryByText('Nothing to browse yet.')).toBeNull();
+  });
+
+  it('still shows the ordinary empty state when there are no documents, hubs, or artifacts', () => {
+    state.docs = [];
+    state.hubFiles = [];
+    state.artifacts = [];
+    render(<KnowledgeExplorer project="p1" />);
+    expect(screen.getByText('Nothing to browse yet.')).toBeInTheDocument();
   });
 });

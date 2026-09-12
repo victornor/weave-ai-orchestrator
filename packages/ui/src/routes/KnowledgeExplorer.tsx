@@ -11,23 +11,31 @@ import { Badge } from '../components/StatusGlyph';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Markdown } from '../components/Markdown';
+import { ArtifactViewer } from '../components/ArtifactViewer';
 import {
   useKnowledgeArchiveFile, useKnowledgeArchiveMany, useKnowledgeDocs, useKnowledgeIndex, useProjects,
+  useProjectArtifacts, useTicketDocumentRevisions,
 } from '../api/hooks';
+import { useWs } from '../api/context';
+import type { TicketArtifactSummary } from '../api/types';
 import { buildExplorerTree, type ExplorerHub, type ExplorerNode } from '../lib/knowledgeExplorer';
 import { DocPanel, KnowledgeDocPanel, type DocRef } from './KnowledgeDocs';
 import { cx } from '../lib/cx';
+import { ago } from '../lib/format';
 
 interface HubOpen { scope: string; project?: string }
 
 export function KnowledgeExplorer({ project }: { project?: string }): React.ReactElement {
+  const ws = useWs();
   const docs = useKnowledgeDocs(project);
   const index = useKnowledgeIndex();
   const projects = useProjects();
+  const artifacts = useProjectArtifacts(project);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [openDoc, setOpenDoc] = useState<DocRef | null>(null);
   const [openHub, setOpenHub] = useState<HubOpen | null>(null);
   const [openArchive, setOpenArchive] = useState<{ scope: string; project?: string; path: string } | null>(null);
+  const [openArtifact, setOpenArtifact] = useState<TicketArtifactSummary | null>(null);
 
   const hubs: ExplorerHub[] = useMemo(
     () =>
@@ -62,9 +70,15 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
     });
   };
 
+  const artifactRows = artifacts.data ?? [];
+
   if (docs.isLoading || index.isLoading) return <SkeletonRows rows={5} />;
   if (docs.isError || index.isError) return <ErrorState code="KNOWLEDGE_EXPLORER_FAILED" message="The knowledge base could not be read." onRetry={() => { void docs.refetch(); void index.refetch(); }} />;
-  if (!tree.length) return <EmptyState title="Nothing to browse yet." detail="A knowledge base and its documents are created as soon as a worker or the conductor writes to them." />;
+  // A project with no documents/hubs but with artifacts still has something to browse (VS-270) — the
+  // "nothing to browse" state only applies once artifacts have loaded and are also empty.
+  if (!tree.length && !artifactRows.length && !artifacts.isLoading) {
+    return <EmptyState title="Nothing to browse yet." detail="A knowledge base and its documents are created as soon as a worker or the conductor writes to them." />;
+  }
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4">
@@ -79,21 +93,30 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
               root={root}
               expanded={expanded}
               onToggle={toggle}
-              onOpenDoc={(ref) => { setOpenHub(null); setOpenArchive(null); setOpenDoc(ref); }}
-              onOpenHub={(hub) => { setOpenDoc(null); setOpenArchive(null); setOpenHub(hub); }}
+              onOpenDoc={(ref) => { setOpenHub(null); setOpenArchive(null); setOpenArtifact(null); setOpenDoc(ref); }}
+              onOpenHub={(hub) => { setOpenDoc(null); setOpenArchive(null); setOpenArtifact(null); setOpenHub(hub); }}
               archiveEntries={archive?.data}
               archiveLoading={archive?.isLoading ?? false}
-              onOpenArchive={archiveRoot ? (path) => { setOpenDoc(null); setOpenHub(null); setOpenArchive({ scope: archiveRoot.scope, project: archiveRoot.project, path }); } : undefined}
+              onOpenArchive={archiveRoot ? (path) => { setOpenDoc(null); setOpenHub(null); setOpenArtifact(null); setOpenArchive({ scope: archiveRoot.scope, project: archiveRoot.project, path }); } : undefined}
             />
           );
         })}
+        {/* Flat, recency-ordered, not grouped by ticket or kind (design.md Decision 1) — omitted
+            entirely, not shown empty, when the scope has no artifacts. */}
+        {artifactRows.length ? (
+          <ArtifactsSection
+            artifacts={artifactRows}
+            openId={openArtifact?.id ?? null}
+            onOpen={(a) => { setOpenDoc(null); setOpenHub(null); setOpenArchive(null); setOpenArtifact(a); }}
+          />
+        ) : null}
       </div>
 
       {openDoc ? (
         <DocPanel
           doc={openDoc}
           projects={projects.data ?? []}
-          onOpen={(ref) => { setOpenHub(null); setOpenArchive(null); setOpenDoc(ref); }}
+          onOpen={(ref) => { setOpenHub(null); setOpenArchive(null); setOpenArtifact(null); setOpenDoc(ref); }}
           onClose={() => setOpenDoc(null)}
         />
       ) : null}
@@ -106,6 +129,7 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
         />
       ) : null}
       {openArchive ? <ArchivePanel scope={openArchive.scope} project={openArchive.project} path={openArchive.path} onClose={() => setOpenArchive(null)} /> : null}
+      {openArtifact ? <ArtifactPanel ws={ws} artifact={openArtifact} onClose={() => setOpenArtifact(null)} /> : null}
     </div>
   );
 }
@@ -259,6 +283,70 @@ function ArchivePanel({ scope, project, path, onClose }: { scope: string; projec
         {file.isLoading ? <SkeletonRows rows={4} /> : <Markdown source={file.data?.body ?? ''} />}
       </div>
     </section>
+  );
+}
+
+/**
+ * The Artifacts entry (VS-270): a flat list across every ticket in scope, sorted most-recently-updated
+ * first (server-side; not re-sorted here — see design.md Decision 1 for why this is flat rather than
+ * grouped by ticket or kind).
+ */
+function ArtifactsSection({
+  artifacts, openId, onOpen,
+}: {
+  artifacts: TicketArtifactSummary[];
+  openId: string | null;
+  onOpen: (artifact: TicketArtifactSummary) => void;
+}): React.ReactElement {
+  return (
+    <div>
+      <div className="flex items-center gap-2 bg-bg-2 px-3.5 py-2">
+        <span className="ac-mono text-nano uppercase tracking-wide text-text-4">Artifacts</span>
+      </div>
+      <div>
+        {artifacts.map((a) => (
+          <button
+            key={a.id}
+            type="button"
+            onClick={() => onOpen(a)}
+            style={{ paddingLeft: '0.875rem' }}
+            className={cx('flex w-full items-center gap-2.5 py-1.5 pr-3.5 text-left hover:bg-bg-2', a.id === openId && 'bg-bg-2')}
+          >
+            <ArtifactGlyph />
+            <span className="min-w-0 flex-1 truncate text-meta text-text-1">{a.title ?? a.key}</span>
+            {typeof a.metadata['kind'] === 'string' ? <Badge tone="neutral">{a.metadata['kind'] as string}</Badge> : null}
+            <span className="ac-mono flex-none text-nano text-text-4">{a.ticketIdentifier}</span>
+            <span className="ac-mono flex-none text-nano text-text-4">{ago(a.updatedAt)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ArtifactPanel({ ws, artifact, onClose }: { ws: string; artifact: TicketArtifactSummary; onClose: () => void }): React.ReactElement {
+  const revisions = useTicketDocumentRevisions(artifact.ticketId, `artifact:${artifact.key}`);
+  return (
+    <section className="ac-card">
+      <header className="flex items-center gap-2 border-b border-line-1 px-3.5 py-2.5">
+        <span className="text-meta font-medium text-text-1">{artifact.title ?? artifact.key}</span>
+        <Badge tone="neutral">{artifact.ticketIdentifier}</Badge>
+        <div className="flex-1" />
+        <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
+      </header>
+      <div className="p-3.5">
+        <ArtifactViewer ws={ws} ticketId={artifact.ticketId} artifact={{ key: artifact.key, title: artifact.title, url: artifact.url ?? '' }} revisions={revisions.data} />
+      </div>
+    </section>
+  );
+}
+
+function ArtifactGlyph(): React.ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" className="size-3.5 flex-none text-text-4" aria-hidden>
+      <rect x="2" y="2.5" width="12" height="11" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
+      <path d="M4.5 6h7M4.5 8.5h7M4.5 11h4" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+    </svg>
   );
 }
 

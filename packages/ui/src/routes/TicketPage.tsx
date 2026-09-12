@@ -18,7 +18,7 @@ import { Table } from '../components/Table';
 import { StatTile } from '../components/Chart';
 import { RunTranscript } from '../components/RunTranscript';
 import { useRunEventStream } from '../api/runStream';
-import { api, qs } from '../api/client';
+import { ArtifactViewer } from '../components/ArtifactViewer';
 import {
   usePatchTicket,
   usePostComment,
@@ -647,48 +647,18 @@ function WorkTab({ ticketId }: { ticketId: string }): React.ReactElement {
   );
 }
 
-/** A published artifact is a `type: 'artifact'` work product; `externalId` is its stable key (VS-269). */
+/** A published artifact is a `type: 'artifact'` work product; `externalId` is its stable key (VS-269).
+ * The iframe/revision-picker/actions block itself is `ArtifactViewer` (VS-270), shared with the
+ * document explorer's Artifacts entry so both reuse the exact same rendering path. */
 function ArtifactsTab({ ticketId, ws }: { ticketId: string; ws: string }): React.ReactElement {
   const products = useTicketWorkProducts(ticketId);
   const artifacts = (products.data ?? []).filter((p) => p.type === 'artifact');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [revision, setRevision] = useState<number | undefined>(undefined);
-  const [downloading, setDownloading] = useState(false);
-  const [copied, setCopied] = useState(false);
   const selected = artifacts.find((a) => a.externalId === selectedKey) ?? artifacts[0] ?? null;
   const revisions = useTicketDocumentRevisions(ticketId, selected ? `artifact:${selected.externalId}` : '');
 
   if (products.isLoading) return <SkeletonRows rows={3} />;
   if (!selected) return <EmptyState title="No artifacts yet." detail="They appear here once an agent publishes one." />;
-
-  const src = `${selected.url}${qs({ revision })}`;
-
-  async function download(): Promise<void> {
-    if (!selected) return;
-    setDownloading(true);
-    try {
-      const [html, kitCss] = await Promise.all([
-        api.ws<string>(ws, `/tickets/${ticketId}/artifacts/${selected.externalId}/raw${qs({ revision })}`),
-        api.ws<string>(ws, '/artifacts/kit.css'),
-      ]);
-      const inlined = html.includes(kitCss)
-        ? html
-        : /<\/head>/i.test(html)
-          ? html.replace(/<\/head>/i, `<style>${kitCss}</style></head>`)
-          : /<html[^>]*>/i.test(html)
-            ? html.replace(/<html[^>]*>/i, (m) => `${m}<head><style>${kitCss}</style></head>`)
-            : `<style>${kitCss}</style>${html}`;
-      const blob = new Blob([inlined], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${selected.title || selected.externalId}.html`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } finally {
-      setDownloading(false);
-    }
-  }
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4">
@@ -697,7 +667,7 @@ function ArtifactsTab({ ticketId, ws }: { ticketId: string; ws: string }): React
           <button
             key={a.externalId}
             type="button"
-            onClick={() => { setSelectedKey(a.externalId); setRevision(undefined); }}
+            onClick={() => setSelectedKey(a.externalId)}
             className={cx(
               'rounded-r6 border px-3 py-1.5 text-left text-meta',
               a.externalId === selected.externalId ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-2',
@@ -711,55 +681,11 @@ function ArtifactsTab({ ticketId, ws }: { ticketId: string; ws: string }): React
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {(revisions.data?.length ?? 0) > 1 ? (
-          <>
-            <span className="ac-label">Revisions</span>
-            {(revisions.data ?? []).map((r) => (
-              <button
-                key={r.revision}
-                type="button"
-                onClick={() => setRevision(r.revision)}
-                className={cx(
-                  'ac-mono rounded-r4 border px-2 py-1 text-nano',
-                  (revision ?? revisions.data![revisions.data!.length - 1]!.revision) === r.revision
-                    ? 'border-accent-edge bg-accent-tint text-accent-link'
-                    : 'border-line-2 text-text-3',
-                )}
-              >
-                r{r.revision}
-              </button>
-            ))}
-          </>
-        ) : null}
-        <span className="flex-1" />
-        <a href={src} target="_blank" rel="noreferrer" className="text-micro">
-          Open in new tab ↗
-        </a>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => {
-            if (typeof navigator.clipboard?.writeText !== 'function') return;
-            navigator.clipboard.writeText(`${window.location.origin}${src}`).then(() => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }).catch(() => {});
-          }}
-        >
-          {copied ? 'Copied' : 'Copy link'}
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => void download()} disabled={downloading}>
-          {downloading ? 'Downloading…' : 'Download'}
-        </Button>
-      </div>
-
-      <iframe
-        key={src}
-        src={src}
-        sandbox="allow-scripts allow-forms allow-popups allow-downloads"
-        title={selected.title ?? selected.externalId ?? 'artifact'}
-        className="h-[75vh] w-full rounded-r6 border border-line-1 bg-bg-0"
+      <ArtifactViewer
+        ws={ws}
+        ticketId={ticketId}
+        artifact={{ key: selected.externalId ?? '', title: selected.title, url: selected.url ?? '' }}
+        revisions={revisions.data}
       />
     </div>
   );

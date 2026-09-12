@@ -44,6 +44,11 @@ export function knowledgeRoutes(): Hono<AppEnv> {
     const { folder } = await body(c, z.object({ folder: z.string().min(2).optional() }));
     return c.json(c.get('ws').services.knowledge.moveDoc(c.get('actor'), scopeParam.parse(c.req.param('scope')), c.req.param('slug'), project(c), folder));
   });
+  // Every published artifact across the project's tickets (VS-270): the data is ticket-owned
+  // (`ticket_work_products`), never a knowledge document — this is a second read surface over it for
+  // the document explorer's Artifacts entry, not a new kind of knowledge content. `?project=` optional,
+  // matching `/docs`/`/graph`/`/health` above, registered before `/:scope` for the same reason.
+  app.get('/artifacts', (c) => c.json(c.get('ws').services.tickets.artifacts(project(c))));
   app.get('/graph', (c) => c.json(c.get('ws').services.knowledge.graph(project(c))));
   app.get('/health', (c) => c.json(c.get('ws').services.knowledge.health(project(c))));
   // Read-only view of the dated archive files deletion/curation already write to disk (VS-265).

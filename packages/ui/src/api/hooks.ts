@@ -1222,6 +1222,13 @@ export function useKnowledgeHealth(project?: string): UseQueryResult<T.Knowledge
   return useQuery({ queryKey: [...qk.knowledge(ws), 'health', project ?? ''], queryFn: () => api.ws<T.KnowledgeHealth>(ws, `/knowledge/health${qs({ project })}`) });
 }
 
+/** Every published artifact across the project's tickets (VS-270), for the document explorer's
+ * Artifacts entry. `qk.artifacts` is its own root, not nested under `qk.knowledge` — see keys.ts. */
+export function useProjectArtifacts(project?: string): UseQueryResult<T.TicketArtifactSummary[]> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.artifacts(ws, project), queryFn: () => api.ws<unknown>(ws, `/knowledge/artifacts${qs({ project })}`).then((r) => listOf<T.TicketArtifactSummary>(r)) });
+}
+
 export function useKnowledgeDocMutation(): UseMutationResult<unknown, Error, { scope: string; slug: string; project?: string; op: 'put' | 'delete'; body?: string }> {
   const ws = useWs();
   const qc = useQueryClient();

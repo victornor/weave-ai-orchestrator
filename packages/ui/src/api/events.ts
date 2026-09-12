@@ -310,6 +310,9 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       inv(qk.pullRequestsRoot(ws));
       // A recorded `branch` work product can add a ref the History section covers (VS-96).
       inv(qk.historyRoot(ws));
+      // An artifact publish/republish is what makes it appear (or move to the top of) the document
+      // explorer's Artifacts entry, live, with no reload (VS-270).
+      inv(qk.artifactsRoot(ws));
       break;
     case 'decision.answered':
     case 'decision.expired':

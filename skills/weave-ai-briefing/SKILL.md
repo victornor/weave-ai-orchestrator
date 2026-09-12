@@ -19,6 +19,7 @@ Render them in this order, every time, even when the human asked only about one 
 
 ### Needs you
 Only items requiring the human's **own** action: decisions they own, approvals, credentials, product calls. One line each: what it is, why now, and where to answer it (the link). Anything you could have handled yourself does not belong here — handle it.
+If the snapshot carries more open decisions than the items in `needsYou` (`needsYouTotal` is larger), the section is capped: after the last item, state how many more are waiting, e.g. `3 more waiting`. Never present the capped list as if it were everything.
 Empty: "Nothing needs you."
 
 ### Recently landed

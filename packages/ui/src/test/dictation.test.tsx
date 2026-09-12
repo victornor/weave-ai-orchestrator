@@ -592,7 +592,9 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
 
     expect(screen.getByLabelText('Message…')).toBeDisabled();
     expect(screen.getByLabelText('Attach a file')).toBeDisabled();
-    expect(screen.getByLabelText('Send')).toBeDisabled();
+    // Send is deliberately not locked: on the non-streaming backend it is how the dictation is
+    // finished and sent (VS-282). The textarea and attach lock above are what VS-195 still owns.
+    expect(screen.getByLabelText('Send')).not.toBeDisabled();
     // Both halves, in one line: capturing now, and processed once you stop.
     expect(screen.getByText(/transcribed once you stop/i)).toBeInTheDocument();
 
@@ -683,5 +685,170 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     expect(screen.getByLabelText('Send')).not.toBeDisabled();
     expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
     expect(screen.queryByText(/transcribed once you stop/i)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * VS-282: on the non-streaming (Voxtype) backend, send means "finish the dictation and send it".
+ * These pin the stale-text trap (the submit must carry the transcript, not the text the composer
+ * held when the button was pressed), the empty/failed clears, and one message per press sequence.
+ */
+describe('dictation — send finishes the upload dictation (VS-282)', () => {
+  type TranscribeResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
+
+  function stubHealthAndTranscribe(postHandler: () => Promise<TranscribeResponse>): void {
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return postHandler();
+      if (typeof url === 'string' && url.includes('/api/health')) {
+        return Promise.resolve({ ok: true, json: async () => ({ transcription: { configured: true, backend: 'voxtype' } }) });
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+  }
+
+  function deferredResponse(): { promise: Promise<TranscribeResponse>; settle: (v: TranscribeResponse) => void } {
+    let settle!: (v: TranscribeResponse) => void;
+    const promise = new Promise<TranscribeResponse>((resolve) => { settle = resolve; });
+    return { promise, settle };
+  }
+
+  function ok(text: string): TranscribeResponse {
+    return { ok: true, status: 200, json: async () => ({ text }) };
+  }
+
+  beforeEach(() => {
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+  });
+
+  async function renderUpload(onSubmit: (text: string, files?: File[], idempotencyKey?: string) => void | Promise<void>): Promise<void> {
+    render(<Composer onSubmit={onSubmit} placeholder="Message…" allowAttachments />);
+    // `Dictate` only exists once the async /api/health probe has landed on upload mode; in these
+    // tests there is no SpeechRecognition, so its presence pins the backend.
+    await waitFor(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+  }
+
+  it('pressing send while recording stops it and submits the transcript once it lands', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    stubHealthAndTranscribe(() => Promise.resolve(ok('ship it')));
+    await renderUpload(onSubmit);
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    // The textarea and attach lock stay; only send is exempt (VS-282).
+    expect(screen.getByLabelText('Message…')).toBeDisabled();
+    expect(screen.getByLabelText('Attach a file')).toBeDisabled();
+    expect(screen.getByLabelText('Send')).not.toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText('Send'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith('ship it', undefined, expect.any(String));
+    expect(screen.getByLabelText('Message…')).toHaveValue('');
+  });
+
+  it('pressing send while already transcribing submits once the transcript lands', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const d = deferredResponse();
+    stubHealthAndTranscribe(() => d.promise);
+    await renderUpload(onSubmit);
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Stop dictation'));
+    expect(screen.getByText('Transcribing…')).toBeInTheDocument();
+    getUserMedia.mockClear();
+
+    fireEvent.click(screen.getByLabelText('Send'));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(/Waiting for the transcript/)).toBeInTheDocument();
+
+    d.settle(ok('late words'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith('late words', undefined, expect.any(String));
+    expect(getUserMedia).not.toHaveBeenCalled(); // no second recording was started
+  });
+
+  it('submits the transcript, not the pre-press text, when the two differ', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const d = deferredResponse();
+    stubHealthAndTranscribe(() => d.promise);
+    await renderUpload(onSubmit);
+
+    fireEvent.change(screen.getByLabelText('Message…'), { target: { value: 'typed first' } });
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Send'));
+    d.settle(ok('spoken words'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const submitted = onSubmit.mock.calls[0]![0] as string;
+    expect(submitted).toContain('spoken words');
+    expect(submitted).toBe('typed first spoken words');
+  });
+
+  it('a failed transcript clears the queued send without submitting and leaves the composer usable', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    stubHealthAndTranscribe(() => Promise.resolve({ ok: false, status: 500, json: async () => ({}) }));
+    await renderUpload(onSubmit);
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Send'));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Message…')).not.toBeDisabled();
+    expect(screen.queryByText(/Waiting for the transcript/)).not.toBeInTheDocument();
+  });
+
+  it('an empty transcript clears the queued send without submitting', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    stubHealthAndTranscribe(() => Promise.resolve(ok('')));
+    await renderUpload(onSubmit);
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Send'));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Message…')).not.toBeDisabled();
+    expect(screen.queryByText(/Waiting for the transcript/)).not.toBeInTheDocument();
+  });
+
+  it('one press sequence submits one message, however often send or the mic is pressed', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const d = deferredResponse();
+    stubHealthAndTranscribe(() => d.promise);
+    await renderUpload(onSubmit);
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Send'));
+    // The queued control is disabled, so a second press is a no-op; the mic is already stopped by
+    // the send and disabled while transcribing, so it cannot submit a second time either.
+    expect(screen.getByLabelText('Send queued')).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Send queued'));
+    expect(screen.getByLabelText('Transcribing')).toBeDisabled();
+
+    d.settle(ok('once'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith('once', undefined, expect.any(String));
+  });
+
+  it('streaming (speech-mode) send stays immediate and unqueued', async () => {
+    w.webkitSpeechRecognition = FakeRecognition;
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<Composer onSubmit={onSubmit} placeholder="Message…" allowAttachments />);
+    await waitFor(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    const rec = FakeRecognition.last!;
+    act(() => rec.onresult!(said(['live words', true])));
+
+    fireEvent.click(screen.getByLabelText('Send'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith('live words', undefined, expect.any(String));
+    expect(screen.queryByText(/Waiting for the transcript/)).not.toBeInTheDocument();
   });
 });

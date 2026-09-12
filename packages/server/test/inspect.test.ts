@@ -12,7 +12,7 @@ import { makeHarness, ticket, type Harness } from './fakes.js';
 let harness: Harness | null = null;
 afterEach(async () => { await harness?.close(); harness = null; });
 
-const CONDUCTOR: RunTokenClaims = { workspaceId: 'ws1', runId: 'run_c', agentId: 'ag_conductor', agentKind: 'conductor', projectId: null, ticketId: null, roleId: null };
+const CONDUCTOR: RunTokenClaims = { workspaceId: 'ws1', runId: 'run_c', agentId: 'ag_conductor', agentKind: 'weaver', projectId: null, ticketId: null, roleId: null };
 const WORKER: RunTokenClaims = { workspaceId: 'ws1', runId: 'run_1', agentId: 'ag_1', agentKind: 'worker', projectId: 'proj1', ticketId: 'tk_1', roleId: 'role_1' };
 
 function run(over: Partial<Run> = {}): Run {
@@ -359,13 +359,13 @@ describe('scope', () => {
     harness = makeHarness();
     seq = 0;
     const own = run({ id: 'run_c', agentId: 'ag_conductor', ticketId: null });
-    seed(harness, [{ ...ev('assistant.text', { text: 'Filed VS-61.' }), runId: 'run_c' }], own, [worker({ id: 'ag_conductor', kind: 'conductor', name: 'Conductor', roleId: null, ticketId: null })]);
+    seed(harness, [{ ...ev('assistant.text', { text: 'Filed VS-61.' }), runId: 'run_c' }], own, [worker({ id: 'ag_conductor', kind: 'weaver', name: 'Weaver', roleId: null, ticketId: null })]);
 
     const res = await call(harness, 'ac_run_inspect', { ref: 'run_c' });
 
     expect(res.ok).toBe(true);
     const d = res.data as Record<string, never>;
-    expect((d['worker'] as Record<string, unknown>)['kind']).toBe('conductor');
+    expect((d['worker'] as Record<string, unknown>)['kind']).toBe('weaver');
     expect((d['transcript'] as Array<{ text: string }>)[0]!.text).toBe('Filed VS-61.');
   });
 });

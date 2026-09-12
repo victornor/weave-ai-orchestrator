@@ -10,7 +10,7 @@ function decision(over: Partial<Decision> & { kind: DecisionKind }): Decision {
     options: [], inputs: [], recommendation: null, status: 'open', answerKey: null, answerText: null, answerInputs: null,
     answeredByKind: null, answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null,
     createdAt: '2026-09-04T11:56:00.000Z',
-    conductorReviewStatus: 'unseen', conductorReviewedAt: null, conductorReviewNote: null, conductorReviewedByAgentId: null,
+    weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null,
     ...over,
   } as Decision;
 }
@@ -67,7 +67,7 @@ describe('decisionToCard', () => {
       { label: 'Diff', value: '+18 −2', format: 'diff' },
       { label: 'Files', value: '3 files', format: 'mono' },
       { label: 'Branch', value: 'ac/acme-42', format: 'mono' },
-      { label: 'Review', value: "Conductor hasn't reviewed yet", format: 'text' },
+      { label: 'Review', value: "Weaver hasn't reviewed yet", format: 'text' },
     ]);
   });
 
@@ -183,9 +183,9 @@ describe('decisionToCard', () => {
   });
 
   it('falls back to a generic approval for unknown kinds and conductor-owned headers', () => {
-    const card = decisionToCard(decision({ kind: 'approval' as DecisionKind, owner: 'conductor' }), { now });
+    const card = decisionToCard(decision({ kind: 'approval' as DecisionKind, owner: 'weaver' }), { now });
     expect(card.variant).toBe('approval');
-    expect(card.header).toBe('Conductor decides');
+    expect(card.header).toBe('Weaver decides');
     expect(card.options.map((o) => o.key)).toEqual(['approve', 'reject']);
   });
 
@@ -262,47 +262,47 @@ describe('decisionToCard', () => {
     it('shows the unseen line on plan, merge and action cards', () => {
       for (const kind of ['plan_approval', 'merge_approval', 'action_approval'] as const) {
         const card = decisionToCard(decision({ kind }), { now });
-        expect(card.body).toContainEqual({ label: 'Review', value: "Conductor hasn't reviewed yet", format: 'text' });
+        expect(card.body).toContainEqual({ label: 'Review', value: "Weaver hasn't reviewed yet", format: 'text' });
       }
     });
 
     it('does not put a review line on a question card', () => {
       const card = decisionToCard(decision({ kind: 'question' }), { now });
       expect(card.body.some((l) => l.label === 'Review')).toBe(false);
-      expect(card.body.some((l) => /Conductor/.test(l.value))).toBe(false);
+      expect(card.body.some((l) => /Weaver/.test(l.value))).toBe(false);
     });
 
     it('uses after-the-fact wording only when reviewedAt is strictly later than answeredAt', () => {
       const prior = decisionToCard(decision({
         kind: 'plan_approval', status: 'answered', answeredAt: '2026-09-11T03:02:00.000Z',
-        conductorReviewStatus: 'looked', conductorReviewedAt: '2026-09-11T03:01:00.000Z',
-        conductorReviewNote: 'diff is exactly the plan',
+        weaverReviewStatus: 'looked', weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+        weaverReviewNote: 'diff is exactly the plan',
       }), { now });
-      expect(prior.body).toContainEqual({ label: 'Review', value: 'Conductor reviewed — no concerns', format: 'text' });
+      expect(prior.body).toContainEqual({ label: 'Review', value: 'Weaver reviewed — no concerns', format: 'text' });
 
       const after = decisionToCard(decision({
         kind: 'merge_approval', status: 'answered', answeredAt: '2026-09-11T03:01:00.000Z',
-        conductorReviewStatus: 'looked', conductorReviewedAt: '2026-09-11T03:02:00.000Z',
-        conductorReviewNote: 'squash-merge verified after the rebase',
+        weaverReviewStatus: 'looked', weaverReviewedAt: '2026-09-11T03:02:00.000Z',
+        weaverReviewNote: 'squash-merge verified after the rebase',
       }), { now });
-      expect(after.body).toContainEqual({ label: 'Review', value: 'Conductor reviewed after you answered — no concerns', format: 'text' });
+      expect(after.body).toContainEqual({ label: 'Review', value: 'Weaver reviewed after you answered — no concerns', format: 'text' });
     });
 
     it('includes the concern note as a following body line', () => {
       const card = decisionToCard(decision({
-        kind: 'plan_approval', conductorReviewStatus: 'concerns',
-        conductorReviewedAt: '2026-09-11T03:01:00.000Z',
-        conductorReviewNote: 'the migration contradicts itself',
+        kind: 'plan_approval', weaverReviewStatus: 'concerns',
+        weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+        weaverReviewNote: 'the migration contradicts itself',
       }), { now });
-      expect(card.body).toContainEqual({ label: 'Review', value: 'Conductor reviewed — has concerns', format: 'text' });
+      expect(card.body).toContainEqual({ label: 'Review', value: 'Weaver reviewed — has concerns', format: 'text' });
       expect(card.body).toContainEqual({ label: null, value: 'the migration contradicts itself', format: 'text' });
     });
 
     it('marks the card held and adds the held sentence for an open concern (VS-266)', () => {
       const card = decisionToCard(decision({
-        kind: 'plan_approval', status: 'open', conductorReviewStatus: 'concerns',
-        conductorReviewedAt: '2026-09-11T03:01:00.000Z',
-        conductorReviewNote: 'the migration contradicts itself',
+        kind: 'plan_approval', status: 'open', weaverReviewStatus: 'concerns',
+        weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+        weaverReviewNote: 'the migration contradicts itself',
       }), { now });
       expect(card.held).toBe(true);
       expect(card.body).toContainEqual({ label: null, value: 'Approval is held until this is revised, or you override it.', format: 'text' });
@@ -311,8 +311,8 @@ describe('decisionToCard', () => {
     it('is not held once the concern-marked decision is answered', () => {
       const card = decisionToCard(decision({
         kind: 'merge_approval', status: 'answered', answeredAt: '2026-09-11T03:02:00.000Z',
-        conductorReviewStatus: 'concerns', conductorReviewedAt: '2026-09-11T03:01:00.000Z',
-        conductorReviewNote: 'screenshot is cropped',
+        weaverReviewStatus: 'concerns', weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+        weaverReviewNote: 'screenshot is cropped',
       }), { now });
       expect(card.held).toBe(false);
       expect(card.body.some((l) => l.value.includes('is held'))).toBe(false);
@@ -325,17 +325,17 @@ describe('decisionToCard', () => {
 
     it('shows a clean mark with its note, and a legacy mark as the line alone (VS-234)', () => {
       const noted = decisionToCard(decision({
-        kind: 'merge_approval', conductorReviewStatus: 'looked',
-        conductorReviewedAt: '2026-09-11T03:01:00.000Z',
-        conductorReviewNote: 'squash diff matches the approved plan',
+        kind: 'merge_approval', weaverReviewStatus: 'looked',
+        weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+        weaverReviewNote: 'squash diff matches the approved plan',
       }), { now });
-      expect(noted.body).toContainEqual({ label: 'Review', value: 'Conductor reviewed — no concerns', format: 'text' });
+      expect(noted.body).toContainEqual({ label: 'Review', value: 'Weaver reviewed — no concerns', format: 'text' });
       expect(noted.body).toContainEqual({ label: null, value: 'squash diff matches the approved plan', format: 'text' });
 
       const legacy = decisionToCard(decision({
-        kind: 'merge_approval', conductorReviewStatus: 'looked',
-        conductorReviewedAt: '2026-09-11T03:01:00.000Z',
-        conductorReviewNote: null,
+        kind: 'merge_approval', weaverReviewStatus: 'looked',
+        weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+        weaverReviewNote: null,
         target: { prUrl: 'https://github.com/acme/web/pull/12', ciPassed: 7, ciTotal: 7, additions: 18, deletions: 2, files: 3, branch: 'ac/acme-42' },
       }), { now });
       expect(legacy.body).toEqual([
@@ -344,7 +344,7 @@ describe('decisionToCard', () => {
         { label: 'Diff', value: '+18 −2', format: 'diff' },
         { label: 'Files', value: '3 files', format: 'mono' },
         { label: 'Branch', value: 'ac/acme-42', format: 'mono' },
-        { label: 'Review', value: 'Conductor reviewed — no concerns', format: 'text' },
+        { label: 'Review', value: 'Weaver reviewed — no concerns', format: 'text' },
       ]);
     });
   });

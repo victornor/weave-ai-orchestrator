@@ -20,7 +20,7 @@ const PatchSchema = z.object({
 });
 const TransitionSchema = z.object({
   to: z.enum(TICKET_STATUSES), note: z.string().optional(),
-  unblock: z.object({ owner: z.enum(['conductor', 'human']), action: z.string().min(1) }).optional(),
+  unblock: z.object({ owner: z.enum(['weaver', 'human']), action: z.string().min(1) }).optional(),
   blockedBy: z.array(z.string()).optional(),
 });
 const ListQuery = z.object({

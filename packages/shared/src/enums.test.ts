@@ -15,8 +15,8 @@ describe('run event types (VS-99)', () => {
 });
 
 describe('incident reporter kinds (VS-174)', () => {
-  it('is conductor or worker', () => {
-    expect(INCIDENT_REPORTER_KINDS).toEqual(['conductor', 'worker']);
+  it('is weaver or worker', () => {
+    expect(INCIDENT_REPORTER_KINDS).toEqual(['weaver', 'worker']);
     const ok: IncidentReporterKind = 'worker';
     expect(INCIDENT_REPORTER_KINDS).toContain(ok);
   });

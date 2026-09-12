@@ -49,8 +49,8 @@ export function presenterRoutes(deps: AppDeps): Hono<AppEnv> {
       status: a.status, uiStatus: agentUiStatus(a.status),
     });
     const workers = s.workers.list({ status: ['provisioning', 'active', 'running', 'paused', 'error'] }).map(view);
-    const conductor = safe(() => view(s.workers.conductor()));
-    return c.json({ conductor, workers, config: ws.ctx.config.presentation, surfaces: [...deps.registries.surfaces.keys()] });
+    const weaver = safe(() => view(s.workers.conductor()));
+    return c.json({ weaver, workers, config: ws.ctx.config.presentation, surfaces: [...deps.registries.surfaces.keys()] });
   });
 
   app.put('/:presenterId/handles', async (c) => {

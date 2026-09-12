@@ -207,6 +207,8 @@ describe('migrations', () => {
         id: 'd2', ticketId: 't1', kind: 'merge_approval', title: 'Merge?', status: 'answered',
         answerKey: 'merge', answerText: 'go ahead', answeredByKind: 'human', answeredAt: 't2',
       });
+      // owner: 'conductor' is 0027's (VS-259) rename target; openDb runs every migration, so d3
+      // reads back owner: 'weaver' below.
       insertDecision(before, { id: 'd3', ticketId: null, kind: 'gate_finding', owner: 'conductor', title: 'Three empty turns' });
       expect(() => insertDecision(before, { id: 'd0', kind: 'retry_approval', title: 'Parked' })).toThrow(/CHECK constraint failed/);
       before.close();
@@ -222,7 +224,7 @@ describe('migrations', () => {
         kind: 'merge_approval', status: 'answered', answerKey: 'merge', answerText: 'go ahead',
         answeredByKind: 'human', answeredAt: 't2',
       });
-      expect(db.get('SELECT * FROM decisions WHERE id = ?', ['d3'])).toMatchObject({ ticketId: null, kind: 'gate_finding', owner: 'conductor' });
+      expect(db.get('SELECT * FROM decisions WHERE id = ?', ['d3'])).toMatchObject({ ticketId: null, kind: 'gate_finding', owner: 'weaver' });
 
       expect(db.all<{ name: string }>('PRAGMA index_list(decisions)').map((i) => i.name))
         .toEqual(expect.arrayContaining(['decisions_open_corr', 'decisions_ws_status']));
@@ -790,15 +792,17 @@ describe('migrations', () => {
          VALUES ('d1', 'w1', 't1', 'plan_approval', 'human', 'Approve the plan', 'open', 't1')`);
       before.close();
 
+      // 0027 (VS-259) later renames these four columns weaver_review_* in the same release; openDb
+      // applies every migration, so the columns this row reads back through are the final names.
       const db = openDb(path);
       expect(cols(db, 'decisions')).toEqual(expect.arrayContaining([
-        'conductor_review_status', 'conductor_reviewed_at', 'conductor_review_note', 'conductor_reviewed_by_agent_id',
+        'weaver_review_status', 'weaver_reviewed_at', 'weaver_review_note', 'weaver_reviewed_by_agent_id',
       ]));
       expect(db.get('SELECT * FROM decisions WHERE id = ?', ['d1'])).toMatchObject({
-        conductorReviewStatus: 'unseen',
-        conductorReviewedAt: null,
-        conductorReviewNote: null,
-        conductorReviewedByAgentId: null,
+        weaverReviewStatus: 'unseen',
+        weaverReviewedAt: null,
+        weaverReviewNote: null,
+        weaverReviewedByAgentId: null,
       });
       expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
       db.close();
@@ -816,17 +820,17 @@ describe('migrations', () => {
       ] as const) {
         db.insert('decisions', {
           id, workspaceId: 'w1', kind, owner: 'human', title: kind, status: 'open', createdAt: 't1',
-          conductorReviewStatus: 'concerns',
-          conductorReviewedAt: '2026-09-11T03:00:00.000Z',
-          conductorReviewNote: 'look at the migration',
-          conductorReviewedByAgentId: 'ag_conductor',
+          weaverReviewStatus: 'concerns',
+          weaverReviewedAt: '2026-09-11T03:00:00.000Z',
+          weaverReviewNote: 'look at the migration',
+          weaverReviewedByAgentId: 'ag_weaver',
         });
         expect(db.get('SELECT * FROM decisions WHERE id = ?', [id])).toMatchObject({
           kind,
-          conductorReviewStatus: 'concerns',
-          conductorReviewedAt: '2026-09-11T03:00:00.000Z',
-          conductorReviewNote: 'look at the migration',
-          conductorReviewedByAgentId: 'ag_conductor',
+          weaverReviewStatus: 'concerns',
+          weaverReviewedAt: '2026-09-11T03:00:00.000Z',
+          weaverReviewNote: 'look at the migration',
+          weaverReviewedByAgentId: 'ag_weaver',
         });
       }
       db.close();
@@ -884,6 +888,161 @@ describe('migrations', () => {
       const db = openDb(join(dir, 'handovers3.sqlite'));
       const idx = db.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'agent_handovers'");
       expect(idx.map((r) => r.name)).toContain('agent_handovers_agent_status');
+      db.close();
+    });
+  });
+
+  describe('0027_agent_kind_weaver (VS-259)', () => {
+    /**
+     * Every table this migration writes, scanned column by column, for a value the rebuild should
+     * have already renamed. This is the migration's actual completion evidence (design.md Decision
+     * 6) — the itemized rebuild list is a record of how, not proof of complete, and this repo has
+     * already found two columns the itemized list first missed.
+     */
+    function scanForLiteralConductor(db: Db): string[] {
+      const tables = db.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").map((t) => t.name);
+      const hits: string[] = [];
+      for (const table of tables) {
+        for (const col of db.all<{ name: string }>(`PRAGMA table_info(${table})`)) {
+          const row = db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM "${table}" WHERE "${col.name}" = 'conductor'`);
+          if (row && row.n > 0) hits.push(`${table}.${col.name} (${row.n})`);
+        }
+      }
+      return hits;
+    }
+
+    it('rebuilds agents, decisions and roles while every existing row survives with its value renamed', () => {
+      const path = join(dir, 'agent-kind.sqlite');
+      const before = openDbAsOf(path, '0026_agent_handovers.sql');
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      before.run(
+        `INSERT INTO tickets (id, workspace_id, number, identifier, kind, title, created_by_kind, created_at, updated_at)
+         VALUES ('t1', 'w1', 1, 'VS-1', 'change', 'Rename to weaver', 'human', 't0', 't0')`);
+      before.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, created_at, updated_at)
+         VALUES ('p1', 'w1', 'p1', 'P1', 'git@x', '/tmp/p1', 't0', 't0')`,
+      );
+      before.insert('roles', {
+        id: 'r1', workspaceId: 'w1', projectId: 'p1', slug: 'r1', name: 'R1', charterSummary: 'c', scopeText: 's',
+        createdBy: 'conductor', createdAt: 't0', updatedAt: 't0',
+      });
+      before.insert('role_revisions', {
+        id: 'rr1', roleId: 'r1', revision: 1, beforeJson: {}, afterJson: {}, author: 'conductor', createdAt: 't0',
+      });
+      before.insert('agents', {
+        id: 'a1', workspaceId: 'w1', kind: 'conductor', name: 'Conductor', runtimeId: 'claude',
+        homePath: '/tmp/conductor', createdAt: 't0', updatedAt: 't0',
+      });
+      before.insert('decisions', {
+        id: 'd1', workspaceId: 'w1', ticketId: 't1', kind: 'plan_approval', owner: 'conductor', title: 'Approve',
+        status: 'open', createdAt: 't0',
+        conductorReviewStatus: 'concerns', conductorReviewedAt: 't0', conductorReviewNote: 'checked the migration',
+        conductorReviewedByAgentId: 'a1',
+      });
+      // A row already using a value this migration does not touch — unaffected. spawnedBy:
+      // 'conductor' (no CHECK — found by the column scan, same class of miss as
+      // role_revisions.author) proves the agents rebuild also transforms that column, not only kind.
+      before.insert('agents', {
+        id: 'a-worker', workspaceId: 'w1', kind: 'worker', name: 'Worker', runtimeId: 'claude',
+        homePath: '/tmp/worker', spawnedBy: 'conductor', createdAt: 't0', updatedAt: 't0',
+      });
+      before.close();
+
+      const db = openDb(path);
+
+      expect(db.get('SELECT id, kind FROM agents WHERE id = ?', ['a1'])).toMatchObject({ id: 'a1', kind: 'weaver' });
+      expect(db.get('SELECT id, kind, spawned_by FROM agents WHERE id = ?', ['a-worker'])).toMatchObject({
+        id: 'a-worker', kind: 'worker', spawnedBy: 'weaver',
+      });
+      expect(db.get('SELECT * FROM decisions WHERE id = ?', ['d1'])).toMatchObject({
+        owner: 'weaver',
+        weaverReviewStatus: 'concerns', weaverReviewedAt: 't0', weaverReviewNote: 'checked the migration',
+        weaverReviewedByAgentId: 'a1',
+      });
+      expect(db.get('SELECT id, created_by FROM roles WHERE id = ?', ['r1'])).toMatchObject({ id: 'r1', createdBy: 'weaver' });
+      expect(db.get('SELECT id, author FROM role_revisions WHERE id = ?', ['rr1'])).toMatchObject({ id: 'rr1', author: 'weaver' });
+
+      expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+      expect(scanForLiteralConductor(db)).toEqual([]);
+      db.close();
+    });
+
+    it('renames incidents.reporter_kind, the column only daemon.sqlite ever populates', () => {
+      // Simulates daemon.sqlite's shape: no workspace rows at all, only incidents — the one table
+      // this migration touches that is empty in every *workspace* database (per 0022's own header)
+      // but carries real rows at the daemon level (VS-259's plan review found 6 such rows live).
+      const path = join(dir, 'daemon-shaped.sqlite');
+      const before = openDbAsOf(path, '0026_agent_handovers.sql');
+      before.insert('incidents', {
+        id: 'i1', reporterKind: 'conductor', title: 'stuck', whatFailed: 'ac_ticket_get',
+        tryingToDo: 'read the ticket', agentId: 'ag1', runId: 'run1', createdAt: 't0',
+      });
+      before.insert('incidents', {
+        id: 'i2', reporterKind: 'worker', title: 'stuck too', whatFailed: 'ac_ticket_get',
+        tryingToDo: 'read the ticket', agentId: 'ag2', runId: 'run2', createdAt: 't0',
+      });
+      before.close();
+
+      const db = openDb(path);
+      expect(db.get('SELECT id, reporter_kind FROM incidents WHERE id = ?', ['i1'])).toMatchObject({ id: 'i1', reporterKind: 'weaver' });
+      expect(db.get('SELECT id, reporter_kind FROM incidents WHERE id = ?', ['i2'])).toMatchObject({ id: 'i2', reporterKind: 'worker' });
+      expect(scanForLiteralConductor(db)).toEqual([]);
+      db.close();
+    });
+
+    it('still enforces one weaver-kind agent per workspace after the rebuild', () => {
+      const db = openDb(join(dir, 'one-weaver.sqlite'));
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.insert('agents', {
+        id: 'a1', workspaceId: 'w1', kind: 'weaver', name: 'Weaver', runtimeId: 'claude',
+        homePath: '/tmp/weaver', createdAt: 't0', updatedAt: 't0',
+      });
+      expect(() => db.insert('agents', {
+        id: 'a2', workspaceId: 'w1', kind: 'weaver', name: 'Second weaver', runtimeId: 'claude',
+        homePath: '/tmp/weaver2', createdAt: 't0', updatedAt: 't0',
+      })).toThrow(/UNIQUE constraint failed/);
+
+      // A second worker-kind agent in the same workspace is unaffected.
+      db.insert('agents', {
+        id: 'a3', workspaceId: 'w1', kind: 'worker', name: 'Worker 1', runtimeId: 'claude',
+        homePath: '/tmp/w1', createdAt: 't0', updatedAt: 't0',
+      });
+      db.insert('agents', {
+        id: 'a4', workspaceId: 'w1', kind: 'worker', name: 'Worker 2', runtimeId: 'claude',
+        homePath: '/tmp/w2', createdAt: 't0', updatedAt: 't0',
+      });
+      expect(db.all<{ id: string }>("SELECT id FROM agents WHERE kind = 'worker'").map((r) => r.id).sort()).toEqual(['a3', 'a4']);
+      db.close();
+    });
+
+    it('a fresh workspace provisions its one agent of this kind as weaver', () => {
+      const db = openDb(join(dir, 'fresh.sqlite'));
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.insert('agents', {
+        id: 'a1', workspaceId: 'w1', kind: 'weaver', name: 'Weaver', runtimeId: 'claude',
+        homePath: '/tmp/weaver', createdAt: 't0', updatedAt: 't0',
+      });
+      expect(db.get('SELECT kind FROM agents WHERE id = ?', ['a1'])).toMatchObject({ kind: 'weaver' });
+      db.close();
+    });
+
+    it('filtering agents by kind matches only the renamed value', () => {
+      const db = openDb(join(dir, 'filter.sqlite'));
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.insert('agents', {
+        id: 'a1', workspaceId: 'w1', kind: 'weaver', name: 'Weaver', runtimeId: 'claude',
+        homePath: '/tmp/weaver', createdAt: 't0', updatedAt: 't0',
+      });
+      expect(db.all("SELECT id FROM agents WHERE kind = 'weaver'")).toHaveLength(1);
+      expect(db.all("SELECT id FROM agents WHERE kind = 'conductor'")).toHaveLength(0);
       db.close();
     });
   });

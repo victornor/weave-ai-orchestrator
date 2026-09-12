@@ -12,7 +12,7 @@ const WORKER: RunTokenClaims = {
   workspaceId: 'ws1', runId: 'run_1', agentId: 'ag_1', agentKind: 'worker',
   projectId: 'proj1', ticketId: 'tk_1', roleId: 'role_1',
 };
-const CONDUCTOR: RunTokenClaims = { ...WORKER, agentKind: 'conductor', ticketId: null };
+const CONDUCTOR: RunTokenClaims = { ...WORKER, agentKind: 'weaver', ticketId: null };
 
 const FILE = {
   title: 'MCP call failed',
@@ -51,7 +51,7 @@ describe('ac_incident', () => {
     const res = await fileViaAgent(harness, CONDUCTOR, FILE);
     const payload = await res.json() as { ok: boolean; data: { reporterKind: string } };
     expect(payload.ok).toBe(true);
-    expect(payload.data.reporterKind).toBe('conductor');
+    expect(payload.data.reporterKind).toBe('weaver');
   });
 
   it('rejects an empty title with validation and stores nothing', async () => {
@@ -89,12 +89,12 @@ describe('GET /api/incidents', () => {
     expect(body.items.map((i) => i.title)).toEqual(['conductor one', 'worker one']);
   });
 
-  it('filters reporter=conductor', async () => {
+  it('filters reporter=weaver', async () => {
     harness = makeHarness({ listener: 'loopback' });
     await fileViaAgent(harness, WORKER, { ...FILE, title: 'worker one' });
     await fileViaAgent(harness, CONDUCTOR, { ...FILE, title: 'conductor one' });
     const app = createApp(harness.deps);
-    const res = await app.fetch(new Request('http://127.0.0.1/api/incidents?reporter=conductor', { headers: authed() }));
+    const res = await app.fetch(new Request('http://127.0.0.1/api/incidents?reporter=weaver', { headers: authed() }));
     const body = await res.json() as { items: Array<{ title: string }> };
     expect(body.items.map((i) => i.title)).toEqual(['conductor one']);
   });
@@ -142,7 +142,7 @@ describe('ac_incident_list / ac_incident_get (VS-222)', () => {
     await fileViaAgent(harness, CONDUCTOR, { ...FILE, title: 'alpha conductor' });
     await fileViaAgent(harness, WORKER, { ...FILE, title: 'alpha worker' });
     harness.deps.incidents.create({
-      reporterKind: 'conductor', title: 'daemon-global', whatFailed: 'x', tryingToDo: 'y',
+      reporterKind: 'weaver', title: 'daemon-global', whatFailed: 'x', tryingToDo: 'y',
       agentId: 'ag_0', runId: 'run_0', workspaceId: null,
     });
     const beta = harness.deps.incidents.create({

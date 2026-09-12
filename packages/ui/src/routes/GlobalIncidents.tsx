@@ -13,12 +13,12 @@ import { cx } from '../lib/cx';
 
 const FILTERS: Array<{ key: 'all' | IncidentReporterKind; label: string }> = [
   { key: 'all', label: 'All' },
-  { key: 'conductor', label: 'Conductor' },
+  { key: 'weaver', label: 'Weaver' },
   { key: 'worker', label: 'Worker' },
 ];
 
 function reporterOf(search: string | undefined): IncidentReporterKind | undefined {
-  return search === 'conductor' || search === 'worker' ? search : undefined;
+  return search === 'weaver' || search === 'worker' ? search : undefined;
 }
 
 function IncidentRow({
@@ -38,7 +38,7 @@ function IncidentRow({
         onClick={() => setOpen((v) => !v)}
       >
         <span className="min-w-0 flex-1 truncate text-ui text-text-1">{incident.title}</span>
-        <Badge tone={incident.reporterKind === 'conductor' ? 'accent' : 'neutral'}>{incident.reporterKind}</Badge>
+        <Badge tone={incident.reporterKind === 'weaver' ? 'accent' : 'neutral'}>{incident.reporterKind}</Badge>
         {workspaceName ? <span className="hidden text-micro text-text-3 sm:inline">{workspaceName}</span> : null}
         <time className="ac-mono shrink-0 text-nano text-text-3" dateTime={incident.createdAt}>
           {incident.createdAt.replace('T', ' ').replace(/\.\d+Z$/, 'Z')}
@@ -71,8 +71,8 @@ export function GlobalIncidentsRoute(): React.ReactElement {
   };
 
   const items = list.data?.items ?? [];
-  const emptyTitle = reporter === 'conductor'
-    ? 'No conductor incidents.'
+  const emptyTitle = reporter === 'weaver'
+    ? 'No weaver incidents.'
     : reporter === 'worker'
       ? 'No worker incidents.'
       : 'No incidents have been filed.';

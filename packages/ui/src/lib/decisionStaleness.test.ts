@@ -4,10 +4,10 @@ import { staleAnswerCopy } from './decisionStaleness';
 
 describe('staleAnswerCopy', () => {
   it('names the concern when a decision is held (VS-266)', () => {
-    const e = new ApiError(409, { code: 'revision_pending', message: 'held', details: { conductorReviewNote: 'the migration needs splitting' } });
+    const e = new ApiError(409, { code: 'revision_pending', message: 'held', details: { weaverReviewNote: 'the migration needs splitting' } });
     expect(staleAnswerCopy(e, null)).toEqual({
       title: 'Approval is held',
-      detail: 'The conductor has concerns: the migration needs splitting',
+      detail: 'The weaver has concerns: the migration needs splitting',
       ticketId: null,
     });
   });

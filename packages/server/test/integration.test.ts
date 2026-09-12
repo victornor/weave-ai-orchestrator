@@ -173,7 +173,7 @@ describe('real core services over HTTP', () => {
     expect(services.wake.listForAgent(workerId).length).toBeGreaterThan(0);
   });
 
-  it('refuses approving a decision the conductor has concerns about over the REST route, then accepts an override (VS-266)', async () => {
+  it('refuses approving a decision the weaver has concerns about over the REST route, then accepts an override (VS-266)', async () => {
     const { deps, harness } = boot();
     const app = createApp(deps);
     const services = deps.workspaces.get(harness.workspaceId)!.services;
@@ -241,7 +241,7 @@ describe('real core services over HTTP', () => {
         turnEpoch: 1, cwd: '/tmp', retryOfRunId: null, createdAt: new Date().toISOString(),
       });
       const token = await signRunToken(runTokenSecret(harness.ctx.db), {
-        workspaceId: harness.workspaceId, runId, agentId: harness.conductorId, agentKind: 'conductor', projectId: null, ticketId: null, roleId: null,
+        workspaceId: harness.workspaceId, runId, agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
       });
       return { threadId: thread.id, token, messageIds };
     }
@@ -311,7 +311,7 @@ describe('real core services over HTTP', () => {
       expect((wakes[0]?.payload as { truncated?: boolean; bodyLength?: number }).bodyLength).toBe(9000);
 
       const token = await signRunToken(runTokenSecret(harness.ctx.db), {
-        workspaceId: harness.workspaceId, runId: 'run_msg', agentId: harness.conductorId, agentKind: 'conductor', projectId: null, ticketId: null, roleId: null,
+        workspaceId: harness.workspaceId, runId: 'run_msg', agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
       });
       const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_thread_message_get`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -332,7 +332,7 @@ describe('real core services over HTTP', () => {
       const t = services.threads.bindOrGet('web', 'web-vs242-here', null);
 
       const token = await signRunToken(runTokenSecret(harness.ctx.db), {
-        workspaceId: harness.workspaceId, runId: 'run_msg2', agentId: harness.conductorId, agentKind: 'conductor', projectId: null, ticketId: null, roleId: null,
+        workspaceId: harness.workspaceId, runId: 'run_msg2', agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
       });
       const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_thread_message_get`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -377,7 +377,7 @@ describe('real core services over HTTP', () => {
     expect(role.maxWorkers).toBe(2);
 
     const token = await signRunToken(runTokenSecret(harness.ctx.db), {
-      workspaceId: harness.workspaceId, runId: 'run_c', agentId: harness.conductorId, agentKind: 'conductor', projectId: null, ticketId: null, roleId: null,
+      workspaceId: harness.workspaceId, runId: 'run_c', agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
     });
     const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_role_set_max_workers`, {
       method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },

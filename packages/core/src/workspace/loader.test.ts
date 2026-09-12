@@ -116,7 +116,7 @@ describe('workspace loader', () => {
     expect(ctx.workspaceId).toBe(workspaceId); // same workspace row, found under the old name
     expect(ctx.paths.state).toBe(join(root, '.agent-conductor'));
     expect(ctx.paths.db).toBe(join(root, '.agent-conductor', 'db.sqlite'));
-    expect(ctx.paths.conductor).toBe(join(root, 'conductor'));
+    expect(ctx.paths.weaver).toBe(join(root, 'conductor'));
     expect(existsSync(join(root, '.agent-conductor', 'runtimes', 'claude'))).toBe(true);
     // The whole safety claim: no second, empty .weave/weaver is created beside the real installation.
     expect(existsSync(join(root, '.weave'))).toBe(false);

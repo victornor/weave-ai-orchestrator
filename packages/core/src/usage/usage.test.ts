@@ -184,14 +184,14 @@ describe('usage top / models / ticket', () => {
     const byTicket = usage().top({ scope: 'workspace', window: '24h', by: 'ticket' });
     expect(byTicket.map((r) => r.key)).toEqual([`agent:${h.conductorId}`, t.id]);
     expect(byTicket[1]!.label).toBe(`${t.identifier} Fix the thing`);
-    expect(byTicket[0]!.label).toBe('Conductor chat');
+    expect(byTicket[0]!.label).toBe('Weaver chat');
 
     const byRole = usage().top({ scope: 'workspace', window: '24h', by: 'role' });
     expect(byRole[0]!.label).toBe('Backend Engineer');
     const byProject = usage().top({ scope: 'workspace', window: '24h', by: 'project' });
     expect(byProject[0]!.label).toBe('API');
     const byWorker = usage().top({ scope: 'workspace', window: '24h', by: 'worker' });
-    expect(byWorker[0]!.label).toBe('Conductor');
+    expect(byWorker[0]!.label).toBe('Weaver');
   });
 
   it('groups ticket-less usage per agent instead of one unknown bucket', () => {
@@ -207,7 +207,7 @@ describe('usage top / models / ticket', () => {
 
     const rows = usage().top({ scope: 'workspace', window: '24h', by: 'ticket' });
     expect(rows.map((r) => [r.key, r.label, r.costCents])).toEqual([
-      [`agent:${h.conductorId}`, 'Conductor chat', 50],
+      [`agent:${h.conductorId}`, 'Weaver chat', 50],
       [`agent:${worker}`, 'Backend Engineer #1 · no ticket', 10],
     ]);
     // the null bucket is split, never dropped: the dimension still sums to the window total

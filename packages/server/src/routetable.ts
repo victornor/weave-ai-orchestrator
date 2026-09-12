@@ -95,8 +95,8 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: `${W}/workers/{id}/handover-command`, tag: 'workers', summary: 'The resume command this worker would offer, without taking it (VS-249)', auth: 'session' },
   { method: 'POST', path: `${W}/workers/{id}/handover`, tag: 'workers', summary: 'Take a worker\'s session for a human\'s own terminal (VS-249)', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/workers/{id}/handback`, tag: 'workers', summary: 'Give a held session back, with a required note (VS-249)', auth: 'session', mutating: true },
-  { method: 'GET', path: `${W}/conductor`, tag: 'workers', summary: 'The conductor agent', auth: 'session' },
-  { method: 'POST', path: `${W}/conductor/reset-session`, tag: 'workers', summary: 'Drop the conductor session', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/weaver`, tag: 'workers', summary: 'The weaver agent', auth: 'session' },
+  { method: 'POST', path: `${W}/weaver/reset-session`, tag: 'workers', summary: 'Drop the weaver session', auth: 'session', mutating: true },
 
   { method: 'GET', path: `${W}/tickets`, tag: 'tickets', summary: 'List tickets', auth: 'session' },
   { method: 'POST', path: `${W}/tickets`, tag: 'tickets', summary: 'Create a ticket', auth: 'session', mutating: true },

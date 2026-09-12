@@ -27,7 +27,7 @@ vi.mock('../api/context', () => ({
 vi.mock('../api/hooks', () => ({
   useDecisions: (p: { owner?: string }) => {
     state.queries.push(p);
-    return { data: p.owner === 'conductor' ? state.conductorOwned : state.decisions, isLoading: false, isError: false, refetch: vi.fn() };
+    return { data: p.owner === 'weaver' ? state.conductorOwned : state.decisions, isLoading: false, isError: false, refetch: vi.fn() };
   },
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
   useTickets: () => ({ data: state.tickets }),
@@ -93,10 +93,10 @@ describe('NeedsYouRoute', () => {
     expect(screen.getByText('1 waiting')).toBeInTheDocument();
   });
 
-  it('shows the conductor-review line on an unseen plan card (VS-223)', () => {
+  it('shows the weaver-review line on an unseen plan card (VS-223)', () => {
     state.decisions = [decision({ kind: 'plan_approval', title: 'Approve the plan for ACME-42' })];
     render(<NeedsYouRoute />);
-    expect(screen.getByText("Conductor hasn't reviewed yet")).toBeInTheDocument();
+    expect(screen.getByText("Weaver hasn't reviewed yet")).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Approve/ })).toBeInTheDocument();
   });
 

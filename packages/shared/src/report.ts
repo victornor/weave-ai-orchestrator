@@ -23,7 +23,7 @@ export const RunReportSchema = z.object({
   state: z.enum(REPORT_STATES),
   summary: z.string().max(4000),
   tickets: z.array(z.object({ id: z.string(), status: z.string().optional(), note: z.string().optional() })).default([]),
-  nextAction: z.object({ owner: z.enum(['self', 'conductor', 'human', 'none']), what: z.string() }).optional(),
+  nextAction: z.object({ owner: z.enum(['self', 'weaver', 'human', 'none']), what: z.string() }).optional(),
   knowledge: KnowledgeReportSchema,
   uncommittedWork: z.boolean().default(false),
 });
@@ -34,7 +34,7 @@ export const RUN_REPORT_JSON_SCHEMA = {
     state: { type: 'string', enum: [...REPORT_STATES] },
     summary: { type: 'string' },
     tickets: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' }, note: { type: 'string' } }, required: ['id'] } },
-    nextAction: { type: 'object', properties: { owner: { type: 'string', enum: ['self', 'conductor', 'human', 'none'] }, what: { type: 'string' } }, required: ['owner', 'what'] },
+    nextAction: { type: 'object', properties: { owner: { type: 'string', enum: ['self', 'weaver', 'human', 'none'] }, what: { type: 'string' } }, required: ['owner', 'what'] },
     knowledge: {
       type: 'object',
       properties: { recorded: { type: 'boolean' }, where: { type: 'string' }, reason: { type: 'string' } },

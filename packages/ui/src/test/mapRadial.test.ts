@@ -15,7 +15,7 @@ function role(over: Partial<Role> = {}): Role {
 }
 
 function ws(over: Partial<MapWorkspaceInput> & Pick<MapWorkspaceInput, 'id' | 'name'>): MapWorkspaceInput {
-  return { projects: [], roles: [], tickets: [], knowledge: [], conductor: null, ...over };
+  return { projects: [], roles: [], tickets: [], knowledge: [], weaver: null, ...over };
 }
 
 describe('layoutRadial', () => {

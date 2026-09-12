@@ -34,7 +34,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
   const ws = ctx.workspaceId;
 
   function conductor(): { id: string } {
-    const c = db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND kind = 'conductor'", [ws]);
+    const c = db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND kind = 'weaver'", [ws]);
     if (!c) throw new OcError('not_found', 'this workspace has no conductor yet');
     return c;
   }

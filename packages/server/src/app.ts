@@ -67,7 +67,7 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   ws.route('/jobs', jobRoutes());
   ws.route('/roles', roleRoutes());
   ws.route('/workers', workerRoutes());
-  ws.route('/conductor', conductorRoutes());
+  ws.route('/weaver', conductorRoutes());
   ws.route('/tickets', ticketRoutes());
   ws.route('/decisions', decisionRoutes());
   ws.route('/runs', runRoutes());

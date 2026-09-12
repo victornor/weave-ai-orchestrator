@@ -12,7 +12,7 @@ export interface WorktreeProvider {
   list(repoPath: string, configPath?: string): Promise<WorktreeInfo[]>;
   remove(input: { repoPath: string; path: string; branch: string; deleteBranch: boolean; force: boolean; configPath?: string }): Promise<void>;
 }
-export interface AgentToolDefinition { name: string; description: string; inputSchema: Record<string, unknown>; scope: 'conductor' | 'worker' | 'all'; handler(input: Record<string, unknown>, ctx: { workspaceId: string; agentId: string; agentKind: 'conductor' | 'worker'; projectId: string | null; ticketId: string | null; runId: string }): Promise<unknown> }
+export interface AgentToolDefinition { name: string; description: string; inputSchema: Record<string, unknown>; scope: 'weaver' | 'worker' | 'all'; handler(input: Record<string, unknown>, ctx: { workspaceId: string; agentId: string; agentKind: 'weaver' | 'worker'; projectId: string | null; ticketId: string | null; runId: string }): Promise<unknown> }
 /** How a pull request's checks stand, rolled up. `none` is "the forge reported no check", not "no answer". */
 export type ForgeCheckState = 'pending' | 'success' | 'failure' | 'none';
 /** One changed file with the lines it adds and removes. */

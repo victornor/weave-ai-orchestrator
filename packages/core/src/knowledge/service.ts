@@ -531,7 +531,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         usage.push({ scope, projectId, tokens: estimateTokens(chunk) });
       };
 
-      if (agent.kind === 'conductor') {
+      if (agent.kind === 'weaver') {
         const workspaceChunk = service.get('workspace').body.trimEnd();
         parts.push(workspaceChunk);
         record('workspace', null, workspaceChunk);

@@ -49,7 +49,7 @@ export function modelSettingFor(
   ticket?: { workerModelId?: string | null } | null,
 ): ModelSetting {
   const models = config.models ?? DEFAULT_WORKSPACE_MODELS;
-  if (kind === 'conductor') return models.conductor;
+  if (kind === 'weaver') return models.conductor;
   const id = ticket?.workerModelId;
   if (id) {
     const opt = (models.workerOptions ?? []).find((o) => o.id === id);

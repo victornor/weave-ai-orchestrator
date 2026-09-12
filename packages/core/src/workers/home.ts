@@ -8,12 +8,12 @@ import { renderBrief, renderConductorInstructions, renderWorkerInstructions } fr
 
 const MARKER = '.ac-render.json';
 
-const CONDUCTOR_SKILLS = ['agent-conductor-conductor', 'agent-conductor-hire', 'agent-conductor-planning', 'agent-conductor-briefing', 'agent-conductor-knowledge', 'agent-conductor-artifacts'];
+const CONDUCTOR_SKILLS = ['agent-conductor-weaver', 'agent-conductor-hire', 'agent-conductor-planning', 'agent-conductor-briefing', 'agent-conductor-knowledge', 'agent-conductor-artifacts'];
 const WORKER_SKILLS = ['agent-conductor-worker', 'agent-conductor-openspec', 'agent-conductor-scout', 'agent-conductor-knowledge', 'agent-conductor-artifacts'];
 
 /** Skill packages shipped with the daemon, filtered to the ones this agent kind loads. */
-export function skillsFor(ctx: WorkspaceContext, kind: 'conductor' | 'worker'): Array<{ name: string; dir: string }> {
-  const wanted = kind === 'conductor' ? CONDUCTOR_SKILLS : WORKER_SKILLS;
+export function skillsFor(ctx: WorkspaceContext, kind: 'weaver' | 'worker'): Array<{ name: string; dir: string }> {
+  const wanted = kind === 'weaver' ? CONDUCTOR_SKILLS : WORKER_SKILLS;
   if (!ctx.skillsDir || !existsSync(ctx.skillsDir)) return [];
   let entries: string[] = [];
   try { entries = readdirSync(ctx.skillsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch { return []; }
@@ -35,7 +35,7 @@ function currentRevisions(ctx: WorkspaceContext, agent: Agent): Omit<Marker, 're
 export async function renderHome(ctx: WorkspaceContext, deps: () => CoreServices, agent: Agent, opts: { relaunchNote?: string | null } = {}): Promise<void> {
   const home = agent.homePath;
   mkdirSync(home, { recursive: true });
-  const instructions = agent.kind === 'conductor'
+  const instructions = agent.kind === 'weaver'
     ? renderConductorInstructions(ctx, deps)
     : renderWorkerInstructions(ctx, deps, agent, opts);
   writeFileSync(join(home, 'AGENTS.md'), instructions, 'utf8');

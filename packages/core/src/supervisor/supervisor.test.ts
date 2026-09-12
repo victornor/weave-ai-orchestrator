@@ -48,7 +48,7 @@ describe('supervisor', () => {
     const runId = newId();
     h.db.insert('runs', {
       id: runId, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: [], runtimeId: 'claude',
-      status: 'running', turnEpoch: 1, cwd: h.ctx.paths.conductor, pid: 999_999, startedAt: nowIso(), createdAt: nowIso(),
+      status: 'running', turnEpoch: 1, cwd: h.ctx.paths.weaver, pid: 999_999, startedAt: nowIso(), createdAt: nowIso(),
     });
     await supervisor.tick();
     const run = h.db.get<Run>('SELECT * FROM runs WHERE id = ?', [runId])!;
@@ -524,7 +524,7 @@ describe('supervisor scheduled passes', () => {
         writeFileSync(join(dir, 'events.jsonl'), '{}\n');
         h.db.insert('runs', {
           id, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: [], runtimeId: 'claude', status: 'succeeded',
-          turnEpoch: 1, cwd: h.ctx.paths.conductor, finishedAt, logPath: join(dir, 'events.jsonl'), createdAt: finishedAt,
+          turnEpoch: 1, cwd: h.ctx.paths.weaver, finishedAt, logPath: join(dir, 'events.jsonl'), createdAt: finishedAt,
         });
       }
       await supervisor.tick();

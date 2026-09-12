@@ -119,7 +119,7 @@ export interface CardModel {
   id: string;
   kind: DecisionKind;
   variant: CardVariant;
-  /** Always "Needs you" for human-owned decisions, "Conductor" for conductor-owned ones. */
+  /** Always "Needs you" for human-owned decisions, "Weaver" for weaver-owned ones. */
   header: string;
   title: string;
   /** `ACME-42 · api` */
@@ -146,7 +146,7 @@ export interface CardModel {
    * shows the question and points at the web app rather than offering an answer it cannot complete.
    */
   answerElsewhere: boolean;
-  /** VS-266: the conductor has concerns and this decision is still open — its approving option is refused without a deliberate override. False for every other decision, including one that does not carry a conductor review at all. */
+  /** VS-266: the weaver has concerns and this decision is still open — its approving option is refused without a deliberate override. False for every other decision, including one that does not carry a weaver review at all. */
   held: boolean;
 }
 
@@ -186,7 +186,7 @@ export interface WorkerCardModel {
   id: string;
   name: string;
   initials: string;
-  kind: 'conductor' | 'worker';
+  kind: 'weaver' | 'worker';
   role: string | null;
   project: string | null;
   ticket: { id: string; identifier: string; title: string } | null;

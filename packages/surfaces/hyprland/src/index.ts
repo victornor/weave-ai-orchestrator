@@ -101,8 +101,8 @@ export function createHyprlandSurface(): SurfaceAdapter {
     },
 
     async ensureConductorView(cfg, ctx) {
-      // The conductor deliberately gets no workspace rule: it opens where the human is.
-      return spawn(ctx, { ...cfg, workspace: undefined }, 'conductor', ctx.chatCommand());
+      // The weaver deliberately gets no workspace rule: it opens where the human is.
+      return spawn(ctx, { ...cfg, workspace: undefined }, 'weaver', ctx.chatCommand());
     },
 
     /** Titles come from the terminal's OSC title, set by `conductor attach`; nothing to push. */

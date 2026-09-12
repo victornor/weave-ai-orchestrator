@@ -92,7 +92,7 @@ describe('graceful shutdown (VS-262)', () => {
     // The workspace db is closed as part of shutdown — reopen it to see what was actually recorded.
     const db = openDb(dbPath);
     try {
-      const run = db.get<Run>("SELECT * FROM runs WHERE agent_id = (SELECT id FROM agents WHERE kind = 'conductor')");
+      const run = db.get<Run>("SELECT * FROM runs WHERE agent_id = (SELECT id FROM agents WHERE kind = 'weaver')");
       expect(run?.status).toBe('interrupted');
     } finally {
       db.close();

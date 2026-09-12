@@ -23,7 +23,7 @@ export function NeedsYouRoute(): React.ReactElement {
   const toast = useToast();
   const conn = useConnection();
   const decisions = useDecisions({ status: 'open', owner: 'human' });
-  const conductorOwned = useDecisions({ status: 'open', owner: 'conductor' });
+  const conductorOwned = useDecisions({ status: 'open', owner: 'weaver' });
   const workers = useWorkers({ status: 'running' });
   const tickets = useTickets({ limit: 200 });
   const projects = useProjects();

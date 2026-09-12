@@ -21,7 +21,7 @@ import { ContextMeter } from '../components/ContextMeter';
 import {
   ACCOUNTS_REFRESH_MS,
   useAnswerDecision,
-  useConductor,
+  useWeaver,
   useCreateThread,
   useDecisions,
   usePostThreadMessage,
@@ -132,7 +132,7 @@ export function ChatPage({
   const pickedProject = draft.projectId;
   /** The conductor message the next message answers, or null. Choosing another replaces it. */
   const replyToId = draft.replyToId ?? null;
-  const conductor = useConductor();
+  const conductor = useWeaver();
   const conductorId = conductor.data?.agent.id ?? null;
   // The conductor's own runtime, not the workers': the agent row is kept in step with the
   // `conductor` block of the workspace config by `ensureConductor`, and Settings reads the same
@@ -742,7 +742,7 @@ export function ChatPage({
                         <DecisionCard
                           key={d.id}
                           decision={d}
-                          asker="conductor"
+                          asker="weaver"
                           ticketIdentifier={ticketOf(d)?.identifier ?? d.ticketId}
                           projectSlug={projectSlugOf(d)}
                           ws={ws}
@@ -763,7 +763,7 @@ export function ChatPage({
                 replaces it is on screen, so the end of a turn is a fold rather than a blink. The
                 streamed reply text is still never left behind — the thread message is the record. */}
             {working || live ? (
-              <section aria-label="Conductor is working" className="flex flex-col gap-2">
+              <section aria-label="Weaver is working" className="flex flex-col gap-2">
                 <div className="flex items-center gap-2.5">
                   <StatusGlyph status="working" size="xs" />
                   <span className="ac-mono text-micro text-text-3">{runId ? 'working' : 'starting…'}</span>
@@ -853,7 +853,7 @@ export function ChatPage({
               <DecisionCard
                 key={d.id}
                 decision={d}
-                {...(askedByConductor(d) ? { asker: 'conductor' as const } : {})}
+                {...(askedByConductor(d) ? { asker: 'weaver' as const } : {})}
                 ticketIdentifier={ticketOf(d)?.identifier ?? d.ticketId}
                 projectSlug={projectSlugOf(d)}
                 ws={ws}

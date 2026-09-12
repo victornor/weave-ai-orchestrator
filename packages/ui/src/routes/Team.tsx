@@ -8,7 +8,7 @@ import { StatusBadge, Badge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
 import { Markdown } from '../components/Markdown';
 import { Sheet } from '../components/Sheet';
-import { useConductor, useProjects, useRole, useRoleAction, useRoles, useRollbackCharter, useStartSession, useUpdateRole, useWorkerAction, useWorkers } from '../api/hooks';
+import { useWeaver, useProjects, useRole, useRoleAction, useRoles, useRollbackCharter, useStartSession, useUpdateRole, useWorkerAction, useWorkers } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import { ago } from '../lib/format';
@@ -19,7 +19,7 @@ export function TeamRoute(): React.ReactElement {
   const projects = useProjects();
   const roles = useRoles();
   const workers = useWorkers({});
-  const conductor = useConductor();
+  const conductor = useWeaver();
   const workerAction = useWorkerAction();
   const startSession = useStartSession();
   const [openRole, setOpenRole] = useState<string | null>(null);

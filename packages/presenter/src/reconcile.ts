@@ -52,14 +52,14 @@ export function createReconciler(opts: ReconcilerOptions): Reconciler {
     [...entries.entries()].map(([agentId, e]) => ({ agentId, surfaceKind: surface.kind, handle: e.handle, view: e.view, kindOfAgent: e.view.kind }));
 
   const cfgFor = (view: AgentView): Record<string, unknown> =>
-    (view.kind === 'conductor' ? conductorCfg ?? workersCfg : workersCfg) as Record<string, unknown>;
+    (view.kind === 'weaver' ? conductorCfg ?? workersCfg : workersCfg) as Record<string, unknown>;
 
   const ensure = async (view: AgentView, o: { force?: boolean } = {}): Promise<void> => {
     closing.delete(view.agentId);
     const existing = entries.get(view.agentId);
     try {
       const cfg = { ...cfgFor(view), ...(o.force ? { reconcile: true } : {}) };
-      const handle = view.kind === 'conductor' && surface.ensureConductorView
+      const handle = view.kind === 'weaver' && surface.ensureConductorView
         ? await surface.ensureConductorView(cfg, ctx)
         : await surface.ensureAgentView(view, cfg, ctx, existing?.handle);
       entries.set(view.agentId, { view, handle });
@@ -118,12 +118,12 @@ export function createReconciler(opts: ReconcilerOptions): Reconciler {
     workersCfg = { ...(desired.config.workers ?? {}) };
     conductorCfg = desired.config.conductor ? { ...desired.config.conductor } : null;
 
-    if (desired.conductor && conductorCfg) await ensure(desired.conductor, o);
+    if (desired.weaver && conductorCfg) await ensure(desired.weaver, o);
     const live = desired.workers.filter((w) => w.status !== 'retired');
     for (const worker of live) { if (!o.force && entries.has(worker.agentId)) await update(worker); else await ensure(worker, o); }
 
     const desiredIds = new Set(live.map((w) => w.agentId));
-    if (desired.conductor && conductorCfg) desiredIds.add(desired.conductor.agentId);
+    if (desired.weaver && conductorCfg) desiredIds.add(desired.weaver.agentId);
     for (const agentId of entries.keys()) if (!desiredIds.has(agentId)) retire(agentId);
 
     await layout();

@@ -78,10 +78,10 @@ export type DecisionAnswerInputs = Record<string, string | string[]>;
 export interface Decision {
   id: string; workspaceId: string; ticketId: string | null; projectId: string | null; kind: E.DecisionKind; owner: E.DecisionOwner; askedByAgentId: string | null; askedInRunId: string | null; title: string; context: string; options: Array<{ key: string; label: string; description?: string; recommended?: boolean }>; inputs: DecisionInput[]; allowFreeText: boolean; recommendation: string | null; status: E.DecisionStatus; answerKey: string | null; answerText: string | null; answerInputs: DecisionAnswerInputs | null; answeredByKind: string | null; answeredById: string | null; answeredAt: string | null; expiresAt: string | null; target: Record<string, unknown> | null; correlationKey: string | null; createdAt: string;
   /** VS-223: asserted conductor review of plan/merge/action cards. Default `unseen`. */
-  conductorReviewStatus: E.ConductorReviewStatus;
-  conductorReviewedAt: string | null;
-  conductorReviewNote: string | null;
-  conductorReviewedByAgentId: string | null;
+  weaverReviewStatus: E.WeaverReviewStatus;
+  weaverReviewedAt: string | null;
+  weaverReviewNote: string | null;
+  weaverReviewedByAgentId: string | null;
 }
 /** A workspace secret as any surface may see it (VS-92): the name, where it is exposed, and whether a value is held. Never the value. */
 export interface WorkspaceSecret { name: string; envVarName: string; scope: E.SecretScope; scopeId: string | null; hasValue: boolean }

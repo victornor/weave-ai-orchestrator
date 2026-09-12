@@ -381,7 +381,7 @@ describe('daemon state is not cached per workspace', () => {
   });
 
   it('keeps workspace-level queries under their workspace', () => {
-    for (const key of [qk.workspace('ws1'), qk.projects('ws1'), qk.conductor('ws1'), qk.presentation('ws1'), qk.routines('ws1')]) {
+    for (const key of [qk.workspace('ws1'), qk.projects('ws1'), qk.weaver('ws1'), qk.presentation('ws1'), qk.routines('ws1')]) {
       expect(key.slice(0, 2)).toEqual(['w', 'ws1']);
     }
     expect(qk.workspace('ws1')).not.toEqual(qk.workspace('ws2'));

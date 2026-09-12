@@ -46,7 +46,7 @@ describe('skillsFor (VS-189)', () => {
     h = makeHarness();
     seedSkills(h.ctx);
     const expected = manifest.skills.filter((s) => s.audience === 'conductor' || s.audience === 'all').map((s) => s.name).sort();
-    expect(skillsFor(h.ctx, 'conductor').map((s) => s.name).sort()).toEqual(expected);
+    expect(skillsFor(h.ctx, 'weaver').map((s) => s.name).sort()).toEqual(expected);
   });
 });
 

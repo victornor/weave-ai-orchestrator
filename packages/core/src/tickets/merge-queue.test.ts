@@ -179,13 +179,13 @@ describe('merge queue', () => {
       await approve(b);
 
       const blocked = await tickets.transition(AGENT, a.id, {
-        to: 'blocked', unblock: { owner: 'conductor', action: 'conflict in schema.sql needs a decision' },
+        to: 'blocked', unblock: { owner: 'weaver', action: 'conflict in schema.sql needs a decision' },
       });
 
       expect(blocked.status).toBe('blocked');
       expect(blocked.mergeQueuedAt).toBeNull();
       expect(blocked.mergeStartedAt).toBeNull();
-      expect(blocked.unblock).toMatchObject({ owner: 'conductor' });
+      expect(blocked.unblock).toMatchObject({ owner: 'weaver' });
       expect(tickets.get(b.id).mergeStartedAt).not.toBeNull();
       expect(mergeWakes(b.id)).toBe(1);
     });
@@ -223,7 +223,7 @@ describe('merge queue', () => {
       const a = approved('First');
       await approve(a);
 
-      await tickets.transition(AGENT, a.id, { to: 'blocked', unblock: { owner: 'conductor', action: 'unresolvable conflict' } });
+      await tickets.transition(AGENT, a.id, { to: 'blocked', unblock: { owner: 'weaver', action: 'unresolvable conflict' } });
 
       expect(recent()).toEqual([{ identifier: a.identifier, outcome: 'failed' }]);
     });

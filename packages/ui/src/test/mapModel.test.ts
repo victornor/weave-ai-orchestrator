@@ -25,7 +25,7 @@ function role(over: Partial<Role> = {}): Role {
     status: 'active',
     pauseReason: null,
     specRevision: 1,
-    createdBy: 'conductor',
+    createdBy: 'weaver',
     createdAt: '',
     updatedAt: '',
     ...over,
@@ -38,7 +38,7 @@ function ws(over: Partial<MapWorkspaceInput> & Pick<MapWorkspaceInput, 'id' | 'n
     roles: [],
     tickets: [],
     knowledge: [],
-    conductor: null,
+    weaver: null,
     ...over,
   };
 }
@@ -53,7 +53,7 @@ describe('buildMapModel', () => {
         roles: [role({ id: 'r1', workspaceId: 'alpha', projectId: 'p1' })],
         tickets: [ticket({ id: 't1', identifier: 'VS-176', title: 'Map', status: 'in_progress', assigneeRoleId: 'r1', projectId: 'p1', workspaceId: 'alpha' })],
         knowledge: [{ projectId: 'p1', updatedAt: '2026-09-01T00:00:00.000Z' }, { projectId: 'p1', updatedAt: '2026-09-02T00:00:00.000Z' }, { projectId: 'p1', updatedAt: '2026-09-03T00:00:00.000Z' }],
-        conductor: { id: 'c1', name: 'Conductor' },
+        weaver: { id: 'c1', name: 'Weaver' },
       }),
       ws({
         id: 'beta',
@@ -71,7 +71,7 @@ describe('buildMapModel', () => {
       'role:Platform Engineer',
       'ticket:VS-176 Map',
       'knowledge:api knowledge',
-      'conductor:Conductor',
+      'weaver:Weaver',
     ]));
     expect(model.nodes.filter((n) => n.kind === 'knowledge')).toHaveLength(1);
 
@@ -80,7 +80,7 @@ describe('buildMapModel', () => {
     expect(edge('project:p1', 'role:r1')).toBe(true);
     expect(edge('role:r1', 'ticket:t1')).toBe(true);
     expect(edge('project:p1', 'knowledge:project:p1')).toBe(true);
-    expect(edge('workspace:alpha', 'conductor:c1')).toBe(true);
+    expect(edge('workspace:alpha', 'weaver:c1')).toBe(true);
     expect(model.edges.every((e) => {
       const s = model.byId.get(e.source);
       const t = model.byId.get(e.target);

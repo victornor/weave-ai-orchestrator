@@ -10,7 +10,7 @@ import {
 export * from './commands.js';
 
 const TIMEOUT_MS = 10_000;
-const CONDUCTOR_AGENT_ID = 'conductor';
+const CONDUCTOR_AGENT_ID = 'weaver';
 
 export const STATUS_GLYPHS: Record<string, string> = {
   idle: '○', working: '◑', blocked: '■', 'needs-you': '!', merging: '⇅', done: '✓', failed: '✗', paused: '‖', stalled: '~',
@@ -155,12 +155,12 @@ export function createHerdrSurface(): SurfaceAdapter {
       if (existingPane) {
         return { kind: 'herdr', agentId: CONDUCTOR_AGENT_ID, paneId: existingPane.paneId, tabId: existingPane.tabId, herdrWorkspaceId: ws.id } satisfies HerdrHandle;
       }
-      const tabId = await ensureTab(ctx, ws.id, 'conductor', ws.created);
+      const tabId = await ensureTab(ctx, ws.id, 'weaver', ws.created);
       const root = await rootPaneOfTab(ws.id, tabId);
-      if (!root) throw new Error('herdr: conductor tab has no root pane');
+      if (!root) throw new Error('herdr: weaver tab has no root pane');
       const run = await herdr(paneRunArgs(root.paneId, ctx.chatCommand()));
-      if (!run.ok) ctx.log('warn', 'herdr pane run failed for the conductor', { paneId: root.paneId, stderr: run.stderr.trim() });
-      await herdr(paneRenameArgs(root.paneId, paneLabel(CONDUCTOR_AGENT_ID, 'conductor')));
+      if (!run.ok) ctx.log('warn', 'herdr pane run failed for the weaver', { paneId: root.paneId, stderr: run.stderr.trim() });
+      await herdr(paneRenameArgs(root.paneId, paneLabel(CONDUCTOR_AGENT_ID, 'weaver')));
       return { kind: 'herdr', agentId: CONDUCTOR_AGENT_ID, paneId: root.paneId, tabId, herdrWorkspaceId: ws.id } satisfies HerdrHandle;
     },
 

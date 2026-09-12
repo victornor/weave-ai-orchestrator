@@ -36,7 +36,7 @@ describe('command tree', () => {
   it('exposes every top-level command from PLAN §20', () => {
     const expected = [
       'init', 'daemon', 'login', 'logout', 'context', 'devices', 'presenter', 'project', 'runtime', 'role',
-      'worker', 'ticket', 'decision', 'chat', 'say', 'briefing', 'attach', 'top', 'presentation', 'conductor',
+      'worker', 'ticket', 'decision', 'chat', 'say', 'briefing', 'attach', 'top', 'presentation', 'weaver',
       'workspace', 'runs', 'usage', 'knowledge', 'specs', 'worktree', 'doctor', 'agent',
     ];
     const actual = program.commands.map((c) => c.name());
@@ -55,7 +55,7 @@ describe('command tree', () => {
     ['ticket', ['create', 'list', 'show', 'assign', 'set', 'transition', 'comment', 'cancel', 'discard', 'open']],
     ['decision', ['list', 'show', 'answer']],
     ['presentation', ['set', 'open', 'reconcile', 'status']],
-    ['conductor', ['show', 'reset-session']],
+    ['weaver', ['show', 'reset-session']],
     // Model selection, whole and entire (VS-77).
     ['models', ['show', 'set', 'options']],
     ['workspace', ['list', 'use', 'register', 'unregister', 'set-default', 'pause', 'resume', 'export', 'import']],

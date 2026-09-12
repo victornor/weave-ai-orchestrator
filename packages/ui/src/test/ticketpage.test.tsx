@@ -214,11 +214,11 @@ describe("TicketRoute's Activity tab answers the merge approval (VS-106)", () =>
     expect(screen.getByRole('button', { name: 'Ask for revisions…' })).toBeTruthy();
   });
 
-  it('shows the conductor-review line on an unseen plan card (VS-223)', () => {
+  it('shows the weaver-review line on an unseen plan card (VS-223)', () => {
     state.decisions = [decision({ kind: 'plan_approval', ticketId: 'tk_1', title: 'Approve the plan for ACME-42' })];
     render(<TicketRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Plan' }));
-    expect(screen.getByText("Conductor hasn't reviewed yet")).toBeInTheDocument();
+    expect(screen.getByText("Weaver hasn't reviewed yet")).toBeInTheDocument();
   });
 
   it('approve answers the decision with key "approve"', () => {

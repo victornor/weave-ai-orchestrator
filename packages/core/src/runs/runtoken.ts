@@ -12,7 +12,7 @@ export interface RunTokenClaims {
   workspaceId: string;
   runId: string;
   agentId: string;
-  agentKind: 'conductor' | 'worker';
+  agentKind: 'weaver' | 'worker';
   projectId: string | null;
   ticketId: string | null;
   roleId: string | null;
@@ -57,7 +57,7 @@ export function peekWorkspaceId(token: string): string | null {
 export async function verifyRunToken(secret: Uint8Array, token: string): Promise<RunTokenClaims> {
   try {
     const { payload } = await jwtVerify(strip(token), secret, { issuer: 'agent-conductor', audience: 'run' });
-    const kind = payload.kind === 'conductor' ? 'conductor' : 'worker';
+    const kind = payload.kind === 'weaver' ? 'weaver' : 'worker';
     if (typeof payload.wid !== 'string' || typeof payload.rid !== 'string' || typeof payload.aid !== 'string') {
       throw new OcError('unauthorized', 'run token missing claims');
     }

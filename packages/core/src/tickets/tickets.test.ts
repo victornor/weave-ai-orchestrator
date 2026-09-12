@@ -254,7 +254,7 @@ describe('tickets', () => {
     // makes a conductor-owned unblock action wake it the same turn instead.
     it('wakes the conductor immediately when blocked on an unblock action it owns', async () => {
       const t = make();
-      await tickets.transition(AGENT, t.id, { to: 'blocked', unblock: { owner: 'conductor', action: 'pick a store' } });
+      await tickets.transition(AGENT, t.id, { to: 'blocked', unblock: { owner: 'weaver', action: 'pick a store' } });
       const w = wake.calls.find((c) => c.agentId === h.conductorId && c.input.source === 'ticket_blocked');
       expect(w).toBeDefined();
       expect(w?.input.reason).toContain(t.identifier);
@@ -884,7 +884,7 @@ describe('tickets', () => {
       await expect(tickets.mergeDone(AGENT, t.id, {})).rejects.toThrow(/archive failed/);
       const after = tickets.get(t.id);
       expect(after.status).toBe('merging');
-      expect(after.unblock).toMatchObject({ owner: 'conductor' });
+      expect(after.unblock).toMatchObject({ owner: 'weaver' });
       expect(wake.calls.some((c) => c.agentId === h.conductorId && c.input.source === 'system')).toBe(true);
     });
 
@@ -1193,7 +1193,7 @@ describe('tickets', () => {
       }
       h.db.insert('runs', {
         id: runId, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: ids, runtimeId: 'claude',
-        turnEpoch: 1, cwd: h.ctx.paths.conductor, createdAt: nowIso(),
+        turnEpoch: 1, cwd: h.ctx.paths.weaver, createdAt: nowIso(),
       });
     }
 

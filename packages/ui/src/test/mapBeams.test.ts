@@ -5,7 +5,7 @@ import { buildMapModel, type MapWorkspaceInput } from '../lib/map/model';
 import { agent, project, ticket } from './factories';
 
 function ws(over: Partial<MapWorkspaceInput> & Pick<MapWorkspaceInput, 'id' | 'name'>): MapWorkspaceInput {
-  return { projects: [], roles: [], tickets: [], knowledge: [], conductor: null, ...over };
+  return { projects: [], roles: [], tickets: [], knowledge: [], weaver: null, ...over };
 }
 
 describe('beamsFor', () => {

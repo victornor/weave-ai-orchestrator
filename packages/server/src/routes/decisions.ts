@@ -6,7 +6,7 @@ import { body, csv, query } from '../http.js';
 export function decisionRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.get('/', (c) => {
-    const q = query(c, z.object({ status: csv.optional(), owner: z.enum(['human', 'conductor']).optional(), ticket: z.string().optional(), limit: z.coerce.number().int().optional() }));
+    const q = query(c, z.object({ status: csv.optional(), owner: z.enum(['human', 'weaver']).optional(), ticket: z.string().optional(), limit: z.coerce.number().int().optional() }));
     return c.json(c.get('ws').services.decisions.list({ status: q.status as never, owner: q.owner, ticketId: q.ticket, limit: q.limit }));
   });
   app.get('/:id', (c) => c.json(c.get('ws').services.decisions.get(c.req.param('id'))));

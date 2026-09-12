@@ -5,7 +5,7 @@
     { "name": "agent-conductor-worker",    "audience": "worker",    "description": "The worker turn loop, ticket rules, delivery and merge, report format, common mistakes." },
     { "name": "agent-conductor-openspec",  "audience": "worker",    "description": "Ticket status to OpenSpec workflow mapping; propose/apply rules; never archive." },
     { "name": "agent-conductor-scout",     "audience": "worker",    "description": "Investigation tickets: report format, evidence rules, no PRs." },
-    { "name": "agent-conductor-conductor", "audience": "conductor", "description": "Intake, routing, supervision, digest handling, outcome language." },
+    { "name": "agent-conductor-weaver",    "audience": "conductor", "description": "Intake, routing, supervision, digest handling, outcome language." },
     { "name": "agent-conductor-hire",      "audience": "conductor", "description": "Role overlap check, spec drafting, activation flow, charter refinement." },
     { "name": "agent-conductor-planning",  "audience": "conductor", "description": "Minimal ticket graphs, qualifying split reasons, acceptance criteria." },
     { "name": "agent-conductor-briefing",  "audience": "conductor", "description": "Four-section briefing, one decision at a time." },

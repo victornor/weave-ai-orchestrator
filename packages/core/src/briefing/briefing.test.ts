@@ -40,7 +40,7 @@ describe('briefing needsYou', () => {
     const t = mkTicket();
     mkDecision({ title: 'older', createdAt: ago(2) });
     mkDecision({ title: 'newer', createdAt: ago(1), ticketId: t.id, recommendation: 'ship it', kind: 'merge_approval' });
-    mkDecision({ title: 'conductor owns this', owner: 'conductor' });
+    mkDecision({ title: 'conductor owns this', owner: 'weaver' });
     mkDecision({ title: 'already answered', status: 'answered' });
 
     const snap = briefing().snapshot();
@@ -149,7 +149,7 @@ describe('briefing warnings', () => {
     h = makeHarness();
     h.addWorker(null, { name: 'Backend Engineer #3', status: 'error', errorText: 'runtime unreachable' });
     h.addWorker(null, { name: 'Backend Engineer #4', status: 'error', errorText: null });
-    const withPath = mkTicket({ status: 'blocked', unblockJson: { owner: 'conductor', action: 'ask the API team for a token' } });
+    const withPath = mkTicket({ status: 'blocked', unblockJson: { owner: 'weaver', action: 'ask the API team for a token' } });
     const noPath = mkTicket({ status: 'blocked' });
     mkDecision({ title: 'stale approval', status: 'expired', expiresAt: ago(1) });
     mkDecision({ title: 'ancient approval', status: 'expired', expiresAt: ago(30) });

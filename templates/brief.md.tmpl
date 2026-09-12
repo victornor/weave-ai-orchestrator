@@ -1,5 +1,5 @@
 <!-- Rendered by the daemon into workers/<id>/brief.md and inlined into workers/<id>/AGENTS.md (PLAN §11.2). -->
-<!-- Generated from structured ticket data, never from the conductor's prose alone. Revisioned: brief_revision. -->
+<!-- Generated from structured ticket data, never from the weaver's prose alone. Revisioned: brief_revision. -->
 
 # Brief — {{ticket.identifier}}
 
@@ -31,7 +31,7 @@ Kind `{{ticket.kind}}` · priority `{{ticket.priority}}`
 {{#unless brief.noWorktree}}
 Your worktree is `work/`, on branch `{{worktree.branch}}`, created from `origin/{{project.landingBranch}}`. Absolute path: `{{worktree.path}}`.
 
-**Before anything else, call `ac_worktree_status`.** It returns the authoritative path, branch, dirty flag and ahead/behind counts — never guess them. If the path or the branch differs from what this brief says, **stop**: `ac_report({state: "blocked"})` and transition the ticket to `blocked` with `{owner: "conductor", action: "worker launched in the wrong worktree"}`. Do not work in a checkout you cannot confirm.
+**Before anything else, call `ac_worktree_status`.** It returns the authoritative path, branch, dirty flag and ahead/behind counts — never guess them. If the path or the branch differs from what this brief says, **stop**: `ac_report({state: "blocked"})` and transition the ticket to `blocked` with `{owner: "weaver", action: "worker launched in the wrong worktree"}`. Do not work in a checkout you cannot confirm.
 
 {{#if worktree.hasAgentsFile}}
 Then read `work/AGENTS.md` (the project's own instructions for contributors) once. The project knowledge base and the shared conventions are already in this file — do not fetch them again.
@@ -54,7 +54,7 @@ Do not call `ac_worktree_status`. Load `agent-conductor-knowledge` and follow th
 
 ## Rules
 
-- Stay inside this ticket and this project. Cross-project needs become `blocked` with `{owner: "conductor", action: "…"}`.
+- Stay inside this ticket and this project. Cross-project needs become `blocked` with `{owner: "weaver", action: "…"}`.
 - Never push to `{{project.landingBranch}}`. Never merge unless the ticket is in `merging`.
 - Delivery mode is `{{project.deliveryMode}}`; merges use `{{project.mergeMethod}}`.
 {{#if ticket.interactiveSession}}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COMMON_TOOLS, CONDUCTOR_TOOLS, HUMAN_REPLY_TOOL, isHumanReplyToolEvent } from './tools.js';
+import { COMMON_TOOLS, WEAVER_TOOLS, HUMAN_REPLY_TOOL, isHumanReplyToolEvent } from './tools.js';
 import { ROUTINE_ACTIONS, ROUTINE_STATUSES } from './enums.js';
 
 const event = (type: string, payload: Record<string, unknown> | null) => ({ type, payload });
@@ -10,26 +10,26 @@ describe('COMMON_TOOLS (VS-174)', () => {
   });
 });
 
-describe('CONDUCTOR_TOOLS (VS-220)', () => {
+describe('WEAVER_TOOLS (VS-220)', () => {
   it('includes the four routine tools', () => {
-    expect(CONDUCTOR_TOOLS).toContain('ac_routine_list');
-    expect(CONDUCTOR_TOOLS).toContain('ac_routine_create');
-    expect(CONDUCTOR_TOOLS).toContain('ac_routine_update');
-    expect(CONDUCTOR_TOOLS).toContain('ac_routine_remove');
+    expect(WEAVER_TOOLS).toContain('ac_routine_list');
+    expect(WEAVER_TOOLS).toContain('ac_routine_create');
+    expect(WEAVER_TOOLS).toContain('ac_routine_update');
+    expect(WEAVER_TOOLS).toContain('ac_routine_remove');
   });
 });
 
-describe('CONDUCTOR_TOOLS (VS-223)', () => {
+describe('WEAVER_TOOLS (VS-223)', () => {
   it('lists ac_decision_review on the conductor and not on COMMON_TOOLS', () => {
-    expect(CONDUCTOR_TOOLS).toContain('ac_decision_review');
+    expect(WEAVER_TOOLS).toContain('ac_decision_review');
     expect(COMMON_TOOLS).not.toContain('ac_decision_review');
   });
 });
 
 describe('incident read tools (VS-222)', () => {
-  it('are conductor-only: in CONDUCTOR_TOOLS, not in COMMON_TOOLS', () => {
-    expect(CONDUCTOR_TOOLS).toContain('ac_incident_list');
-    expect(CONDUCTOR_TOOLS).toContain('ac_incident_get');
+  it('are conductor-only: in WEAVER_TOOLS, not in COMMON_TOOLS', () => {
+    expect(WEAVER_TOOLS).toContain('ac_incident_list');
+    expect(WEAVER_TOOLS).toContain('ac_incident_get');
     expect(COMMON_TOOLS).not.toContain('ac_incident_list');
     expect(COMMON_TOOLS).not.toContain('ac_incident_get');
     expect(COMMON_TOOLS).toContain('ac_incident');

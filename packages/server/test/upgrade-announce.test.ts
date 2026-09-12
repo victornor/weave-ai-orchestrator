@@ -58,7 +58,7 @@ function fixture(): Fixture {
     wsDb.run('INSERT INTO workspaces (id, slug, name, ticket_prefix, status, root_path, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
       [id, id, id, 'TST', 'active', '/tmp/ws', nowIso(), nowIso()]);
     wsDb.run('INSERT INTO agents (id, workspace_id, kind, name, runtime_id, status, home_path, turn_epoch, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      [`${id}-conductor`, id, 'conductor', 'Conductor', 'claude', 'active', '/tmp/home', 0, nowIso(), nowIso()]);
+      [`${id}-conductor`, id, 'weaver', 'Weaver', 'claude', 'active', '/tmp/home', 0, nowIso(), nowIso()]);
 
     const ws: Workspace = {
       id, db: wsDb, sent: [], woken: [], supervisorRunning: true,

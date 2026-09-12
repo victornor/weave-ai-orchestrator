@@ -1,5 +1,5 @@
 export type JsonSchema = Record<string, unknown>;
-export interface AgentView { agentId: string; workspaceId: string; name: string; kind: 'conductor' | 'worker'; projectId: string | null; ticketIdentifier: string | null; roleName: string | null; status: string; uiStatus: string }
+export interface AgentView { agentId: string; workspaceId: string; name: string; kind: 'weaver' | 'worker'; projectId: string | null; ticketIdentifier: string | null; roleName: string | null; status: string; uiStatus: string }
 export interface AgentPresence { status: string; uiStatus: string; title: string }
 export type SurfaceHandle = Record<string, unknown> & { kind: string };
 export interface SurfaceContext { workspaceId: string; daemonUrl: string; attachCommand(agentId: string): string[]; chatCommand(): string[]; terminal(): { cmd: string; classFlag: string; execFlag: string } | null; log(level: 'debug' | 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>): void }

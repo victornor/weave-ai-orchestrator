@@ -35,7 +35,7 @@ export function printCard(card: CardModel): void {
  */
 export function resolveOverrideHold(card: Pick<CardModel, 'held' | 'id'>, reason: string | undefined): { overrideHold: true; overrideReason: string } | undefined {
   if (reason === undefined) return undefined;
-  if (!card.held) throw new ApiError('validation', `${card.id} is not held by a conductor concern; --override-hold does not apply here`, 400);
+  if (!card.held) throw new ApiError('validation', `${card.id} is not held by a weaver concern; --override-hold does not apply here`, 400);
   return { overrideHold: true, overrideReason: reason };
 }
 
@@ -46,7 +46,7 @@ export function register(program: Command): void {
     .command('list', { isDefault: true })
     .description('list decisions')
     .option('-s, --status <statuses>', 'comma-separated; defaults to open', 'open')
-    .option('--owner <owner>', 'human|conductor')
+    .option('--owner <owner>', 'human|weaver')
     .action(async (opts: Record<string, string>, command: Command) => run(async () => {
       const { client } = await session(command);
       const payload = await client.wget('/decisions', { status: opts['status'], owner: opts['owner'] });
@@ -82,7 +82,7 @@ export function register(program: Command): void {
     .option('--text <text>', 'free-text answer (with or without a key)')
     .option('--remember', 'remember this answer for similar decisions')
     .option('--yes', 'skip the typed confirmation on destructive decisions')
-    .option('--override-hold <reason>', 'deliberately approve a decision the conductor has concerns about, stating why (VS-266)')
+    .option('--override-hold <reason>', 'deliberately approve a decision the weaver has concerns about, stating why (VS-266)')
     .description('answer a decision')
     .action(async (id: string, answer: string | undefined, opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const { client } = await session(command);

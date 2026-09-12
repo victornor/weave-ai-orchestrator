@@ -719,16 +719,16 @@ export function useStartSession(): UseMutationResult<Agent, Error, { ticketId: s
   });
 }
 
-export function useConductor(wsOverride?: string): UseQueryResult<T.WorkerDetail> {
+export function useWeaver(wsOverride?: string): UseQueryResult<T.WorkerDetail> {
   const ws = useHookWs(wsOverride);
-  return useQuery({ queryKey: qk.conductor(ws), queryFn: () => api.ws<unknown>(ws, '/conductor').then(workerDetail), enabled: Boolean(ws) });
+  return useQuery({ queryKey: qk.weaver(ws), queryFn: () => api.ws<unknown>(ws, '/weaver').then(workerDetail), enabled: Boolean(ws) });
 }
 
-export function useConductorMany(ids: readonly string[]): UseQueryResult<T.WorkerDetail>[] {
+export function useWeaverMany(ids: readonly string[]): UseQueryResult<T.WorkerDetail>[] {
   return useQueries({
     queries: ids.map((id) => ({
-      queryKey: qk.conductor(id),
-      queryFn: () => api.ws<unknown>(id, '/conductor').then(workerDetail),
+      queryKey: qk.weaver(id),
+      queryFn: () => api.ws<unknown>(id, '/weaver').then(workerDetail),
     })),
   });
 }
@@ -771,7 +771,7 @@ export function useSetModels(): UseMutationResult<T.WorkspaceModels, Error, T.Wo
     mutationFn: (body) => api.ws<T.WorkspaceModels>(ws, '/models', { method: 'PUT', body }),
     onSuccess: (next) => {
       qc.setQueryData(qk.models(ws), next);
-      void qc.invalidateQueries({ queryKey: qk.conductor(ws) });
+      void qc.invalidateQueries({ queryKey: qk.weaver(ws) });
     },
   });
 }

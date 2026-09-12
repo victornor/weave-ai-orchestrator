@@ -39,7 +39,7 @@ export function resolveTelegramToken(ctx: WorkspaceContext, secrets: SecretsServ
 export const HELP_TEXT = [
   'Commands',
   '/talk <ticket>   talk to the worker on a ticket (e.g. /talk ACME-42)',
-  '/conductor       switch this thread back to the conductor',
+  '/weaver          switch this thread back to the weaver',
   '/d <id> <answer> answer a decision by option number, key or free text',
   '/help            this list',
   '',
@@ -161,7 +161,7 @@ export class ChannelManager {
     }
   }
 
-  /** `/talk <ticket>` · `/conductor` · `/d <decisionId> <key|text>` · `/help` (PLAN §14.2). Kind-agnostic: every channel gets the same commands. */
+  /** `/talk <ticket>` · `/weaver` · `/d <decisionId> <key|text>` · `/help` (PLAN §14.2). Kind-agnostic: every channel gets the same commands. */
   private async handleCommand(actor: Actor, threadId: string, text: string): Promise<boolean> {
     if (/^\/help\s*$/i.test(text)) {
       await this.reply(threadId, HELP_TEXT);
@@ -171,12 +171,12 @@ export class ChannelManager {
     if (talk) {
       const ticket = this.services.tickets.get(talk[1]!);
       this.services.threads.bindTicket(actor, threadId, ticket.id);
-      await this.reply(threadId, `Now talking to ${ticket.identifier} — ${ticket.title}. /conductor switches back.`);
+      await this.reply(threadId, `Now talking to ${ticket.identifier} — ${ticket.title}. /weaver switches back.`);
       return true;
     }
-    if (/^\/conductor\s*$/i.test(text)) {
+    if (/^\/weaver\s*$/i.test(text)) {
       this.services.threads.bindTicket(actor, threadId, null);
-      await this.reply(threadId, 'Back to the conductor.');
+      await this.reply(threadId, 'Back to the weaver.');
       return true;
     }
     const answer = /^\/d\s+(\S+)\s+([\s\S]+)$/i.exec(text);
@@ -244,10 +244,10 @@ export class ChannelManager {
   private async pushDecisionReviewFollowUp(decisionId: string): Promise<void> {
     try {
       const decision = this.services.decisions.get(decisionId);
-      if (decision.status !== 'open' || decision.conductorReviewStatus !== 'concerns') return;
+      if (decision.status !== 'open' || decision.weaverReviewStatus !== 'concerns') return;
       const thread = this.services.threads.primaryThread();
       if (!thread) { log.debug({ decisionId }, 'no primary thread for the review follow-up'); return; }
-      const note = (decision.conductorReviewNote ?? '').trim() || 'has concerns';
+      const note = (decision.weaverReviewNote ?? '').trim() || 'has concerns';
       const text = `Conductor reviewed ${decision.title} — has concerns: ${note}`;
       await this.services.threads.outbound(SYSTEM, thread.id, text);
     } catch (e) {

@@ -7,7 +7,7 @@ import { configureOutput } from './output.js';
 import * as agent from './commands/agent.js';
 import * as auth from './commands/auth.js';
 import * as changelog from './commands/changelog.js';
-import * as conductor from './commands/conductor.js';
+import * as weaver from './commands/weaver.js';
 import * as conversation from './commands/conversation.js';
 import * as daemon from './commands/daemon.js';
 import * as decision from './commands/decision.js';
@@ -56,7 +56,7 @@ export function buildProgram(): Command {
 
   for (const register of [
     init.register, daemon.register, auth.register, workspace.register, project.register, runtime.register,
-    models.register, role.register, worker.register, ticket.register, decision.register, conversation.register, conductor.register,
+    models.register, role.register, worker.register, ticket.register, decision.register, conversation.register, weaver.register,
     presentation.register, runs.register, usage.register, knowledge.register, changelog.register, specs.register, worktree.register,
     doctor.register, agent.register, routine.register,
   ]) register(program);

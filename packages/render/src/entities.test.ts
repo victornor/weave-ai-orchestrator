@@ -21,7 +21,7 @@ function agent(over: Partial<Agent> = {}): Agent {
     id: 'ag_1', workspaceId: 'ws', kind: 'worker', projectId: 'web', roleId: 'role_1', roleRevision: 1,
     ticketId: 'tkt_1', name: 'Backend Engineer #7', runtimeId: 'claude',
     status: 'running', pauseReason: null, pauseDetail: null, errorText: null, homePath: '/ws/workers/ag_1', worktreePath: '/ws/workers/ag_1/work',
-    branch: 'ac/acme-42', turnEpoch: 1, turnCount: 7, spawnedBy: 'conductor', spawnReason: null, briefRevision: 1,
+    branch: 'ac/acme-42', turnEpoch: 1, turnCount: 7, spawnedBy: 'weaver', spawnReason: null, briefRevision: 1,
     lastRunAt: null, retiredAt: null, createdAt: '2026-09-04T11:00:00.000Z', updatedAt: '2026-09-04T11:00:00.000Z', ...over,
   };
 }
@@ -106,12 +106,12 @@ describe('workerToCard', () => {
   });
 
   it('degrades without a ticket, worktree or usage', () => {
-    const c = workerToCard(agent({ kind: 'conductor', name: 'Conductor', ticketId: null, worktreePath: null }), {});
-    expect(c.kind).toBe('conductor');
+    const c = workerToCard(agent({ kind: 'weaver', name: 'Weaver', ticketId: null, worktreePath: null }), {});
+    expect(c.kind).toBe('weaver');
     expect(c.ticket).toBeNull();
     expect(c.worktree).toBeNull();
     expect(c.tokens).toBeNull();
-    expect(c.windowTitle).toBe('Conductor · working');
+    expect(c.windowTitle).toBe('Weaver · working');
   });
 
   it('never crashes on an empty agent', () => {

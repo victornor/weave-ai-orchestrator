@@ -27,9 +27,9 @@ describe('tmux command building', () => {
     expect(shellQuote(['conductor', 'say', "it's fine"])).toBe("conductor say 'it'\\''s fine'");
   });
 
-  it('creates the session with the conductor in window 0', () => {
-    const args = newSessionArgs('ac-acme', 'conductor', ['conductor', 'chat'], { AC_TOKEN: 't' });
-    expect(args.slice(0, 6)).toEqual(['new-session', '-d', '-s', 'ac-acme', '-n', 'conductor']);
+  it('creates the session with the weaver in window 0', () => {
+    const args = newSessionArgs('ac-acme', 'weaver', ['conductor', 'chat'], { AC_TOKEN: 't' });
+    expect(args.slice(0, 6)).toEqual(['new-session', '-d', '-s', 'ac-acme', '-n', 'weaver']);
     expect(args).toContain('-e');
     expect(args).toContain('AC_TOKEN=t');
     expect(args.at(-1)).toBe('conductor chat');
@@ -48,9 +48,9 @@ describe('tmux command building', () => {
   });
 
   it('parses list-windows output and finds the agent window', () => {
-    const windows = parseListWindows('@0\tconductor\tconductor\n@3\tw ACME-42\tw-1\nnot-a-window\n');
+    const windows = parseListWindows('@0\tweaver\tweaver\n@3\tw ACME-42\tw-1\nnot-a-window\n');
     expect(windows).toEqual([
-      { windowId: '@0', name: 'conductor', agentId: 'conductor' },
+      { windowId: '@0', name: 'weaver', agentId: 'weaver' },
       { windowId: '@3', name: 'w ACME-42', agentId: 'w-1' },
     ]);
     expect(findWindow(windows, 'w-1')?.windowId).toBe('@3');

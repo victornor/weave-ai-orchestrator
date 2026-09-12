@@ -5,7 +5,7 @@ import type * as S from '@agent-conductor/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { renderTemplate } from './template.js';
-import { BRIEF_TMPL, CHARTER_TMPL, CONDUCTOR_TMPL, WORKER_TMPL } from './defaults.js';
+import { BRIEF_TMPL, CHARTER_TMPL, WEAVER_TMPL, WORKER_TMPL } from './defaults.js';
 import { worktreeState } from '../util/git.js';
 
 export { renderTemplate, truthy } from './template.js';
@@ -177,7 +177,7 @@ export function renderWorkerInstructions(ctx: WorkspaceContext, deps: () => Core
 }
 
 export function renderConductorInstructions(ctx: WorkspaceContext, deps: () => CoreServices): string {
-  const tmpl = loadTemplate(ctx, 'conductor.AGENTS.md.tmpl', CONDUCTOR_TMPL);
+  const tmpl = loadTemplate(ctx, 'weaver.AGENTS.md.tmpl', WEAVER_TMPL);
   const projects = ctx.db.all<S.Project>('SELECT * FROM projects WHERE workspace_id = ? AND status != ?', [ctx.workspaceId, 'archived']);
   const roles = ctx.db.all<S.Role>('SELECT * FROM roles WHERE workspace_id = ? AND status != ?', [ctx.workspaceId, 'retired']);
   const workers = ctx.db.all<S.Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'worker' AND status NOT IN ('retired','done')", [ctx.workspaceId]);
@@ -256,8 +256,8 @@ export function mergeQueueLine(ctx: WorkspaceContext, t: S.Ticket, landingBranch
 }
 
 /**
- * How a worker reads in the conductor's open-work list. A worker parked after a failure is waiting
- * on the human, not stalled: say what stopped it and who owns the next move, so the conductor does
+ * How a worker reads in the weaver's open-work list. A worker parked after a failure is waiting
+ * on the human, not stalled: say what stopped it and who owns the next move, so the weaver does
  * not answer a quota limit by relaunching into it (VS-56).
  */
 function workerStatusLine(w: S.Agent): string {
@@ -312,7 +312,7 @@ export async function buildTurnPrompt(
     }
   }
 
-  if (agent.kind === 'conductor') {
+  if (agent.kind === 'weaver') {
     const open = ctx.db.all<S.Ticket>(
       "SELECT * FROM tickets WHERE workspace_id = ? AND status NOT IN ('done','cancelled') ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, updated_at DESC",
       [ctx.workspaceId],
@@ -379,13 +379,13 @@ export async function buildTurnPrompt(
   return parts.join('\n') + '\n';
 }
 
-const CONDUCTOR_NOW = 'Call `ac_inbox` if you need details. Handle human messages first, then ticket events. Reply to the human only through `ac_human_send`. Finish with the structured final report.';
+const WEAVER_NOW = 'Call `ac_inbox` if you need details. Handle human messages first, then ticket events. Reply to the human only through `ac_human_send`. Finish with the structured final report.';
 const WORKER_DELIVERY_NOW = 'Call `ac_inbox` if you need details, do the phase your ticket status asks for, leave durable progress on the ticket, and finish with the structured final report. Ask with `ac_ask` instead of guessing; report `blocked` with a routable path if you are stuck.';
 const INTERACTIVE_FIRST_TURN_NOW = 'This is an interactive session: a human is about to work with you directly on this ticket. Read the ticket and its existing context, then post exactly one `ac_ticket_comment` stating what you understand the ticket to be and what you are ready to do. Do not edit anything, run anything, transition the ticket, or take any other action this turn — only the tools needed to read and to post that one comment are available to you right now. Stop after posting it and wait for the human\'s first message; the tools you need for the rest return on your next turn.';
 const INTERACTIVE_CONVERSATION_NOW = 'This is an interactive session: a conversation with the human on this ticket. Answer, investigate, read and explain. Do not write code, transition the ticket toward delivery, or create a plan or merge approval unless the human asked for changes in this conversation. If you think a change is warranted and they have not asked, say so in the conversation and wait — do not start planning while you ask. A conversation that ends with a good answer and nothing delivered is complete success; the ticket is a container, not a mandate. The ordinary plan-approval and merge-approval gates still apply if they ask you to make a change.';
 
 function whatToDoNow(agent: S.Agent, workerTicket: S.Ticket | null): string {
-  if (agent.kind === 'conductor') return CONDUCTOR_NOW;
+  if (agent.kind === 'weaver') return WEAVER_NOW;
   if (workerTicket && Boolean(workerTicket.interactiveSession)) {
     return agent.turnCount === 0 ? INTERACTIVE_FIRST_TURN_NOW : INTERACTIVE_CONVERSATION_NOW;
   }

@@ -11,7 +11,7 @@ Always-loaded prompts live in `templates/` (`conductor.AGENTS.md.tmpl`, `worker.
 | `agent-conductor-worker` | worker | The turn loop, brief verification, ticket rules, status protocol, delivery and merge, report format, common mistakes. |
 | `agent-conductor-openspec` | worker | How ticket status maps onto the OpenSpec workflows; what never to do. |
 | `agent-conductor-scout` | worker | Report format and rules for investigation tickets. |
-| `agent-conductor-conductor` | conductor | Intake, routing, supervision, digest handling, outcome language. |
+| `agent-conductor-weaver` | conductor | Intake, routing, supervision, digest handling, outcome language. |
 | `agent-conductor-hire` | conductor | Role overlap check, spec drafting, activation flow, charter refinement. |
 | `agent-conductor-planning` | conductor | Minimal ticket graphs, qualifying split reasons, acceptance criteria. |
 | `agent-conductor-briefing` | conductor | The four-section briefing, one decision at a time. |

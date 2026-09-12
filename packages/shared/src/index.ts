@@ -9,7 +9,7 @@ export * from './usage.js';
 export * from './pricing.js';
 export * from './events.js';
 export * from './types.js';
-export * from './conductor-review.js';
+export * from './weaver-review.js';
 export * from './decision-target.js';
 export * from './push.js';
 export * from './channels.js';

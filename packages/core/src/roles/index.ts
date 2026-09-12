@@ -109,7 +109,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
           status: autoActivate ? 'active' : 'pending_activation', specRevision: 1, createdBy: spec.createdBy,
           createdAt: now, updatedAt: now,
         });
-        writeRevision(spec.id, {}, spec, actor.kind === 'human' ? 'human' : 'conductor', 'hired', ['*']);
+        writeRevision(spec.id, {}, spec, actor.kind === 'human' ? 'human' : 'weaver', 'hired', ['*']);
       });
       writeRoleFiles(ctx, spec, charter);
 
@@ -167,7 +167,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
       const merged = RoleSpecSchema.parse({ ...before, ...patch, id: before.id, project: before.project });
       const changedKeys = Object.keys(patch).filter((k) => JSON.stringify((before as Record<string, unknown>)[k]) !== JSON.stringify((merged as Record<string, unknown>)[k]));
       const updated = persistSpec(role, merged);
-      writeRevision(id, before, merged, actor.kind === 'human' ? 'human' : actor.kind === 'agent' ? 'conductor' : 'system', reason, changedKeys);
+      writeRevision(id, before, merged, actor.kind === 'human' ? 'human' : actor.kind === 'agent' ? 'weaver' : 'system', reason, changedKeys);
       recordActivity(ctx.db, ctx.workspaceId, actor, 'role.update', 'role', id, { changedKeys, reason });
       ctx.events.emit('role.updated', 'role', id, { changedKeys, reason });
       return updated;
@@ -196,7 +196,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
       const before = existsSync(path) ? readFileSync(path, 'utf8') : '';
       writeFileSync(path, charter, 'utf8');
       ctx.db.update('roles', id, { specRevision: role.specRevision + 1, updatedAt: nowIso() });
-      writeRevision(id, { charter: before }, { charter, applyToRunning: opts.applyToRunning === true }, actor.kind === 'human' ? 'human' : 'conductor', reason, ['charter']);
+      writeRevision(id, { charter: before }, { charter, applyToRunning: opts.applyToRunning === true }, actor.kind === 'human' ? 'human' : 'weaver', reason, ['charter']);
       recordActivity(ctx.db, ctx.workspaceId, actor, 'role.charter', 'role', id, { reason, applyToRunning: opts.applyToRunning === true });
       ctx.events.emit('role.updated', 'role', id, { changedKeys: ['charter'], reason });
       return get(id);

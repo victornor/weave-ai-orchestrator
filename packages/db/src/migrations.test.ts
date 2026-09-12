@@ -580,7 +580,7 @@ describe('migrations', () => {
 
   describe('0022_incidents', () => {
     it('creates the daemon-level incidents table with no foreign keys', () => {
-      const db = openDb(join(dir, 'incidents.sqlite'));
+      const db = openDbAsOf(join(dir, 'incidents.sqlite'), '0022_incidents.sql');
       const cols = db.all<{ name: string }>('PRAGMA table_info(incidents)').map((c) => c.name);
       expect(cols).toEqual([
         'id', 'reporter_kind', 'title', 'what_failed', 'trying_to_do', 'evidence',
@@ -602,6 +602,54 @@ describe('migrations', () => {
       });
       const row = db.get<{ title: string; reporterKind: string; whatFailed: string }>('SELECT * FROM incidents WHERE id = ?', ['i1']);
       expect(row).toMatchObject({ title: 'MCP failed', reporterKind: 'worker', whatFailed: 'ac_ticket_get' });
+      db.close();
+    });
+  });
+
+  describe('0028_incident_resolution (VS-271)', () => {
+    it('adds four nullable resolution columns with no foreign keys', () => {
+      const db = openDb(join(dir, 'incidents-resolution.sqlite'));
+      const cols = db.all<{ name: string }>('PRAGMA table_info(incidents)').map((c) => c.name);
+      expect(cols).toEqual([
+        'id', 'reporter_kind', 'title', 'what_failed', 'trying_to_do', 'evidence',
+        'workspace_id', 'project_id', 'ticket_id', 'agent_id', 'run_id', 'role_id', 'created_at',
+        'resolved_at', 'resolved_by_agent_id', 'resolution', 'resolution_ticket_id',
+      ]);
+      expect(db.all<{ table: string }>('PRAGMA foreign_key_list(incidents)')).toHaveLength(0);
+      db.close();
+    });
+
+    it('a pre-existing incident starts unresolved (null resolvedAt) after the migration', () => {
+      const before = openDbAsOf(join(dir, 'incidents-resolution-upgrade.sqlite'), '0022_incidents.sql');
+      before.insert('incidents', {
+        id: 'i1', reporterKind: 'worker', title: 'old incident', whatFailed: 'x', tryingToDo: 'y',
+        agentId: 'ag1', runId: 'run1', createdAt: '2026-09-10T00:00:00.000Z',
+      });
+      before.close();
+
+      const db = openDb(join(dir, 'incidents-resolution-upgrade.sqlite'));
+      const row = db.get<{ resolvedAt: string | null; resolvedByAgentId: string | null; resolution: string | null; resolutionTicketId: string | null }>(
+        'SELECT * FROM incidents WHERE id = ?', ['i1'],
+      );
+      expect(row).toMatchObject({ resolvedAt: null, resolvedByAgentId: null, resolution: null, resolutionTicketId: null });
+      db.close();
+    });
+
+    it('round-trips a resolved incident', () => {
+      const db = openDb(join(dir, 'incidents-resolution-row.sqlite'));
+      db.insert('incidents', {
+        id: 'i1', reporterKind: 'worker', title: 'MCP failed', whatFailed: 'x', tryingToDo: 'y',
+        agentId: 'ag1', runId: 'run1', createdAt: '2026-09-10T00:00:00.000Z',
+      });
+      db.update('incidents', 'i1', {
+        resolvedAt: '2026-09-12T00:00:00.000Z', resolvedByAgentId: 'weaver1',
+        resolution: 'fixed by VS-232', resolutionTicketId: 'VS-232',
+      });
+      const row = db.get('SELECT * FROM incidents WHERE id = ?', ['i1']);
+      expect(row).toMatchObject({
+        resolvedAt: '2026-09-12T00:00:00.000Z', resolvedByAgentId: 'weaver1',
+        resolution: 'fixed by VS-232', resolutionTicketId: 'VS-232',
+      });
       db.close();
     });
   });

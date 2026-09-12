@@ -43,6 +43,10 @@ const incident = (over: Partial<Incident> = {}): Incident => ({
   runId: 'run1',
   roleId: 'r1',
   createdAt: '2026-09-10T12:00:00.000Z',
+  resolvedAt: null,
+  resolvedByAgentId: null,
+  resolution: null,
+  resolutionTicketId: null,
   ...over,
 });
 

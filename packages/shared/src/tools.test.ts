@@ -36,6 +36,13 @@ describe('incident read tools (VS-222)', () => {
   });
 });
 
+describe('incident resolve tool (VS-271)', () => {
+  it('is conductor-only: in WEAVER_TOOLS, not in COMMON_TOOLS', () => {
+    expect(WEAVER_TOOLS).toContain('ac_incident_resolve');
+    expect(COMMON_TOOLS).not.toContain('ac_incident_resolve');
+  });
+});
+
 describe('routine enums (VS-220)', () => {
   it('is active or paused, report or file_work', () => {
     expect(ROUTINE_STATUSES).toEqual(['active', 'paused']);

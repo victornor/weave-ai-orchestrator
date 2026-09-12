@@ -6,7 +6,7 @@
 import { newId, nowIso, type Db } from '@agent-conductor/db';
 import {
   INCIDENT_REPORTER_KINDS, OcError,
-  type Incident, type IncidentReporterKind,
+  type Incident, type IncidentReporterKind, type IncidentStatusFilter,
 } from '@agent-conductor/shared';
 
 export const INCIDENT_TITLE_MAX = 200;
@@ -14,6 +14,7 @@ export const INCIDENT_BODY_MAX = 2000;
 export const INCIDENT_EVIDENCE_MAX = 8000;
 export const INCIDENT_LIST_DEFAULT = 100;
 export const INCIDENT_LIST_MAX = 200;
+export const INCIDENT_RESOLUTION_MAX = 2000;
 
 export interface IncidentCreateInput {
   reporterKind: IncidentReporterKind;
@@ -36,6 +37,8 @@ export interface IncidentListQuery {
   /** Scope to this workspace plus workspace-less (daemon-global) rows; unset returns every row. (VS-222) */
   workspaceId?: string;
   limit?: number;
+  /** Filters on resolution state; unset (like `all`) applies no filter (VS-271). No default here — see `ac_incident_list`. */
+  status?: IncidentStatusFilter;
 }
 
 /** Read scope for `get`: rows from another workspace are forbidden; workspace-less rows are daemon-global. (VS-222) */
@@ -43,10 +46,18 @@ export interface IncidentGetScope {
   workspaceId?: string;
 }
 
+/** Input to `resolve` (VS-271): the reason is required, the ticket reference is optional and unvalidated. */
+export interface IncidentResolveInput {
+  resolution: string;
+  resolvedByAgentId: string;
+  ticketId?: string | null;
+}
+
 export interface IncidentsService {
   create(input: IncidentCreateInput): Incident;
   get(id: string, scope?: IncidentGetScope): Incident;
   list(query?: IncidentListQuery): { items: Incident[]; total: number };
+  resolve(id: string, input: IncidentResolveInput, scope?: IncidentGetScope): Incident;
 }
 
 function trimRequired(label: string, value: string, max: number): string {
@@ -129,6 +140,14 @@ export function createIncidentsService(db: Db): IncidentsService {
         conds.push('(workspace_id = ? OR workspace_id IS NULL)');
         params.push(query.workspaceId);
       }
+      // No default here: unset behaves like 'all'. `ac_incident_list` defaults to 'open' in its own
+      // input schema so the default cannot leak into this service's other caller, `GET
+      // /api/incidents` (VS-271).
+      if (query.status === 'open') {
+        conds.push('resolved_at IS NULL');
+      } else if (query.status === 'resolved') {
+        conds.push('resolved_at IS NOT NULL');
+      }
       const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
       const total = db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM incidents ${where}`, params)?.n ?? 0;
       const items = db.all<Incident>(
@@ -136,6 +155,25 @@ export function createIncidentsService(db: Db): IncidentsService {
         [...params, limit],
       );
       return { items, total };
+    },
+
+    resolve(id, input, scope) {
+      const row = read(id, scope);
+      if (row.resolvedAt) {
+        throw new OcError('wrong_status', `incident ${id} is already resolved`, {
+          resolvedAt: row.resolvedAt,
+          resolvedByAgentId: row.resolvedByAgentId,
+          resolution: row.resolution,
+        });
+      }
+      const resolution = trimRequired('resolution', input.resolution, INCIDENT_RESOLUTION_MAX);
+      db.update('incidents', id, {
+        resolvedAt: nowIso(),
+        resolvedByAgentId: input.resolvedByAgentId,
+        resolution,
+        resolutionTicketId: input.ticketId ?? null,
+      });
+      return read(id);
     },
   };
 }

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+goal: Give an incident a resolution lifecycle (resolve + hide-by-default list)
+  so a review routine can finish instead of re-litigating the same rows forever

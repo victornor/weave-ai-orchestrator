@@ -99,6 +99,19 @@ describe('GET /api/incidents', () => {
     expect(body.items.map((i) => i.title)).toEqual(['conductor one']);
   });
 
+  it('keeps listing a resolved incident (VS-271): the tool-level open default does not leak here', async () => {
+    harness = makeHarness({ listener: 'loopback' });
+    const filed = await fileViaAgent(harness, WORKER, { ...FILE, title: 'will be resolved' });
+    const { data } = await filed.json() as { data: { id: string } };
+    harness.deps.incidents.resolve(data.id, { resolution: 'dealt with', resolvedByAgentId: 'ag_conductor' });
+    const app = createApp(harness.deps);
+    const res = await app.fetch(new Request('http://127.0.0.1/api/incidents', { headers: authed() }));
+    const body = await res.json() as { items: Array<{ title: string; resolvedAt: string | null }>; total: number };
+    expect(body.total).toBe(1);
+    expect(body.items[0]).toMatchObject({ title: 'will be resolved' });
+    expect(body.items[0]?.resolvedAt).not.toBeNull();
+  });
+
   it('rejects a run token', async () => {
     harness = makeHarness({ listener: 'loopback' });
     const app = createApp(harness.deps);
@@ -224,5 +237,112 @@ describe('ac_incident_list / ac_incident_get (VS-222)', () => {
     const got = JSON.parse(encodeMcpToolResult('ac_incident_get', { ok: true, data: bigRow }));
     expect(got.data.title).toBe(bigRow.title);
     expect(JSON.stringify(got).length).toBeGreaterThan(64 * 1024);
+  });
+});
+
+describe('ac_incident_resolve (VS-271)', () => {
+  async function callTool(h: Harness, claims: RunTokenClaims, tool: string, input: Record<string, unknown>) {
+    const app = createApp(h.deps);
+    const token = await signRunToken(runTokenSecret(h.runtime.ctx.db), claims);
+    return app.fetch(new Request(`http://127.0.0.1/api/w/${claims.workspaceId}/agent/tools/${tool}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ input }),
+    }));
+  }
+
+  it('a conductor resolves an incident, and it round-trips through ac_incident_get', async () => {
+    harness = makeHarness({ listener: 'loopback' });
+    const filed = await fileViaAgent(harness, WORKER, FILE);
+    const { data } = await filed.json() as { data: { id: string } };
+
+    const res = await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: data.id, resolution: 'fixed by VS-232', ticketId: 'VS-232' });
+    const payload = await res.json() as { ok: boolean; data: { resolvedAt: string | null; resolvedByAgentId: string; resolution: string; resolutionTicketId: string } };
+    expect(payload.ok).toBe(true);
+    expect(payload.data.resolvedAt).not.toBeNull();
+    expect(payload.data.resolvedByAgentId).toBe(CONDUCTOR.agentId);
+    expect(payload.data.resolution).toBe('fixed by VS-232');
+    expect(payload.data.resolutionTicketId).toBe('VS-232');
+
+    const got = (await (await callTool(harness, CONDUCTOR, 'ac_incident_get', { id: data.id })).json()) as {
+      data: { resolvedAt: string | null; resolution: string };
+    };
+    expect(got.data.resolvedAt).toBe(payload.data.resolvedAt);
+    expect(got.data.resolution).toBe('fixed by VS-232');
+  });
+
+  it('stores ticketId as given even when no such ticket exists', async () => {
+    harness = makeHarness({ listener: 'loopback' });
+    const filed = await fileViaAgent(harness, WORKER, FILE);
+    const { data } = await filed.json() as { data: { id: string } };
+    const res = await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: data.id, resolution: 'x', ticketId: 'NOPE-999' });
+    const payload = await res.json() as { data: { resolutionTicketId: string } };
+    expect(payload.data.resolutionTicketId).toBe('NOPE-999');
+  });
+
+  it('rejects a worker with forbidden, and the incident stays unresolved', async () => {
+    harness = makeHarness({ listener: 'loopback' });
+    const filed = await fileViaAgent(harness, WORKER, FILE);
+    const { data } = await filed.json() as { data: { id: string } };
+    const res = await callTool(harness, WORKER, 'ac_incident_resolve', { id: data.id, resolution: 'x' });
+    const payload = await res.json() as ToolEnvelope;
+    expect(res.status).toBe(403);
+    expect(payload.error?.code).toBe('forbidden');
+    expect(harness.deps.incidents.get(data.id).resolvedAt).toBeNull();
+  });
+
+  it('rejects re-resolving with wrong_status and leaves the original resolution intact', async () => {
+    harness = makeHarness({ listener: 'loopback' });
+    const filed = await fileViaAgent(harness, WORKER, FILE);
+    const { data } = await filed.json() as { data: { id: string } };
+    await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: data.id, resolution: 'first' });
+    const res = await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: data.id, resolution: 'second' });
+    const payload = await res.json() as ToolEnvelope;
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.code).toBe('wrong_status');
+    expect(harness.deps.incidents.get(data.id).resolution).toBe('first');
+  });
+
+  it('resolve: not_found for an unknown id, forbidden for another workspace', async () => {
+    harness = makeHarness({ listener: 'loopback' });
+    const beta = harness.deps.incidents.create({
+      reporterKind: 'worker', title: 'beta worker', whatFailed: 'x', tryingToDo: 'y',
+      agentId: 'ag_2', runId: 'run_2', workspaceId: 'ws2',
+    });
+
+    const unknown = (await (await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: 'inc_nope', resolution: 'x' })).json()) as ToolEnvelope;
+    expect(unknown.ok).toBe(false);
+    expect(unknown.error?.code).toBe('not_found');
+
+    const cross = (await (await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: beta.id, resolution: 'x' })).json()) as ToolEnvelope;
+    expect(cross.ok).toBe(false);
+    expect(cross.error?.code).toBe('forbidden');
+    expect(harness.deps.incidents.get(beta.id).resolvedAt).toBeNull();
+  });
+
+  it('a second sweep finds nothing new: list, resolve everything found, list again', async () => {
+    harness = makeHarness({ listener: 'loopback' });
+    await fileViaAgent(harness, WORKER, { ...FILE, title: 'one' });
+    await fileViaAgent(harness, WORKER, { ...FILE, title: 'two' });
+
+    const first = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', {})).json()) as {
+      data: { items: Array<{ id: string }> };
+    };
+    expect(first.data.items).toHaveLength(2);
+    for (const item of first.data.items) {
+      await callTool(harness, CONDUCTOR, 'ac_incident_resolve', { id: item.id, resolution: 'swept' });
+    }
+
+    const second = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', {})).json()) as {
+      data: { items: unknown[]; total: number };
+    };
+    expect(second.data.items).toEqual([]);
+    expect(second.data.total).toBe(0);
+
+    // status: 'all' still shows them.
+    const all = (await (await callTool(harness, CONDUCTOR, 'ac_incident_list', { status: 'all' })).json()) as {
+      data: { items: unknown[]; total: number };
+    };
+    expect(all.data.total).toBe(2);
   });
 });

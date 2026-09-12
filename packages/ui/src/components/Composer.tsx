@@ -8,6 +8,15 @@ import { VoiceMeter } from './VoiceMeter';
 const ACCEPTED_ATTACHMENT_TYPES = [...ATTACHMENT_IMAGE_TYPES, ...ATTACHMENT_TEXT_TYPES];
 const ACCEPT_ATTR = ACCEPTED_ATTACHMENT_TYPES.join(',');
 
+/**
+ * Whether a drag is carrying files, and so is an attachment drag rather than a dragged link or a
+ * selection. Checked on every drag event so non-file drags pass straight through to the browser,
+ * including text dragged within the textarea (VS-277).
+ */
+function dragHasFiles(dt: DataTransfer | null): boolean {
+  return Array.from(dt?.types ?? []).includes('Files');
+}
+
 export type ComposerState = 'idle' | 'queued';
 
 /**
@@ -104,6 +113,12 @@ export function Composer({
   const setFiles = useCallback((f: File[]) => (onAttachmentsChange ? onAttachmentsChange(f) : setInternalFiles(f)), [onAttachmentsChange]);
   const fileInput = useRef<HTMLInputElement>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
+  // A depth counter, not `relatedTarget`: dragenter/dragleave fire for every child the pointer
+  // crosses, so clearing on the first dragleave would flicker across the chips, textarea and
+  // buttons. `relatedTarget` is null on a drag that leaves the window and cannot be trusted to tell
+  // containment here (VS-277).
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepth = useRef(0);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const [submitFailed, setSubmitFailed] = useState(false);
@@ -238,6 +253,62 @@ export function Composer({
     addFiles(pasted);
   }, [allowAttachments, addFiles]);
 
+  const clearDrag = useCallback((): void => {
+    dragDepth.current = 0;
+    setDragActive(false);
+  }, []);
+
+  const onDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
+    if (!allowAttachments || !dragHasFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragActive(true);
+  }, [allowAttachments]);
+
+  const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
+    if (!allowAttachments || !dragHasFiles(e.dataTransfer)) return;
+    // Without this the browser takes the drop itself and navigates away to the file, losing the
+    // composer's text. This is the one call that makes the composer a real drop target (VS-277).
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, [allowAttachments]);
+
+  const onDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
+    if (!allowAttachments || !dragHasFiles(e.dataTransfer)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragActive(false);
+  }, [allowAttachments]);
+
+  const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
+    if (!allowAttachments || !dragHasFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    clearDrag();
+    // The same funnel browse and paste call, so types, cap and both error messages cannot drift.
+    addFiles(Array.from(e.dataTransfer.files));
+  }, [allowAttachments, addFiles, clearDrag]);
+
+  // The composer is only 40px tall when idle, and a file dropped anywhere else would be handled by
+  // the browser, which navigates to it and unloads the app. This window guard refuses that default
+  // for file drags across the whole app (allowAttachments only); it never attaches or highlights —
+  // the composer does that. Non-file drags are left untouched so a dragged link still works.
+  useEffect(() => {
+    if (!allowAttachments) return;
+    const refuseDefault = (e: DragEvent): void => {
+      if (dragHasFiles(e.dataTransfer)) e.preventDefault();
+    };
+    const onWindowDrop = (e: DragEvent): void => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      clearDrag();
+    };
+    window.addEventListener('dragover', refuseDefault);
+    window.addEventListener('drop', onWindowDrop);
+    return () => {
+      window.removeEventListener('dragover', refuseDefault);
+      window.removeEventListener('drop', onWindowDrop);
+    };
+  }, [allowAttachments, clearDrag]);
+
   const dictating = dictation.listening;
   // Only the non-streaming (upload/Voxtype) backend has anything to lock for: Chrome hands words
   // back live, so there is nothing stale on screen to protect (VS-195).
@@ -256,13 +327,20 @@ export function Composer({
       {scope ? <div className="text-micro text-text-3">{scope}</div> : null}
 
       <div
+        data-testid="composer-drop-zone"
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
         className={cx(
           'rounded-r8 border bg-bg-1 transition-colors duration-(--dur-fast) ease-ac',
           queuedReason && 'rounded-t-none',
-          // No focus ring: the caret says it all. The border only changes while the mic is open —
-          // and, for a non-streaming backend, while its transcript is still in flight, so the
-          // locked state reads as one continuous state rather than flickering back mid-attempt.
-          dictating || transcribing ? 'border-accent' : 'border-line-2',
+          // No focus ring: the caret says it all. The border changes while the mic is open — and,
+          // for a non-streaming backend, while its transcript is still in flight — and while a file
+          // is dragged over the composer, so both read as one continuous state rather than
+          // flickering back mid-attempt. Drop reuses the same active-border language as the mic
+          // (VS-277).
+          dictating || transcribing || dragActive ? 'border-accent' : 'border-line-2',
         )}
       >
         {allowAttachments && files.length > 0 ? (

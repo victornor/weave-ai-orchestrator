@@ -166,3 +166,98 @@ describe('incident reads (VS-222)', () => {
     close();
   });
 });
+
+describe('incident resolution (VS-271)', () => {
+  const seedBase = {
+    reporterKind: 'worker', title: 'seeded', whatFailed: 'broke', tryingToDo: 'fix',
+    evidence: null, workspaceId: null, projectId: null, ticketId: null, agentId: 'ag1', runId: 'run1', roleId: null,
+  } as const;
+
+  it('resolves an open incident, recording who, why and the fixing ticket', () => {
+    const { incidents, close } = service();
+    const row = incidents.create({ ...base, reporterKind: 'worker' });
+    const resolved = incidents.resolve(row.id, { resolution: 'fixed by VS-232', resolvedByAgentId: 'weaver1', ticketId: 'VS-232' });
+    expect(resolved.resolvedAt).not.toBeNull();
+    expect(resolved.resolvedByAgentId).toBe('weaver1');
+    expect(resolved.resolution).toBe('fixed by VS-232');
+    expect(resolved.resolutionTicketId).toBe('VS-232');
+    // Round-trips through get.
+    expect(incidents.get(row.id)).toMatchObject({
+      resolvedAt: resolved.resolvedAt, resolvedByAgentId: 'weaver1', resolution: 'fixed by VS-232', resolutionTicketId: 'VS-232',
+    });
+    close();
+  });
+
+  it('stores ticketId unvalidated when the ticket does not exist', () => {
+    const { incidents, close } = service();
+    const row = incidents.create({ ...base, reporterKind: 'worker' });
+    const resolved = incidents.resolve(row.id, { resolution: 'no such ticket really', resolvedByAgentId: 'weaver1', ticketId: 'NOPE-999' });
+    expect(resolved.resolutionTicketId).toBe('NOPE-999');
+    close();
+  });
+
+  it('rejects re-resolving an already-resolved incident, leaving it unchanged', () => {
+    const { incidents, close } = service();
+    const row = incidents.create({ ...base, reporterKind: 'worker' });
+    const first = incidents.resolve(row.id, { resolution: 'first reason', resolvedByAgentId: 'weaver1' });
+    expect(() => incidents.resolve(row.id, { resolution: 'second reason', resolvedByAgentId: 'weaver2' })).toThrow(OcError);
+    try {
+      incidents.resolve(row.id, { resolution: 'second reason', resolvedByAgentId: 'weaver2' });
+    } catch (e) {
+      expect((e as OcError).code).toBe('wrong_status');
+    }
+    const after = incidents.get(row.id);
+    expect(after.resolution).toBe('first reason');
+    expect(after.resolvedByAgentId).toBe('weaver1');
+    expect(after.resolvedAt).toBe(first.resolvedAt);
+    close();
+  });
+
+  it('rejects an empty or whitespace-only resolution, leaving the incident open', () => {
+    const { incidents, close } = service();
+    const row = incidents.create({ ...base, reporterKind: 'worker' });
+    expect(() => incidents.resolve(row.id, { resolution: '  ', resolvedByAgentId: 'weaver1' })).toThrow(OcError);
+    expect(incidents.get(row.id).resolvedAt).toBeNull();
+    close();
+  });
+
+  it('resolve is not_found for an unknown id and forbidden for another workspace', () => {
+    const { incidents, close } = service();
+    const ws2 = incidents.create({ ...seedBase, reporterKind: 'worker', workspaceId: 'ws2' });
+    expect(() => incidents.resolve('nope', { resolution: 'x', resolvedByAgentId: 'weaver1' })).toThrow(OcError);
+    try {
+      incidents.resolve('nope', { resolution: 'x', resolvedByAgentId: 'weaver1' });
+    } catch (e) {
+      expect((e as OcError).code).toBe('not_found');
+    }
+    expect(() => incidents.resolve(ws2.id, { resolution: 'x', resolvedByAgentId: 'weaver1' }, { workspaceId: 'ws1' })).toThrow(OcError);
+    try {
+      incidents.resolve(ws2.id, { resolution: 'x', resolvedByAgentId: 'weaver1' }, { workspaceId: 'ws1' });
+    } catch (e) {
+      expect((e as OcError).code).toBe('forbidden');
+    }
+    expect(incidents.get(ws2.id).resolvedAt).toBeNull();
+    close();
+  });
+
+  it('list status filter: open (default caller behavior), resolved, all, and unset is unfiltered', () => {
+    const { incidents, close } = service();
+    const open = incidents.create({ ...base, reporterKind: 'worker', title: 'open one' });
+    const resolvedRow = incidents.create({ ...base, reporterKind: 'worker', title: 'resolved one' });
+    incidents.resolve(resolvedRow.id, { resolution: 'dealt with', resolvedByAgentId: 'weaver1' });
+
+    expect(incidents.list({ status: 'open' }).items.map((i) => i.id)).toEqual([open.id]);
+    expect(incidents.list({ status: 'open' }).total).toBe(1);
+    expect(incidents.list({ status: 'resolved' }).items.map((i) => i.id)).toEqual([resolvedRow.id]);
+    expect(incidents.list({ status: 'resolved' }).total).toBe(1);
+    const all = incidents.list({ status: 'all' });
+    expect([...all.items.map((i) => i.id)].sort()).toEqual([open.id, resolvedRow.id].sort());
+    expect(all.total).toBe(2);
+    // The service applies no default: status omitted behaves exactly like 'all', so the tool-level
+    // 'open' default (VS-271) cannot leak into this service's other caller, GET /api/incidents.
+    const unset = incidents.list();
+    expect([...unset.items.map((i) => i.id)].sort()).toEqual([open.id, resolvedRow.id].sort());
+    expect(unset.total).toBe(2);
+    close();
+  });
+});

@@ -13,8 +13,8 @@ export { createThreadsService, REPLY_EXCERPT_CHARS } from './threads/index.js';
 export { createHistoryReader, HISTORY_GIT_SUBCOMMANDS } from './projects/history.js';
 export { createAuthService, openDaemonDb, DAEMON_DB_FILE } from './auth/index.js';
 export {
-  createIncidentsService, INCIDENT_LIST_MAX,
-  type IncidentsService, type IncidentCreateInput, type IncidentListQuery, type IncidentGetScope,
+  createIncidentsService, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX,
+  type IncidentsService, type IncidentCreateInput, type IncidentListQuery, type IncidentGetScope, type IncidentResolveInput,
 } from './incidents/index.js';
 export { signRunToken, verifyRunToken, runTokenSecret, peekWorkspaceId, isRunToken, RUN_TOKEN_PREFIX, RUN_TOKEN_TTL_SECONDS, type RunTokenClaims } from './runs/runtoken.js';
 export { describeLiveInput, type LiveInputStatus } from './runs/active.js';

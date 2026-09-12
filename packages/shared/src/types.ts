@@ -147,6 +147,11 @@ export interface Incident {
   runId: string;
   roleId: string | null;
   createdAt: string;
+  /** Set by `ac_incident_resolve` (VS-271); null means still open. */
+  resolvedAt: string | null;
+  resolvedByAgentId: string | null;
+  resolution: string | null;
+  resolutionTicketId: string | null;
 }
 
 /**

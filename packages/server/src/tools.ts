@@ -11,12 +11,12 @@ import {
   COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
-  ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS,
+  ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS,
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock,
 } from '@agent-conductor/shared';
 import {
-  flattenWakes, INCIDENT_LIST_MAX, ARTIFACT_KIT_CSS, ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks,
+  flattenWakes, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX, ARTIFACT_KIT_CSS, ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks,
   type Actor, type CoreServices, type IncidentsService,
 } from '@agent-conductor/core';
 import type { RunTokenClaims } from './runtoken.js';
@@ -438,18 +438,21 @@ export const TOOLS: ToolDef[] = [
       since: z.string().optional().describe('ISO-8601 instant; returns only incidents created strictly after it'),
       limit: z.number().int().min(1).max(INCIDENT_LIST_MAX).optional(),
       includeEvidence: z.boolean().optional(),
+      status: z.enum(INCIDENT_STATUS_FILTERS).default('open'),
     }),
     description:
       'List system incidents (VS-174) filed from your workspace, plus workspace-less daemon-global ones, newest first — never another workspace\'s. '
       + 'Lean by default: no `evidence` per item unless includeEvidence is set; read one in full with ac_incident_get. '
       + '`total` counts everything matching the filters, not just the returned page. '
-      + 'For an incremental sweep, page until a page comes back short, then pass the newest createdAt you processed as `since` next run — that instant is excluded.',
+      + 'For an incremental sweep, page until a page comes back short, then pass the newest createdAt you processed as `since` next run — that instant is excluded. '
+      + 'Defaults to `status: "open"` so an already-resolved incident (VS-271) does not keep resurfacing; pass `"resolved"` or `"all"` to see it.',
     handler: (ctx, i) => {
       const { items, total } = ctx.incidents.list({
         reporterKind: i.reporterKind,
         since: i.since,
         limit: i.limit,
         workspaceId: ctx.claims.workspaceId,
+        status: i.status,
       });
       return {
         items: i.includeEvidence ? items : items.map(({ evidence: _evidence, ...row }) => row),
@@ -463,6 +466,24 @@ export const TOOLS: ToolDef[] = [
       'Read one system incident back in full, evidence included, by id. Scoped like ac_incident_list: '
       + 'your workspace plus workspace-less daemon-global rows; another workspace\'s incident is `forbidden`, an unknown id is `not_found`.',
     handler: (ctx, i) => ctx.incidents.get(i.id, { workspaceId: ctx.claims.workspaceId }),
+  },
+  {
+    name: 'ac_incident_resolve', scope: 'weaver', input: z.object({
+      id: z.string().min(1),
+      resolution: z.string().min(1).max(INCIDENT_RESOLUTION_MAX),
+      ticketId: z.string().min(1).optional(),
+    }),
+    description:
+      'Mark a system incident resolved (VS-271): `resolution` is a required reason explaining why, `ticketId` optionally '
+      + 'names the ticket that fixed the cause and is stored as given, unvalidated. Scoped like ac_incident_get: an unknown '
+      + 'id is `not_found`, another workspace\'s incident is `forbidden`. Resolving an already-resolved incident is '
+      + '`wrong_status` and never overwrites the existing resolution. Never inferred — a ticket landing does not resolve one; '
+      + 'call this explicitly.',
+    handler: (ctx, i) => ctx.incidents.resolve(
+      i.id,
+      { resolution: i.resolution, resolvedByAgentId: ctx.claims.agentId, ticketId: i.ticketId ?? null },
+      { workspaceId: ctx.claims.workspaceId },
+    ),
   },
   {
     name: 'ac_knowledge_get', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), projectId: z.string().optional() }),

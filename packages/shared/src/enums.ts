@@ -11,6 +11,10 @@ export type AgentKind = (typeof AGENT_KINDS)[number];
 export const INCIDENT_REPORTER_KINDS = ['weaver', 'worker'] as const;
 export type IncidentReporterKind = (typeof INCIDENT_REPORTER_KINDS)[number];
 
+/** `ac_incident_list`'s `status` filter (VS-271); `list()` itself applies no default. */
+export const INCIDENT_STATUS_FILTERS = ['open', 'resolved', 'all'] as const;
+export type IncidentStatusFilter = (typeof INCIDENT_STATUS_FILTERS)[number];
+
 export const AGENT_STATUSES = ['provisioning', 'active', 'running', 'paused', 'error', 'done', 'retired'] as const;
 export type AgentStatus = (typeof AGENT_STATUSES)[number];
 

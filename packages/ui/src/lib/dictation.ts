@@ -247,11 +247,19 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     }
     const fd = new FormData();
     fd.append('audio', blob, 'dictation.wav');
-    void fetch(transcribeUrlRef.current ?? '/api/transcribe', { method: 'POST', credentials: 'include', body: fd })
-      .then(async (res) => {
+    // `transcribing` clears in the same statement as whatever else each branch sets — never behind
+    // a trailing `.finally()`. A `.catch().finally()` tail sets them across two separate promise
+    // continuations, which land in two separate React commits often enough to matter: the composer's
+    // queued-send effect reads `error` and `transcribing` together, and a render where `error` is
+    // already set but `transcribing` is still true briefly shows both the failure alert and the
+    // "waiting for the transcript" banner at once (found via VS-294, ~20% of runs).
+    void (async () => {
+      try {
+        const res = await fetch(transcribeUrlRef.current ?? '/api/transcribe', { method: 'POST', credentials: 'include', body: fd });
         if (res.status === 501) {
           setMode(speechCtor() ? 'speech' : 'unavailable');
           setError('No transcription provider is configured on the daemon. Set one in Settings → Conductor.');
+          setTranscribingState(false);
           return;
         }
         if (!res.ok) throw new Error(String(res.status));
@@ -261,11 +269,12 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         } else {
           setError(NO_TRANSCRIPT_UPLOAD);
         }
-      })
-      .catch(() => setError('Transcription failed on the daemon. Type instead, or retry.'))
-      // The one place `transcribing` clears, on every branch above: a landed transcript, an empty
-      // one, a 501, any other non-OK response, or a network failure (VS-195).
-      .finally(() => setTranscribingState(false));
+        setTranscribingState(false);
+      } catch {
+        setError('Transcription failed on the daemon. Type instead, or retry.');
+        setTranscribingState(false);
+      }
+    })();
   }, [setTranscribingState]);
 
   const stop = useCallback(() => {

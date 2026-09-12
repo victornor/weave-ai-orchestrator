@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KnowledgeGraph } from '../api/types';
 import { buildModel, neighbourhood, neighboursOf } from '../lib/graph/model';
-import { convexHull, hullPath } from '../lib/graph/hull';
 
 function node(id: string, over: Partial<KnowledgeGraph['nodes'][number]> = {}): KnowledgeGraph['nodes'][number] {
   return {
@@ -81,39 +80,5 @@ describe('buildModel', () => {
     expect(model.byId.get('p')!.group).toBe('api');
     expect(model.byId.get('s')!.group).toBe('shared');
     expect(model.groups).toEqual(['api', 'shared']);
-  });
-});
-
-describe('hull', () => {
-  it('returns the corners of a triangle', () => {
-    const hull = convexHull([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 5, y: 8 }]);
-    expect(hull).toHaveLength(3);
-  });
-
-  it('reduces a collinear run to its two ends', () => {
-    const hull = convexHull([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 10, y: 0 }]);
-    expect(hull).toEqual([{ x: 0, y: 0 }, { x: 10, y: 0 }]);
-  });
-
-  it('ignores an interior point', () => {
-    const hull = convexHull([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }, { x: 5, y: 5 }]);
-    expect(hull).toHaveLength(4);
-  });
-
-  it('draws no region for a group of one', () => {
-    expect(hullPath([{ x: 3, y: 4 }], 20)).toBeNull();
-  });
-
-  it('draws a region for two nodes sitting on the same spot', () => {
-    const d = hullPath([{ x: 3, y: 4 }, { x: 3, y: 4 }], 20);
-    expect(d).toMatch(/^M/);
-    expect(d).toMatch(/Z$/);
-  });
-
-  it('pads the region out past the nodes it encloses', () => {
-    const d = hullPath([{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 20, y: 30 }], 24)!;
-    const xs = [...d.matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
-    expect(Math.min(...xs)).toBeLessThan(0);
-    expect(Math.max(...xs)).toBeGreaterThan(40);
   });
 });

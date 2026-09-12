@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+goal: Rebuild the knowledge graph route on a canvas-rendered force-directed
+  graph (react-force-graph-2d), replacing the React Flow node-editor wrapper

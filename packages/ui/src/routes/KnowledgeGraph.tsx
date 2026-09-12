@@ -1,39 +1,23 @@
 /**
  * The knowledge graph: hub files and documents as nodes, `[[links]]` as edges, laid out by a live
- * `d3-force` simulation you can drag, zoom, pan, search and filter.
+ * `d3-force` simulation you can drag, zoom, pan, search and filter — drawn on a `<canvas>` by
+ * `react-force-graph-2d` (VS-280), which owns wheel/pinch/drag/pan itself rather than those being
+ * hand-built or routed through a DOM node-editor. See
+ * `openspec/changes/vs-280-rebuild-the-knowledge-graph-on-a-canvas/design.md` for why.
  *
- * Rendering and interaction (pan, zoom, drag) are owned by `@xyflow/react` (VS-267) — it takes over
- * wheel/pinch/drag from the moment the canvas mounts, which a hand-rolled `useEffect`-attached
- * listener never could. `d3-force` still owns the layout: `createSimulation()` is unchanged in its
- * public shape, and its tick output is pushed into React Flow's node state. Edges and cluster hulls
- * are drawn as ordinary React Flow *nodes* rather than through its edge system — see
- * `EdgesLayerNode`'s doc comment for why — positioned at the origin with a `zIndex` that keeps
- * cluster region behind edges behind chips. Everything that can be reasoned about without a DOM —
- * the model, the layout, the geometry, the filters — still lives in `../lib/graph/` and is
- * unit-tested there.
+ * A node is a circle sized by its degree and filled with its group's colour (no cluster hulls —
+ * the colour alone carries "which pages belong together", per the same design doc). Everything
+ * that can be reasoned about without a canvas — the model, the filters, node geometry, the
+ * group-clustering force — lives in `../lib/graph/` and is unit-tested there; this file wires that
+ * to `react-force-graph-2d`'s callbacks.
  *
- * A node's *position* is tick-driven (`setNodes` on every `onTick`, rebuilt from `sim.nodes()`).
- * Its *visual* state — dimmed, selected, pinned, label detail, colour — is not: those come from
- * `GraphVisualContext`, updated only when the reader actually does something (search, hover, select,
- * pin, resize), so a hover doesn't wait for the next tick and a settled graph doesn't re-render for
- * no reason. `suppressedLabels()` is the one exception that stays tick-driven and ref-written,
- * exactly as before: it is a narrow backstop for the transient overlap a drag or a reheat can cause
- * before collision has resolved it again, not a per-render concern.
- *
- * Under `prefers-reduced-motion` nothing animates: the layout is settled in one synchronous pass and
- * the viewport moves in one step. Under the phone breakpoint the default is the neighbour list
- * (DESIGN-CONTRACT §7.4), with the canvas one tap away.
+ * Canvas 2D cannot resolve a CSS custom property (`ctx.fillStyle = 'var(--x)'` is not a colour),
+ * so the app's design tokens are read once via `getComputedStyle` and re-read whenever the
+ * `data-theme` attribute changes (`useThemeColours` below) — the one place this file talks to the
+ * DOM rather than to `react-force-graph-2d`'s own props.
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ReactFlow,
-  getViewportForBounds,
-  type Node,
-  type NodeProps,
-  type OnMove,
-  type ReactFlowInstance,
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Button } from '../components/Button';
@@ -41,21 +25,24 @@ import { useKnowledgeGraph } from '../api/hooks';
 import { cx } from '../lib/cx';
 import { buildModel, type GraphModel, type GraphNode } from '../lib/graph/model';
 import { highlighted, matchingIds, nodeDimmed, visible } from '../lib/graph/filters';
-import { chipSize, createSimulation, rectIntersection, suppressedLabels, type GraphSimulation } from '../lib/graph/simulation';
-import { hullPath, type Point } from '../lib/graph/hull';
+import { centeringForce, clusterForce } from '../lib/graph/cluster';
+import { circleIntersection, linksFor, reconcileNodes, suppressedLabels, type CanvasLink, type CanvasNode } from '../lib/graph/nodes';
 
-const PALETTE = ['var(--accent)', 'var(--status-done)', 'var(--status-working)', 'var(--status-merging)', 'var(--status-blocked)', 'var(--status-needs-you)'];
+const PALETTE_VARS = ['--accent', '--status-done', '--status-working', '--status-merging', '--status-blocked', '--status-needs-you'];
 
 /** Used when the frame has not been measured — jsdom has no layout, and neither has a first paint. */
 const FALLBACK_SIZE = { width: 900, height: 520 };
-/** How far a cluster region is drawn outside the nodes it encloses, in graph units. */
-const HULL_PAD = 40;
-const VIEW_TWEEN_MS = 260;
 const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 6;
 const DEFAULT_ZOOM = 1;
-/** Fraction of the fitted bounds added as margin — React Flow's `fitBounds`/`fitView` padding unit. */
-const FIT_PADDING = 0.12;
+const VIEW_TWEEN_MS = 260;
+const FIT_PADDING = 48;
+/** Ticks a synchronous settle runs under reduced motion. Enough for alpha to decay to rest. */
+const SETTLE_TICKS = 320;
+const CLUSTER_STRENGTH = 0.08;
+const CENTER_STRENGTH = 0.02;
+const DOUBLE_CLICK_MS = 350;
+const LABEL_FONT_PX = 5.5;
 
 /** How much of a label to draw. Below `none` only hubs and the focused node are labelled. */
 type LabelDetail = 'none' | 'truncated' | 'full';
@@ -65,6 +52,13 @@ function labelDetail(k: number): LabelDetail {
   if (k < LABEL_TRUNCATED_ZOOM) return 'none';
   if (k < LABEL_FULL_ZOOM) return 'truncated';
   return 'full';
+}
+
+/** What a node's label says at this zoom. A hub, and whatever is focused, is always named. */
+function labelFor(kind: GraphNode['kind'], title: string, detail: LabelDetail, focused: boolean): string | null {
+  if (detail === 'none' && kind !== 'hub' && !focused) return null;
+  if (detail === 'full' || focused) return title;
+  return title.length > 26 ? `${title.slice(0, 24)}…` : title;
 }
 
 /** A media query as a boolean that follows changes. */
@@ -80,179 +74,39 @@ function useMediaQuery(query: string): boolean {
   return matches;
 }
 
-// ── the visual context every chip/hull reads, independent of the tick-driven position ────────────
-
-type ChipInfo = Pick<GraphNode, 'kind' | 'title' | 'group' | 'degree'>;
-
-interface GraphVisualContextValue {
-  colourOf: (group: string) => string;
-  isDimmed: (id: string) => boolean;
-  selectedId: string | null;
-  hoverId: string | null;
-  pins: ReadonlySet<string>;
-  detail: LabelDetail;
-  /** Where `suppressedLabels()`'s tick-driven opacity is written directly, bypassing React. */
-  nodeRefs: React.RefObject<Map<string, SVGSVGElement>>;
+interface ThemeColours {
+  group: string[];
+  text1: string;
+  line3: string;
 }
 
-const GraphVisualContext = createContext<GraphVisualContextValue | null>(null);
-
-function useGraphVisual(): GraphVisualContextValue {
-  const ctx = useContext(GraphVisualContext);
-  if (!ctx) throw new Error('Graph chip/hull rendered outside GraphVisualContext');
-  return ctx;
+function readThemeColours(el: Element): ThemeColours {
+  const style = getComputedStyle(el);
+  const read = (name: string, fallback: string): string => style.getPropertyValue(name).trim() || fallback;
+  return {
+    group: PALETTE_VARS.map((name) => read(name, '#5e6ad2')),
+    text1: read('--text-1', '#e6e6e6'),
+    line3: read('--line-3', '#666'),
+  };
 }
 
-/** What a node's label says at this zoom. A hub, and whatever is focused, is always named. */
-function labelFor(node: Pick<GraphNode, 'kind' | 'title'>, detail: LabelDetail, focused: boolean): string | null {
-  if (detail === 'none' && node.kind !== 'hub' && !focused) return null;
-  if (detail === 'full' || focused) return node.title;
-  return node.title.length > 26 ? `${node.title.slice(0, 24)}…` : node.title;
+/** Reads the app's design tokens once, and again whenever the theme switches. Not React state:
+ *  a canvas repaint is driven by bumping `tick`, which changes the paint callbacks' identity. */
+function useThemeColours(el: Element | null): { colours: React.RefObject<ThemeColours>; tick: number } {
+  const colours = useRef<ThemeColours>({ group: [], text1: '#e6e6e6', line3: '#666' });
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!el) return;
+    colours.current = readThemeColours(el);
+    const observer = new MutationObserver(() => {
+      colours.current = readThemeColours(el);
+      setTick((t) => t + 1);
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, [el]);
+  return { colours, tick };
 }
-
-// ── React Flow node/edge types ─────────────────────────────────────────────────────────────────
-
-type ChipNodeType = Node<{ chip: ChipInfo }, 'chip'>;
-type HullNodeType = Node<{ group: string; d: string | null }, 'hull'>;
-type GraphNodeType = ChipNodeType | HullNodeType | EdgesLayerNodeType;
-
-function KnowledgeChipNode({ id, data }: NodeProps<ChipNodeType>): React.ReactElement {
-  const { colourOf, isDimmed, selectedId, hoverId, pins, detail, nodeRefs } = useGraphVisual();
-  const { chip } = data;
-  const { width, height } = chipSize(chip);
-  const selected = selectedId === id;
-  const hovered = hoverId === id;
-  const pinned = pins.has(id);
-  const dimmed = isDimmed(id);
-  const label = labelFor(chip, detail, selected || hovered);
-  const colour = colourOf(chip.group);
-
-  return (
-    <svg
-      ref={(el) => {
-        if (el) nodeRefs.current.set(id, el);
-        else nodeRefs.current.delete(id);
-      }}
-      data-node={id}
-      data-chip=""
-      data-kind={chip.kind}
-      data-dimmed={dimmed ? 'true' : undefined}
-      data-pinned={pinned ? 'true' : undefined}
-      width={width}
-      height={height}
-      className="cursor-pointer overflow-visible"
-      opacity={dimmed ? 0.22 : 1}
-      role="button"
-      tabIndex={0}
-      aria-label={chip.title}
-    >
-      <rect
-        x={0}
-        y={0}
-        width={width}
-        height={height}
-        rx={4}
-        fill="var(--bg-1)"
-        stroke={selected ? 'var(--text-1)' : 'var(--line-2)'}
-        strokeWidth={selected ? 2 : 1}
-      />
-      <rect x={0} y={0} width={3} height={height} rx={1} fill={colour} />
-      {label ? (
-        <text
-          x={width / 2 + 1.5}
-          y={height / 2}
-          dominantBaseline="central"
-          textAnchor="middle"
-          fontSize="var(--fs-micro)"
-          fill="var(--text-1)"
-          className={cx('pointer-events-none', chip.kind === 'hub' && 'font-semibold')}
-        >
-          {label}
-        </text>
-      ) : null}
-      {pinned ? <circle cx={width - 5} cy={5} r={3} fill="var(--text-1)" stroke="var(--bg-0)" strokeWidth={1} /> : null}
-    </svg>
-  );
-}
-
-function HullNode({ data }: NodeProps<HullNodeType>): React.ReactElement | null {
-  const { colourOf } = useGraphVisual();
-  if (!data.d) return null;
-  const colour = colourOf(data.group);
-  return (
-    <svg className="overflow-visible" style={{ width: 1, height: 1 }} aria-hidden="true">
-      <path d={data.d} fill={colour} fillOpacity={0.07} stroke={colour} strokeOpacity={0.18} strokeWidth={1.5} />
-    </svg>
-  );
-}
-
-/**
- * All edges as a single overlay node (VS-267), not React Flow's own edge system: RF's edge
- * renderer requires a node's `handleBounds` to be measured before it will draw anything touching
- * it, and in this canvas — no visible `<Handle>`, no user-drawn connections, only display lines
- * with their own computed geometry — that measurement pass never completed in testing against a
- * real browser render, so no edge ever appeared. Drawing edges the same way hulls are drawn (a
- * `zIndex`-ordered node, positioned at the origin, painting an absolute-coordinate SVG that React
- * Flow does not clip) sidesteps that system entirely and keeps edges on the same tick-driven,
- * pure-geometry footing as everything else in this file. `zIndex` between the hulls (-1) and the
- * chips (1) keeps edges behind chips and in front of cluster regions, matching the existing
- * "cluster region, then edges, then nodes" layering.
- */
-type EdgesLayerNodeType = Node<{ paths: EdgePathInfo[] }, 'edges'>;
-
-interface EdgePathInfo {
-  id: string;
-  d: string;
-  directed: boolean;
-  dimmed: boolean;
-}
-
-function EdgesLayerNode({ data }: NodeProps<EdgesLayerNodeType>): React.ReactElement {
-  return (
-    <svg className="overflow-visible" style={{ width: 1, height: 1 }} aria-hidden="true">
-      <defs>
-        <marker id="ac-graph-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-          <path d="M0 0 L8 4 L0 8 z" fill="var(--line-3)" />
-        </marker>
-      </defs>
-      {data.paths.map((p) => (
-        <path
-          key={p.id}
-          data-edge={p.id}
-          d={p.d}
-          fill="none"
-          stroke="var(--line-3)"
-          strokeWidth={p.dimmed ? 0.8 : 1.6}
-          strokeOpacity={p.dimmed ? 0.25 : 0.85}
-          markerEnd={p.directed ? 'url(#ac-graph-arrow)' : undefined}
-        />
-      ))}
-    </svg>
-  );
-}
-
-/** Computes one edge's SVG path, trimmed to each chip's real rectangle boundary (VS-267), not a
- *  circumscribed circle — the fix for edges that used to stop short of the visible chip. */
-function edgePathFor(s: { x: number; y: number } & ChipInfo, t: { x: number; y: number } & ChipInfo, directed: boolean): string {
-  const sSize = chipSize(s);
-  const tSize = chipSize(t);
-  const from = rectIntersection(s.x, s.y, sSize.width / 2, sSize.height / 2, t.x, t.y);
-  const to = rectIntersection(t.x, t.y, tSize.width / 2, tSize.height / 2, s.x, s.y);
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const gap = directed ? 4 : 1;
-  const endX = to.x - (dx / len) * gap;
-  const endY = to.y - (dy / len) * gap;
-
-  return `M${round(from.x)} ${round(from.y)}L${round(endX)} ${round(endY)}`;
-}
-
-function round(n: number): number {
-  return Math.round(n * 10) / 10;
-}
-
-const NODE_TYPES = { chip: KnowledgeChipNode, hull: HullNode, edges: EdgesLayerNode };
 
 export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOpen: (path: string) => void }): React.ReactElement {
   const graph = useKnowledgeGraph(project);
@@ -265,232 +119,161 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
   const [selected, setSelected] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [pins, setPins] = useState<ReadonlySet<string>>(() => new Set());
-  const [detail, setDetail] = useState<LabelDetail>('truncated');
-  const [canvas, setCanvas] = useState(false);
-  const [nodes, setNodes] = useState<GraphNodeType[]>([]);
+  const [canvasView, setCanvasView] = useState(false);
+  const [size, setSize] = useState(FALLBACK_SIZE);
+  const [graphData, setGraphData] = useState<{ nodes: CanvasNode[]; links: CanvasLink[] }>({ nodes: [], links: [] });
 
   const model = useMemo(() => (graph.data ? buildModel(graph.data) : null), [graph.data]);
   const shown = useMemo(() => (model ? visible(model, hidden) : null), [model, hidden]);
   const matches = useMemo(() => (model ? matchingIds(model, query) : null), [model, query]);
   const lit = useMemo(() => (shown ? highlighted(shown, hover ?? selected) : null), [shown, hover, selected]);
-  const colourOf = useCallback((group: string): string => PALETTE[Math.max(0, model?.groups.indexOf(group) ?? 0) % PALETTE.length]!, [model]);
-  const isDimmed = useCallback((id: string): boolean => nodeDimmed(id, lit, matches), [lit, matches]);
 
   const frameRef = useRef<HTMLDivElement | null>(null);
   const frameObserverRef = useRef<ResizeObserver | null>(null);
-  const simRef = useRef<GraphSimulation | null>(null);
-  const rfRef = useRef<ReactFlowInstance<GraphNodeType> | null>(null);
-  const sizeRef = useRef(FALLBACK_SIZE);
+  const fgRef = useRef<ForceGraphMethods<CanvasNode, CanvasLink> | undefined>(undefined);
   const autoFitRef = useRef(true);
-  const nodeRefs = useRef(new Map<string, SVGSVGElement>());
-  // `draw` is bound to the simulation's tick event once, at creation, so it must read hover and
-  // selection through refs — a state closure captured at that moment would go stale the instant
-  // the reader hovers or selects something without the simulation itself being recreated.
+  const lastClickRef = useRef<{ id: string; t: number } | null>(null);
+
+  // `nodeCanvasObject`/`linkCanvasObject` run every animation frame, long after the render that
+  // set hover/selection — a state closure captured then would go stale the instant the reader
+  // hovers or selects something without the simulation itself restarting.
   const hoverRef = useRef<string | null>(null);
   const selectedRef = useRef<string | null>(null);
   const litRef = useRef<ReadonlySet<string> | null>(null);
   const matchesRef = useRef<ReadonlySet<string> | null>(null);
-
-  const measure = useCallback((): { width: number; height: number } => {
-    const el = frameRef.current;
-    const width = el?.clientWidth || FALLBACK_SIZE.width;
-    const height = el?.clientHeight || FALLBACK_SIZE.height;
-    sizeRef.current = { width, height };
-    return sizeRef.current;
-  }, []);
-
-  /** The one place geometry reaches React state: called on every simulation tick. */
-  const draw = useCallback((): void => {
-    const sim = simRef.current;
-    if (!sim) return;
-    const simNodes = sim.nodes();
-
-    // The backstop: whatever the layout itself does not (yet) keep apart — mid-drag, mid-reheat —
-    // at most one overlapping chip's label is drawn, written straight to the DOM so a drag sees the
-    // verdict immediately rather than waiting on React. O(n²) over the chip count, same order as
-    // the collide force already pays every tick at this graph's supported scale.
-    const keep = new Set<string>();
-    if (hoverRef.current) keep.add(hoverRef.current);
-    if (selectedRef.current) keep.add(selectedRef.current);
-    const suppressed = suppressedLabels(simNodes, keep);
-    for (const n of simNodes) {
-      const el = nodeRefs.current.get(n.id);
-      if (el) el.style.opacity = suppressed.has(n.id) ? '0.22' : '';
-    }
-
-    const byGroup = new Map<string, Point[]>();
-    for (const n of simNodes) {
-      const points = byGroup.get(n.group) ?? [];
-      points.push({ x: n.x, y: n.y });
-      byGroup.set(n.group, points);
-    }
-
-    const chipNodes: ChipNodeType[] = simNodes.map((n) => {
-      const { width, height } = chipSize(n);
-      return {
-        id: n.id,
-        type: 'chip',
-        position: { x: n.x - width / 2, y: n.y - height / 2 },
-        width,
-        height,
-        draggable: true,
-        selectable: false,
-        connectable: false,
-        zIndex: 1,
-        data: { chip: { kind: n.kind, title: n.title, group: n.group, degree: n.degree } },
-      };
-    });
-    const hullNodes: HullNodeType[] = [...byGroup.entries()].map(([group, points]) => ({
-      id: `hull:${group}`,
-      type: 'hull',
-      position: { x: 0, y: 0 },
-      // React Flow marks a node `visibility: hidden` until it has *some* declared or measured
-      // size (`nodeHasDimensions`) — without this, a node with no ResizeObserver-measured content
-      // (this one paints entirely outside its own 0×0 box) stays invisible forever. Confirmed
-      // against a real browser render, not just a jsdom assumption.
-      width: 1,
-      height: 1,
-      draggable: false,
-      selectable: false,
-      connectable: false,
-      focusable: false,
-      zIndex: -1,
-      data: { group, d: hullPath(points, HULL_PAD) },
-    }));
-
-    // Edges, drawn as one overlay node rather than React Flow's own edge system — see
-    // `EdgesLayerNode`'s doc comment for why. `sim.links()` already resolves `source`/`target` to
-    // the live SimNode objects (d3-force's own behaviour once `.links()` has initialized them),
-    // so this reads the same tick-fresh positions the chips above were just built from.
-    const lit = litRef.current;
-    const matches = matchesRef.current;
-    const isEdgeEndDimmed = (id: string): boolean => (!!lit && !lit.has(id)) || (!!matches && !matches.has(id));
-    const paths: EdgePathInfo[] = [];
-    for (const link of sim.links()) {
-      const s = link.source;
-      const t = link.target;
-      if (typeof s !== 'object' || typeof t !== 'object') continue;
-      paths.push({
-        id: link.id,
-        d: edgePathFor(s, t, link.directed),
-        directed: link.directed,
-        dimmed: isEdgeEndDimmed(s.id) || isEdgeEndDimmed(t.id),
-      });
-    }
-    const edgesLayer: EdgesLayerNodeType = {
-      id: 'edges-layer',
-      type: 'edges',
-      position: { x: 0, y: 0 },
-      width: 1,
-      height: 1,
-      draggable: false,
-      selectable: false,
-      connectable: false,
-      focusable: false,
-      zIndex: 0,
-      data: { paths },
-    };
-
-    setNodes([...hullNodes, edgesLayer, ...chipNodes]);
-
-    if (autoFitRef.current) fitToDefault(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /** Fit the viewport to the current chip bounds, floored at `DEFAULT_ZOOM` so titles stay legible. */
-  const fitToDefault = useCallback((animate: boolean): void => {
-    const sim = simRef.current;
-    const rf = rfRef.current;
-    if (!sim || !rf) return;
-    const chipIds = sim.nodes().map((n) => n.id);
-    if (chipIds.length === 0) return;
-    const bounds = rf.getNodesBounds(chipIds);
-    const size = sizeRef.current;
-    const fitted = getViewportForBounds(bounds, size.width, size.height, MIN_ZOOM, MAX_ZOOM, FIT_PADDING);
-    const zoom = Math.max(fitted.zoom, DEFAULT_ZOOM);
-    const cx = bounds.x + bounds.width / 2;
-    const cy = bounds.y + bounds.height / 2;
-    const x = size.width / 2 - cx * zoom;
-    const y = size.height / 2 - cy * zoom;
-    void rf.setViewport({ x, y, zoom }, { duration: animate ? VIEW_TWEEN_MS : 0 });
-  }, []);
-
-  // The simulation: created once per motion preference, updated whenever the visible graph changes.
-  const animatedRef = useRef(animated);
-  useEffect(() => {
-    if (!shown) return;
-    measure();
-    if (simRef.current && animatedRef.current !== animated) {
-      simRef.current.destroy();
-      simRef.current = null;
-    }
-    animatedRef.current = animated;
-    let sim = simRef.current;
-    if (!sim) {
-      sim = createSimulation(shown, sizeRef.current, { animated });
-      simRef.current = sim;
-      sim.onTick(draw);
-      sim.start(1);
-    } else {
-      sim.update(shown, sizeRef.current);
-    }
-    draw();
-    setPins(new Set(sim.pinned()));
-  }, [shown, animated, draw, measure]);
-
-  useEffect(() => () => {
-    simRef.current?.destroy();
-    simRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    const onResize = (): void => {
-      measure();
-      if (autoFitRef.current) fitToDefault(false);
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [measure, fitToDefault]);
-
-  /**
-   * The frame is conditionally mounted — on phone it does not exist until the reader switches
-   * from the default neighbour list to the canvas — so a `resize` listener alone never fires for
-   * that transition and `sizeRef` is left holding `FALLBACK_SIZE` forever. A callback ref measures
-   * the frame the moment it exists, and a `ResizeObserver` keeps that measurement correct
-   * afterwards, without depending on the window ever resizing.
-   */
-  const attachFrame = useCallback((el: HTMLDivElement | null): void => {
-    frameRef.current = el;
-    frameObserverRef.current?.disconnect();
-    frameObserverRef.current = null;
-    if (!el) return;
-    measure();
-    if (autoFitRef.current) fitToDefault(false);
-    const observer = new ResizeObserver(() => {
-      measure();
-      if (autoFitRef.current) fitToDefault(false);
-    });
-    observer.observe(el);
-    frameObserverRef.current = observer;
-  }, [measure, fitToDefault]);
-
-  useEffect(() => () => frameObserverRef.current?.disconnect(), []);
-
-  useEffect(() => { setSelected(null); }, [project]);
+  const suppressedRef = useRef<ReadonlySet<string>>(new Set());
   useEffect(() => { hoverRef.current = hover; }, [hover]);
   useEffect(() => { selectedRef.current = selected; }, [selected]);
   useEffect(() => { litRef.current = lit; }, [lit]);
   useEffect(() => { matchesRef.current = matches; }, [matches]);
 
-  const focusNode = useCallback((id: string): void => {
-    const rf = rfRef.current;
-    const n = simRef.current?.node(id);
-    if (!rf || !n) return;
-    autoFitRef.current = false;
-    const { zoom } = rf.getViewport();
-    const size = sizeRef.current;
-    void rf.setViewport({ x: size.width / 2 - n.x * zoom, y: size.height / 2 - n.y * zoom, zoom }, { duration: VIEW_TWEEN_MS });
+  const { colours, tick: coloursTick } = useThemeColours(frameRef.current);
+
+  const colourOf = useCallback((group: string): string => {
+    const palette = colours.current.group;
+    if (palette.length === 0) return '#5e6ad2';
+    const idx = Math.max(0, model?.groups.indexOf(group) ?? 0);
+    return palette[idx % palette.length]!;
+  }, [model, colours]);
+
+  const measure = useCallback((): void => {
+    const el = frameRef.current;
+    setSize({ width: el?.clientWidth || FALLBACK_SIZE.width, height: el?.clientHeight || FALLBACK_SIZE.height });
   }, []);
+
+  // Reconcile the model into stable CanvasNode/CanvasLink objects only when the *visible* model
+  // changes (a group hidden/shown, or a refetch) — never on hover/select/search, so those never
+  // touch `graphData` identity and never reheat or reposition the layout.
+  const graphDataRef = useRef(graphData);
+  useEffect(() => {
+    if (!shown) return;
+    const centre = { x: size.width / 2, y: size.height / 2 };
+    const next = { nodes: reconcileNodes(graphDataRef.current.nodes, shown, centre), links: linksFor(shown) };
+    graphDataRef.current = next;
+    setGraphData(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown]);
+
+  const refit = useCallback((): void => {
+    const fg = fgRef.current;
+    if (!fg || !autoFitRef.current) return;
+    fg.zoomToFit(0, FIT_PADDING);
+    if (fg.zoom() < DEFAULT_ZOOM) fg.zoom(DEFAULT_ZOOM);
+  }, []);
+
+  // `onEngineStop` alone is not enough: `react-force-graph-2d`'s default `cooldownTime` is 15s, so
+  // waiting for it leaves the reader looking at an unfit view (nodes seeded near the frame centre,
+  // spreading outward under the charge/link forces with nothing re-framing them) for up to 15
+  // real seconds after every open — confirmed visually before this was added. Refitting on every
+  // tick, the same way the pre-VS-280 renderer's `draw()` did, keeps the view tracking the
+  // expanding bounds as the layout unfolds instead of only correcting it once at the very end.
+  const tickCountRef = useRef(0);
+  const onEngineTick = useCallback((): void => {
+    tickCountRef.current += 1;
+    if (tickCountRef.current % 3 !== 0) return;
+    refit();
+  }, [refit]);
+  const onEngineStop = refit;
+
+  const onRenderFramePre = useCallback((): void => {
+    const keep = new Set<string>();
+    if (hoverRef.current) keep.add(hoverRef.current);
+    if (selectedRef.current) keep.add(selectedRef.current);
+    suppressedRef.current = suppressedLabels(graphDataRef.current.nodes, keep);
+  }, []);
+
+  const nodeCanvasObject = useCallback((n: CanvasNode, ctx: CanvasRenderingContext2D, globalScale: number): void => {
+    const dimmed = nodeDimmed(n.id, litRef.current, matchesRef.current);
+    const focused = selectedRef.current === n.id || hoverRef.current === n.id;
+
+    ctx.globalAlpha = dimmed ? 0.22 : 1;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+    ctx.fillStyle = colourOf(n.group);
+    ctx.fill();
+    if (focused) {
+      ctx.lineWidth = 1.5 / globalScale;
+      ctx.strokeStyle = colours.current.text1;
+      ctx.stroke();
+    }
+
+    const label = suppressedRef.current.has(n.id) ? null : labelFor(n.kind, n.title, labelDetail(globalScale), focused);
+    if (label) {
+      ctx.font = `${n.kind === 'hub' ? 'bold ' : ''}${LABEL_FONT_PX}px sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = colours.current.text1;
+      ctx.fillText(label, n.x + n.radius + 1.5, n.y);
+    }
+    ctx.globalAlpha = 1;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colourOf, coloursTick]);
+
+  const nodePointerAreaPaint = useCallback((n: CanvasNode, color: string, ctx: CanvasRenderingContext2D): void => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }, []);
+
+  const linkCanvasObject = useCallback((link: CanvasLink, ctx: CanvasRenderingContext2D): void => {
+    const s = link.source as unknown as CanvasNode;
+    const t = link.target as unknown as CanvasNode;
+    if (typeof s !== 'object' || typeof t !== 'object') return;
+    const dimmed = nodeDimmed(s.id, litRef.current, matchesRef.current) || nodeDimmed(t.id, litRef.current, matchesRef.current);
+    const from = circleIntersection(s.x, s.y, s.radius, t.x, t.y);
+    const to = circleIntersection(t.x, t.y, t.radius, s.x, s.y);
+
+    ctx.globalAlpha = dimmed ? 0.25 : 0.85;
+    ctx.strokeStyle = colours.current.line3;
+    ctx.lineWidth = dimmed ? 0.8 : 1.4;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+
+    if (link.directed) {
+      const angle = Math.atan2(to.y - from.y, to.x - from.x);
+      const size2 = 4.5;
+      ctx.beginPath();
+      ctx.moveTo(to.x, to.y);
+      ctx.lineTo(to.x - size2 * Math.cos(angle - Math.PI / 6), to.y - size2 * Math.sin(angle - Math.PI / 6));
+      ctx.lineTo(to.x - size2 * Math.cos(angle + Math.PI / 6), to.y - size2 * Math.sin(angle + Math.PI / 6));
+      ctx.closePath();
+      ctx.fillStyle = colours.current.line3;
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coloursTick]);
+
+  const focusNode = useCallback((id: string): void => {
+    const fg = fgRef.current;
+    const n = graphDataRef.current.nodes.find((x) => x.id === id);
+    if (!fg || !n) return;
+    autoFitRef.current = false;
+    fg.centerAt(n.x, n.y, animated ? VIEW_TWEEN_MS : 0);
+  }, [animated]);
 
   // A search that lands on exactly one page brings it into view.
   useEffect(() => {
@@ -499,94 +282,92 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
     if (only) focusNode(only);
   }, [matches, focusNode]);
 
-  const fitView = useCallback((): void => {
-    autoFitRef.current = false;
-    fitToDefault(animated);
-  }, [fitToDefault, animated]);
-
-  const resetView = useCallback((): void => {
-    autoFitRef.current = false;
-    fitToDefault(animated);
-  }, [fitToDefault, animated]);
-
-  /**
-   * Zoom about the frame centre by `factor`, via `setViewport` rather than React Flow's own
-   * `zoomIn`/`zoomOut` (`panZoom.scaleBy`). `setViewport` is the same call `fitToDefault` already
-   * uses for Fit/Reset/the initial default view, so it shares one proven-reliable path instead of
-   * a second one — and it gives an exact, `ZOOM_STEP`-matching factor instead of `zoomIn`/`zoomOut`'s
-   * fixed internal 1.2.
-   */
-  const zoomBy = useCallback((factor: number): void => {
-    const rf = rfRef.current;
-    if (!rf) return;
-    autoFitRef.current = false;
-    const { x, y, zoom } = rf.getViewport();
-    const size = sizeRef.current;
-    const cx = size.width / 2;
-    const cy = size.height / 2;
-    const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor));
-    const gx = (cx - x) / zoom;
-    const gy = (cy - y) / zoom;
-    void rf.setViewport(
-      { x: cx - gx * nextZoom, y: cy - gy * nextZoom, zoom: nextZoom },
-      { duration: animated ? VIEW_TWEEN_MS : 0 },
-    );
-  }, [animated]);
-
   const togglePin = useCallback((id: string): void => {
-    const sim = simRef.current;
-    if (!sim) return;
-    if (sim.isPinned(id)) sim.unpin(id);
-    else sim.pin(id);
-    setPins(new Set(sim.pinned()));
+    const n = graphDataRef.current.nodes.find((x) => x.id === id);
+    if (!n) return;
+    if (n.fx != null || n.fy != null) {
+      n.fx = undefined;
+      n.fy = undefined;
+    } else {
+      n.fx = n.x;
+      n.fy = n.y;
+    }
+    setPins(new Set(graphDataRef.current.nodes.filter((x) => x.fx != null).map((x) => x.id)));
+    fgRef.current?.d3ReheatSimulation();
   }, []);
 
-  const selectNode = useCallback((id: string): void => {
-    setSelected(id);
-  }, []);
-
-  const onMove = useCallback<OnMove>((event, viewport) => {
-    if (event) autoFitRef.current = false;
-    setDetail((was) => {
-      const now = labelDetail(viewport.zoom);
-      return now === was ? was : now;
-    });
-  }, []);
-
-  const onNodeClick = useCallback((_event: unknown, node: GraphNodeType): void => {
-    if (node.type === 'chip') selectNode(node.id);
-  }, [selectNode]);
-
-  const onNodeDoubleClick = useCallback((_event: unknown, node: GraphNodeType): void => {
-    if (node.type === 'chip') onOpen(node.id);
+  const onNodeClick = useCallback((n: CanvasNode): void => {
+    const now = Date.now();
+    const last = lastClickRef.current;
+    if (last && last.id === n.id && now - last.t < DOUBLE_CLICK_MS) {
+      lastClickRef.current = null;
+      onOpen(n.id);
+      return;
+    }
+    lastClickRef.current = { id: n.id, t: now };
+    setSelected(n.id);
   }, [onOpen]);
 
-  const onNodeMouseEnter = useCallback((_event: unknown, node: GraphNodeType): void => {
-    if (node.type === 'chip') setHover(node.id);
+  const onNodeHover = useCallback((n: CanvasNode | null): void => {
+    setHover(n ? n.id : null);
   }, []);
 
-  const onNodeMouseLeave = useCallback((_event: unknown, node: GraphNodeType): void => {
-    if (node.type === 'chip') setHover((was) => (was === node.id ? null : was));
-  }, []);
-
-  const onNodeDragStart = useCallback((): void => {
+  const onNodeDrag = useCallback((): void => {
     autoFitRef.current = false;
   }, []);
 
-  const onNodeDrag = useCallback((_event: unknown, node: GraphNodeType): void => {
-    if (node.type !== 'chip') return;
-    const { width, height } = chipSize(node.data.chip);
-    simRef.current?.drag(node.id, node.position.x + width / 2, node.position.y + height / 2);
-  }, []);
+  /**
+   * The frame is conditionally mounted — on phone it does not exist until the reader switches
+   * from the default neighbour list to the canvas — so a plain `resize` listener never fires for
+   * that transition. A callback ref measures the frame the moment it exists, a `ResizeObserver`
+   * keeps it correct afterwards, and a raw listener on the canvas itself (react-force-graph-2d's
+   * own gestures already do the zooming/panning; this only observes that one happened) stops the
+   * auto-fit-on-settle behaviour the moment the reader does anything themselves.
+   */
+  const attachFrame = useCallback((el: HTMLDivElement | null): void => {
+    frameRef.current = el;
+    frameObserverRef.current?.disconnect();
+    frameObserverRef.current = null;
+    if (!el) return;
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    frameObserverRef.current = observer;
+  }, [measure]);
 
-  const onNodeDragStop = useCallback((_event: unknown, node: GraphNodeType): void => {
-    if (node.type === 'chip') simRef.current?.endDrag(node.id);
-  }, []);
+  useEffect(() => () => frameObserverRef.current?.disconnect(), []);
 
-  const visualContext = useMemo<GraphVisualContextValue>(() => ({
-    colourOf, isDimmed, selectedId: selected, hoverId: hover, pins, detail, nodeRefs,
-  }), [colourOf, isDimmed, selected, hover, pins, detail]);
+  useEffect(() => {
+    const root = frameRef.current;
+    const canvasEl = root?.querySelector('canvas');
+    if (!canvasEl) return;
+    const stop = (): void => { autoFitRef.current = false; };
+    // Capture phase: `force-graph`'s own d3-zoom/d3-drag wheel/pointer handling calls
+    // `stopImmediatePropagation`, which would otherwise stop a same-phase (bubble) listener on
+    // this same element from ever running — confirmed directly (a bubble-phase test listener on
+    // the same canvas never fired for a real wheel event) before switching to capture.
+    canvasEl.addEventListener('wheel', stop, { passive: true, capture: true });
+    canvasEl.addEventListener('pointerdown', stop, { capture: true });
+    return () => {
+      canvasEl.removeEventListener('wheel', stop, { capture: true });
+      canvasEl.removeEventListener('pointerdown', stop, { capture: true });
+    };
+  }, [phone, canvasView, graphData]);
 
+  useEffect(() => { setSelected(null); }, [project]);
+
+  const clusterForceFn = useMemo(() => clusterForce(CLUSTER_STRENGTH), []);
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    fg.d3Force('cluster', clusterForceFn);
+    // Replace react-force-graph-2d's default `center` force (recentres the whole mean every
+    // tick, dragging every node whenever one is pinned) with the same weak pull-to-a-point the
+    // pre-VS-280 renderer used — otherwise different groups' clusters drift apart with nothing
+    // bounding the overall spread. See `lib/graph/cluster.ts`'s `centeringForce` doc comment.
+    fg.d3Force('center', null);
+    fg.d3Force('centre', centeringForce(size.width / 2, size.height / 2, CENTER_STRENGTH));
+  }, [clusterForceFn, graphData, size]);
 
   // ── render ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -594,7 +375,7 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
   if (graph.isError) return <ErrorState code="KNOWLEDGE_GRAPH_FAILED" message="The graph could not be built." onRetry={() => void graph.refetch()} />;
   if (!model || !model.nodes.length || !shown) return <EmptyState title="Nothing to draw yet." detail="The graph fills in as documents are written and linked." />;
 
-  const asList = phone && !canvas;
+  const asList = phone && !canvasView;
   const sel = selected ? model.byId.get(selected) ?? null : null;
 
   return (
@@ -607,16 +388,8 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
           aria-label="Search the graph"
           className="ac-mono h-7 min-w-40 flex-1 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1"
         />
-        {!asList ? (
-          <>
-            <Button size="sm" onClick={() => zoomBy(1.25)}>Zoom in</Button>
-            <Button size="sm" onClick={() => zoomBy(1 / 1.25)}>Zoom out</Button>
-            <Button size="sm" onClick={fitView}>Fit</Button>
-            <Button size="sm" onClick={resetView}>Reset</Button>
-          </>
-        ) : null}
         {phone ? (
-          <Button size="sm" onClick={() => setCanvas((v) => !v)}>{canvas ? 'List' : 'Canvas'}</Button>
+          <Button size="sm" onClick={() => setCanvasView((v) => !v)}>{canvasView ? 'List' : 'Canvas'}</Button>
         ) : null}
       </div>
 
@@ -653,30 +426,28 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
       ) : (
         <div ref={attachFrame} className="ac-card relative overflow-hidden p-0">
           <div className="h-[32rem] w-full" aria-label="Knowledge graph">
-            <GraphVisualContext.Provider value={visualContext}>
-              <ReactFlow<GraphNodeType>
-                nodes={nodes}
-                edges={[]}
-                nodeTypes={NODE_TYPES}
-                onInit={(instance) => { rfRef.current = instance; }}
-                onMove={onMove}
-                onNodeClick={onNodeClick}
-                onNodeDoubleClick={onNodeDoubleClick}
-                onNodeMouseEnter={onNodeMouseEnter}
-                onNodeMouseLeave={onNodeMouseLeave}
-                onNodeDragStart={onNodeDragStart}
-                onNodeDrag={onNodeDrag}
-                onNodeDragStop={onNodeDragStop}
-                minZoom={MIN_ZOOM}
-                maxZoom={MAX_ZOOM}
-                defaultViewport={{ x: 0, y: 0, zoom: DEFAULT_ZOOM }}
-                nodesConnectable={false}
-                elementsSelectable={false}
-                zoomOnDoubleClick={false}
-                nodeClickDistance={4}
-                proOptions={{ hideAttribution: true }}
-              />
-            </GraphVisualContext.Provider>
+            <ForceGraph2D<CanvasNode, CanvasLink>
+              ref={fgRef}
+              graphData={graphData}
+              width={size.width}
+              height={size.height}
+              minZoom={MIN_ZOOM}
+              maxZoom={MAX_ZOOM}
+              warmupTicks={reduced ? SETTLE_TICKS : 0}
+              cooldownTicks={reduced ? 0 : undefined}
+              nodeCanvasObject={nodeCanvasObject}
+              nodeCanvasObjectMode={() => 'replace'}
+              nodePointerAreaPaint={nodePointerAreaPaint}
+              linkCanvasObject={linkCanvasObject}
+              linkCanvasObjectMode={() => 'replace'}
+              onRenderFramePre={onRenderFramePre}
+              onEngineTick={onEngineTick}
+              onEngineStop={onEngineStop}
+              onNodeClick={onNodeClick}
+              onNodeHover={onNodeHover}
+              onNodeDrag={onNodeDrag}
+              onDagError={undefined}
+            />
           </div>
         </div>
       )}

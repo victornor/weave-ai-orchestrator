@@ -24,6 +24,13 @@ const CURATION_REQUEST_COOLDOWN_MS = DAY_MS;
 const KNOWLEDGE_HEALTH_EVERY_MS = 30 * 60_000;
 /** A scope's total open issues reaching this many is itself worth telling the conductor about. */
 const KNOWLEDGE_HEALTH_ISSUE_THRESHOLD = 5;
+/**
+ * VS-306: how long an open decision attached to a terminal ticket is left before the stale sweep
+ * withdraws it. A day is the smallest round period that guarantees a follow-up asked just after its
+ * ticket finished — including one raised late in the day — is still waiting the next morning, so it
+ * is readable before it is withdrawn. The two observed near-misses were 52s and 82s after terminal.
+ */
+const TERMINAL_DECISION_GRACE_MS = DAY_MS;
 /** PLAN §7.5 reconciliation is hourly; PLAN §16.1 log retention is a daily sweep. */
 const RECONCILE_EVERY_MS = 60 * 60_000;
 /**
@@ -851,6 +858,10 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
           lastLiveness = Date.now();
           try { livenessScan(); } catch (e) { log.error({ err: String(e) }, 'liveness scan failed'); }
           await approvalIntegrityScan().catch((e) => log.error({ err: String(e) }, 'approval integrity scan failed'));
+          // VS-306: withdraw stale open decisions on already-terminal tickets. Disjoint from the
+          // repair scan above — that one raises approvals only for non-terminal tickets.
+          try { deps().decisions.sweepTerminalTickets(SYSTEM, TERMINAL_DECISION_GRACE_MS); }
+          catch (e) { log.error({ err: String(e) }, 'stale terminal-decision sweep failed'); }
           try { stalledWorkerScan(); } catch (e) { log.error({ err: String(e) }, 'stalled worker scan failed'); }
         }
         try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }

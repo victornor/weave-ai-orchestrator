@@ -1,5 +1,5 @@
 import { decisionRow, newId, nowIso, type Db } from '@weave-ai/db';
-import { OcError, WEAVER_REVIEW_KINDS, WEAVER_REVIEW_NOTE_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type TicketStatus } from '@weave-ai/shared';
+import { OcError, TERMINAL_TICKET_STATUSES, WEAVER_REVIEW_KINDS, WEAVER_REVIEW_NOTE_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type TicketStatus } from '@weave-ai/shared';
 import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -83,9 +83,16 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     }
   }
 
-  /** Every still-open decision scoped to `ticketId`, withdrawn with `reason` (VS-142: a ticket that reaches done/cancelled leaves nothing open behind it). */
-  function withdrawOpenForTicket(actor: Actor, ticketId: string, reason: string): number {
-    const rows = db.all<{ id: string }>('SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND status = ?', [ws, ticketId, 'open']);
+  /**
+   * Every still-open decision scoped to `ticketId`, withdrawn with `reason` (VS-142: a ticket that
+   * reaches done/cancelled leaves nothing open behind it). `createdBefore` (VS-306) narrows it to
+   * decisions older than that instant, so the stale-terminal sweep can reuse this closure path
+   * without touching a follow-up asked yesterday that is still within its grace period.
+   */
+  function withdrawOpenForTicket(actor: Actor, ticketId: string, reason: string, createdBefore?: string): number {
+    const rows = createdBefore
+      ? db.all<{ id: string }>('SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND status = ? AND created_at <= ?', [ws, ticketId, 'open', createdBefore])
+      : db.all<{ id: string }>('SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND status = ?', [ws, ticketId, 'open']);
     for (const r of rows) {
       db.update('decisions', r.id, { status: 'withdrawn' as DecisionStatus, answerText: reason });
       recordActivity(db, ws, actor, 'decision.withdraw', 'decision', r.id, { reason }, ticketId);
@@ -167,12 +174,24 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
   }
 
   function create(actor: Actor, input: DecisionCreateInput): Decision {
-    const ticketId = input.ticketId ?? null;
-    if (ticketId && !db.get('SELECT id FROM tickets WHERE id = ?', [ticketId])) throw new OcError('not_found', `ticket ${ticketId} not found`);
-    const projectId = resolveProject(input, ticketId);
+    const requestedTicketId = input.ticketId ?? null;
+    const ticket = requestedTicketId
+      ? db.get<{ id: string; status: TicketStatus; projectId: string | null }>('SELECT id, status, project_id FROM tickets WHERE id = ?', [requestedTicketId])
+      : null;
+    if (requestedTicketId && !ticket) throw new OcError('not_found', `ticket ${requestedTicketId} not found`);
+    // VS-306: a decision named at an already-terminal ticket has no future terminal transition to
+    // ride, so it is created with no ticket attachment rather than left orphaned. The ask stays
+    // legitimate (a follow-up on a finished ticket), so it is created, not refused. The project AND
+    // the correlation key are both derived from the original ticket before the attachment is
+    // dropped: the key must stay `kind:<ticketId>` so the detached card keeps its own bucket and
+    // neither supersedes nor is superseded by a workspace-level decision of the same kind.
+    const terminal = ticket ? (TERMINAL_TICKET_STATUSES as readonly string[]).includes(ticket.status) : false;
+    if (terminal) log.warn({ ticketId: requestedTicketId, kind: input.kind }, 'decision created for an already-terminal ticket; dropping its ticket attachment');
+    const ticketId = terminal ? null : requestedTicketId;
+    const projectId = resolveProject(input, requestedTicketId);
     const inputs = validateInputs(input.inputs ?? []);
-    const correlationKey = input.correlationKey ?? `${input.kind}:${ticketId ?? 'workspace'}`;
-    const owner = input.owner ?? defaultOwner(input.kind, ticketId, input.askedByAgentId);
+    const correlationKey = input.correlationKey ?? `${input.kind}:${requestedTicketId ?? 'workspace'}`;
+    const owner = input.owner ?? defaultOwner(input.kind, requestedTicketId, input.askedByAgentId);
     const id = newId();
     const now = nowIso();
     return tx(db, () => {
@@ -588,6 +607,28 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
 
     withdrawForTicket(actor, ticketId, reason) {
       return tx(db, () => withdrawOpenForTicket(actor, ticketId, reason));
+    },
+
+    sweepTerminalTickets(actor, olderThanMs) {
+      const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+      const placeholders = TERMINAL_TICKET_STATUSES.map(() => '?').join(', ');
+      // Only decisions whose ticket is ALREADY terminal: a finished ticket cannot be waiting on a
+      // gate, which is the whole reason this may run across every decision kind (VS-306). The
+      // approval-integrity repair scan raises approvals only for non-terminal tickets, so the two
+      // passes cannot contend. A decision newer than the cutoff is left so a just-asked follow-up is
+      // readable before it is withdrawn.
+      const stale = db.all<{ ticketId: string; identifier: string; status: TicketStatus }>(
+        `SELECT DISTINCT d.ticket_id AS ticketId, t.identifier AS identifier, t.status AS status
+           FROM decisions d JOIN tickets t ON t.id = d.ticket_id
+          WHERE d.workspace_id = ? AND d.status = 'open' AND t.status IN (${placeholders}) AND d.created_at <= ?`,
+        [ws, ...TERMINAL_TICKET_STATUSES, cutoff],
+      );
+      let withdrawn = 0;
+      for (const row of stale) {
+        const reason = `${row.identifier} is ${row.status}; this decision was left open past its terminal-ticket grace period`;
+        withdrawn += tx(db, () => withdrawOpenForTicket(actor, row.ticketId, reason, cutoff));
+      }
+      return withdrawn;
     },
 
     async expireDue() {

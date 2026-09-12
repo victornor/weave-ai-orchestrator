@@ -81,7 +81,7 @@ describe('dispatcher does not claim a worker whose session is held by a human (V
     });
     h.services.tickets = { livenessViolations: () => [], comment: () => ({ id: 'c1' }) } as never;
     h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }), cancel: vi.fn() } as never;
-    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
     const supervisor = createSupervisor(h.ctx, h.deps);

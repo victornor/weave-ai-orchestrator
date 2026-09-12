@@ -6,6 +6,7 @@ import type { Run, Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createSupervisor } from './index.js';
 import { createKnowledgeService } from '../knowledge/service.js';
+import { createDecisionsService } from '../decisions/service.js';
 import { runState } from '../runs/active.js';
 import type { Supervisor } from '../api.js';
 
@@ -36,7 +37,7 @@ describe('supervisor', () => {
     h.services.wake = wake as never;
     h.services.workers = { spawnForTicket, retireIfLanded, conductor: () => ({ id: h.conductorId }) } as never;
     h.services.tickets = { livenessViolations: () => [] } as never;
-    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     refreshAccounts = vi.fn(async () => []);
     h.services.accounts = { list: () => [], get: () => null, refresh: refreshAccounts } as never;
@@ -182,7 +183,7 @@ describe('supervisor scheduled passes', () => {
     h.services.wake = wake as never;
     h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
     h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0 } as never;
-    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     refreshAccounts = vi.fn(async () => []);
     h.services.accounts = { list: () => [], get: () => null, refresh: refreshAccounts } as never;
@@ -566,7 +567,7 @@ describe('supervisor runtime account refresh', () => {
     h.services.wake = fakeWake() as never;
     h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
     h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0 } as never;
-    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     supervisor = createSupervisor(h.ctx, h.deps);
   });
@@ -626,7 +627,7 @@ describe('supervisor runtime login recheck', () => {
     h.services.wake = fakeWake() as never;
     h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
     h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0 } as never;
-    h.services.decisions = { expireDue: vi.fn(async () => []), list: () => [], withdraw: vi.fn() } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0), list: () => [], withdraw: vi.fn() } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     refresh = vi.fn(async () => []);
     noteVerified = vi.fn();
@@ -706,7 +707,7 @@ describe('supervisor idle interactive sessions (VS-101)', () => {
     cancel = vi.fn(async () => ({}));
     h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }), cancel } as never;
     h.services.tickets = { livenessViolations: () => [] } as never;
-    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
     supervisor = createSupervisor(h.ctx, h.deps);
@@ -780,7 +781,7 @@ describe('supervisor abandoned handover sweep (VS-249)', () => {
     comment = vi.fn(() => ({ id: 'c1' }));
     h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }), cancel: vi.fn() } as never;
     h.services.tickets = { livenessViolations: () => [], comment } as never;
-    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
     h.ctx.config.defaults.handoverAbandonTimeoutMinutes = 120;
@@ -888,7 +889,7 @@ describe('stalled worker detection (VS-202)', () => {
     h.services.wake = wake as never;
     h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
     h.services.tickets = { livenessViolations: () => [] } as never;
-    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
     h.ctx.config.defaults.stalledWorkerTimeoutSec = 60;
@@ -1060,7 +1061,7 @@ describe('conductor digest run summaries (VS-245)', () => {
     h.services.wake = wake as never;
     h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
     h.services.tickets = { livenessViolations: () => [] } as never;
-    h.services.decisions = { expireDue: vi.fn(async () => []) } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
     h.ctx.config.defaults.weaverDigestIntervalSec = 0;
@@ -1134,5 +1135,48 @@ describe('conductor digest run summaries (VS-245)', () => {
     expect(carried.reduce((n, s) => n + s.length, 0)).toBeLessThanOrEqual(1_600);
     expect(events.some((e) => e.summaryOmitted === 'digest_cap')).toBe(true);
     expect(events.length).toBeLessThanOrEqual(30);
+  });
+});
+
+/**
+ * VS-306: the stale-terminal sweep is wired into the same `LIVENESS_EVERY_MS` block as the
+ * approval-integrity scan. It withdraws an `open` decision attached to a ticket that is already
+ * terminal and older than the 24h grace, and touches nothing on a live ticket.
+ */
+describe('stale terminal-decision sweep (VS-306)', () => {
+  let h: TestHarness;
+  let supervisor: Supervisor;
+
+  beforeEach(() => {
+    h = makeHarness();
+    const decisions = createDecisionsService(h.ctx, h.deps);
+    h.services.decisions = decisions as never;
+    h.services.wake = fakeWake() as never;
+    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.tickets = { livenessViolations: () => [] } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
+    supervisor = createSupervisor(h.ctx, h.deps);
+  });
+  afterEach(() => { supervisor.stop(); h.cleanup(); });
+
+  it('withdraws a stale open decision on a done ticket and leaves a live one alone', async () => {
+    const doneId = seedTicket(h, { status: 'done' });
+    const liveId = seedTicket(h, { status: 'in_progress', number: 2 });
+    const old = new Date(Date.now() - 48 * 3600e3).toISOString();
+    h.db.insert('decisions', {
+      id: newId(), workspaceId: h.workspaceId, ticketId: doneId, kind: 'question', owner: 'human', title: 'stale',
+      context: '', optionsJson: [], allowFreeText: 1, status: 'open', correlationKey: `question:${doneId}`, createdAt: old,
+    });
+    h.db.insert('decisions', {
+      id: newId(), workspaceId: h.workspaceId, ticketId: liveId, kind: 'question', owner: 'human', title: 'live',
+      context: '', optionsJson: [], allowFreeText: 1, status: 'open', correlationKey: `question:${liveId}`, createdAt: old,
+    });
+
+    await supervisor.tick();
+
+    const rows = h.db.all<{ title: string; status: string }>('SELECT title, status FROM decisions WHERE workspace_id = ?', [h.workspaceId]);
+    expect(rows.find((r) => r.title === 'stale')!.status).toBe('withdrawn');
+    expect(rows.find((r) => r.title === 'live')!.status).toBe('open');
   });
 });

@@ -1,5 +1,5 @@
 {
-  "name": "@agent-conductor/example-echo-channel",
+  "name": "@weave-ai/example-echo-channel",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
@@ -10,6 +10,6 @@
     ".": "./index.js"
   },
   "dependencies": {
-    "@agent-conductor/plugin-sdk": "workspace:*"
+    "@weave-ai/plugin-sdk": "workspace:*"
   }
 }

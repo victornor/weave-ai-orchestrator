@@ -5,8 +5,8 @@
  * once per run. Separate from `UsageService`, which tracks billed model tokens; this measures only —
  * nothing here throttles, caps or refuses a run, and a write failure here must never fail one.
  */
-import { newId, nowIso, type Db } from '@agent-conductor/db';
-import { OcError, resolveUsageWindow, type KnowledgeScope } from '@agent-conductor/shared';
+import { newId, nowIso, type Db } from '@weave-ai/db';
+import { OcError, resolveUsageWindow, type KnowledgeScope } from '@weave-ai/shared';
 import type {
   CoreServices, KnowledgeContextUsage, KnowledgeDocumentRef, KnowledgeDocumentUsage,
   KnowledgeReadEvent, KnowledgeUsageQuery, KnowledgeUsageService,
@@ -29,7 +29,7 @@ function emptyUsage(): KnowledgeContextUsage {
 function summarize(rows: EventRow[]): KnowledgeContextUsage {
   const usage = emptyUsage();
   // Only actual linked-document reads (a slug) populate `documents` — a hub chunk or an explicit
-  // whole-hub-scope read (ac_knowledge_get, slug null) is knowledge context but is not "a document".
+  // whole-hub-scope read (weave_knowledge_get, slug null) is knowledge context but is not "a document".
   const docs = new Map<string, { scope: KnowledgeScope; projectId: string | null; slug: string | null; tokens: number }>();
   for (const r of rows) {
     if (r.kind === 'hub') usage.hubTokens += r.tokens;

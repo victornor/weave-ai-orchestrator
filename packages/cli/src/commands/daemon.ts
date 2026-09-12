@@ -1,4 +1,4 @@
-/** `conductor daemon start|stop|status|logs|set-password|install-service` (PLAN §20). */
+/** `weave daemon start|stop|status|logs|set-password|install-service` (PLAN §20). */
 import type { Command } from 'commander';
 import { ApiError } from '../api.js';
 import { emit, fields, style, table, write } from '../output.js';
@@ -11,7 +11,7 @@ import { LAUNCHD_LABEL, SERVICE_NAME, followLog, installLaunchdAgent, installSer
 import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, releaseStamp, resolveWorkspaceStateDir, switchRelease } from '../release.js';
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { AC_ENV, isTerminalUpgrade, type Upgrade } from '@agent-conductor/shared';
+import { AC_ENV, isTerminalUpgrade, type Upgrade } from '@weave-ai/shared';
 import { run, session } from './util.js';
 import { runUpgradeRunner } from '../upgrade-runner.js';
 
@@ -37,7 +37,7 @@ export function register(program: Command): void {
 
   daemon
     .command('start')
-    .description('start the AgentConductor daemon')
+    .description('start the Weave AI daemon')
     .option('-f, --foreground', 'run in the foreground and stream logs here')
     .option('--listen <addr>', 'override the listen address, e.g. 127.0.0.1:7433')
     .action(async (opts: Record<string, string | boolean>, command: Command) => run(async () => {
@@ -71,8 +71,8 @@ export function register(program: Command): void {
       emit({ started: true, ...result, publicUrl: ready?.publicUrl ?? null }, () => {
         if (result.foreground) return;
         write(`${style.ok(ready ? 'started' : 'started (not confirmed yet)')} pid ${result.pid}`);
-        if (ready?.setupRequired) write(style.warn('public listener held: no operator password yet — run `conductor daemon set-password` on this machine to open it'));
-        fields([['url', ready?.setupRequired ? `${ready.publicUrl ?? ''} (after set-password)` : ready?.publicUrl ?? '(pending)'], ['bin', result.bin], ['log', result.log], ['next', ready?.setupRequired ? 'conductor daemon set-password' : 'conductor daemon status']]);
+        if (ready?.setupRequired) write(style.warn('public listener held: no operator password yet — run `weave daemon set-password` on this machine to open it'));
+        fields([['url', ready?.setupRequired ? `${ready.publicUrl ?? ''} (after set-password)` : ready?.publicUrl ?? '(pending)'], ['bin', result.bin], ['log', result.log], ['next', ready?.setupRequired ? 'weave daemon set-password' : 'weave daemon status']]);
       });
     }));
 
@@ -122,7 +122,7 @@ export function register(program: Command): void {
           ['log', local.log],
           ['version', health ? displayVersion(health.version, health.release?.path) : undefined],
           ['tls', health?.tlsMode],
-          ['operator', health?.operatorConfigured === undefined ? undefined : health.operatorConfigured ? 'configured' : style.warn('not configured — run `conductor daemon set-password`')],
+          ['operator', health?.operatorConfigured === undefined ? undefined : health.operatorConfigured ? 'configured' : style.warn('not configured — run `weave daemon set-password`')],
           ['error', error ? style.bad(error) : undefined],
         ]);
         if (health?.workspaces?.length) {
@@ -172,7 +172,7 @@ export function register(program: Command): void {
         const password = given || await promptHidden('New password');
         if (!given) { const again = await promptHidden('Repeat password'); if (password !== again) throw new ApiError('validation', 'passwords do not match', 400); }
         await client.post('/api/auth/setup', { username, password });
-        emit({ ok: true, mode: 'setup', publicUrl: health?.publicUrl ?? client.baseUrl }, () => write(`${style.ok('operator configured')} — sign in with \`conductor login ${health?.publicUrl ?? client.baseUrl}${health?.tlsMode === 'self-signed' ? ' --pin' : ''}\``));
+        emit({ ok: true, mode: 'setup', publicUrl: health?.publicUrl ?? client.baseUrl }, () => write(`${style.ok('operator configured')} — sign in with \`weave login ${health?.publicUrl ?? client.baseUrl}${health?.tlsMode === 'self-signed' ? ' --pin' : ''}\``));
         return;
       }
       const givenNext = (typeof opts['password'] === 'string' && opts['password']) || process.env['AC_PASSWORD'];
@@ -229,15 +229,15 @@ on any other platform the plist is printed so it can be copied to a Mac.`)
     .option('--from <url|path>', 'git URL or local checkout to build from (default: daemon.yaml upgrade.source)')
     .option('--ref <ref>', 'branch, tag or commit (default: daemon.yaml upgrade.ref, else main)')
     .option('--test', 'run the test suite in the new release before switching')
-    .option('--no-restart', 'build and switch only; restart later with `systemctl --user restart` or `conductor daemon stop && start`')
+    .option('--no-restart', 'build and switch only; restart later with `systemctl --user restart` or `weave daemon stop && start`')
     .option('--drain-timeout <sec>', 'seconds to wait for running turns (default: daemon.yaml upgrade.drainTimeoutSec, else 900)')
     .addHelpText('after', `
-Releases live in ~/.local/share/agent-conductor/releases/<stamp>-<sha>; \`current\` and \`previous\`
+Releases live in ~/.local/share/weave/releases/<stamp>-<sha>; \`current\` and \`previous\`
 are symlinks next to them. The daemon and the CLI both run from \`current\`, never from a checkout,
 so agents can edit and build any checkout without touching the running system. Refused inside a
 worker run (AC_RUN_TOKEN set): agents propose upgrades through tickets, humans run them.`)
     .action(async (opts: Record<string, string | boolean>, command: Command) => run(async () => {
-      if (process.env[AC_ENV.RUN_TOKEN]) throw new ApiError('forbidden', 'conductor daemon upgrade is not available inside a worker run; leave it to the human', 403);
+      if (process.env[AC_ENV.RUN_TOKEN]) throw new ApiError('forbidden', 'weave daemon upgrade is not available inside a worker run; leave it to the human', 403);
       const cfg = readDaemonYaml();
       const from = (typeof opts['from'] === 'string' && opts['from']) || cfg.upgrade?.source;
       if (!from) throw new ApiError('validation', 'no source: pass --from <url|path> or set upgrade.source in daemon.yaml', 400);
@@ -265,7 +265,7 @@ worker run (AC_RUN_TOKEN set): agents propose upgrades through tickets, humans r
       emit({ release: built.path, sha: built.sha, restarted: true, backups, ...result }, () => {
         write(`${style.ok('restarted')} ${result.how} · ${result.version ?? '?'}`);
         if (result.interrupted.length) write(style.warn(`${result.interrupted.length} run(s) were still going and got interrupted; they resume on their own`));
-        write(style.dim('next: conductor doctor'));
+        write(style.dim('next: weave doctor'));
       });
     }));
 
@@ -330,7 +330,7 @@ when the daemon is not answering and has to be replaced from here.`)
     .action(async () => run(async () => {
       const releases = listReleases();
       emit({ releases, current: readLink(currentLink()), previous: readLink(previousLink()) }, () => {
-        if (releases.length === 0) { write(style.dim('no releases yet — `conductor daemon upgrade --from <url|path>`')); return; }
+        if (releases.length === 0) { write(style.dim('no releases yet — `weave daemon upgrade --from <url|path>`')); return; }
         table(releases, [
           { header: '', get: (r) => (r.current ? '*' : r.previous ? '-' : '') },
           { header: 'RELEASE', get: (r) => r.name },
@@ -581,7 +581,7 @@ function renderUpdate(status: UpdateStatus): void {
   if (!status.configured) return;
   write('');
   write(status.updateAvailable
-    ? `${style.ok('update available')} — \`conductor daemon update apply\``
+    ? `${style.ok('update available')} — \`weave daemon update apply\``
     : style.dim('up to date'));
 }
 

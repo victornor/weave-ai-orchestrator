@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FakeRuntime } from '@agent-conductor/runtime-sdk';
-import { OcError, type Agent } from '@agent-conductor/shared';
+import { FakeRuntime } from '@weave-ai/runtime-sdk';
+import { OcError, type Agent } from '@weave-ai/shared';
 import { createApp } from '../src/app.js';
 import { authed, makeHarness, type Harness } from './fakes.js';
 

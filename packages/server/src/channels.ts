@@ -3,13 +3,13 @@
  * messages into `threads`, and drains outbound `thread_messages` rows with `delivery_status =
  * 'pending'` through the owning adapter with capability degradation and backoff.
  */
-import type { ChannelAdapter, CanonicalMessage, CanonicalPart, InboundMessage, RejectedContact, RunningChannel } from '@agent-conductor/channel-sdk';
-import { degrade, textMessage } from '@agent-conductor/channel-sdk';
-import type { Actor, CoreServices, SecretsService, WorkspaceContext } from '@agent-conductor/core';
-import { getLogger } from '@agent-conductor/core';
-import { newId, nowIso } from '@agent-conductor/db';
-import { UNRESOLVED_ENV_REF } from '@agent-conductor/channel-telegram';
-import { OcError, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, type Decision, type WorkspaceEvent } from '@agent-conductor/shared';
+import type { ChannelAdapter, CanonicalMessage, CanonicalPart, InboundMessage, RejectedContact, RunningChannel } from '@weave-ai/channel-sdk';
+import { degrade, textMessage } from '@weave-ai/channel-sdk';
+import type { Actor, CoreServices, SecretsService, WorkspaceContext } from '@weave-ai/core';
+import { getLogger } from '@weave-ai/core';
+import { newId, nowIso } from '@weave-ai/db';
+import { UNRESOLVED_ENV_REF } from '@weave-ai/channel-telegram';
+import { OcError, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, type Decision, type WorkspaceEvent } from '@weave-ai/shared';
 
 const log = getLogger('channel');
 const SYSTEM: Actor = { kind: 'system', id: null };

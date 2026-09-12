@@ -2,7 +2,7 @@
  * VS-258: the two-name compatibility layer ahead of the agent-conductor -> weave-ai rename. Every
  * directory this product owns may exist on a host under an old name or a new one; these two
  * functions are the one place that decides which, so no other file has to spell both names itself.
- * Leaf: imports nothing from `@agent-conductor/*`, so it throws plain `Error`s, not `OcError` — see
+ * Leaf: imports nothing from `@weave-ai/*`, so it throws plain `Error`s, not `OcError` — see
  * this change's design.md, Decision 1.
  */
 import { existsSync } from 'node:fs';

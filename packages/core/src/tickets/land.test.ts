@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { WorkspaceConfigSchema, type Project, type Ticket, type WorkspaceConfig } from '@agent-conductor/shared';
+import { WorkspaceConfigSchema, type Project, type Ticket, type WorkspaceConfig } from '@weave-ai/shared';
 import { git } from '../util/git.js';
 import { landDelivery } from './land.js';
 

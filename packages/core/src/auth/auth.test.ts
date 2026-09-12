@@ -3,8 +3,8 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { openDb, type Db } from '@agent-conductor/db';
-import { DaemonConfigSchema } from '@agent-conductor/shared';
+import { openDb, type Db } from '@weave-ai/db';
+import { DaemonConfigSchema } from '@weave-ai/shared';
 import { createAuthService } from './index.js';
 import type { AuthService } from '../api.js';
 

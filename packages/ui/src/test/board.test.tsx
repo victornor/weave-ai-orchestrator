@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Agent } from '@agent-conductor/shared';
-import { TICKET_STATUSES } from '@agent-conductor/shared';
+import type { Agent } from '@weave-ai/shared';
+import { TICKET_STATUSES } from '@weave-ai/shared';
 import {
   BOARD_COLUMNS,
   RECENT_FINISHED_MAX,

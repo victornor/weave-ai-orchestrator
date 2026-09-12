@@ -2,8 +2,8 @@
  * The workspace's two model settings as a service (VS-77, ADR 0011): read them, change one, and
  * settle the question a mixed-runtime migration left open.
  */
-import { OcError, WorkspaceModelsSchema, type ModelsLocked, type WorkspaceModels, type WorkspaceModelsPut } from '@agent-conductor/shared';
-import type { Db } from '@agent-conductor/db';
+import { OcError, WorkspaceModelsSchema, type ModelsLocked, type WorkspaceModels, type WorkspaceModelsPut } from '@weave-ai/shared';
+import type { Db } from '@weave-ai/db';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, ModelsService } from '../api.js';
 import { recordActivity } from '../events.js';

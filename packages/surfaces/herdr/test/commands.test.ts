@@ -10,8 +10,8 @@ const paneListJson = JSON.stringify({
   result: {
     type: 'pane_list',
     panes: [
-      { pane_id: 'w6:p1', tab_id: 'w6:t1', workspace_id: 'w6', agent_status: 'working', terminal_title: 'conductor:weaver weaver' },
-      { pane_id: 'w6:p2', tab_id: 'w6:t2', workspace_id: 'w6', agent_status: 'idle', terminal_title: 'conductor:w-1 ◑ ACME-42' },
+      { pane_id: 'w6:p1', tab_id: 'w6:t1', workspace_id: 'w6', agent_status: 'working', terminal_title: 'weave:weaver weaver' },
+      { pane_id: 'w6:p2', tab_id: 'w6:t2', workspace_id: 'w6', agent_status: 'idle', terminal_title: 'weave:w-1 ◑ ACME-42' },
       { pane_id: 'w9:p1', tab_id: 'w9:t1', workspace_id: 'w9', agent_status: 'unknown' },
     ],
   },
@@ -28,9 +28,9 @@ describe('herdr command building', () => {
 
   it('splits right and runs the attach command as one quoted string', () => {
     expect(paneSplitArgs('w6:p1')).toEqual(['pane', 'split', 'w6:p1', '--direction', 'right', '--no-focus']);
-    expect(paneRunArgs('w6:p2', ['conductor', 'attach', 'w-1', '--url', 'http://127.0.0.1:7433']))
-      .toEqual(['pane', 'run', 'w6:p2', 'conductor attach w-1 --url http://127.0.0.1:7433']);
-    expect(paneRenameArgs('w6:p2', paneLabel('w-1', '◑ ACME-42'))).toEqual(['pane', 'rename', 'w6:p2', 'conductor:w-1 ◑ ACME-42']);
+    expect(paneRunArgs('w6:p2', ['weave', 'attach', 'w-1', '--url', 'http://127.0.0.1:7433']))
+      .toEqual(['pane', 'run', 'w6:p2', 'weave attach w-1 --url http://127.0.0.1:7433']);
+    expect(paneRenameArgs('w6:p2', paneLabel('w-1', '◑ ACME-42'))).toEqual(['pane', 'rename', 'w6:p2', 'weave:w-1 ◑ ACME-42']);
     expect(paneCloseArgs('w6:p2')).toEqual(['pane', 'close', 'w6:p2']);
   });
 
@@ -52,7 +52,7 @@ describe('herdr command building', () => {
 
   it('re-resolves panes by the agent marker rather than trusting stored ids', () => {
     const panes = parsePaneList(paneListJson);
-    expect(agentMarker('w-1')).toBe('conductor:w-1');
+    expect(agentMarker('w-1')).toBe('weave:w-1');
     expect(findPaneForAgent(panes, 'w-1', 'w6')?.paneId).toBe('w6:p2');
     expect(findPaneForAgent(panes, 'weaver', 'w6')?.paneId).toBe('w6:p1');
     expect(findPaneForAgent(panes, 'w-9', 'w6')).toBeUndefined();

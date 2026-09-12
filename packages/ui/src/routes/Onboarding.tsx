@@ -1,7 +1,7 @@
 /**
- * First-run onboarding and "new workspace" (PLAN §20 `conductor init`, DESIGN-CONTRACT first-run).
+ * First-run onboarding and "new workspace" (PLAN §20 `weave init`, DESIGN-CONTRACT first-run).
  * Four steps: the workspace, the conductor, projects, then create. Everything here is what
- * `conductor init` + `workspace config` + `project add` do; the daemon has no notion of a default
+ * `weave init` + `workspace config` + `project add` do; the daemon has no notion of a default
  * workspace, so a fresh install lands here until the first one exists.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -118,7 +118,7 @@ export function OnboardingRoute(): React.ReactElement {
 
   useEffect(() => { if (!idTouched) setId(slugOf(name)); }, [name, idTouched]);
   useEffect(() => { if (!prefixTouched) setPrefix(name ? prefixOf(name) : ''); }, [name, prefixTouched]);
-  const root = health.data?.host?.defaultWorkspaceRoot ?? '~/agent-conductor';
+  const root = health.data?.host?.defaultWorkspaceRoot ?? '~/weave';
   useEffect(() => { if (!pathTouched) setPath(id ? `${root}/${id}` : ''); }, [id, root, pathTouched]);
 
   // Step 2 — the two model settings: the conductor's and every worker's (VS-77)
@@ -318,7 +318,7 @@ export function OnboardingRoute(): React.ReactElement {
 
       {step === 'models' ? (
         <section className="flex flex-col gap-4">
-          <Field group label="Runtime" hint="The coding CLI the conductor runs on. Only CLIs installed on the daemon host are offered; log in with `conductor runtime login <id>` if a run later fails with auth.">
+          <Field group label="Runtime" hint="The coding CLI the weave runs on. Only CLIs installed on the daemon host are offered; log in with `weave runtime login <id>` if a run later fails with auth.">
             {runtimes.isLoading ? <Skeleton className="h-16 w-full rounded-r6" /> : available.length === 0 ? (
               <div className="rounded-r6 border border-blocked/35 bg-blocked/8 p-3 text-meta text-text-1">
                 No coding CLI was detected on the daemon host. Install claude, codex, opencode or gemini there, then reload.
@@ -523,7 +523,7 @@ function Frame({ children }: { children: React.ReactNode }): React.ReactElement 
               <path d="M6 0.3 L11.7 6 L6 11.7 L0.3 6 Z" fill="var(--accent-on)" />
             </svg>
           </span>
-          <h1 className="text-title font-semibold tracking-title text-text-strong">AgentConductor</h1>
+          <h1 className="text-title font-semibold tracking-title text-text-strong">Weave AI</h1>
         </div>
         {children}
       </div>

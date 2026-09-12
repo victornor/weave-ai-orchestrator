@@ -1,9 +1,9 @@
 /**
- * `ac_run_inspect` / `ac_run_list` — the conductor's read of a run it does not own (VS-61).
+ * `weave_run_inspect` / `weave_run_list` — the conductor's read of a run it does not own (VS-61).
  * The tools are exercised through `runTool`, the same entry the MCP endpoint and the agent route use.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Run, RunEvent, RunEventType, ToolResult } from '@agent-conductor/shared';
+import type { Run, RunEvent, RunEventType, ToolResult } from '@weave-ai/shared';
 import { runTool, type ToolCtx } from '../src/tools.js';
 import type { RunTokenClaims } from '../src/runtoken.js';
 import { MAX_PAYLOAD_BYTES } from '../src/inspect.js';
@@ -90,12 +90,12 @@ function workingRun(): RunEvent[] {
   ];
 }
 
-describe('ac_run_inspect — resolving a reference', () => {
+describe('weave_run_inspect — resolving a reference', () => {
   it('resolves a ticket identifier to the run behind it', async () => {
     harness = makeHarness();
     seed(harness, workingRun());
 
-    const res = await call(harness, 'ac_run_inspect', { ref: 'ACME-42' });
+    const res = await call(harness, 'weave_run_inspect', { ref: 'ACME-42' });
 
     expect(res.ok).toBe(true);
     const d = res.data as Record<string, never>;
@@ -107,8 +107,8 @@ describe('ac_run_inspect — resolving a reference', () => {
     harness = makeHarness();
     seed(harness, workingRun());
 
-    const byWorker = await call(harness, 'ac_run_inspect', { ref: 'ag_1' });
-    const byRun = await call(harness, 'ac_run_inspect', { ref: 'run_1' });
+    const byWorker = await call(harness, 'weave_run_inspect', { ref: 'ag_1' });
+    const byRun = await call(harness, 'weave_run_inspect', { ref: 'run_1' });
 
     expect((byWorker.data as Record<string, never>)['resolved']).toEqual({ kind: 'worker', id: 'ag_1' });
     expect((byRun.data as Record<string, never>)['resolved']).toEqual({ kind: 'run', id: 'run_1' });
@@ -121,7 +121,7 @@ describe('ac_run_inspect — resolving a reference', () => {
     harness = makeHarness();
     seed(harness, workingRun());
 
-    const res = await call(harness, 'ac_run_inspect', { ref: 'ACME-999' });
+    const res = await call(harness, 'weave_run_inspect', { ref: 'ACME-999' });
 
     expect(res.ok).toBe(false);
     expect(res.error?.code).toBe('not_found');
@@ -133,7 +133,7 @@ describe('ac_run_inspect — resolving a reference', () => {
     harness.tickets.set('tk_2', ticket({ id: 'tk_2', identifier: 'ACME-77', workerId: null }));
     seedRuns(harness, []);
 
-    const res = await call(harness, 'ac_run_inspect', { ref: 'ACME-77' });
+    const res = await call(harness, 'weave_run_inspect', { ref: 'ACME-77' });
 
     expect(res.ok).toBe(true);
     const d = res.data as Record<string, never>;
@@ -143,12 +143,12 @@ describe('ac_run_inspect — resolving a reference', () => {
   });
 });
 
-describe('ac_run_inspect — phase and elapsed', () => {
+describe('weave_run_inspect — phase and elapsed', () => {
   it('names the phase under way and the phases already done', async () => {
     harness = makeHarness();
     seed(harness, workingRun());
 
-    const d = (await call(harness, 'ac_run_inspect', { ref: 'ACME-42' })).data as Record<string, never>;
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'ACME-42' })).data as Record<string, never>;
     const phase = d['phase'] as { current: string; completed: Array<{ phase: string; durationMs: number }> };
 
     expect(phase.current).toBe('turn');
@@ -163,7 +163,7 @@ describe('ac_run_inspect — phase and elapsed', () => {
     harness = makeHarness();
     seed(harness, [ev('run.started', {})]);
 
-    const d = (await call(harness, 'ac_run_inspect', { ref: 'run_1' })).data as Record<string, never>;
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'run_1' })).data as Record<string, never>;
     expect((d['phase'] as { current: string }).current).toBe('prepare_home');
   });
 
@@ -172,19 +172,19 @@ describe('ac_run_inspect — phase and elapsed', () => {
     const finished = run({ status: 'succeeded', finishedAt: '2026-09-05T12:04:00.000Z', liveness: 'advanced', summary: 'Ticked tasks 1-3.' });
     seed(harness, [...workingRun(), ev('run.phase.timing', { phase: 'finalize', ms: 60 })], finished);
 
-    const d = (await call(harness, 'ac_run_inspect', { ref: 'run_1' })).data as Record<string, never>;
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'run_1' })).data as Record<string, never>;
 
     expect((d['phase'] as { current: string | null }).current).toBeNull();
     expect(d['run']).toMatchObject({ status: 'succeeded', elapsedMs: 240_000, elapsed: '4m00s', liveness: 'advanced', turn: 3 });
   });
 });
 
-describe('ac_run_inspect — the worker and the transcript', () => {
+describe('weave_run_inspect — the worker and the transcript', () => {
   it('returns the worker status, its pause reason and its ticket', async () => {
     harness = makeHarness();
     seed(harness, workingRun(), run(), [worker({ status: 'paused', pauseReason: 'usage limit until 14:00' })]);
 
-    const d = (await call(harness, 'ac_run_inspect', { ref: 'ACME-42' })).data as Record<string, never>;
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'ACME-42' })).data as Record<string, never>;
 
     expect(d['worker']).toMatchObject({
       id: 'ag_1', name: 'Backend Engineer #7', status: 'paused', pauseReason: 'usage limit until 14:00', role: 'Backend Engineer',
@@ -196,7 +196,7 @@ describe('ac_run_inspect — the worker and the transcript', () => {
     harness = makeHarness();
     seed(harness, workingRun());
 
-    const d = (await call(harness, 'ac_run_inspect', { ref: 'ACME-42' })).data as Record<string, never>;
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'ACME-42' })).data as Record<string, never>;
     const lines = d['transcript'] as Array<{ seq: number; kind: string; text: string }>;
 
     expect(lines.map((l) => l.kind)).toEqual(['status', 'phase', 'phase', 'phase', 'text', 'tool']);
@@ -211,7 +211,7 @@ describe('ac_run_inspect — the worker and the transcript', () => {
     seq = 0;
     seed(harness, [ev('assistant.text', { text: 'Exporting GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123 now.' })]);
 
-    const d = (await call(harness, 'ac_run_inspect', { ref: 'run_1' })).data as Record<string, never>;
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'run_1' })).data as Record<string, never>;
     const body = JSON.stringify(d['transcript']);
 
     expect(body).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123');
@@ -219,7 +219,7 @@ describe('ac_run_inspect — the worker and the transcript', () => {
   });
 });
 
-describe('ac_run_inspect — the cursor', () => {
+describe('weave_run_inspect — the cursor', () => {
   /** `count` assistant lines, so every event becomes its own block. */
   function chatter(count: number, chars = 20): RunEvent[] {
     seq = 0;
@@ -230,7 +230,7 @@ describe('ac_run_inspect — the cursor', () => {
     harness = makeHarness();
     seed(harness, chatter(100));
 
-    const d = (await call(harness, 'ac_run_inspect', { ref: 'run_1' })).data as Record<string, never>;
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'run_1' })).data as Record<string, never>;
     const cursor = d['cursor'] as Record<string, unknown>;
     const lines = d['transcript'] as Array<{ seq: number }>;
 
@@ -246,7 +246,7 @@ describe('ac_run_inspect — the cursor', () => {
     harness = makeHarness();
     seed(harness, chatter(100));
 
-    const d = (await call(harness, 'ac_run_inspect', { ref: 'run_1', since: 10, limit: 5 })).data as Record<string, never>;
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'run_1', since: 10, limit: 5 })).data as Record<string, never>;
     const lines = d['transcript'] as Array<{ seq: number }>;
 
     expect(lines.map((l) => l.seq)).toEqual([11, 12, 13, 14, 15]);
@@ -257,7 +257,7 @@ describe('ac_run_inspect — the cursor', () => {
     harness = makeHarness();
     seed(harness, chatter(12));
 
-    const d = (await call(harness, 'ac_run_inspect', { ref: 'run_1', full: true })).data as Record<string, never>;
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'run_1', full: true })).data as Record<string, never>;
     const lines = d['transcript'] as Array<{ seq: number }>;
 
     expect(lines[0]!.seq).toBe(1);
@@ -269,7 +269,7 @@ describe('ac_run_inspect — the cursor', () => {
     harness = makeHarness();
     seed(harness, chatter(10));
 
-    const res = await call(harness, 'ac_run_inspect', { ref: 'run_1', limit: 500 });
+    const res = await call(harness, 'weave_run_inspect', { ref: 'run_1', limit: 500 });
 
     expect(res.ok).toBe(false);
     expect(res.error?.code).toBe('validation');
@@ -279,7 +279,7 @@ describe('ac_run_inspect — the cursor', () => {
     harness = makeHarness();
     seed(harness, chatter(200, 4000));
 
-    const d = (await call(harness, 'ac_run_inspect', { ref: 'run_1', limit: 200 })).data as Record<string, never>;
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'run_1', limit: 200 })).data as Record<string, never>;
     const cursor = d['cursor'] as Record<string, unknown>;
     const lines = d['transcript'] as Array<{ seq: number }>;
 
@@ -295,7 +295,7 @@ describe('ac_run_inspect — the cursor', () => {
     seq = 0;
     seed(harness, [ev('assistant.text', { text: 'z'.repeat(200_000) })]);
 
-    const d = (await call(harness, 'ac_run_inspect', { ref: 'run_1' })).data as Record<string, never>;
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'run_1' })).data as Record<string, never>;
     const lines = d['transcript'] as Array<{ text: string }>;
 
     expect(lines).toHaveLength(1);
@@ -303,7 +303,7 @@ describe('ac_run_inspect — the cursor', () => {
   });
 });
 
-describe('ac_run_list', () => {
+describe('weave_run_list', () => {
   it('lists the retry ladder newest first, each naming the run it retried', async () => {
     harness = makeHarness();
     seed(harness, workingRun());
@@ -313,7 +313,7 @@ describe('ac_run_list', () => {
       run({ id: 'run_1', status: 'failed', turnEpoch: 1, errorFamily: 'transient_upstream', errorCode: 'net', startedAt: '2026-09-05T12:00:00.000Z', finishedAt: '2026-09-05T12:01:00.000Z' }),
     ]);
 
-    const res = await call(harness, 'ac_run_list', { ref: 'ACME-42' });
+    const res = await call(harness, 'weave_run_list', { ref: 'ACME-42' });
     const d = res.data as Record<string, never>;
     const runs = d['runs'] as Array<Record<string, unknown>>;
 
@@ -327,7 +327,7 @@ describe('ac_run_list', () => {
     seed(harness, []);
     seedRuns(harness, []);
 
-    const res = await call(harness, 'ac_run_list', { ref: 'ACME-42' });
+    const res = await call(harness, 'weave_run_list', { ref: 'ACME-42' });
 
     expect(res.ok).toBe(true);
     expect((res.data as Record<string, never>)['runs']).toEqual([]);
@@ -337,7 +337,7 @@ describe('ac_run_list', () => {
     harness = makeHarness();
     seed(harness, []);
 
-    expect((await call(harness, 'ac_run_list', { ref: 'ACME-42', limit: 500 })).error?.code).toBe('validation');
+    expect((await call(harness, 'weave_run_list', { ref: 'ACME-42', limit: 500 })).error?.code).toBe('validation');
   });
 });
 
@@ -346,7 +346,7 @@ describe('scope', () => {
     harness = makeHarness();
     seed(harness, workingRun());
 
-    for (const tool of ['ac_run_inspect', 'ac_run_list']) {
+    for (const tool of ['weave_run_inspect', 'weave_run_list']) {
       const res = await call(harness, tool, { ref: 'ACME-42' }, WORKER);
       expect(res.ok).toBe(false);
       expect(res.error?.code).toBe('forbidden');
@@ -361,7 +361,7 @@ describe('scope', () => {
     const own = run({ id: 'run_c', agentId: 'ag_conductor', ticketId: null });
     seed(harness, [{ ...ev('assistant.text', { text: 'Filed VS-61.' }), runId: 'run_c' }], own, [worker({ id: 'ag_conductor', kind: 'weaver', name: 'Weaver', roleId: null, ticketId: null })]);
 
-    const res = await call(harness, 'ac_run_inspect', { ref: 'run_c' });
+    const res = await call(harness, 'weave_run_inspect', { ref: 'run_c' });
 
     expect(res.ok).toBe(true);
     const d = res.data as Record<string, never>;
@@ -370,7 +370,7 @@ describe('scope', () => {
   });
 });
 
-describe('ac_worker_models (VS-236)', () => {
+describe('weave_worker_models (VS-236)', () => {
   it('lists an unconfigured option as unset, not as claude', async () => {
     harness = makeHarness({
       daemon: {
@@ -379,7 +379,7 @@ describe('ac_worker_models (VS-236)', () => {
         },
       },
     });
-    const res = await call(harness, 'ac_worker_models', {});
+    const res = await call(harness, 'weave_worker_models', {});
     expect(res.ok).toBe(true);
     const data = res.data as { default: { runtime: string }; options: Array<{ id: string; description: string; runtime: string | null; model: string | null }> };
     expect(data.options).toEqual([{ id: 'quick', description: 'Fastest.', runtime: null, model: null }]);

@@ -1,4 +1,4 @@
-import type { AccountLimitWindow, BillingType, RunErrorFamily, RunEventType, PermissionMode, SessionPolicy } from '@agent-conductor/shared';
+import type { AccountLimitWindow, BillingType, RunErrorFamily, RunEventType, PermissionMode, SessionPolicy } from '@weave-ai/shared';
 export type { RunErrorFamily, RunEventType };
 
 export type JsonSchema = Record<string, unknown>;

@@ -6,7 +6,7 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Agent } from '@agent-conductor/shared';
+import type { Agent } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { HandoverReconciliation } from '../api.js';
 import { git } from '../util/git.js';

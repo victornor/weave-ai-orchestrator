@@ -1,15 +1,15 @@
 /**
  * The conductor's live plan meter in the chat header (PLAN §16.3): how much of the current session
  * window the subscription behind the conductor has spent, and how long until it resets. Prop-driven
- * — the view model comes from `runtimeLimitStrip()` in `@agent-conductor/render`, the same snapshot
+ * — the view model comes from `runtimeLimitStrip()` in `@weave-ai/render`, the same snapshot
  * the usage page reads, so the two can never disagree.
  *
  * The strip is deliberately absent rather than empty on a metered account: an API key has no window
  * to be a fraction of, and a bar at zero would be a lie about a plan that does not exist.
  */
 import { useEffect, useMemo, useState } from 'react';
-import type { RuntimeAccount } from '@agent-conductor/shared';
-import { accountLimits, runtimeLimitStrip } from '@agent-conductor/render';
+import type { RuntimeAccount } from '@weave-ai/shared';
+import { accountLimits, runtimeLimitStrip } from '@weave-ai/render';
 import { PlanLimits, type PlanSync } from './PlanLimits';
 import { Sheet } from './Sheet';
 import { cx } from '../lib/cx';

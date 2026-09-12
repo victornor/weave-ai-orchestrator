@@ -1,11 +1,11 @@
-# AgentConductor — Implementation Plan
+# Weave AI — Implementation Plan
 
 Status: **v0.3 (2026-09-03).** Second review folded in: hired **roles** spawn a fresh **worker** per ticket (firstmate's crewmate model) instead of one persistent agent per project, and worktrees are managed by a provider interface with **worktrunk** as the default. §23 is the decision log. Written for handoff to an implementing agent (Opus 5). Every section is a decision unless it is listed under "Open questions". Iterate on this file; do not fork it.
 
 Companion files:
 - `docs/prompts/conductor.AGENTS.md` — draft conductor system prompt.
 - `docs/prompts/worker.AGENTS.md.tmpl` — draft worker instruction file (role charter + ticket brief) as a worker sees it.
-- `docs/prompts/skills.md` — the skills AgentConductor ships to agents (outline + key rules).
+- `docs/prompts/skills.md` — the skills Weave AI ships to agents (outline + key rules).
 
 ## Implementation status (2026-09-04)
 
@@ -20,7 +20,7 @@ Implemented and verified on this machine against the real Claude Code CLI (see `
 | Usage collection and analytics | done |
 | Channels: web, cli, telegram (unit-tested; no live bot in this environment) | done |
 | Surfaces: headless, tmux (verified), herdr and hyprland (implemented against the real CLIs, not exercised on a live desktop here) and the client-side presenter | done |
-| Web UI (React, PWA, both themes) served by the daemon; `conductor` CLI; Ink TUI (`conductor chat` verified inside tmux) | done |
+| Web UI (React, PWA, both themes) served by the daemon; `weave` CLI; Ink TUI (`weave chat` verified inside tmux) | done |
 | Runtimes: claude verified live end to end (conductor + workers); opencode verified live end to end (a hired Docs Writer role answered a question ticket through the MCP tools on a free model); codex and gemini implemented from documented formats, unverified live (no credentials here) | partial |
 | Routines (cron/webhook triggers), push notifications sending, ACME TLS | schema/stubs only; use a reverse proxy for ACME |
 
@@ -45,15 +45,15 @@ Conventions in this document:
 
 ## 1. Vision
 
-AgentConductor turns a directory into a **workspace**: a virtual business made of one or more git projects, staffed by AI agents with well-defined roles, coordinated by one **conductor** agent that the human talks to.
+Weave AI turns a directory into a **workspace**: a virtual business made of one or more git projects, staffed by AI agents with well-defined roles, coordinated by one **conductor** agent that the human talks to.
 
 - The human talks to the conductor (web, CLI, Telegram, anything with a channel adapter), or directly to a live worker through its ticket.
 - The conductor turns requests into **tickets**, hires **roles** when no suitable one exists, assigns tickets to roles, supervises the workers that spawn from them, and reports outcomes in plain language.
 - Project work is done by **workers**: disposable agents spawned from a hired **role** (a template: charter, runtime, model) for exactly one ticket, in their own git worktree, with one session that lasts the ticket's whole life (propose → approval → apply → merge). Workers never cross the project boundary and run on the one coding CLI the human chose for the workspace's workers (Claude Code, Codex, OpenCode, Gemini CLI; ADR 0011). Concurrency is simply more workers. Familiarity with a project lives in the project's knowledge base and the repo's own instructions, not in a long-lived chat.
 - Everything is logged: every run, event, token, and cent is attributed to a workspace, project, agent, ticket, and run.
-- **The daemon is a server.** It runs wherever the code should run (your workstation, a home server, a VPS), holds the workspaces, the coding CLIs and the git credentials, and is reached from anywhere: the web app on a phone, the `conductor` CLI on a laptop, Telegram. Nothing on the client needs to run for work to progress. Remote access is password-gated and encrypted by default; the only unauthenticated mode is an explicit loopback-only setting.
+- **The daemon is a server.** It runs wherever the code should run (your workstation, a home server, a VPS), holds the workspaces, the coding CLIs and the git credentials, and is reached from anywhere: the web app on a phone, the `weave` CLI on a laptop, Telegram. Nothing on the client needs to run for work to progress. Remote access is password-gated and encrypted by default; the only unauthenticated mode is an explicit loopback-only setting.
 - Everything is open: runtimes, channels, hooks, tools, storage and presentation surfaces are plugins behind small interfaces; the control plane is a documented HTTP + MCP API.
-- Two first-class front doors with equal polish: a web app (chat, monitoring, tickets, org, analytics) and the terminal (an `conductor` TUI for chat and per-worker monitoring). A power user on Hyprland can talk to the conductor in a terminal and have every live worker in its own window on a dedicated Hyprland workspace, or in herdr tabs and panes; a web user gets the same in the browser. Execution is identical underneath; only the surface differs.
+- Two first-class front doors with equal polish: a web app (chat, monitoring, tickets, org, analytics) and the terminal (a `weave` TUI for chat and per-worker monitoring). A power user on Hyprland can talk to the conductor in a terminal and have every live worker in its own window on a dedicated Hyprland workspace, or in herdr tabs and panes; a web user gets the same in the browser. Execution is identical underneath; only the surface differs.
 
 ### 1.1 Principles (in priority order)
 
@@ -119,7 +119,7 @@ AgentConductor turns a directory into a **workspace**: a virtual business made o
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  agent-conductor daemon  (one process per host, `conductor daemon`)               │
+│  agent-weave daemon  (one process per host, `weave daemon`)               │
 │                                                                          │
 │   HTTP API (Hono)  ──  MCP endpoint per run  ──  SSE/WebSocket events    │
 │   ┌────────────┐ ┌─────────────┐ ┌────────────┐ ┌──────────┐ ┌────────┐  │
@@ -137,10 +137,10 @@ AgentConductor turns a directory into a **workspace**: a virtual business made o
    claude|codex|opencode|gemini  (cwd = agent home; a worker's home contains its worktree; --mcp-config → daemon)
 ```
 
-- **The daemon is the only stateful process and can live on any host** (§4.4). Clients (web app, `conductor`, the presenter) hold no state beyond a login token and a cache.
-- **One daemon per host hosts many workspaces.** The daemon keeps a registry (`~/.config/agent-conductor/workspaces.yaml`: id → root path) and opens one SQLite database per workspace. Every API path is workspace-scoped (`/api/w/<workspaceId>/...`); channels, budgets, runtimes' config homes and presentation surfaces are per workspace. The dispatcher, supervisor and event outbox run per workspace under one process with a shared global concurrency cap. The CLI (`conductor`), the web UI, channel adapters and agents talk to the daemon over HTTP (loopback by default, Unix socket optional); `conductor` resolves the workspace from `--workspace`, `AC_WORKSPACE`, or the nearest `workspace.yaml` above the cwd.
+- **The daemon is the only stateful process and can live on any host** (§4.4). Clients (web app, `weave`, the presenter) hold no state beyond a login token and a cache.
+- **One daemon per host hosts many workspaces.** The daemon keeps a registry (`~/.config/weave/workspaces.yaml`: id → root path) and opens one SQLite database per workspace. Every API path is workspace-scoped (`/api/w/<workspaceId>/...`); channels, budgets, runtimes' config homes and presentation surfaces are per workspace. The dispatcher, supervisor and event outbox run per workspace under one process with a shared global concurrency cap. The CLI (`weave`), the web UI, channel adapters and agents talk to the daemon over HTTP (loopback by default, Unix socket optional); `weave` resolves the workspace from `--workspace`, `AC_WORKSPACE`, or the nearest `workspace.yaml` above the cwd.
 - **Agents (the conductor and workers) are child processes spawned per turn** by a runtime adapter, resuming that agent's session. A runtime adapter MAY keep a warm process between turns (streaming-input mode) but the contract is turn-based (§8).
-- **Agents talk back** through an MCP server the daemon exposes per run (`/mcp/runs/<runId>`) authenticated by a run token, and optionally through the `conductor` CLI with the same token. The MCP/run endpoint listens on a **separate loopback-only listener** (or a Unix socket) on the daemon host; it is never exposed on the public listener. Nothing pushes into an agent mid-turn except the runtime's own input channel; new work arrives as the next wake.
+- **Agents talk back** through an MCP server the daemon exposes per run (`/mcp/runs/<runId>`) authenticated by a run token, and optionally through the `weave` CLI with the same token. The MCP/run endpoint listens on a **separate loopback-only listener** (or a Unix socket) on the daemon host; it is never exposed on the public listener. Nothing pushes into an agent mid-turn except the runtime's own input channel; new work arrives as the next wake.
 
 ### 4.2 Stack
 
@@ -150,7 +150,7 @@ AgentConductor turns a directory into a **workspace**: a virtual business made o
 | Monorepo | pnpm workspaces + turbo | Standard. |
 | HTTP | Hono | Small, typed, runs on Node; easy to embed an MCP transport. Two listeners: public (auth required, TLS-terminated by the daemon or a proxy) and loopback/socket (run tokens, presenter on the same host). |
 | MCP | `@modelcontextprotocol/sdk` (Streamable HTTP) | All four CLIs support MCP over HTTP. |
-| DB | SQLite via Node's built-in `node:sqlite` with hand-written SQL migrations (ADR 0001); WAL mode; one file per workspace at `.agent-conductor/db.sqlite` | Local-first, zero-config, no native build, single writer (the daemon). Postgres is out of scope for v1. |
+| DB | SQLite via Node's built-in `node:sqlite` with hand-written SQL migrations (ADR 0001); WAL mode; one file per workspace at `.weave/db.sqlite` | Local-first, zero-config, no native build, single writer (the daemon). Postgres is out of scope for v1. |
 | Validation | Zod, single source of truth; JSON Schemas generated for config files (draft-07) with a CI drift check | Synapse pattern. |
 | Process control | `child_process.spawn` with `detached: true` process groups, kill by group | Needed to reap CLI subprocess trees. |
 | Logging | pino, closed `domain` enum, `trace_id` in body | Synapse pattern; guard script bans bare `console.*` in `packages/*/src`. |
@@ -163,7 +163,7 @@ AgentConductor turns a directory into a **workspace**: a virtual business made o
 ### 4.3 Monorepo layout
 
 ```
-agent-conductor/
+weave-ai/
   package.json  pnpm-workspace.yaml  turbo.json  tsconfig.base.json
   packages/
     shared/        # types, Zod schemas, enums (const object + tuple), constants, event names, error codes
@@ -171,7 +171,7 @@ agent-conductor/
                    # supervisor, knowledge, usage, openspec adapter, hooks bus. No HTTP, no CLI.
     db/            # Drizzle schema + migrations + repo layer (camelCase records, snake_case columns)
     server/        # Hono app: REST routes, MCP endpoint, SSE, auth, static UI; wires core + plugins
-    cli/           # `conductor` binary: human commands + agent commands (uses the HTTP API, never the DB)
+    cli/           # `weave` binary: human commands + agent commands (uses the HTTP API, never the DB)
     runtime-sdk/   # RuntimeAdapter interface, event normalizer helpers, process utilities, test kit
     runtimes/
       claude/  codex/  opencode/  gemini/
@@ -181,7 +181,7 @@ agent-conductor/
     surface-sdk/   # SurfaceAdapter interface (§14b) + test kit
     surfaces/
       headless/  tmux/  herdr/  hyprland/
-    tui/           # Ink-based terminal apps: `conductor chat`, `conductor attach`, `conductor top`
+    tui/           # Ink-based terminal apps: `weave chat`, `weave attach`, `weave top`
     plugin-sdk/    # createPlugin(host) contract: register runtimes/channels/hooks/tools/surfaces/storage
     ui/            # React web app (§21)
   skills/          # SKILL.md packages shipped to agents (§18); copied into agent homes by the daemon
@@ -203,32 +203,32 @@ The daemon host is where code runs: it holds the workspace directories, the codi
 | Topology | How it is reached | Auth | TLS |
 |---|---|---|---|
 | **Local** (daemon on the machine you sit at) | `http://127.0.0.1:<port>` | password still required by default; `auth.loopbackTrusted: true` opts out for loopback only | none needed |
-| **LAN / Tailscale** | `https://conductor.tailnet.ts.net` or `https://conductor.lan` | password (+ optional TOTP) | Tailscale Serve, or self-signed cert with `conductor login --pin` |
-| **Public server** (VPS, home server with a port forward) | `https://conductor.example.com` | password + TOTP recommended; lockout and rate limiting on | built-in ACME, or Caddy/nginx in front (`conductor daemon install-service` prints both variants) |
+| **LAN / Tailscale** | `https://conductor.tailnet.ts.net` or `https://conductor.lan` | password (+ optional TOTP) | Tailscale Serve, or self-signed cert with `weave login --pin` |
+| **Public server** (VPS, home server with a port forward) | `https://conductor.example.com` | password + TOTP recommended; lockout and rate limiting on | built-in ACME, or Caddy/nginx in front (`weave daemon install-service` prints both variants) |
 
 Rules:
-- The public listener **never** starts without a configured operator password, except when bound to loopback with `loopbackTrusted`. `conductor init` sets the password (or `conductor daemon set-password`).
-- Every request outside loopback is authenticated (session cookie for the web app, bearer token for `conductor`, per-channel bot auth for Telegram, HMAC for webhooks). The run-token MCP endpoint and the same-host presenter socket live on the loopback listener only.
+- The public listener **never** starts without a configured operator password, except when bound to loopback with `loopbackTrusted`. `weave init` sets the password (or `weave daemon set-password`).
+- Every request outside loopback is authenticated (session cookie for the web app, bearer token for `weave`, per-channel bot auth for Telegram, HMAC for webhooks). The run-token MCP endpoint and the same-host presenter socket live on the loopback listener only.
 - One operator account per daemon in v1 (many devices, many sessions, each revocable from Settings → Devices). Multi-user, roles and per-workspace permissions are a later feature and the auth model must not preclude them (tokens already carry a principal id).
-- Session tokens: opaque, hashed at rest, 30-day sliding expiry for devices the operator names, 12 h for unnamed browser sessions; `conductor logout --all` and Settings revoke. Login attempts are rate-limited and logged in `activity`; five failures lock the account for 15 minutes.
-- TLS: the daemon can terminate TLS itself (ACME with HTTP-01 on port 80/443, or TLS-ALPN) or run behind a proxy that sets `X-Forwarded-*` (only trusted when `http.trustProxy` is set). `conductor login` refuses plaintext to non-loopback hosts unless `--insecure` is given.
+- Session tokens: opaque, hashed at rest, 30-day sliding expiry for devices the operator names, 12 h for unnamed browser sessions; `weave logout --all` and Settings revoke. Login attempts are rate-limited and logged in `activity`; five failures lock the account for 15 minutes.
+- TLS: the daemon can terminate TLS itself (ACME with HTTP-01 on port 80/443, or TLS-ALPN) or run behind a proxy that sets `X-Forwarded-*` (only trusted when `http.trustProxy` is set). `weave login` refuses plaintext to non-loopback hosts unless `--insecure` is given.
 - The web app is served by the daemon and works as an installable PWA remotely (push notifications through the web channel, service worker caching of the shell, offline read of the last state, queued composer messages sent on reconnect).
-- `conductor` is a pure remote client: `conductor login https://conductor.example.com` stores a named context in `~/.config/agent-conductor/contexts.yaml` (URL, token, default workspace, cert pin); `conductor context use <name>`; every command works identically against a local or remote daemon. `conductor attach`, `conductor chat`, `conductor top` stream over WebSocket/SSE with reconnect.
-- **Presentation surfaces run on the client** (§14b): `conductor presenter` is a small local process that subscribes to the daemon's event stream and manages terminal windows (Hyprland, herdr, tmux) on the machine it runs on, each window running `conductor attach <worker>` against the remote daemon. The daemon holds only the desired presentation config; the presenter reconciles it locally. On the daemon host itself the presenter is optional.
+- `weave` is a pure remote client: `weave login https://conductor.example.com` stores a named context in `~/.config/weave/contexts.yaml` (URL, token, default workspace, cert pin); `weave context use <name>`; every command works identically against a local or remote daemon. `weave attach`, `weave chat`, `weave top` stream over WebSocket/SSE with reconnect.
+- **Presentation surfaces run on the client** (§14b): `weave presenter` is a small local process that subscribes to the daemon's event stream and manages terminal windows (Hyprland, herdr, tmux) on the machine it runs on, each window running `weave attach <worker>` against the remote daemon. The daemon holds only the desired presentation config; the presenter reconciles it locally. On the daemon host itself the presenter is optional.
 - Voice dictation works remotely: Chrome / Web Speech is the default. Optionally the daemon's `transcription.backend` is `voxtype`: the composer records 16 kHz mono WAV and `POST /api/transcribe` runs `voxtype transcribe` on the host (one-shot when recording stops, not live partials). Missing Voxtype does not break Chrome dictation.
-- What must be set up on the daemon host and nowhere else: coding-CLI logins (`conductor runtime login <id>` walks the device-code/OAuth flows in the per-workspace config homes), git credentials/SSH keys and `gh auth`, secrets referenced from `workspace.yaml`, channel bot tokens, worktrunk. `conductor doctor [--install] [--yes]` verifies all of them and prints what is missing.
-- Packaging: `conductor daemon install-service` writes a systemd user or system unit (Linux) and a launchd plist (macOS); a Docker image with a volume for `/data` (workspaces, config homes) is provided for servers. Backups are the workspace directories plus `~/.config/agent-conductor`.
+- What must be set up on the daemon host and nowhere else: coding-CLI logins (`weave runtime login <id>` walks the device-code/OAuth flows in the per-workspace config homes), git credentials/SSH keys and `gh auth`, secrets referenced from `workspace.yaml`, channel bot tokens, worktrunk. `weave doctor [--install] [--yes]` verifies all of them and prints what is missing.
+- Packaging: `weave daemon install-service` writes a systemd user or system unit (Linux) and a launchd plist (macOS); a Docker image with a volume for `/data` (workspaces, config homes) is provided for servers. Backups are the workspace directories plus `~/.config/weave`.
 
 ---
 
 ## 5. Workspace filesystem layout
 
-A workspace is a directory. `conductor init <dir> --prefix ACME` scaffolds it.
+A workspace is a directory. `weave init <dir> --prefix ACME` scaffolds it.
 
 ```
 <workspace>/
   workspace.yaml              # identity, projects, channels, plugins, defaults, presentation
-  .agent-conductor/             # runtime state (gitignored if the workspace is itself versioned)
+  .weave/             # runtime state (gitignored if the workspace is itself versioned)
     db.sqlite                 # canonical state: tickets, runs, wakeups, decisions, costs, events
     runs/<runId>/             # stdout/stderr logs, raw event stream (jsonl), mcp config, prompt file
     sessions/                 # runtime-specific session artifacts when a runtime needs a stable place
@@ -256,7 +256,7 @@ A workspace is a directory. `conductor init <dir> --prefix ACME` scaffolds it.
     work/                     # the ticket worktree (worktree provider places it here)
     notes.md                  # worker scratch, not injected anywhere, archived with the worker
   projects/<projectId>/       # primary git clone (reference only; the daemon fast-forwards it, nobody works here)
-  archive/workers/<workerId>/ # retired workers' brief, notes, final report (logs stay under .agent-conductor/runs)
+  archive/workers/<workerId>/ # retired workers' brief, notes, final report (logs stay under .weave/runs)
   tickets/                    # optional rendered markdown mirror of tickets (generated, read-only)
 ```
 
@@ -317,7 +317,7 @@ plugins:
   - ./plugins/jira-sync
 ```
 
-Daemon-level settings (listen addresses, TLS, auth, ACME, trusted proxy, transcription provider, optional model overlays) live in `~/.config/agent-conductor/daemon.yaml`, not in any workspace; secrets there are also env references. `models.conductor` / `models.workers` / `models.workerOptions` are optional overlays (VS-185, ADR 0013): filled, they govern every workspace and lock the matching workspace Settings fields; empty, each workspace uses its own `models` block. A missing `daemon.yaml` is seeded with `workerOptions: quick`, `standard`, `deep` — captain's when-to-use descriptions, `runtime: null`, no conductor/workers overlay (VS-236, ADR 0019). An existing file is never rewritten, including `version: 1` with no `models` block. An option whose `runtime` is null is unconfigured: naming it on a ticket is `model_unconfigured` (HTTP 400) and starts no runtime. The web app shows an undismissable banner until every daemon option has an adapter.
+Daemon-level settings (listen addresses, TLS, auth, ACME, trusted proxy, transcription provider, optional model overlays) live in `~/.config/weave/daemon.yaml`, not in any workspace; secrets there are also env references. `models.conductor` / `models.workers` / `models.workerOptions` are optional overlays (VS-185, ADR 0013): filled, they govern every workspace and lock the matching workspace Settings fields; empty, each workspace uses its own `models` block. A missing `daemon.yaml` is seeded with `workerOptions: quick`, `standard`, `deep` — captain's when-to-use descriptions, `runtime: null`, no conductor/workers overlay (VS-236, ADR 0019). An existing file is never rewritten, including `version: 1` with no `models` block. An option whose `runtime` is null is unconfigured: naming it on a ticket is `model_unconfigured` (HTTP 400) and starts no runtime. The web app shows an undismissable banner until every daemon option has an adapter.
 
 Roles are NOT normally listed in `workspace.yaml`; they are hired at runtime and live in `roles/<id>/role.yaml` (which the daemon writes). Workers are pure runtime state. A workspace can be exported/imported as a directory (§20).
 
@@ -355,14 +355,14 @@ Constraints: assignee is role XOR human XOR null; `worker_id` implies `assignee_
 **ticket_work_products** — `id, ticket_id, run_id, type (pull_request|branch|commit|artifact|preview_url|report), provider, external_id, url, title, state, is_primary, metadata_json, created_at, updated_at`.
 
 **decisions** — `id, workspace_id, ticket_id (nullable for workspace-level), kind (approval|question|concern|gate_finding|plan_approval|hire_approval|merge_approval|discard_approval|retry_approval|action_approval), owner (human|weaver), asked_by_agent_id, asked_in_run_id, title, context (markdown), options_json ([{key,label,description,recommended}]), allow_free_text, recommendation, status (open|answered|expired|withdrawn|superseded), answer_key, answer_text (verbatim words of the answerer), answered_by_kind, answered_by_id, answered_at, expires_at, target_json (e.g. {documentId, revision} so a newer plan revision supersedes the pending approval), correlation_key, created_at, weaver_review_status (unseen|looked|concerns, default unseen), weaver_reviewed_at, weaver_review_note, weaver_reviewed_by_agent_id`.
-Rule: one open decision per `(ticket_id, correlation_key)`. Answering a decision enqueues a wake for `asked_by_agent_id` with `source=decision_answered`. `question` and `concern` have no fixed owner: raised by a worker they resolve to `weaver`, raised by the weaver to `human` (VS-127) — `gate_finding` stays unconditionally `weaver`. `action_approval` is always human-owned; YOLO and `proposalApproval: none` do not grant it. `ac_ask` (the general-purpose ask tool) can construct only `question`, `concern` and `gate_finding`; the remaining kinds are exclusively system-raised, each setting its own owner directly where it is created.
-`plan_approval`, `merge_approval` and `action_approval` carry an asserted weaver review (VS-223): the weaver marks `looked` or `concerns` via `ac_decision_review` after reading the plan or PR — never derived from a digest, a comment or a turn. Both marks require a note (VS-234): the concern's summary, or the clean mark's stated reason the work is clean (≤500 chars, `weaver_review_note`, replacing any earlier mark's note). The card always shows the state and its note (unseen is loud; a clean mark states the outcome — "reviewed, no concerns" — with its reason; concerns is loudest). Marks made before notes were required have no note and still render. The mark does not gate `answer()`; the human can approve at any time. A mark after `answered_at` is shown as after-the-fact (`reviewed_at > answered_at`). YOLO auto-approve leaves the row `unseen`.
+Rule: one open decision per `(ticket_id, correlation_key)`. Answering a decision enqueues a wake for `asked_by_agent_id` with `source=decision_answered`. `question` and `concern` have no fixed owner: raised by a worker they resolve to `weaver`, raised by the weaver to `human` (VS-127) — `gate_finding` stays unconditionally `weaver`. `action_approval` is always human-owned; YOLO and `proposalApproval: none` do not grant it. `weave_ask` (the general-purpose ask tool) can construct only `question`, `concern` and `gate_finding`; the remaining kinds are exclusively system-raised, each setting its own owner directly where it is created.
+`plan_approval`, `merge_approval` and `action_approval` carry an asserted weaver review (VS-223): the weaver marks `looked` or `concerns` via `weave_decision_review` after reading the plan or PR — never derived from a digest, a comment or a turn. Both marks require a note (VS-234): the concern's summary, or the clean mark's stated reason the work is clean (≤500 chars, `weaver_review_note`, replacing any earlier mark's note). The card always shows the state and its note (unseen is loud; a clean mark states the outcome — "reviewed, no concerns" — with its reason; concerns is loudest). Marks made before notes were required have no note and still render. The mark does not gate `answer()`; the human can approve at any time. A mark after `answered_at` is shown as after-the-fact (`reviewed_at > answered_at`). YOLO auto-approve leaves the row `unseen`.
 
 **wakeups** — `id, workspace_id, agent_id, source (human_message|ticket_assigned|ticket_comment|mention|decision_answered|blockers_resolved|children_completed|ticket_blocked|timer|routine|system|retry|conductor_request), reason (short text), payload_json, idempotency_key, status (queued|claimed|coalesced|skipped|completed|failed|cancelled), coalesced_into_id, skip_reason, run_id, requested_by_kind, requested_by_id, created_at, claimed_at, finished_at, not_before`. Unique `(agent_id, idempotency_key)` where not null.
 
 **runs** — `id, workspace_id, agent_id, ticket_id (nullable FK, real column), session_id, wakeup_ids_json, runtime_id, model, status (queued|running|succeeded|failed|timed_out|cancelled|interrupted), turn_epoch, cwd, started_at, finished_at, exit_code, signal, pid, pgid, error_code, error_family (transient_upstream|provider_quota|model_refusal|auth|tooling|unknown), retry_of_run_id, scheduled_retry_at, usage_json {inputTokens, outputTokens, cachedInputTokens, usageBasis}, cost_cents, result_json (structured final report, §9.4), liveness (advanced|plan_only|empty|idle|blocked|needs_decision|failed), log_path, prompt_path, summary`.
 
-**run_events** — `id, run_id, seq (unique per run), ts, type (closed enum, §16.1), stream (stdout|stderr|runtime|system), level, payload_json (redacted, size-bounded), source_event_id`. Raw untruncated stream goes to `.agent-conductor/runs/<id>/events.jsonl`.
+**run_events** — `id, run_id, seq (unique per run), ts, type (closed enum, §16.1), stream (stdout|stderr|runtime|system), level, payload_json (redacted, size-bounded), source_event_id`. Raw untruncated stream goes to `.weave/runs/<id>/events.jsonl`.
 
 **usage_events** — `id, workspace_id, project_id, role_id, agent_id, ticket_id, run_id, runtime_id, provider, model, billing_type (metered_api|subscription_included|unknown), input_tokens, cached_input_tokens, output_tokens, cost_cents (nullable), cost_status (reported|estimated|unpriced), duration_ms, occurred_at`. One row per run (or per usage delta for cumulative-session runtimes). Indexed on `(workspace_id, occurred_at)`, `(project_id, occurred_at)`, `(ticket_id)`, `(model, occurred_at)` so the analytics windows (§16.3) are cheap.
 
@@ -408,11 +408,11 @@ Statuses and meaning (each status states who owns the next move):
 | `done` | nobody | terminal; for `change`: merge landed on the ticket's landing branch (verified by reconciliation), OpenSpec change archived on the project's landing branch, worktree removed, worker retired; for `task`: either that same merge path or a stated ending with no unlanded commits (ADR 0016); for `operational`: the action ran (or was refused) with no unlanded commits (ADR 0017) |
 | `cancelled` | nobody | terminal |
 
-Transitions are validated in `core/tickets/transitions.ts` (single owner). Agents request transitions through the MCP tool `ac_ticket_transition`; the daemon applies guards and returns the resulting state or a typed error (`invalid_disposition`, `missing_action_path`, `not_checked_out`). The full flow for `change` tickets is in §12.
+Transitions are validated in `core/tickets/transitions.ts` (single owner). Agents request transitions through the MCP tool `weave_ticket_transition`; the daemon applies guards and returns the resulting state or a typed error (`invalid_disposition`, `missing_action_path`, `not_checked_out`). The full flow for `change` tickets is in §12.
 
 **Liveness rule (enforced, not narrated):** a ticket in `todo|proposing|approved|in_progress|merging` MUST have at least one of: a live worker with an active run or a queued wake, a pending spawn (waiting for a worker slot), an open decision, a scheduled `monitor_next_check_at`, or a human assignee. The supervisor scans every 60 s; violations produce a `system` wake for the worker (reason `liveness_repair`) or a spawn attempt, then after two failures a `gate_finding` decision for the conductor.
 
-**Checkout:** a worker is bound to its ticket at spawn (the daemon performs the checkout); a run MUST still call `ac_ticket_checkout` before writing (idempotent for the bound worker, `409` for anyone else, never retried). `checkout_run_id` = ownership; `execution_run_id` = live run. Compare-and-clear on run finalization. Subtree-scoped authority: a run may mutate its ticket and that ticket's descendants; anything else is `403`.
+**Checkout:** a worker is bound to its ticket at spawn (the daemon performs the checkout); a run MUST still call `weave_ticket_checkout` before writing (idempotent for the bound worker, `409` for anyone else, never retried). `checkout_run_id` = ownership; `execution_run_id` = live run. Compare-and-clear on run finalization. Subtree-scoped authority: a run may mutate its ticket and that ticket's descendants; anything else is `403`.
 
 ### 6.3 Agent state machine
 
@@ -444,7 +444,7 @@ Wake sources and who enqueues them:
 | `ticket_comment` / `mention` | comment on the worker's ticket / @mention of the conductor or a worker |
 | `decision_answered` | a decision the agent asked is answered |
 | `blockers_resolved` / `children_completed` | all blockers `done` / all children terminal |
-| `conductor_request` | the conductor calls `ac_worker_message` (steering a live worker on its ticket) |
+| `conductor_request` | the conductor calls `weave_worker_message` (steering a live worker on its ticket) |
 | `timer` | conductor heartbeat (`conductor.heartbeatIntervalSec`, default off); workers have no timers |
 | `routine` | routine fired |
 | `system` | supervisor: liveness repair, stuck escalation, reconciliation |
@@ -466,7 +466,7 @@ Steps (module `core/runs/engine.ts`, each step emits `run.phase.timing` with a c
 
 1. **Prepare home**: ensure skills are installed for the agent's runtime and the home's `AGENTS.md` is current (conductor: regenerate on template change; worker: rendered once at spawn, re-rendered only on relaunch or brief revision).
 2. **Prepare worktree** (workers): verify the worktree still exists at `work/` and `git fetch origin` there. The engine never resets, cleans or switches branches in a worker's worktree.
-3. **Build the turn prompt** (§9.3): wake digest (which tickets/messages/decisions), deltas since last turn, explicit instructions for what to do now. Written to `.agent-conductor/runs/<id>/prompt.md` and passed to the runtime.
+3. **Build the turn prompt** (§9.3): wake digest (which tickets/messages/decisions), deltas since last turn, explicit instructions for what to do now. Written to `.weave/runs/<id>/prompt.md` and passed to the runtime.
 4. **Mint run token** (JWT, 2 h, claims: workspace, agent, run, ticket scope) and write the MCP config file pointing to `http://127.0.0.1:<port>/mcp/runs/<runId>` with the token.
 5. **Spawn via runtime adapter** (`runtime.runTurn`), streaming events into `run_events` (redacted) and the raw jsonl. Update `agent.status=running`, `execution_run_id` on the worker's ticket.
 6. **Supervise** (§7.5): silence watchdog, hard timeout (`agent.spec.turnTimeoutSec`, default 45 min).
@@ -475,7 +475,7 @@ Steps (module `core/runs/engine.ts`, each step emits `run.phase.timing` with a c
 
 ### 7.4 Sessions and context economy
 
-- **Conductor: one persistent session**, resumed every turn; the CLI's own compaction manages growth. `conductor conductor reset-session` starts a new one (old ref kept for audit); the next turn gets a bootstrap digest (§13.3).
+- **Conductor: one persistent session**, resumed every turn; the CLI's own compaction manages growth. `weave weaver reset-session` starts a new one (old ref kept for audit); the next turn gets a bootstrap digest (§13.3).
 - **Worker: one session for the life of its ticket** (`role.session_policy=per_ticket`, the default). The first turn injects charter + brief; every later wake (approval answered, comment, steering, merge approved, relaunch) resumes the same session, so the worker remembers its own proposal and implementation without re-reading. Nothing is re-injected on resumed turns (5–10k tokens saved per turn, paperclip's finding); a changed brief is delivered as a short "brief updated" note in the turn prompt.
 - **`fresh`** (no resume) exists for stateless roles such as a reviewer whose deliverable is one report.
 - **Cross-ticket familiarity does not live in sessions.** It lives in the project KB (`PROJECT.md`: concise, budgeted, written by workers, curated on a schedule), the repo's own instructions and OpenSpec specs, and the ticket's documents. A new worker bootstraps from those (§13.3) in a bounded digest. This is cheaper and more reliable than dragging a long conversation along, and it is what makes N concurrent workers possible.
@@ -540,7 +540,7 @@ export interface TurnInput {
   systemPrompt: { text: string; mode: "inject" | "skip" };   // inject only on first turn / after reset
   prompt: string;                           // the turn prompt (wake digest)
   outputSchema?: JsonSchema;                // final structured report
-  mcpServers: Record<string, McpServerConfig>;  // includes the agent-conductor run endpoint
+  mcpServers: Record<string, McpServerConfig>;  // includes the weave-ai run endpoint
   env: Record<string, string>;              // AC_* vars + agent secrets
   options: Record<string, unknown>;         // validated against configSchema()
   limits: { timeoutMs: number; maxBudgetUsd?: number; maxTurns?: number };
@@ -592,9 +592,9 @@ Closed enum (`shared/src/run-events.ts`): `session.started, session.resumed, tur
 
 Decisions:
 - **Claude is the reference adapter** and the only one required for M1. It supports every capability.
-- Codex, OpenCode, Gemini use `file_only` prompt injection: the rendered charter+brief is the `AGENTS.md` (Codex, OpenCode) / `GEMINI.md` (Gemini) at the worker home, which is cwd, so every CLI discovers it natively; Claude additionally gets it via `--append-system-prompt-file` on the first turn of a session (its `CLAUDE.md` at home is a `@AGENTS.md` pointer). Because the worktree is `work/` under cwd, the project's own `AGENTS.md`/`CLAUDE.md` inside it is read by the CLIs as nested project instructions (Claude reads nested `CLAUDE.md`; for Codex/OpenCode/Gemini the `agent-conductor-worker` skill instructs the worker to read `work/AGENTS.md` first). Nothing is ever written into the project's discovery files. Implementer: verify nested-instruction behavior per CLI in M5 and record it in `docs/adr/`.
-- `listModels()` is mandatory. Claude: static alias list (`fable`, `opus`, `sonnet`, `haiku`) plus full ids, marked `static`; OpenCode: `opencode models` output (`detected`); Codex: static list from the pinned version plus any `-c model=` the human adds; Gemini: static. Settings → Models and `conductor models set` show only models from that setting's runtime, plus free text for one the adapter does not list (ADR 0011).
-- Each runtime gets a **per-workspace config home** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) under `.agent-conductor/runtimes/<runtime>/` so agent runs never mutate the human's personal CLI config, and so session stores are per workspace. Authentication is inherited by copying/linking credential files on `conductor runtime login <id>` (documented per CLI; Claude: `claude setup-token` or OAuth in that config dir).
+- Codex, OpenCode, Gemini use `file_only` prompt injection: the rendered charter+brief is the `AGENTS.md` (Codex, OpenCode) / `GEMINI.md` (Gemini) at the worker home, which is cwd, so every CLI discovers it natively; Claude additionally gets it via `--append-system-prompt-file` on the first turn of a session (its `CLAUDE.md` at home is a `@AGENTS.md` pointer). Because the worktree is `work/` under cwd, the project's own `AGENTS.md`/`CLAUDE.md` inside it is read by the CLIs as nested project instructions (Claude reads nested `CLAUDE.md`; for Codex/OpenCode/Gemini the `weave-ai-worker` skill instructs the worker to read `work/AGENTS.md` first). Nothing is ever written into the project's discovery files. Implementer: verify nested-instruction behavior per CLI in M5 and record it in `docs/adr/`.
+- `listModels()` is mandatory. Claude: static alias list (`fable`, `opus`, `sonnet`, `haiku`) plus full ids, marked `static`; OpenCode: `opencode models` output (`detected`); Codex: static list from the pinned version plus any `-c model=` the human adds; Gemini: static. Settings → Models and `weave models set` show only models from that setting's runtime, plus free text for one the adapter does not list (ADR 0011).
+- Each runtime gets a **per-workspace config home** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) under `.weave/runtimes/<runtime>/` so agent runs never mutate the human's personal CLI config, and so session stores are per workspace. Authentication is inherited by copying/linking credential files on `weave runtime login <id>` (documented per CLI; Claude: `claude setup-token` or OAuth in that config dir).
 - Permission posture default: `auto`-style with a deny list (`git push --force`, `rm -rf` outside worktree, network to non-allowlisted hosts where the CLI can express it). `bypass` is opt-in per agent and warned about in the UI.
 
 ### Implementation notes
@@ -605,54 +605,54 @@ Package per runtime with: `adapter.ts`, `args.ts` (pure function `buildArgs(inpu
 
 ## 9. Agent ↔ control-plane protocol
 
-Agents never touch the database or the filesystem outside their scope to communicate. They use the daemon's MCP tools (preferred) or the `conductor` CLI (same operations, for runtimes with weak MCP support or for humans).
+Agents never touch the database or the filesystem outside their scope to communicate. They use the daemon's MCP tools (preferred) or the `weave` CLI (same operations, for runtimes with weak MCP support or for humans).
 
 ### 9.1 Run token and scope
 
 Each run receives `AC_API_URL`, `AC_RUN_TOKEN`, `AC_RUN_ID`, `AC_AGENT_ID`, `AC_ROLE_ID`, `AC_WORKSPACE_ID`, `AC_PROJECT_ID`, `AC_TICKET_ID` (workers), `AC_WORKTREE` (workers), `AC_WAKE_REASON`. The token's scope for a worker: read its own project's tickets, its project KB and `SHARED.md`; write only its own ticket subtree and its project KB. It cannot read other projects' tickets, KBs, or `WORKSPACE.md`. The conductor reads everything and writes the workspace KB. Conductor tokens additionally allow ticket creation in any project, hiring, assignment, and worker control.
 
-### 9.2 MCP tools (server `agent-conductor`)
+### 9.2 MCP tools (server `weave-ai`)
 
-Prefix `ac_`. Names are stable API; descriptions carry the rules so skills can stay short.
+Prefix `weave_`. Names are stable API; descriptions carry the rules so skills can stay short.
 
 Common (all agents):
-- `ac_inbox()` → wakes bundled into this run: messages, ticket events, answered decisions, mentions, steering from the conductor. Call first.
-- `ac_ticket_get(id)`, `ac_ticket_list(filter, includeDescription?)` — list is lean by default (no `description`); pass `includeDescription: true` or call `get` for the body. `ac_ticket_comments(id, after?)`.
-- `ac_ticket_checkout(id)` → 409 on conflict (never retry). `ac_ticket_release(id, note)`.
-- `ac_ticket_comment(id, body, kind=comment)`; `ac_ticket_document_put(id, key, body)` (revisioned; plan/report); `ac_ticket_document_get(id, key=report, revision?)` (read scope: own project for a worker, everything for the conductor; `not_found` carries the keys that do exist).
-- `ac_ticket_transition(id, to, {note, unblock?: {owner, action}, blockedBy?: [ids]})` → applies guards.
-- `ac_ticket_work_product(id, {type, url, title, state})`.
-- `ac_ask(ticketId?, {title, context, kind ('question'|'concern'|'gate_finding'), options[], recommendation, allowFreeText, correlationKey})` → creates a decision owned by who is asking: a worker's ask is always `conductor`-owned, whichever of the three kinds it names; the conductor's own use reaches `human`. `concern` needs no options — it is how a worker says it is stuck and what would help. The run should end after asking; the answer arrives as a wake, whether the conductor answers directly or relays what the human decided after escalating.
-- `ac_report({state: working|needs_decision|blocked|paused|done|failed, key?, note})` → firstmate status protocol; writes a `status` comment and updates liveness. Sparingly: phase changes only.
-- `ac_incident({title, whatFailed, tryingToDo, evidence?})` → file a system incident (VS-174). Use when an AgentConductor call fails or you cannot proceed because of AgentConductor itself. Returns `{ id, createdAt, reporterKind }`. `reporterKind` is this run's agent kind, never an input. This is not a ticket. Never put secrets in evidence.
-- `ac_knowledge_get(scope)` → `scope` is `shared` (SHARED.md), `project` (own project KB; conductor passes a project id), `workspace` (conductor only), `decisions` (conductor only).
-- `ac_knowledge_note(scope, section, text)` → append one concise, dated entry to a KB section (worker: own project KB only; conductor: workspace KB). The daemon rejects entries over 60 words, duplicates (near-match on an existing entry), and anything that would exceed the file's budget, returning the current size and the sections that are over; over-budget writes schedule a curation run instead of being silently dropped.
-- `ac_knowledge_replace(scope, body)` → full rewrite; only available inside a curation run (§13.4) or to the human.
-- `ac_openspec_status(ticketId)` → the daemon's cached view of the bound change (planning complete, tasks, validation).
-- `ac_spec_list(projectId)`, `ac_spec_get(projectId, capability)`, `ac_spec_search(projectId?, query)`, `ac_spec_change_get(changeName)` → the spec index (§12.5); workers are scoped to their own project.
-- `ac_ticket_merge_done(id, {mergeCommit, method})` → the agent reports that it merged its approved PR; the daemon verifies against the forge and the ticket's landing branch (its own declaration, else its project's, else the default branch — VS-119) before accepting.
-- `ac_worktree_status()` → the worker's worktree path, branch, dirty flag, ahead/behind default, landed evidence (so the worker never guesses).
-- `ac_artifact_kit()` → the AC Artifact Kit on demand: `{ css, tokens, components, playbooks }` — the drift-checked CSS for a self-contained HTML artifact (§ artifact-kit), its parsed token set (`dark`/`light`/`scale`), the semantic component classes with descriptions, and the `agent-conductor-artifacts` skill's playbook reference material. No input, no scoping — every agent gets the same result.
+- `weave_inbox()` → wakes bundled into this run: messages, ticket events, answered decisions, mentions, steering from the conductor. Call first.
+- `weave_ticket_get(id)`, `weave_ticket_list(filter, includeDescription?)` — list is lean by default (no `description`); pass `includeDescription: true` or call `get` for the body. `weave_ticket_comments(id, after?)`.
+- `weave_ticket_checkout(id)` → 409 on conflict (never retry). `weave_ticket_release(id, note)`.
+- `weave_ticket_comment(id, body, kind=comment)`; `weave_ticket_document_put(id, key, body)` (revisioned; plan/report); `weave_ticket_document_get(id, key=report, revision?)` (read scope: own project for a worker, everything for the conductor; `not_found` carries the keys that do exist).
+- `weave_ticket_transition(id, to, {note, unblock?: {owner, action}, blockedBy?: [ids]})` → applies guards.
+- `weave_ticket_work_product(id, {type, url, title, state})`.
+- `weave_ask(ticketId?, {title, context, kind ('question'|'concern'|'gate_finding'), options[], recommendation, allowFreeText, correlationKey})` → creates a decision owned by who is asking: a worker's ask is always `conductor`-owned, whichever of the three kinds it names; the conductor's own use reaches `human`. `concern` needs no options — it is how a worker says it is stuck and what would help. The run should end after asking; the answer arrives as a wake, whether the conductor answers directly or relays what the human decided after escalating.
+- `weave_report({state: working|needs_decision|blocked|paused|done|failed, key?, note})` → firstmate status protocol; writes a `status` comment and updates liveness. Sparingly: phase changes only.
+- `weave_incident({title, whatFailed, tryingToDo, evidence?})` → file a system incident (VS-174). Use when an Weave AI call fails or you cannot proceed because of Weave AI itself. Returns `{ id, createdAt, reporterKind }`. `reporterKind` is this run's agent kind, never an input. This is not a ticket. Never put secrets in evidence.
+- `weave_knowledge_get(scope)` → `scope` is `shared` (SHARED.md), `project` (own project KB; conductor passes a project id), `workspace` (conductor only), `decisions` (conductor only).
+- `weave_knowledge_note(scope, section, text)` → append one concise, dated entry to a KB section (worker: own project KB only; conductor: workspace KB). The daemon rejects entries over 60 words, duplicates (near-match on an existing entry), and anything that would exceed the file's budget, returning the current size and the sections that are over; over-budget writes schedule a curation run instead of being silently dropped.
+- `weave_knowledge_replace(scope, body)` → full rewrite; only available inside a curation run (§13.4) or to the human.
+- `weave_openspec_status(ticketId)` → the daemon's cached view of the bound change (planning complete, tasks, validation).
+- `weave_spec_list(projectId)`, `weave_spec_get(projectId, capability)`, `weave_spec_search(projectId?, query)`, `weave_spec_change_get(changeName)` → the spec index (§12.5); workers are scoped to their own project.
+- `weave_ticket_merge_done(id, {mergeCommit, method})` → the agent reports that it merged its approved PR; the daemon verifies against the forge and the ticket's landing branch (its own declaration, else its project's, else the default branch — VS-119) before accepting.
+- `weave_worktree_status()` → the worker's worktree path, branch, dirty flag, ahead/behind default, landed evidence (so the worker never guesses).
+- `weave_artifact_kit()` → the AC Artifact Kit on demand: `{ css, tokens, components, playbooks }` — the drift-checked CSS for a self-contained HTML artifact (§ artifact-kit), its parsed token set (`dark`/`light`/`scale`), the semantic component classes with descriptions, and the `weave-ai-artifacts` skill's playbook reference material. No input, no scoping — every agent gets the same result.
 
 Conductor only:
-- `ac_ticket_create({projectId?, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?})` — `autoMerge` only when the human asked for it in the same request. `summary` is a one-line why (VS-146, max 200), shown on plan-approval cards.
-- `ac_ticket_assign(id, roleId)` → the daemon spawns a worker when a slot is free; `ac_ticket_set_priority`.
-- `ac_role_list()`, `ac_role_get(id)` (spec, charter, scope, status, live workers, recent outcomes).
-- `ac_role_hire(spec)` → §10.4; returns a `pending_activation` role, or `active` when `hireApproval=none`.
-- `ac_role_update_charter(id, {charter, reason, applyToRunning?})` → new role revision.
-- `ac_role_set_max_workers(id, {maxWorkers, reason})` → new role revision; writes the stored field and returns the role and its `concurrency`. The field is not a spawn gate (VS-156); `concurrency.effective` is the project's Settings max-workers. Raising throughput is that Settings field.
-- `ac_role_pause(id, reason)` / `ac_role_resume(id)` / `ac_role_retire(id, reason)` (retire with live workers requires a human decision).
-- `ac_worker_list(filter)`, `ac_worker_get(id)` (ticket, status, worktree state, last report, spend).
-- `ac_worker_message(workerId, message, {live?})` → steering: a comment on the worker's ticket, attributed to the conductor, then — by default (`live: true`) — an attempt to deliver it to the worker's currently executing turn (VS-99's mid-turn channel); `live: false` skips straight to queuing. Returns `{ delivery: 'mid_turn' | 'queued', runId, wake }`: `mid_turn` means it landed inside the running turn; `queued` means it fell back to a wake (`conductor_request`) and the worker sees it at the start of its next turn. Never both, never neither, and never a change to the worker's permission mode, tool list or an open decision (VS-103).
-- `ac_worker_relaunch(id, note)` / `ac_worker_cancel(id, reason)` (cancel leaves the worktree; discarding unlanded work is a human `discard_approval`).
-- `ac_decision_answer(id, {key?, text})` for decisions owned by the conductor.
-- `ac_decision_review(decisionId, {status: looked|concerns, note})` — mark that the conductor has reviewed a `plan_approval`, `merge_approval` or `action_approval`. Asserted, never derived. Both marks require a short note (≤500 chars) shown on the card: the concern, or the clean mark's stated reason the work is clean. Does not answer the decision and does not wake anyone.
-- `ac_human_send(threadId?, body)` → outbound message to the human on the originating channel (the only way the conductor's text reaches the human; plain assistant text is captured as the run's summary but NOT delivered — Synapse's `send_to` rule). Workers do not have this tool: a worker talks to the human only by commenting on its ticket (`ac_ticket_comment`), and the daemon relays ticket comments to any thread bound to that ticket (§11.7).
-- `ac_run_inspect(ref, {since?, full?, limit?})` → what a worker is doing: `ref` is a ticket identifier, worker id or run id, resolving to the running run or the most recent one. Returns the run (id, status, turn, current phase, phases already timed, started at, elapsed, liveness, error), the worker (status, pause reason, role, ticket), and a compact redacted transcript of its recent events. Read-only. The window is the newest `limit` events (default 40, max 200); `since` pages forward from a sequence and `full` starts at the beginning. The response is capped at 32 KB and carries `{ totalEvents, firstSeq, lastSeq, truncated, resumeFrom, omittedBefore, note }`.
-- `ac_run_list(ref, {limit?})` → that ticket's or worker's recent runs, newest first, with status, turn, liveness, duration, error family and the run each retry names.
-- `ac_briefing()` → deterministic snapshot JSON (§10.5) for status reports.
-- `ac_project_list()`, `ac_project_add(url, opts)` (requires human decision), `ac_usage(filter)` (same windows as §16.3).
-- `ac_incident_list({reporterKind?, since?, limit?, includeEvidence?, status?})` → system incidents (§ `ac_incident`, VS-222) filed from this workspace plus workspace-less daemon-global rows, newest first, as `{ items, total }` where `total` counts everything matching the filters. Lean by default (no `evidence`; `includeEvidence: true` restores it) and capped like every list tool (`truncated: true`). `since` returns incidents created strictly after an ISO-8601 instant — an incremental caller pages until short, then passes the newest `createdAt` it processed next run. `status` (`open` | `resolved` | `all`, VS-271) defaults to `open`: a resolved incident stops resurfacing in a sweep unless `resolved` or `all` is asked for. The default is applied by this tool, not by the underlying service, so the session-auth `GET /api/incidents` route (used by the global Incidents page) is unaffected and keeps listing every incident. `ac_incident_get(id)` → one incident in full; another workspace's incident is `forbidden`, an unknown id `not_found`. `ac_incident_resolve({id, resolution, ticketId?})` (VS-271) → marks an incident resolved: `resolution` is a required free-text reason, `ticketId` an optional unvalidated reference to the ticket that fixed the cause. Records `resolvedAt`, `resolvedByAgentId`, `resolution`, `resolutionTicketId`; resolving an already-resolved incident is `wrong_status` and does not overwrite it. Resolution is never inferred — landing a ticket that names an incident does not resolve it. Workers have no incident reads or resolve access. Filing and the session-auth HTTP routes are unchanged.
+- `weave_ticket_create({projectId?, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?})` — `autoMerge` only when the human asked for it in the same request. `summary` is a one-line why (VS-146, max 200), shown on plan-approval cards.
+- `weave_ticket_assign(id, roleId)` → the daemon spawns a worker when a slot is free; `weave_ticket_set_priority`.
+- `weave_role_list()`, `weave_role_get(id)` (spec, charter, scope, status, live workers, recent outcomes).
+- `weave_role_hire(spec)` → §10.4; returns a `pending_activation` role, or `active` when `hireApproval=none`.
+- `weave_role_update_charter(id, {charter, reason, applyToRunning?})` → new role revision.
+- `weave_role_set_max_workers(id, {maxWorkers, reason})` → new role revision; writes the stored field and returns the role and its `concurrency`. The field is not a spawn gate (VS-156); `concurrency.effective` is the project's Settings max-workers. Raising throughput is that Settings field.
+- `weave_role_pause(id, reason)` / `weave_role_resume(id)` / `weave_role_retire(id, reason)` (retire with live workers requires a human decision).
+- `weave_worker_list(filter)`, `weave_worker_get(id)` (ticket, status, worktree state, last report, spend).
+- `weave_worker_message(workerId, message, {live?})` → steering: a comment on the worker's ticket, attributed to the conductor, then — by default (`live: true`) — an attempt to deliver it to the worker's currently executing turn (VS-99's mid-turn channel); `live: false` skips straight to queuing. Returns `{ delivery: 'mid_turn' | 'queued', runId, wake }`: `mid_turn` means it landed inside the running turn; `queued` means it fell back to a wake (`conductor_request`) and the worker sees it at the start of its next turn. Never both, never neither, and never a change to the worker's permission mode, tool list or an open decision (VS-103).
+- `weave_worker_relaunch(id, note)` / `weave_worker_cancel(id, reason)` (cancel leaves the worktree; discarding unlanded work is a human `discard_approval`).
+- `weave_decision_answer(id, {key?, text})` for decisions owned by the conductor.
+- `weave_decision_review(decisionId, {status: looked|concerns, note})` — mark that the conductor has reviewed a `plan_approval`, `merge_approval` or `action_approval`. Asserted, never derived. Both marks require a short note (≤500 chars) shown on the card: the concern, or the clean mark's stated reason the work is clean. Does not answer the decision and does not wake anyone.
+- `weave_human_send(threadId?, body)` → outbound message to the human on the originating channel (the only way the conductor's text reaches the human; plain assistant text is captured as the run's summary but NOT delivered — Synapse's `send_to` rule). Workers do not have this tool: a worker talks to the human only by commenting on its ticket (`weave_ticket_comment`), and the daemon relays ticket comments to any thread bound to that ticket (§11.7).
+- `weave_run_inspect(ref, {since?, full?, limit?})` → what a worker is doing: `ref` is a ticket identifier, worker id or run id, resolving to the running run or the most recent one. Returns the run (id, status, turn, current phase, phases already timed, started at, elapsed, liveness, error), the worker (status, pause reason, role, ticket), and a compact redacted transcript of its recent events. Read-only. The window is the newest `limit` events (default 40, max 200); `since` pages forward from a sequence and `full` starts at the beginning. The response is capped at 32 KB and carries `{ totalEvents, firstSeq, lastSeq, truncated, resumeFrom, omittedBefore, note }`.
+- `weave_run_list(ref, {limit?})` → that ticket's or worker's recent runs, newest first, with status, turn, liveness, duration, error family and the run each retry names.
+- `weave_briefing()` → deterministic snapshot JSON (§10.5) for status reports.
+- `weave_project_list()`, `weave_project_add(url, opts)` (requires human decision), `weave_usage(filter)` (same windows as §16.3).
+- `weave_incident_list({reporterKind?, since?, limit?, includeEvidence?, status?})` → system incidents (§ `weave_incident`, VS-222) filed from this workspace plus workspace-less daemon-global rows, newest first, as `{ items, total }` where `total` counts everything matching the filters. Lean by default (no `evidence`; `includeEvidence: true` restores it) and capped like every list tool (`truncated: true`). `since` returns incidents created strictly after an ISO-8601 instant — an incremental caller pages until short, then passes the newest `createdAt` it processed next run. `status` (`open` | `resolved` | `all`, VS-271) defaults to `open`: a resolved incident stops resurfacing in a sweep unless `resolved` or `all` is asked for. The default is applied by this tool, not by the underlying service, so the session-auth `GET /api/incidents` route (used by the global Incidents page) is unaffected and keeps listing every incident. `weave_incident_get(id)` → one incident in full; another workspace's incident is `forbidden`, an unknown id `not_found`. `weave_incident_resolve({id, resolution, ticketId?})` (VS-271) → marks an incident resolved: `resolution` is a required free-text reason, `ticketId` an optional unvalidated reference to the ticket that fixed the cause. Records `resolvedAt`, `resolvedByAgentId`, `resolution`, `resolutionTicketId`; resolving an already-resolved incident is `wrong_status` and does not overwrite it. Resolution is never inferred — landing a ticket that names an incident does not resolve it. Workers have no incident reads or resolve access. Filing and the session-auth HTTP routes are unchanged.
 
 Every tool response includes `{ ok, data | error: { code, message, retryable } }`; unknown ids return `not_found`, not exceptions.
 
@@ -667,14 +667,14 @@ Structure (markdown, ≤ 2k tokens typical; bounded lists with remainder counts)
 ## Your ticket (workers)
 - ACME-42 [approved] Add dark mode — worktree work/ on ac/acme-42-dark-mode (clean, 0 ahead / 3 behind main); last status: needs_decision resolved
 ## Open work (conductor)
-- ACME-42 [in_progress] Add dark mode — Backend Engineer #7, working: tests passing   (max 10, then "+N more, call ac_ticket_list")
+- ACME-42 [in_progress] Add dark mode — Backend Engineer #7, working: tests passing   (max 10, then "+N more, call weave_ticket_list")
 ## Answered decisions
 - D-7 (ACME-42): "Use CSS variables" — answered by Victor: "yes, variables"
 ## Notes
 - <charter changed since last turn: summary>   (only when applicable)
 - <session bootstrap digest when session is fresh/stale: SHARED.md + project KB + top rules>
 ## What to do now
-Call `ac_inbox` if you need details, do the work, report via ac_report / ac_ticket_*, and finish with the structured final report.
+Call `weave_inbox` if you need details, do the work, report via weave_report / weave_ticket_*, and finish with the structured final report.
 ```
 
 For the conductor the same shape lists human messages per thread, pending decisions owned by the human (so it can nudge), tickets waiting for a worker slot, and the supervisor digest.
@@ -697,9 +697,9 @@ Three consecutive `empty`/`idle` turns raise a `gate_finding` for the conductor 
 
 `knowledge` is required (VS-102) and is one of `{recorded: true, where: "…"}` or `{recorded: false, reason: "…"}` — the turn's explicit answer to "did this produce durable knowledge, and where, or why not." "Nothing durable" is always a complete, unpenalised answer. A report missing `knowledge`, or giving `recorded: true` with no `where`, or `recorded: false` with no `reason`, fails to parse and is treated exactly like a report missing `state`: `liveness = empty`, on the same terms as no report at all. Nothing checks whether a stated `reason` is a good one — see §13.7 for the check that actually looks at outcomes rather than self-reported claims.
 
-### 9.5 `conductor` CLI for agents
+### 9.5 `weave` CLI for agents
 
-`conductor agent inbox`, `conductor ticket get|list|checkout|comment|transition|doc put|work-product`, `conductor ask`, `conductor report`, `conductor memory`, `conductor knowledge`, `conductor human send` — thin wrappers over the same HTTP endpoints using `AC_RUN_TOKEN`. Output JSON with `--json`; human-readable otherwise. Skills reference MCP tools first and the CLI as fallback.
+`weave agent inbox`, `weave ticket get|list|checkout|comment|transition|doc put|work-product`, `weave ask`, `weave report`, `conductor memory`, `weave knowledge`, `weave human send` — thin wrappers over the same HTTP endpoints using `AC_RUN_TOKEN`. Output JSON with `--json`; human-readable otherwise. Skills reference MCP tools first and the CLI as fallback.
 
 ---
 
@@ -709,10 +709,10 @@ Three consecutive `empty`/`idle` turns raise a `gate_finding` for the conductor 
 
 One conductor per workspace. It is the only agent the human needs to talk to. It:
 - receives human messages from any channel and answers in outcome language;
-- creates tickets from requests (one ticket per distinct deliverable; decomposition rules in the `agent-conductor-planning` skill);
+- creates tickets from requests (one ticket per distinct deliverable; decomposition rules in the `weave-ai-planning` skill);
 - picks the project and the **role** (project by the portfolio in WORKSPACE.md and each PROJECT.md Overview; role by `scope_text` and charter summary; asks one question when ambiguous); the daemon spawns a worker from that role for the ticket;
 - hires a role when none fits (§10.4);
-- assigns, then supervises workers via the digest wakes; steers them with `ac_worker_message`; unblocks, answers unambiguous gate findings itself, escalates real decisions to the human one at a time;
+- assigns, then supervises workers via the digest wakes; steers them with `weave_worker_message`; unblocks, answers unambiguous gate findings itself, escalates real decisions to the human one at a time;
 - maintains workspace knowledge (`knowledge/`), its own memory, and refines role charters when it sees repeated mistakes across workers;
 - produces briefings (§10.5).
 
@@ -720,12 +720,12 @@ Hard rules (in priority order, in its prompt): (1) never writes to a project or 
 
 ### 10.2 Runtime
 
-The conductor is an agent like any other: `kind=conductor`, cwd = `conductor/`, persistent session, its runtime chosen in `workspace.yaml` (default Claude). A conductor turn always spawns with permission mode `bypass` (VS-171), regardless of the workspace default or any role permission, so the runtime cannot classify away `ac_*`; the deny list still applies. It has read access to `knowledge/` and to project summary cards, and read-only access to project clones through `ac_*` tools and, optionally, `--add-dir projects/<id>` for reading code when investigating (it MUST NOT edit; the runtime permission deny list blocks writes outside `conductor/`).
+The conductor is an agent like any other: `kind=conductor`, cwd = `conductor/`, persistent session, its runtime chosen in `workspace.yaml` (default Claude). A conductor turn always spawns with permission mode `bypass` (VS-171), regardless of the workspace default or any role permission, so the runtime cannot classify away `weave_*`; the deny list still applies. It has read access to `knowledge/` and to project summary cards, and read-only access to project clones through `weave_*` tools and, optionally, `--add-dir projects/<id>` for reading code when investigating (it MUST NOT edit; the runtime permission deny list blocks writes outside `conductor/`).
 
 ### 10.3 Intake loop (per human message)
 
-1. Read the message and thread context (`ac_inbox`).
-2. Classify: question (answer directly from the knowledge bases and the spec index; no ticket), status request (use `ac_briefing`), work request, decision answer (route to the decision), configuration (add project, change policy → decision or `ac_project_add`).
+1. Read the message and thread context (`weave_inbox`).
+2. Classify: question (answer directly from the knowledge bases and the spec index; no ticket), status request (use `weave_briefing`), work request, decision answer (route to the decision), configuration (add project, change policy → decision or `weave_project_add`).
 3. For work: resolve project (explicit > follow-up referent > match against the portfolio in WORKSPACE.md and each PROJECT.md Overview; ask if ambiguous). Create a ticket (`change` by default when code changes are implied; `scout` when the request is diagnostic; `task` for chores; `question` when an agent must answer but not change code). Set kind, priority, description with acceptance criteria, blockers.
 4. Choose a role: existing role whose scope matches → assign (a worker spawns automatically; if the role is at `max_workers` the ticket waits and the conductor says so). No match → hire (§10.4) → assign once active (if `pending_activation`, tell the human what was hired and that they can switch the CLI before the first worker runs).
 5. Reply to the human with what is under way, in outcome language, then end the turn.
@@ -757,16 +757,16 @@ createdAt: 2026-09-03T10:00:00Z
 
 Charter (`CHARTER.md`) is rendered from `templates/charter.md.tmpl` (see `docs/prompts/worker.AGENTS.md.tmpl`, which shows charter and brief together as a worker sees them) with the spec fields plus the fixed operating contract (status protocol, ticket rules, OpenSpec flow, project boundary, reporting contract "you report to the conductor through your ticket; you never address the human unless in a direct thread").
 
-Conductor's hiring procedure (skill `agent-conductor-hire`):
+Conductor's hiring procedure (skill `weave-ai-hire`):
 1. Check overlap: list roles in the project; if a charter matches or highly overlaps, reuse; if partial overlap, hire and clarify the distinction in **both** charters (firstmate's rule). A role is a kind of work, not a person: one "Backend Engineer" role serves any number of concurrent backend tickets.
 2. Draft spec: role, one-sentence charter summary, natural-language scope (used for routing), responsibilities (5–9 bullets), capabilities, rules specific to this project (from the project KB), runtime = project default.
-3. `ac_role_hire(spec)` → daemon validates, writes files, creates a `pending_activation` role, creates a `hire_approval` decision for the human **if** `workspace.defaults.hireApproval=human` (default) — the decision card shows the spec and offers approve or decline. Answering activates. With `hireApproval=none` the role activates immediately. A role names no runtime or model: every worker it spawns runs on `models.workers` (ADR 0011).
+3. `weave_role_hire(spec)` → daemon validates, writes files, creates a `pending_activation` role, creates a `hire_approval` decision for the human **if** `workspace.defaults.hireApproval=human` (default) — the decision card shows the spec and offers approve or decline. Answering activates. With `hireApproval=none` the role activates immediately. A role names no runtime or model: every worker it spawns runs on `models.workers` (ADR 0011).
 4. Daemon writes the role directory transactionally (spec, charter, empty memory). Workers are provisioned later, per ticket (§11.2).
-5. When the conductor sees repeated mistakes across workers, it calls `ac_role_update_charter` with a reason; the daemon records a revision; the human can roll back.
+5. When the conductor sees repeated mistakes across workers, it calls `weave_role_update_charter` with a reason; the daemon records a revision; the human can roll back.
 
 ### 10.5 Briefing
 
-`ac_briefing()` returns a deterministic snapshot `{ needsYou: [...], landed: [...], underway: [...], queued: [...], warnings: [...] }` computed by the daemon (tickets by status and decisions by owner within a window). The conductor renders firstmate's four sections, always all four, never a delta: **Needs you** / **Recently landed** / **Under way** / **Up next**. One decision at a time when the human asks "what do you need from me": the conductor presents the highest-impact open decision with what/why-now/options/recommendation.
+`weave_briefing()` returns a deterministic snapshot `{ needsYou: [...], landed: [...], underway: [...], queued: [...], warnings: [...] }` computed by the daemon (tickets by status and decisions by owner within a window). The conductor renders firstmate's four sections, always all four, never a delta: **Needs you** / **Recently landed** / **Under way** / **Up next**. One decision at a time when the human asks "what do you need from me": the conductor presents the highest-impact open decision with what/why-now/options/recommendation.
 
 ### 10.6 Language
 
@@ -780,7 +780,7 @@ The conductor speaks in outcomes: the fix, the PR, the review, the decision, the
 
 A **role** is what the conductor hires: a template scoped to one project (charter, runtime, model). A **worker** is what runs: spawned from a role for one ticket, with its own home, brief, worktree and session, and retired when the ticket's work has landed. This is firstmate's crewmate model: the conductor never talks to "the backend engineer" as a person; it assigns a ticket to the Backend Engineer role and a fresh worker picks it up. Concurrency is the number of live workers, bounded per project (`project.max_workers`).
 
-A worker's write scope: its worktree (`workers/<id>/work/`), its ticket and that ticket's descendants, and its project's KB (`knowledge/projects/<project>/PROJECT.md`, concise dated entries only). It reads its project repo (through the worktree), its project KB, `SHARED.md`, and its ticket. It cannot see other projects' code, tickets or KBs, other workers' worktrees, or `WORKSPACE.md` (which lists the portfolio). Cross-project needs become a `blocked` transition with `unblock_json {owner: conductor, action}` or an `ac_ask`; the conductor creates the courier ticket in the other project.
+A worker's write scope: its worktree (`workers/<id>/work/`), its ticket and that ticket's descendants, and its project's KB (`knowledge/projects/<project>/PROJECT.md`, concise dated entries only). It reads its project repo (through the worktree), its project KB, `SHARED.md`, and its ticket. It cannot see other projects' code, tickets or KBs, other workers' worktrees, or `WORKSPACE.md` (which lists the portfolio). Cross-project needs become a `blocked` transition with `unblock_json {owner: conductor, action}` or an `weave_ask`; the conductor creates the courier ticket in the other project.
 
 ### 11.2 Spawn, brief, home
 
@@ -791,9 +791,9 @@ Trigger: a ticket is assigned to a role and the project has a free slot (`projec
 3. Create the worktree through the project's worktree provider (§11.5) on branch `ac/<ticket>-<slug>`, based on the ticket's landing branch (its own declaration, else its project's, else the default branch — VS-119), at `workers/<id>/work/`, running `setup_command` once. Record the `worktrees` row.
 4. Render `AGENTS.md` = role charter + **brief**. The brief (firstmate's `fm-brief.sh`; generated by the daemon from structured ticket data, never from the conductor's prose alone):
    - **Task**: ticket identifier, title, description, acceptance criteria, kind, priority, links (parent, blockers), the OpenSpec change name for `change` tickets.
-   - **Setup**: worktree path and branch; "verify with `ac_worktree_status` before anything else; if the path or branch differs, stop and report `blocked`".
-   - **Rules**: project boundary, delivery mode, never push the ticket's landing branch (its own declaration, else its project's, else the default branch — VS-119) / never merge outside `merging`, status protocol, when to `ac_ask`, when to stop.
-   - **Definition of done**: per kind and delivery mode (e.g. change+pr: "artifacts complete → `proposed`; after approval implement all tasks → PR → `in_review`; after merge approval merge → `ac_ticket_merge_done`").
+   - **Setup**: worktree path and branch; "verify with `weave_worktree_status` before anything else; if the path or branch differs, stop and report `blocked`".
+   - **Rules**: project boundary, delivery mode, never push the ticket's landing branch (its own declaration, else its project's, else the default branch — VS-119) / never merge outside `merging`, status protocol, when to `weave_ask`, when to stop.
+   - **Definition of done**: per kind and delivery mode (e.g. change+pr: "artifacts complete → `proposed`; after approval implement all tasks → PR → `in_review`; after merge approval merge → `weave_ticket_merge_done`").
    - **Context pointers**: project KB, `SHARED.md`, `work/AGENTS.md`, OpenSpec `config.yaml` context. Pointers, not contents; the bootstrap digest injects the budgeted ones.
 5. Create the session placeholder, bind the ticket (`tickets.worker_id`, checkout), set `status=active`, enqueue the first wake (`ticket_assigned`).
 
@@ -801,23 +801,23 @@ Any failure rolls back the row, the home and the worktree (provider `remove --fo
 
 ### 11.3 Lifecycle of a worker turn (what the charter+brief tells it)
 
-1. `ac_inbox` → why you were woken (first turn: your brief; later: approval answered, comment, steering, merge approved, relaunch note).
-2. `ac_worktree_status` on the first turn and after any relaunch; read `work/AGENTS.md` once (the project KB and SHARED.md are already in your bootstrap).
-3. Do the phase the ticket status asks for (§12); report phase changes with `ac_report`; leave durable progress as comments/documents/work products; transition honestly.
-4. Same obstacle twice → `ac_report blocked` + transition `blocked` with a routable path; end the turn.
-5. A decision above you (product choice, destructive action, contract expansion) → `ac_ask` with options and a recommendation; end the turn. The answer arrives as your next wake.
-6. Durable learnings that would help the next worker on this project → one concise `ac_knowledge_note` into the project KB (rules in the knowledge skill). Facts every contributor needs regardless of AgentConductor → the repo (through your PR).
+1. `weave_inbox` → why you were woken (first turn: your brief; later: approval answered, comment, steering, merge approved, relaunch note).
+2. `weave_worktree_status` on the first turn and after any relaunch; read `work/AGENTS.md` once (the project KB and SHARED.md are already in your bootstrap).
+3. Do the phase the ticket status asks for (§12); report phase changes with `weave_report`; leave durable progress as comments/documents/work products; transition honestly.
+4. Same obstacle twice → `weave_report blocked` + transition `blocked` with a routable path; end the turn.
+5. A decision above you (product choice, destructive action, contract expansion) → `weave_ask` with options and a recommendation; end the turn. The answer arrives as your next wake.
+6. Durable learnings that would help the next worker on this project → one concise `weave_knowledge_note` into the project KB (rules in the knowledge skill). Facts every contributor needs regardless of Weave AI → the repo (through your PR).
 7. End with the structured final report. An empty inbox is an idle turn; never invent work.
 
 ### 11.4 Delivery and merge
 
 Per project policy `deliveryMode`:
 - `pr` (default): work on the ticket branch in `work/`, push, open a PR with `gh` (or the forge plugin), record a `pull_request` work product, transition `in_review`. Unless the ticket has `auto_merge` on, a `merge_approval` decision **owned by the human** is created; the conductor can never approve a merge.
-- `local-branch`: no push; transition `in_review` with a `branch` work product; on approval the same worker merges into the local landing branch (VS-119) through the daemon (`ac_ticket_merge_done` triggers a fast-forward in `projects/<id>`; if not fast-forwardable the worker rebases first).
+- `local-branch`: no push; transition `in_review` with a `branch` work product; on approval the same worker merges into the local landing branch (VS-119) through the daemon (`weave_ticket_merge_done` triggers a fast-forward in `projects/<id>`; if not fast-forwardable the worker rebases first).
 
-**The worker that implemented the ticket performs the merge, never without human consent, and only when the project's merge queue admits it.** Consent is either the human's `approve` on the merge decision, or the ticket's `auto_merge` flag (default off). `auto_merge` can be set by the human on the ticket (`conductor ticket set ACME-42 --auto-merge`, the ticket page toggle, or a Telegram `/automerge ACME-42`), or by the conductor at creation when the human said so ("build X and merge it when done" → `ac_ticket_create({..., autoMerge: true})`); the conductor MUST NOT set it on an existing ticket on its own initiative. With `auto_merge` on, the daemon moves the ticket to `merging` as soon as the PR is open and CI is green (or immediately when the project has no CI), and the human is told the merge is proceeding. In either case the ticket moves to `merging` and **joins its project's merge queue** rather than merging at once. Joining stamps `tickets.merge_queued_at`; the queue admits waiting tickets in join order (ties broken by ticket number) while fewer than the project's `mergeConcurrency` policy (integer ≥ 1, default 1) are in the active merge step, stamps `tickets.merge_started_at`, brings a worker back if the ticket has none, and wakes it. A ticket waiting in the queue is neither spawned for nor treated as a liveness violation — the queue is its action path — so ten workers can be building while the queue lands one at a time. Leaving `merging` for any status (merged, blocked, sent back for changes) clears both stamps and admits the next ticket, so a failed merge never holds the queue; the supervisor also pumps every project's queue on its tick, so a restart cannot strand it. The queue is readable at `GET /projects/:id/merge-queue` — which also carries `recent`, the last few tickets that left the queue with their outcome (`landed` · `failed` · `withdrawn`) and time, derived from the activity log — as `conductor ticket merge-queue`, on its own page in the web app (`/w/:ws/merge-queue?project=`, showing one project at a time), and on the ticket page. The board does not hold the queue: it carries one line among its filters saying how much is landing and waiting, which opens that page. Rationale and the departure from §11.5 are in `docs/adr/0006-merge-queue.md`. When the queue admits it, the worker is woken. It fetches, rebases onto (or merges in) its ticket's landing branch — its own declaration, else its project's, else the default branch (VS-119, `docs/adr/0014-project-landing-branch.md`) — **resolves conflicts itself** (re-running tests and lint; if a resolution changes behavior the spec described, it asks with `ac_ask` before merging), pushes with `--force-with-lease`, waits for CI when required, merges the PR with `gh pr merge --<mergeMethod>` (default `squash`), and reports `ac_ticket_merge_done`. The daemon verifies the branch's content reached that landing branch — ancestry, then identical trees, then the branch's cumulative patch id against the commits the landing branch gained since the merge base (a squash of a multi-commit branch), then every commit present individually — fast-forwards `projects/<id>` to the project's own landing branch regardless of any one ticket's override (one landing at a time per project), archives the OpenSpec change there (§12.2), runs the landed-work test against the ticket's landing branch, removes the worktree, retires the worker, and moves the ticket to `done`. If the merge cannot complete (CI red after rebase, unresolvable conflict, forge error) the worker transitions to `blocked` with `{owner: conductor, action}`; the conductor decides (steer, relaunch, cancel, escalate).
+**The worker that implemented the ticket performs the merge, never without human consent, and only when the project's merge queue admits it.** Consent is either the human's `approve` on the merge decision, or the ticket's `auto_merge` flag (default off). `auto_merge` can be set by the human on the ticket (`weave ticket set ACME-42 --auto-merge`, the ticket page toggle, or a Telegram `/automerge ACME-42`), or by the conductor at creation when the human said so ("build X and merge it when done" → `weave_ticket_create({..., autoMerge: true})`); the conductor MUST NOT set it on an existing ticket on its own initiative. With `auto_merge` on, the daemon moves the ticket to `merging` as soon as the PR is open and CI is green (or immediately when the project has no CI), and the human is told the merge is proceeding. In either case the ticket moves to `merging` and **joins its project's merge queue** rather than merging at once. Joining stamps `tickets.merge_queued_at`; the queue admits waiting tickets in join order (ties broken by ticket number) while fewer than the project's `mergeConcurrency` policy (integer ≥ 1, default 1) are in the active merge step, stamps `tickets.merge_started_at`, brings a worker back if the ticket has none, and wakes it. A ticket waiting in the queue is neither spawned for nor treated as a liveness violation — the queue is its action path — so ten workers can be building while the queue lands one at a time. Leaving `merging` for any status (merged, blocked, sent back for changes) clears both stamps and admits the next ticket, so a failed merge never holds the queue; the supervisor also pumps every project's queue on its tick, so a restart cannot strand it. The queue is readable at `GET /projects/:id/merge-queue` — which also carries `recent`, the last few tickets that left the queue with their outcome (`landed` · `failed` · `withdrawn`) and time, derived from the activity log — as `weave ticket merge-queue`, on its own page in the web app (`/w/:ws/merge-queue?project=`, showing one project at a time), and on the ticket page. The board does not hold the queue: it carries one line among its filters saying how much is landing and waiting, which opens that page. Rationale and the departure from §11.5 are in `docs/adr/0006-merge-queue.md`. When the queue admits it, the worker is woken. It fetches, rebases onto (or merges in) its ticket's landing branch — its own declaration, else its project's, else the default branch (VS-119, `docs/adr/0014-project-landing-branch.md`) — **resolves conflicts itself** (re-running tests and lint; if a resolution changes behavior the spec described, it asks with `weave_ask` before merging), pushes with `--force-with-lease`, waits for CI when required, merges the PR with `gh pr merge --<mergeMethod>` (default `squash`), and reports `weave_ticket_merge_done`. The daemon verifies the branch's content reached that landing branch — ancestry, then identical trees, then the branch's cumulative patch id against the commits the landing branch gained since the merge base (a squash of a multi-commit branch), then every commit present individually — fast-forwards `projects/<id>` to the project's own landing branch regardless of any one ticket's override (one landing at a time per project), archives the OpenSpec change there (§12.2), runs the landed-work test against the ticket's landing branch, removes the worktree, retires the worker, and moves the ticket to `done`. If the merge cannot complete (CI red after rebase, unresolvable conflict, forge error) the worker transitions to `blocked` with `{owner: conductor, action}`; the conductor decides (steer, relaunch, cancel, escalate).
 
-Rules: workers MUST NOT push to their ticket's landing branch except through the merge of an approved PR, MUST NOT merge unless their ticket is in `merging`, MUST NOT force-push shared branches. The daemon enforces the gate (`merging` is only reachable through the human's approval or the `auto_merge` flag; `ac_ticket_merge_done` is rejected outside it); the forge enforces branch protection (setup docs recommend "require PR" on the landing branch); the runtime deny list blocks direct landing-branch pushes where expressible; reconciliation detects violations. Promoting a project's landing branch to its default branch (Fernwood's `edge` → `main`) is never automated or performed by the daemon or a worker: it is the human's own step, run outside AgentConductor.
+Rules: workers MUST NOT push to their ticket's landing branch except through the merge of an approved PR, MUST NOT merge unless their ticket is in `merging`, MUST NOT force-push shared branches. The daemon enforces the gate (`merging` is only reachable through the human's approval or the `auto_merge` flag; `weave_ticket_merge_done` is rejected outside it); the forge enforces branch protection (setup docs recommend "require PR" on the landing branch); the runtime deny list blocks direct landing-branch pushes where expressible; reconciliation detects violations. Promoting a project's landing branch to its default branch (Fernwood's `edge` → `main`) is never automated or performed by the daemon or a worker: it is the human's own step, run outside Weave AI.
 
 ### 11.5 Worktrees: provider interface, worktrunk default
 
@@ -834,13 +834,13 @@ export interface WorktreeProvider {
 }
 ```
 
-- **worktrunk** (`wt` v0.68.0; Rust; Arch package `extra/worktrunk`; "Git worktree management for parallel AI agent workflows") is the default provider. Its CLI contract was verified against `wt` v0.68.0 on 2026-09-03. The daemon invokes it as `wt -C <primary-clone> --config <workspace>/.agent-conductor/wt.toml --config-set 'worktree-path="<workspace>/workers/<workerId>/work"' -y switch --create ac/<ticket>-<slug> --base <landing> --no-cd --format json`, where `<landing>` is the ticket's landing branch (its own declaration, else its project's, else the default branch — VS-119), so the human's personal worktrunk config is never read or written and the worktree lands exactly at the worker's `work/`. State is mirrored from `wt list --format json` (schema 2: per-branch dirty flags, ahead/behind the landing branch, predicted `merge_conflicts`). Warm-up is a user-config `pre-start` pipeline in the generated `wt.toml`: `wt step copy-ignored --from main` (copies gitignored caches such as `node_modules` from the primary clone) followed by `project.setup_command`; user-config hooks need no interactive approval, project-config hooks do, so the daemon never relies on a repo's own `.config/wt.toml`. Removal is `wt remove <branch> --foreground --format json --no-delete-branch` (the daemon deletes the branch itself only after the landed-work test; `wt remove` refuses dirty worktrees without `--force`, which the daemon never passes except on a human-approved discard). Two quirks to code around: `wt remove` exits 0 on refusal (check the JSON and the path), and its JSON `branch_deleted` field is unreliable (check `git branch`).
+- **worktrunk** (`wt` v0.68.0; Rust; Arch package `extra/worktrunk`; "Git worktree management for parallel AI agent workflows") is the default provider. Its CLI contract was verified against `wt` v0.68.0 on 2026-09-03. The daemon invokes it as `wt -C <primary-clone> --config <workspace>/.weave/wt.toml --config-set 'worktree-path="<workspace>/workers/<workerId>/work"' -y switch --create ac/<ticket>-<slug> --base <landing> --no-cd --format json`, where `<landing>` is the ticket's landing branch (its own declaration, else its project's, else the default branch — VS-119), so the human's personal worktrunk config is never read or written and the worktree lands exactly at the worker's `work/`. State is mirrored from `wt list --format json` (schema 2: per-branch dirty flags, ahead/behind the landing branch, predicted `merge_conflicts`). Warm-up is a user-config `pre-start` pipeline in the generated `wt.toml`: `wt step copy-ignored --from main` (copies gitignored caches such as `node_modules` from the primary clone) followed by `project.setup_command`; user-config hooks need no interactive approval, project-config hooks do, so the daemon never relies on a repo's own `.config/wt.toml`. Removal is `wt remove <branch> --foreground --format json --no-delete-branch` (the daemon deletes the branch itself only after the landed-work test; `wt remove` refuses dirty worktrees without `--force`, which the daemon never passes except on a human-approved discard). Two quirks to code around: `wt remove` exits 0 on refusal (check the JSON and the path), and its JSON `branch_deleted` field is unreliable (check `git branch`).
 - **git** (built-in fallback, always available): `git worktree add -b <branch> <path> <base>`, `git worktree list --porcelain`, `git worktree remove`; warm-up = `rsync` of gitignored cache directories listed in `project.warmPaths` plus `setup_command`, run by the daemon. Used when worktrunk is missing, or per project (`worktrees: git`). Both providers pass the same contract test; the M2 demo runs with both.
-- **Rejected**: `agenttools/worktree` (Claude-only, GitHub-issue-bound, macOS/iTerm2 + tmux, no merge workflow, spawns its own Claude workers with coordination files, which is AgentConductor's own job).
+- **Rejected**: `agenttools/worktree` (Claude-only, GitHub-issue-bound, macOS/iTerm2 + tmux, no merge workflow, spawns its own Claude workers with coordination files, which is Weave AI's own job).
 - **Never reset, never clean.** The engine and supervisor never run `git reset`, `git clean`, `git checkout` or `git stash` in a worker's worktree. Only the worker changes its state.
-- **Remove = landed-work test (firstmate's teardown rule).** A worktree is removed only when the work has provably landed: every commit on the ticket branch is reachable from a remote-tracking branch, **or** the ticket's PR is merged and its landing branch (its own declaration, else its project's, else the default branch — VS-119) contains the branch's content (squash-merge-then-delete), **or** for `local-branch` mode the local landing branch contains it. Uncommitted changes never count. If the daemon cannot tell (forge unreachable, ambiguous history) it refuses and marks the worktree `dirty`; nothing is discarded. `conductor ticket discard <id> --force` is the only path that removes an unlanded worktree, and it creates a `discard_approval` decision for the human first.
+- **Remove = landed-work test (firstmate's teardown rule).** A worktree is removed only when the work has provably landed: every commit on the ticket branch is reachable from a remote-tracking branch, **or** the ticket's PR is merged and its landing branch (its own declaration, else its project's, else the default branch — VS-119) contains the branch's content (squash-merge-then-delete), **or** for `local-branch` mode the local landing branch contains it. Uncommitted changes never count. If the daemon cannot tell (forge unreachable, ambiguous history) it refuses and marks the worktree `dirty`; nothing is discarded. `weave ticket discard <id> --force` is the only path that removes an unlanded worktree, and it creates a `discard_approval` decision for the human first.
 - **Cancelled tickets** keep worker home and worktree as `dirty` until discarded or landed elsewhere (the conductor may ask the worker to push the branch for the record before cancelling).
-- **Worker retirement**: after removal the home is moved to `archive/workers/<id>/` (brief, notes, final report); run logs stay under `.agent-conductor/runs/`. `conductor worker purge` deletes archives older than `workerArchiveDays` (default 30).
+- **Worker retirement**: after removal the home is moved to `archive/workers/<id>/` (brief, notes, final report); run logs stay under `.weave/runs/`. `weave worker purge` deletes archives older than `workerArchiveDays` (default 30).
 - **Concurrency**: many workers per project, each in its own worktree; conflicts surface at merge time and are resolved by the merging worker (§11.4). Building is serialized only on declared blockers. **Landing is serialized by the project's merge queue** (§11.4, `mergeConcurrency`, default 1), because every ticket of a project shares one primary clone; see `docs/adr/0006-merge-queue.md`.
 
 ### 11.6 Stuck-worker ladder and relaunch
@@ -851,7 +851,7 @@ Supervisor ladder (firstmate's stuck-crewmate recovery), per worker: (1) silence
 
 Chat exists in exactly two places: with the conductor, and with a live worker **through its ticket**. There are no chat workers and no "talk to a role"; a role is a template, and questions about a project go to the conductor, which answers from the project KB or creates a `question` ticket.
 
-Talking to a worker: the human comments on the ticket (web ticket page, `conductor ticket comment`, `conductor attach <worker>` whose input line posts a ticket comment, or Telegram `/talk <ticket>` which binds the thread to that ticket until `/conductor`). The comment is stored as a `ticket_comment` with `author_kind=human`, wakes the worker (`ticket_comment`), and the worker answers with `ac_ticket_comment`; the daemon relays worker comments back to every thread bound to that ticket and to the web page live. Everything the human and the worker say to each other is therefore on the ticket's record, visible to the conductor, and survives the worker's retirement. When the worker is retired, comments still land on the ticket and the conductor is woken instead.
+Talking to a worker: the human comments on the ticket (web ticket page, `weave ticket comment`, `weave attach <worker>` whose input line posts a ticket comment, or Telegram `/talk <ticket>` which binds the thread to that ticket until `/conductor`). The comment is stored as a `ticket_comment` with `author_kind=human`, wakes the worker (`ticket_comment`), and the worker answers with `weave_ticket_comment`; the daemon relays worker comments back to every thread bound to that ticket and to the web page live. Everything the human and the worker say to each other is therefore on the ticket's record, visible to the conductor, and survives the worker's retirement. When the worker is retired, comments still land on the ticket and the conductor is woken instead.
 
 ---
 
@@ -874,12 +874,12 @@ in_progress ──(apply all_done; worker delivers PR)──▶ in_review ──
 ```
 
 Detailed rules:
-1. **Propose turn.** The worker's first turn prompt says: "Ticket ACME-42 is `todo`. Your worktree is `work/` on branch `ac/acme-42-dark-mode`. Create OpenSpec change `acme-42-dark-mode` there with `openspec new change` if it does not exist (do not ask). Then run the OpenSpec propose workflow for it. Write proposal, specs, design, tasks. Do not implement. If the request is materially ambiguous, call `ac_ask` with concrete options instead of asking in text. When artifacts are complete, transition to `proposed`." The worker invokes the installed OpenSpec skill (`/opsx:propose` on Claude/OpenCode, `$openspec-propose` on Codex).
+1. **Propose turn.** The worker's first turn prompt says: "Ticket ACME-42 is `todo`. Your worktree is `work/` on branch `ac/acme-42-dark-mode`. Create OpenSpec change `acme-42-dark-mode` there with `openspec new change` if it does not exist (do not ask). Then run the OpenSpec propose workflow for it. Write proposal, specs, design, tasks. Do not implement. If the request is materially ambiguous, call `weave_ask` with concrete options instead of asking in text. When artifacts are complete, transition to `proposed`." The worker invokes the installed OpenSpec skill (`/opsx:propose` on Claude/OpenCode, `$openspec-propose` on Codex).
 2. **Proposed gate (daemon).** On transition request to `proposed`, the daemon runs `openspec status --change <c> --json` and `openspec validate <c> --json --strict` in the ticket's leased worktree (read-only commands). If `isPlanningComplete` is false or validation has errors, the transition is rejected with the issues; the worker fixes them. On success the daemon writes a `plan` document revision on the ticket containing proposal.md + tasks.md (rendered), and creates a `plan_approval` decision owned per project policy (`human` default; `conductor` allowed; `none` auto-approves). The decision target is the plan document revision, so a new revision supersedes an open approval.
 3. **Approval.** Human answers on any channel (`approve` / `revise: <feedback>` / `reject`). `revise` puts the ticket back to `proposing` with the feedback as a comment and a wake; `reject` cancels; `approve` → `approved` + wake.
-4. **Apply turns** (same worker, same session, so it remembers its own proposal). Prompt: "Your plan for `acme-42-dark-mode` was approved. Run the OpenSpec apply workflow: implement pending tasks, tick them in tasks.md as you complete them, commit as you go. Pause with `ac_ask` on scope expansion. Deliver per `deliveryMode` when all tasks are done." The daemon polls `openspec instructions apply --change <c> --json` after each turn to mirror `progress` into `openspec_state_json` and the UI. Workers MUST NOT run `/opsx:archive`.
+4. **Apply turns** (same worker, same session, so it remembers its own proposal). Prompt: "Your plan for `acme-42-dark-mode` was approved. Run the OpenSpec apply workflow: implement pending tasks, tick them in tasks.md as you complete them, commit as you go. Pause with `weave_ask` on scope expansion. Deliver per `deliveryMode` when all tasks are done." The daemon polls `openspec instructions apply --change <c> --json` after each turn to mirror `progress` into `openspec_state_json` and the UI. Workers MUST NOT run `/opsx:archive`.
 5. **Review.** On delivery the worker records the work product and transitions `in_review`. A `merge_approval` decision owned by the human is created, unless the ticket has `auto_merge` on, in which case the daemon waits for CI and proceeds. Optional: the conductor may create a `scout` review ticket for a reviewer role (`sessionPolicy=fresh`), whose deliverable is a `report` document; the verdict is the deliverable (`done`), never `blocked`.
-6. **Merge (by the same worker).** On the human's `approve` (or auto-merge with green CI) the ticket moves to `merging` and joins the project's merge queue; the worker is woken when the queue admits it (at most `mergeConcurrency` tickets merge at once, default 1). It syncs with the ticket's landing branch (VS-119), resolves conflicts, re-runs checks, merges the PR per `mergeMethod`, and reports `ac_ticket_merge_done` (§11.4). A human merging manually on the forge is also fine: reconciliation detects the merged PR and proceeds identically.
+6. **Merge (by the same worker).** On the human's `approve` (or auto-merge with green CI) the ticket moves to `merging` and joins the project's merge queue; the worker is woken when the queue admits it (at most `mergeConcurrency` tickets merge at once, default 1). It syncs with the ticket's landing branch (VS-119), resolves conflicts, re-runs checks, merges the PR per `mergeMethod`, and reports `weave_ticket_merge_done` (§11.4). A human merging manually on the forge is also fine: reconciliation detects the merged PR and proceeds identically.
 7. **Archive (by the daemon).** After the merge is verified, the daemon fast-forwards `projects/<id>` to the project's own landing branch (its default branch when it declares none — VS-119), runs `openspec archive <c> --yes --json` **in the primary clone on that landing branch**, commits `chore(openspec): archive <c>` and pushes (policy `archiveCommit: push | pr | local`, default `push`; with branch protection use `pr`, which opens a tiny PR the conductor may merge under policy). Archive is serialized per project. Then the landed-work test runs, the worktree is removed, the worker retired, and the ticket → `done`. If archive fails, the ticket stays `merging` with `unblock_json {owner: conductor, action: "openspec archive failed: <code>"}` and the conductor is woken.
 
 ### 12.3 Flow for other kinds
@@ -891,7 +891,7 @@ Detailed rules:
 
 ### 12.4 OpenSpec adapter (`core/openspec/`)
 
-A typed wrapper over the CLI (never import the package): `newChange`, `statusAll`, `list`, `instructionsApply`, `validate`, `archive`, with `cwd`, `--json`, env `CI=1 OPENSPEC_TELEMETRY=0 OPENSPEC_NO_UPDATE_CHECK=1 NO_COLOR=1`, one JSON doc from stdout, 30 s timeout, `root.path` asserted equal to the expected clone root. Pinned version per project (`openspec_version`); `conductor project openspec-upgrade` diffs the generated SKILL.md files and requires confirmation. Installation: `openspec init --tools <runtime tools>` in the primary clone at project add time (committed if the repo has no `openspec/` yet — as a `task` ticket "Adopt OpenSpec" assigned to the first role, so the human reviews it as a PR).
+A typed wrapper over the CLI (never import the package): `newChange`, `statusAll`, `list`, `instructionsApply`, `validate`, `archive`, with `cwd`, `--json`, env `CI=1 OPENSPEC_TELEMETRY=0 OPENSPEC_NO_UPDATE_CHECK=1 NO_COLOR=1`, one JSON doc from stdout, 30 s timeout, `root.path` asserted equal to the expected clone root. Pinned version per project (`openspec_version`); `weave project openspec-upgrade` diffs the generated SKILL.md files and requires confirmation. Installation: `openspec init --tools <runtime tools>` in the primary clone at project add time (committed if the repo has no `openspec/` yet — as a `task` ticket "Adopt OpenSpec" assigned to the first role, so the human reviews it as a PR).
 
 Per-project OpenSpec `config.yaml` `context:` is generated by the daemon from the project KB + SHARED.md (≤ 4k tokens) and kept in sync (only the `context` and `rules` keys; a marker comment delimits the generated block).
 
@@ -906,15 +906,15 @@ OpenSpec leaves a spec document behind for nearly every feature: main specs unde
 - `spec_change_capabilities` — `change_id, capability_id, delta_kind (added|modified|removed|renamed)`, from each change's `specs/**` deltas, so every capability has a change history and every change lists what it touched.
 Full-text search across capabilities, requirements, change artifacts and the knowledge bases (`knowledge_search` FTS5 table).
 
-**Tools.** `ac_spec_list(projectId)`, `ac_spec_get(projectId, capability)`, `ac_spec_search(projectId?, query)`, `ac_spec_change_get(changeName)`. The conductor may query any project (it uses specs to answer "how does X work today" before creating a `question` ticket); a worker only its own project (it also has the files in its worktree, so the tools mainly give it search and history).
+**Tools.** `weave_spec_list(projectId)`, `weave_spec_get(projectId, capability)`, `weave_spec_search(projectId?, query)`, `weave_spec_change_get(changeName)`. The conductor may query any project (it uses specs to answer "how does X work today" before creating a `question` ticket); a worker only its own project (it also has the files in its worktree, so the tools mainly give it search and history).
 
-**Spec Explorer (UI §21.1, screen 7, and TUI `conductor specs`).** Per project: a capability list with requirement counts and last change; a capability page rendering the spec with its requirements and scenarios, the pending deltas from active changes (highlighted, linked to their tickets), and the change history (archived changes → tickets → PRs); a change page rendering proposal, design, tasks (with progress) and delta specs for active and archived changes; search across specs and knowledge bases; and a **graph view** (capabilities ↔ changes ↔ tickets as a node network, filterable by time and status) for seeing how a project's spec surface evolved. Knowledge and Specs live under one "Knowledge" section in the UI with a shared search box.
+**Spec Explorer (UI §21.1, screen 7, and TUI `weave specs`).** Per project: a capability list with requirement counts and last change; a capability page rendering the spec with its requirements and scenarios, the pending deltas from active changes (highlighted, linked to their tickets), and the change history (archived changes → tickets → PRs); a change page rendering proposal, design, tasks (with progress) and delta specs for active and archived changes; search across specs and knowledge bases; and a **graph view** (capabilities ↔ changes ↔ tickets as a node network, filterable by time and status) for seeing how a project's spec surface evolved. Knowledge and Specs live under one "Knowledge" section in the UI with a shared search box.
 
 **Boundaries.** Specs are read-only in the UI; they change only through tickets (propose/apply/archive). The index never writes into a repo. Isolation holds: a worker's spec tools are scoped to its project.
 
-### 12.6 Planning rules (skill `agent-conductor-planning`)
+### 12.6 Planning rules (skill `weave-ai-planning`)
 
-Minimize the ticket graph: one end-to-end ticket with one owner by default. Split only for: different owner/project, parallelizable self-contained deliverable, hard dependency needing its own blocker lifecycle, independent review gate, substantial follow-up. Merge-back pass. Every child ticket names its qualifying reason. Scope creep during apply is surfaced with `ac_ask`, never silently absorbed or dropped.
+Minimize the ticket graph: one end-to-end ticket with one owner by default. Split only for: different owner/project, parallelizable self-contained deliverable, hard dependency needing its own blocker lifecycle, independent review gate, substantial follow-up. Merge-back pass. Every child ticket names its qualifying reason. Scope creep during apply is surfaced with `weave_ask`, never silently absorbed or dropped.
 
 ### Implementation notes
 
@@ -928,15 +928,15 @@ Two knowledge bases, both markdown, both budgeted, both curated. They are the me
 
 ### 13.1 Files, audiences, budgets
 
-Budgets are workspace settings: `defaults.knowledgeBudgetTokens` in `workspace.yaml`, one key per hub file plus `document`, editable from Settings → Workspace and `conductor workspace set-default`. The configured value is what the daemon enforces, reports and triggers curation on; the column `knowledge_files.budget_tokens` mirrors it. The numbers below are the defaults.
+Budgets are workspace settings: `defaults.knowledgeBudgetTokens` in `workspace.yaml`, one key per hub file plus `document`, editable from Settings → Workspace and `weave workspace set-default`. The configured value is what the daemon enforces, reports and triggers curation on; the column `knowledge_files.budget_tokens` mirrors it. The numbers below are the defaults.
 
 | File | Audience | Written by | Budget (tokens) | Content |
 |---|---|---|---|---|
-| `knowledge/workspace/WORKSPACE.md` | conductor only | human (bootstrap interview) + conductor (`ac_knowledge_note`) | 10000 | what the business is, goals, people and how the human likes to work, the project portfolio (one line per project: id, purpose, default role), cross-project conventions and policies, standing instructions |
+| `knowledge/workspace/WORKSPACE.md` | conductor only | human (bootstrap interview) + conductor (`weave_knowledge_note`) | 10000 | what the business is, goals, people and how the human likes to work, the project portfolio (one line per project: id, purpose, default role), cross-project conventions and policies, standing instructions |
 | `knowledge/workspace/SHARED.md` | every agent | conductor | 2000 | the project-agnostic subset: house conventions (commit style, PR etiquette, testing expectations), glossary, tone. **Never names projects**, so a worker learns nothing about the portfolio from it |
 | `knowledge/workspace/decisions.md` | conductor | daemon (answered decisions marked durable) | 4000 | one line per durable decision with date and ticket; older lines are archived by curation |
-| `knowledge/projects/<id>/PROJECT.md` | that project's workers and the conductor | workers (`ac_knowledge_note`), conductor (curation, focus updates), human | 10000 | sections: **Overview** (what it is, who uses it), **Stack & commands** (run, test, lint, build), **Conventions** (project-specific rules the repo docs do not state), **Current focus** (what is being worked toward this month), **Landmines** (things that bite), **Learnings** (dated, concise, perishable entries from workers) |
-| `knowledge/projects/<id>/docs/<slug>.md`, `knowledge/workspace/docs/<slug>.md`, `knowledge/workspace/shared/<slug>.md` | linked to from a hub or another document via `[[slug]]` | workers and the conductor (`ac_knowledge_doc_put`) | 10000 (`document`) | a topic page, one per subsystem/integration/runbook. Optionally nested in a folder (`.../docs/<folder>/<sub>/<slug>.md`, VS-265) — folders are organisation only: a document is addressed by its `slug`, unique within its scope regardless of folder, and `[[slug]]` resolves the same way no matter where the folder places it. `ac_knowledge_doc_put`'s `folder` argument places a *new* document; it has no effect on an existing slug, which is found and updated wherever it already lives. A document can be moved to a different folder afterward (conductor/human, via the web app, not an agent tool) without touching any link. |
+| `knowledge/projects/<id>/PROJECT.md` | that project's workers and the conductor | workers (`weave_knowledge_note`), conductor (curation, focus updates), human | 10000 | sections: **Overview** (what it is, who uses it), **Stack & commands** (run, test, lint, build), **Conventions** (project-specific rules the repo docs do not state), **Current focus** (what is being worked toward this month), **Landmines** (things that bite), **Learnings** (dated, concise, perishable entries from workers) |
+| `knowledge/projects/<id>/docs/<slug>.md`, `knowledge/workspace/docs/<slug>.md`, `knowledge/workspace/shared/<slug>.md` | linked to from a hub or another document via `[[slug]]` | workers and the conductor (`weave_knowledge_doc_put`) | 10000 (`document`) | a topic page, one per subsystem/integration/runbook. Optionally nested in a folder (`.../docs/<folder>/<sub>/<slug>.md`, VS-265) — folders are organisation only: a document is addressed by its `slug`, unique within its scope regardless of folder, and `[[slug]]` resolves the same way no matter where the folder places it. `weave_knowledge_doc_put`'s `folder` argument places a *new* document; it has no effect on an existing slug, which is found and updated wherever it already lives. A document can be moved to a different folder afterward (conductor/human, via the web app, not an agent tool) without touching any link. |
 | `*/archive/` | nobody by default | curation | none | pruned entries with date, author and reason; grep-able, never injected |
 
 The repo's own `AGENTS.md`/`CLAUDE.md`, docs and OpenSpec specs remain the committed contributor knowledge; workers read them from the worktree and change them through PRs like any contributor. The OpenSpec specs are additionally indexed and explorable next to the knowledge bases (§12.5); the project KB should point at capabilities rather than restate them. The project KB holds what is *about* working on this project from the outside and what is not yet (or should not be) in the repo.
@@ -953,7 +953,7 @@ A worker's run token cannot fetch anything outside that set: other projects' KBs
 ### 13.3 Writing rules (in skills, enforced by the daemon)
 
 - Entries are **concise** (≤ 60 words), **standalone** (no pronouns, absolute dates), **durable** (not task state, not anything derivable from git or the repo, never secrets), and written for the next reader who has no other context.
-- Workers write only to the project KB, only through `ac_knowledge_note`, typically at most once per ticket, usually in the merge turn ("what would I have wanted to know before starting this ticket?"). The daemon rejects near-duplicates, over-length entries, and over-budget writes (returning the current size and the sections that are over).
+- Workers write only to the project KB, only through `weave_knowledge_note`, typically at most once per ticket, usually in the merge turn ("what would I have wanted to know before starting this ticket?"). The daemon rejects near-duplicates, over-length entries, and over-budget writes (returning the current size and the sections that are over).
 - The conductor writes to the workspace KB the same way (how the human works, standing preferences, cross-project conventions) and may edit **Current focus** in any project KB.
 - The human may edit any file directly; the daemon re-indexes on change and re-checks budgets.
 - Perishable entries carry `<!--exp:YYYY-MM-DD-->`; expired entries are archived automatically.
@@ -962,14 +962,14 @@ A worker's run token cannot fetch anything outside that set: other projects' KBs
 
 Curation is a scheduled, agent-performed rewrite of one knowledge file, run by the daemon:
 
-- **Triggers**: a file crosses 80 % of its budget; or 14 days since its last curation; or `conductor knowledge curate <file>`; or an over-budget write was rejected.
+- **Triggers**: a file crosses 80 % of its budget; or 14 days since its last curation; or `weave knowledge curate <file>`; or an over-budget write was rejected.
 - **Who**: workspace files are curated by the conductor in a dedicated turn (`system` wake, reason `curate`). A project KB is curated by a **curation worker**: a worker spawned from the project's default role for an auto-created `task` ticket "Curate project knowledge" with `noWorktree: true` (cwd = worker home, read-only checkout of the primary clone exposed as `work/` for fact-checking). It runs on the role's runtime with a fresh session, costs one turn, and retires when the ticket is `done`.
-- **What the curator does** (skill `agent-conductor-knowledge`): merge duplicates, fold learnings that have become conventions into the right section, delete or archive entries that are stale, contradicted by the repo, or now stated in the repo docs, tighten wording, keep every section within its share of the budget. It produces the new file with `ac_knowledge_replace`; the daemon diffs it, archives every removed entry with provenance, and records the diff on the curation ticket so the human can review or revert (`conductor knowledge revert <file> <revision>`).
-- **Guarantees**: a curated file is always at or under budget; nothing is deleted without an archive copy; curation never invents facts (the skill forbids adding entries; it may only merge, move, tighten or remove); `conductor knowledge lint` reports sizes, last-curated dates and pending triggers.
+- **What the curator does** (skill `weave-ai-knowledge`): merge duplicates, fold learnings that have become conventions into the right section, delete or archive entries that are stale, contradicted by the repo, or now stated in the repo docs, tighten wording, keep every section within its share of the budget. It produces the new file with `weave_knowledge_replace`; the daemon diffs it, archives every removed entry with provenance, and records the diff on the curation ticket so the human can review or revert (`weave knowledge revert <file> <revision>`).
+- **Guarantees**: a curated file is always at or under budget; nothing is deleted without an archive copy; curation never invents facts (the skill forbids adding entries; it may only merge, move, tighten or remove); `weave knowledge lint` reports sizes, last-curated dates and pending triggers.
 
 ### 13.5 Bootstrap digest
 
-On a worker's first turn (and on a conductor session reset or staleness), the turn prompt includes the injected set from §13.2 plus a five-line reminder of the status protocol. The total is measured and logged as `bootstrap_tokens`; the hard cap is `bootstrapBudgetTokens` (default 16000) and, because every file is itself budgeted, the cap is normally not reached. If it is, project KB **Learnings** are truncated first with an explicit "truncated, call ac_knowledge_get" line; never the brief, SHARED.md or the rules.
+On a worker's first turn (and on a conductor session reset or staleness), the turn prompt includes the injected set from §13.2 plus a five-line reminder of the status protocol. The total is measured and logged as `bootstrap_tokens`; the hard cap is `bootstrapBudgetTokens` (default 16000) and, because every file is itself budgeted, the cap is normally not reached. If it is, project KB **Learnings** are truncated first with an explicit "truncated, call weave_knowledge_get" line; never the brief, SHARED.md or the rules.
 
 ### 13.6 The changelog
 
@@ -994,10 +994,10 @@ An entry carries an absolute timestamp, its kind, the actor (`human`, `agent`, `
 **Guarantees.**
 
 - **Append-only.** No client can edit or delete an entry, because no write route and no service member exists to do it. Curation never touches it and no size limit applies.
-- **Never injected.** No changelog entry appears in a bootstrap digest, a worker brief, the conductor's context or any turn prompt, and no `ac_*` tool returns one. A test asserts the digests are byte-identical with and without a year of entries.
+- **Never injected.** No changelog entry appears in a bootstrap digest, a worker brief, the conductor's context or any turn prompt, and no `weave_*` tool returns one. A test asserts the digests are byte-identical with and without a year of entries.
 - **No backfill step.** The entries come from history the daemon already recorded, so an upgraded workspace shows a populated changelog on first read. The one exception is `upgraded`, which has no record before this shipped and so appears from the first upgrade after it.
 
-**Surfaces.** `GET /changelog` and `GET /changelog/heatmap` (§API.md), the Changelog tab in the web app's Knowledge area, and `conductor changelog [--project <id>] [--from <date>] [--to <date>]`.
+**Surfaces.** `GET /changelog` and `GET /changelog/heatmap` (§API.md), the Changelog tab in the web app's Knowledge area, and `weave changelog [--project <id>] [--from <date>] [--to <date>]`.
 
 **The heatmap** is a calendar grid of the last 371 days shading **tickets landed per day** — the measure of a day's output, since landing is what means work reached the repository. The view states the measure and its definition. Days are bucketed in a named IANA timezone (the reader's in the web app, the machine's in the CLI), in TypeScript rather than in SQL: SQLite can only express a fixed offset, which is wrong across a DST boundary and so wrong for part of any one-year range. The timeline's day, week and month separators bucket through the same function, so a heatmap cell and the separator it scrolls to always mean the same day.
 
@@ -1056,27 +1056,27 @@ export interface ChannelAdapter {
 
 - **First contact binds.** An inbound external conversation (Telegram chat id) binds to a `channel_thread` for the conductor. `/talk <ticket>` (or a UI action) binds the thread to that ticket: messages become ticket comments and wake the ticket's live worker (§11.7); `/conductor` unbinds. Unknown senders are ignored unless in `allowedUserIds` (Telegram) — never auto-onboard. A rejected sender's identity (never their message) is recorded through `ctx.rejected` (VS-135) and offered for approval in Settings, capped and expiring, so gaining access never requires typing a numeric user id.
 - Inbound message → `thread_messages` row → `enqueueWakeup(agent, {source: human_message, payload: {threadId, messageId}})`.
-- Outbound: the conductor only through `ac_human_send`; workers only through ticket comments, which the daemon relays to bound threads. A run's plain final text is stored on the run but not sent; the charters say so explicitly.
+- Outbound: the conductor only through `weave_human_send`; workers only through ticket comments, which the daemon relays to bound threads. A run's plain final text is stored on the run but not sent; the charters say so explicitly.
 - Decisions owned by the human are pushed to the human's **primary thread** (the most recently active thread, or the one configured as `notify`) as a card; answering on any channel resolves the decision everywhere (idempotent by decision id; late clicks return "already answered").
 - Typing indicators / "working…" acks: the daemon sends a short acknowledgement when a human message arrives and the agent is busy or the queue is deep (> 20 s), so the human is never left in silence (firstmate's ack → act → follow up).
 
 ### 14.3 Built-in channels
 
 - `web`: SSE stream + POST endpoint used by the UI (§21).
-- `cli`: `conductor chat [agentId]` interactive REPL over the HTTP API; `conductor say "<text>"` one-shot.
+- `cli`: `weave chat [agentId]` interactive REPL over the HTTP API; `weave say "<text>"` one-shot.
 - `telegram`: long polling (no public URL needed), inline keyboard buttons for decisions, markdown v2 rendering with fallback, file uploads for reports. The **only** external channel in v1; WhatsApp/Discord/Slack are plugin work that the interface must make trivial (contract test + `channels/telegram` as the reference implementation).
 
 ---
 
 ## 14b. Presentation surfaces (herdr, Hyprland, tmux, terminal, web)
 
-Execution never changes: every agent turn is a daemon-spawned headless process with a JSON event stream (§7–§8). A **surface** decides where that agent is *shown* and how a human attaches to it. Surfaces are plugins (`packages/surface-sdk`) that run inside the **presenter** (`conductor presenter`, a small client-side process on the machine whose screen you are looking at; §4.4), configured per workspace under `presentation:` (§5), switchable at runtime (`conductor presentation set workers.surface hyprland`), and always additive: the web UI and the run log work regardless of the chosen surface. The daemon stores the desired config and streams worker lifecycle events; the presenter reconciles windows locally and reports handles back. Several presenters can run at once (a laptop and a desktop) with their own surface each.
+Execution never changes: every agent turn is a daemon-spawned headless process with a JSON event stream (§7–§8). A **surface** decides where that agent is *shown* and how a human attaches to it. Surfaces are plugins (`packages/surface-sdk`) that run inside the **presenter** (`weave presenter`, a small client-side process on the machine whose screen you are looking at; §4.4), configured per workspace under `presentation:` (§5), switchable at runtime (`weave presentation set workers.surface hyprland`), and always additive: the web UI and the run log work regardless of the chosen surface. The daemon stores the desired config and streams worker lifecycle events; the presenter reconciles windows locally and reports handles back. Several presenters can run at once (a laptop and a desktop) with their own surface each.
 
-### 14b.1 The attach TUI (`conductor attach`)
+### 14b.1 The attach TUI (`weave attach`)
 
-`conductor attach <agentId>` (package `tui`, Ink) is the universal terminal view of one agent (the conductor or a worker): a live transcript rendered from `run_events` (assistant text, tool calls with collapsed results, file changes, status lines, and the human's own messages attributed as `human.input` blocks), a status bar (worker name and role, ticket, runtime, model, turn count, worktree state, spend so far), and an input line. On a worker, text typed there is recorded as a ticket comment and, when the runtime genuinely supports mid-turn input and a turn is executing, is delivered to that turn immediately; otherwise it is queued for the agent's next turn (VS-99, ADR 0012) — the notice line names whichever happened, never assumes delivery. On the conductor it is a direct-thread message (`human_message` wake), unchanged. Attaching is a pure subscription to the existing event stream: nothing about a run depends on someone watching it, and detaching changes nothing. Keybindings: pause/resume, open ticket, jump to worktree in `$SHELL`, cancel run, relaunch. `conductor chat` is the same component pointed at the conductor with chat-first layout (§21.3). `conductor top` is a one-screen fleet view (workers grouped by project and role × status × ticket × spend) with the same keys.
+`weave attach <agentId>` (package `tui`, Ink) is the universal terminal view of one agent (the conductor or a worker): a live transcript rendered from `run_events` (assistant text, tool calls with collapsed results, file changes, status lines, and the human's own messages attributed as `human.input` blocks), a status bar (worker name and role, ticket, runtime, model, turn count, worktree state, spend so far), and an input line. On a worker, text typed there is recorded as a ticket comment and, when the runtime genuinely supports mid-turn input and a turn is executing, is delivered to that turn immediately; otherwise it is queued for the agent's next turn (VS-99, ADR 0012) — the notice line names whichever happened, never assumes delivery. On the conductor it is a direct-thread message (`human_message` wake), unchanged. Attaching is a pure subscription to the existing event stream: nothing about a run depends on someone watching it, and detaching changes nothing. Keybindings: pause/resume, open ticket, jump to worktree in `$SHELL`, cancel run, relaunch. `weave chat` is the same component pointed at the conductor with chat-first layout (§21.3). `weave top` is a one-screen fleet view (workers grouped by project and role × status × ticket × spend) with the same keys.
 
-This means every surface is just "open a terminal running `conductor attach <id>`" in the right place.
+This means every surface is just "open a terminal running `weave attach <id>`" in the right place.
 
 ### 14b.2 Interface
 
@@ -1098,16 +1098,16 @@ The presenter calls `ensureAgentView` when a worker is spawned (or the presentat
 
 ### 14b.3 Built-in surfaces
 
-- **headless** (default): no-op; monitoring via web UI or ad-hoc `conductor attach`.
-- **tmux**: one tmux session per workspace (`ac-<workspace>`), one window per live worker running `conductor attach <id>`, window name = role + ticket + status glyph; conductor in window 0 running `conductor chat`. `conductor presentation open` attaches the human's terminal to the session.
-- **herdr** (Omarchy/Hyprland users already run it; the herdr CLI is socket-driven): one herdr workspace per AgentConductor workspace (`herdr workspace create --cwd <ws> --label <name>`), one tab per project (`herdr tab create --label <project>`), one pane per live worker (`herdr pane split ... --no-focus` then `herdr pane run <pane> "conductor attach <id>"`), conductor in the first tab's root pane running `conductor chat`. Handles store herdr ids but, because herdr ids compact when panes close, the adapter re-resolves by pane title/command on every reconcile rather than trusting stored ids. The adapter reads `herdr pane list` to detect the human closed a pane and does not fight it (recreate only on explicit `conductor presentation reconcile`). Optional: mirror herdr's own `agent_status` (it detects idle/working/blocked from the pane) into the UI as a secondary signal.
-- **hyprland**: each live worker gets its own terminal window on a chosen Hyprland workspace. **The adapter never touches any Hyprland config file.** Everything goes through `hyprctl` at runtime: window rules with `hyprctl keyword windowrule "workspace <n> silent, class:^(ac-<workspace>-.*)$"` (rule syntax per the installed Hyprland version; verified by `detect()` and re-applied on daemon start and on every reconcile, since keyword rules are not persisted), windows with `hyprctl dispatch exec "[workspace <n> silent] <terminal> --class ac-<workspace>-<agentId> -e conductor attach <agentId>"`, focus with `hyprctl dispatch focuswindow class:^(ac-<workspace>-<agentId>)$`, and state queries with `hyprctl clients -j` (so a window the human closed is noticed, not fought). Layout: Hyprland's tiling gives the grid for free; `layout: grid` issues `hyprctl dispatch layoutmsg` calls to balance; `layout: per-project` groups windows with `hyprctl dispatch togglegroup`. Titles come from the terminal's OSC title, which `conductor attach` sets (`<role> #<n> · <ticket> · <status>`). The conductor can live in a terminal on the human's current workspace (`conductor: { surface: terminal }` opens `conductor chat` in a new terminal window with no workspace rule). `conductor doctor` prints the equivalent rule lines for humans who prefer a persistent rule in their own config, but the daemon never writes them.
-- **terminal** (conductor only): spawn the terminal running `conductor chat`; used by the `conductor:` block.
+- **headless** (default): no-op; monitoring via web UI or ad-hoc `weave attach`.
+- **tmux**: one tmux session per workspace (`ac-<workspace>`), one window per live worker running `weave attach <id>`, window name = role + ticket + status glyph; conductor in window 0 running `weave chat`. `weave presentation open` attaches the human's terminal to the session.
+- **herdr** (Omarchy/Hyprland users already run it; the herdr CLI is socket-driven): one herdr workspace per Weave AI workspace (`herdr workspace create --cwd <ws> --label <name>`), one tab per project (`herdr tab create --label <project>`), one pane per live worker (`herdr pane split ... --no-focus` then `herdr pane run <pane> "weave attach <id>"`), conductor in the first tab's root pane running `weave chat`. Handles store herdr ids but, because herdr ids compact when panes close, the adapter re-resolves by pane title/command on every reconcile rather than trusting stored ids. The adapter reads `herdr pane list` to detect the human closed a pane and does not fight it (recreate only on explicit `weave presentation reconcile`). Optional: mirror herdr's own `agent_status` (it detects idle/working/blocked from the pane) into the UI as a secondary signal.
+- **hyprland**: each live worker gets its own terminal window on a chosen Hyprland workspace. **The adapter never touches any Hyprland config file.** Everything goes through `hyprctl` at runtime: window rules with `hyprctl keyword windowrule "workspace <n> silent, class:^(ac-<workspace>-.*)$"` (rule syntax per the installed Hyprland version; verified by `detect()` and re-applied on daemon start and on every reconcile, since keyword rules are not persisted), windows with `hyprctl dispatch exec "[workspace <n> silent] <terminal> --class ac-<workspace>-<agentId> -e weave attach <agentId>"`, focus with `hyprctl dispatch focuswindow class:^(ac-<workspace>-<agentId>)$`, and state queries with `hyprctl clients -j` (so a window the human closed is noticed, not fought). Layout: Hyprland's tiling gives the grid for free; `layout: grid` issues `hyprctl dispatch layoutmsg` calls to balance; `layout: per-project` groups windows with `hyprctl dispatch togglegroup`. Titles come from the terminal's OSC title, which `weave attach` sets (`<role> #<n> · <ticket> · <status>`). The conductor can live in a terminal on the human's current workspace (`conductor: { surface: terminal }` opens `weave chat` in a new terminal window with no workspace rule). `weave doctor` prints the equivalent rule lines for humans who prefer a persistent rule in their own config, but the daemon never writes them.
+- **terminal** (conductor only): spawn the terminal running `weave chat`; used by the `conductor:` block.
 - **Terminal resolution** (all terminal-spawning surfaces): `presentation.<block>.terminal` if set, else the system default: `$TERMINAL`, else `xdg-terminal-exec` when present, else fail with a clear message asking for one of the two. No hard-coded emulator list; foot, kitty, ghostty, alacritty all work because the adapter only needs `--class`/`--app-id` and `-e` (a small per-emulator arg table covers the flag spelling, detected from the binary name).
 
 ### 14b.4 Interactive escape hatch (M6, approved)
 
-Some power users will want the real CLI TUI for a worker (to use slash commands, watch permission prompts). Claude Code now supports background sessions (`claude --bg` → id; `claude attach <id>` opens the live session in a terminal; `claude logs`), which would let the daemon run an agent's turns in the background and a surface open `claude attach` instead of `conductor attach`. Whether events and structured results can still be captured in that mode is unverified; it is an approved M6 spike (`interactive: true` per role on the Claude runtime): the daemon runs the worker's turns with `claude --bg` and the surface opens `claude attach <id>` instead of `conductor attach`, falling back to `conductor attach` when the capture contract cannot be met. Written up as an ADR either way. Until then, `conductor attach` is the only interactive view.
+Some power users will want the real CLI TUI for a worker (to use slash commands, watch permission prompts). Claude Code now supports background sessions (`claude --bg` → id; `claude attach <id>` opens the live session in a terminal; `claude logs`), which would let the daemon run an agent's turns in the background and a surface open `claude attach` instead of `weave attach`. Whether events and structured results can still be captured in that mode is unverified; it is an approved M6 spike (`interactive: true` per role on the Claude runtime): the daemon runs the worker's turns with `claude --bg` and the surface opens `claude attach <id>` instead of `weave attach`, falling back to `weave attach` when the capture contract cannot be met. Written up as an ADR either way. Until then, `weave attach` is the only interactive view.
 
 ### Implementation notes
 
@@ -1117,11 +1117,11 @@ Some power users will want the real CLI TUI for a worker (to use slash commands,
 
 ## 15. Decisions, approvals, human-in-the-loop
 
-A **decision** is the single primitive for: plan approval, merge approval, hire approval, agent questions and concerns (`ac_ask`), gate findings, and conductor questions to the human. Properties: one owner, options with a recommendation, free-text allowed, expiry, correlation key, target (document revision or spec revision) for supersession, verbatim answer text recorded.
+A **decision** is the single primitive for: plan approval, merge approval, hire approval, agent questions and concerns (`weave_ask`), gate findings, and conductor questions to the human. Properties: one owner, options with a recommendation, free-text allowed, expiry, correlation key, target (document revision or spec revision) for supersession, verbatim answer text recorded.
 
-Ownership policy (`workspace.yaml` defaults, overridable per project): `plan_approval: human`, `merge_approval: human`, `hire_approval: human`, `gate_finding: conductor` (the conductor decides unambiguous findings toward the accepted design and escalates contract expansions, product calls, destructive or security-sensitive choices — firstmate's ask-user-authority rule, in the conductor prompt). `question` and `concern` have no fixed policy entry: raised by a worker they resolve to `conductor`, exactly like `gate_finding`; raised by the conductor (its own way of reaching the human) they resolve to `human` (VS-127) — a worker cannot reach the human's queue by naming a kind, and `ac_ask` itself refuses to construct any of the other, system-raised kinds.
+Ownership policy (`workspace.yaml` defaults, overridable per project): `plan_approval: human`, `merge_approval: human`, `hire_approval: human`, `gate_finding: conductor` (the conductor decides unambiguous findings toward the accepted design and escalates contract expansions, product calls, destructive or security-sensitive choices — firstmate's ask-user-authority rule, in the conductor prompt). `question` and `concern` have no fixed policy entry: raised by a worker they resolve to `conductor`, exactly like `gate_finding`; raised by the conductor (its own way of reaching the human) they resolve to `human` (VS-127) — a worker cannot reach the human's queue by naming a kind, and `weave_ask` itself refuses to construct any of the other, system-raised kinds.
 
-Presentation to the human: one decision per message, containing what it is, why now, the real options, the recommendation with a one-line why. Batching unrelated decisions into one list is forbidden in the conductor prompt. Answer forms: button (channels with cards), `/d <id> <key>` reply, or natural language in the thread that the conductor maps to `ac_decision_answer` **only when it owns the decision**; human-owned decisions answered in natural language are matched by the conductor and confirmed with a one-line echo ("Recorded: approve plan for ACME-42"). Plan, merge and action cards also show whether the conductor has reviewed (VS-223, VS-234): the line states the outcome ("reviewed — no concerns" / "— has concerns") with the note beside the buttons, and Approve stays live while the state is `unseen`. A later `ac_decision_review` flips the open card live (`decision.updated`); a mark after the human already answered is worded as after-the-fact.
+Presentation to the human: one decision per message, containing what it is, why now, the real options, the recommendation with a one-line why. Batching unrelated decisions into one list is forbidden in the conductor prompt. Answer forms: button (channels with cards), `/d <id> <key>` reply, or natural language in the thread that the conductor maps to `weave_decision_answer` **only when it owns the decision**; human-owned decisions answered in natural language are matched by the conductor and confirmed with a one-line echo ("Recorded: approve plan for ACME-42"). Plan, merge and action cards also show whether the conductor has reviewed (VS-223, VS-234): the line states the outcome ("reviewed — no concerns" / "— has concerns") with the note beside the buttons, and Approve stays live while the state is `unseen`. A later `weave_decision_review` flips the open card live (`decision.updated`); a mark after the human already answered is worded as after-the-fact.
 
 CLI intercepts: when a runtime surfaces a native ask (Claude `AskUserQuestion`, `ExitPlanMode`), the runtime adapter converts it into a `user_input.requested` event; the engine creates a decision and, because headless CLIs cannot block on an answer indefinitely, the adapter answers the CLI with a canned "This question was forwarded to the human as decision D-n; stop working on this item and end your turn" so the run ends cleanly. The answer arrives as the next wake.
 
@@ -1135,7 +1135,7 @@ CLI intercepts: when a runtime surfaces a native ask (Claude `AskUserQuestion`, 
 
 Three named data paths (paperclip's rule, adopted verbatim): **run log** (local DB + files, no review), **observability** (OTLP traces, off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set), **telemetry** (does not exist; there is no phone-home).
 
-**Budgets are out of scope for v1.** AgentConductor collects usage and shows it; it never blocks work because of spend. Budget policies, hard stops and override decisions are a later feature and must be designed so they attach to the usage model below without changing it.
+**Budgets are out of scope for v1.** Weave AI collects usage and shows it; it never blocks work because of spend. Budget policies, hard stops and override decisions are a later feature and must be designed so they attach to the usage model below without changing it.
 
 ### 16.1 Run log
 
@@ -1149,9 +1149,9 @@ One `usage_events` row per run (or per usage delta for `session_cumulative` runt
 
 Every query is answered from `usage_events` with the same shape: a **scope** (workspace, project, role, ticket incl. subtree, worker, model, runtime) × a **window** (last 24 h, today, yesterday, this week, last 7 days, this month, custom range, all time) × a **grain** (hour, day, week) → series of `{ tokensIn, tokensOut, tokensCached, runs, workerTurns, durationMs, costCents, costStatus }` plus a total. Comparisons against the previous window are computed server-side.
 
-For a subscription account the dollar figure is meaningless, so the usage view leads with plan consumption instead: when every token in the queried scope and window was billed `subscription_included`, the cost tile and cost columns are replaced by the plan label and the limit windows with their reset times and the snapshot's age, and no dollar figure is shown; any `metered_api` or `unknown` token in the window keeps cost exactly as it is. `conductor usage` shows the same block from the same `packages/render` view model. An account that reports no windows says so with its note rather than drawing zeros. The conductor chat header carries the same snapshot in one line for the conductor's own runtime: the session window's utilisation and the time left before it resets, ticking locally between the daemon's refreshes, with the other windows behind a tap; a metered or unprobed runtime shows nothing there rather than a zero. Beside it the header meters the conductor's context: the last finished turn's input plus cache-read tokens as a fraction of the model's `contextWindowTokens` and of the runtime's `contextCompactionAt` point, both read from the runtime adapter and never stated in the client; an unknown window or an unreported size says so instead of drawing a percentage.
+For a subscription account the dollar figure is meaningless, so the usage view leads with plan consumption instead: when every token in the queried scope and window was billed `subscription_included`, the cost tile and cost columns are replaced by the plan label and the limit windows with their reset times and the snapshot's age, and no dollar figure is shown; any `metered_api` or `unknown` token in the window keeps cost exactly as it is. `weave usage` shows the same block from the same `packages/render` view model. An account that reports no windows says so with its note rather than drawing zeros. The weave chat header carries the same snapshot in one line for the conductor's own runtime: the session window's utilisation and the time left before it resets, ticking locally between the daemon's refreshes, with the other windows behind a tap; a metered or unprobed runtime shows nothing there rather than a zero. Beside it the header meters the conductor's context: the last finished turn's input plus cache-read tokens as a fraction of the model's `contextWindowTokens` and of the runtime's `contextCompactionAt` point, both read from the runtime adapter and never stated in the client; an unknown window or an unreported size says so instead of drawing a percentage.
 
-Views the UI builds on it: workspace usage over time; per-project usage (and per-project share of the workspace); per-ticket cost including subtree rollup and a per-turn breakdown; per-model usage (tokens and cost by model, model mix over time, which projects/roles use which model); per-role and per-worker; runs per hour/day with success and recovered counts. Windows and grains are shared constants (`shared/src/usage-windows.ts`) so the TUI, the CLI (`conductor usage`) and the web agree.
+Views the UI builds on it: workspace usage over time; per-project usage (and per-project share of the workspace); per-ticket cost including subtree rollup and a per-turn breakdown; per-model usage (tokens and cost by model, model mix over time, which projects/roles use which model); per-role and per-worker; runs per hour/day with success and recovered counts. Windows and grains are shared constants (`shared/src/usage-windows.ts`) so the TUI, the CLI (`weave usage`) and the web agree.
 
 API: `GET /api/w/<ws>/usage?scope=project:api&window=7d&grain=day`, `GET …/usage/top?by=model|ticket|role&window=24h`, `GET …/usage/ticket/<id>` (subtree + turns), `GET …/usage/models?window=month`, `GET …/usage/accounts` (the current `runtime_accounts` snapshots). Materialized daily rollups (`usage_daily`) keep month-scale queries fast; hour grain reads raw rows.
 
@@ -1170,7 +1170,7 @@ OpenTelemetry traces per run (span per phase) and per HTTP request; `trace_id` i
 All extension goes through `packages/plugin-sdk`:
 
 ```ts
-export interface AgentConductorPlugin {
+export interface WeaveAIPlugin {
   id: string; version: string; apiVersion: 1;
   register(host: PluginHost): void | Promise<void>;
 }
@@ -1179,7 +1179,7 @@ export interface PluginHost {
   registerChannel(adapter: ChannelAdapter): void;
   registerSurface(adapter: SurfaceAdapter): void;
   registerHook(subscription: { events: EventType[] | "*"; handler: (ev: WorkspaceEvent) => Promise<void> }): void;
-  registerAgentTool(tool: AgentToolDefinition): void;   // extra ac_* MCP tools with scope: conductor | worker | all
+  registerAgentTool(tool: AgentToolDefinition): void;   // extra weave_* MCP tools with scope: conductor | worker | all
   registerWorktreeProvider(provider: WorktreeProvider): void;   // §11.5
   registerForge(adapter: ForgeAdapter): void;           // PR/merge operations (github via gh is built in)
   registerStorage?(provider: LogStorageProvider): void;
@@ -1203,14 +1203,14 @@ Installed by the daemon into each agent home for its runtime (Claude `.claude/sk
 
 | Skill | Audience | Purpose |
 |---|---|---|
-| `agent-conductor-worker` | workers | The turn loop, brief verification, ticket rules, status protocol, delivery and merge, report format, common mistakes table. |
-| `agent-conductor-openspec` | workers | How the ticket flow maps to OpenSpec skills; what never to do (archive, ask in prose, start implementing during propose). |
-| `agent-conductor-scout` | workers | Report format and rules for investigation tickets. |
-| `agent-conductor-conductor` | conductor | Intake, routing, supervision, digest handling, outcome language, translation table. |
-| `agent-conductor-hire` | conductor | Role overlap check, spec drafting, charter template usage, activation flow, charter refinement across workers. |
-| `agent-conductor-planning` | conductor (and agents decomposing) | Minimal ticket graphs, qualifying split reasons, acceptance criteria format. |
-| `agent-conductor-briefing` | conductor | Four-section briefing, one-decision-at-a-time flow. |
-| `agent-conductor-knowledge` | all | What belongs in the project KB vs the workspace KB vs the repo vs the ticket; writing concise dated entries; curation procedure (merge, move, tighten, remove; never invent); budget behavior; expiry markers. |
+| `weave-ai-worker` | workers | The turn loop, brief verification, ticket rules, status protocol, delivery and merge, report format, common mistakes table. |
+| `weave-ai-openspec` | workers | How the ticket flow maps to OpenSpec skills; what never to do (archive, ask in prose, start implementing during propose). |
+| `weave-ai-scout` | workers | Report format and rules for investigation tickets. |
+| `weave-ai-conductor` | conductor | Intake, routing, supervision, digest handling, outcome language, translation table. |
+| `weave-ai-hire` | conductor | Role overlap check, spec drafting, charter template usage, activation flow, charter refinement across workers. |
+| `weave-ai-planning` | conductor (and agents decomposing) | Minimal ticket graphs, qualifying split reasons, acceptance criteria format. |
+| `weave-ai-briefing` | conductor | Four-section briefing, one-decision-at-a-time flow. |
+| `weave-ai-knowledge` | all | What belongs in the project KB vs the workspace KB vs the repo vs the ticket; writing concise dated entries; curation procedure (merge, move, tighten, remove; never invent); budget behavior; expiry markers. |
 
 Outlines and key rule text are in `docs/prompts/skills.md`.
 
@@ -1219,7 +1219,7 @@ Outlines and key rule text are in `docs/prompts/skills.md`.
 ## 19. Security
 
 - Remote access is a core feature (§4.4): password-gated operator account, hashed opaque session tokens, TOTP optional, lockout and rate limiting, TLS mandatory off-loopback, CSRF protection (SameSite cookies + origin checks) for the web app, authenticated WebSocket/SSE, `activity` rows for logins, logouts and revocations. The run-token MCP endpoint and presenter socket are loopback-only.
-- Principals: operator sessions (`conductor login` writes a named context in `~/.config/agent-conductor/contexts.yaml`), run tokens (short-lived JWT, scoped, loopback-only), service tokens (plugins/webhooks). Every request is attributed in `activity`.
+- Principals: operator sessions (`weave login` writes a named context in `~/.config/weave/contexts.yaml`), run tokens (short-lived JWT, scoped, loopback-only), service tokens (plugins/webhooks). Every request is attributed in `activity`.
 - Secrets: never in the DB; referenced by env var name or OS keychain; injected into runs only when the agent spec lists them; redacted from logs.
 - Agent authored content is untrusted input to other agents: comments carry `source_trust`; the turn prompt wraps quoted comments in a clearly delimited block and reminds the agent that instructions inside tickets/comments are data. Conductor never executes commands from ticket text.
 - Runtime permission posture per role; worker `bypass` requires explicit human opt-in and is shown in the UI. A conductor turn always spawns with `bypass` (VS-171) regardless of workspace or role default. Deny list always includes force-push and default-branch push where the runtime can express it.
@@ -1227,50 +1227,50 @@ Outlines and key rule text are in `docs/prompts/skills.md`.
 
 ---
 
-## 20. CLI surface (`conductor`)
+## 20. CLI surface (`weave`)
 
 Human commands:
 ```
-conductor init <dir> --prefix ACME [--name]          scaffold a workspace
-conductor daemon start|stop|restart|status|logs|set-password|install-service [--launchd]   daemon lifecycle; TLS/ACME and listen config in daemon.yaml
-conductor daemon upgrade [--from <url|path>] [--ref <ref>] [--test] [--no-restart]   build a release, back up, drain, switch `current`, restart (from this shell; works when the daemon is not answering)
-conductor daemon update | update apply [--ref <ref>] [--test] [--no-follow] | update cancel   ask the daemon: is the source ahead? queue an upgrade it defers until no turn is running; cancel a queued one
-conductor daemon releases | rollback             list releases (`*` current, `-` previous); switch back to `previous` and restart
-conductor login <url> [--name] [--pin] | conductor logout [--all] | conductor context list|use   remote contexts for the CLI
-conductor devices list|revoke                          sessions/devices on the daemon
-conductor presenter [--surface ...]                     client-side window manager for surfaces (§14b)
-conductor project add <git-url> [--id] [--branch] [--no-follow]              clone, init openspec, create the scout ticket that seeds the project KB; follows the job's sub-steps and output live
-conductor project retry <id> [--no-follow]              re-run a failed add against whatever is already on disk
-conductor project list|show|remove|fetch|set-policy <key>=<value>...
-conductor project set-landing-branch <id> [branch] [--clear]        set/change/clear the landing branch after creation (VS-122); applies to the next ticket action, no restart needed
-conductor runtime list|detect|login <id>              runtime availability and auth per workspace
-conductor role list|show|activate|pause|resume|retire|charter show|charter rollback|memory show
-conductor worker list|show|pause|resume|relaunch|cancel|purge|handover|handback --note <note>   handover/handback (VS-249): take a worker's session for your own terminal, or give it back
-conductor ticket create|list|show|merge-queue [-p <project>]|assign <role>|set --auto-merge|transition|comment|cancel|discard --force|open (browser)
-conductor decision list|show|answer <id> <key|text>
-conductor routine list|show|add|pause|resume|rm     scheduled tasks (recurring conductor alarms); add --daily HH:MM or --every <minutes> --tz --instruction [--action report|file_work] [--max-tickets] [--project]
-conductor chat [ticketId]                              interactive thread (conductor by default; a ticket binds to its live worker)
-conductor say "<text>"                                 one-shot message to the conductor; prints the reply
-conductor briefing                                     four-section briefing (no LLM: rendered from the snapshot)
-conductor attach <workerId|conductor>                   live transcript + steering for one agent (TUI)
-conductor top                                           fleet view
-conductor presentation set|open|reconcile|status       surfaces (§14b)
-conductor conductor show|reset-session                 the conductor agent
-conductor models [show]|set conductor|workers --runtime <id> --model <id|default> [--effort <e>]
-conductor models options add --id <id> --description <text> --runtime <id> [--model <id|default>] [--effort <e>]
-conductor models options set <id> … | options remove <id>
+weave init <dir> --prefix ACME [--name]          scaffold a workspace
+weave daemon start|stop|restart|status|logs|set-password|install-service [--launchd]   daemon lifecycle; TLS/ACME and listen config in daemon.yaml
+weave daemon upgrade [--from <url|path>] [--ref <ref>] [--test] [--no-restart]   build a release, back up, drain, switch `current`, restart (from this shell; works when the daemon is not answering)
+weave daemon update | update apply [--ref <ref>] [--test] [--no-follow] | update cancel   ask the daemon: is the source ahead? queue an upgrade it defers until no turn is running; cancel a queued one
+weave daemon releases | rollback             list releases (`*` current, `-` previous); switch back to `previous` and restart
+weave login <url> [--name] [--pin] | weave logout [--all] | weave context list|use   remote contexts for the CLI
+weave devices list|revoke                          sessions/devices on the daemon
+weave presenter [--surface ...]                     client-side window manager for surfaces (§14b)
+weave project add <git-url> [--id] [--branch] [--no-follow]              clone, init openspec, create the scout ticket that seeds the project KB; follows the job's sub-steps and output live
+weave project retry <id> [--no-follow]              re-run a failed add against whatever is already on disk
+weave project list|show|remove|fetch|set-policy <key>=<value>...
+weave project set-landing-branch <id> [branch] [--clear]        set/change/clear the landing branch after creation (VS-122); applies to the next ticket action, no restart needed
+weave runtime list|detect|login <id>              runtime availability and auth per workspace
+weave role list|show|activate|pause|resume|retire|charter show|charter rollback|memory show
+weave worker list|show|pause|resume|relaunch|cancel|purge|handover|handback --note <note>   handover/handback (VS-249): take a worker's session for your own terminal, or give it back
+weave ticket create|list|show|merge-queue [-p <project>]|assign <role>|set --auto-merge|transition|comment|cancel|discard --force|open (browser)
+weave decision list|show|answer <id> <key|text>
+weave routine list|show|add|pause|resume|rm     scheduled tasks (recurring conductor alarms); add --daily HH:MM or --every <minutes> --tz --instruction [--action report|file_work] [--max-tickets] [--project]
+weave chat [ticketId]                              interactive thread (conductor by default; a ticket binds to its live worker)
+weave say "<text>"                                 one-shot message to the conductor; prints the reply
+weave briefing                                     four-section briefing (no LLM: rendered from the snapshot)
+weave attach <workerId|conductor>                   live transcript + steering for one agent (TUI)
+weave top                                           fleet view
+weave presentation set|open|reconcile|status       surfaces (§14b)
+weave weaver show|reset-session                 the weave agent
+weave models [show]|set conductor|workers --runtime <id> --model <id|default> [--effort <e>]
+weave models options add --id <id> --description <text> --runtime <id> [--model <id|default>] [--effort <e>]
+weave models options set <id> … | options remove <id>
                                                        workspace model selection (ADR 0011); locked controls error
-conductor daemon models [show]|set conductor|workers --runtime <id> --model <id|default> [--effort <e>] [--clear]
-conductor daemon models options add|remove …           daemon overlays for every workspace (VS-185, ADR 0013)
-conductor workspace list|use|register|unregister|pause|resume   multi-workspace registry
-conductor workspace set-default <key=value...>         workspace defaults, e.g. knowledgeBudgetTokens.project=20000
-conductor runs list|show|tail <runId>|cancel
-conductor usage [--scope workspace|project:<id>|ticket:<id>|role:<id>|model:<id>] [--window 24h|today|7d|week|month|all] [--grain hour|day|week] [--sync [--runtime <id>]]
-conductor knowledge show|edit|note|lint|curate|revert   knowledge bases: sizes, budgets, last curation, curation history
-conductor specs list|show <capability>|changes|search   the spec index (TUI explorer with `conductor specs`)
-conductor worktree list|verify|discard                 provider-managed worktrees and landed-work verdicts
-conductor workspace export [--out <dir>] | import <dir> --target <dir>   portable package (role specs, charters, knowledge, tickets as markdown, no secrets)
-conductor doctor [--install] [--yes]                    checks: runtimes, git, gh, openspec, worktrunk, db, permissions; --install offers no-root installs
+weave daemon models [show]|set conductor|workers --runtime <id> --model <id|default> [--effort <e>] [--clear]
+weave daemon models options add|remove …           daemon overlays for every workspace (VS-185, ADR 0013)
+weave workspace list|use|register|unregister|pause|resume   multi-workspace registry
+weave workspace set-default <key=value...>         workspace defaults, e.g. knowledgeBudgetTokens.project=20000
+weave runs list|show|tail <runId>|cancel
+weave usage [--scope workspace|project:<id>|ticket:<id>|role:<id>|model:<id>] [--window 24h|today|7d|week|month|all] [--grain hour|day|week] [--sync [--runtime <id>]]
+weave knowledge show|edit|note|lint|curate|revert   knowledge bases: sizes, budgets, last curation, curation history
+weave specs list|show <capability>|changes|search   the spec index (TUI explorer with `weave specs`)
+weave worktree list|verify|discard                 provider-managed worktrees and landed-work verdicts
+weave workspace export [--out <dir>] | import <dir> --target <dir>   portable package (role specs, charters, knowledge, tickets as markdown, no secrets)
+weave doctor [--install] [--yes]                    checks: runtimes, git, gh, openspec, worktrunk, db, permissions; --install offers no-root installs
 ```
 Agent commands (run-token scoped): §9.5.
 
@@ -1278,7 +1278,7 @@ Agent commands (run-token scoped): §9.5.
 
 ## 21. Front ends
 
-Two front doors, same product quality, same data: the **web app** and the **terminal (`conductor` TUI)**. Both are thin clients over the REST + SSE API; neither embeds business logic. Design goal: the human should prefer talking to the conductor here over opening any CLI directly, and should be able to watch any agent think without reading raw logs.
+Two front doors, same product quality, same data: the **web app** and the **terminal (`weave` TUI)**. Both are thin clients over the REST + SSE API; neither embeds business logic. Design goal: the human should prefer talking to the conductor here over opening any CLI directly, and should be able to watch any agent think without reading raw logs.
 
 ### 21.1 Web app (`packages/ui`)
 
@@ -1289,7 +1289,7 @@ A global section sits **above** the workspace list: daemon-wide **Needs you**, *
 1. **Chat** (default view, and the one place work is asked for — `1` on the rail, the first tab on a phone). Its composer carries a **microphone** toggle for voice dictation (Chrome / Web Speech by default; optional Voxtype on the daemon host, one-shot when recording stops; push-to-talk on `⌘⇧M` held, tap-to-toggle on mobile; transcript editable before sending). The same composer is used everywhere the human writes: chat, ticket comments, decision notes, revise-plan notes. Conductor thread with streamed replies, inline **decision cards** (approve/revise/reject with a note; plan cards render the proposal and tasks with diff-style highlighting of revisions), ticket chips that expand inline, worker chips with live status, slash commands (`/talk <ticket>`, `/ticket`, `/brief`), message search. A bound ticket thread opens as a secondary tab showing the ticket's comment stream with the worker. Typing/working indicators driven by run events ("Backend Engineer #7 is running tests…" from `tool.call` events).
 2. **Board**: tickets by project as kanban (status columns of §6.2) and as list/table with filters (project, agent, kind, priority, blocked-on-me). Ticket page: description, plan document with revision history and inline approve, comments (agent/human/system, run-attributed), work products (PR with live CI state), OpenSpec progress (tasks ticked), blockers graph, runs and cost for this ticket (subtree rollup), worktree state.
 3. **Live** (`4` on the rail; on a phone, reached from More — six tabs still do not fit at 390px): a grid of every worker currently working on a ticket in this workspace, each cell the worker's name, the ticket, and that worker's live transcript as it streams. Paused and idle workers are not mixed in. Empty when nobody is working.
-4. **Team**: org view (conductor → projects → roles → live workers); roles with status, runtime/model (dropdown from `listModels()`), max workers, spend, charter with revision history and rollback, pause/resume/retire; workers as live cards (ticket, phase, worktree state, last status line, spend) opening a worker page with the **live transcript** (same renderer as `conductor attach`: assistant text, tool calls collapsed, file diffs, status lines), brief, steering input (posts a ticket comment), relaunch/cancel.
+4. **Team**: org view (conductor → projects → roles → live workers); roles with status, runtime/model (dropdown from `listModels()`), max workers, spend, charter with revision history and rollback, pause/resume/retire; workers as live cards (ticket, phase, worktree state, last status line, spend) opening a worker page with the **live transcript** (same renderer as `weave attach`: assistant text, tool calls collapsed, file diffs, status lines), brief, steering input (posts a ticket comment), relaunch/cancel.
 5. **Decisions** inbox: everything waiting on the human, one card per decision, answer inline; also the conductor-owned ones for transparency.
 6. **Runs**: timeline of runs across workers with filters; run page = transcript + phase timings + usage + cost + raw event download.
 7. **Usage**: tokens and cost by workspace, project, role, worker, ticket (with subtree rollup) and model over selectable windows (24 h, today, week, month, custom) and grains (hour, day, week); model mix over time; run success with recovered count; a per-ticket turn breakdown. Cost is always labelled reported or estimated, tokens are the headline.
@@ -1312,7 +1312,7 @@ Quality bar: no spinner-only states (skeletons with real structure), every list 
 
 ### 21.2 Terminal (`packages/tui`, Ink)
 
-`conductor chat` (conductor), `conductor attach <agent>`, `conductor top`, plus non-interactive `conductor say` and `conductor briefing`. Same renderer for transcripts and decision cards as the web (shared `@agent-conductor/render` package that turns run events and decisions into a view model; web and TUI only differ in the widget layer). Decision cards in the TUI render options as numbered choices; answering is `1`/`2` or free text. Mouse optional. Works over SSH. This is what the Hyprland/herdr/tmux surfaces (§14b) place in windows.
+`weave chat` (conductor), `weave attach <agent>`, `weave top`, plus non-interactive `weave say` and `weave briefing`. Same renderer for transcripts and decision cards as the web (shared `@weave-ai/render` package that turns run events and decisions into a view model; web and TUI only differ in the widget layer). Decision cards in the TUI render options as numbered choices; answering is `1`/`2` or free text. Mouse optional. Works over SSH. This is what the Hyprland/herdr/tmux surfaces (§14b) place in windows.
 
 ### 21.3 Shared render package
 
@@ -1326,31 +1326,31 @@ Each milestone ends with a demo script in `docs/demos/M<n>.md` that the implemen
 
 **M0 — Scaffold (1–2 days)**
 - pnpm monorepo, packages stubbed, shared enums/Zod, Drizzle schema + first migration for all §6 tables, guard scripts, CI (lint, typecheck, unit tests), `packages/render` skeleton.
-- Accept: `pnpm test` green; `conductor init` creates the §5 layout; JSON Schemas for `workspace.yaml` and `agent.yaml` generated and validated; daemon registers two workspaces and serves `/api/w/<id>/health` for both.
+- Accept: `pnpm test` green; `weave init` creates the §5 layout; JSON Schemas for `workspace.yaml` and `agent.yaml` generated and validated; daemon registers two workspaces and serves `/api/w/<id>/health` for both.
 
 **M1 — Conductor you can talk to (core loop)**
-- Operator password, session tokens, `conductor login`/contexts, authenticated public listener with self-signed TLS, loopback listener for run tokens; the whole milestone is demoed from a second machine.
+- Operator password, session tokens, `weave login`/contexts, authenticated public listener with self-signed TLS, loopback listener for run tokens; the whole milestone is demoed from a second machine.
 - Multi-workspace daemon with wake queue, dispatcher, run engine, supervisor (silence + timeout), sessions (persistent policy), Claude runtime adapter (headless + resume + stream-json parser + structured report + `listModels`), MCP endpoint with the common + conductor tools, `cli` and `web` channels, tickets service with transitions and guards, decisions service, activity + events outbox, cost events from Claude usage, conductor model selection.
-- UI: `conductor chat` TUI with streaming and decision cards; web app shell with Chat view (streaming, cards) and Runs view (live transcript).
-- Accept: from a laptop against a daemon on another host, `conductor login` then `conductor say "create a ticket to add a README badge in project api"` → conductor creates the ticket (no roles yet, so it stays `backlog` and the conductor says so). Restart the daemon mid-run → the run is marked interrupted, the wake is retried once, nothing is lost. Turn 2 resumes the session (same session id; the conductor recalls turn 1). Changing the conductor's model in settings takes effect on the next turn.
+- UI: `weave chat` TUI with streaming and decision cards; web app shell with Chat view (streaming, cards) and Runs view (live transcript).
+- Accept: from a laptop against a daemon on another host, `weave login` then `weave say "create a ticket to add a README badge in project api"` → conductor creates the ticket (no roles yet, so it stays `backlog` and the conductor says so). Restart the daemon mid-run → the run is marked interrupted, the wake is retried once, nothing is lost. Turn 2 resumes the session (same session id; the conductor recalls turn 1). Changing the conductor's model in settings takes effect on the next turn.
 
 **M2 — Roles, workers, worktrees, OpenSpec flow, worker-performed merge**
-- `conductor project add` (clone, worktree provider setup, `openspec init`, project-KB scout ticket), hiring roles (`ac_role_hire`, spec + charter generation, `pending_activation`, `hire_approval` decision with runtime switch), worker spawn with generated briefs and provider-created worktrees (worktrunk default, git fallback), landed-work removal test, worker tools, OpenSpec adapter, full `change` ticket flow through `proposed → approved → in_progress → in_review → merging → done` with the same worker rebasing/resolving/merging across turns of one session, reconciliation of PR state, archive on the project's landing branch, worker retirement and archive, knowledge bases with budgets and curation workers, stuck-worker relaunch, skills `agent-conductor-worker|openspec|scout|knowledge|hire|planning|conductor`.
-- UI: Board + ticket page (plan approval inline), Team view with live worker cards and transcript, `conductor attach`.
-- Accept (demo): human asks for a feature → ticket → conductor hires a role → human approves hire → a worker spawns and proposes in its worktree → human approves the plan → the same worker implements, ticks tasks, opens PR → human approves merge → the worker rebases onto a deliberately conflicting main, resolves, merges → daemon archives the change, removes the worktree, retires the worker → ticket `done` → conductor reports. Three tickets assigned to one role run as three concurrent workers in separate worktrees; a fourth waits for a slot and the conductor says so. Killing a worker mid-turn relaunches it with a progress note and it finishes. `conductor ticket discard` on an unlanded worktree refuses without `--force`. The demo passes with both worktree providers.
+- `weave project add` (clone, worktree provider setup, `openspec init`, project-KB scout ticket), hiring roles (`weave_role_hire`, spec + charter generation, `pending_activation`, `hire_approval` decision with runtime switch), worker spawn with generated briefs and provider-created worktrees (worktrunk default, git fallback), landed-work removal test, worker tools, OpenSpec adapter, full `change` ticket flow through `proposed → approved → in_progress → in_review → merging → done` with the same worker rebasing/resolving/merging across turns of one session, reconciliation of PR state, archive on the project's landing branch, worker retirement and archive, knowledge bases with budgets and curation workers, stuck-worker relaunch, skills `weave-ai-worker|openspec|scout|knowledge|hire|planning|conductor`.
+- UI: Board + ticket page (plan approval inline), Team view with live worker cards and transcript, `weave attach`.
+- Accept (demo): human asks for a feature → ticket → conductor hires a role → human approves hire → a worker spawns and proposes in its worktree → human approves the plan → the same worker implements, ticks tasks, opens PR → human approves merge → the worker rebases onto a deliberately conflicting main, resolves, merges → daemon archives the change, removes the worktree, retires the worker → ticket `done` → conductor reports. Three tickets assigned to one role run as three concurrent workers in separate worktrees; a fourth waits for a slot and the conductor says so. Killing a worker mid-turn relaunches it with a progress note and it finishes. `weave ticket discard` on an unlanded worktree refuses without `--force`. The demo passes with both worktree providers.
 
 **M3 — Telegram, surfaces, human-in-the-loop polish**
-- Telegram channel (long polling, allowlist, buttons, degrade path), decision cards on all channels, `/talk <ticket>`, busy acknowledgements, conductor digest wakes, briefing skill + `conductor briefing`, decision expiry, `decisions.md`, native ask interception.
-- Surfaces: `surface-sdk`, the client-side `conductor presenter`, `headless`, `tmux` (reference), **`hyprland`** and **`herdr`** adapters, `conductor presentation`, `conductor top`; built-in ACME, TOTP, device management, PWA push notifications, remote voice dictation endpoint, `conductor daemon install-service` and the Docker image.
-- Accept: the daemon on a VPS with ACME TLS; the M2 demo done from a phone via the PWA and via Telegram, with the laptop closed; then on the Hyprland machine, `presentation.workers.surface=hyprland workspace=5` puts every live worker in its own terminal window on workspace 5 with live titles that appear and disappear with tickets, and `conductor chat` runs in a terminal on the current workspace; switching to `herdr` moves them into one herdr workspace with a tab per project and a pane per worker, without restarting any run.
+- Telegram channel (long polling, allowlist, buttons, degrade path), decision cards on all channels, `/talk <ticket>`, busy acknowledgements, conductor digest wakes, briefing skill + `weave briefing`, decision expiry, `decisions.md`, native ask interception.
+- Surfaces: `surface-sdk`, the client-side `weave presenter`, `headless`, `tmux` (reference), **`hyprland`** and **`herdr`** adapters, `weave presentation`, `weave top`; built-in ACME, TOTP, device management, PWA push notifications, remote voice dictation endpoint, `weave daemon install-service` and the Docker image.
+- Accept: the daemon on a VPS with ACME TLS; the M2 demo done from a phone via the PWA and via Telegram, with the laptop closed; then on the Hyprland machine, `presentation.workers.surface=hyprland workspace=5` puts every live worker in its own terminal window on workspace 5 with live titles that appear and disappear with tickets, and `weave chat` runs in a terminal on the current workspace; switching to `herdr` moves them into one herdr workspace with a tab per project and a pane per worker, without restarting any run.
 
 **M4 — Usage analytics, full web app**
-- Usage API with the shared windows/grains, daily rollups, the spec index and its tools (§12.5), OTLP export, log retention, `conductor doctor`, workspace export/import.
+- Usage API with the shared windows/grains, daily rollups, the spec index and its tools (§12.5), OTLP export, log retention, `weave doctor`, workspace export/import.
 - UI: Decisions inbox, Usage (all views in §16.3), Knowledge & Specs with the Spec Explorer and graph view, Settings (all sections incl. presentation and model dropdowns), command palette, search, PWA, voice dictation; the design-language pass (§21.1 tokens, Linear-grade layout and interaction, both themes, status set) applied everywhere, reviewed with the human on the three reference screens.
-- Accept: after the M2 demo, the Usage view shows the feature ticket's tokens and cost per turn, the project's last-7-days series by day, and the model mix; `conductor usage --scope ticket:ACME-42` matches the UI to the token; a UX review session with the human signs off the Chat, Team and Usage views on desktop and phone.
+- Accept: after the M2 demo, the Usage view shows the feature ticket's tokens and cost per turn, the project's last-7-days series by day, and the model mix; `weave usage --scope ticket:ACME-42` matches the UI to the token; a UX review session with the human signs off the Chat, Team and Usage views on desktop and phone.
 
 **M5 — More runtimes and plugin API**
-- Codex, OpenCode, Gemini adapters (args, event parsers with fixtures, session resume/fork, cwd=home instruction discovery verified, per-workspace config homes, `listModels`, `conductor runtime login`), `plugin-sdk` stabilized with sample runtime, channel and surface plugins in `examples/`, webhooks, OpenAPI + `llms/api.txt`.
+- Codex, OpenCode, Gemini adapters (args, event parsers with fixtures, session resume/fork, cwd=home instruction discovery verified, per-workspace config homes, `listModels`, `weave runtime login`), `plugin-sdk` stabilized with sample runtime, channel and surface plugins in `examples/`, webhooks, OpenAPI + `llms/api.txt`.
 - Accept: the M2 demo passes with the role on Codex and again on OpenCode; the model dropdown shows each runtime's models; a third-party surface plugin loaded from a local path places agents somewhere new.
 
 **M6 — Hardening**
@@ -1364,7 +1364,7 @@ Each milestone ends with a demo script in `docs/demos/M<n>.md` that the implemen
 | # | Question | Decision |
 |---|---|---|
 | 1 | Single or multi-workspace daemon | **Multi-workspace from M1.** One daemon per host, registry of workspaces, one SQLite DB each, workspace-scoped API. |
-| 2 | Conductor model | **Human-configured.** `models.conductor` — a dropdown of models from its runtime (`listModels()`), in Settings → Models and `conductor models set conductor` (ADR 0011). |
+| 2 | Conductor model | **Human-configured.** `models.conductor` — a dropdown of models from its runtime (`listModels()`), in Settings → Models and `weave models set conductor` (ADR 0011). |
 | 3 | Where OpenSpec artifacts live / when to archive | **Artifacts on the ticket branch; archive on the project's landing branch after merge** (VS-119; the default branch when the project declares no landing branch), by the daemon. |
 | 4 | Merge authority | **The implementing worker merges its own ticket once the human approves, and resolves merge conflicts itself.** New `merging` status; daemon verifies. Superseded in part by #18. |
 | 5 | Direct chat with workers | Allowed, through the worker's ticket only (superseded by #17). |
@@ -1372,7 +1372,7 @@ Each milestone ends with a demo script in `docs/demos/M<n>.md` that the implemen
 | 7 | Sandboxing | None in v1; CLIs run on the host under their own permission model. |
 | 8 | Database | SQLite only for now. |
 | 9 | Addressing the human | By configured name; **"captain" when no name is provided.** |
-| 10 | Telemetry | OpenSpec telemetry disabled by us; CLI telemetry is the operator's setting. No AgentConductor phone-home. |
+| 10 | Telemetry | OpenSpec telemetry disabled by us; CLI telemetry is the operator's setting. No Weave AI phone-home. |
 
 Added requirements from the same review, folded in: presentation surfaces with herdr and Hyprland (§14b), two polished front doors, web and terminal (§21).
 
@@ -1381,7 +1381,7 @@ Added requirements from the same review, folded in: presentation surfaces with h
 | # | Question | Decision |
 |---|---|---|
 | 11 | Persistent per-project agent vs disposable per-ticket workers | **Roles are templates; a fresh worker is spawned per ticket** (firstmate's crewmate model), with one session for the ticket's life. Concurrency = more workers. Cross-ticket familiarity lives in the project KB and the repo, not in sessions. §11 rewritten. |
-| 12 | Worktree tooling: worktrunk vs agenttools/worktree vs our own pool | **A `WorktreeProvider` interface with worktrunk as the default and plain `git worktree` as the built-in fallback.** agenttools/worktree was rejected: Claude-only, GitHub-issue-bound, macOS/iTerm2+tmux, 13 stars, no merge workflow, and it spawns its own Claude workers, which duplicates AgentConductor's job. The pool idea is dropped; worktrunk's hooks and build-cache copying cover the warm-up need. The landed-work removal rule stays. §11.5 rewritten. |
+| 12 | Worktree tooling: worktrunk vs agenttools/worktree vs our own pool | **A `WorktreeProvider` interface with worktrunk as the default and plain `git worktree` as the built-in fallback.** agenttools/worktree was rejected: Claude-only, GitHub-issue-bound, macOS/iTerm2+tmux, 13 stars, no merge workflow, and it spawns its own Claude workers, which duplicates Weave AI's job. The pool idea is dropped; worktrunk's hooks and build-cache copying cover the warm-up need. The landed-work removal rule stays. §11.5 rewritten. |
 
 **Fifth review (2026-09-04):**
 
@@ -1389,19 +1389,19 @@ Added requirements from the same review, folded in: presentation surfaces with h
 |---|---|---|
 | 23 | Specs as knowledge | OpenSpec specs and changes are indexed per project and explorable in the UI next to the knowledge bases (Spec Explorer with capability pages, change pages, search and a graph view); the conductor uses the index to answer questions. §12.5. |
 | 24 | Mockup accepted | The Claude Design mockup is imported and its decisions adopted (design contract §7): land on Needs you after sign-in, five phone tabs (the floating Start Work they were drawn around has since been removed — the chat's composer is the one way in), six board columns, push-to-talk on desktop, needs-you in the accent hue, worker questions as decision cards, auto-merge suppresses only the merge card, specs read-only. |
-| 22 | Remote daemon | **Remote-first is core.** The daemon is a server that can run on any host; web app, `conductor` and Telegram are remote clients; password-gated (+TOTP) and TLS off-loopback; presentation surfaces run in a client-side presenter. §4.4, §14b, §19. |
+| 22 | Remote daemon | **Remote-first is core.** The daemon is a server that can run on any host; web app, `weave` and Telegram are remote clients; password-gated (+TOTP) and TLS off-loopback; presentation surfaces run in a client-side presenter. §4.4, §14b, §19. |
 | 18 | Merge consent | **A worker never merges without human approval unless the ticket has `auto_merge` on (default off).** The human can set it on a ticket, or tell the conductor to create a ticket with it on. The conductor can never approve a merge itself. §11.4. |
 | 19 | Budgets | **No budgets in v1.** Usage is collected and surfaced workspace-wide, per project, per ticket, per role/worker, per model, over 24 h / day / week / month windows. §16. |
-| 20 | Frontend input | Mobile-first web app with voice dictation (mic button and keyboard shortcut) for prompting the conductor. Every request goes through the conductor chat; there is no separate "Start Work" surface. §21.1. |
+| 20 | Frontend input | Mobile-first web app with voice dictation (mic button and keyboard shortcut) for prompting the conductor. Every request goes through the weave chat; there is no separate "Start Work" surface. §21.1. |
 | 21 | Web design language (revised) | **Linear as the UI/UX reference**: fast, calm, keyboard-first, dense lists, subtle borders, small radii, one accent, Linear-style status glyphs, `⌘K` for everything, **light and dark modes as equals**. Paperclip's tokens-only and status-vocabulary discipline kept. §21.1. |
 
 **Fourth review (2026-09-03):**
 
 | # | Question | Decision |
 |---|---|---|
-| 13 | Hyprland rules delivery | **Never touch any Hyprland config file.** Rules and windows are applied at runtime through `hyprctl` (keyword rules re-applied on start/reconcile); `conductor doctor` prints equivalent lines for humans who want them persistent. §14b.3. |
+| 13 | Hyprland rules delivery | **Never touch any Hyprland config file.** Rules and windows are applied at runtime through `hyprctl` (keyword rules re-applied on start/reconcile); `weave doctor` prints equivalent lines for humans who want them persistent. §14b.3. |
 | 14 | Terminal emulator | **System default**: `$TERMINAL`, else `xdg-terminal-exec`, else ask; no hard-coded list. Per-emulator flag spelling handled by a small table. §14b.3. |
-| 15 | Raw CLI TUI per worker | **Approved for M6**: `claude --bg` + `claude attach` behind `interactive: true` per role on the Claude runtime, with `conductor attach` fallback and an ADR. §14b.4. |
+| 15 | Raw CLI TUI per worker | **Approved for M6**: `claude --bg` + `claude attach` behind `interactive: true` per role on the Claude runtime, with `weave attach` fallback and an ADR. §14b.4. |
 | 16 | Web design language | ~~Boxy, terminal-like~~ Superseded by #21. |
 | 17 | Chat scope | **Only with the conductor and with live workers, and worker chat happens through the ticket** (comments that wake the worker; relayed to bound threads). No chat workers, no talking to a role. §11.7, §14.2. |
 | 6 | worktrunk config ownership | Resolved: `wt --config <file> --config-set …` scopes every invocation to the daemon's generated config; the human's config is untouched. |
@@ -1418,4 +1418,4 @@ None at the moment. New ones are added here as they arise.
 - `docs/adr/` records deviations from this plan with reasons.
 - `docs/demos/M1..M6.md` scripts pass.
 
-**Gaps closed in the final pass (2026-09-04).** Webhook dispatch (HMAC-signed, at-least-once, per-webhook cursor); supervisor curation (10 min), forge reconciliation + archive backfill (hourly) and retention (daily) with persisted stamps; workspace export/import; `conductor workspace pause|resume|export|import`, `conductor project set-policy`, `conductor daemon install-service --launchd`; `/help` on every channel; plugin loader resolving relative `plugins:` paths against the workspace root; Dockerfile + `docs/DOCKER.md`; `examples/plugins/echo-channel`. `ac_report` with `state: done` closes `question` tickets, and tickets can be created by project slug. Verified live on the Claude Code and OpenCode runtimes.
+**Gaps closed in the final pass (2026-09-04).** Webhook dispatch (HMAC-signed, at-least-once, per-webhook cursor); supervisor curation (10 min), forge reconciliation + archive backfill (hourly) and retention (daily) with persisted stamps; workspace export/import; `weave workspace pause|resume|export|import`, `weave project set-policy`, `weave daemon install-service --launchd`; `/help` on every channel; plugin loader resolving relative `plugins:` paths against the workspace root; Dockerfile + `docs/DOCKER.md`; `examples/plugins/echo-channel`. `weave_report` with `state: done` closes `question` tickets, and tickets can be created by project slug. Verified live on the Claude Code and OpenCode runtimes.

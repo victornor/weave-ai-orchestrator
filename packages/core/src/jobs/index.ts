@@ -13,8 +13,8 @@
  * would be replayed to every SSE client and pushed through every hook and webhook.
  */
 import { EventEmitter } from 'node:events';
-import { newId, nowIso, type Params } from '@agent-conductor/db';
-import { JOB_STEPS, OcError, isTerminalJob, type Job, type JobKind, type JobLogLine, type JobLogStream, type JobState, type JobStep, type JobStepState } from '@agent-conductor/shared';
+import { newId, nowIso, type Params } from '@weave-ai/db';
+import { JOB_STEPS, OcError, isTerminalJob, type Job, type JobKind, type JobLogLine, type JobLogStream, type JobState, type JobStep, type JobStepState } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, JobsService, JobStreamItem } from '../api.js';
 

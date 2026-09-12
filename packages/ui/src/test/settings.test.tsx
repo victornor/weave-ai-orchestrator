@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProjectConfigSchema } from '@agent-conductor/shared';
+import { ProjectConfigSchema } from '@weave-ai/shared';
 import { ApiError } from '../api/client';
 
 const state = vi.hoisted(() => ({

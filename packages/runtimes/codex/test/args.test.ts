@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TurnInput } from '@agent-conductor/runtime-sdk';
+import type { TurnInput } from '@weave-ai/runtime-sdk';
 import { buildArgs, mcpConfigToml, mcpOverrides, resumeCommand } from '../src/args.js';
 
 function input(over: Partial<TurnInput> = {}): TurnInput {
@@ -57,25 +57,25 @@ describe('codex buildArgs', () => {
 
   it('passes MCP per invocation and keeps the bearer token out of argv', () => {
     const b = buildArgs(input({
-      mcpServers: { agentconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer secret-token', 'X-Trace': 'abc' } } },
+      mcpServers: { 'weave-ai': { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer secret-token', 'X-Trace': 'abc' } } },
     }));
-    expect(s(b.args)).toContain('-c mcp_servers.agentconductor.url="http://127.0.0.1:7777/mcp/runs/run-1"');
-    expect(s(b.args)).toContain('-c mcp_servers.agentconductor.bearer_token_env_var="AC_MCP_TOKEN_AGENTCONDUCTOR"');
-    expect(s(b.args)).toContain('-c mcp_servers.agentconductor.http_headers.X-Trace="abc"');
+    expect(s(b.args)).toContain('-c mcp_servers.weave-ai.url="http://127.0.0.1:7777/mcp/runs/run-1"');
+    expect(s(b.args)).toContain('-c mcp_servers.weave-ai.bearer_token_env_var="AC_MCP_TOKEN_WEAVE_AI"');
+    expect(s(b.args)).toContain('-c mcp_servers.weave-ai.http_headers.X-Trace="abc"');
     expect(s(b.args)).not.toContain('secret-token');
-    expect(b.env['AC_MCP_TOKEN_AGENTCONDUCTOR']).toBe('secret-token');
+    expect(b.env['AC_MCP_TOKEN_WEAVE_AI']).toBe('secret-token');
   });
 
   it('falls back to CODEX_HOME/config.toml when asked', () => {
     const b = buildArgs(input({
       configHome: '/ws/.agent-conductor/runtimes/codex',
       options: { mcpViaConfigFile: true },
-      mcpServers: { agentconductor: { type: 'http', url: 'http://h/mcp', headers: { Authorization: 'Bearer t' } } },
+      mcpServers: { 'weave-ai': { type: 'http', url: 'http://h/mcp', headers: { Authorization: 'Bearer t' } } },
     }));
     expect(b.env['CODEX_HOME']).toBe('/ws/.agent-conductor/runtimes/codex');
     expect(s(b.args)).not.toContain('mcp_servers');
     const f = b.files.find((x) => x.path === '/ws/.agent-conductor/runtimes/codex/config.toml')!;
-    expect(f.content).toContain('[mcp_servers.agentconductor]');
+    expect(f.content).toContain('[mcp_servers.weave-ai]');
     expect(f.content).toContain('url = "http://h/mcp"');
   });
 

@@ -147,7 +147,7 @@ export interface Incident {
   runId: string;
   roleId: string | null;
   createdAt: string;
-  /** Set by `ac_incident_resolve` (VS-271); null means still open. */
+  /** Set by `weave_incident_resolve` (VS-271); null means still open. */
   resolvedAt: string | null;
   resolvedByAgentId: string | null;
   resolution: string | null;
@@ -287,7 +287,7 @@ export interface RoutineListItem extends Routine {
 
 /**
  * One entry in a workspace's changelog (PLAN §13.6). Derived from an `activity` row at read time, so
- * `summary` and `link` are rendered rather than stored — see `changelogEntry` in `@agent-conductor/render`.
+ * `summary` and `link` are rendered rather than stored — see `changelogEntry` in `@weave-ai/render`.
  */
 export interface ChangelogEntry {
   id: string; at: string; kind: E.ChangelogKind;

@@ -6,7 +6,7 @@
  */
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Run, RunEvent } from '@agent-conductor/shared';
+import type { Run, RunEvent } from '@weave-ai/shared';
 import { agent, run as makeRun, ticket } from './factories';
 
 const state = vi.hoisted(() => ({

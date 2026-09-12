@@ -6,8 +6,8 @@
  * strips unknown keys, so `defaults.runtime`, `conductor.model` and the rest are already gone by the
  * time a parsed config exists. The loader does the I/O; this decides.
  */
-import type { ModelSetting, WorkspaceModels } from '@agent-conductor/shared';
-import { ModelSettingSchema } from '@agent-conductor/shared';
+import type { ModelSetting, WorkspaceModels } from '@weave-ai/shared';
+import { ModelSettingSchema } from '@weave-ai/shared';
 
 /** A role as the derivation needs it: what that role was actually running on. */
 export interface RoleRuntimeRow { runtimeId: string | null; model: string | null; effort: string | null }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TurnInput } from '@agent-conductor/runtime-sdk';
+import type { TurnInput } from '@weave-ai/runtime-sdk';
 import { buildArgs, opencodeConfig, resumeCommand } from '../src/args.js';
 
 function input(over: Partial<TurnInput> = {}): TurnInput {
@@ -43,9 +43,9 @@ describe('opencode buildArgs', () => {
   });
 
   it('writes the MCP server into .opencode/opencode.json in cwd', () => {
-    const b = buildArgs(input({ mcpServers: { agentconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } } }));
+    const b = buildArgs(input({ mcpServers: { 'weave-ai': { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } } }));
     const f = b.files.find((x) => x.path === '/home/agent/.opencode/opencode.json')!;
-    expect(JSON.parse(f.content).mcp.agentconductor).toEqual({
+    expect(JSON.parse(f.content).mcp['weave-ai']).toEqual({
       type: 'remote', url: 'http://127.0.0.1:7777/mcp/runs/run-1', enabled: true, headers: { Authorization: 'Bearer t' },
     });
   });

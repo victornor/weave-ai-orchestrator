@@ -1,4 +1,4 @@
-/** `conductor project add|retry` against a stub daemon that streams a job (VS-37). */
+/** `weave project add|retry` against a stub daemon that streams a job (VS-37). */
 import { createServer, type Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildProgram } from './program.js';
@@ -81,7 +81,7 @@ async function cli(...argv: string[]): Promise<{ out: string; err: string }> {
 
 const project = (over: Record<string, unknown> = {}) => ({ id: 'p1', slug: 'api', status: 'cloning', defaultBranch: 'main', clonePath: '/ws/projects/api', ...over });
 
-describe('conductor project add', () => {
+describe('weave project add', () => {
   it('prints each sub-step and the output of the one running', async () => {
     routes['POST /api/w/ws1/projects'] = () => ({ status: 202, body: { project: project(), jobId: 'j1' } });
     routes['GET /api/w/ws1/projects/api'] = () => ({ body: project({ status: 'ready' }) });
@@ -128,7 +128,7 @@ describe('conductor project add', () => {
     const { err } = await cli('project', 'add', 'git@github.com:acme/nope.git', '--id', 'api');
     expect(err).toContain('failed Clone the repository');
     expect(err).toContain('fatal: repository not found');
-    expect(err).toContain('conductor project retry api');
+    expect(err).toContain('weave project retry api');
     expect(process.exitCode).toBeGreaterThan(0);
   });
 
@@ -151,7 +151,7 @@ describe('conductor project add', () => {
   });
 });
 
-describe('conductor project set-landing-branch (VS-122)', () => {
+describe('weave project set-landing-branch (VS-122)', () => {
   it('sets the landing branch and reports what is in effect', async () => {
     routes['PATCH /api/w/ws1/projects/api'] = () => ({ body: project({ status: 'ready', landingBranch: 'edge' }) });
 
@@ -196,7 +196,7 @@ describe('conductor project set-landing-branch (VS-122)', () => {
   });
 });
 
-describe('conductor project retry', () => {
+describe('weave project retry', () => {
   it('posts the retry and follows the new job', async () => {
     routes['POST /api/w/ws1/projects/api/retry'] = () => ({ status: 202, body: { project: project(), jobId: 'j1' } });
     routes['GET /api/w/ws1/projects/api'] = () => ({ body: project({ status: 'ready' }) });

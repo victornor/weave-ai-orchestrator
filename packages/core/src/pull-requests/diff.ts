@@ -5,7 +5,7 @@
  * `git()` helper (`execFile`, no shell, `GIT_TERMINAL_PROMPT=0`, a timeout) — `diff.test.ts`
  * enumerates every argv this module can build and refuses anything that is not one of these two.
  */
-import { OcError } from '@agent-conductor/shared';
+import { OcError } from '@weave-ai/shared';
 import { git } from '../util/git.js';
 
 /** The only git subcommands this module ever runs. Named so the allowlist test can assert against it directly. */

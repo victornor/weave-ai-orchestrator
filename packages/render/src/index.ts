@@ -1,4 +1,4 @@
-export const PACKAGE = '@agent-conductor/render';
+export const PACKAGE = '@weave-ai/render';
 
 export * from './types.js';
 export * from './format.js';

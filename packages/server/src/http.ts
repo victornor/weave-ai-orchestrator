@@ -1,8 +1,8 @@
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z, type ZodTypeAny } from 'zod';
-import { OcError, type ErrorCode } from '@agent-conductor/shared';
-import { getLogger } from '@agent-conductor/core';
+import { OcError, type ErrorCode } from '@weave-ai/shared';
+import { getLogger } from '@weave-ai/core';
 import type { AppEnv } from './types.js';
 
 const log = getLogger('http');

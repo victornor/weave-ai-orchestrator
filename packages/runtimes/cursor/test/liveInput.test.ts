@@ -1,6 +1,6 @@
 import { rmSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { RuntimeEvent, TurnHandle, TurnInput } from '@agent-conductor/runtime-sdk';
+import type { RuntimeEvent, TurnHandle, TurnInput } from '@weave-ai/runtime-sdk';
 import { adapter } from '../src/adapter.js';
 import { writeFakeCursorCli, writeSilentFakeCursorCli } from './fakeCli.js';
 

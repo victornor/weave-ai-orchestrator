@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakeRuntime, type AccountDescription, type AccountProbeInput, type CredentialFacts } from '@agent-conductor/runtime-sdk';
+import { FakeRuntime, type AccountDescription, type AccountProbeInput, type CredentialFacts } from '@weave-ai/runtime-sdk';
 import { ensureFreshCredential } from './credentialFreshness.js';
 import { type CredentialReader, linkRuntimeCredentials, reconcileRuntimeCredential } from '../workspace/loader.js';
 

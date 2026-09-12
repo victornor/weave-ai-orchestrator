@@ -1,5 +1,5 @@
 {
-  "name": "@agent-conductor/surface-hyprland",
+  "name": "@weave-ai/surface-hyprland",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -15,8 +15,8 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@agent-conductor/shared": "workspace:*",
-    "@agent-conductor/surface-sdk": "workspace:*",
+    "@weave-ai/shared": "workspace:*",
+    "@weave-ai/surface-sdk": "workspace:*",
     "execa": "^9.6.0"
   },
   "devDependencies": {}

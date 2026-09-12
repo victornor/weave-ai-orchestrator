@@ -1,4 +1,4 @@
-/** `conductor workspace list|use|register|unregister|set-default|pause|resume|export|import` (PLAN §20). */
+/** `weave workspace list|use|register|unregister|set-default|pause|resume|export|import` (PLAN §20). */
 import type { Command } from 'commander';
 import { resolve as resolvePath } from 'node:path';
 import { emit, fields, style, table, write } from '../output.js';
@@ -23,7 +23,7 @@ export function register(program: Command): void {
           { header: 'PREFIX', get: (r) => String(r['ticketPrefix'] ?? '') },
           { header: 'STATUS', get: (r) => String(r['status'] ?? '') },
           { header: 'PATH', get: (r) => String(r['rootPath'] ?? r['path'] ?? '') },
-        ], { empty: 'no workspaces — run `conductor init <dir>`' });
+        ], { empty: 'no workspaces — run `weave init <dir>`' });
       });
     }));
 
@@ -33,7 +33,7 @@ export function register(program: Command): void {
     .description('make a workspace the default for the active context')
     .action(async (id: string, _opts: unknown, command: Command) => run(async () => {
       const { contextName } = await session(command, { workspace: 'none' });
-      if (!contextName) throw new Error('no context configured — run `conductor login <url>` first');
+      if (!contextName) throw new Error('no context configured — run `weave login <url>` first');
       const file = loadContexts();
       const entry = file.contexts[contextName];
       if (!entry) throw new Error(`no such context: ${contextName}`);
@@ -82,7 +82,7 @@ Keys:    knowledgeBudgetTokens.project=<n>    knowledgeBudgetTokens.document=<n>
          knowledgeBudgetTokens.decisions=<n>  bootstrapBudgetTokens=<n>
          maxConcurrentRuns=<n>  turnTimeoutSec=<n>  autoMerge=true|false
          yolo=true|false  (YOLO mode: the daemon grants plan and merge approvals itself)
-Example: conductor workspace set-default knowledgeBudgetTokens.project=20000`)
+Example: weave workspace set-default knowledgeBudgetTokens.project=20000`)
     .action(async (assignments: string[], _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
       const defaults = parseAssignments(assignments);

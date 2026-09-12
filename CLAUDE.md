@@ -1,4 +1,4 @@
-# CLAUDE.md — working on AgentConductor
+# CLAUDE.md — working on Weave AI
 
 For coding agents (and humans) changing this repo. User-facing docs are in [`README.md`](README.md)
 and [`docs/`](docs/); this file is about the code.
@@ -37,10 +37,10 @@ packages/
                   usage, threads, briefing, prompts, auth, forge, workspace loader
   server/         the process: Hono app, routes, two listeners, MCP endpoint, auth, SSE,
                   static UI serving, channel manager, plugin loading. `dist/bin.js` is the daemon.
-  cli/            the `conductor` command tree (commander). `dist/bin.js` is the CLI.
-  tui/            Ink components behind `conductor chat`, `conductor attach`, `conductor top`, `conductor specs explore`
+  cli/            the `weave` command tree (commander). `dist/bin.js` is the CLI.
+  tui/            Ink components behind `weave chat`, `weave attach`, `weave top`, `weave specs explore`
   ui/             React 19 + Vite + Tailwind v4 web app; built to `dist/`, served by the daemon
-  presenter/      the client-side reconciler behind `conductor presenter`
+  presenter/      the client-side reconciler behind `weave presenter`
   runtimes/       claude, codex, opencode, gemini, cursor adapters
   channels/       web, cli, telegram
   surfaces/       headless, tmux, herdr, hyprland
@@ -51,7 +51,7 @@ scripts/          guard-boundaries.mjs, guard-console.mjs, guard-test-fixtures.m
 
 Dependency direction, enforced by `scripts/guard-boundaries.mjs`:
 
-- `shared` imports **nothing** from `@agent-conductor/*`.
+- `shared` imports **nothing** from `@weave-ai/*`.
 - The three SDKs may import `shared` only — never `core`, `db` or `server`.
 - `core` may not import `server`, `cli`, `tui`, `ui`, `presenter`, or any runtime/channel/surface
   package. Adapters are reached through the registries on `WorkspaceContext`, never by import.
@@ -77,7 +77,7 @@ details, retryable)`. `OcError.status(code)` maps to HTTP; the API serialises
 Agent tools return `ToolResult<T>` (`ok(data)` / `fail(err)`) rather than throwing.
 
 **No `console` outside `cli`, `tui` and `ui`.** Enforced by `scripts/guard-console.mjs`. Everywhere
-else use `getLogger(domain, bindings)` from `@agent-conductor/core` with a domain from `LOG_DOMAINS`;
+else use `getLogger(domain, bindings)` from `@weave-ai/core` with a domain from `LOG_DOMAINS`;
 it is pino, structured, to stderr (`log.info({ ...fields }, 'message')`). An unavoidable exception carries
 an `ac-allow-console` comment on the line.
 
@@ -85,7 +85,7 @@ an `ac-allow-console` comment on the line.
 are in `vitest.config.ts`'s include); the web app's `.test.tsx` files run through `packages/ui/vitest.config.ts`, which `pnpm test` at the root also runs. Runtime adapters are tested against recorded `fixtures/*.jsonl`
 event streams plus pure `buildArgs` unit tests — do not shell out to a real CLI in a test. Core is
 tested with a fake runtime adapter that scripts events and results. Both vitest configs alias
-`@agent-conductor/*` onto each package's `src/index.ts`, so `pnpm test` runs against sources and
+`@weave-ai/*` onto each package's `src/index.ts`, so `pnpm test` runs against sources and
 needs no prior `pnpm build`.
 
 **Style.** Match the file you are in. Short doc comments at the top of a module saying what it is and
@@ -101,7 +101,7 @@ invariant (checkout, approvals, project boundary).
 ```bash
 pnpm install
 pnpm build                                # tsc -b everywhere
-pnpm --filter @agent-conductor/ui build     # only when you touched the web app
+pnpm --filter @weave-ai/ui build     # only when you touched the web app
 
 pnpm test                                 # core/server suite, then UI suite; fails if either is red
 pnpm vitest run packages/core             # one package
@@ -141,19 +141,19 @@ Useful env vars: `AC_SKILLS_DIR`, `AC_TEMPLATES_DIR` (point the daemon at a chec
 - New skills are in `skills/manifest.json` and `skills/README.md`, and something names their trigger.
 - A deviation from `docs/PLAN.md` has an ADR in `docs/adr/`.
 
-## Developing AgentConductor inside AgentConductor
+## Developing Weave AI inside Weave AI
 
-This repo is itself a project in a running AgentConductor workspace, so a worker editing it is a
+This repo is itself a project in a running Weave AI workspace, so a worker editing it is a
 process spawned by the system it is changing. Rules that keep that sane:
 
 - **The running daemon is a release, not a checkout.** It lives under
-  `~/.local/share/agent-conductor/current`. Building in your worktree changes nothing that runs.
-- **Never touch the live install**: not `~/.config/agent-conductor`, not the release dirs, not the
-  systemd unit, not the port it listens on. `conductor daemon upgrade|rollback|stop|start` are
+  `~/.local/share/weave/current`. Building in your worktree changes nothing that runs.
+- **Never touch the live install**: not `~/.config/weave`, not the release dirs, not the
+  systemd unit, not the port it listens on. `weave daemon upgrade|rollback|stop|start` are
   human commands; they refuse to run inside a worker.
 - **Test against throwaway daemons only**: `--config-dir <tmp> --listen 127.0.0.1:0` (or the
   loopback port of your choice), with `auth.loopbackTrusted: true` in that dir's `daemon.yaml`.
-  Since VS-143, any config dir other than the plain default (`~/.config/agent-conductor`, or
+  Since VS-143, any config dir other than the plain default (`~/.config/weave`, or
   whatever `AC_CONFIG_HOME`/`XDG_CONFIG_HOME` resolves to) makes the daemon **isolated** by
   default, with no extra flag needed: it never resolves a runtime's credential to the host's real
   `~/.claude/.credentials.json` (each runtime gets its own, empty-until-logged-in home under
@@ -162,11 +162,11 @@ process spawned by the system it is changing. Rules that keep that sane:
   wake a human sent directly (a chat message, answering a decision) is dispatched. This is a
   daemon-level property: `--share-host-credentials` (or `AC_SHARE_HOST_CREDENTIALS=1`) is the
   explicit, rarely-needed opt-out of both, for a deliberate second real daemon on the host. It does
-  **not** relax the `agent-conductor-worker` skill's "never run a coding CLI against live
+  **not** relax the `weave-ai-worker` skill's "never run a coding CLI against live
   credentials" rule: an isolated daemon's own credential home starts empty, so a real turn on it
   just fails to authenticate rather than spending anything, but a fake CLI and a scratch config dir
   are still how you verify launcher/adapter changes.
 - **The test suite clears `AC_*` from the environment** (`vitest.setup.ts`), because your run's
   `AC_RUN_TOKEN` / `AC_API_URL` would otherwise point tests at the live daemon. Keep it that way.
-- **Deliver through the ticket**: PR, plan, report. The human runs `conductor daemon upgrade`
+- **Deliver through the ticket**: PR, plan, report. The human runs `weave daemon upgrade`
   after the merge; that is the deploy step, and it is not yours.

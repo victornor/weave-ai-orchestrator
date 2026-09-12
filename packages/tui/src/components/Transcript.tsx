@@ -1,7 +1,7 @@
-/** Renders `@agent-conductor/render` transcript blocks. The web renders the same models as widgets. */
+/** Renders `@weave-ai/render` transcript blocks. The web renders the same models as widgets. */
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { TranscriptBlock } from '@agent-conductor/render';
+import type { TranscriptBlock } from '@weave-ai/render';
 
 export function TranscriptView({ blocks, expanded, maxLines }: { blocks: TranscriptBlock[]; expanded?: Set<string>; maxLines?: number }): React.ReactElement {
   const visible = maxLines && blocks.length > maxLines ? blocks.slice(blocks.length - maxLines) : blocks;

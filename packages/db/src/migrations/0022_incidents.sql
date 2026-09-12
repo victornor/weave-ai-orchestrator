@@ -1,4 +1,4 @@
--- System incidents agents file through ac_incident (VS-174). Daemon-level: this table is used in
+-- System incidents agents file through weave_incident (VS-174). Daemon-level: this table is used in
 -- daemon.sqlite, so there is no foreign key to a workspace. The same migration runs on workspace
 -- databases (openDaemonDb shares the schema file); those copies stay empty.
 CREATE TABLE IF NOT EXISTS incidents (

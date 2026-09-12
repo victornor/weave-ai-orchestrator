@@ -8,7 +8,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CredentialFacts, CredentialProbeInput } from '@agent-conductor/runtime-sdk';
+import type { CredentialFacts, CredentialProbeInput } from '@weave-ai/runtime-sdk';
 
 /** The credential file inside a Claude config home (`CLAUDE_CONFIG_DIR`). */
 export const CREDENTIAL_FILE = '.credentials.json';

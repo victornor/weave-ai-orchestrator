@@ -6,16 +6,16 @@ import { Hono } from 'hono';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { OcError, type ToolResult } from '@agent-conductor/shared';
-import { getLogger } from '@agent-conductor/core';
+import { OcError, type ToolResult, MCP_SERVER_NAME } from '@weave-ai/shared';
+import { getLogger } from '@weave-ai/core';
 import type { AppDeps, AppEnv } from './types.js';
 import { jsonSchemaFor, runTool, toolsFor, type ToolCtx } from './tools.js';
 
 const log = getLogger('http', { component: 'mcp' });
 
-export const MCP_SERVER_NAME = 'agentconductor';
+export { MCP_SERVER_NAME };
 export const MCP_LIST_RESULT_CAP = 64 * 1024;
-const LIST_TOOLS = new Set(['ac_ticket_list', 'ac_incident_list']);
+const LIST_TOOLS = new Set(['weave_ticket_list', 'weave_incident_list']);
 
 /** Encode a tool result for MCP. List tools are capped at MCP_LIST_RESULT_CAP with `truncated: true`. */
 export function encodeMcpToolResult(name: string, result: ToolResult<unknown>): string {
@@ -47,7 +47,7 @@ export function createMcpServer(ctx: ToolCtx, version: string): Server {
   }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const result = await runTool(req.params.name, ctx, req.params.arguments ?? {});
-    // `mcpContent` (set only by `ac_inbox` today, VS-133) carries real image bytes the model can see —
+    // `mcpContent` (set only by `weave_inbox` today, VS-133) carries real image bytes the model can see —
     // appended after the JSON summary, never in place of it, so the agent still gets the structured
     // data even when a tool that has no images to report leaves it unset.
     const images = (result.ok && result.mcpContent) || [];

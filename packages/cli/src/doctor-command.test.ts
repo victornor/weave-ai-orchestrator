@@ -1,5 +1,5 @@
 /**
- * `conductor doctor`'s runtime credential check (VS-75,
+ * `weave doctor`'s runtime credential check (VS-75,
  * runtime-credentials/credential-visibility), against a stub daemon.
  *
  * The check exists so a human who has just been told "every agent is stopped" can confirm it from
@@ -62,7 +62,7 @@ function stub(credentials: unknown[]): void {
   routes['/api/w/ws1/usage/credentials'] = credentials;
 }
 
-describe('conductor doctor — runtime credentials', () => {
+describe('weave doctor — runtime credentials', () => {
   it('passes and names the expiry when the credential is valid', async () => {
     stub([valid]);
     const out = await cli('doctor');

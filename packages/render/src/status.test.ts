@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { UI_STATUSES } from '@agent-conductor/shared';
+import { UI_STATUSES } from '@weave-ai/shared';
 import { STATUS_COLORS, STATUS_GLYPHS, STATUS_INK_COLORS, STATUS_LABELS, statusBadge, statusGlyph, statusRank } from './status.js';
 
 describe('status tokens', () => {

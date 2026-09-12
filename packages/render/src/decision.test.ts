@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { NAMED_CARD_OPTION_KEYS } from '@agent-conductor/shared';
-import type { Decision, DecisionKind } from '@agent-conductor/shared';
+import { NAMED_CARD_OPTION_KEYS } from '@weave-ai/shared';
+import type { Decision, DecisionKind } from '@weave-ai/shared';
 import { decisionToCard } from './decision.js';
 
 function decision(over: Partial<Decision> & { kind: DecisionKind }): Decision {

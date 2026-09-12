@@ -4,8 +4,8 @@
  * openspec/changes/vs-192-rebuild-the-global-map-as-a-gource-style/design.md.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Agent } from '@agent-conductor/shared';
-import { ticketUiStatus } from '@agent-conductor/shared';
+import type { Agent } from '@weave-ai/shared';
+import { ticketUiStatus } from '@weave-ai/shared';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/States';
 import { cx } from '../lib/cx';

@@ -1,9 +1,9 @@
-/** `conductor usage` — tokens are the headline, cost is labelled reported or estimated (PLAN §16.3). */
+/** `weave usage` — tokens are the headline, cost is labelled reported or estimated (PLAN §16.3). */
 import type { Command } from 'commander';
-import { USAGE_GRAINS, USAGE_WINDOWS } from '@agent-conductor/shared';
-import { accountLimits, mixedBillingNote, showCost, usageRows, usageTotals, type UsageSeries } from '@agent-conductor/render';
+import { USAGE_GRAINS, USAGE_WINDOWS } from '@weave-ai/shared';
+import { accountLimits, mixedBillingNote, showCost, usageRows, usageTotals, type UsageSeries } from '@weave-ai/render';
 import { emit, fields, heading, style, table, write } from '../output.js';
-import type { AccountSync, RuntimeAccount } from '@agent-conductor/shared';
+import type { AccountSync, RuntimeAccount } from '@weave-ai/shared';
 import { run, session } from './util.js';
 
 export function register(program: Command): void {

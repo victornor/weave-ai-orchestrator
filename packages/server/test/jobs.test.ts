@@ -3,7 +3,7 @@
  * finishes, and the job it names is readable, listable and streamable.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Job } from '@agent-conductor/shared';
+import type { Job } from '@weave-ai/shared';
 import { createApp } from '../src/app.js';
 import { authed, makeHarness, type Harness } from './fakes.js';
 
@@ -87,7 +87,7 @@ describe('project add answers before the work finishes', () => {
 
   it('refuses the retry with the conflict core raised', async () => {
     harness = makeHarness();
-    const { OcError } = await import('@agent-conductor/shared');
+    const { OcError } = await import('@weave-ai/shared');
     harness.impls['projects']!['retryAdd'] = () => { throw new OcError('conflict', 'project api is ready, not error — there is nothing to retry'); };
     const res = await createApp(harness.deps).fetch(new Request('http://127.0.0.1/api/w/ws1/projects/api/retry', { method: 'POST', headers: authed() }));
     expect(res.status).toBe(409);

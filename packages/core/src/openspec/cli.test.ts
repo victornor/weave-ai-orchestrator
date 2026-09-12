@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { OcError } from '@agent-conductor/shared';
+import { OcError } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { writeFakeOpenspec } from './fakeBin.js';
 import * as cli from './cli.js';

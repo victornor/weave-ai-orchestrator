@@ -2,7 +2,7 @@
  * Daemon-wide Live floor (VS-168): one cell per live worker on a ticket, across every workspace.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { isActiveRun, type Agent, type Run, type Ticket, type WorkerModelOption } from '@agent-conductor/shared';
+import { isActiveRun, type Agent, type Run, type Ticket, type WorkerModelOption } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';

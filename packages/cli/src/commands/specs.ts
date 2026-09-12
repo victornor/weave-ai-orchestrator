@@ -1,6 +1,6 @@
-/** `conductor specs list|show|changes|search|explore` — the spec index (PLAN §12.5). */
+/** `weave specs list|show|changes|search|explore` — the spec index (PLAN §12.5). */
 import type { Command } from 'commander';
-import { oneLine } from '@agent-conductor/render';
+import { oneLine } from '@weave-ai/render';
 import { ApiError } from '../api.js';
 import { emit, fields, heading, style, table, write } from '../output.js';
 import { items, run, session } from './util.js';
@@ -123,7 +123,7 @@ export function register(program: Command): void {
     .action(async (query: string[], opts: Record<string, string>, command: Command) => run(async () => {
       const { client } = await session(command);
       const payload = await client.write<unknown>({
-        tool: 'ac_spec_search', input: { query: query.join(' '), projectId: opts['project'] },
+        tool: 'weave_spec_search', input: { query: query.join(' '), projectId: opts['project'] },
         http: { method: 'GET', path: client.w('/search'), query: { q: query.join(' '), project: opts['project'] } },
       });
       const rows = items<Record<string, unknown>>(payload, 'results');
@@ -144,7 +144,7 @@ export function register(program: Command): void {
     .action(async (project: string | undefined, _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
       const projectId = await defaultProject(client, project);
-      const { runSpecs } = await import('@agent-conductor/tui');
+      const { runSpecs } = await import('@weave-ai/tui');
       await runSpecs(client, projectId);
     }));
 }

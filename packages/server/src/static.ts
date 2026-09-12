@@ -10,7 +10,7 @@ import { stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { join, normalize, extname, resolve } from 'node:path';
 import { Hono } from 'hono';
-import { OcError } from '@agent-conductor/shared';
+import { OcError } from '@weave-ai/shared';
 import type { AppEnv } from './types.js';
 
 const MIME: Record<string, string> = {
@@ -21,12 +21,12 @@ const MIME: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json',
 };
 
-const PLACEHOLDER = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>AgentConductor</title>
+const PLACEHOLDER = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Weave AI</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{font:15px/1.6 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;background:#0f1115;color:#e6e8ee}
 main{max-width:38rem;padding:2rem}code{background:#1b1f28;padding:.15em .4em;border-radius:4px}a{color:#7aa2f7}</style>
-</head><body><main><h1>AgentConductor daemon is running</h1>
-<p>The web UI has not been built. Run <code>pnpm --filter @agent-conductor/ui run build</code> and reload.</p>
+</head><body><main><h1>Weave AI daemon is running</h1>
+<p>The web UI has not been built. Run <code>pnpm --filter @weave-ai/ui run build</code> and reload.</p>
 <p>The API is live at <code>/api</code>; see <a href="/api/openapi.json">/api/openapi.json</a> and <a href="/llms/api.txt">/llms/api.txt</a>.</p>
 </main></body></html>`;
 

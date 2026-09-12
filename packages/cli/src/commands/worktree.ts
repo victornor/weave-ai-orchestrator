@@ -1,4 +1,4 @@
-/** `conductor worktree list|verify|discard` — provider-managed worktrees (PLAN §11.5, §20). */
+/** `weave worktree list|verify|discard` — provider-managed worktrees (PLAN §11.5, §20). */
 import type { Command } from 'commander';
 import { emit, fields, style, table, write } from '../output.js';
 import { promptTyped } from '../prompt.js';
@@ -34,7 +34,7 @@ export function register(program: Command): void {
     .action(async (id: string, _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
       const result = await client.write<Record<string, unknown>>({
-        tool: 'ac_worktree_status', input: { id },
+        tool: 'weave_worktree_status', input: { id },
         http: { method: 'POST', path: client.w(`/worktrees/${encodeURIComponent(id)}/verify`), body: {} },
       });
       emit(result, () => {

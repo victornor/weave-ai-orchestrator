@@ -1,4 +1,4 @@
-import { incompleteDelivery, type Ticket, type WorkerModelOption } from '@agent-conductor/shared';
+import { incompleteDelivery, type Ticket, type WorkerModelOption } from '@weave-ai/shared';
 import { StatusGlyph, Badge } from './StatusGlyph';
 import { WorkerModelTag } from './WorkerModelTag';
 import { isFolded, ticketBoardStatus } from '../lib/board';

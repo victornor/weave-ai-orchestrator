@@ -1,6 +1,6 @@
 /**
  * The AC Artifact Kit — a small, prebuilt, dependency-free CSS kit so a self-contained HTML
- * artifact looks like AgentConductor. `openspec/specs/artifact-kit/design-tokens`.
+ * artifact looks like Weave AI. `openspec/specs/artifact-kit/design-tokens`.
  *
  * The token block below is a scoped, hand-kept copy of `packages/ui/src/index.css`'s dark/light
  * theme tokens and theme-independent scale — see `ARTIFACT_KIT_TOKEN_NAMES` for exactly which
@@ -42,7 +42,7 @@ export const ARTIFACT_KIT_SCALE_TOKEN_NAMES = [
 export const ARTIFACT_KIT_TOKEN_NAMES: readonly string[] = [...ARTIFACT_KIT_THEME_TOKEN_NAMES, ...ARTIFACT_KIT_SCALE_TOKEN_NAMES];
 
 export const ARTIFACT_KIT_CSS = `/* ------------------------------------------------------------------ *
- * The AC Artifact Kit — AgentConductor's design tokens plus a compact, dependency-free semantic
+ * The AC Artifact Kit — Weave AI's design tokens plus a compact, dependency-free semantic
  * layer, for a single self-contained HTML artifact. No JavaScript, no build step, no external
  * reference of any kind. Dark is the default theme; add [data-theme='light'] to an ancestor
  * element to opt an artifact into the light theme.
@@ -419,13 +419,13 @@ export const ARTIFACT_KIT_COMPONENTS: readonly ArtifactKitComponent[] = [
 ] as const;
 
 /**
- * The `agent-conductor-artifacts` skill's playbook markdown, read at call time so the tool result
+ * The `weave-ai-artifacts` skill's playbook markdown, read at call time so the tool result
  * and the skill an agent reads directly are the same bytes — never a hand-duplicated second copy.
  * Mirrors `workers/home.ts`'s `skillsFor()`: a missing skill directory yields an empty object, not
  * a thrown error.
  */
 export function readArtifactPlaybooks(skillsDir: string): Record<string, string> {
-  const dir = join(skillsDir, 'agent-conductor-artifacts', 'references');
+  const dir = join(skillsDir, 'weave-ai-artifacts', 'references');
   if (!skillsDir || !existsSync(dir)) return {};
   let entries: string[] = [];
   try { entries = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.md')).map((e) => e.name); } catch { return {}; }

@@ -1,4 +1,4 @@
-import type { Db } from '@agent-conductor/db';
+import type { Db } from '@weave-ai/db';
 
 const depth = new WeakMap<object, number>();
 

@@ -3,7 +3,7 @@
  * to and has no plan concept at all, so dollar cost stays the right metric for it and there is
  * nothing to probe: the answer is static.
  */
-import type { AccountDescription } from '@agent-conductor/runtime-sdk';
+import type { AccountDescription } from '@weave-ai/runtime-sdk';
 
 export function describeOpenCodeAccount(): AccountDescription {
   return {

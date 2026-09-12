@@ -1,4 +1,4 @@
--- A deferred daemon upgrade (PLAN §20): `conductor daemon update apply` and the web app's Upgrade
+-- A deferred daemon upgrade (PLAN §20): `weave daemon update apply` and the web app's Upgrade
 -- action record their intent here instead of performing it, so the daemon can hold dispatch, wait for
 -- every running turn to finish, and still report the outcome after the restart that ended the session
 -- which asked for it. Daemon-level: this table is used in `daemon.sqlite`, so there is no workspace_id

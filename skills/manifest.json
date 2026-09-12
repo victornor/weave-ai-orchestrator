@@ -2,15 +2,15 @@
   "$comment": "Which shipped skills go to which agent kind. The daemon reads this when installing skills into an agent home. audience: weaver | worker | all.",
   "version": 1,
   "skills": [
-    { "name": "agent-conductor-worker",    "audience": "worker",    "description": "The worker turn loop, ticket rules, delivery and merge, report format, common mistakes." },
-    { "name": "agent-conductor-openspec",  "audience": "worker",    "description": "Ticket status to OpenSpec workflow mapping; propose/apply rules; never archive." },
-    { "name": "agent-conductor-scout",     "audience": "worker",    "description": "Investigation tickets: report format, evidence rules, no PRs." },
-    { "name": "agent-conductor-weaver",    "audience": "weaver",    "description": "Intake, routing, supervision, digest handling, outcome language." },
-    { "name": "agent-conductor-hire",      "audience": "weaver",    "description": "Role overlap check, spec drafting, activation flow, charter refinement." },
-    { "name": "agent-conductor-planning",  "audience": "weaver",    "description": "Minimal ticket graphs, qualifying split reasons, acceptance criteria." },
-    { "name": "agent-conductor-briefing",  "audience": "weaver",    "description": "Four-section briefing, one decision at a time." },
-    { "name": "agent-conductor-knowledge", "audience": "all",       "description": "Knowledge placement, entry rules, curation procedure." },
-    { "name": "agent-conductor-artifacts", "audience": "all",       "description": "When and how to publish a self-contained HTML artifact with the AC Artifact Kit; diagram, table, comparison, plan, code and change playbooks." }
+    { "name": "weave-ai-worker",    "audience": "worker",    "description": "The worker turn loop, ticket rules, delivery and merge, report format, common mistakes." },
+    { "name": "weave-ai-openspec",  "audience": "worker",    "description": "Ticket status to OpenSpec workflow mapping; propose/apply rules; never archive." },
+    { "name": "weave-ai-scout",     "audience": "worker",    "description": "Investigation tickets: report format, evidence rules, no PRs." },
+    { "name": "weave-ai-weaver",    "audience": "weaver",    "description": "Intake, routing, supervision, digest handling, outcome language." },
+    { "name": "weave-ai-hire",      "audience": "weaver",    "description": "Role overlap check, spec drafting, activation flow, charter refinement." },
+    { "name": "weave-ai-planning",  "audience": "weaver",    "description": "Minimal ticket graphs, qualifying split reasons, acceptance criteria." },
+    { "name": "weave-ai-briefing",  "audience": "weaver",    "description": "Four-section briefing, one decision at a time." },
+    { "name": "weave-ai-knowledge", "audience": "all",       "description": "Knowledge placement, entry rules, curation procedure." },
+    { "name": "weave-ai-artifacts", "audience": "all",       "description": "When and how to publish a self-contained HTML artifact with the AC Artifact Kit; diagram, table, comparison, plan, code and change playbooks." }
   ],
   "runtimes": {
     "claude":   { "path": ".claude/skills/<name>/SKILL.md" },

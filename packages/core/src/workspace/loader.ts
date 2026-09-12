@@ -2,13 +2,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, chmod
 import { homedir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import YAML from 'yaml';
-import { openDb, newId, nowIso } from '@agent-conductor/db';
-import { configDir as resolveConfigDir } from '@agent-conductor/release';
+import { openDb, newId, nowIso } from '@weave-ai/db';
+import { configDir as resolveConfigDir } from '@weave-ai/release';
 import {
   DaemonConfigSchema, DEFAULT_KNOWLEDGE_BUDGETS, DEFAULT_WORKER_TIERS, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, WorkspaceRegistrySchema, OcError,
   daemonConfigToLegacySpelling, toLegacySpelling,
   type DaemonConfig, type KnowledgeBudgets, type WorkspaceConfig, type WorkspaceRegistry,
-} from '@agent-conductor/shared';
+} from '@weave-ai/shared';
 import type { Registries, WorkspaceContext } from '../context.js';
 import { workspacePaths } from '../context.js';
 import { EventBus } from '../events.js';
@@ -28,7 +28,7 @@ export const WORKSPACE_FILE = 'workspace.yaml';
 
 // ---------- config dir (daemon-level) ----------
 
-/** VS-258: collapsed into `@agent-conductor/release`, the one place old/new resolution happens. */
+/** VS-258: collapsed into `@weave-ai/release`, the one place old/new resolution happens. */
 function configDir(): string {
   return resolveConfigDir();
 }
@@ -159,7 +159,7 @@ const KNOWLEDGE_SKELETONS: Array<[string, (cfg: { name: string; humanName: strin
 const PROJECT_SECTION_HINTS: Record<(typeof PROJECT_SECTIONS)[number], string> = {
   'Overview': '(what this project is, who uses it)',
   'Stack & commands': '(run, test, lint, build)',
-  'Conventions': '(project-specific rules the repo docs do not state — once a subject has its own document, put its rules there via ac_knowledge_note(..., doc: slug) and leave a one-line pointer here)',
+  'Conventions': '(project-specific rules the repo docs do not state — once a subject has its own document, put its rules there via weave_knowledge_note(..., doc: slug) and leave a one-line pointer here)',
   'Current focus': '(what is being worked toward this month)',
   'Landmines': "(things that bite — one subject, one document, from the first entry on; don't wait for a second one to justify creating it, and leave a one-line pointer here once it exists)",
   'Documents': '(one line per linked document: `[[slug]] — what it covers`)',

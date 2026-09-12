@@ -20,7 +20,7 @@ FROM roles WHERE status <> 'retired';
 --   agent_sessions.runtime_id  which CLI issued the session handle, so a runtime change can retire it
 --   usage_events.*          the spend record, which must keep describing what was really spent
 --
--- One-way: `conductor daemon upgrade` takes a database backup before migrating, and rolling back to a
+-- One-way: `weave daemon upgrade` takes a database backup before migrating, and rolling back to a
 -- release that predates this restores from it (docs/OPERATIONS.md). DROP COLUMN needs SQLite >= 3.35;
 -- node:sqlite on Node 26 is well past it. No index, CHECK or foreign key references these columns, so
 -- each drop is a metadata change rather than a table rebuild.

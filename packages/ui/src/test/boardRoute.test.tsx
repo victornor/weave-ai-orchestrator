@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Ticket, WorkerModelOption } from '@agent-conductor/shared';
+import type { Agent, Ticket, WorkerModelOption } from '@weave-ai/shared';
 import { agent, ticket } from './factories';
 
 const state = vi.hoisted(() => ({

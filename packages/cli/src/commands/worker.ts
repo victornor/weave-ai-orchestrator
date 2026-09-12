@@ -1,7 +1,7 @@
-/** `conductor worker list|show|pause|resume|relaunch|cancel|purge` (PLAN §11, §20). */
+/** `weave worker list|show|pause|resume|relaunch|cancel|purge` (PLAN §11, §20). */
 import type { Command } from 'commander';
-import type { Agent } from '@agent-conductor/shared';
-import { workerToCard } from '@agent-conductor/render';
+import type { Agent } from '@weave-ai/shared';
+import { workerToCard } from '@weave-ai/render';
 import { emit, fields, heading, style, table, write } from '../output.js';
 import { items, run, session } from './util.js';
 
@@ -107,7 +107,7 @@ export function register(program: Command): void {
       const { client } = await session(command);
       const text = body.join(' ');
       const result = await client.write({
-        tool: 'ac_worker_message', input: { workerId: id, body: text },
+        tool: 'weave_worker_message', input: { workerId: id, body: text },
         http: { method: 'POST', path: client.w(`/workers/${encodeURIComponent(id)}/message`), body: { body: text } },
       });
       emit(result, () => write(`${style.ok('queued')} message for ${id}`));
@@ -134,7 +134,7 @@ export function register(program: Command): void {
     .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
       const { client } = await session(command);
       const result = await client.write({
-        tool: 'ac_worker_relaunch', input: { workerId: id, note: opts['note'] ?? '' },
+        tool: 'weave_worker_relaunch', input: { workerId: id, note: opts['note'] ?? '' },
         http: { method: 'POST', path: client.w(`/workers/${encodeURIComponent(id)}/relaunch`), body: { note: opts['note'] ?? '' } },
       });
       emit(result, () => write(`${style.ok('relaunched')} ${id}`));
@@ -148,7 +148,7 @@ export function register(program: Command): void {
     .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
       const { client } = await session(command);
       const result = await client.write({
-        tool: 'ac_worker_cancel', input: { workerId: id, reason: opts['reason'] ?? '' },
+        tool: 'weave_worker_cancel', input: { workerId: id, reason: opts['reason'] ?? '' },
         http: { method: 'POST', path: client.w(`/workers/${encodeURIComponent(id)}/cancel`), body: { reason: opts['reason'] ?? '' } },
       });
       emit(result, () => write(`${style.ok('cancelled')} ${id}`));

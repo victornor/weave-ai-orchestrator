@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { JsonSchema } from '@agent-conductor/channel-sdk';
+import type { JsonSchema } from '@weave-ai/channel-sdk';
 
 export const TelegramConfigSchema = z.object({
   /**

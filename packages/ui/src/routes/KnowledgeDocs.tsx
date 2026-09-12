@@ -69,7 +69,7 @@ export function DocsPanel({ project, open, onOpen }: { project?: string; open: D
       {!docs.data?.length ? (
         <EmptyState
           title="No documents yet."
-          detail="Workers write one per subsystem, integration or runbook with ac_knowledge_doc_put and link them with [[slug]]. The scout ticket on a new project is usually the first."
+          detail="Workers write one per subsystem, integration or runbook with weave_knowledge_doc_put and link them with [[slug]]. The scout ticket on a new project is usually the first."
         />
       ) : (
         groups.map(([group, list]) => (
@@ -192,7 +192,7 @@ export function DocPanel({ doc, projects, onOpen, onClose }: { doc: DocRef; proj
           {detail.isLoading ? (
             <SkeletonRows rows={5} />
           ) : detail.isError ? (
-            <EmptyState title="This document does not exist yet." detail="A [[link]] pointed here. Write it with ac_knowledge_doc_put, or fix the link." />
+            <EmptyState title="This document does not exist yet." detail="A [[link]] pointed here. Write it with weave_knowledge_doc_put, or fix the link." />
           ) : editing ? (
             <textarea
               value={body}

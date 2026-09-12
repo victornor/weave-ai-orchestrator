@@ -2,8 +2,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { RuntimeEvent, TurnInput } from '@agent-conductor/runtime-sdk';
-import { RUN_REPORT_JSON_SCHEMA } from '@agent-conductor/shared';
+import type { RuntimeEvent, TurnInput } from '@weave-ai/runtime-sdk';
+import { RUN_REPORT_JSON_SCHEMA } from '@weave-ai/shared';
 import { adapter } from '../src/adapter.js';
 
 // Real `claude` turn. Opt in with AC_LIVE_RUNTIME_TESTS=1 (costs tokens, needs auth).
@@ -16,7 +16,7 @@ describe.skipIf(!live)('claude live turn', () => {
       const input: TurnInput = {
         runId: `live-${Date.now()}`, turnEpoch: 1, cwd: home, worktree: null,
         session: { policy: 'fresh', ref: null, isFirstTurn: true },
-        systemPrompt: { text: 'You are an AgentConductor test agent. Answer briefly.', mode: 'inject' },
+        systemPrompt: { text: 'You are an Weave AI test agent. Answer briefly.', mode: 'inject' },
         prompt: 'Do nothing. Finish with the structured report: state "idle", summary "live runtime smoke test".',
         outputSchema: RUN_REPORT_JSON_SCHEMA as unknown as Record<string, unknown>,
         mcpServers: {}, env: {}, options: { model: 'haiku' },

@@ -1,6 +1,6 @@
 /**
  * The daemon process: config, registries, workspaces, two listeners, graceful shutdown.
- * `conductor daemon start` execs `bin.js`, which calls `startDaemon()`.
+ * `weave daemon start` execs `bin.js`, which calls `startDaemon()`.
  */
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
@@ -9,21 +9,21 @@ import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { releaseVersion } from '@agent-conductor/release';
+import { releaseVersion } from '@weave-ai/release';
 import { createAdaptorServer } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
-import { openDb } from '@agent-conductor/db';
-import type { Db } from '@agent-conductor/db';
+import { openDb } from '@weave-ai/db';
+import type { Db } from '@weave-ai/db';
 import {
   createRegistries, createCore, createAuthService, createIncidentsService, getLogger, initLogger, workspaceLoader,
   stageWorkspaceImport, importTickets,
   type Registries, type WorkspaceContext,
-} from '@agent-conductor/core';
-import type { AuthService, CoreServices } from '@agent-conductor/core';
-import type { ChannelAdapter, SurfaceAdapter } from '@agent-conductor/plugin-sdk';
-import type { RuntimeAdapter } from '@agent-conductor/runtime-sdk';
-import type { AgentConductorPlugin, PluginHost, AgentToolDefinition, WorktreeProvider, ForgeAdapter } from '@agent-conductor/plugin-sdk';
-import { OcError, SHUTDOWN_CANCEL_GRACE_MS, SHUTDOWN_DRAIN_GRACE_MS, type DaemonConfig, type EventType, type WorkspaceEvent } from '@agent-conductor/shared';
+} from '@weave-ai/core';
+import type { AuthService, CoreServices } from '@weave-ai/core';
+import type { ChannelAdapter, SurfaceAdapter } from '@weave-ai/plugin-sdk';
+import type { RuntimeAdapter } from '@weave-ai/runtime-sdk';
+import type { WeaveAIPlugin, PluginHost, AgentToolDefinition, WorktreeProvider, ForgeAdapter } from '@weave-ai/plugin-sdk';
+import { OcError, SHUTDOWN_CANCEL_GRACE_MS, SHUTDOWN_DRAIN_GRACE_MS, type DaemonConfig, type EventType, type WorkspaceEvent } from '@weave-ai/shared';
 import { createApp, type WorkspaceAdmin } from './app.js';
 import { createUpdateChecker, runningReleaseRoot } from './release-info.js';
 import { createUpgradeService } from './upgrade.js';
@@ -34,13 +34,13 @@ import type { AppDeps, WorkspaceRuntime } from './types.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const log = getLogger('daemon');
 
-const RUNTIME_PACKAGES = ['@agent-conductor/runtime-claude', '@agent-conductor/runtime-codex', '@agent-conductor/runtime-opencode', '@agent-conductor/runtime-gemini', '@agent-conductor/runtime-cursor'];
-const CHANNEL_PACKAGES = ['@agent-conductor/channel-web', '@agent-conductor/channel-cli', '@agent-conductor/channel-telegram'];
-const SURFACE_PACKAGES = ['@agent-conductor/surface-headless', '@agent-conductor/surface-tmux', '@agent-conductor/surface-herdr', '@agent-conductor/surface-hyprland'];
+const RUNTIME_PACKAGES = ['@weave-ai/runtime-claude', '@weave-ai/runtime-codex', '@weave-ai/runtime-opencode', '@weave-ai/runtime-gemini', '@weave-ai/runtime-cursor'];
+const CHANNEL_PACKAGES = ['@weave-ai/channel-web', '@weave-ai/channel-cli', '@weave-ai/channel-telegram'];
+const SURFACE_PACKAGES = ['@weave-ai/surface-headless', '@weave-ai/surface-tmux', '@weave-ai/surface-herdr', '@weave-ai/surface-hyprland'];
 
 export interface StartOptions {
   configDir?: string;
-  /** Override the public listen address (`host:port`), e.g. from `conductor daemon start --listen`. */
+  /** Override the public listen address (`host:port`), e.g. from `weave daemon start --listen`. */
   listen?: string;
   uiDir?: string | null;
   /**
@@ -146,8 +146,8 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     await startPublic();
   } else {
     // PLAN §4.4: never expose an unauthenticated daemon. Hold the public listener; the loopback
-    // listener still serves `POST /api/auth/setup`, and `conductor daemon set-password` on this host opens it.
-    log.warn({ host, loopback: loopback.url }, 'public listener held until an operator password is set: run `conductor daemon set-password` on this host');
+    // listener still serves `POST /api/auth/setup`, and `weave daemon set-password` on this host opens it.
+    log.warn({ host, loopback: loopback.url }, 'public listener held until an operator password is set: run `weave daemon set-password` on this host');
     onOperatorConfigured = () => { startPublic().catch((e: unknown) => log.error({ err: e }, 'public listener failed to start after setup')); };
     await writePidFile();
   }
@@ -348,7 +348,7 @@ async function loadPlugins(
     const config = typeof entry === 'string' ? {} : entry.config ?? {};
     try {
       const mod = (await import(pluginSpecifier(ctx, name))) as Record<string, unknown>;
-      const plugin = (mod.default ?? mod.plugin) as AgentConductorPlugin | undefined;
+      const plugin = (mod.default ?? mod.plugin) as WeaveAIPlugin | undefined;
       if (!plugin || typeof plugin.register !== 'function') { log.error({ plugin: name }, 'plugin has no definePlugin default export'); continue; }
       if (plugin.apiVersion !== 1) { log.error({ plugin: name, apiVersion: plugin.apiVersion }, 'unsupported plugin apiVersion'); continue; }
       await plugin.register(pluginHost(name, config, registries, hooks));

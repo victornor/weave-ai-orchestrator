@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { ARTIFACT_KIT_CSS } from '@agent-conductor/core';
+import { ARTIFACT_KIT_CSS } from '@weave-ai/core';
 import type { AppEnv } from '../types.js';
 
 /**

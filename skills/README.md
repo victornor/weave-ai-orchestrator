@@ -8,15 +8,15 @@ Always-loaded prompts live in `templates/` (`conductor.AGENTS.md.tmpl`, `worker.
 
 | Skill | Audience | Purpose |
 |---|---|---|
-| `agent-conductor-worker` | worker | The turn loop, brief verification, ticket rules, status protocol, delivery and merge, report format, common mistakes. |
-| `agent-conductor-openspec` | worker | How ticket status maps onto the OpenSpec workflows; what never to do. |
-| `agent-conductor-scout` | worker | Report format and rules for investigation tickets. |
-| `agent-conductor-weaver` | weaver | Intake, routing, supervision, digest handling, outcome language. |
-| `agent-conductor-hire` | weaver | Role overlap check, spec drafting, activation flow, charter refinement. |
-| `agent-conductor-planning` | weaver | Minimal ticket graphs, qualifying split reasons, acceptance criteria. |
-| `agent-conductor-briefing` | weaver | The four-section briefing, one decision at a time. |
-| `agent-conductor-knowledge` | all | Knowledge placement, entry rules, the curation procedure. |
-| `agent-conductor-artifacts` | all | When and how to publish a self-contained HTML artifact with the AC Artifact Kit; diagram, table, comparison, plan, code and change playbooks. |
+| `weave-ai-worker` | worker | The turn loop, brief verification, ticket rules, status protocol, delivery and merge, report format, common mistakes. |
+| `weave-ai-openspec` | worker | How ticket status maps onto the OpenSpec workflows; what never to do. |
+| `weave-ai-scout` | worker | Report format and rules for investigation tickets. |
+| `weave-ai-weaver` | weaver | Intake, routing, supervision, digest handling, outcome language. |
+| `weave-ai-hire` | weaver | Role overlap check, spec drafting, activation flow, charter refinement. |
+| `weave-ai-planning` | weaver | Minimal ticket graphs, qualifying split reasons, acceptance criteria. |
+| `weave-ai-briefing` | weaver | The four-section briefing, one decision at a time. |
+| `weave-ai-knowledge` | all | Knowledge placement, entry rules, the curation procedure. |
+| `weave-ai-artifacts` | all | When and how to publish a self-contained HTML artifact with the AC Artifact Kit; diagram, table, comparison, plan, code and change playbooks. |
 
 `manifest.json` is the machine-readable version of that table: `skills[].{name, audience, description}` where `audience` is `weaver`, `worker` or `all`, plus the per-runtime install paths.
 

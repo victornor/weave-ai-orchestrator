@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TurnInput } from '@agent-conductor/runtime-sdk';
+import type { TurnInput } from '@weave-ai/runtime-sdk';
 import { buildArgs, MAX_ARGV_PROMPT, resumeCommand, RESTRICTED_TOOLS, userFrame } from '../src/args.js';
 
 const NEW_ID = '11111111-2222-4333-8444-555555555555';
@@ -71,13 +71,13 @@ describe('claude buildArgs — live input (default)', () => {
   it('passes the output schema inline and the mcp config as a strict file', () => {
     const b = buildArgs(input({
       outputSchema: { type: 'object', properties: { state: { type: 'string' } } },
-      mcpServers: { agentconductor: { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } },
+      mcpServers: { 'weave-ai': { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } } },
     }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
     const i = b.args.indexOf('--json-schema');
     expect(JSON.parse(b.args[i + 1]!)).toEqual({ type: 'object', properties: { state: { type: 'string' } } });
     expect(pairs(b.args)).toContain('--mcp-config /tmp/ac/mcp-config.json --strict-mcp-config');
     const cfg = JSON.parse(b.files.find((f) => f.path.endsWith('mcp-config.json'))!.content);
-    expect(cfg.mcpServers.agentconductor).toEqual({ type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } });
+    expect(cfg.mcpServers['weave-ai']).toEqual({ type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer t' } });
   });
 
   it('maps the three permission postures', () => {
@@ -92,11 +92,11 @@ describe('claude buildArgs — live input (default)', () => {
   it('allowlists the MCP control plane in restricted mode (dontAsk denies by default)', () => {
     const b = buildArgs(input({
       permission: { mode: 'restricted' },
-      mcpServers: { agentconductor: { type: 'http', url: 'http://h/mcp' } },
+      mcpServers: { 'weave-ai': { type: 'http', url: 'http://h/mcp' } },
     }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
-    expect(pairs(b.args)).toContain('--allowedTools mcp__agentconductor');
+    expect(pairs(b.args)).toContain('--allowedTools mcp__weave-ai');
     // auto mode needs no such allowlist
-    const auto = buildArgs(input({ permission: { mode: 'auto' }, mcpServers: { agentconductor: { type: 'http', url: 'http://h/mcp' } } }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
+    const auto = buildArgs(input({ permission: { mode: 'auto' }, mcpServers: { 'weave-ai': { type: 'http', url: 'http://h/mcp' } } }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
     expect(auto.args).not.toContain('--allowedTools');
   });
 

@@ -2,7 +2,7 @@
  * Usage view models: totals with a window-over-window delta and a cost-provenance label, and the
  * plan-limit block a subscription account replaces that cost with (PLAN §16.3).
  */
-import type { CostStatus, RuntimeAccount, UsageBillingMix } from '@agent-conductor/shared';
+import type { CostStatus, RuntimeAccount, UsageBillingMix } from '@weave-ai/shared';
 import { formatCents, formatCost, formatCountdown, formatDelta, formatRelative, formatReportedShare, formatTokens } from './format.js';
 import type { AccountLimitsView, ContextStripView, RuntimeLimitStripView, UsageTotalsView } from './types.js';
 
@@ -132,7 +132,7 @@ function windowLabel(label: string, scopeLabel: string | null): string {
 }
 
 /**
- * The plan-limit block for one runtime account: what the web usage page and `conductor usage`
+ * The plan-limit block for one runtime account: what the web usage page and `weave usage`
  * both render. An account with no windows carries `note` and an empty `windows` — the caller
  * says the limits are unavailable rather than drawing a bar at zero.
  */

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { RuntimeModel } from '@agent-conductor/runtime-sdk';
-import { which } from '@agent-conductor/runtime-sdk';
+import type { RuntimeModel } from '@weave-ai/runtime-sdk';
+import { which } from '@weave-ai/runtime-sdk';
 
 const pExecFile = promisify(execFile);
 

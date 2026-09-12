@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakeRuntime, type AccountDescription } from '@agent-conductor/runtime-sdk';
-import { newId, nowIso } from '@agent-conductor/db';
+import { FakeRuntime, type AccountDescription } from '@weave-ai/runtime-sdk';
+import { newId, nowIso } from '@weave-ai/db';
 import type { AccountsService } from '../api.js';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createAccountsService, MANUAL_SYNC_INTERVAL_MS } from './accounts.js';
@@ -84,7 +84,7 @@ describe('accounts service', () => {
   });
 
   it('refreshes every runtime the workspace uses, and only those', async () => {
-    // The harness seeds a project, a role and a conductor agent, all on `claude`.
+    // The harness seeds a project, a role and a weave agent, all on `claude`.
     const codex = new AccountRuntime({ ...subscription, planLabel: null, limitsAvailable: false, limits: [], note: 'no limits' });
     const claude = new AccountRuntime(subscription);
     const idle = new AccountRuntime(subscription);

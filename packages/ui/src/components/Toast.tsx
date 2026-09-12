@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { UiStatus } from '@agent-conductor/shared';
+import type { UiStatus } from '@weave-ai/shared';
 import { StatusGlyph } from './StatusGlyph';
 import { cx } from '../lib/cx';
 

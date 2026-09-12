@@ -5,7 +5,7 @@
  */
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project } from '@agent-conductor/shared';
+import type { Project } from '@weave-ai/shared';
 import type { CommitDetail, HistoryCommit, ProjectRef } from '../api/types';
 import { project as projectOf } from './factories';
 

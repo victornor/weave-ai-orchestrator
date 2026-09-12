@@ -1,4 +1,4 @@
-/** `conductor presentation set|open|reconcile|status` and `conductor presenter` (PLAN §14b, §20). */
+/** `weave presentation set|open|reconcile|status` and `weave presenter` (PLAN §14b, §20). */
 import type { Command } from 'commander';
 import { spawn } from 'node:child_process';
 import { ApiError } from '../api.js';
@@ -89,8 +89,8 @@ export function register(program: Command): void {
       const sessionName = String(workers['session'] ?? `ac-${client.workspace ?? 'workspace'}`);
       if (surface !== 'tmux') {
         emit({ surface, attach: null }, () => {
-          write(`surface is ${style.bold(surface)} — its windows are managed by \`conductor presenter\` on the machine you are looking at.`);
-          write(style.dim('run `conductor presenter` there, or switch with `conductor presentation set workers.surface tmux`'));
+          write(`surface is ${style.bold(surface)} — its windows are managed by \`weave presenter\` on the machine you are looking at.`);
+          write(style.dim('run `weave presenter` there, or switch with `weave presentation set workers.surface tmux`'));
         });
         return;
       }
@@ -106,23 +106,23 @@ export function register(program: Command): void {
     .option('--once', 'reconcile once and exit')
     .action(async (opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const { client } = await session(command);
-      const specifier = '@agent-conductor/presenter';
+      const specifier = '@weave-ai/presenter';
       let mod: { startPresenter?: (input: Record<string, unknown>) => Promise<unknown> };
       try {
         mod = (await import(specifier)) as { startPresenter?: (input: Record<string, unknown>) => Promise<unknown> };
       } catch (cause) {
-        throw new ApiError('not_found', `the presenter is not installed: install @agent-conductor/presenter (${(cause as Error).message})`, 404, {
-          hint: 'pnpm add -g @agent-conductor/presenter, or run it from a source checkout',
+        throw new ApiError('not_found', `the presenter is not installed: install @weave-ai/presenter (${(cause as Error).message})`, 404, {
+          hint: 'pnpm add -g @weave-ai/presenter, or run it from a source checkout',
         });
       }
       if (typeof mod.startPresenter !== 'function') {
-        throw new ApiError('internal', '@agent-conductor/presenter does not export startPresenter', 500);
+        throw new ApiError('internal', '@weave-ai/presenter does not export startPresenter', 500);
       }
       await mod.startPresenter({
         client,
         apiUrl: client.baseUrl,
         token: client.token ?? '',
-        ocCommand: [process.execPath, process.argv[1] ?? 'conductor'],
+        ocCommand: [process.execPath, process.argv[1] ?? 'weave'],
         workspaceId: client.workspace,
         surface: typeof opts['surface'] === 'string' ? opts['surface'] : undefined,
         once: opts['once'] === true,

@@ -1,5 +1,5 @@
 {
-  "name": "@agent-conductor/channel-telegram",
+  "name": "@weave-ai/channel-telegram",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -15,8 +15,8 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@agent-conductor/shared": "workspace:*",
-    "@agent-conductor/channel-sdk": "workspace:*",
+    "@weave-ai/shared": "workspace:*",
+    "@weave-ai/channel-sdk": "workspace:*",
     "zod": "^3.25.76"
   },
   "devDependencies": {}

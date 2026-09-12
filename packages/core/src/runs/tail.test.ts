@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { newId, nowIso } from '@agent-conductor/db';
+import { newId, nowIso } from '@weave-ai/db';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createRunsService } from './index.js';
 

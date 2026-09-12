@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId, nowIso } from '@agent-conductor/db';
-import { FakeRuntime } from '@agent-conductor/runtime-sdk';
-import type { WorktreeProvider } from '@agent-conductor/plugin-sdk';
-import type { Agent, Ticket } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { FakeRuntime } from '@weave-ai/runtime-sdk';
+import type { WorktreeProvider } from '@weave-ai/plugin-sdk';
+import type { Agent, Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createWorkersService, ticketBranch, branchSlug } from './index.js';
 import { createRolesService } from '../roles/index.js';
@@ -356,7 +356,7 @@ describe('workers', () => {
     const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
     wake.calls.length = 0;
     // This pins the *service's own* default (queued) when a caller omits `live` entirely — not the
-    // conductor's `ac_worker_message` tool, which defaults to `live: true` at the tool layer (VS-103)
+    // conductor's `weave_worker_message` tool, which defaults to `live: true` at the tool layer (VS-103)
     // and is covered separately in packages/server/test/mcp.test.ts.
     const outcome = await workers.message({ kind: 'agent', id: 'conductor' }, worker.id, 'use CSS variables');
     expect(h.services.tickets!.comment).toHaveBeenCalledWith(expect.anything(), ticket.id, 'use CSS variables', 'relay', 'agent');
@@ -490,7 +490,7 @@ describe('workers', () => {
       const call = wake.calls[0]!;
       const input = call.input as { reason: string; payload: Record<string, unknown> };
       expect(input.payload).toMatchObject({ truncated: true, bodyLength: 8500, message: 'x'.repeat(8000) });
-      expect(input.reason).toContain('truncated; full message via ac_ticket_comments');
+      expect(input.reason).toContain('truncated; full message via weave_ticket_comments');
       // The full, untruncated body is still on the ticket regardless of the wake's bound.
       expect(h.services.tickets!.comment).toHaveBeenCalledWith(expect.anything(), ticket.id, longBody, 'relay', 'trusted');
     });
@@ -657,7 +657,7 @@ describe('workers', () => {
   });
 
   describe('session handover (VS-249)', () => {
-    async function spawnWithSession(): Promise<import('@agent-conductor/shared').Agent> {
+    async function spawnWithSession(): Promise<import('@weave-ai/shared').Agent> {
       const worker = await workers.spawnForTicket(SYSTEM, seedTicket().id);
       h.db.run("UPDATE agent_sessions SET session_ref_json = ? WHERE agent_id = ?", [JSON.stringify({ sessionId: 'sess-1' }), worker.id]);
       return worker;

@@ -13,7 +13,7 @@
  * Payload shapes are read defensively: the runtime adapters normalise events, but a missing field
  * must degrade to a shorter line, never to a crash.
  */
-import { isHumanReplyToolEvent, type AuthorKind, type RunEvent } from '@agent-conductor/shared';
+import { isHumanReplyToolEvent, type AuthorKind, type RunEvent } from '@weave-ai/shared';
 import { formatDuration, formatTokens, formatDiffStat, oneLine } from './format.js';
 import { redact } from './redact.js';
 import type { ErrorBlock, FileBlock, HumanInputBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock, TranscriptBlock, TranscriptOptions } from './types.js';
@@ -85,7 +85,7 @@ function toolTarget(name: string, input: Payload | null): string | null {
   if (url) return oneLine(url, 80);
   const prompt = str(input, 'prompt', 'description');
   if (prompt) return oneLine(prompt, 60);
-  if (/^ac_/.test(name)) {
+  if (/^weave_/.test(name)) {
     const id = str(input, 'ticketId', 'id', 'workerId', 'roleId', 'decisionId');
     if (id) return id;
   }
@@ -419,7 +419,7 @@ function elapsed(from: string | null | undefined, to: string | null | undefined)
 /**
  * The transcript for a conductor *chat*: the same blocks, minus the tool that delivers the reply.
  *
- * `ac_human_send` is how the conductor's words reach the human, and they already render as the
+ * `weave_human_send` is how the conductor's words reach the human, and they already render as the
  * thread message it created — showing the call as well would put the reply on screen twice. Views
  * of the raw turn (`attach`, the run page) call `runEventsToTranscript` directly and keep it.
  */
@@ -440,7 +440,7 @@ function collapsedToolLine(name: string, target: string | null, durationMs: numb
 }
 
 function prettyToolName(name: string): string {
-  if (name.startsWith('ac_')) return name;
+  if (name.startsWith('weave_')) return name;
   if (name.startsWith('mcp__')) return name.split('__').slice(-1)[0] ?? name;
   return name;
 }

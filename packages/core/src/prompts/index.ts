@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { landingBranchOf, yoloEnabled } from '@agent-conductor/shared';
-import type * as S from '@agent-conductor/shared';
+import { landingBranchOf, yoloEnabled } from '@weave-ai/shared';
+import type * as S from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { renderTemplate } from './template.js';
@@ -71,15 +71,15 @@ export function parseAcceptance(description: string): string[] {
 export function definitionOfDone(kind: S.TicketKind, deliveryMode: string): string {
   if (kind === 'change') {
     return deliveryMode === 'pr'
-      ? 'planning artifacts complete and validated → `proposed`; after approval implement every task, commit as you go, open a PR and record it → `in_review`; after the merge approval, sync, resolve conflicts, merge and call `ac_ticket_merge_done`.'
-      : 'planning artifacts complete and validated → `proposed`; after approval implement every task and commit → `in_review` with a branch work product; after approval merge into the default branch and call `ac_ticket_merge_done`.';
+      ? 'planning artifacts complete and validated → `proposed`; after approval implement every task, commit as you go, open a PR and record it → `in_review`; after the merge approval, sync, resolve conflicts, merge and call `weave_ticket_merge_done`.'
+      : 'planning artifacts complete and validated → `proposed`; after approval implement every task and commit → `in_review` with a branch work product; after approval merge into the default branch and call `weave_ticket_merge_done`.';
   }
   if (kind === 'task') return deliveryMode === 'pr'
     ? 'choose the ending that matches what you produced: with a diff to land, commit, open a PR and record it as a work product → `in_review`, then merge when the ticket reaches `merging`; with nothing that needs landing, state the ending and why in the transition note → `done` (no PR, no merge approval — and `done` is refused while commits are unlanded).'
     : 'choose the ending that matches what you produced: with a diff to land, commit on the ticket branch → `in_review` with a branch work product, then merge when the ticket reaches `merging`; with nothing that needs landing, state the ending and why in the transition note → `done` (no PR — and `done` is refused while commits are unlanded).';
-  if (kind === 'scout') return 'write the findings as a `report` document (`ac_ticket_document_put`): what you did, what you found, evidence with file:line, recommendation. No code changes, no PR → `done`.';
-  if (kind === 'operational') return 'write the action as an `action` document (`ac_ticket_document_put`) stating the concrete commands, host or service, and expected outcome; wait for the human to approve (`action_approval` — YOLO does not grant it); then execute, write a `report` of what actually happened (including if it differed), and update the knowledge base where applicable. A later `approve` of an `action` revision that already has a `report` is not a second authorisation to run. Repo docs are a follow-up `change` ticket. No PR → `done` (`done` is refused while commits are unlanded).';
-  return 'answer on the ticket with `ac_ticket_comment`, then transition to `done`.';
+  if (kind === 'scout') return 'write the findings as a `report` document (`weave_ticket_document_put`): what you did, what you found, evidence with file:line, recommendation. No code changes, no PR → `done`.';
+  if (kind === 'operational') return 'write the action as an `action` document (`weave_ticket_document_put`) stating the concrete commands, host or service, and expected outcome; wait for the human to approve (`action_approval` — YOLO does not grant it); then execute, write a `report` of what actually happened (including if it differed), and update the knowledge base where applicable. A later `approve` of an `action` revision that already has a `report` is not a second authorisation to run. Repo docs are a follow-up `change` ticket. No PR → `done` (`done` is refused while commits are unlanded).';
+  return 'answer on the ticket with `weave_ticket_comment`, then transition to `done`.';
 }
 
 function knowledgeText(deps: () => CoreServices, scope: S.KnowledgeScope, projectId?: string | null): string {
@@ -245,7 +245,7 @@ export function flattenWakes(wakes: S.Wakeup[]): BundledWake[] {
 export function mergeQueueLine(ctx: WorkspaceContext, t: S.Ticket, landingBranch: string): string | null {
   if (t.status !== 'merging') return null;
   if (t.mergeStartedAt) {
-    return `- **You hold the merge slot for this project.** Only one ticket merges at a time, and it is now yours. Your base moved while you waited: sync \`work/\` with \`${landingBranch}\`, resolve the conflicts yourself, re-run the project's tests and lint, then merge and call \`ac_ticket_merge_done\`. The next ticket starts when you are done, so do not hold the slot longer than the merge needs.`;
+    return `- **You hold the merge slot for this project.** Only one ticket merges at a time, and it is now yours. Your base moved while you waited: sync \`work/\` with \`${landingBranch}\`, resolve the conflicts yourself, re-run the project's tests and lint, then merge and call \`weave_ticket_merge_done\`. The next ticket starts when you are done, so do not hold the slot longer than the merge needs.`;
   }
   if (!t.projectId) return null;
   const ahead = ctx.db.get<{ n: number }>(
@@ -287,7 +287,7 @@ export async function buildTurnPrompt(
 
   const flat = flattenWakes(wakes);
   parts.push('\n## Why you were woken');
-  parts.push(bounded(flat, 12, (w) => `- ${w.source}: ${w.reason || '(no reason given)'}`, 'call `ac_inbox` for the rest'));
+  parts.push(bounded(flat, 12, (w) => `- ${w.source}: ${w.reason || '(no reason given)'}`, 'call `weave_inbox` for the rest'));
 
   let workerTicket: S.Ticket | null = null;
   if (agent.kind === 'worker' && agent.ticketId) {
@@ -322,11 +322,11 @@ export async function buildTurnPrompt(
     parts.push(bounded(open, 10, (t) => {
       const w = workers.find((x) => x.ticketId === t.id);
       return `- ${t.identifier} [${t.status}] ${t.title}${w ? ` — ${w.name} (${workerStatusLine(w)})` : ''}`;
-    }, 'call `ac_ticket_list`'));
+    }, 'call `weave_ticket_list`'));
     const pending = ctx.db.all<S.Decision>("SELECT * FROM decisions WHERE workspace_id = ? AND status = 'open' ORDER BY created_at", [ctx.workspaceId]);
     if (pending.length) {
       parts.push('\n## Open decisions');
-      parts.push(bounded(pending, 8, (d) => `- ${d.id} [${d.kind}, owner ${d.owner}] ${d.title}`, 'call `ac_briefing`'));
+      parts.push(bounded(pending, 8, (d) => `- ${d.id} [${d.kind}, owner ${d.owner}] ${d.title}`, 'call `weave_briefing`'));
     }
   }
 
@@ -336,7 +336,7 @@ export async function buildTurnPrompt(
   );
   if (answered.length) {
     parts.push('\n## Answered decisions');
-    parts.push(bounded(answered, 8, (d) => `- ${d.id}${d.ticketId ? ` (${ticket(ctx, d.ticketId)?.identifier ?? d.ticketId})` : ''}: "${d.title}" — answered ${d.answerKey ?? ''}${d.answerText ? `: "${d.answerText}"` : ''}`, 'call `ac_inbox`'));
+    parts.push(bounded(answered, 8, (d) => `- ${d.id}${d.ticketId ? ` (${ticket(ctx, d.ticketId)?.identifier ?? d.ticketId})` : ''}: "${d.title}" — answered ${d.answerKey ?? ''}${d.answerText ? `: "${d.answerText}"` : ''}`, 'call `weave_inbox`'));
   }
 
   const notes: string[] = [];
@@ -379,9 +379,9 @@ export async function buildTurnPrompt(
   return parts.join('\n') + '\n';
 }
 
-const WEAVER_NOW = 'Call `ac_inbox` if you need details. Handle human messages first, then ticket events. Reply to the human only through `ac_human_send`. Finish with the structured final report.';
-const WORKER_DELIVERY_NOW = 'Call `ac_inbox` if you need details, do the phase your ticket status asks for, leave durable progress on the ticket, and finish with the structured final report. Ask with `ac_ask` instead of guessing; report `blocked` with a routable path if you are stuck.';
-const INTERACTIVE_FIRST_TURN_NOW = 'This is an interactive session: a human is about to work with you directly on this ticket. Read the ticket and its existing context, then post exactly one `ac_ticket_comment` stating what you understand the ticket to be and what you are ready to do. Do not edit anything, run anything, transition the ticket, or take any other action this turn — only the tools needed to read and to post that one comment are available to you right now. Stop after posting it and wait for the human\'s first message; the tools you need for the rest return on your next turn.';
+const WEAVER_NOW = 'Call `weave_inbox` if you need details. Handle human messages first, then ticket events. Reply to the human only through `weave_human_send`. Finish with the structured final report.';
+const WORKER_DELIVERY_NOW = 'Call `weave_inbox` if you need details, do the phase your ticket status asks for, leave durable progress on the ticket, and finish with the structured final report. Ask with `weave_ask` instead of guessing; report `blocked` with a routable path if you are stuck.';
+const INTERACTIVE_FIRST_TURN_NOW = 'This is an interactive session: a human is about to work with you directly on this ticket. Read the ticket and its existing context, then post exactly one `weave_ticket_comment` stating what you understand the ticket to be and what you are ready to do. Do not edit anything, run anything, transition the ticket, or take any other action this turn — only the tools needed to read and to post that one comment are available to you right now. Stop after posting it and wait for the human\'s first message; the tools you need for the rest return on your next turn.';
 const INTERACTIVE_CONVERSATION_NOW = 'This is an interactive session: a conversation with the human on this ticket. Answer, investigate, read and explain. Do not write code, transition the ticket toward delivery, or create a plan or merge approval unless the human asked for changes in this conversation. If you think a change is warranted and they have not asked, say so in the conversation and wait — do not start planning while you ask. A conversation that ends with a good answer and nothing delivered is complete success; the ticket is a container, not a mandate. The ordinary plan-approval and merge-approval gates still apply if they ask you to make a change.';
 
 function whatToDoNow(agent: S.Agent, workerTicket: S.Ticket | null): string {

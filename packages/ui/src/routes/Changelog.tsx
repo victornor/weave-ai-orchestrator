@@ -7,7 +7,7 @@
  * so a cell and the separator it scrolls to always mean the same day.
  */
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { groupTimeline, type TimelineGroup } from '@agent-conductor/render';
+import { groupTimeline, type TimelineGroup } from '@weave-ai/render';
 import { useChangelog, useChangelogHeatmap, readerTimezone } from '../api/hooks';
 import type { ChangelogEntry, ChangelogKind } from '../api/types';
 import { ActivityHeatmap } from '../components/Heatmap';

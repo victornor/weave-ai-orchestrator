@@ -1,8 +1,8 @@
 /**
- * Response shapes for docs/API.md. Entities come from @agent-conductor/shared;
+ * Response shapes for docs/API.md. Entities come from @weave-ai/shared;
  * these are the envelopes the HTTP layer wraps them in.
  */
-import type { DiffFileStatus, DiffHunk } from '@agent-conductor/render';
+import type { DiffFileStatus, DiffHunk } from '@weave-ai/render';
 import type {
   Agent,
   Briefing,
@@ -33,7 +33,7 @@ import type {
   UsageBillingMix,
   AuthSessionKind,
   PresentationConfig,
-} from '@agent-conductor/shared';
+} from '@weave-ai/shared';
 
 export interface Health {
   ok: boolean;
@@ -150,7 +150,7 @@ export interface RuntimeInfo {
   id: string;
   displayName: string;
   /**
-   * Mirrors `RuntimeDetection` in @agent-conductor/runtime-sdk, which `GET /api/runtimes` returns
+   * Mirrors `RuntimeDetection` in @weave-ai/runtime-sdk, which `GET /api/runtimes` returns
    * unchanged. There is no `available` boolean on the wire — declaring an optional one here let the
    * add-project selector read `undefined` and disable every runtime (VS-45), so the shape is exact
    * on purpose: a future SDK change has to fail typecheck here.

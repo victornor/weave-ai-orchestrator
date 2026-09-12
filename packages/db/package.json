@@ -1,5 +1,5 @@
 {
-  "name": "@agent-conductor/db",
+  "name": "@weave-ai/db",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -15,7 +15,7 @@
     "build": "tsc -b && cp -r src/migrations dist/"
   },
   "dependencies": {
-    "@agent-conductor/shared": "workspace:*",
+    "@weave-ai/shared": "workspace:*",
     "ulid": "^3.0.1"
   },
   "devDependencies": {}

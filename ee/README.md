@@ -1,7 +1,7 @@
 # `ee/` — commercially licensed code
 
 Everything in this directory and every subdirectory of it is **not** covered by the
-AGPL-3.0 licence in the repository root. It is licensed under the AgentConductor
+AGPL-3.0 licence in the repository root. It is licensed under the Weave AI
 Commercial Licence in [`ee/LICENSE`](./LICENSE).
 
 In short:

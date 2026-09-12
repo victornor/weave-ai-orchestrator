@@ -4,7 +4,7 @@
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@agent-conductor/shared';
+import { WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@weave-ai/shared';
 import type { WorkspaceModels } from '../api/types';
 
 const state = vi.hoisted(() => ({

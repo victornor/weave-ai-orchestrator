@@ -1,5 +1,5 @@
-import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, type Agent, type Run, type Wakeup } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { OcError, type Agent, type Run, type Wakeup } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices, Dispatcher } from '../api.js';
 import { executeRun } from './engine.js';

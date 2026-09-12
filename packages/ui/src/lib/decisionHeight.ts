@@ -1,5 +1,5 @@
 /**
- * How tall the conductor chat's pinned decision region is, remembered per device (VS-94).
+ * How tall the weave chat's pinned decision region is, remembered per device (VS-94).
  *
  * The region was capped at a fixed share of the app height, which is a guess made once for every
  * reader and every screen: a long plan approval is read three lines at a time, while a short

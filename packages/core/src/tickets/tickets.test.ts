@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { newId, nowIso } from '@agent-conductor/db';
-import { OcError, TICKET_KINDS, TICKET_STATUSES, TRANSITIONS, NAMED_CARD_OPTION_KEYS, canTransition, type Agent, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { OcError, TICKET_KINDS, TICKET_STATUSES, TRANSITIONS, NAMED_CARD_OPTION_KEYS, canTransition, type Agent, type TicketKind, type TicketStatus } from '@weave-ai/shared';
 import { makeHarness, fakeWake, fakeSpecs, type TestHarness } from '../testing/context.js';
 import { createTicketsService, TICKET_COMMENT_WAKE_BODY_CHARS } from './service.js';
 import { GitWorktreeProvider } from '../worktrees/git.js';
@@ -213,7 +213,7 @@ describe('tickets', () => {
             expect(ok, `${kind}: ${from} -> ${to} expected ${allowed ? 'allowed' : 'rejected'} (${String(err)})`).toBe(allowed && !guardRefuses);
             if (guardRefuses) {
               expect(err).toMatchObject({ code: 'invalid_disposition' });
-              expect((err as OcError).message).toContain('ac_ticket_merge_done');
+              expect((err as OcError).message).toContain('weave_ticket_merge_done');
               expect(tickets.get(t.id).status).toBe('merging');
             } else if (ok) {
               expect(tickets.get(t.id).status).toBe(to);
@@ -232,7 +232,7 @@ describe('tickets', () => {
         h.db.update('tickets', t.id, { status: 'merging', autoMerge: 1 });
         await expect(tickets.transition(SYSTEM, t.id, { to: 'done', note: 'ending stated for the guard' })).rejects.toMatchObject({
           code: 'invalid_disposition',
-          message: expect.stringContaining('ac_ticket_merge_done'),
+          message: expect.stringContaining('weave_ticket_merge_done'),
         });
         expect(tickets.get(t.id).status).toBe('merging');
       }
@@ -744,7 +744,7 @@ describe('tickets', () => {
 
     // VS-275: a decision held under the weaver's concern (VS-266) is answered by the worker's fix,
     // which arrives as an ordinary comment. Every wake below is a notification only — resolving the
-    // concern stays the weaver's judgement through ac_decision_review.
+    // concern stays the weaver's judgement through weave_decision_review.
     const seedDecision = (ticketId: string, over: Record<string, unknown> = {}): string => {
       const id = newId();
       h.db.insert('decisions', {
@@ -825,7 +825,7 @@ describe('tickets', () => {
 
     // VS-246: a comment over the bound used to be sliced silently into the wake payload. Every
     // payload site now carries VS-242's `truncated`/`bodyLength` marker, and a reader is pointed at
-    // `ac_ticket_comments` for the full body.
+    // `weave_ticket_comments` for the full body.
     describe('ticket comment truncation (VS-246)', () => {
       const tick = () => new Promise((r) => setImmediate(r));
 
@@ -839,7 +839,7 @@ describe('tickets', () => {
         expect(payload.body).toHaveLength(TICKET_COMMENT_WAKE_BODY_CHARS);
         expect(payload.truncated).toBe(true);
         expect(payload.bodyLength).toBe(body.length);
-        expect(call.input.reason).toContain('ac_ticket_comments');
+        expect(call.input.reason).toContain('weave_ticket_comments');
       });
 
       it('reproduces bodyLength 9000 for a 9,000-character comment', () => {
@@ -873,7 +873,7 @@ describe('tickets', () => {
         const payload = call?.input.payload as { body: string; truncated?: boolean; bodyLength?: number };
         expect(payload.truncated).toBe(true);
         expect(payload.bodyLength).toBe(body.length);
-        expect(call?.input.reason).toContain('ac_ticket_comments');
+        expect(call?.input.reason).toContain('weave_ticket_comments');
       });
 
       it('marks the relaunch note when the reply is longer than its excerpt, and leaves a short one alone', async () => {
@@ -887,14 +887,14 @@ describe('tickets', () => {
         expect(relaunch).toHaveBeenCalledTimes(1);
         const marked = String(relaunch.mock.calls[0]![2]);
         expect(marked).toContain(t.identifier);
-        expect(marked).toContain('ac_ticket_comments');
+        expect(marked).toContain('weave_ticket_comments');
 
         relaunch.mockClear();
         tickets.comment(HUMAN, t.id, 'a short reply');
         await tick();
         const note = String(relaunch.mock.calls[0]![2]);
         expect(note).toContain('a short reply');
-        expect(note).not.toContain('ac_ticket_comments');
+        expect(note).not.toContain('weave_ticket_comments');
       });
 
       it('points the conductor at the full comment when a workerless ticket has no role', async () => {
@@ -903,7 +903,7 @@ describe('tickets', () => {
         tickets.comment(HUMAN, t.id, body);
         await tick();
         const call = wake.calls.find((c) => c.agentId === h.conductorId);
-        expect(call?.input.reason).toContain('ac_ticket_comments');
+        expect(call?.input.reason).toContain('weave_ticket_comments');
         const payload = call?.input.payload as { truncated?: boolean; bodyLength?: number };
         expect(payload.truncated).toBe(true);
         expect(payload.bodyLength).toBe(body.length);

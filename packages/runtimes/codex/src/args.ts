@@ -1,6 +1,6 @@
 import { join } from 'node:path';
-import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, TurnInput } from '@agent-conductor/runtime-sdk';
-import { runTmpDir } from '@agent-conductor/runtime-sdk';
+import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, TurnInput } from '@weave-ai/runtime-sdk';
+import { runTmpDir } from '@weave-ai/runtime-sdk';
 import { asCodexSession } from './session.js';
 
 export interface CodexBuildOpts { tmpDir?: string }
@@ -49,7 +49,7 @@ export function mcpOverrides(name: string, s: McpServerConfig): { args: string[]
 
 /** TOML fallback for `CODEX_HOME/config.toml` when per-invocation `-c` is not wanted. */
 export function mcpConfigToml(servers: Record<string, McpServerConfig>): string {
-  const lines: string[] = ['# written by AgentConductor before each turn; do not edit'];
+  const lines: string[] = ['# written by Weave AI before each turn; do not edit'];
   for (const [name, s] of Object.entries(servers)) {
     lines.push('', `[mcp_servers.${name}]`);
     if (s.type === 'http') {

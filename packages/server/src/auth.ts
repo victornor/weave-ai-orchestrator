@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
-import { OcError } from '@agent-conductor/shared';
-import { getLogger } from '@agent-conductor/core';
+import { OcError } from '@weave-ai/shared';
+import { getLogger } from '@weave-ai/core';
 import type { AppDeps, AppEnv, Principal } from './types.js';
 import { actorFor } from './types.js';
 import { isRunToken, peekWorkspaceId, runTokenSecret, verifyRunToken } from './runtoken.js';

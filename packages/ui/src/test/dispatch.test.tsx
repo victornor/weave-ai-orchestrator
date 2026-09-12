@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ThreadMessage } from '@agent-conductor/shared';
+import type { ThreadMessage } from '@weave-ai/shared';
 import { chatEntries, dispatchStatus } from '../lib/dispatch';
 import { agent, decision, ticket } from './factories';
 

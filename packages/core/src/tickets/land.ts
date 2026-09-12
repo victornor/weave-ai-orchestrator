@@ -1,4 +1,4 @@
-import { OcError, landingBranchOf, type Project, type Ticket, type WorkspaceConfig } from '@agent-conductor/shared';
+import { OcError, landingBranchOf, type Project, type Ticket, type WorkspaceConfig } from '@weave-ai/shared';
 import { git } from '../util/git.js';
 
 export interface LandResult { mode: 'pr' | 'local-branch'; landed: boolean; head: string | null; detail: string }

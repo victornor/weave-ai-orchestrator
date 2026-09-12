@@ -3,7 +3,7 @@
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ROUTINE_ACTIONS, ROUTINE_STATUSES, ROUTINE_USAGE_WINDOWS } from '@agent-conductor/shared';
+import { ROUTINE_ACTIONS, ROUTINE_STATUSES, ROUTINE_USAGE_WINDOWS } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body, query } from '../http.js';
 

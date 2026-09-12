@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { newId, openDb, type Db } from '@agent-conductor/db';
-import { OcError } from '@agent-conductor/shared';
+import { newId, openDb, type Db } from '@weave-ai/db';
+import { OcError } from '@weave-ai/shared';
 import { createIncidentsService } from './index.js';
 
 const dirs: string[] = [];
@@ -20,7 +20,7 @@ function service() {
 
 const base = {
   title: 'MCP call failed',
-  whatFailed: 'ac_ticket_get returned not_found for a ticket that exists',
+  whatFailed: 'weave_ticket_get returned not_found for a ticket that exists',
   tryingToDo: 'read the bound ticket before commenting',
   agentId: 'ag1',
   runId: 'run1',

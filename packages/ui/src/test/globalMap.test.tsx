@@ -1,7 +1,7 @@
 /** VS-176/VS-192: daemon-wide Map page. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Role, Ticket } from '@agent-conductor/shared';
+import type { Role, Ticket } from '@weave-ai/shared';
 import type { WorkerListItem, WorkspaceProjectsState } from '../api/hooks';
 import { agent, project, ticket } from './factories';
 

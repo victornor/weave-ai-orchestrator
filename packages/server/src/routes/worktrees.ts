@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync } from 'node:fs';
-import { OcError, landingBranchOf } from '@agent-conductor/shared';
-import { landedWorkTest } from '@agent-conductor/core';
+import { OcError, landingBranchOf } from '@weave-ai/shared';
+import { landedWorkTest } from '@weave-ai/core';
 import type { AppEnv } from '../types.js';
 import { body, notFound } from '../http.js';
 

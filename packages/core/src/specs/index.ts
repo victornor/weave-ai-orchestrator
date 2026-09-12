@@ -1,5 +1,5 @@
 /**
- * SpecsService (PLAN §12.5): the per-project spec index behind the Spec Explorer, the `ac_spec_*` tools and
+ * SpecsService (PLAN §12.5): the per-project spec index behind the Spec Explorer, the `weave_spec_*` tools and
  * the shared knowledge search. OpenSpec leaves a spec document behind for nearly every feature, so specs are
  * treated as project knowledge: capabilities and their requirements come from the primary clone on the
  * default branch, archived changes are read from `openspec/changes/archive/`, and active changes are read
@@ -11,8 +11,8 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
-import { newId, nowIso } from '@agent-conductor/db';
-import { OcError } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { OcError } from '@weave-ai/shared';
 import type { Actor, CapabilityRequirement, CoreServices, PendingChange, RequirementDelta, SpecChangeSummary, SpecsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -174,7 +174,7 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
   const identifierOf = (ticketId: string | null): string | null =>
     (ticketId ? db.get<{ identifier: string }>('SELECT identifier FROM tickets WHERE id = ?', [ticketId])?.identifier ?? null : null);
   /**
-   * A row stores the change folder verbatim in `artifacts_json`; the UI, the CLI and `ac_spec_change_get`
+   * A row stores the change folder verbatim in `artifacts_json`; the UI, the CLI and `weave_spec_change_get`
    * all want the parsed change, so the parsing happens once here rather than in each client.
    */
   const summaryOf = (c: ChangeRow): SpecChangeSummary => {

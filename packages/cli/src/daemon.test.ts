@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SHUTDOWN_KILL_GRACE_MS } from '@agent-conductor/shared';
+import { SHUTDOWN_KILL_GRACE_MS } from '@weave-ai/shared';
 import { isRunning, pidFile, renderServiceUnit, stopDaemon } from './daemon.js';
 
 describe('renderServiceUnit (VS-262)', () => {

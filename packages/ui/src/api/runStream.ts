@@ -14,7 +14,7 @@
  * state machine the workspace event stream uses. See `live-streams/connection-state`.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RUN_EVENT_TYPES, type RunEvent } from '@agent-conductor/shared';
+import { RUN_EVENT_TYPES, type RunEvent } from '@weave-ai/shared';
 import { useHookWs } from './context';
 import { useRunEvents } from './hooks';
 import { useLiveStream } from './sseStream';

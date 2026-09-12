@@ -1,19 +1,19 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Agent, Role } from '@agent-conductor/shared';
-import type { RuntimeAdapter } from '@agent-conductor/runtime-sdk';
+import type { Agent, Role } from '@weave-ai/shared';
+import type { RuntimeAdapter } from '@weave-ai/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { renderBrief, renderConductorInstructions, renderWorkerInstructions } from '../prompts/index.js';
 
 const MARKER = '.ac-render.json';
 
-const CONDUCTOR_SKILLS = ['agent-conductor-weaver', 'agent-conductor-hire', 'agent-conductor-planning', 'agent-conductor-briefing', 'agent-conductor-knowledge', 'agent-conductor-artifacts'];
-const WORKER_SKILLS = ['agent-conductor-worker', 'agent-conductor-openspec', 'agent-conductor-scout', 'agent-conductor-knowledge', 'agent-conductor-artifacts'];
+const WEAVER_SKILLS = ['weave-ai-weaver', 'weave-ai-hire', 'weave-ai-planning', 'weave-ai-briefing', 'weave-ai-knowledge', 'weave-ai-artifacts'];
+const WORKER_SKILLS = ['weave-ai-worker', 'weave-ai-openspec', 'weave-ai-scout', 'weave-ai-knowledge', 'weave-ai-artifacts'];
 
 /** Skill packages shipped with the daemon, filtered to the ones this agent kind loads. */
 export function skillsFor(ctx: WorkspaceContext, kind: 'weaver' | 'worker'): Array<{ name: string; dir: string }> {
-  const wanted = kind === 'weaver' ? CONDUCTOR_SKILLS : WORKER_SKILLS;
+  const wanted = kind === 'weaver' ? WEAVER_SKILLS : WORKER_SKILLS;
   if (!ctx.skillsDir || !existsSync(ctx.skillsDir)) return [];
   let entries: string[] = [];
   try { entries = readdirSync(ctx.skillsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch { return []; }

@@ -9,7 +9,7 @@ promoted to `main` separately, in batches, by a human. That is the project's own
 repository. Every place in the daemon that decides "has this ticket's work landed" read
 `project.defaultBranch` directly and assumed it was also the branch a ticket's work lands on. VS-88
 followed Fernwood's rule exactly — captain approved the merge, PR #459 correctly landed on `edge` — and
-`ac_ticket_merge_done` refused to close the ticket because it verified against `origin/main`, where the
+`weave_ticket_merge_done` refused to close the ticket because it verified against `origin/main`, where the
 commit correctly was not. The worker was right to refuse rather than push to `main` to satisfy a check;
 a human had to close the ticket by hand instead, and every Fernwood change ticket would hit the same
 wall.
@@ -18,7 +18,7 @@ A survey of the codebase found eight call sites carrying the same assumption: me
 (`land.ts`), worktree creation (`workers/index.ts`), the landed-work retire test
 (`worktrees/landed.ts`), the primary clone's fetch/fast-forward (`projects/index.ts`), the merge-queue
 sync instruction and the worker's brief/`AGENTS.md` text (`prompts/index.ts` and the shipped
-templates), and the `ac_worktree_status` tool's ahead/behind display (`tools.ts`).
+templates), and the `weave_worktree_status` tool's ahead/behind display (`tools.ts`).
 
 While specifying the fix, captain added a second requirement on the ticket directly: "Unless
 explicitly stated otherwise, Fernwood should land changes on edge... Sometimes I might ask you to do a
@@ -71,6 +71,6 @@ Two declarations, one resolver:
   project with none declared the checkout target equals the branch the clone was already on (a no-op),
   which was already PLAN.md's invariant.
 - Nothing surfaces a ticket's effective landing branch to a human beyond its worker's brief and the raw
-  API/CLI fields (`conductor ticket show`, `conductor project show`): there is no ticket-creation UI to
-  add a form field to, and a human's request reaches `ac_ticket_create` through conductor chat, the
+  API/CLI fields (`weave ticket show`, `weave project show`): there is no ticket-creation UI to
+  add a form field to, and a human's request reaches `weave_ticket_create` through weave chat, the
   CLI, or the API either way.

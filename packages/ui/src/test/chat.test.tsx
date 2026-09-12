@@ -1,6 +1,6 @@
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Decision, Project, RunEvent, RunTrace, RuntimeAccount, ThreadMessage, Ticket, WorkspaceEvent } from '@agent-conductor/shared';
+import type { Agent, Decision, Project, RunEvent, RunTrace, RuntimeAccount, ThreadMessage, Ticket, WorkspaceEvent } from '@weave-ai/shared';
 import { agent, decision, project, ticket } from './factories';
 import { projectColorVar } from '../lib/projectColor';
 import { enqueue } from '../lib/queue';
@@ -289,29 +289,29 @@ describe('ChatRoute live turn', () => {
     render(<ChatRoute />);
     emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
 
-    act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'tool.call', payload: { id: 'tu_1', name: 'ac_briefing', input: { query: 'what is everyone doing' } } })); });
-    expect(screen.getByText('ac_briefing')).toBeInTheDocument();
+    act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'tool.call', payload: { id: 'tu_1', name: 'weave_briefing', input: { query: 'what is everyone doing' } } })); });
+    expect(screen.getByText('weave_briefing')).toBeInTheDocument();
     expect(screen.getByText('what is everyone doing')).toBeInTheDocument();
 
-    act(() => { stream().emit(ev({ id: 'e2', seq: 2, type: 'tool.result', payload: { id: 'tu_1', name: 'ac_briefing', content: '3 workers running' } })); });
+    act(() => { stream().emit(ev({ id: 'e2', seq: 2, type: 'tool.result', payload: { id: 'tu_1', name: 'weave_briefing', content: '3 workers running' } })); });
     // The result is collapsed behind the call it belongs to, not a second block.
     const toggle = screen.getByRole('button', { expanded: false });
     act(() => { toggle.click(); });
     expect(screen.getByText('3 workers running')).toBeInTheDocument();
   });
 
-  it('shows the reply once: the thread message renders, the ac_human_send call does not', () => {
+  it('shows the reply once: the thread message renders, the weave_human_send call does not', () => {
     const reply = 'Filed the ticket and put Ana on it.';
     state.messages = [message({ id: 'm1', body: reply })];
     render(<ChatRoute />);
     emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
 
     act(() => {
-      stream().emit(ev({ id: 'e1', seq: 1, type: 'tool.call', payload: { id: 'tu_1', name: 'ac_human_send', input: { body: reply } } }));
-      stream().emit(ev({ id: 'e2', seq: 2, type: 'tool.result', payload: { id: 'tu_1', name: 'ac_human_send', content: 'delivered' } }));
+      stream().emit(ev({ id: 'e1', seq: 1, type: 'tool.call', payload: { id: 'tu_1', name: 'weave_human_send', input: { body: reply } } }));
+      stream().emit(ev({ id: 'e2', seq: 2, type: 'tool.result', payload: { id: 'tu_1', name: 'weave_human_send', content: 'delivered' } }));
     });
 
-    expect(screen.queryByText('ac_human_send')).not.toBeInTheDocument();
+    expect(screen.queryByText('weave_human_send')).not.toBeInTheDocument();
     expect(screen.getAllByText(reply)).toHaveLength(1);
   });
 
@@ -707,7 +707,7 @@ describe('ChatRoute dispatch labels', () => {
     expect(screen.queryByTestId('context-meter')).not.toBeInTheDocument();
   });
 
-  it('carries the conductor runtime\u2019s plan meter in the header, and only that runtime\u2019s', () => {
+  it('carries the weave runtime\u2019s plan meter in the header, and only that runtime\u2019s', () => {
     state.accounts = [
       {
         workspaceId: 'ws1', runtimeId: 'codex', billingType: 'subscription_included', planLabel: 'pro',

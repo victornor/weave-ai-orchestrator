@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { accountLimits, MIXED_BILLING_NOTE } from '@agent-conductor/render';
-import type { RuntimeAccount, RuntimeCredential, UsageBillingMix } from '@agent-conductor/shared';
+import { accountLimits, MIXED_BILLING_NOTE } from '@weave-ai/render';
+import type { RuntimeAccount, RuntimeCredential, UsageBillingMix } from '@weave-ai/shared';
 import { PlanLimits, type PlanSync } from '../components/PlanLimits';
 import { RuntimeCredentials } from '../components/RuntimeCredentials';
 

@@ -1,13 +1,13 @@
 /**
- * `conductor chat` — the conductor thread with inline decision cards and a composer (PLAN §21.2).
+ * `weave chat` — the conductor thread with inline decision cards and a composer (PLAN §21.2).
  * Commands: `/talk <ticket>` binds the thread to a ticket, `/weaver` goes back,
  * `/d <decision> <key|number>` answers a decision, `/quit` leaves.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
-import type { Agent, ChannelThread, Decision, Run, RunEvent, ThreadMessage } from '@agent-conductor/shared';
-import { isActiveRun } from '@agent-conductor/shared';
-import { chatTranscript, decisionToCard, formatRelative, type CardModel, type TranscriptBlock } from '@agent-conductor/render';
+import type { Agent, ChannelThread, Decision, Run, RunEvent, ThreadMessage } from '@weave-ai/shared';
+import { isActiveRun } from '@weave-ai/shared';
+import { chatTranscript, decisionToCard, formatRelative, type CardModel, type TranscriptBlock } from '@weave-ai/render';
 import { DecisionCardView } from '../components/DecisionCard.js';
 import { StatusBar } from '../components/StatusBar.js';
 import { TextInput } from '../components/TextInput.js';
@@ -138,7 +138,7 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
     if (message.type.startsWith('decision.')) void loadDecisions();
   });
 
-  // The reply renders as the thread message ac_human_send created; showing the call too would
+  // The reply renders as the thread message weave_human_send created; showing the call too would
   // put the same words on screen twice.
   const blocks: TranscriptBlock[] = useMemo(() => chatTranscript(events), [events]);
   const working = pending || runId !== null;
@@ -158,7 +158,7 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
     else if (card.options.some((o) => o.key === raw)) body['key'] = raw;
     else if (card.allowFreeText) body['text'] = raw;
     else { setNotice(`not an option: ${raw}`); return; }
-    if (card.confirm && card.destructive) { setNotice(`${card.confirm.prompt} — use \`conductor decision answer\` for destructive decisions`); return; }
+    if (card.confirm && card.destructive) { setNotice(`${card.confirm.prompt} — use \`weave decision answer\` for destructive decisions`); return; }
     try {
       await client.wpost(`/decisions/${encodeURIComponent(card.id)}/answer`, body);
       setNotice(`answered ${card.id}`);

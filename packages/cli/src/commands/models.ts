@@ -1,5 +1,5 @@
 /**
- * `conductor models [show] | models set conductor|workers | models options …` — model selection
+ * `weave models [show] | models set conductor|workers | models options …` — model selection
  * (VS-77, ADR 0011; VS-162, ADR 0012). The CLI's own argument vocabulary (`conductor`/`workers`) is
  * unchanged for now (VS-260's job); the wire field it reads and writes is `weaver` (VS-263) —
  * `wireField()` is the one place that translates between them.
@@ -29,7 +29,7 @@ function wireField(kind: Kind): 'weaver' | 'workers' {
 function assertUnlocked(current: WorkspaceModels, control: 'conductor' | 'workers' | 'workerOptions'): void {
   const field = control === 'workerOptions' ? 'workerOptions' : wireField(control);
   if (current.locked?.[field]) {
-    throw new ApiError('conflict', `${control} is set on the daemon; use \`conductor daemon models\` to change it`, 409);
+    throw new ApiError('conflict', `${control} is set on the daemon; use \`weave daemon models\` to change it`, 409);
   }
 }
 
@@ -69,7 +69,7 @@ export function register(program: Command): void {
   models
     .command('set')
     .argument('<setting>', `which setting to change: ${KINDS.join(' or ')}`)
-    .option('--runtime <id>', 'runtime id, as `conductor runtime list` reports it')
+    .option('--runtime <id>', 'runtime id, as `weave runtime list` reports it')
     .option('--model <id>', 'model id, or "default" to let the runtime choose')
     .option('--effort <effort>', 'reasoning effort the runtime understands, or "default" to clear it')
     .description('change one of the two model settings')

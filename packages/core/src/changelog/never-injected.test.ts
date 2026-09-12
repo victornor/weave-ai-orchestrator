@@ -6,8 +6,8 @@
  * byte-identical.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId } from '@agent-conductor/db';
-import { COMMON_TOOLS, WEAVER_TOOLS } from '@agent-conductor/shared';
+import { newId } from '@weave-ai/db';
+import { COMMON_TOOLS, WEAVER_TOOLS } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createKnowledgeService } from '../knowledge/service.js';
 import { renderBrief } from '../prompts/index.js';

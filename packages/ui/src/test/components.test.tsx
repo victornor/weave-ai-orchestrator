@@ -1,7 +1,7 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { UI_STATUSES, NAMED_CARD_OPTION_KEYS } from '@agent-conductor/shared';
-import type { Decision, WorkerModelOption } from '@agent-conductor/shared';
+import { UI_STATUSES, NAMED_CARD_OPTION_KEYS } from '@weave-ai/shared';
+import type { Decision, WorkerModelOption } from '@weave-ai/shared';
 import { StatusGlyph, StatusBadge } from '../components/StatusGlyph';
 import { TicketCard } from '../components/TicketCard';
 import { WorkerCard } from '../components/WorkerCard';

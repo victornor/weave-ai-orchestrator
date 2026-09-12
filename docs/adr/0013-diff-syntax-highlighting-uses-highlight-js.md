@@ -63,7 +63,7 @@ seven regex sets right and keeping them right.
 
 - `packages/ui` gains its first syntax-highlighting dependency; `packages/render`'s `highlight.ts`
   and its test are removed — `diff.ts` (parsing) is the only file `PullRequestDiff.tsx` still imports
-  from `@agent-conductor/render`.
+  from `@weave-ai/render`.
 - Coverage is now `lib/common`'s 36 languages, not a fixed hand-picked list; a language that matters
   later and is not in `common` is a follow-up (`highlight.js` ships every other grammar too, importable
   the same way) rather than a rewrite.

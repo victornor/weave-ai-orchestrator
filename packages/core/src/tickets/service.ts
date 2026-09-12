@@ -1,10 +1,10 @@
-import { newId, nowIso, ticketRow, type Db } from '@agent-conductor/db';
+import { newId, nowIso, ticketRow, type Db } from '@weave-ai/db';
 import {
   OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, landingBranchOf, yoloEnabled, isWorkerOptionConfigured,
   type CommentKind, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
-} from '@agent-conductor/shared';
+} from '@weave-ai/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
-import type { Agent, Project } from '@agent-conductor/shared';
+import type { Agent, Project } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { checkTransition, openspecChangeName, type GuardFacts } from './guards.js';
@@ -16,7 +16,7 @@ import { createSerializer } from '../util/serialize.js';
 import { effectiveModels } from '../models/resolve.js';
 import { existsSync } from 'node:fs';
 import { flattenWakes } from '../prompts/index.js';
-import type { Wakeup } from '@agent-conductor/shared';
+import type { Wakeup } from '@weave-ai/shared';
 
 function ticketBranchFor(t: { identifier: string; title: string }): string {
   const slug = t.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
@@ -40,12 +40,12 @@ const TERMINAL = new Set<TicketStatus>(TERMINAL_TICKET_STATUSES);
  * same value as threads' `HUMAN_MESSAGE_WAKE_BODY_CHARS` (VS-242): a human reply on a ticket-bound
  * thread is the same prose as one on a free thread, so the two paths should cut at the same place.
  * A comment over this bound is marked `truncated: true` with `bodyLength` set to its real length,
- * and the full comment stays reachable via `ac_ticket_comments` (VS-246).
+ * and the full comment stays reachable via `weave_ticket_comments` (VS-246).
  */
 export const TICKET_COMMENT_WAKE_BODY_CHARS = 8000;
 
 /** Named in a wake reason when its payload was cut, so a worker reading a fragment knows what to call. */
-const FULL_COMMENT_HINT = 'full comment via ac_ticket_comments';
+const FULL_COMMENT_HINT = 'full comment via weave_ticket_comments';
 
 /**
  * The `body`, `truncated` and `bodyLength` fields for a `ticket_comment` wake payload, mirroring
@@ -448,7 +448,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   /**
    * `opts.system` is set only by `transition()`'s own write of the generated plan digest — the one
    * legitimate writer of the `plan` key — and by `putArtifactWorkProduct`'s caller,
-   * `ac_ticket_artifact_put`, the one legitimate writer of an `artifact:`-prefixed key. Every other
+   * `weave_ticket_artifact_put`, the one legitimate writer of an `artifact:`-prefixed key. Every other
    * external entry point (the agent tool, the HTTP route) rejects both before reaching here, so this
    * is not an authorization check on `actor`; `actorFor()` never produces a `system` actor for a real
    * request in the first place.
@@ -458,7 +458,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       throw new OcError('forbidden', "the `plan` document key is reserved for the daemon-generated plan digest; use `report` (or another key) for your own notes", { key });
     }
     if (key.startsWith('artifact:') && !opts?.system) {
-      throw new OcError('forbidden', 'the `artifact:` key prefix is reserved for published artifacts; use `ac_ticket_artifact_put` instead of writing this key directly', { key });
+      throw new OcError('forbidden', 'the `artifact:` key prefix is reserved for published artifacts; use `weave_ticket_artifact_put` instead of writing this key directly', { key });
     }
     const t = get(id);
     const written = tx(db, () => {
@@ -500,7 +500,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     {
       const cur = get(id);
       if ((cur.status === 'done' || cur.status === 'cancelled') && actor.kind !== 'human') {
-        throw new OcError('forbidden', `only a human reopens a ${cur.status} ticket (reply to it, or \`conductor ticket reopen\`)`);
+        throw new OcError('forbidden', `only a human reopens a ${cur.status} ticket (reply to it, or \`weave ticket reopen\`)`);
       }
     }
     const t = get(id);

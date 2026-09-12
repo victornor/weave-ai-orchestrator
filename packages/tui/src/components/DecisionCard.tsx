@@ -1,7 +1,7 @@
 /** A decision card with numbered options (PLAN §21.2). One decision per card. */
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { CardModel } from '@agent-conductor/render';
+import type { CardModel } from '@weave-ai/render';
 
 export function DecisionCardView({ card, index }: { card: CardModel; index?: number }): React.ReactElement {
   return (

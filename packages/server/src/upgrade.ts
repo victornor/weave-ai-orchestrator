@@ -1,5 +1,5 @@
 /**
- * The deferred daemon upgrade (PLAN §20): `conductor daemon update apply` and the web app's Upgrade
+ * The deferred daemon upgrade (PLAN §20): `weave daemon update apply` and the web app's Upgrade
  * action record an intent here instead of performing one.
  *
  * The split that makes the failure story simple is the `current` symlink. Everything before it —
@@ -15,16 +15,16 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { newId, nowIso, type Db } from '@agent-conductor/db';
+import { newId, nowIso, type Db } from '@weave-ai/db';
 import {
   CHANGELOG_SOURCES, OcError, isCancellableUpgrade, isTerminalUpgrade,
   type DaemonConfig, type Upgrade, type UpgradeFailureReason, type UpgradeHealthCheck, type UpgradeState,
-} from '@agent-conductor/shared';
-import { getLogger, recordActivity } from '@agent-conductor/core';
+} from '@weave-ai/shared';
+import { getLogger, recordActivity } from '@weave-ai/core';
 import {
   buildRelease, cliBinIn, commitSubjectsInRange, currentLink, inOwnScope, planRestart, pruneReleases,
-  readLink, releaseSha, resolveWorkspaceStateDir, switchRelease,
-} from '@agent-conductor/release';
+  readLink, releaseSha, resolveWorkspaceStateDir, switchRelease, SERVICE_NAME,
+} from '@weave-ai/release';
 import type { WorkspaceRuntime } from './types.js';
 import type { UpdateChecker } from './release-info.js';
 import {
@@ -484,7 +484,7 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
 
 /**
  * Copy daemon.sqlite and every registered workspace db into `<config>/backups/<stamp>/`. Same shape as
- * `conductor daemon upgrade`'s: sqlite's online backup, safe while the daemon is serving.
+ * `weave daemon upgrade`'s: sqlite's online backup, safe while the daemon is serving.
  */
 export function backupDatabases(configDir: string): string[] {
   const dir = join(configDir, 'backups', new Date().toISOString().replace(/[:.]/g, '-'));
@@ -511,12 +511,17 @@ function onPath(bin: string): boolean {
   try { execFileSync(bin, ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
 }
 
+/** VS-260: the installed unit may still be the pre-rename `agent-conductor.service` until a human reinstalls it. */
 function serviceUnitPath(): string {
-  return join(process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config'), 'systemd', 'user', 'agent-conductor.service');
+  const dir = join(process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config'), 'systemd', 'user');
+  const current = join(dir, SERVICE_NAME);
+  if (existsSync(current)) return current;
+  const legacy = join(dir, 'agent-conductor.service');
+  return existsSync(legacy) ? legacy : current;
 }
 
 function launchdPlistPath(): string {
-  return join(homedir(), 'Library', 'LaunchAgents', 'com.agentconductor.daemon.plist');
+  return join(homedir(), 'Library', 'LaunchAgents', 'com.weave-ai.daemon.plist');
 }
 
 /**

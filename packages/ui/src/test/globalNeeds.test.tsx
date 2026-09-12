@@ -1,7 +1,7 @@
 /** VS-168: daemon-wide Needs you page. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Decision } from '@agent-conductor/shared';
+import type { Decision } from '@weave-ai/shared';
 import { decision } from './factories';
 import { clearHiddenCache, writeHidden, decisionFingerprint } from '../lib/hiddenDecisions';
 

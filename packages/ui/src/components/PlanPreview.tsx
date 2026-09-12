@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Decision } from '@agent-conductor/shared';
+import type { Decision } from '@weave-ai/shared';
 import { Markdown } from './Markdown';
 import { SkeletonRows } from './Skeleton';
 import { useTicketDocument } from '../api/hooks';

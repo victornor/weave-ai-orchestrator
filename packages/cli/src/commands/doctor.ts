@@ -1,4 +1,4 @@
-/** `conductor doctor [--install]` — the checklist that tells a human exactly what is missing (PLAN §20). */
+/** `weave doctor [--install]` — the checklist that tells a human exactly what is missing (PLAN §20). */
 import type { Command } from 'commander';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
@@ -58,11 +58,11 @@ export function register(program: Command): void {
         name: 'context',
         ok: ctx.entry !== null,
         detail: ctx.entry ? `${ctx.name} -> ${ctx.entry.url}` : `none in ${contextsPath()}`,
-        fix: ctx.entry ? undefined : 'conductor login <url>',
+        fix: ctx.entry ? undefined : 'weave login <url>',
       });
 
       const pid = readPid();
-      checks.push({ name: 'local daemon process', ok: isRunning(pid) ? true : null, detail: isRunning(pid) ? `running (pid ${pid})` : 'not started from this machine', fix: 'conductor daemon start' });
+      checks.push({ name: 'local daemon process', ok: isRunning(pid) ? true : null, detail: isRunning(pid) ? `running (pid ${pid})` : 'not started from this machine', fix: 'weave daemon start' });
 
       const node = process.versions.node;
       checks.push({ name: 'node', ok: Number(node.split('.')[0]) >= 22, detail: `v${node}`, fix: 'install Node 22 or newer' });
@@ -83,14 +83,14 @@ export function register(program: Command): void {
           name: 'operator password',
           ok: health['operatorConfigured'] === true,
           detail: health['operatorConfigured'] === true ? 'configured' : 'not configured',
-          fix: 'conductor daemon set-password',
+          fix: 'weave daemon set-password',
         });
         const workspaces = items<Record<string, unknown>>(health['workspaces']);
         checks.push({
           name: 'workspaces',
           ok: workspaces.length > 0 ? true : null,
           detail: workspaces.map((w) => String(w['id'])).join(', ') || 'none yet — onboarding not completed',
-          fix: workspaces.length > 0 ? undefined : `create the first one in the web app (${String(health['publicUrl'] ?? client.baseUrl)}) or with \`conductor init <dir> --id <slug> --prefix <PFX> --name "…"\``,
+          fix: workspaces.length > 0 ? undefined : `create the first one in the web app (${String(health['publicUrl'] ?? client.baseUrl)}) or with \`weave init <dir> --id <slug> --prefix <PFX> --name "…"\``,
         });
 
         const host = (health['host'] ?? null) as HealthHost | null;
@@ -113,7 +113,7 @@ export function register(program: Command): void {
               name: `daemon host: ${tool.id === 'wt' ? 'worktrunk (wt)' : tool.id}`,
               ok: tool.available ? true : tool.need === 'required' ? false : null,
               detail: tool.available ? `${tool.version ?? 'present'} on ${remoteHost}` : `missing on ${remoteHost} — ${tool.purpose}`,
-              fix: tool.available ? undefined : `install ${tool.id} on ${remoteHost} (run \`conductor doctor --install\` there)`,
+              fix: tool.available ? undefined : `install ${tool.id} on ${remoteHost} (run \`weave doctor --install\` there)`,
             });
           }
         }
@@ -150,13 +150,13 @@ export function register(program: Command): void {
             name: `runtime ${id}`,
             ok: available ? true : missing ? false : null,
             detail: String(detection['version'] ?? detection['notes'] ?? (missing ? 'not installed on the daemon host' : 'unknown')),
-            fix: missing ? `install it on the daemon host, then \`conductor runtime login ${id}\`` : undefined,
+            fix: missing ? `install it on the daemon host, then \`weave runtime login ${id}\`` : undefined,
             install: missing && daemonIsThisHost && isInstallable(id) ? id : undefined,
           });
         }
       } catch (error) {
         const message = error instanceof ApiError ? `${String(error.code).toUpperCase()}: ${error.message}` : (error as Error).message;
-        checks.push({ name: 'daemon api', ok: false, detail: message, fix: 'conductor daemon start' });
+        checks.push({ name: 'daemon api', ok: false, detail: message, fix: 'weave daemon start' });
       }
 
       const failed = checks.filter((c) => c.ok === false).length;
@@ -169,7 +169,7 @@ export function register(program: Command): void {
         }
         write('');
         write(failed === 0 ? style.ok('everything checks out') : style.bad(`${failed} check${failed === 1 ? '' : 's'} failed`));
-        if (installable.length > 0 && opts['install'] !== true) write(style.dim(`installable here: ${installable.join(', ')} — run \`conductor doctor --install\``));
+        if (installable.length > 0 && opts['install'] !== true) write(style.dim(`installable here: ${installable.join(', ')} — run \`weave doctor --install\``));
         if (remoteHost && opts['install'] === true) write(style.dim(`the daemon runs on ${remoteHost}; --install only touches this machine`));
       });
       if (failed > 0) process.exitCode = 1;
@@ -201,7 +201,7 @@ async function installMissing(ids: InstallableId[], yes: boolean): Promise<void>
     write(ok ? `${style.ok('installed')} ${step.id}` : `${style.bad('failed')} ${step.id} — ${r.error?.message ?? `exit ${String(r.status)}`}; try: ${step.manual}`);
   }
   const afterthoughts = results.filter((r) => r.status === 'installed' && ['claude', 'codex', 'opencode', 'gemini'].includes(r.id));
-  if (afterthoughts.length > 0) write(style.dim(`next: ${afterthoughts.map((r) => `conductor runtime login ${r.id}`).join(' · ')}`));
+  if (afterthoughts.length > 0) write(style.dim(`next: ${afterthoughts.map((r) => `weave runtime login ${r.id}`).join(' · ')}`));
   if (results.some((r) => r.status === 'failed')) process.exitCode = 1;
 }
 

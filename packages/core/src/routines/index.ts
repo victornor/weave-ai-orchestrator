@@ -2,14 +2,14 @@
  * Recurring conductor alarms (VS-220). Human-facing name is "Scheduled tasks"; the table,
  * HTTP, CLI and MCP identifiers stay `routine`. Fires go through `wake.enqueue({ source: 'routine' })`.
  */
-import { newId, nowIso } from '@agent-conductor/db';
+import { newId, nowIso } from '@weave-ai/db';
 import {
   OcError, ROUTINE_ACTIONS, ROUTINE_CONCURRENCY, ROUTINE_MAX_TICKETS_PER_FIRE, ROUTINE_STATUSES,
   ROUTINE_USAGE_WINDOWS, resolveUsageWindow,
   type Routine, type RoutineAction, type RoutineConcurrency, type RoutineFire, type RoutineListItem,
   type RoutineStatus, type RoutineTemplate, type RoutineTrigger, type RoutineUsage, type RoutineUsageWindow,
   type Wakeup,
-} from '@agent-conductor/shared';
+} from '@weave-ai/shared';
 import type { Actor, CoreServices, RoutineCreateInput, RoutinePatch, RoutinesService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';

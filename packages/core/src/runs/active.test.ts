@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { FakeRuntime } from '@agent-conductor/runtime-sdk';
+import { FakeRuntime } from '@weave-ai/runtime-sdk';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { describeLiveInput, runState } from './active.js';
 

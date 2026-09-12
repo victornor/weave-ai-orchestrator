@@ -1,5 +1,5 @@
 /**
- * A bounded history of the conductor chat list's follow-and-scroll measurements, for the one time
+ * A bounded history of the weave chat list's follow-and-scroll measurements, for the one time
  * the "sometimes doesn't scroll to the bottom" behaviour (VS-197) is suspected wrong on a device
  * this investigation could not reach. Off by default, and free when off: the flag is read once at
  * module load, so `record` is a single boolean check with no allocation and no timestamp read

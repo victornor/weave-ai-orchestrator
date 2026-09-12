@@ -41,7 +41,7 @@ export function shellQuote(args: string[]): string {
 }
 
 /** Marker put into the pane label so panes can be re-resolved without trusting ids. */
-export const agentMarker = (agentId: string): string => `conductor:${agentId}`;
+export const agentMarker = (agentId: string): string => `weave:${agentId}`;
 
 export function paneLabel(agentId: string, title: string): string {
   return `${agentMarker(agentId)} ${title}`.trim();

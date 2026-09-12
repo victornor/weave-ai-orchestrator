@@ -7,8 +7,8 @@
  */
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { releaseSha, resolveRemoteSha } from '@agent-conductor/release';
-import type { DaemonConfig } from '@agent-conductor/shared';
+import { releaseSha, resolveRemoteSha } from '@weave-ai/release';
+import type { DaemonConfig } from '@weave-ai/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
 

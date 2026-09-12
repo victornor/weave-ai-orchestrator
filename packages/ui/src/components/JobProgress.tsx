@@ -5,7 +5,7 @@
  * mocking the API layer.
  */
 import { useEffect, useRef } from 'react';
-import type { JobLogLine, JobStep } from '@agent-conductor/shared';
+import type { JobLogLine, JobStep } from '@weave-ai/shared';
 import { duration } from '../lib/format';
 import { cx } from '../lib/cx';
 

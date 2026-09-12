@@ -1,7 +1,7 @@
-/** `conductor routine add|list|pause` against a stub daemon (VS-220). */
+/** `weave routine add|list|pause` against a stub daemon (VS-220). */
 import { createServer, type Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Routine } from '@agent-conductor/shared';
+import type { Routine } from '@weave-ai/shared';
 import { buildProgram } from './program.js';
 import { configureOutput } from './output.js';
 
@@ -96,7 +96,7 @@ async function cli(...argv: string[]): Promise<string> {
   return out;
 }
 
-describe('conductor routine', () => {
+describe('weave routine', () => {
   it('adds then lists the scheduled task', async () => {
     await cli('routine', 'add', '--name', 'Morning review', '--daily', '07:00', '--tz', 'UTC', '--instruction', 'Look at incidents');
     const out = await cli('routine', 'list');

@@ -30,7 +30,7 @@ export class OcError extends Error {
 /** An MCP tool result's `image` content item (VS-133) — the shape the installed `@modelcontextprotocol/sdk`'s `ImageContentSchema` accepts, and the one the Claude CLI turns into a real vision `tool_result` block (openspec design.md — Decision 4). */
 export interface McpImageBlock { type: 'image'; data: string; mimeType: string }
 export type ToolResult<T> =
-  | { ok: true; data: T; /** Appended after the JSON text block when the MCP endpoint builds `CallToolResult.content` — nothing but `ac_inbox` sets this today. */ mcpContent?: McpImageBlock[] }
+  | { ok: true; data: T; /** Appended after the JSON text block when the MCP endpoint builds `CallToolResult.content` — nothing but `weave_inbox` sets this today. */ mcpContent?: McpImageBlock[] }
   | { ok: false; error: { code: ErrorCode; message: string; retryable: boolean; details?: Record<string, unknown> } };
 export const ok = <T>(data: T, mcpContent?: McpImageBlock[]): ToolResult<T> => (mcpContent ? { ok: true, data, mcpContent } : { ok: true, data });
 export const fail = (e: OcError): ToolResult<never> => ({ ok: false, error: { code: e.code, message: e.message, retryable: e.retryable, details: e.details } });
@@ -38,7 +38,7 @@ export const fail = (e: OcError): ToolResult<never> => ({ ok: false, error: { co
 /**
  * A `ToolDef.handler`'s escape hatch to attach `mcpContent` (VS-133) through `runTool`'s uniform
  * `ok(await handler(...))` wrapping, without every handler's return shape having to carry an
- * ambiguous `mcpContent` key of its own. Only `ac_inbox` uses this today.
+ * ambiguous `mcpContent` key of its own. Only `weave_inbox` uses this today.
  */
 const MCP_CONTENT: unique symbol = Symbol('mcpContent');
 export interface WithMcpContent<T> { [MCP_CONTENT]: McpImageBlock[]; data: T }

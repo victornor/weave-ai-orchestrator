@@ -1,7 +1,7 @@
-/** `conductor changelog` against a stub daemon: scoping, the date range, and the machine-readable form. */
+/** `weave changelog` against a stub daemon: scoping, the date range, and the machine-readable form. */
 import { createServer, type Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChangelogEntry } from '@agent-conductor/shared';
+import type { ChangelogEntry } from '@weave-ai/shared';
 import { buildProgram } from './program.js';
 import { configureOutput } from './output.js';
 
@@ -66,7 +66,7 @@ const seed = (entries: ChangelogEntry[], nextCursor: string | null = null) => {
 
 beforeEach(() => { n = 0; });
 
-describe('conductor changelog', () => {
+describe('weave changelog', () => {
   it('prints the workspace changelog newest first with kind, ticket, summary and actor', async () => {
     seed([
       entry('2026-09-05T12:00:00.000Z', { summary: 'Landed: dark mode', ticketIdentifier: 'ACME-42' }),

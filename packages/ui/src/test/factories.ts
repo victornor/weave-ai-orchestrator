@@ -1,4 +1,4 @@
-import type { Agent, Decision, Project, Run, Ticket } from '@agent-conductor/shared';
+import type { Agent, Decision, Project, Run, Ticket } from '@weave-ai/shared';
 import type { WorkProduct } from '../api/types';
 
 export function ticket(over: Partial<Ticket> = {}): Ticket {

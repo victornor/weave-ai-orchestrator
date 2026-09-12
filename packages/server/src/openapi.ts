@@ -1,5 +1,5 @@
 /** Minimal OpenAPI 3.1 document and the agent-readable `llms/api.txt`, both generated from ROUTES. */
-import { ERROR_CODES, EVENT_TYPES, COMMON_TOOLS, WEAVER_TOOLS } from '@agent-conductor/shared';
+import { ERROR_CODES, EVENT_TYPES, COMMON_TOOLS, WEAVER_TOOLS } from '@weave-ai/shared';
 import { ROUTES, type RouteRow } from './routetable.js';
 
 const PARAM = /\{([^}]+)\}/g;
@@ -21,7 +21,7 @@ export function openApiDocument(version: string, publicUrl: string): Record<stri
   }
   return {
     openapi: '3.1.0',
-    info: { title: 'AgentConductor', version, description: 'Control plane for a fleet of coding agents. Errors are { error: { code, message, details?, retryable } }.' },
+    info: { title: 'Weave AI', version, description: 'Control plane for a fleet of coding agents. Errors are { error: { code, message, details?, retryable } }.' },
     servers: [{ url: publicUrl }],
     tags: [...new Set(ROUTES.map((r) => r.tag))].map((name) => ({ name })),
     paths,
@@ -59,7 +59,7 @@ export function llmsApiText(version: string, publicUrl: string): string {
   const byTag = new Map<string, RouteRow[]>();
   for (const r of ROUTES) { const list = byTag.get(r.tag) ?? []; list.push(r); byTag.set(r.tag, list); }
   const lines: string[] = [
-    `# AgentConductor HTTP API (v1, daemon ${version})`,
+    `# Weave AI HTTP API (v1, daemon ${version})`,
     '',
     `Base: ${publicUrl}. Workspace routes are /api/w/<workspaceId>/...  JSON in, JSON out.`,
     'Auth: `Authorization: Bearer <session token>` or the ac_session cookie. Agents use a run token',

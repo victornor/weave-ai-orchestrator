@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ATTACHMENT_MAX_OUTBOUND_FILE_BYTES } from '@agent-conductor/shared';
+import { ATTACHMENT_MAX_OUTBOUND_FILE_BYTES } from '@weave-ai/shared';
 import { assertAttachablePath, resolveOutboundAttachmentRoots, resolveOutboundAttachments } from './outboundAttachments.js';
 import type { WorkspaceContext } from '../context.js';
 

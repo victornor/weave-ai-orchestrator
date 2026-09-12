@@ -3,7 +3,7 @@
  * what keeps them that way: it asks for exactly what `packages/ui/src/lib/push.ts` asks for.
  */
 import { describe, expect, it, afterEach } from 'vitest';
-import { pushPath } from '@agent-conductor/shared';
+import { pushPath } from '@weave-ai/shared';
 import { createApp } from '../src/app.js';
 import { ROUTES } from '../src/routetable.js';
 import { authed, makeHarness, type Harness } from './fakes.js';

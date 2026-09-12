@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
-import { AUTH_SESSION_KINDS, OcError } from '@agent-conductor/shared';
+import { AUTH_SESSION_KINDS, OcError } from '@weave-ai/shared';
 import type { AppDeps, AppEnv } from '../types.js';
 import { body } from '../http.js';
 import { SESSION_COOKIE } from '../auth.js';

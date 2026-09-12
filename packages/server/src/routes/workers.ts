@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { describeLiveInput } from '@agent-conductor/core';
-import { TICKET_KINDS } from '@agent-conductor/shared';
+import { describeLiveInput } from '@weave-ai/core';
+import { TICKET_KINDS } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
 

@@ -1,11 +1,11 @@
 -- VS-223. Four columns on `decisions`:
 --
 -- `conductor_review_status` — unseen | looked | concerns, asserted by the conductor via
--- `ac_decision_review`. Default `unseen` so existing open cards render "hasn't looked yet"
+-- `weave_decision_review`. Default `unseen` so existing open cards render "hasn't looked yet"
 -- immediately. Application-validated, no CHECK rebuild.
 --
 -- `conductor_reviewed_at` / `conductor_review_note` / `conductor_reviewed_by_agent_id` — when the
--- mark was made, the concern text (cleared on a clean look), and which conductor agent wrote it.
+-- mark was made, the concern text (cleared on a clean look), and which weave agent wrote it.
 -- After-the-fact is derived (`reviewedAt > answeredAt`), never stored.
 --
 -- ALTER TABLE, not a rebuild: 0010 already replaced this table for its `kind` CHECK, and 0013

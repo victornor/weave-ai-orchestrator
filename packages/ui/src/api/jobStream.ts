@@ -12,7 +12,7 @@
  * state machine the workspace event stream uses. See `live-streams/connection-state`.
  */
 import { useEffect, useRef, useState } from 'react';
-import type { Job, JobLogLine, JobStep } from '@agent-conductor/shared';
+import type { Job, JobLogLine, JobStep } from '@weave-ai/shared';
 import { useLiveStream } from './sseStream';
 import type { ConnectionStatus } from './sseStream';
 

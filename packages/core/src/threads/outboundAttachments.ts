@@ -8,7 +8,7 @@
  */
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, join, sep } from 'node:path';
-import { OcError, ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, ATTACHMENT_MAX_ZIP_INPUT_BYTES, ATTACHMENT_ZIP_MEDIA_TYPE, guessOutboundMediaType } from '@agent-conductor/shared';
+import { OcError, ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, ATTACHMENT_MAX_ZIP_INPUT_BYTES, ATTACHMENT_ZIP_MEDIA_TYPE, guessOutboundMediaType } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import { sanitizeAttachmentFilename } from './attachmentStorage.js';
 import { buildZip, zipEntryNamesFor } from './zip.js';

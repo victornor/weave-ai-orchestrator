@@ -3,8 +3,8 @@
  * the buttons; the TUI numbers the options and the web renders them as buttons, but the model is
  * identical so the two never drift.
  */
-import type { Decision } from '@agent-conductor/shared';
-import { weaverReviewCopy, decisionUiStatus } from '@agent-conductor/shared';
+import type { Decision } from '@weave-ai/shared';
+import { weaverReviewCopy, decisionUiStatus } from '@weave-ai/shared';
 import { formatAge, formatDiffStat, joinMeta, oneLine } from './format.js';
 
 /** What a decision belonging to no project is called, on every surface. */

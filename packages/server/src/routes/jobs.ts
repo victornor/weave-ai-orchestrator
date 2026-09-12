@@ -8,8 +8,8 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { JOB_KINDS } from '@agent-conductor/shared';
-import type { JobStreamItem } from '@agent-conductor/core';
+import { JOB_KINDS } from '@weave-ai/shared';
+import type { JobStreamItem } from '@weave-ai/core';
 import type { AppEnv } from '../types.js';
 import { query } from '../http.js';
 import { HEARTBEAT_MS, Pump, heartbeat } from '../sse.js';

@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentPauseDetail, AgentStatus } from '@agent-conductor/shared';
+import type { AgentPauseDetail, AgentStatus } from '@weave-ai/shared';
 import type { HandoverCommandResult, WorkerMessageOutcome } from '../api/types';
 import { agent, ticket } from './factories';
 

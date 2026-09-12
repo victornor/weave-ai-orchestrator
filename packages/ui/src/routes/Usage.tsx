@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import type { UsageGrain, UsageWindow } from '@agent-conductor/shared';
-import { accountLimits, mixedBillingNote, showCost } from '@agent-conductor/render';
+import type { UsageGrain, UsageWindow } from '@weave-ai/shared';
+import { accountLimits, mixedBillingNote, showCost } from '@weave-ai/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { WindowGrainPicker } from '../components/WindowGrainPicker';
 import { RankedBars, ShareBar, StackedBars, StatTile, LineSeries, seriesColor } from '../components/Chart';

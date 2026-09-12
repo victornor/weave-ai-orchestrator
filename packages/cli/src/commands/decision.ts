@@ -1,7 +1,7 @@
-/** `conductor decision list|show|answer` — everything waiting on a human (PLAN §15, §20). */
+/** `weave decision list|show|answer` — everything waiting on a human (PLAN §15, §20). */
 import type { Command } from 'commander';
-import type { Decision } from '@agent-conductor/shared';
-import { decisionToCard, type CardModel } from '@agent-conductor/render';
+import type { Decision } from '@weave-ai/shared';
+import { decisionToCard, type CardModel } from '@weave-ai/render';
 import { ApiError } from '../api.js';
 import { emit, fields, heading, style, table, write } from '../output.js';
 import { promptTyped } from '../prompt.js';
@@ -24,7 +24,7 @@ export function printCard(card: CardModel): void {
       if (option.consequence) write(`     ${style.dim(option.consequence)}`);
     });
   }
-  if (card.allowFreeText) write(`  ${style.dim(`or free text: conductor decision answer ${card.id} "<text>"`)}`);
+  if (card.allowFreeText) write(`  ${style.dim(`or free text: weave decision answer ${card.id} "<text>"`)}`);
   if (card.confirm) write(style.warn(`  ${card.confirm.prompt}`));
 }
 
@@ -119,7 +119,7 @@ export function register(program: Command): void {
       if (override) Object.assign(body, override);
 
       const result = await client.write({
-        tool: 'ac_decision_answer', input: { decisionId: id, ...body },
+        tool: 'weave_decision_answer', input: { decisionId: id, ...body },
         http: { method: 'POST', path: client.w(`/decisions/${encodeURIComponent(id)}/answer`), body },
       });
       emit(result, () => write(`${style.ok('answered')} ${id}${key ? ` -> ${key}` : ''}`));

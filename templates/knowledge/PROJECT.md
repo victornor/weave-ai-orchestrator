@@ -1,6 +1,6 @@
 <!-- knowledge/projects/<id>/PROJECT.md — the project knowledge base. -->
 <!-- Audience: this project's workers and the conductor. Budget: `defaults.knowledgeBudgetTokens.project` (10000 by default). -->
-<!-- Section headings below are fixed: ac_knowledge_note(scope, section, text) targets them by name. -->
+<!-- Section headings below are fixed: weave_knowledge_note(scope, section, text) targets them by name. -->
 <!-- Entries: <= 60 words, standalone, absolute dates, no pronouns, no secrets, nothing derivable from git. -->
 <!-- Perishable entries carry a marker: <!--exp:YYYY-MM-DD--> -->
 
@@ -28,7 +28,7 @@
 
 ## Documents
 
-<!-- Linked documents for this project: `- [[slug]] — one line on what it covers`. One per subsystem, integration or runbook. Written with ac_knowledge_doc_put; list what exists with ac_knowledge_docs. -->
+<!-- Linked documents for this project: `- [[slug]] — one line on what it covers`. One per subsystem, integration or runbook. Written with weave_knowledge_doc_put; list what exists with weave_knowledge_docs. -->
 
 ## Learnings
 

@@ -3,8 +3,8 @@ import { homedir, hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@agent-conductor/shared';
-import { detectHostToolsCached, getLogger, workspaceLoader } from '@agent-conductor/core';
+import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@weave-ai/shared';
+import { detectHostToolsCached, getLogger, workspaceLoader } from '@weave-ai/core';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { cancelRunningRuns } from '../daemon.js';
 import { body } from '../http.js';
@@ -56,7 +56,7 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
     tlsMode: deps.daemon.http.tls.mode,
     publicUrl: deps.publicUrl,
     transcription: await transcriptionHealth(deps),
-    host: { platform: process.platform, hostname: hostname(), home: homedir(), defaultWorkspaceRoot: join(homedir(), 'agent-conductor'), tools: await detectHostToolsCached() },
+    host: { platform: process.platform, hostname: hostname(), home: homedir(), defaultWorkspaceRoot: join(homedir(), 'weave'), tools: await detectHostToolsCached() },
   }));
 
   app.get('/workspaces', (c) => c.json(uniqueWorkspaces(deps).map((w) => ({
@@ -79,15 +79,15 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   app.post('/workspaces/init', async (c) => {
     if (!admin) throw new OcError('internal', 'workspace creation is not available on this listener');
     const input = await body(c, z.object({
-      /** Absolute, `~`-prefixed, or omitted (→ `~/agent-conductor/<id>`). Always on the daemon host. */
+      /** Absolute, `~`-prefixed, or omitted (→ `~/weave/<id>`). Always on the daemon host. */
       path: z.string().min(1).optional(), id: z.string().min(1), name: z.string().min(1),
       ticketPrefix: z.string().regex(/^[A-Z][A-Z0-9]{1,9}$/),
     }));
-    const path = expandHome(input.path ?? join('~', 'agent-conductor', input.id));
+    const path = expandHome(input.path ?? join('~', 'weave', input.id));
     return c.json(await admin.init({ ...input, path }), 201);
   });
 
-  /** PLAN §20 `conductor workspace import`: stage an export into `target`, register it, and land its tickets in the backlog. */
+  /** PLAN §20 `weave workspace import`: stage an export into `target`, register it, and land its tickets in the backlog. */
   app.post('/workspaces/import', async (c) => {
     if (!admin) throw new OcError('internal', 'workspace import is not available on this listener');
     const input = await body(c, z.object({ path: z.string().min(1), target: z.string().min(1) }));
@@ -158,7 +158,7 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   app.post('/daemon/upgrade/cancel', (c) => c.json(deps.upgrades.cancel()));
 
   /**
-   * Upgrade support (PLAN §20 `conductor daemon upgrade`): stop dispatching new turns everywhere and
+   * Upgrade support (PLAN §20 `weave daemon upgrade`): stop dispatching new turns everywhere and
    * wait for in-flight ones, bounded. Nothing is persisted, so a restart comes back dispatching;
    * `undrain` is for the case where the restart never happens.
    */

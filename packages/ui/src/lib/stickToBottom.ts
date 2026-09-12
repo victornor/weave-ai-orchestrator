@@ -1,5 +1,5 @@
 /**
- * Both ends of a scrolling message list (conductor chat), in the one place that measures it.
+ * Both ends of a scrolling message list (weave chat), in the one place that measures it.
  *
  * The bottom: a transcript that always scrolls to the newest line yanks the human away the moment
  * they scroll up to read history. This follows new content only while they are already at the

@@ -1,7 +1,7 @@
 <!-- knowledge/workspace/WORKSPACE.md — the conductor's knowledge base. -->
 <!-- Audience: the conductor only. Workers get 403 on this file. Budget: `defaults.knowledgeBudgetTokens.workspace` (10000 by default). -->
-<!-- Seeded by the human at the bootstrap interview; extended by the conductor via ac_knowledge_note. -->
-<!-- Section headings below are fixed: ac_knowledge_note("workspace", section, text) targets them by name. -->
+<!-- Seeded by the human at the bootstrap interview; extended by the conductor via weave_knowledge_note. -->
+<!-- Section headings below are fixed: weave_knowledge_note("workspace", section, text) targets them by name. -->
 
 # {{workspace.name}}
 

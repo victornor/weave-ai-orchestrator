@@ -5,8 +5,8 @@
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openDb, newId, nowIso, type Db } from '@agent-conductor/db';
-import { DaemonConfigSchema, WorkspaceConfigSchema, type WorkspaceConfig, type WorkspaceEvent } from '@agent-conductor/shared';
+import { openDb, newId, nowIso, type Db } from '@weave-ai/db';
+import { DaemonConfigSchema, WorkspaceConfigSchema, type WorkspaceConfig, type WorkspaceEvent } from '@weave-ai/shared';
 import { EventBus } from '../events.js';
 import { createRegistries, workspacePaths, type WorkspaceContext } from '../context.js';
 import { getLogger } from '../logger.js';

@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId, nowIso } from '@agent-conductor/db';
-import { FakeRuntime, type AccountDescription, type CredentialFacts, type TurnInput, type TurnSink, type TurnResult } from '@agent-conductor/runtime-sdk';
-import { RECORDED_RUN_PHASES, RUN_PHASES, type Decision, type Run, type Wakeup } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { FakeRuntime, type AccountDescription, type CredentialFacts, type TurnInput, type TurnSink, type TurnResult } from '@weave-ai/runtime-sdk';
+import { RECORDED_RUN_PHASES, RUN_PHASES, type Decision, type Run, type Wakeup } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import type { Actor } from '../api.js';
 import { createDecisionsService } from '../decisions/service.js';
@@ -198,8 +198,8 @@ describe('run engine', () => {
     h.services.wake!.enqueue(h.conductorId, { source: 'system', reason: 'digest' });
     const run = await runOnce();
     const input = runtime.inputs[0]!;
-    expect(input.mcpServers.agentconductor).toMatchObject({ type: 'http', url: `${h.ctx.loopbackUrl}/mcp/runs/${run.id}` });
-    const authHeader = input.mcpServers.agentconductor!.headers!.Authorization!;
+    expect(input.mcpServers['weave-ai']).toMatchObject({ type: 'http', url: `${h.ctx.loopbackUrl}/mcp/runs/${run.id}` });
+    const authHeader = input.mcpServers['weave-ai']!.headers!.Authorization!;
     expect(authHeader.startsWith('Bearer rt_')).toBe(true);
     expect(input.env.AC_RUN_TOKEN).toBe(authHeader.slice('Bearer '.length));
     expect(input.env.AC_RUN_ID).toBe(run.id);
@@ -378,7 +378,7 @@ describe('run engine', () => {
       await runOnce();
 
       expect(runtime.inputs[0]!.permission.allowedTools).toEqual([
-        'ac_inbox', 'ac_ticket_get', 'ac_ticket_comments', 'ac_ticket_comment', 'ac_ticket_document_get', 'ac_worktree_status', 'Read', 'Grep', 'Glob',
+        'weave_inbox', 'weave_ticket_get', 'weave_ticket_comments', 'weave_ticket_comment', 'weave_ticket_document_get', 'weave_worktree_status', 'Read', 'Grep', 'Glob',
       ]);
     });
 
@@ -408,15 +408,15 @@ describe('run engine', () => {
     });
 
     it('never widens beyond a role that already denies one of the allowlisted tools', async () => {
-      h.db.update('roles', h.roleId, { permissionJson: { mode: 'auto', denied: ['ac_ticket_comment'] } });
+      h.db.update('roles', h.roleId, { permissionJson: { mode: 'auto', denied: ['weave_ticket_comment'] } });
       const ticketId = seedTicket(h, { interactiveSession: true });
       const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
       h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
       runtime.queue.push({ structured: { state: 'working', summary: 'stated understanding', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
       await runOnce();
 
-      expect(runtime.inputs[0]!.permission.allowedTools).not.toContain('ac_ticket_comment');
-      expect(runtime.inputs[0]!.permission.deniedTools).toEqual(['ac_ticket_comment']);
+      expect(runtime.inputs[0]!.permission.allowedTools).not.toContain('weave_ticket_comment');
+      expect(runtime.inputs[0]!.permission.deniedTools).toEqual(['weave_ticket_comment']);
     });
   });
 
@@ -429,7 +429,7 @@ describe('run engine', () => {
       expect(runtime.inputs[0]!.permission.mode).toBe('bypass');
     });
 
-    it('a conductor role set to auto is still bypass', async () => {
+    it('a weave role set to auto is still bypass', async () => {
       h.db.update('roles', h.roleId, { permissionJson: { mode: 'auto' } });
       h.db.update('agents', h.conductorId, { roleId: h.roleId });
       h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'hello' });
@@ -1472,7 +1472,7 @@ describe('run engine', () => {
 
     it('does not count a run against the worker when it left evidence, whichever reporting channel produced it', async () => {
       // "Empty" turn one: the terminal report never parses (no StructuredOutput channel used), but the
-      // turn posted a ticket comment mid-run — exactly what `ac_report` does today.
+      // turn posted a ticket comment mid-run — exactly what `weave_report` does today.
       const ticketId = seedTicket(h, { status: 'in_progress' });
       const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
       for (let i = 0; i < 3; i += 1) {
@@ -1549,7 +1549,7 @@ describe('run engine', () => {
       expect(openGateFindings(ticketId)).toHaveLength(1);
     });
 
-    it('never counts an advanced turn toward the gate, whether or not it also called ac_report mid-turn', async () => {
+    it('never counts an advanced turn toward the gate, whether or not it also called weave_report mid-turn', async () => {
       const ticketId = seedTicket(h, { status: 'in_progress' });
       const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
 
@@ -1558,7 +1558,7 @@ describe('run engine', () => {
       const runA = await runWorkerTurn(workerId, ticketId, 'first');
       expect(runA.liveness).toBe('advanced');
 
-      // Channel B: the same valid terminal report, plus a mid-turn `ac_report`-shaped comment.
+      // Channel B: the same valid terminal report, plus a mid-turn `weave_report`-shaped comment.
       runtime.queue.push((input) => {
         h.db.insert('ticket_comments', {
           id: newId(), ticketId, authorKind: 'agent', authorId: workerId, runId: input.runId,

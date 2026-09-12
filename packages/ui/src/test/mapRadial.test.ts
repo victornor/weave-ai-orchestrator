@@ -1,6 +1,6 @@
 /** VS-192: radial tree layout for the global Map. */
 import { describe, expect, it } from 'vitest';
-import type { Role } from '@agent-conductor/shared';
+import type { Role } from '@weave-ai/shared';
 import { buildMapModel, type MapWorkspaceInput } from '../lib/map/model';
 import { layoutRadial, minSiblingGapByDepth } from '../lib/map/radial';
 import { project, ticket } from './factories';

@@ -1,6 +1,6 @@
 # Running the daemon in Docker
 
-The [`Dockerfile`](../Dockerfile) at the repo root builds a single image: the AgentConductor daemon,
+The [`Dockerfile`](../Dockerfile) at the repo root builds a single image: the Weave AI daemon,
 its web UI, `git`, `gh` and `openspec`. Everything stateful lives in one volume at `/data`.
 
 ```
@@ -12,13 +12,13 @@ its web UI, `git`, `gh` and `openspec`. Everything stateful lives in one volume 
 ## Build and run
 
 ```bash
-docker build -t agent-conductor .
+docker build -t weave-ai .
 
 docker volume create ac-data
 docker run -d --name conductor \
   -p 7433:7433 \
   -v ac-data:/data \
-  agent-conductor
+  weave-ai
 ```
 
 The daemon listens on `0.0.0.0:7433` inside the container. It refuses to start on a non-loopback
@@ -30,7 +30,7 @@ docker exec -it conductor node packages/cli/dist/bin.js --url http://127.0.0.1:7
   -w '' init /data/workspaces/acme --prefix ACME --name Acme
 ```
 
-Then point a browser or `conductor login http://<host>:7433` at it.
+Then point a browser or `weave login http://<host>:7433` at it.
 
 ## What the image does not carry
 
@@ -48,12 +48,12 @@ The coding CLIs themselves are **not** installed in the image: which runtimes yo
 licences, are your choice. Add them in a derived image, for example:
 
 ```dockerfile
-FROM agent-conductor
+FROM weave-ai
 RUN npm install -g @anthropic-ai/claude-code
 ```
 
 Without any runtime installed the daemon starts, serves the API and the UI, and reports the missing
-runtime through `conductor doctor` and `GET /api/runtimes`.
+runtime through `weave doctor` and `GET /api/runtimes`.
 
 ## TLS
 

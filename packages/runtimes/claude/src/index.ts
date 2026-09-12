@@ -1,4 +1,4 @@
-export const PACKAGE = '@agent-conductor/runtime-claude';
+export const PACKAGE = '@weave-ai/runtime-claude';
 export { adapter, capabilities, default } from './adapter.js';
 export { parseUsageControlResponse, probeAccount, unknownAccount, GET_USAGE_REQUEST, PROBE_ARGS, type ProbeOverrides } from './account.js';
 export { readCredential, credentialExpiry, hostCredentialPath, CREDENTIAL_FILE } from './credential.js';

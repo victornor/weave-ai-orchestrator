@@ -1,8 +1,8 @@
-# AgentConductor Individual Contributor Licence Agreement
+# Weave AI Individual Contributor Licence Agreement
 
 **Version 1.0**
 
-Thank you for your interest in AgentConductor (the "Project"), owned by Victor Nor (the
+Thank you for your interest in Weave AI (the "Project"), owned by Victor Nor (the
 "Owner"). This agreement clarifies the intellectual property licence granted with
 Contributions from any person or entity. It protects You as a Contributor as well as the
 Owner and the Project's users; it does not change your rights to use your own

@@ -1,5 +1,5 @@
 {
-  "name": "@agent-conductor/cli",
+  "name": "@weave-ai/cli",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -15,12 +15,12 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@agent-conductor/db": "workspace:*",
-    "@agent-conductor/presenter": "workspace:*",
-    "@agent-conductor/release": "workspace:*",
-    "@agent-conductor/render": "workspace:*",
-    "@agent-conductor/shared": "workspace:*",
-    "@agent-conductor/tui": "workspace:*",
+    "@weave-ai/db": "workspace:*",
+    "@weave-ai/presenter": "workspace:*",
+    "@weave-ai/release": "workspace:*",
+    "@weave-ai/render": "workspace:*",
+    "@weave-ai/shared": "workspace:*",
+    "@weave-ai/tui": "workspace:*",
     "chalk": "^5.6.2",
     "commander": "^14.0.0",
     "open": "^10.2.0",
@@ -29,6 +29,6 @@
   },
   "devDependencies": {},
   "bin": {
-    "conductor": "./dist/bin.js"
+    "weave": "./dist/bin.js"
   }
 }

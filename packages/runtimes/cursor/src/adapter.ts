@@ -2,9 +2,9 @@ import type {
   AccountDescription, AccountProbeInput, AgentHome, CredentialFacts, CredentialProbeInput,
   InstructionBundle, JsonSchema, RuntimeAdapter, RuntimeCapabilities,
   RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
-} from '@agent-conductor/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, writeFiles } from '@agent-conductor/runtime-sdk';
-import { extractReport } from '@agent-conductor/shared';
+} from '@weave-ai/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, writeFiles } from '@weave-ai/runtime-sdk';
+import { extractReport } from '@weave-ai/shared';
 import { describeCursorAccount } from './account.js';
 import { buildArgs, namedModel, resumeCommand } from './args.js';
 import { readCredential } from './credential.js';

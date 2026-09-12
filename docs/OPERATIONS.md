@@ -1,6 +1,6 @@
 # Operations
 
-Running an AgentConductor daemon on a server: install, TLS, service management, backups, upgrades,
+Running an Weave AI daemon on a server: install, TLS, service management, backups, upgrades,
 runtime credentials, troubleshooting. For what the product *is*, start at [`../README.md`](../README.md).
 
 The daemon host is the machine where code actually runs. It holds:
@@ -11,7 +11,7 @@ The daemon host is the machine where code actually runs. It holds:
 - channel bot tokens and any secret referenced from `workspace.yaml`,
 - `worktrunk` and `openspec`.
 
-Everything else — web app, `conductor`, Telegram, `conductor presenter` — is a client and holds nothing but a
+Everything else — web app, `weave`, Telegram, `weave presenter` — is a client and holds nothing but a
 session token.
 
 ---
@@ -20,13 +20,13 @@ session token.
 
 ```bash
 # Node >= 22 (node:sqlite). Node 26 and pnpm 11 via mise is what the repo pins.
-git clone <this repo> ~/src/agent-conductor && cd ~/src/agent-conductor
+git clone <this repo> ~/src/weave-ai && cd ~/src/weave-ai
 mise install                              # or install node >= 22 and pnpm yourself
 pnpm install
 pnpm build
-pnpm --filter @agent-conductor/ui build     # the web app; without it the daemon serves a placeholder
+pnpm --filter @weave-ai/ui build     # the web app; without it the daemon serves a placeholder
 
-cd packages/cli && pnpm link --global && cd -   # puts `conductor` on PATH
+cd packages/cli && pnpm link --global && cd -   # puts `weave` on PATH
 ```
 
 Optional but recommended on the host:
@@ -39,7 +39,7 @@ pacman -S worktrunk               # the `wt` binary, default worktree provider (
 Host-only setup that nothing else can do for you:
 
 ```bash
-conductor runtime login claude           # per-workspace config home; repeat per runtime you use
+weave runtime login claude           # per-workspace config home; repeat per runtime you use
 gh auth login                     # required for deliveryMode: pr
 ssh-keygen -t ed25519             # and register the key with your forge
 ```
@@ -48,7 +48,7 @@ ssh-keygen -t ed25519             # and register the key with your forge
 
 ## 2. Daemon configuration
 
-`~/.config/agent-conductor/daemon.yaml` (or `$XDG_CONFIG_HOME/agent-conductor/daemon.yaml`, or the
+`~/.config/weave/daemon.yaml` (or `$XDG_CONFIG_HOME/weave/daemon.yaml`, or the
 directory passed as `--config-dir`). Full key list is in the README; the operational ones:
 
 ```yaml
@@ -76,7 +76,7 @@ The same directory also holds `workspaces.yaml` (the registry of workspace paths
 
 **The public listener is held** on a non-loopback bind until an operator password exists (unless
 `auth.loopbackTrusted` is set). The daemon still starts: the loopback listener serves
-`POST /api/auth/setup`, `daemon.json` carries `setupRequired: true`, and `conductor daemon set-password`
+`POST /api/auth/setup`, `daemon.json` carries `setupRequired: true`, and `weave daemon set-password`
 run on the daemon host (minimum 8 characters) opens the public listener in place, no restart needed.
 Nothing is ever reachable from the network unauthenticated.
 
@@ -84,7 +84,7 @@ Two listeners always run:
 
 | Listener | Bind | Purpose |
 |---|---|---|
-| public | `http.listen` | API, SSE, web app, `conductor`, channels |
+| public | `http.listen` | API, SSE, web app, `weave`, channels |
 | loopback | `127.0.0.1:<random>` (or `AC_LOOPBACK_SOCKET`) | run tokens, the agents' MCP endpoint, the presenter socket. **Never reachable from outside the host.** |
 
 ### TLS modes
@@ -92,11 +92,11 @@ Two listeners always run:
 | `http.tls.mode` | Behaviour | Use when |
 |---|---|---|
 | `none` | plain HTTP | loopback only, or strictly behind a proxy on the same host |
-| `self-signed` | generates `self-signed.crt`/`.key` in the config dir on first start (10-year, SANs from `tls.domains` plus `127.0.0.1`) | LAN, Tailscale, anything where clients can pin. Clients use `conductor login <url> --pin`. |
+| `self-signed` | generates `self-signed.crt`/`.key` in the config dir on first start (10-year, SANs from `tls.domains` plus `127.0.0.1`) | LAN, Tailscale, anything where clients can pin. Clients use `weave login <url> --pin`. |
 | `files` | reads `tls.cert` and `tls.key` (PEM) | you already have a certificate — Let's Encrypt via certbot, an internal CA, Tailscale certs |
 | `acme` | **not implemented** — the daemon throws `http.tls.mode "acme" is not implemented; use a reverse proxy or mode "files"` | — |
 
-`conductor login` refuses to send a password in plaintext to a non-loopback host unless you pass
+`weave login` refuses to send a password in plaintext to a non-loopback host unless you pass
 `--insecure`. Don't.
 
 ### Reverse proxy
@@ -152,22 +152,22 @@ server {
 ## 3. Running as a service
 
 ```bash
-conductor daemon install-service          # writes ~/.config/systemd/user/agent-conductor.service
-conductor daemon install-service --print  # just show the unit
+weave daemon install-service          # writes ~/.config/systemd/user/weave-ai.service
+weave daemon install-service --print  # just show the unit
 ```
 
 The generated unit:
 
 ```ini
 [Unit]
-Description=AgentConductor daemon
+Description=Weave AI daemon
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 ExecStart=/path/to/node /path/to/packages/server/dist/bin.js
-Environment=AC_CONFIG_HOME=/home/you/.config/agent-conductor
+Environment=AC_CONFIG_HOME=/home/you/.config/weave
 Restart=on-failure
 RestartSec=3
 KillSignal=SIGTERM
@@ -181,8 +181,8 @@ Then:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now agent-conductor.service
-systemctl --user status agent-conductor.service
+systemctl --user enable --now weave-ai.service
+systemctl --user status weave-ai.service
 loginctl enable-linger "$USER"     # keep it running after you log out
 ```
 
@@ -190,23 +190,23 @@ Notes before you enable it:
 
 - **The daemon resolves its config directory from `XDG_CONFIG_HOME` (falling back to `$HOME/.config`)
   or from `--config-dir`, and `AC_CONFIG_HOME` overrides both.** The `AC_CONFIG_HOME` line the generator emits is therefore effective; if your
-  config lives anywhere other than `$HOME/.config/agent-conductor`, edit the unit and add
+  config lives anywhere other than `$HOME/.config/weave`, edit the unit and add
   `Environment=XDG_CONFIG_HOME=/your/config/parent` or append `--config-dir /your/path` to
-  `ExecStart`. Verify with `conductor daemon status` after starting.
+  `ExecStart`. Verify with `weave daemon status` after starting.
 - The unit inherits the user session's environment only partially. Any `${ENV_VAR}` referenced from
   a `workspace.yaml` (Telegram bot tokens, plugin secrets) must be added to the unit explicitly —
-  `Environment=TELEGRAM_BOT_TOKEN=…`, or better `EnvironmentFile=%h/.config/agent-conductor/env`
+  `Environment=TELEGRAM_BOT_TOKEN=…`, or better `EnvironmentFile=%h/.config/weave/env`
   (mode 0600). The daemon logs `workspace.yaml references environment variables that are not set`
   when one is missing, and the Telegram channel refuses to start with an unresolved reference.
 - A system-wide unit is fine too, but then `HOME` must point at the account that holds the coding-CLI
   credentials and the SSH keys, or nothing will authenticate.
-- Under systemd the daemon logs to the journal, not to `~/.local/state/agent-conductor/daemon.log`
-  (that file only exists for a daemon started by `conductor daemon start`). Do not run both.
+- Under systemd the daemon logs to the journal, not to `~/.local/state/weave/daemon.log`
+  (that file only exists for a daemon started by `weave daemon start`). Do not run both.
 
-`conductor daemon stop` only stops a daemon that `conductor daemon start` launched from this machine; under
-systemd use `systemctl --user stop agent-conductor.service`.
+`weave daemon stop` only stops a daemon that `weave daemon start` launched from this machine; under
+systemd use `systemctl --user stop weave-ai.service`.
 
-`conductor daemon start --listen host:port` exports `AC_LISTEN`, which the daemon honours (it overrides `http.listen` in `daemon.yaml`); `node packages/server/dist/bin.js --listen 127.0.0.1:9000` does the same.
+`weave daemon start --listen host:port` exports `AC_LISTEN`, which the daemon honours (it overrides `http.listen` in `daemon.yaml`); `node packages/server/dist/bin.js --listen 127.0.0.1:9000` does the same.
 
 ---
 
@@ -214,11 +214,11 @@ systemd use `systemctl --user stop agent-conductor.service`.
 
 | Where | What |
 |---|---|
-| `journalctl --user -u agent-conductor -f` | the daemon under systemd (pino JSON on stderr) |
-| `~/.local/state/agent-conductor/daemon.log` | the daemon started by `conductor daemon start`; `conductor daemon logs -f` tails it |
-| `<workspace>/.agent-conductor/runs/<runId>/` | per-run stdout/stderr, the raw normalized event stream (`.jsonl`), the MCP config and the prompt file |
-| `conductor runs list` / `conductor runs show <id> [--raw]` / `conductor runs tail <id>` | the same, through the API |
-| `conductor daemon status` | local process state plus `GET /api/health` |
+| `journalctl --user -u weave-ai -f` | the daemon under systemd (pino JSON on stderr) |
+| `~/.local/state/weave/daemon.log` | the daemon started by `weave daemon start`; `weave daemon logs -f` tails it |
+| `<workspace>/.weave/runs/<runId>/` | per-run stdout/stderr, the raw normalized event stream (`.jsonl`), the MCP config and the prompt file |
+| `weave runs list` / `weave runs show <id> [--raw]` / `weave runs tail <id>` | the same, through the API |
+| `weave daemon status` | local process state plus `GET /api/health` |
 
 `logLevel: debug` in `daemon.yaml` (or `AC_LOG_LEVEL=debug`) turns on per-wake and per-event
 detail. Run logs are pruned after `defaults.runLogRetentionDays` (30) per workspace. Telemetry never
@@ -231,32 +231,32 @@ leaves the host; OTLP export happens only if you set `otlpEndpoint`.
 Two things, and nothing else:
 
 1. **Every workspace directory.** It contains `workspace.yaml`, `knowledge/`, `roles/`,
-   `.agent-conductor/db.sqlite` (all tickets, runs, decisions, usage), the primary clones, live worker
+   `.weave/db.sqlite` (all tickets, runs, decisions, usage), the primary clones, live worker
    homes and worktrees, and `archive/`.
-2. **`~/.config/agent-conductor/`** — `daemon.yaml`, `workspaces.yaml`, `daemon.sqlite` (operator
+2. **`~/.config/weave/`** — `daemon.yaml`, `workspaces.yaml`, `daemon.sqlite` (operator
    account, sessions, TOTP secret), TLS material.
 
 ```bash
-systemctl --user stop agent-conductor.service       # quiesce so SQLite is consistent
+systemctl --user stop weave-ai.service       # quiesce so SQLite is consistent
 tar czf ac-backup-$(date +%F).tar.gz \
-    -C "$HOME" .config/agent-conductor \
+    -C "$HOME" .config/weave \
     -C "$HOME" work/acme
-systemctl --user start agent-conductor.service
+systemctl --user start weave-ai.service
 ```
 
 If you cannot stop the daemon, back up the databases with SQLite's online backup instead of copying
 the files:
 
 ```bash
-sqlite3 ~/work/acme/.agent-conductor/db.sqlite ".backup '/backup/acme-db.sqlite'"
-sqlite3 ~/.config/agent-conductor/daemon.sqlite ".backup '/backup/daemon.sqlite'"
+sqlite3 ~/work/acme/.weave/db.sqlite ".backup '/backup/acme-db.sqlite'"
+sqlite3 ~/.config/weave/daemon.sqlite ".backup '/backup/daemon.sqlite'"
 ```
 
-Safe to exclude: `<workspace>/.agent-conductor/runs/` (log volume; only history is lost) and
+Safe to exclude: `<workspace>/.weave/runs/` (log volume; only history is lost) and
 `<workspace>/projects/*` (re-clonable, but then unlanded worker branches are gone too — do not
 exclude it while tickets are in flight).
 
-`conductor workspace export <dir>` produces a portable, secret-free package (role specs, charters,
+`weave workspace export <dir>` produces a portable, secret-free package (role specs, charters,
 knowledge, tickets as markdown) — that is a migration tool, not a backup.
 
 Restore: put the directories back, make sure `workspaces.yaml` points at the restored paths, start
@@ -270,27 +270,27 @@ and DB rows with no declaration are flagged, never deleted.
 The daemon runs from an immutable **release directory**, never from a checkout anyone edits:
 
 ```
-~/.local/share/agent-conductor/
+~/.local/share/weave/
   releases/20260904-231500-1a2b3c4d5e/   a clone at one commit, installed and built
   releases/20260905-101200-9f8e7d6c5b/
-  current  -> releases/20260905-…         what the service and the `conductor` wrapper run
+  current  -> releases/20260905-…         what the service and the `weave` wrapper run
   previous -> releases/20260904-…         one `rollback` away
 ```
 
-There are two ways in. **`conductor daemon update apply`** (and the web app's Settings → Updates) asks
-the running daemon to upgrade itself, deferring until no turn is running. **`conductor daemon upgrade`**
+There are two ways in. **`weave daemon update apply`** (and the web app's Settings → Updates) asks
+the running daemon to upgrade itself, deferring until no turn is running. **`weave daemon upgrade`**
 does it from this shell — the path that still works when the daemon is not answering.
 
 ```bash
-conductor daemon update                       # running version + commit vs the source at its ref
-conductor daemon update apply                 # queue it: the daemon waits for idle, then upgrades
-conductor daemon update apply --ref v0.2.0 --test
-conductor daemon update cancel                # only before the build starts
+weave daemon update                       # running version + commit vs the source at its ref
+weave daemon update apply                 # queue it: the daemon waits for idle, then upgrades
+weave daemon update apply --ref v0.2.0 --test
+weave daemon update cancel                # only before the build starts
 
-conductor daemon upgrade                      # from this shell; source and ref from daemon.yaml
-conductor daemon upgrade --ref v0.2.0 --test  # any ref; --test runs the suite before switching
-conductor daemon releases
-conductor daemon rollback
+weave daemon upgrade                      # from this shell; source and ref from daemon.yaml
+weave daemon upgrade --ref v0.2.0 --test  # any ref; --test runs the suite before switching
+weave daemon releases
+weave daemon rollback
 ```
 
 ### The deferred upgrade (`update apply`)
@@ -315,7 +315,7 @@ service kills that service's whole control group**, so the daemon starts the run
 `systemd-run --user --scope --collect` where that exists; on launchd and on a bare `daemon start`
 install a plain detached process already survives. On a host with systemd but no `systemd-run`, the
 runner dies with the restart: nothing rolls back automatically, the next daemon to boot marks the
-record `restart_unverified`, and **`conductor daemon rollback` is yours to run**.
+record `restart_unverified`, and **`weave daemon rollback` is yours to run**.
 
 A daemon that boots while a record is unfinished reconciles it: `restarting` on the target release
 becomes `completed`; `restarting` on some other release, past ten minutes, becomes `restart_unverified`;
@@ -326,12 +326,12 @@ reaches neither — `/api/daemon/*` is not on the run-token path list.
 
 `upgrade` does, in order: clone `upgrade.source` at `upgrade.ref` into a new release dir and
 `pnpm install --frozen-lockfile && pnpm build` there (nothing running is touched yet) → online
-backup of `daemon.sqlite` and every workspace db into `~/.config/agent-conductor/backups/<stamp>/`
+backup of `daemon.sqlite` and every workspace db into `~/.config/weave/backups/<stamp>/`
 → switch `current` (and `previous`) → `POST /api/daemon/drain`, which stops dispatching new turns
 and waits up to `upgrade.drainTimeoutSec` (default 30s — an agent turn can take many minutes, so this
 bound only ever catches the fast case; anything still running restarts anyway and is interrupted and
 resumed like any run a restart interrupts) for running ones → `systemctl --user
-restart agent-conductor.service` (or stop/start when no unit is installed) → wait for
+restart weave-ai.service` (or stop/start when no unit is installed) → wait for
 `/api/health`. Releases beyond `upgrade.keep` (default 3) are pruned, never `current` or `previous`.
 
 ```yaml
@@ -351,21 +351,21 @@ benefit, since a turn that is not done in 30s is not meaningfully closer to done
 remain overridable per invocation (`--drain-timeout`) or in `daemon.yaml`.
 
 - Schema migrations run automatically when a database is opened. There is no down-migration; the
-  backup taken by `upgrade` is the rollback for data, `conductor daemon rollback` for code.
+  backup taken by `upgrade` is the rollback for data, `weave daemon rollback` for code.
 - The unit's `ExecStart` points at `current/packages/server/dist/bin.js`; it never needs re-writing
-  for an upgrade. `conductor daemon install-service` prefers `current` whenever it exists.
+  for an upgrade. `weave daemon install-service` prefers `current` whenever it exists.
 - Skills and prompt templates ship inside the release and are re-installed into agent homes when
   they change; an agent's local edits are overwritten by design.
 - In-flight work: the drain lets running turns finish. Anything still running at the timeout is
   recorded as `interrupted` (never `failed`), re-queued once on boot, and resumes its session; worktrees and worker homes are
   exactly where they were. Nothing is ever reset.
 - `upgrade` and `rollback` refuse to run inside a worker (`AC_RUN_TOKEN` set). Agents developing
-  AgentConductor propose the change in a ticket; a human runs the upgrade.
+  Weave AI propose the change in a ticket; a human runs the upgrade.
 - The two paths now handle in-flight work the same way: both `upgrade`'s drain and `update apply`'s
   wait for idle **interrupt** whatever is still running once their bound expires, rather than either
   killing it outright or waiting on it forever — the run is ended and resumed exactly like any run a
   daemon restart interrupts, and neither path ever fails purely because something was still running.
-- After an upgrade, `conductor daemon status` and `conductor doctor` are the two things to look at.
+- After an upgrade, `weave daemon status` and `weave doctor` are the two things to look at.
 
 ---
 
@@ -378,7 +378,7 @@ is no second copy anywhere.
 
 | Runtime | The one credential | What the workspace has |
 |---|---|---|
-| `claude` | `~/.claude/.credentials.json` | `<workspace>/.agent-conductor/runtimes/claude/.credentials.json` → symlink |
+| `claude` | `~/.claude/.credentials.json` | `<workspace>/.weave/runtimes/claude/.credentials.json` → symlink |
 | `codex` | `~/.codex/auth.json` | `…/runtimes/codex/auth.json` → symlink |
 | `gemini` | `~/.gemini/oauth_creds.json`, `~/.gemini/google_accounts.json` | symlinks |
 | `opencode` | `~/.local/share/opencode/auth.json` | `…/runtimes/opencode/opencode/auth.json` → symlink |
@@ -415,7 +415,7 @@ below: one decision, no per-agent spam.
 belongs and reconciles once. A workspace that had its own separate login keeps whichever credential
 is live. Nobody is signed out and no login is required.
 
-**Consequence.** `conductor runtime login <id>` no longer gives a workspace an independent login: it
+**Consequence.** `weave runtime login <id>` no longer gives a workspace an independent login: it
 logs in the one host credential for that runtime. Multi-account and per-role credentials are not
 supported.
 
@@ -454,7 +454,7 @@ start every agent into the same failure again.
 ### Seeing the state
 
 ```bash
-conductor doctor                       # a `credential <runtime>` check per runtime
+weave doctor                       # a `credential <runtime>` check per runtime
 curl .../api/w/<ws>/usage/credentials  # present, expiresAt, lastVerifiedAt, refreshFailedAt, needsLogin
 ```
 
@@ -474,52 +474,52 @@ Five failed logins within `auth.lockoutMinutes` lock the account. Wait it out (1
 default), or clear the attempts:
 
 ```bash
-systemctl --user stop agent-conductor.service
-sqlite3 ~/.config/agent-conductor/daemon.sqlite \
+systemctl --user stop weave-ai.service
+sqlite3 ~/.config/weave/daemon.sqlite \
   "DELETE FROM login_attempts WHERE username = 'operator';"
-systemctl --user start agent-conductor.service
+systemctl --user start weave-ai.service
 ```
 
 **Forgotten password.** `POST /api/auth/setup` is refused once an operator exists (`conflict`), and
-`conductor daemon set-password` then needs the current password. To reset, delete the operator row and
+`weave daemon set-password` then needs the current password. To reset, delete the operator row and
 start over — this also invalidates every session and any TOTP enrolment:
 
 ```bash
-systemctl --user stop agent-conductor.service
-sqlite3 ~/.config/agent-conductor/daemon.sqlite \
+systemctl --user stop weave-ai.service
+sqlite3 ~/.config/weave/daemon.sqlite \
   "DELETE FROM auth_sessions; DELETE FROM operator;"
-systemctl --user start agent-conductor.service
-conductor daemon set-password
+systemctl --user start weave-ai.service
+weave daemon set-password
 ```
 
 **Lost TOTP device.** Use one of the recovery codes shown at enrolment in place of the six-digit code
-(`conductor login` accepts it at the "Six-digit code" prompt). If those are gone too, reset the operator as
+(`weave login` accepts it at the "Six-digit code" prompt). If those are gone too, reset the operator as
 above.
 
-**Suspicious session.** `conductor devices list`, then `conductor devices revoke <id>` or `conductor devices revoke --all`
+**Suspicious session.** `weave devices list`, then `weave devices revoke <id>` or `weave devices revoke --all`
 (everything except the session you are using). Same list in Settings → Devices.
 
-### `conductor login` fails on TLS
+### `weave login` fails on TLS
 
 Self-signed daemon: use `--pin`. It fetches the certificate, shows you the subject and validity,
 stores the SHA-256 fingerprint in the context, and trusts exactly that certificate afterwards. If
 you regenerate the certificate (delete `self-signed.crt`/`.key` and restart), every pinned client
-must `conductor login --pin` again. Plaintext to a non-loopback host is refused; `--insecure` overrides it
+must `weave login --pin` again. Plaintext to a non-loopback host is refused; `--insecure` overrides it
 and you should not need to.
 
 ### Credentials: a runtime is `missing` or every run fails with `auth`
 
 ```bash
-conductor runtime list          # detection, version, path per runtime
-conductor doctor                # includes each runtime with the fix for it
+weave runtime list          # detection, version, path per runtime
+weave doctor                # includes each runtime with the fix for it
 ```
 
 - `missing` means the CLI is not installed **on the daemon host**. Installing it on your laptop does
   nothing.
 - Installed but unauthenticated: the daemon copies host credentials into
-  `<workspace>/.agent-conductor/runtimes/<runtime>/` **once, when the workspace is first loaded** and
+  `<workspace>/.weave/runtimes/<runtime>/` **once, when the workspace is first loaded** and
   only when that config home has no credential file yet. If you logged the CLI in afterwards, the
-  copy never happened. Fix it with `conductor runtime login <id>`, which runs the CLI's own login flow with
+  copy never happened. Fix it with `weave runtime login <id>`, which runs the CLI's own login flow with
   its config-home env pointed at the workspace:
 
   | Runtime | env | command |
@@ -529,7 +529,7 @@ conductor doctor                # includes each runtime with the fix for it
   | opencode | `XDG_CONFIG_HOME` | `opencode auth login` |
   | gemini | `GEMINI_CLI_HOME` | `gemini` (prompts on first run) |
 
-  `conductor runtime login <id> --print` shows the plan without running anything — use that when you need to
+  `weave runtime login <id> --print` shows the plan without running anything — use that when you need to
   run the login by hand, e.g. over SSH with a browser flow.
 - Git/forge auth is separate: `gh auth status` and `ssh -T git@github.com` as the daemon's user.
   Workers deliver via `gh` when `deliveryMode: pr`; without it, set `deliveryMode: local-branch` in
@@ -537,7 +537,7 @@ conductor doctor                # includes each runtime with the fix for it
 
 ### `worktrunk` is missing
 
-Symptom: worker spawn fails on worktree creation, or `conductor worktree list` is empty for a project
+Symptom: worker spawn fails on worktree creation, or `weave worktree list` is empty for a project
 configured with `worktrees: worktrunk`.
 
 `wt` is the binary (`pacman -S worktrunk` on Arch). The built-in `git worktree` provider is a full
@@ -555,53 +555,53 @@ projects:
 
 Then restart the daemon (or `PATCH /api/w/<ws>/config`) and re-spawn. Existing worktrees are not
 migrated; finish or discard the tickets that own them first. With `worktrunk` present the daemon
-always passes `--config <workspace>/.agent-conductor/wt.toml`, so your personal worktrunk config is
+always passes `--config <workspace>/.weave/wt.toml`, so your personal worktrunk config is
 never read or written.
 
 ### `openspec` is missing
 
 Everything keeps working — a missing binary is never fatal — but `change` tickets degrade:
 
-- `ac_openspec_status` returns a zeroed record and the daemon logs `openspec binary missing`;
+- `weave_openspec_status` returns a zeroed record and the daemon logs `openspec binary missing`;
 - proposal validation reports `the openspec binary is not installed` instead of validating;
 - archiving after merge is skipped (`skipped: "the openspec binary is not installed"`), so no archive
   commit is made;
-- `conductor specs list|show|changes` and the Spec Explorer are empty.
+- `weave specs list|show|changes` and the Spec Explorer are empty.
 
-Fix: `conductor doctor --install` (or `npm i -g @fission-ai/openspec` by hand), confirm with `openspec --version`, then re-run
-`conductor project fetch` (which reindexes) or `POST /api/w/<ws>/specs/<project>/reindex`. If the binary is
+Fix: `weave doctor --install` (or `npm i -g @fission-ai/openspec` by hand), confirm with `openspec --version`, then re-run
+`weave project fetch` (which reindexes) or `POST /api/w/<ws>/specs/<project>/reindex`. If the binary is
 somewhere unusual, point the daemon at it with `AC_OPENSPEC_BIN=/path/to/openspec` in the unit. To
 opt a project out entirely, set `openspec: { enabled: false }` on it.
 
 ### Workers stall or pile up
 
 ```bash
-conductor top                       # fleet view
-conductor worker list --all
-conductor runs list -s running
-conductor worker show <id>          # session, ticket, last run, spend
-conductor runs tail <id>
+weave top                       # fleet view
+weave worker list --all
+weave runs list -s running
+weave worker show <id>          # session, ticket, last run, spend
+weave runs tail <id>
 ```
 
 The supervisor runs every 15 s and escalates on its own: silence past
 `defaults.silenceTimeoutSec` (600) with no worktree writes → interrupt, then kill the process group,
 then relaunch the same worker into the same home and worktree with a progress note; a second failure
 gets a fresh session; a third marks the worker `error` and the ticket `blocked` with the conductor
-woken. Manual overrides: `conductor worker relaunch <id> --note "..."`, `conductor worker cancel <id>`,
-`conductor runs cancel <id> --mode kill`.
+woken. Manual overrides: `weave worker relaunch <id> --note "..."`, `weave worker cancel <id>`,
+`weave runs cancel <id> --mode kill`.
 
 If work is not starting at all: check `role_full` (the project's `maxWorkers` across all its roles),
-that the role is `active` (`conductor role list`), and that the workspace is
-not paused (`POST /api/w/<ws>/resume`; there is no `conductor workspace pause|resume` yet).
-`conductor role show <id>` prints the project's effective concurrency; raise throughput from the
-project's Settings max-workers field, not `conductor role set-max-workers`.
+that the role is `active` (`weave role list`), and that the workspace is
+not paused (`POST /api/w/<ws>/resume`; there is no `weave workspace pause|resume` yet).
+`weave role show <id>` prints the project's effective concurrency; raise throughput from the
+project's Settings max-workers field, not `weave role set-max-workers`.
 
 ### Nothing is reachable
 
 ```bash
-conductor daemon status                       # local pid + GET /api/health
+weave daemon status                       # local pid + GET /api/health
 curl -sk https://conductor.example.com/api/health | jq
-conductor context show                        # which URL and workspace the CLI is actually using
+weave context show                        # which URL and workspace the CLI is actually using
 ```
 
 `net_daemon_unreachable` means the client could not reach the URL at all — wrong context, firewall,
@@ -611,17 +611,17 @@ proxy down, or the daemon refused to start. Check the journal: a refusal to bind
 ### The web app shows "the web UI has not been built"
 
 `packages/ui/dist` is missing or the daemon was pointed elsewhere. Run
-`pnpm --filter @agent-conductor/ui build` and reload, or start the daemon with `--ui-dir <path>` /
+`pnpm --filter @weave-ai/ui build` and reload, or start the daemon with `--ui-dir <path>` /
 `AC_UI_DIR=<path>`. The API stays fully live either way (`/api/openapi.json`, `/llms/api.txt`).
 
 ### Disk fills up
 
-`<workspace>/.agent-conductor/runs/` and `<workspace>/archive/workers/` are the usual culprits, then
+`<workspace>/.weave/runs/` and `<workspace>/archive/workers/` are the usual culprits, then
 per-worker `node_modules` in worktrees. **Neither is pruned automatically yet** —
 `defaults.runLogRetentionDays` (30) and `defaults.workerArchiveDays` (30) are accepted by the config
 schema but nothing enforces them, so delete old run directories and worker archives yourself (a
 `find … -mtime +30 -delete` in a cron job is enough; run directories are named by run id and nothing
-else references them once the run is finished). `conductor worker purge <id>` removes one worker's home and
+else references them once the run is finished). `weave worker purge <id>` removes one worker's home and
 worktree (refuses a dirty worktree without `--force`). Never delete a live worker's `work/` by hand —
-`conductor worktree verify <id>` tells you whether the work has landed, and `conductor worktree discard <id>` is
+`weave worktree verify <id>` tells you whether the work has landed, and `weave worktree discard <id>` is
 the supported destructive path.

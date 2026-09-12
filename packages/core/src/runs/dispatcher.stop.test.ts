@@ -4,7 +4,7 @@
  * on. With no argument it keeps today's unbounded wait; with one, it races the drain against a timer
  * and reports whether the drain actually finished.
  */
-import { FakeRuntime } from '@agent-conductor/runtime-sdk';
+import { FakeRuntime } from '@weave-ai/runtime-sdk';
 import { afterEach, describe, expect, it } from 'vitest';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createWakeService } from '../wake/index.js';

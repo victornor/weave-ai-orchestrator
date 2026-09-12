@@ -12,14 +12,14 @@
  * may be on the same runtime and therefore unable to take one. The supervisor's probe clears all of
  * it again without the human answering anything.
  */
-import { nowIso } from '@agent-conductor/db';
-import { LOGIN_PAUSE_CODE, OcError, type Agent } from '@agent-conductor/shared';
+import { nowIso } from '@weave-ai/db';
+import { LOGIN_PAUSE_CODE, OcError, type Agent } from '@weave-ai/shared';
 import type { CoreServices } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { modelSettingFor, modelsFor, workerOptionRuntimes } from '../models/resolve.js';
 import { redactSecrets } from '../util/redact.js';
 
-export { LOGIN_PAUSE_CODE } from '@agent-conductor/shared';
+export { LOGIN_PAUSE_CODE } from '@weave-ai/shared';
 
 /** One open card per runtime, whatever fails and however often. */
 export const loginCorrelationKey = (runtimeId: string): string => `runtime-login:${runtimeId}`;

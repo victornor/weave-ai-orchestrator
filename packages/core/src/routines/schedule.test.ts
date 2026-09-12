@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OcError } from '@agent-conductor/shared';
+import { OcError } from '@weave-ai/shared';
 import { nextAfter, parseSchedule, zonedLocalToUtc } from './schedule.js';
 
 describe('parseSchedule (VS-220)', () => {

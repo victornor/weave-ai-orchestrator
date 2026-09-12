@@ -1,4 +1,4 @@
-/** `conductor runtime list|detect|login` — runtime availability and per-workspace auth (PLAN §8.3, §20). */
+/** `weave runtime list|detect|login` — runtime availability and per-workspace auth (PLAN §8.3, §20). */
 import type { Command } from 'commander';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';

@@ -8,7 +8,7 @@ import { createDecisionsService } from '../decisions/index.js';
 import { createModelsService, deriveModelSettings, hasModelSettings, migrationSummary, recordPendingMigration, WORKERS_RUNTIME_CORRELATION } from './index.js';
 import { effectiveModels, modelSettingFor, modelsLocked } from './resolve.js';
 import type { ModelsService } from '../api.js';
-import { OcError, type Decision } from '@agent-conductor/shared';
+import { OcError, type Decision } from '@weave-ai/shared';
 
 const HUMAN = { kind: 'human' as const, id: 'victor' };
 const role = (runtimeId: string, model: string | null = null, effort: string | null = null) => ({ runtimeId, model, effort });

@@ -101,17 +101,17 @@ export function printError(error: unknown): number {
 
 function nextSteps(error: ApiError): string[] {
   switch (error.code) {
-    case 'net_daemon_unreachable': return ['start it with `conductor daemon start`, or point at another one with `conductor login <url>`'];
+    case 'net_daemon_unreachable': return ['start it with `weave daemon start`, or point at another one with `weave login <url>`'];
     case 'unauthorized':
-    case 'auth_session_expired': return ['sign in again with `conductor login <url>`'];
+    case 'auth_session_expired': return ['sign in again with `weave login <url>`'];
     case 'auth_totp_required': return ['pass the six-digit code when prompted'];
     case 'auth_locked': return ['wait for the lockout to expire, then try again'];
-    case 'runtime_unreachable': return ['check the runtime with `conductor runtime detect`', 'or switch runtime with `conductor role set-runtime <role> <runtime>`'];
-    case 'model_unconfigured': return ['choose an adapter for that option in daemon Settings → Models, or with `conductor daemon models`'];
+    case 'runtime_unreachable': return ['check the runtime with `weave runtime detect`', 'or switch runtime with `weave role set-runtime <role> <runtime>`'];
+    case 'model_unconfigured': return ['choose an adapter for that option in daemon Settings → Models, or with `weave daemon models`'];
     case 'not_found': return ['list what exists with the matching `conductor ... list` command'];
-    case 'worktree_dirty': return ['inspect it with `conductor worktree verify <id>`'];
-    case 'merge_not_approved': return ['approve the merge decision with `conductor decision list`'];
-    case 'revision_pending': return ['wait for the conductor\'s concern to be revised, or force it through with `conductor decision answer <id> approve --override-hold "<reason>"`'];
+    case 'worktree_dirty': return ['inspect it with `weave worktree verify <id>`'];
+    case 'merge_not_approved': return ['approve the merge decision with `weave decision list`'];
+    case 'revision_pending': return ['wait for the conductor\'s concern to be revised, or force it through with `weave decision answer <id> approve --override-hold "<reason>"`'];
     default: return error.retryable ? ['retryable: try again'] : [];
   }
 }

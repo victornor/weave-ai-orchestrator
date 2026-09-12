@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Decision, DecisionAnswerInputs, Project, RunTrace, ThreadMessage, Ticket } from '@agent-conductor/shared';
-import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@agent-conductor/shared';
+import type { Decision, DecisionAnswerInputs, Project, RunTrace, ThreadMessage, Ticket } from '@weave-ai/shared';
+import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Composer } from '../components/Composer';
 import { DecisionCard } from '../components/DecisionCard';
@@ -38,7 +38,7 @@ import {
 import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import { ApiError, NetworkError, SEND_TIMEOUT_MS, withTimeout } from '../api/client';
-import { attachmentPartsOf, attachmentToView, contextStrip, resolveModel, runtimeLimitStrip } from '@agent-conductor/render';
+import { attachmentPartsOf, attachmentToView, contextStrip, resolveModel, runtimeLimitStrip } from '@weave-ai/render';
 import { chatEntries, chatRows } from '../lib/dispatch';
 import { useShowSilentTurns } from '../lib/chatPrefs';
 import { readExpandedTraces, toggleExpandedTrace } from '../lib/traceExpansion';
@@ -180,7 +180,7 @@ export function ChatPage({
   const [attachments, setAttachments] = useState<File[]>([]);
 
   const { events: runEvents, status: runStreamStatus, retryNow: retryRunStream } = useRunEventStream(runId, { live: focused && (live?.running ?? false) });
-  // The reply renders as the thread message ac_human_send created; showing the call too would
+  // The reply renders as the thread message weave_human_send created; showing the call too would
   // put the same words on screen twice.
   const liveEvents = useMemo(() => runEvents.filter((e) => !isHumanReplyToolEvent(e)), [runEvents]);
   const working = sending || (live?.running ?? false);

@@ -67,7 +67,7 @@ describe('AC Artifact Kit token drift (openspec/specs/artifact-kit/design-tokens
 });
 
 describe('readArtifactPlaybooks', () => {
-  it('returns an empty object when the skills directory has no agent-conductor-artifacts skill', () => {
+  it('returns an empty object when the skills directory has no weave-ai-artifacts skill', () => {
     expect(readArtifactPlaybooks('/nonexistent/skills/dir')).toEqual({});
   });
 

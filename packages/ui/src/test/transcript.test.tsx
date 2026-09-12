@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { RunEvent } from '@agent-conductor/shared';
+import type { RunEvent } from '@weave-ai/shared';
 import { groupConsecutiveTools, reportUiStatus, runEventsToTranscript } from '../lib/transcript';
 import type { TranscriptBlock } from '../lib/transcript';
 import { Transcript } from '../components/Transcript';
@@ -464,7 +464,7 @@ describe('Markdown copy control', () => {
 
 describe('qr', () => {
   it('produces a square matrix with the three finder patterns', () => {
-    const m = qrMatrix('otpauth://totp/AgentConductor:operator?secret=JBSWY3DPEHPK3PXP&issuer=AgentConductor');
+    const m = qrMatrix('otpauth://totp/Weave AI:operator?secret=JBSWY3DPEHPK3PXP&issuer=Weave AI');
     expect(m.length).toBeGreaterThanOrEqual(21);
     expect(m.every((row) => row.length === m.length)).toBe(true);
     for (const [r, c] of [

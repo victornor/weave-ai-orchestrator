@@ -2,7 +2,7 @@
  * Daemon-wide Needs you (VS-168): open human-owned decisions from every workspace.
  */
 import { useCallback } from 'react';
-import type { Decision, DecisionAnswerInputs } from '@agent-conductor/shared';
+import type { Decision, DecisionAnswerInputs } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { DecisionCard } from '../components/DecisionCard';
 import { PlanPreview } from '../components/PlanPreview';

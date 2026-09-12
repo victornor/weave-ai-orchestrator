@@ -8,8 +8,8 @@
  * `agent.model ?? role.model ?? config.defaults.model` goes through it instead, so there is no
  * chain left for a stale row to enter.
  */
-import type { AgentKind, DaemonModels, ModelSetting, ModelsLocked, WorkspaceConfig, WorkspaceModels } from '@agent-conductor/shared';
-import { DEFAULT_WORKSPACE_MODELS, OcError, isWorkerOptionConfigured } from '@agent-conductor/shared';
+import type { AgentKind, DaemonModels, ModelSetting, ModelsLocked, WorkspaceConfig, WorkspaceModels } from '@weave-ai/shared';
+import { DEFAULT_WORKSPACE_MODELS, OcError, isWorkerOptionConfigured } from '@weave-ai/shared';
 
 export function catalogOverlayFilled(opts: DaemonModels['workerOptions']): opts is NonNullable<DaemonModels['workerOptions']> {
   return Array.isArray(opts) && opts.length > 0;

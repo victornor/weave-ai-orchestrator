@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type { Decision, EventType, WorkspaceEvent } from '@agent-conductor/shared';
+import type { Decision, EventType, WorkspaceEvent } from '@weave-ai/shared';
 import { qk } from './keys';
 import { BACKOFF, documentIsHidden, type ConnectionState, type ConnectionStatus } from './sseStream';
 

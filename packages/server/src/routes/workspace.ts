@@ -1,9 +1,9 @@
 import { resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { nowIso } from '@agent-conductor/db';
-import { exportWorkspace } from '@agent-conductor/core';
-import { OcError, WorkspaceConfigSchema } from '@agent-conductor/shared';
+import { nowIso } from '@weave-ai/db';
+import { exportWorkspace } from '@weave-ai/core';
+import { OcError, WorkspaceConfigSchema } from '@weave-ai/shared';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { body } from '../http.js';
 import { transcribe } from './daemon.js';

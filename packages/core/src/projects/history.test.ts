@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { newId } from '@agent-conductor/db';
-import type { Project } from '@agent-conductor/shared';
+import { newId } from '@weave-ai/db';
+import type { Project } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { git } from '../util/git.js';
 import { createHistoryReader, HISTORY_GIT_SUBCOMMANDS } from './history.js';

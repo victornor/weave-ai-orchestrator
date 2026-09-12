@@ -9,8 +9,8 @@
  * `standalone` is the turn that said nothing: same trace, no reply above it, so the row carries the
  * time and the run's own summary that a reply would otherwise have supplied.
  */
-import type { RunTrace } from '@agent-conductor/shared';
-import { contextStrip } from '@agent-conductor/render';
+import type { RunTrace } from '@weave-ai/shared';
+import { contextStrip } from '@weave-ai/render';
 import { RunTranscript } from './RunTranscript';
 import { useRunEvents } from '../api/hooks';
 import { clock, duration, tokens } from '../lib/format';

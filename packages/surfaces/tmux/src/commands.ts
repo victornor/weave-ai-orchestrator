@@ -1,4 +1,4 @@
-import type { AgentView } from '@agent-conductor/surface-sdk';
+import type { AgentView } from '@weave-ai/surface-sdk';
 
 /** Glyphs for the nine UI status tokens (design contract §2). */
 export const STATUS_GLYPHS: Record<string, string> = {

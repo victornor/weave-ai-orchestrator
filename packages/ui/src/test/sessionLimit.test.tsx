@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RuntimeAccount } from '@agent-conductor/shared';
+import type { RuntimeAccount } from '@weave-ai/shared';
 import { COUNTDOWN_TICK_MS, SessionLimit } from '../components/SessionLimit';
 
 const NOW = new Date('2026-09-05T17:35:00.000Z');
@@ -71,7 +71,7 @@ describe('SessionLimit', () => {
     expect(screen.getByText('· now')).toBeTruthy();
   });
 
-  it('shows the conductor runtime, never another runtime that happens to be probed', () => {
+  it('shows the weave runtime, never another runtime that happens to be probed', () => {
     const { container } = render(<SessionLimit accounts={[metered, subscription]} runtimeId="codex" />);
     expect(container.innerHTML).toBe('');
   });

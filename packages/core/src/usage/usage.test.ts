@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { newId, nowIso } from '@agent-conductor/db';
-import { OcError } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { OcError } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createUsageService } from './index.js';
 import { recordUsage, type RecordUsageInput } from './service.js';

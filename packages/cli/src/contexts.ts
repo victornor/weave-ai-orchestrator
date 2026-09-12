@@ -1,18 +1,18 @@
 /**
- * Remote contexts (`~/.config/agent-conductor/contexts.yaml`, PLAN §4.4) and workspace resolution.
+ * Remote contexts (`~/.config/weave/contexts.yaml`, PLAN §4.4) and workspace resolution.
  * `conductor` is a pure remote client: every command works identically against a local or remote daemon.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { dirname, join, parse as parsePath, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { ContextsFileSchema, type ContextsFile } from '@agent-conductor/shared';
-import { configDir as resolveConfigDir, stateHome as resolveStateHome } from '@agent-conductor/release';
+import { ContextsFileSchema, type ContextsFile } from '@weave-ai/shared';
+import { configDir as resolveConfigDir, stateHome as resolveStateHome } from '@weave-ai/release';
 
 export interface ContextEntry { url: string; token: string; workspace?: string; certPin?: string }
 
 export const DEFAULT_URL = 'http://127.0.0.1:7433';
 
-/** VS-258: collapsed into `@agent-conductor/release`, the one place old/new resolution happens. */
+/** VS-258: collapsed into `@weave-ai/release`, the one place old/new resolution happens. */
 export function configHome(): string {
   return resolveConfigDir();
 }

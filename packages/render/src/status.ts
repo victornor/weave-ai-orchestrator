@@ -2,7 +2,7 @@
  * The nine UI status tokens (design contract §2): one glyph + one hue each, used identically
  * in badges, rows, cards, charts and transcript lines, in the web app and in the TUI.
  */
-import { UI_STATUSES, type UiStatus } from '@agent-conductor/shared';
+import { UI_STATUSES, type UiStatus } from '@weave-ai/shared';
 
 /** Unicode glyphs for the TUI. The shape carries the meaning, the colour only reinforces it. */
 export const STATUS_GLYPHS: Record<UiStatus, string> = {

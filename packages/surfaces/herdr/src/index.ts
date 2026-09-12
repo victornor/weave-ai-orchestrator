@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import type { AgentPresence, AgentView, JsonSchema, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@agent-conductor/surface-sdk';
+import type { AgentPresence, AgentView, JsonSchema, SurfaceAdapter, SurfaceContext, SurfaceHandle } from '@weave-ai/surface-sdk';
 import {
   findPaneForAgent, findTabByLabel, findWorkspaceByLabel, paneCloseArgs, paneLabel, paneListArgs, paneRenameArgs,
   paneRunArgs, paneSplitArgs, parseCreatedPaneId, parseCreatedTabId, parsePaneList, parseTabList, parseWorkspaceList,
@@ -127,7 +127,7 @@ export function createHerdrSurface(): SurfaceAdapter {
           layout: { type: 'string', enum: ['grid', 'per-project'] },
           terminal: { type: 'string' },
           workspace: { type: ['string', 'number'] },
-          reconcile: { type: 'boolean', description: 'Recreate panes the human closed (set by `conductor presentation reconcile`)' },
+          reconcile: { type: 'boolean', description: 'Recreate panes the human closed (set by `weave presentation reconcile`)' },
         },
       };
     },

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { UiStatus } from '@agent-conductor/shared';
+import type { UiStatus } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented } from '../components/Tabs';
 import { SkeletonRows } from '../components/Skeleton';

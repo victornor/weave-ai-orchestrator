@@ -26,17 +26,17 @@ describe('hyprctl command building', () => {
   });
 
   it('spawns the terminal on the configured workspace', () => {
-    const args = execArgs({ terminal: foot, cls: 'ac-acme-w-1', command: ['conductor', 'attach', 'w-1'], hyprWorkspace: 5 });
-    expect(args).toEqual(['dispatch', 'exec', '[workspace 5 silent] foot -a ac-acme-w-1 -e conductor attach w-1']);
+    const args = execArgs({ terminal: foot, cls: 'ac-acme-w-1', command: ['weave', 'attach', 'w-1'], hyprWorkspace: 5 });
+    expect(args).toEqual(['dispatch', 'exec', '[workspace 5 silent] foot -a ac-acme-w-1 -e weave attach w-1']);
   });
 
   it('omits the workspace rule when none is configured (weaver terminal)', () => {
-    const args = execArgs({ terminal: ghostty, cls: 'ac-acme-weaver', command: ['conductor', 'chat'], hyprWorkspace: null });
-    expect(args[2]).toBe('ghostty --class=ac-acme-weaver -e conductor chat');
+    const args = execArgs({ terminal: ghostty, cls: 'ac-acme-weaver', command: ['weave', 'chat'], hyprWorkspace: null });
+    expect(args[2]).toBe('ghostty --class=ac-acme-weaver -e weave chat');
   });
 
   it('quotes command arguments that need it', () => {
-    const args = execArgs({ terminal: foot, cls: 'c', command: ['conductor', 'say', 'hello world'], hyprWorkspace: 1 });
+    const args = execArgs({ terminal: foot, cls: 'c', command: ['weave', 'say', 'hello world'], hyprWorkspace: 1 });
     expect(args[2]).toContain("'hello world'");
   });
 

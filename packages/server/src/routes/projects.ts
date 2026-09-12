@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { OcError, ProjectConfigSchema, ProjectPoliciesSchema } from '@agent-conductor/shared';
+import { OcError, ProjectConfigSchema, ProjectPoliciesSchema } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
 

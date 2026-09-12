@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { RunEvent } from '@agent-conductor/shared';
+import type { RunEvent } from '@weave-ai/shared';
 import { groupConsecutiveTools, reportUiStatus, runEventsToTranscript } from '../lib/transcript';
 import type { ToolBlock, TranscriptBlock } from '../lib/transcript';
 import { StatusGlyph } from './StatusGlyph';

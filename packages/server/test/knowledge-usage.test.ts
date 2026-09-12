@@ -1,11 +1,11 @@
 /**
  * VS-110: knowledge context accounting, end to end against real core services (not the fakes) —
- * `ac_knowledge_get` and `ac_knowledge_doc_get` record what they returned, once per distinct
+ * `weave_knowledge_get` and `weave_knowledge_doc_get` record what they returned, once per distinct
  * document per run.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { createCore, initLogger } from '@agent-conductor/core';
-import { DaemonConfigSchema } from '@agent-conductor/shared';
+import { createCore, initLogger } from '@weave-ai/core';
+import { DaemonConfigSchema } from '@weave-ai/shared';
 import { makeHarness } from '../../core/src/testing/context.js';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
@@ -40,7 +40,7 @@ async function callTool(app: ReturnType<typeof createApp>, ws: string, token: st
 const H = { authorization: 'Bearer sess' };
 
 describe('knowledge context accounting (VS-110)', () => {
-  it('records an explicit ac_knowledge_get as a document read', async () => {
+  it('records an explicit weave_knowledge_get as a document read', async () => {
     const { deps, harness, services } = boot();
     const app = createApp(deps);
     const ticket = services.tickets.create({ kind: 'human', id: null }, { projectId: harness.projectId, kind: 'task', title: 'Read the shared KB' });
@@ -50,7 +50,7 @@ describe('knowledge context accounting (VS-110)', () => {
       workspaceId: harness.workspaceId, runId, agentId, agentKind: 'worker', projectId: harness.projectId, ticketId: ticket.id, roleId: harness.roleId,
     });
 
-    const payload = await callTool(app, harness.workspaceId, token, 'ac_knowledge_get', { scope: 'shared' });
+    const payload = await callTool(app, harness.workspaceId, token, 'weave_knowledge_get', { scope: 'shared' });
     expect(payload.ok).toBe(true);
 
     const rows = harness.db.all<{ kind: string; scope: string; slug: string | null; tokens: number }>(
@@ -70,8 +70,8 @@ describe('knowledge context accounting (VS-110)', () => {
     });
     services.knowledge.putDoc({ kind: 'agent', id: agentId, runId }, 'project', 'payments-webhooks', '# Payments webhooks\n\nStripe events.\n', harness.projectId);
 
-    const first = await callTool(app, harness.workspaceId, token, 'ac_knowledge_doc_get', { slug: 'payments-webhooks', scope: 'project' });
-    await callTool(app, harness.workspaceId, token, 'ac_knowledge_doc_get', { slug: 'payments-webhooks', scope: 'project' });
+    const first = await callTool(app, harness.workspaceId, token, 'weave_knowledge_doc_get', { slug: 'payments-webhooks', scope: 'project' });
+    await callTool(app, harness.workspaceId, token, 'weave_knowledge_doc_get', { slug: 'payments-webhooks', scope: 'project' });
 
     const rows = harness.db.all<{ kind: string; scope: string; slug: string | null; tokens: number }>(
       'SELECT kind, scope, slug, tokens FROM knowledge_usage_events WHERE run_id = ?', [runId],
@@ -91,7 +91,7 @@ describe('knowledge context accounting (VS-110)', () => {
     // Stand in for what the engine's own bootstrap recording would have already written this turn.
     services.knowledgeUsage.recordBootstrap(runId, agentId, ticket.id, [{ scope: 'shared', projectId: null, tokens: 40 }]);
 
-    await callTool(app, harness.workspaceId, token, 'ac_knowledge_get', { scope: 'shared' });
+    await callTool(app, harness.workspaceId, token, 'weave_knowledge_get', { scope: 'shared' });
 
     const rows = harness.db.all<{ kind: string; scope: string }>('SELECT kind, scope FROM knowledge_usage_events WHERE run_id = ? ORDER BY kind', [runId]);
     expect(rows).toEqual([{ kind: 'document', scope: 'shared' }, { kind: 'hub', scope: 'shared' }]);

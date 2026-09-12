@@ -1,11 +1,11 @@
-# ADR 0015 — Attachments reach the conductor through `ac_inbox`'s MCP content, not the turn prompt
+# ADR 0015 — Attachments reach the conductor through `weave_inbox`'s MCP content, not the turn prompt
 
 **Status:** accepted · 2026-09-08 · adds surface area PLAN's headless-turn description does not
 mention; deviates from no existing PLAN row
 
 ## Context
 
-VS-133 ("files and images can be attached to a conductor chat message... and the conductor can
+VS-133 ("files and images can be attached to a weave chat message... and the conductor can
 actually read them") needed to settle a genuine unknown first: whether the Claude runtime can be
 shown an image at all, and by what mechanism. Launching the real CLI to find out is forbidden by the
 runtime-credential rule (ADR 0012, VS-99) — the answer was established instead by reading the
@@ -38,7 +38,7 @@ Traced in full: `POST /threads/:id/messages` → `threads.inbound` → a `human_
 truncated to 2000 characters in the payload → `buildTurnPrompt`/`flattenWakes`
 (`packages/core/src/prompts/index.ts`) renders only a short "message from X" reason line into the
 turn's prompt. The full body — and therefore any attachment reference — never reaches
-`TurnInput.prompt`; the agent is expected to read it with `ac_inbox`, the tool its own brief tells it
+`TurnInput.prompt`; the agent is expected to read it with `weave_inbox`, the tool its own brief tells it
 to call first, every turn. There is no existing path where attaching content to the prompt would even
 be seen, so this is not a stylistic choice between two working options — it is the only path that
 already exists.
@@ -50,23 +50,23 @@ already exists.
 it, when present, after the existing single JSON `text` block — `content` becomes `[textBlock,
 ...imageBlocks]`. A handler sets it through a small escape hatch (`withMcpContent`/`isWithMcpContent`/
 `mcpContentOf`) rather than reshaping its own return type, since `runTool` wraps every handler's
-return in `ok(...)` uniformly and only `ac_inbox` needs to say more than its data.
+return in `ok(...)` uniformly and only `weave_inbox` needs to say more than its data.
 
-`ac_inbox`'s handler resolves each `human_message` wake's attachment ids
+`weave_inbox`'s handler resolves each `human_message` wake's attachment ids
 (`packages/server/src/tools.ts`, `attachmentsForWake`): an image's bytes are read and pushed onto
 `mcpContent` as `{type:'image', data: base64, mimeType}`; a text document's decoded content is
 inlined directly into that message's `attachments` entry; a deleted or otherwise unreadable attachment
 is dropped rather than failing the whole call. Nothing else — PDFs, other binaries — is delivered as
 content; their upload is refused server-side before this point (`packages/server/src/routes/
-threads.ts`), so `ac_inbox` never has one to resolve.
+threads.ts`), so `weave_inbox` never has one to resolve.
 
 ## Why
 
 - **The transport had to be settled with evidence, not left as an open question**, per the ticket's
   own instruction — the same posture ADR 0012 took, for the same reason (the credential rule forbids
   the one way to check directly).
-- **`ac_inbox` is the only place a human message's content is actually read.** Building a second path
-  through the prompt would mean the conductor might see an attachment reference in `ac_inbox`'s JSON
+- **`weave_inbox` is the only place a human message's content is actually read.** Building a second path
+  through the prompt would mean the conductor might see an attachment reference in `weave_inbox`'s JSON
   and the image itself nowhere, or duplicate work reshaping the prompt builder for a path nothing else
   uses.
 - **A capability with no evidenced delivery path is refused, not half-built.** Storing a PDF and
@@ -75,13 +75,13 @@ threads.ts`), so `ac_inbox` never has one to resolve.
 
 ## Consequences
 
-- Every `ac_inbox` call now resolves attachment bytes synchronously from disk for any bundled
+- Every `weave_inbox` call now resolves attachment bytes synchronously from disk for any bundled
   `human_message` wake that carries them — bounded by the 4-attachment-per-message cap and the 5MB
   image / 256KB text per-file caps (`packages/shared/src/attachments.ts`), so one call's worst case is
   a handful of megabytes of base64, the same order of magnitude the CLI's own paste feature already
   handles.
 - `ToolResult.mcpContent` is additive and optional; every existing `ok(data)` call site — every tool
-  but `ac_inbox` — is unaffected, pinned by `mcp.test.ts` asserting the no-mcpContent case still
+  but `weave_inbox` — is unaffected, pinned by `mcp.test.ts` asserting the no-mcpContent case still
   produces exactly one text block.
 - **None of this is verified against a live CLI**, by rule. `mcp.test.ts` and `threads-attachments.
   test.ts` (VS-133) pin the daemon's own contract — a real MCP client receiving a genuine `image`

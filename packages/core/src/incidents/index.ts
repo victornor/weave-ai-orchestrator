@@ -1,13 +1,13 @@
 /**
- * Daemon-level system incidents (VS-174). Agents file them through `ac_incident`; the human reads
- * them on the global Incidents page, the conductor through `ac_incident_list`/`ac_incident_get`
+ * Daemon-level system incidents (VS-174). Agents file them through `weave_incident`; the human reads
+ * them on the global Incidents page, the conductor through `weave_incident_list`/`weave_incident_get`
  * (VS-222), scoped to its own workspace. Lives in `daemon.sqlite`, not a workspace db.
  */
-import { newId, nowIso, type Db } from '@agent-conductor/db';
+import { newId, nowIso, type Db } from '@weave-ai/db';
 import {
   INCIDENT_REPORTER_KINDS, OcError,
   type Incident, type IncidentReporterKind, type IncidentStatusFilter,
-} from '@agent-conductor/shared';
+} from '@weave-ai/shared';
 
 export const INCIDENT_TITLE_MAX = 200;
 export const INCIDENT_BODY_MAX = 2000;
@@ -37,7 +37,7 @@ export interface IncidentListQuery {
   /** Scope to this workspace plus workspace-less (daemon-global) rows; unset returns every row. (VS-222) */
   workspaceId?: string;
   limit?: number;
-  /** Filters on resolution state; unset (like `all`) applies no filter (VS-271). No default here — see `ac_incident_list`. */
+  /** Filters on resolution state; unset (like `all`) applies no filter (VS-271). No default here — see `weave_incident_list`. */
   status?: IncidentStatusFilter;
 }
 
@@ -140,7 +140,7 @@ export function createIncidentsService(db: Db): IncidentsService {
         conds.push('(workspace_id = ? OR workspace_id IS NULL)');
         params.push(query.workspaceId);
       }
-      // No default here: unset behaves like 'all'. `ac_incident_list` defaults to 'open' in its own
+      // No default here: unset behaves like 'all'. `weave_incident_list` defaults to 'open' in its own
       // input schema so the default cannot leak into this service's other caller, `GET
       // /api/incidents` (VS-271).
       if (query.status === 'open') {

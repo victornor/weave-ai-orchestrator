@@ -8,8 +8,8 @@
  */
 import { mkdirSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId } from '@agent-conductor/db';
-import type { ForgeAdapter, ForgePullRequest, ForgePullRequestDetail } from '@agent-conductor/plugin-sdk';
+import { newId } from '@weave-ai/db';
+import type { ForgeAdapter, ForgePullRequest, ForgePullRequestDetail } from '@weave-ai/plugin-sdk';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createPullRequestsService, PR_CACHE_TTL_MS } from './index.js';
 import type { CoreServices, MergeQueueView, PullRequestsService } from '../api.js';

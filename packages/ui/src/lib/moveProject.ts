@@ -1,4 +1,4 @@
-import type { Project } from '@agent-conductor/shared';
+import type { Project } from '@weave-ai/shared';
 import { ApiError } from '../api/client';
 
 export type MoveProjectKind = 'slug_clash' | 'add_failed' | 'archive_failed';

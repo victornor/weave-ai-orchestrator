@@ -11,7 +11,7 @@
 import { execa } from 'execa';
 import { resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
-import { OcError } from '@agent-conductor/shared';
+import { OcError } from '@weave-ai/shared';
 
 export const OPENSPEC_TIMEOUT_MS = 30_000;
 

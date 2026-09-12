@@ -6,7 +6,7 @@ import type { HandleStore, StoredHandle } from './types.js';
 export function defaultHandleStorePath(workspaceId: string, presenterId: string): string {
   const stateHome = process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state');
   const safe = (s: string): string => s.replace(/[^A-Za-z0-9_.-]+/g, '-');
-  return join(stateHome, 'agent-conductor', 'presenter', `${safe(workspaceId)}-${safe(presenterId)}.json`);
+  return join(stateHome, 'weave', 'presenter', `${safe(workspaceId)}-${safe(presenterId)}.json`);
 }
 
 /** Handles live on the client: the presenter reloads them from disk and re-verifies each. */

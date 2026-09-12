@@ -10,5 +10,5 @@ Use `node:sqlite` through a small typed wrapper (`packages/db/src/db.ts`: get/al
 
 ## Consequences
 - Zero native dependencies; one fewer build step; the daemon runs wherever Node ≥ 22.5 runs.
-- Queries are hand-written; the repo layer keeps them small and colocated with services. Drizzle's type inference is replaced by the shared DTO types in `@agent-conductor/shared`.
+- Queries are hand-written; the repo layer keeps them small and colocated with services. Drizzle's type inference is replaced by the shared DTO types in `@weave-ai/shared`.
 - Migrations are forward-only SQL files applied in order and recorded in `meta`.

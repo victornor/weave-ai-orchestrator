@@ -1,5 +1,5 @@
 /**
- * `conductor attach <agent>` — the universal terminal view of one agent (PLAN §14b.1): live transcript,
+ * `weave attach <agent>` — the universal terminal view of one agent (PLAN §14b.1): live transcript,
  * status bar, and an input line that sends live to a worker (VS-99: the ticket comment is recorded
  * either way, and the notice line says whether it reached the running turn or was queued for the
  * next one) or a thread message (conductor).
@@ -9,8 +9,8 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
-import type { Agent, Run, RunEvent } from '@agent-conductor/shared';
-import { runEventsToTranscript, workerToCard, type TranscriptBlock } from '@agent-conductor/render';
+import type { Agent, Run, RunEvent } from '@weave-ai/shared';
+import { runEventsToTranscript, workerToCard, type TranscriptBlock } from '@weave-ai/render';
 import { StatusBar } from '../components/StatusBar.js';
 import { TextInput } from '../components/TextInput.js';
 import { TranscriptView } from '../components/Transcript.js';
@@ -29,7 +29,7 @@ export function deliveryNotice(outcome: { delivery?: 'mid_turn' | 'queued' } | n
 }
 
 /**
- * The pre-send label for `conductor attach` (VS-253): whether the words about to be typed reach the
+ * The pre-send label for `weave attach` (VS-253): whether the words about to be typed reach the
  * running turn or queue for the next one, carrying the reason the API supplies. The wording is the
  * web app's composer label (`WorkerPage.tsx`), and `null` while the detail fetch has not resolved, so
  * an unresolved status implies neither delivery.
@@ -169,11 +169,11 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
     if (key === 'i' || meta.return) { setMode('insert'); return; }
     if (key === 'p') {
       const paused = detail?.agent?.status === 'paused';
-      void act(paused ? 'resumed' : 'paused', () => client.wpost(`/workers/${encodeURIComponent(String(detail?.agent?.id ?? agentId))}/${paused ? 'resume' : 'pause'}`, { reason: 'from conductor attach' }));
+      void act(paused ? 'resumed' : 'paused', () => client.wpost(`/workers/${encodeURIComponent(String(detail?.agent?.id ?? agentId))}/${paused ? 'resume' : 'pause'}`, { reason: 'from weave attach' }));
       return;
     }
     if (key === 'r') {
-      void act('relaunched', () => client.wpost(`/workers/${encodeURIComponent(String(detail?.agent?.id ?? agentId))}/relaunch`, { note: 'relaunched from conductor attach' }));
+      void act('relaunched', () => client.wpost(`/workers/${encodeURIComponent(String(detail?.agent?.id ?? agentId))}/relaunch`, { note: 'relaunched from weave attach' }));
       return;
     }
     if (key === 'c') {

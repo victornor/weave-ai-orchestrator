@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DaemonConfigSchema } from '@agent-conductor/shared';
-import { resolveRemoteSha } from '@agent-conductor/release';
+import { DaemonConfigSchema } from '@weave-ai/shared';
+import { resolveRemoteSha } from '@weave-ai/release';
 import { createUpdateChecker, describeRelease } from '../src/release-info.js';
 
 const tmps: string[] = [];

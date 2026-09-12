@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RUN_STATUSES } from '@agent-conductor/shared';
+import { RUN_STATUSES } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Table } from '../components/Table';
 import { SkeletonRows } from '../components/Skeleton';

@@ -8,8 +8,8 @@
  * decision is attributed to the run that raised it. Either is matched against the run behind an
  * outbound message in the thread.
  */
-import type { Agent, AgentStatus, Decision, RunTrace, Ticket, ThreadMessage, UiStatus } from '@agent-conductor/shared';
-import { agentUiStatus, isActiveRun, ticketUiStatus } from '@agent-conductor/shared';
+import type { Agent, AgentStatus, Decision, RunTrace, Ticket, ThreadMessage, UiStatus } from '@weave-ai/shared';
+import { agentUiStatus, isActiveRun, ticketUiStatus } from '@weave-ai/shared';
 
 /** A worker in one of these has stopped; the ticket is then the honest record of how the work ended. */
 const FINISHED: readonly AgentStatus[] = ['done', 'retired'];

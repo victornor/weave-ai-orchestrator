@@ -1,5 +1,5 @@
 {
-  "name": "@agent-conductor/runtime-sdk",
+  "name": "@weave-ai/runtime-sdk",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -15,7 +15,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@agent-conductor/shared": "workspace:*",
+    "@weave-ai/shared": "workspace:*",
     "zod": "^3.25.76",
     "execa": "^9.6.0"
   },

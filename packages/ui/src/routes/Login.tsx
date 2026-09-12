@@ -168,7 +168,7 @@ export function LoginRoute(): React.ReactElement {
               <path d="M6 0.3 L11.7 6 L6 11.7 L0.3 6 Z" fill="var(--accent-on)" />
             </svg>
           </span>
-          <h1 className="text-title font-semibold tracking-title text-text-strong">AgentConductor</h1>
+          <h1 className="text-title font-semibold tracking-title text-text-strong">Weave AI</h1>
         </div>
 
         {health.isLoading ? (

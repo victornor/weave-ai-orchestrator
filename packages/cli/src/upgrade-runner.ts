@@ -10,9 +10,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { openDb, nowIso, type Db } from '@agent-conductor/db';
-import type { Upgrade } from '@agent-conductor/shared';
-import { planRestart, previousLink, readLink, switchRelease } from '@agent-conductor/release';
+import { openDb, nowIso, type Db } from '@weave-ai/db';
+import type { Upgrade } from '@weave-ai/shared';
+import { planRestart, previousLink, readLink, switchRelease } from '@weave-ai/release';
 import { configHome } from './contexts.js';
 import { launchdPlistPath, serviceUnitPath, startDaemon, stopDaemon } from './daemon.js';
 
@@ -138,7 +138,7 @@ function restartCommand(): { how: string; run: () => Promise<void> } {
   return { how: plan.how, run: async () => { spawnSync(cmd, args, { encoding: 'utf8' }); } };
 }
 
-/** `conductor daemon upgrade-runner <upgradeId>`: hidden, started by the daemon, never by a human. */
+/** `weave daemon upgrade-runner <upgradeId>`: hidden, started by the daemon, never by a human. */
 export async function runUpgradeRunner(upgradeId: string): Promise<RunnerVerdict> {
   const config = configHome();
   const db = openDb(join(config, 'daemon.sqlite'));

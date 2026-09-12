@@ -2,9 +2,9 @@
  * VS-154: a paused role holds the turn, not the wake. The dispatcher must not claim a worker
  * whose role is paused (same as the login gate); resume lets the queued wake start.
  */
-import { newId, nowIso } from '@agent-conductor/db';
-import { FakeRuntime } from '@agent-conductor/runtime-sdk';
-import type { Run, Wakeup } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { FakeRuntime } from '@weave-ai/runtime-sdk';
+import type { Run, Wakeup } from '@weave-ai/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createWakeService } from '../wake/index.js';

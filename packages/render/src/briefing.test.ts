@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Briefing } from '@agent-conductor/shared';
+import type { Briefing } from '@weave-ai/shared';
 import { briefingToSections } from './briefing.js';
 
 const now = new Date('2026-09-04T12:00:00.000Z');

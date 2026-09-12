@@ -1,5 +1,5 @@
 /**
- * `conductor changelog` — the human-facing record of what happened (PLAN §13.6), for a project or the
+ * `weave changelog` — the human-facing record of what happened (PLAN §13.6), for a project or the
  * whole workspace, over a range of dates.
  *
  * Read-only, like the record itself: there is no subcommand that writes, because there is no route to
@@ -7,7 +7,7 @@
  * app shows for the same entry.
  */
 import type { Command } from 'commander';
-import { OcError, type ChangelogEntry, type ChangelogPage } from '@agent-conductor/shared';
+import { OcError, type ChangelogEntry, type ChangelogPage } from '@weave-ai/shared';
 import { emit, style, table, write } from '../output.js';
 import { run, session } from './util.js';
 

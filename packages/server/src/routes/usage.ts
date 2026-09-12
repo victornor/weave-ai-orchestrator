@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { USAGE_GRAINS, USAGE_WINDOWS } from '@agent-conductor/shared';
+import { USAGE_GRAINS, USAGE_WINDOWS } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body, query } from '../http.js';
 

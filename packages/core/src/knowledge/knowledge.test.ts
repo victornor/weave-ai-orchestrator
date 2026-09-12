@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newId } from '@agent-conductor/db';
-import { estimateTokens } from '@agent-conductor/shared';
+import { newId } from '@weave-ai/db';
+import { estimateTokens } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createKnowledgeService } from './service.js';
 import { BUDGETS, PROJECT_SECTIONS, parseDoc, parseLinks } from './files.js';

@@ -6,8 +6,8 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OcError } from '@agent-conductor/shared';
-import { getLogger } from '@agent-conductor/core';
+import { OcError } from '@weave-ai/shared';
+import { getLogger } from '@weave-ai/core';
 
 const log = getLogger('http', { component: 'voxtype' });
 

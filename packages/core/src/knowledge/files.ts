@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { DEFAULT_KNOWLEDGE_BUDGETS, estimateTokens, OcError, type KnowledgeBudgets, type KnowledgeScope } from '@agent-conductor/shared';
+import { DEFAULT_KNOWLEDGE_BUDGETS, estimateTokens, OcError, type KnowledgeBudgets, type KnowledgeScope } from '@weave-ai/shared';
 
 /**
  * Budgets in tokens per file (PLAN §13.1). These are the defaults a workspace that has not set

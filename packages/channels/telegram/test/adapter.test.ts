@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PermanentChannelError, RetryableChannelError, textMessage, type ChannelContext, type InboundMessage, type RejectedContact } from '@agent-conductor/channel-sdk';
+import { PermanentChannelError, RetryableChannelError, textMessage, type ChannelContext, type InboundMessage, type RejectedContact } from '@weave-ai/channel-sdk';
 import { createTelegramAdapter } from '../src/index.js';
 import { mapTelegramError, isParseError } from '../src/api.js';
 import { parseUpdate } from '../src/updates.js';

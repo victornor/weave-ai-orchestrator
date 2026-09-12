@@ -9,10 +9,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { newId, nowIso } from '@agent-conductor/db';
-import { createThreadsService } from '@agent-conductor/core';
-import type { EnqueueInput } from '@agent-conductor/core';
-import type { Wakeup } from '@agent-conductor/shared';
+import { newId, nowIso } from '@weave-ai/db';
+import { createThreadsService } from '@weave-ai/core';
+import type { EnqueueInput } from '@weave-ai/core';
+import type { Wakeup } from '@weave-ai/shared';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createApp } from '../src/app.js';
@@ -38,7 +38,7 @@ function withRealThreads(options: Parameters<typeof makeHarness>[0] = {}): { h: 
   const attachmentsDir = mkdtempSync(join(tmpdir(), 'ac-attachments-route-'));
   attachmentsDirs.push(attachmentsDir);
   (h.runtime.ctx.paths as { attachments: string }).attachments = attachmentsDir;
-  // makeHarness seeds a conductor agent (`ag_conductor`); threads.bindOrGet addresses that row.
+  // makeHarness seeds a weave agent (`ag_conductor`); threads.bindOrGet addresses that row.
   h.runtime.services.threads = createThreadsService(h.runtime.ctx, () => h.runtime.services);
   return { h, fetch: (path, init) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433${path}`, init)) };
 }
@@ -207,10 +207,10 @@ describe('GET /threads/:threadId/attachments/:attachmentId', () => {
   });
 });
 
-describe('end to end: a sent attachment reaches ac_inbox as real content (VS-133)', () => {
+describe('end to end: a sent attachment reaches weave_inbox as real content (VS-133)', () => {
   /** `wake` stays a hand-double even here — its own scheduling/persistence is not this ticket's
    * concern — but `enqueue`/`listForAgent` are wired to a real in-memory queue, so the exact payload
-   * shape `threads.inbound` writes is the exact shape `ac_inbox` reads, with nothing hand-copied
+   * shape `threads.inbound` writes is the exact shape `weave_inbox` reads, with nothing hand-copied
    * between the two ends of the seam. */
   function withRealThreadsAndWake(): { h: Harness; fetch: (path: string, init?: RequestInit) => Promise<Response>; conductorId: string } {
     const { h, fetch } = withRealThreads({ listener: 'loopback' });
@@ -230,7 +230,7 @@ describe('end to end: a sent attachment reaches ac_inbox as real content (VS-133
     return { h, fetch, conductorId };
   }
 
-  it('a message with an image attachment turns into a real MCP image content block on ac_inbox', async () => {
+  it('a message with an image attachment turns into a real MCP image content block on weave_inbox', async () => {
     const { h, fetch, conductorId } = withRealThreadsAndWake();
     const t = h.runtime.services.threads.bindOrGet('web', 'web-loop', null, 'Victor');
     const sent = await fetch(`/api/w/ws1/threads/${t.id}/messages`, {
@@ -250,7 +250,7 @@ describe('end to end: a sent attachment reaches ac_inbox as real content (VS-133
     });
     await client.connect(transport);
 
-    const res = await client.callTool({ name: 'ac_inbox', arguments: {} });
+    const res = await client.callTool({ name: 'weave_inbox', arguments: {} });
     const blocks = res.content as Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
     const summary = JSON.parse(blocks[0]!.text!);
     expect(summary.data.messages[0]).toMatchObject({

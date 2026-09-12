@@ -1,4 +1,4 @@
-/** `conductor worker handover|handback` (VS-249). */
+/** `weave worker handover|handback` (VS-249). */
 import { createServer, type Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildProgram } from './program.js';
@@ -53,7 +53,7 @@ async function cli(...argv: string[]): Promise<{ out: string; err: string }> {
   return { out, err };
 }
 
-describe('conductor worker handover', () => {
+describe('weave worker handover', () => {
   it('prints the landing line and the command on separate lines', async () => {
     routes['POST /api/w/ws1/workers/ag_1/handover'] = () => ({
       body: { resumable: true, command: "cd '/home/a1' && CLAUDE_CONFIG_DIR='/ws/runtimes/claude' claude --resume sess-1", runtime: 'claude', landingLine: 'Lands in the home directory.', reason: null },
@@ -85,7 +85,7 @@ describe('conductor worker handover', () => {
   });
 });
 
-describe('conductor worker handback', () => {
+describe('weave worker handback', () => {
   it('sends the note and confirms the handback', async () => {
     routes['POST /api/w/ws1/workers/ag_1/handback'] = () => ({
       body: { note: 'attached Frida to the device', reconciliation: { worktree: { headBefore: 'a', headAfter: 'b', newCommits: 1, dirty: false, changedFiles: 0 }, sessionActivityDetected: true, durationMs: 60_000 } },

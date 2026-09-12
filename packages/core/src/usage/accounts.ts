@@ -8,8 +8,8 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type * as S from '@agent-conductor/shared';
-import { nowIso } from '@agent-conductor/db';
+import type * as S from '@weave-ai/shared';
+import { nowIso } from '@weave-ai/db';
 import type { AccountsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { credentialReaderFor, reconcileRuntimeCredential } from '../workspace/loader.js';

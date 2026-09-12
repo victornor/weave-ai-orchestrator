@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { RuntimeModel } from '@agent-conductor/runtime-sdk';
-import { which } from '@agent-conductor/runtime-sdk';
+import type { RuntimeModel } from '@weave-ai/runtime-sdk';
+import { which } from '@weave-ai/runtime-sdk';
 
 const pExecFile = promisify(execFile);
 
@@ -123,7 +123,7 @@ interface ModelsResult { models: RuntimeModel[]; source: 'detected' | 'static' }
 
 async function resolveModels(binaryPath: string | null): Promise<ModelsResult> {
   if (!binaryPath) {
-    // This leaf package cannot depend on @agent-conductor/core's logger; a silent fallback is the same failure this ticket exists to fix, one level up.
+    // This leaf package cannot depend on @weave-ai/core's logger; a silent fallback is the same failure this ticket exists to fix, one level up.
     console.warn('[cursor] listModels: cursor-agent not found on PATH; using the static fallback catalogue'); // ac-allow-console
     return { models: FALLBACK_MODELS.map((m) => ({ ...m })), source: 'static' };
   }

@@ -1,8 +1,8 @@
-/** `conductor weaver show|reset-session` (PLAN §10, §20). The runtime and the model are the
- * workspace's two model settings — `conductor models` (VS-77), not a weaver-only knob. */
+/** `weave weaver show|reset-session` (PLAN §10, §20). The runtime and the model are the
+ * workspace's two model settings — `weave models` (VS-77), not a weaver-only knob. */
 import type { Command } from 'commander';
-import type { Agent } from '@agent-conductor/shared';
-import { workerToCard } from '@agent-conductor/render';
+import type { Agent } from '@weave-ai/shared';
+import { workerToCard } from '@weave-ai/render';
 import { emit, fields, style, write } from '../output.js';
 import { run, session, unwrap } from './util.js';
 

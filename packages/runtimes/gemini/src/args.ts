@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, TurnInput } from '@agent-conductor/runtime-sdk';
+import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, TurnInput } from '@weave-ai/runtime-sdk';
 import { asGeminiSession, isUuid } from './session.js';
 
 export const SETTINGS_RELATIVE_PATH = '.gemini/settings.json';

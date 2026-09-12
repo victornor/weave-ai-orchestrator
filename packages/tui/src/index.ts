@@ -1,7 +1,7 @@
 /**
- * `@agent-conductor/tui` — the Ink apps behind `conductor chat`, `conductor attach`, `conductor top` and `conductor specs explore`
+ * `@weave-ai/tui` — the Ink apps behind `weave chat`, `weave attach`, `weave top` and `weave specs explore`
  * (PLAN §21.2). Every app is a thin client over the same REST + SSE API and renders the view models
- * from `@agent-conductor/render`, so the terminal and the web never drift.
+ * from `@weave-ai/render`, so the terminal and the web never drift.
  */
 import React from 'react';
 import { render } from 'ink';
@@ -12,7 +12,7 @@ import { Specs } from './apps/Specs.js';
 import { clearTerminalTitle } from './terminal.js';
 import type { TuiClient } from './client.js';
 
-export const PACKAGE = '@agent-conductor/tui';
+export const PACKAGE = '@weave-ai/tui';
 
 export type { TuiClient, TuiSseMessage, TuiStreamOptions, TuiSubscription } from './client.js';
 export type { ChatOptions } from './apps/Chat.js';

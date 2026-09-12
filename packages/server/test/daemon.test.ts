@@ -5,7 +5,7 @@ import { join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
-import { workspaceLoader, initLogger } from '@agent-conductor/core';
+import { workspaceLoader, initLogger } from '@weave-ai/core';
 import { pluginSpecifier, startDaemon, resolveIsolation, type DaemonHandle } from '../src/daemon.js';
 
 initLogger(process.env.AC_LOG_LEVEL ?? 'silent');

@@ -3,8 +3,8 @@
  * harness's real db, so these assert on what the route actually serves rather than on a double.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { newId } from '@agent-conductor/db';
-import type { ChangelogEntry, ChangelogHeatmap, ChangelogPage } from '@agent-conductor/shared';
+import { newId } from '@weave-ai/db';
+import type { ChangelogEntry, ChangelogHeatmap, ChangelogPage } from '@weave-ai/shared';
 import { createApp } from '../src/app.js';
 import { authed, makeHarness, type Harness } from './fakes.js';
 

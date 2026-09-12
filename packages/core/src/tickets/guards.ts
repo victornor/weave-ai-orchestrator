@@ -1,4 +1,4 @@
-import { OcError, canTransition, TRANSITIONS, type TicketKind, type TicketStatus } from '@agent-conductor/shared';
+import { OcError, canTransition, TRANSITIONS, type TicketKind, type TicketStatus } from '@weave-ai/shared';
 
 /** Everything the transition guards need, gathered by the service before it decides (PLAN §6.2). */
 export interface GuardFacts {
@@ -41,7 +41,7 @@ export function checkTransition(kind: TicketKind, from: TicketStatus, to: Ticket
   if (from === 'merging' && to === 'done') {
     // VS-250: the old bypass set `done` with no complete delivery (VS-227). merge-done writes that
     // record and touches `done` directly, so it never comes through here.
-    throw new OcError('invalid_disposition', 'a ticket leaves merging for done only through ac_ticket_merge_done — report the merged pull request with that tool', { from, to });
+    throw new OcError('invalid_disposition', 'a ticket leaves merging for done only through weave_ticket_merge_done — report the merged pull request with that tool', { from, to });
   }
   if (to === 'in_review' && !facts.hasWorkProduct) {
     throw new OcError('invalid_disposition', 'in_review requires a work product (record the PR, branch or report first)', { from });

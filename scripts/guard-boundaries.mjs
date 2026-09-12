@@ -2,11 +2,11 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 const rules = [
-  { pkg: 'packages/core', forbid: ['@agent-conductor/server', '@agent-conductor/cli', '@agent-conductor/runtime-claude', '@agent-conductor/runtime-codex', '@agent-conductor/runtime-opencode', '@agent-conductor/runtime-gemini', '@agent-conductor/runtime-cursor', '@agent-conductor/channel-web', '@agent-conductor/channel-cli', '@agent-conductor/channel-telegram', '@agent-conductor/surface-headless', '@agent-conductor/surface-tmux', '@agent-conductor/surface-herdr', '@agent-conductor/surface-hyprland', '@agent-conductor/tui', '@agent-conductor/ui', '@agent-conductor/presenter'] },
-  { pkg: 'packages/shared', forbid: ['@agent-conductor/'] },
-  { pkg: 'packages/runtime-sdk', forbid: ['@agent-conductor/core', '@agent-conductor/db', '@agent-conductor/server'] },
-  { pkg: 'packages/channel-sdk', forbid: ['@agent-conductor/core', '@agent-conductor/db', '@agent-conductor/server'] },
-  { pkg: 'packages/surface-sdk', forbid: ['@agent-conductor/core', '@agent-conductor/db', '@agent-conductor/server'] },
+  { pkg: 'packages/core', forbid: ['@weave-ai/server', '@weave-ai/cli', '@weave-ai/runtime-claude', '@weave-ai/runtime-codex', '@weave-ai/runtime-opencode', '@weave-ai/runtime-gemini', '@weave-ai/runtime-cursor', '@weave-ai/channel-web', '@weave-ai/channel-cli', '@weave-ai/channel-telegram', '@weave-ai/surface-headless', '@weave-ai/surface-tmux', '@weave-ai/surface-herdr', '@weave-ai/surface-hyprland', '@weave-ai/tui', '@weave-ai/ui', '@weave-ai/presenter'] },
+  { pkg: 'packages/shared', forbid: ['@weave-ai/'] },
+  { pkg: 'packages/runtime-sdk', forbid: ['@weave-ai/core', '@weave-ai/db', '@weave-ai/server'] },
+  { pkg: 'packages/channel-sdk', forbid: ['@weave-ai/core', '@weave-ai/db', '@weave-ai/server'] },
+  { pkg: 'packages/surface-sdk', forbid: ['@weave-ai/core', '@weave-ai/db', '@weave-ai/server'] },
 ];
 function walk(dir, out = []) { for (const e of readdirSync(dir)) { const p = join(dir, e); const s = statSync(p); if (s.isDirectory()) { if (e !== 'node_modules' && e !== 'dist') walk(p, out); } else if (/\.(ts|tsx)$/.test(e)) out.push(p); } return out; }
 let bad = 0;

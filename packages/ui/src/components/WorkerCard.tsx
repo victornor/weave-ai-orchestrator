@@ -1,6 +1,6 @@
-import type { Agent } from '@agent-conductor/shared';
-import { agentUiStatus, waitingOnRuntimeLogin } from '@agent-conductor/shared';
-import { workerPauseDetail } from '@agent-conductor/render';
+import type { Agent } from '@weave-ai/shared';
+import { agentUiStatus, waitingOnRuntimeLogin } from '@weave-ai/shared';
+import { workerPauseDetail } from '@weave-ai/render';
 import { StatusGlyph, StatusBadge, Badge } from './StatusGlyph';
 import { Button } from './Button';
 import { cents, initials, tokens } from '../lib/format';
@@ -40,7 +40,7 @@ export function WorkerCard({
   className,
 }: WorkerCardProps): React.ReactElement {
   const ui = agentUiStatus(agent.status, { needsYou, stalled });
-  // Why it stopped, worded once in @agent-conductor/render so the web app and `conductor worker`
+  // Why it stopped, worded once in @weave-ai/render so the web app and `weave worker`
   // say the same thing. Null unless the worker is paused. The tooltip carries the complete message
   // (VS-201) — the visible line stays the capped, ellipsis-marked preview.
   const pauseDetail = workerPauseDetail(agent);

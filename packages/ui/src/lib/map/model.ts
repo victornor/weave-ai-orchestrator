@@ -2,7 +2,7 @@
  * The instance Map as a graph: workspaces, projects, roles, in-flight tickets and knowledge
  * nodes, with ownership edges. Pure — the route fans out HTTP and this assembles what to draw.
  */
-import type { Project, Role, Ticket } from '@agent-conductor/shared';
+import type { Project, Role, Ticket } from '@weave-ai/shared';
 
 export const IN_FLIGHT_TICKET_STATUSES = [
   'proposing', 'proposed', 'approved', 'in_progress', 'in_review', 'merging', 'blocked',

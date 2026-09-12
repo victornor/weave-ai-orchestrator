@@ -2945,3 +2945,200 @@ describe('ChatRoute open-decision layout (VS-289)', () => {
     expect(left.contains(rail)).toBe(false);
   });
 });
+
+/**
+ * VS-309: a decision the channel manager pushed to the thread renders as an answerable card where it
+ * was asked, the pinned copy stands down while that card is readably on screen, and a decision whose
+ * raising run left no message still reads in the transcript.
+ */
+describe('ChatRoute inline decision cards (VS-309)', () => {
+  class FakeIntersectionObserver {
+    static instances: FakeIntersectionObserver[] = [];
+    readonly targets = new Set<Element>();
+    constructor(readonly callback: IntersectionObserverCallback, readonly options?: IntersectionObserverInit) {
+      FakeIntersectionObserver.instances.push(this);
+    }
+    observe(el: Element): void { this.targets.add(el); }
+    unobserve(el: Element): void { this.targets.delete(el); }
+    disconnect(): void { this.targets.clear(); }
+    takeRecords(): IntersectionObserverEntry[] { return []; }
+    trigger(target: Element, ratio: number, heightPx = 300): void {
+      const entry = {
+        target,
+        isIntersecting: ratio > 0,
+        intersectionRatio: ratio,
+        boundingClientRect: { height: heightPx },
+        intersectionRect: { height: ratio * heightPx },
+      } as unknown as IntersectionObserverEntry;
+      this.callback([entry], this as unknown as IntersectionObserver);
+    }
+  }
+
+  function report(ratio: number): void {
+    act(() => {
+      for (const io of FakeIntersectionObserver.instances) for (const t of [...io.targets]) io.trigger(t, ratio);
+    });
+  }
+  const readable = (): void => report(0.9);
+  const sliver = (): void => report(0.01);
+
+  const asked = (over: Partial<Decision> = {}): Decision =>
+    decision({
+      id: 'd1', kind: 'question', ticketId: null, askedInRunId: 'run_1', title: 'File this as a ticket?',
+      context: 'It is a one-line fix.', recommendation: null, target: null,
+      options: [
+        { key: 'file', label: 'File it', description: 'A ticket, routed to the engineer.' },
+        { key: 'skip', label: 'Leave it', description: 'Nothing is filed.' },
+      ],
+      ...over,
+    });
+
+  const cardPart = (id: string): Record<string, unknown> => ({
+    type: 'card',
+    title: 'File this as a ticket?',
+    body: 'It is a one-line fix.',
+    actions: [
+      { key: 'file', label: 'File it', style: 'primary' },
+      { key: 'skip', label: 'Leave it', style: 'default' },
+    ],
+    ref: { kind: 'decision', id },
+  });
+
+  /** The real shape: a card message whose run left no message of its own. */
+  const cardMessage = (over: Partial<ThreadMessage> = {}): ThreadMessage =>
+    message({ body: 'PROSE-FALLBACK-SHOULD-NOT-RENDER', runId: null, parts: [cardPart('d1')], ...over, id: over.id ?? 'm1' });
+
+  beforeEach(() => {
+    FakeIntersectionObserver.instances = [];
+    (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = FakeIntersectionObserver;
+  });
+  afterEach(() => {
+    delete (globalThis as unknown as { IntersectionObserver?: unknown }).IntersectionObserver;
+  });
+
+  const precedes = (a: Element, b: Element): boolean =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it('renders an open card inline with its options and answers that decision, not the prose fallback', () => {
+    state.messages = [cardMessage()];
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+    readable();
+
+    expect(screen.queryByText('PROSE-FALLBACK-SHOULD-NOT-RENDER')).not.toBeInTheDocument();
+    const card = screen.getByLabelText('Weaver asks: File this as a ticket?');
+    expect(within(card).getByText('A ticket, routed to the engineer.')).toBeInTheDocument();
+    expect(within(card).getByRole('radio', { name: /Leave it/ })).toBeInTheDocument();
+
+    fireEvent.click(within(card).getByRole('radio', { name: /File it/ }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Send answer' }));
+    expect(state.answer).toHaveBeenCalledWith({ id: 'd1', key: 'file' }, expect.anything());
+  });
+
+  it('renders an answered decision whose raising run left no message, after its card message', () => {
+    state.messages = [
+      message({ id: 'm0', body: 'Before.', runId: 'run_0' }),
+      cardMessage({ id: 'm1' }),
+      message({ id: 'm2', body: 'After.', runId: 'run_2' }),
+    ];
+    state.decisions = [asked({ id: 'd1', askedInRunId: 'run_worker', status: 'answered', answerKey: 'file', answeredAt: '2026-09-01T09:30:00.000Z' })];
+    render(<ChatRoute />);
+
+    const record = screen.getByLabelText('Answered: File this as a ticket?');
+    expect(precedes(screen.getByText('Before.'), record)).toBe(true);
+    expect(precedes(record, screen.getByText('After.'))).toBe(true);
+    expect(screen.getByText('File it', { selector: 'p' })).toBeInTheDocument();
+    expect(within(record).queryByRole('radio')).not.toBeInTheDocument();
+  });
+
+  it('never reads as two cards: the pin stands down while the inline card is readably visible', () => {
+    state.messages = [cardMessage()];
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+
+    // Before the observer has spoken, the safe default is to keep the pin: two cards at worst.
+    expect(screen.getByLabelText('Open decisions')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Weaver asks: File this as a ticket?')).toHaveLength(2);
+
+    readable();
+    expect(screen.queryByLabelText('Open decisions')).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText('Weaver asks: File this as a ticket?')).toHaveLength(1);
+
+    // A one-pixel sliver must not suppress the pin and leave the human with neither.
+    sliver();
+    expect(screen.getByLabelText('Open decisions')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Weaver asks: File this as a ticket?')).toHaveLength(2);
+  });
+
+  it('hides an inline open card without answering it, and counts it', () => {
+    state.messages = [cardMessage()];
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+    readable();
+
+    fireEvent.click(screen.getByRole('button', { name: /Hide from chat/ }));
+    expect(screen.queryByLabelText('Weaver asks: File this as a ticket?')).not.toBeInTheDocument();
+    expect(state.answer).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /1 hidden from chat/ })).toBeInTheDocument();
+  });
+
+  it('queues a non-secret inline answer while offline, the same way Needs you does', () => {
+    state.connection = 'offline';
+    state.messages = [cardMessage()];
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+    readable();
+
+    const card = screen.getByLabelText('Weaver asks: File this as a ticket?');
+    fireEvent.click(within(card).getByRole('radio', { name: /File it/ }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Send answer' }));
+
+    expect(state.answer).not.toHaveBeenCalled();
+    expect(vi.mocked(enqueue).mock.calls[0]?.[0]).toMatchObject({ kind: 'decision', path: '/decisions/d1/answer', body: { key: 'file' } });
+  });
+
+  it('never queues a secret-carrying inline answer while offline', () => {
+    state.connection = 'offline';
+    state.messages = [cardMessage()];
+    state.decisions = [asked({
+      options: [],
+      inputs: [{ key: 'token', label: 'Read-only token', type: 'secret', required: true, secretName: 'CF_READONLY_TOKEN' }],
+    })];
+    render(<ChatRoute />);
+    readable();
+
+    const card = screen.getByLabelText('Weaver asks: File this as a ticket?');
+    fireEvent.change(within(card).getByLabelText(/Read-only token/), { target: { value: 'cf-not-a-real-token-0000000000' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Send answer' }));
+
+    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+    expect(state.toasts.at(-1)).toMatchObject({ title: 'Not sent', status: 'failed' });
+  });
+
+  it('renders a card part whose decision is not loaded as its text, not nothing', () => {
+    state.messages = [cardMessage()];
+    state.decisions = [];
+    render(<ChatRoute />);
+    expect(screen.getByText('File this as a ticket?')).toBeInTheDocument();
+    expect(screen.getByText('It is a one-line fix.')).toBeInTheDocument();
+  });
+
+  it('resolves the decision everywhere once it is answered from the inline card', () => {
+    state.messages = [cardMessage()];
+    state.decisions = [asked()];
+    const { rerender } = render(<ChatRoute />);
+    readable();
+
+    const card = screen.getByLabelText('Weaver asks: File this as a ticket?');
+    fireEvent.click(within(card).getByRole('radio', { name: /File it/ }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Send answer' }));
+    expect(state.answer).toHaveBeenCalledWith({ id: 'd1', key: 'file' }, expect.anything());
+
+    // The same decision comes back answered — here or from Needs you — and reads as the record.
+    state.decisions = [asked({ status: 'answered', answerKey: 'file', answeredAt: '2026-09-01T09:30:00.000Z' })];
+    rerender(<ChatRoute />);
+    expect(screen.queryByLabelText('Open decisions')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Answered: File this as a ticket?')).toBeInTheDocument();
+  });
+});
+

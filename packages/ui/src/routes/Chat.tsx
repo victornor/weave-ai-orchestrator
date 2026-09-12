@@ -39,12 +39,14 @@ import {
 import { useRunEventStream } from '../api/runStream';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import { ApiError, NetworkError, SEND_TIMEOUT_MS, withTimeout } from '../api/client';
-import { attachmentPartsOf, attachmentToView, contextStrip, resolveModel, runtimeLimitStrip } from '@weave-ai/render';
+import { attachmentPartsOf, attachmentToView, contextStrip, decisionCardPartsOf, resolveModel, runtimeLimitStrip } from '@weave-ai/render';
+import type { DecisionCardPart } from '@weave-ai/render';
 import { chatEntries, chatRows } from '../lib/dispatch';
 import { useShowSilentTurns } from '../lib/chatPrefs';
 import { readExpandedTraces, toggleExpandedTrace } from '../lib/traceExpansion';
 import { draftKey, useDraft } from '../lib/drafts';
 import { isHiddenFromChat, useHiddenDecisions } from '../lib/hiddenDecisions';
+import { pinnedOpenDecisions, useOnScreenDecisions } from '../lib/decisionVisibility';
 import { useDecisionLayout } from '../lib/decisionLayout';
 import { MIN_PX, STEP_PX, clampHeight, maxHeight, readDecisionHeight, writeDecisionHeight } from '../lib/decisionHeight';
 import type { HeightBounds } from '../lib/decisionHeight';
@@ -318,6 +320,12 @@ export function ChatPage({
   const [expanded, setExpanded] = useState<string[]>(() => readExpandedTraces(ws));
   useEffect(() => setExpanded(readExpandedTraces(ws)), [ws]);
   const toggleTrace = useCallback((runId: string) => setExpanded(toggleExpandedTrace(ws, runId)), [ws]);
+  /**
+   * The scrolling element, so this workspace's reading position can be kept and the on-screen
+   * observer below has its root. Held as state rather than a ref because the effects key on it; the
+   * stick hook's own ref is still called, so it keeps owning the measuring.
+   */
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   // Every open decision is pinned above the composer instead of sitting where it was asked, so one
   // raised twenty messages ago is still the thing on screen. Oldest first: the longest wait reads
   // first, and the order does not shuffle as answers come in.
@@ -328,11 +336,17 @@ export function ChatPage({
         .sort((a, b) => (a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt))),
     [decisions.data],
   );
+  /** The loaded decision behind a card part, by id — the part only names it. */
+  const decisionsById = useMemo(() => new Map((decisions.data ?? []).map((d) => [d.id, d] as const)), [decisions.data]);
   // Hidden on this device (VS-72): a decision the human means to take later, taken off the pinned
   // area without being answered. It is still open and still in Needs you — only the card is gone —
   // so the pinned area keeps a count of them and can put them all back with one press.
   const { hidden, hide, showMany } = useHiddenDecisions(ws);
-  const shown = useMemo(() => pinned.filter((d) => !isHiddenFromChat(d, hidden)), [pinned, hidden]);
+  // The inline card is the answerable one while it is readably on screen; the pin keeps only what is
+  // not, so one decision never reads as two cards at once and a scrolled-away card is still pinned
+  // (VS-309). A decision with no inline card is never in `onScreen`, so it stays pinned as before.
+  const { onScreen, register } = useOnScreenDecisions(scrollEl);
+  const shown = useMemo(() => pinnedOpenDecisions(pinned, hidden, onScreen), [pinned, hidden, onScreen]);
   const hiddenOpen = useMemo(() => pinned.filter((d) => isHiddenFromChat(d, hidden)), [pinned, hidden]);
   // One predicate for both regions: a layout choice with nothing to show must not leave a dead
   // column, so a region renders only when there is an open card or the hidden-count line.
@@ -376,11 +390,9 @@ export function ChatPage({
   });
 
   /**
-   * The scrolling element, so this workspace's reading position can be kept. Held as state rather
-   * than a ref because the effects below key on it; the hook's own ref is still called, so it keeps
-   * owning the measuring.
+   * The stick hook owns the measuring; its ref is chained through `attachScroll` so the element is
+   * also held in state for the reading-position and on-screen effects.
    */
-  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   // Depends on the hook's own ref rather than on `stick`, which is a fresh object every render: a
   // ref callback whose identity changes is detached and re-attached on every commit.
   const attach = stick.scrollRef;
@@ -648,6 +660,18 @@ export function ChatPage({
   const running = (workers.data ?? []).filter((w) => w.status === 'running').length;
   const answered = Math.min(5, (messages.data ?? []).filter((m) => m.direction === 'inbound').length);
 
+  // What every chat decision card gets, pinned or inline, so the two renderings cannot drift and
+  // answering goes through the one `answerDecision` path (offline queue and secret refusal included).
+  const cardCtx: ChatCardContext = {
+    ws,
+    busy: answer.isPending,
+    askedByConductor,
+    ticketOf,
+    projectSlugOf,
+    onAnswer: (id, a) => answerDecision(id, a),
+    onHide: (d) => hide(d),
+  };
+
   // The open cards and the hidden-count line, rendered in whichever region the layout chose. Built
   // once and placed in either the bottom strip or the rail, so the two can never drift.
   const decisionContent = (
@@ -664,21 +688,7 @@ export function ChatPage({
         </button>
       ) : null}
       {shown.map((d) => (
-        <DecisionCard
-          key={d.id}
-          decision={d}
-          {...(askedByConductor(d) ? { asker: 'weaver' as const } : {})}
-          ticketIdentifier={ticketOf(d)?.identifier ?? d.ticketId}
-          projectSlug={projectSlugOf(d)}
-          ws={ws}
-          busy={answer.isPending}
-          plan={<PlanPreview decision={d} />}
-          ticketFiledByConductor={ticketOf(d)?.createdByKind === 'agent'}
-          ticketSummary={ticketOf(d)?.summary}
-          compact
-          onHide={() => hide(d)}
-          onAnswer={(a) => answerDecision(d.id, a)}
-        />
+        <ChatDecisionCard key={d.id} d={d} ctx={cardCtx} />
       ))}
     </>
   );
@@ -787,60 +797,64 @@ export function ChatPage({
                           compactionAt={compactionAt}
                         />
                       </div>
-                    ) : (
-                      <div key={row.key} className="flex flex-col gap-2">
-                        <ChatMessage
-                          message={row.entry.message}
-                          ws={ws}
-                          onTicket={openTicket}
-                          ticketStatus={ticketStatus}
-                          projectName={projectName}
-                          onReply={row.entry.message.direction === 'outbound' ? () => patch({ replyToId: row.entry.message.id }) : undefined}
-                          usage={row.trace?.usage ?? null}
-                        />
-                        {/* Under the reply, above the work it filed: what the turn did, then what it left. */}
-                        {row.trace ? (
-                          <TurnTrace
-                            trace={row.trace}
-                            open={expanded.includes(row.trace.runId)}
-                            onToggle={() => toggleTrace(row.trace!.runId)}
-                            contextWindowTokens={resolveModel(conductorModels.data, row.trace.model)?.contextWindowTokens}
-                            compactionAt={compactionAt}
-                          />
-                        ) : null}
-                        {row.entry.dispatches.map((d) => (
-                          <DispatchLabel
-                            key={d.ticket.id}
-                            identifier={d.ticket.identifier}
-                            name={d.worker?.name ?? d.ticket.title}
-                            status={d.status}
-                            projectColorVar={d.ticket.projectId ? projectColorVar(d.ticket.projectId, projectIds) : undefined}
-                            onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
-                          />
-                        ))}
-                        {/* Answered here, open in the strip or the rail: an open card is pinned in the
-                            region the layout chose, and the record of what was decided takes its place
-                            here once it has been answered. */}
-                        {row.entry.decisions
-                          .filter((d) => d.status !== 'open')
-                          .map((d) => (
-                            <DecisionCard
-                              key={d.id}
-                              decision={d}
-                              asker="weaver"
-                              ticketIdentifier={ticketOf(d)?.identifier ?? d.ticketId}
-                              projectSlug={projectSlugOf(d)}
-                              ws={ws}
-                              busy={answer.isPending}
-                              plan={<PlanPreview decision={d} />}
-                              ticketFiledByConductor={ticketOf(d)?.createdByKind === 'agent'}
-                              ticketSummary={ticketOf(d)?.summary}
-                              compact
-                              onAnswer={(a) => answerDecision(d.id, a)}
+                    ) : (() => {
+                      // A card the decision was pushed as renders in place of the message's prose
+                      // fallback; the decision it names supplies the options and their descriptions.
+                      const cardParts = decisionCardPartsOf(row.entry.message.parts);
+                      const cardedIds = new Set(cardParts.map((p) => p.ref.id));
+                      const inlineCards = cardParts.length
+                        ? cardParts
+                            .map((part) => {
+                              const d = decisionsById.get(part.ref.id);
+                              if (!d) return <CardPartText key={part.ref.id} part={part} />;
+                              // A hidden open card leaves the chat entirely, as a hidden pinned one does.
+                              if (d.status === 'open' && isHiddenFromChat(d, hidden)) return null;
+                              return <ChatDecisionCard key={d.id} d={d} ctx={cardCtx} register={register} />;
+                            })
+                            .filter(Boolean)
+                        : null;
+                      // A decision anchored to this message by its raising run (no card part) is the
+                      // record of what was decided, rendered here as it always has been.
+                      const records = row.entry.decisions.filter((d) => !cardedIds.has(d.id) && d.status !== 'open');
+                      return (
+                        <div key={row.key} className="flex flex-col gap-2">
+                          <ChatMessage
+                            message={row.entry.message}
+                            ws={ws}
+                            onTicket={openTicket}
+                            ticketStatus={ticketStatus}
+                            projectName={projectName}
+                            onReply={row.entry.message.direction === 'outbound' ? () => patch({ replyToId: row.entry.message.id }) : undefined}
+                            usage={row.trace?.usage ?? null}
+                            replaceBody={cardParts.length > 0}
+                          >
+                            {inlineCards?.length ? inlineCards : null}
+                          </ChatMessage>
+                          {/* Under the reply, above the work it filed: what the turn did, then what it left. */}
+                          {row.trace ? (
+                            <TurnTrace
+                              trace={row.trace}
+                              open={expanded.includes(row.trace.runId)}
+                              onToggle={() => toggleTrace(row.trace!.runId)}
+                              contextWindowTokens={resolveModel(conductorModels.data, row.trace.model)?.contextWindowTokens}
+                              compactionAt={compactionAt}
+                            />
+                          ) : null}
+                          {row.entry.dispatches.map((d) => (
+                            <DispatchLabel
+                              key={d.ticket.id}
+                              identifier={d.ticket.identifier}
+                              name={d.worker?.name ?? d.ticket.title}
+                              status={d.status}
+                              projectColorVar={d.ticket.projectId ? projectColorVar(d.ticket.projectId, projectIds) : undefined}
+                              onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
                             />
                           ))}
-                      </div>
-                    ),
+                          {/* The record of what was decided, anchored by the turn that raised it. */}
+                          {records.map((d) => <ChatDecisionCard key={d.id} d={d} ctx={cardCtx} />)}
+                        </div>
+                      );
+                    })()
                   )
                 )}
 
@@ -1063,6 +1077,60 @@ function AttachmentGallery({ ws, threadId, parts }: { ws: string; threadId: stri
   );
 }
 
+/** What a chat decision card needs from the page: the lookups, and the one answer path. */
+interface ChatCardContext {
+  ws: string;
+  busy: boolean;
+  askedByConductor: (d: Decision) => boolean;
+  ticketOf: (d: { ticketId: string | null }) => Ticket | undefined;
+  projectSlugOf: (d: { projectId: string | null; ticketId: string | null }) => string | null;
+  onAnswer: (id: string, a: { key?: string; text?: string; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string; remember?: boolean }) => void;
+  onHide: (d: Decision) => void;
+}
+
+/**
+ * One decision card in the chat, pinned or inline. An open inline card registers its host element
+ * with the on-screen observer (`register`), so the pinned copy can stand down while this one is
+ * readable; a pinned card or a record passes no `register` and is never observed.
+ */
+function ChatDecisionCard({ d, ctx, register }: { d: Decision; ctx: ChatCardContext; register?: (id: string, el: HTMLElement | null) => void }): React.ReactElement {
+  const host = useRef<HTMLDivElement | null>(null);
+  const open = d.status === 'open';
+  const live = open && register != null;
+  useEffect(() => {
+    if (!live || !register) return;
+    register(d.id, host.current);
+    return () => register(d.id, null);
+  }, [live, register, d.id]);
+  const card = (
+    <DecisionCard
+      decision={d}
+      {...(ctx.askedByConductor(d) ? { asker: 'weaver' as const } : {})}
+      ticketIdentifier={ctx.ticketOf(d)?.identifier ?? d.ticketId}
+      projectSlug={ctx.projectSlugOf(d)}
+      ws={ctx.ws}
+      busy={ctx.busy}
+      plan={<PlanPreview decision={d} />}
+      ticketFiledByConductor={ctx.ticketOf(d)?.createdByKind === 'agent'}
+      ticketSummary={ctx.ticketOf(d)?.summary}
+      compact
+      onHide={open ? () => ctx.onHide(d) : undefined}
+      onAnswer={(a) => ctx.onAnswer(d.id, a)}
+    />
+  );
+  return live ? <div ref={host}>{card}</div> : card;
+}
+
+/** A card part whose decision is not among the loaded ones: show its text rather than nothing. */
+function CardPartText({ part }: { part: DecisionCardPart }): React.ReactElement {
+  return (
+    <div className="rounded-r6 border border-line-2 bg-bg-1 px-3 py-2.5">
+      <p className="text-ui font-medium text-text-strong">{part.title}</p>
+      {part.body ? <Markdown source={part.body} className="mt-1 text-meta leading-relaxed text-text-2" /> : null}
+    </div>
+  );
+}
+
 function ChatMessage({
   message,
   ws,
@@ -1071,6 +1139,8 @@ function ChatMessage({
   projectName,
   onReply,
   usage,
+  replaceBody,
+  children,
 }: {
   message: ThreadMessage;
   ws: string;
@@ -1080,6 +1150,9 @@ function ChatMessage({
   onReply?: () => void;
   /** The message's own turn's token usage, or null when it has none (VS-204). */
   usage?: RunTrace['usage'];
+  /** The message's content is rendered by `children` (a decision card), not its prose body (VS-309). */
+  replaceBody?: boolean;
+  children?: React.ReactNode;
 }): React.ReactElement {
   const mine = message.direction === 'inbound';
   // No turn produced a human's own message, so it never carries a token count even if a run happened
@@ -1094,18 +1167,22 @@ function ChatMessage({
           <span className="line-clamp-2 block">{message.replyToExcerpt}</span>
         </span>
       ) : null}
-      <div
-        data-chat-bubble=""
-        className={cx(
-          'min-w-0 overflow-x-hidden rounded-r10 bg-bg-3 px-3.5 py-2.5 text-body text-text-1',
-          mine ? 'max-w-[80%] rounded-br-r4' : 'w-full max-w-full rounded-bl-r4',
-        )}
-      >
-        {/* Both directions through the same renderer: what the human typed reads back the way they
-            typed it, and the two sides of the thread stay consistent. */}
-        <MessageBody body={message.body} onTicket={onTicket} ticketStatus={ticketStatus} />
-        <AttachmentGallery ws={ws} threadId={message.threadId} parts={message.parts} />
-      </div>
+      {replaceBody ? (
+        children ? <div className="flex min-w-0 flex-col gap-2">{children}</div> : null
+      ) : (
+        <div
+          data-chat-bubble=""
+          className={cx(
+            'min-w-0 overflow-x-hidden rounded-r10 bg-bg-3 px-3.5 py-2.5 text-body text-text-1',
+            mine ? 'max-w-[80%] rounded-br-r4' : 'w-full max-w-full rounded-bl-r4',
+          )}
+        >
+          {/* Both directions through the same renderer: what the human typed reads back the way they
+              typed it, and the two sides of the thread stay consistent. */}
+          <MessageBody body={message.body} onTicket={onTicket} ticketStatus={ticketStatus} />
+          <AttachmentGallery ws={ws} threadId={message.threadId} parts={message.parts} />
+        </div>
+      )}
       <span className="flex items-center gap-1.5">
         {message.projectId ? (
           <span className="rounded-r4 border border-line-2 bg-bg-2 px-1.5 py-0.5 text-nano text-text-3">{projectName(message.projectId)}</span>

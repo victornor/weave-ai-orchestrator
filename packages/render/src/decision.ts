@@ -108,7 +108,7 @@ export function decisionToCard(decision: Decision, ctx: DecisionCardContext = {}
     ticketId: d.ticketId ?? null,
     createdAt: d.createdAt ?? '',
     age: formatAge(d.createdAt, ctx.now ?? new Date()),
-    answer: d.status === 'answered' ? { key: d.answerKey ?? null, text: d.answerText ? redact(d.answerText) : null, at: d.answeredAt ?? null } : null,
+    answer: d.status === 'answered' ? { key: d.answerKey ?? null, text: d.answerText ? redact(d.answerText) : null, at: d.answeredAt ?? null, relayedFromMessageId: d.relayedFromMessageId ?? null } : null,
     answerElsewhere,
     held: weaverReviewCopy(d)?.held ?? false,
     awaitsReview: weaverReviewCopy(d)?.awaitsReview ?? false,

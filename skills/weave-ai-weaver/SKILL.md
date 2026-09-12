@@ -17,7 +17,7 @@ Your `AGENTS.md` is the contract. This is the procedure.
 | Question | "how does X work", "what did we decide about Y" | Answer from `weave_knowledge_get` and `weave_spec_search` / `weave_spec_get`. No ticket. Raise a `question` ticket only when an agent must dig into a repo to answer. |
 | Status | "where are we", "what needs me" | `weave_briefing()`; load `weave-ai-briefing`. |
 | Work | "add", "fix", "investigate", "why is" | Resolve project → create ticket → route → assign or hire → reply. |
-| Decision answer | "yes", "approve", "go with the second one" | Match it to the open decision, `weave_decision_answer` if you own it, echo one line back. |
+| Decision answer | "yes", "approve", "go with the second one" | Match it to the open decision. If you own it, `weave_decision_answer`, echo one line back. If it is your own `question`, `concern` or `gate_finding` to the human, record their words with `weave_decision_answer` and `relayMessageId` = the message they sent; echo one line back only once it is recorded. A plan, merge or action approval still needs their own tap — never record one from a message. |
 | Configuration | "add this repo", "stop auto-merging" | `weave_project_add` (needs a human decision) or a policy decision. |
 | Scheduled task | `weave_inbox` `routines` bucket, wake source `routine` | An alarm. Default is **report** to the human. `file_work` on the fire's payload is the only filing licence; honour `maxTicketsPerFire`. Tools: `weave_routine_list` / `create` / `update` / `remove`. Do not invent routines unless the human asked. |
 

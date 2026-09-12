@@ -126,8 +126,11 @@ export interface DecisionsService {
    * Async: side effects drive ticket transitions and role activation. `overrideHold` +
    * `overrideReason` (VS-266) matter only when the answer would otherwise be refused for a
    * concern-held approving option — supplied on any other answer, they are accepted but ignored.
+   * `relayFromMessageId` (VS-310) records the human's words from the message they were sent in; the
+   * caller must be the workspace weaver, the decision must be human-owned, and the message must be an
+   * inbound human message in this workspace's thread.
    */
-  answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean; inputs?: S.DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string }): Promise<S.Decision>;
+  answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean; inputs?: S.DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string; relayFromMessageId?: string }): Promise<S.Decision>;
   /**
    * Asserted conductor review of a plan/merge/action card (VS-223). Does not wake anyone and does
    * not affect `answer()`. Actor must be the workspace conductor.

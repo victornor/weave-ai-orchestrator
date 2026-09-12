@@ -138,8 +138,8 @@ export interface CardModel {
   ticketId: string | null;
   createdAt: string;
   age: string;
-  /** Set once answered, so an answered card still reads correctly in history. */
-  answer: { key: string | null; text: string | null; at: string | null } | null;
+  /** Set once answered, so an answered card still reads correctly in history. VS-310: `relayedFromMessageId` is the human's message the words were recorded from, non-null exactly on a relay. */
+  answer: { key: string | null; text: string | null; at: string | null; relayedFromMessageId: string | null } | null;
   /**
    * The decision collects values this surface cannot take (VS-92) — a secret cannot be typed into
    * a chat message, and a channel has no controls for a multi-select. A surface that sees this

@@ -59,6 +59,7 @@ export function decision(over: Partial<Decision> = {}): Decision {
     inputs: [], allowFreeText: true, recommendation: 'CSS variables', status: 'open', answerKey: null, answerText: null, answerInputs: null, answeredByKind: null,
     answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null, createdAt: '2026-09-01T00:00:00.000Z',
     weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null,
+    answerAuthorKind: null, relayedFromMessageId: null,
     ...over,
   };
 }

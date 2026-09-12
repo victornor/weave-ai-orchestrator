@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { OcError, ok } from '@weave-ai/shared';
+import { ASKABLE_DECISION_KINDS, DECISION_KINDS, OcError, ok } from '@weave-ai/shared';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createApp } from '../src/app.js';
@@ -178,6 +178,48 @@ describe('MCP endpoint', () => {
     expect(payload.error.code).toBe('forbidden');
     await client.close();
   });
+
+  it('relays a human-owned askable decision and refuses every approval, driven off DECISION_KINDS (VS-310)', async () => {
+    const { client, h } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null, agentId: 'ag_conductor' });
+    const weaver = { kind: 'agent', id: 'ag_conductor' } as never;
+    let answerCalls = 0;
+    for (const kind of DECISION_KINDS) {
+      const d = h.runtime.services.decisions.create(weaver, { kind, title: kind, owner: 'human' });
+      const res = await client.callTool({
+        name: 'weave_decision_answer',
+        arguments: { id: d.id, text: 'captain said so', relayMessageId: 'msg_1' },
+      });
+      const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+      if ((ASKABLE_DECISION_KINDS as readonly string[]).includes(kind)) {
+        expect(payload.ok, `${kind} should be relayable`).toBe(true);
+        answerCalls += 1;
+      } else {
+        expect(payload.ok, `${kind} must be refused`).toBe(false);
+        expect(payload.error.code, `${kind} keeps the forbidden answer`).toBe('forbidden');
+      }
+    }
+    // The askable relaying actually reached the service with the message named, not just a 200.
+    const calls = h.calls.filter((c) => c.service === 'decisions' && c.method === 'answer');
+    expect(calls).toHaveLength(answerCalls);
+    expect(calls.at(-1)?.args[2]).toMatchObject({ relayFromMessageId: 'msg_1' });
+    await client.close();
+  });
+
+  it('requires the message on a human-owned card and refuses a relay on the weaver\'s own (VS-310)', async () => {
+    const { client, h } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null, agentId: 'ag_conductor' });
+    const weaver = { kind: 'agent', id: 'ag_conductor' } as never;
+    const text = (res: { content: unknown }) => JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+
+    const humanCard = h.runtime.services.decisions.create(weaver, { kind: 'question', title: 'q', owner: 'human' });
+    const missing = await client.callTool({ name: 'weave_decision_answer', arguments: { id: humanCard.id, text: 'no message' } });
+    expect(text(missing).error.code).toBe('validation');
+
+    const mine = h.runtime.services.decisions.create(weaver, { kind: 'question', title: 'mine', owner: 'weaver' });
+    const relayed = await client.callTool({ name: 'weave_decision_answer', arguments: { id: mine.id, text: 'x', relayMessageId: 'msg_1' } });
+    expect(text(relayed).error.code).toBe('validation');
+    await client.close();
+  });
+
 
   it('reads a scout report on another ticket in the worker\'s own project', async () => {
     const { client, h } = await connect();

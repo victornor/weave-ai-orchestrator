@@ -766,7 +766,9 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         ? db.get<{ identifier: string }>('SELECT identifier FROM tickets WHERE id = ?', [decision.ticketId])?.identifier ?? null
         : null;
       const answer = [decision.answerKey, decision.answerText].filter(Boolean).join(' — ');
-      const line = `- ${today()} · ${ident ? `[${ident}] ` : ''}${decision.title}${answer ? ` → ${answer}` : ''}`;
+      // VS-310: a relayed answer is distinguishable from one the human gave directly, here too.
+      const relay = decision.relayedFromMessageId ? " (relayed from the human's message)" : '';
+      const line = `- ${today()} · ${ident ? `[${ident}] ` : ''}${decision.title}${answer ? ` → ${answer}` : ''}${relay}`;
       const norm = normalize(line.replace(/^- /, ''));
       if (entriesOf(body).some((e) => similarity(norm, e.normalized) >= 0.95)) return;
       const next = appendEntry(body, 'Decisions', line);

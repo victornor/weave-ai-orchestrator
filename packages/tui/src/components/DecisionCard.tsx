@@ -40,7 +40,7 @@ export function DecisionCardView({ card, index }: { card: CardModel; index?: num
       ) : null}
       {card.allowFreeText ? <Text dimColor>{`/d ${card.id} <text>  or  ${card.freeTextLabel ?? 'free text'}`}</Text> : null}
       {card.confirm ? <Text color="yellow">{card.confirm.prompt}</Text> : null}
-      {card.answer ? <Text color="green">answered: {card.answer.key ?? card.answer.text ?? ''}</Text> : null}
+      {card.answer ? <Text color="green">answered: {card.answer.key ?? card.answer.text ?? ''}{card.answer.relayedFromMessageId ? " (relayed from the human's message)" : ''}</Text> : null}
     </Box>
   );
 }

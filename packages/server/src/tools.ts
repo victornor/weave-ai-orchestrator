@@ -721,11 +721,22 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx, i) => svc(ctx).workers.cancel(ctx.actor, i.id, i.reason),
   },
   {
-    name: 'weave_decision_answer', scope: 'weaver', input: z.object({ id: z.string().min(1), key: z.string().optional(), text: z.string().optional(), remember: z.boolean().optional() }),
-    description: 'Answer a decision you own. Human-owned decisions are not yours to answer: relay them instead.',
+    name: 'weave_decision_answer', scope: 'weaver',
+    input: z.object({
+      id: z.string().min(1), key: z.string().optional(), text: z.string().optional(), remember: z.boolean().optional(),
+      relayMessageId: z.string().min(1).optional(),
+    }),
+    description: 'Answer a decision you own. A human-owned `question`, `concern` or `gate_finding` may instead be recorded from the human\'s own words: pass `relayMessageId` naming the inbound human thread message the answer came from, and their words are kept verbatim, marked as relayed, and linked to that message. A plan, merge, hire, discard, retry or action approval is never recordable this way — however the human phrased it in chat, it still needs their own tap.',
     handler: async (ctx, i) => {
       const d = svc(ctx).decisions.get(i.id);
-      if (d.owner !== 'weaver') throw new OcError('forbidden', `decision ${i.id} is owned by the human`);
+      if (d.owner !== 'weaver') {
+        // VS-310: only a kind an agent may raise can be recorded from the human's message. Every
+        // approval keeps the same forbidden answer it has always had, whatever the human wrote.
+        if (!(ASKABLE_DECISION_KINDS as readonly string[]).includes(d.kind)) throw new OcError('forbidden', `decision ${i.id} is owned by the human`);
+        if (!i.relayMessageId) throw new OcError('validation', `recording ${d.kind} "${d.title}" from the human's words requires the id of the message it came from`);
+        return svc(ctx).decisions.answer(ctx.actor, i.id, { key: i.key, text: i.text, remember: i.remember, relayFromMessageId: i.relayMessageId });
+      }
+      if (i.relayMessageId) throw new OcError('validation', `decision ${i.id} is yours to answer directly; a relay names a message from the human`);
       return svc(ctx).decisions.answer(ctx.actor, i.id, { key: i.key, text: i.text, remember: i.remember });
     },
   },

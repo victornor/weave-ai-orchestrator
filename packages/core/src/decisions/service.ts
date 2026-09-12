@@ -416,16 +416,48 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     return (NAMED_CARD_OPTION_KEYS as Record<string, { approve?: string }>)[kind]?.approve ?? null;
   }
 
+  /**
+   * VS-310: a relayed answer is the human's words, transcribed by the weaver from the message they
+   * were sent in. Only the weaver may do this — enforced here rather than left to the tool's
+   * `scope`, so a worker cannot fabricate an answer the human never gave. The decision must be
+   * human-owned (a relay names the human's message), and the message must be an inbound human
+   * message in one of this workspace's threads. Scoping in the query itself (not checked after the
+   * fact) is the pattern `threads.message()` already uses: an unknown id and a row from another
+   * workspace come back as one `not_found`.
+   */
+  function validateRelayMessage(actor: Actor, d: Decision, messageId: string): { id: string } {
+    if (actor.kind !== 'agent' || !actor.id || actor.id !== conductorId()) {
+      throw new OcError('forbidden', "only the workspace weaver can record an answer from the human's message");
+    }
+    if (d.owner !== 'human') {
+      throw new OcError('validation', `decision ${d.id} is owned by the weaver and is answered directly`);
+    }
+    const m = db.get<{ id: string; direction: string; authorKind: string }>(
+      `SELECT m.* FROM thread_messages m
+         JOIN channel_threads t ON t.id = m.thread_id
+         JOIN channels c ON c.id = t.channel_id
+        WHERE m.id = ? AND c.workspace_id = ?`,
+      [messageId, ws],
+    );
+    if (!m) throw new OcError('not_found', `relay message ${messageId} not found in this workspace`);
+    if (m.direction !== 'inbound') throw new OcError('validation', 'a relayed answer must name an inbound message from the human');
+    if (m.authorKind !== 'human') throw new OcError('validation', 'a relayed answer must name a message authored by the human');
+    return m;
+  }
+
   async function answer(
     actor: Actor,
     id: string,
-    ans: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string },
+    ans: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string; relayFromMessageId?: string },
   ): Promise<Decision> {
     const d = get(id);
     if (d.status !== 'open') {
       const supersededBy = d.status === 'superseded' ? replacementFor(d) : null;
       throw new OcError('wrong_status', `decision ${id} is ${d.status}`, { status: d.status, ...(supersededBy ? { supersededBy } : {}) });
     }
+    // VS-310: enforced here, not only in the tool's `scope: 'weaver'`, so no future caller can
+    // fabricate a relay. Validated before any write and before the side effects below.
+    const relayFrom = ans.relayFromMessageId ? validateRelayMessage(actor, d, ans.relayFromMessageId) : null;
     // VS-266 / VS-281: an approving answer on a still-open review-carrying decision is held in two
     // cases. The weaver marked `concerns` (VS-266 — every actor, including the system actor, so an
     // unattended merge cannot silently override a stated objection). Or the weaver has not reviewed
@@ -472,6 +504,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       db.update('decisions', d.id, {
         status: 'answered' as DecisionStatus, answerKey: key, answerText: text, answerInputsJson: answerInputs,
         answeredByKind: actor.kind, answeredById: actor.id, answeredAt: nowIso(),
+        ...(relayFrom ? { answerAuthorKind: 'human', relayedFromMessageId: relayFrom.id } : {}),
       });
       const next = get(d.id);
       recordActivity(db, ws, actor, 'decision.answer', 'decision', d.id, { key, kind: d.kind }, d.ticketId);

@@ -1,11 +1,14 @@
 import { rmSync } from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeEvent, TurnHandle, TurnInput } from '@weave-ai/runtime-sdk';
 import { adapter } from '../src/adapter.js';
 import { writeFakeCursorCli, writeSilentFakeCursorCli } from './fakeCli.js';
 
 const dirs: string[] = [];
-afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+afterEach(() => {
+  vi.useRealTimers();
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
 
 function input(over: Partial<TurnInput> = {}, fakeDir = writeFakeCursorCli()): TurnInput {
   dirs.push(fakeDir);
@@ -103,23 +106,43 @@ gpt-5.6-sol-xhigh, ...`;
 });
 
 describe('cursor adapter — fails fast on a silent process (VS-187)', () => {
-  it('interrupts and fails within the no-output grace period instead of hanging', async () => {
+  // The grace is driven by the adapter's own setTimeout, so freeze the clock instead of racing a
+  // freshly spawned process: the deadline is reached by advancing timers, never by real elapsed
+  // time. Under a full `pnpm test` a spawn alone can outlast a real 100ms, which is what made
+  // these cases fail on a loaded machine (VS-312).
+  it('interrupts a silent process at the no-output deadline and reports no_output', async () => {
+    vi.useFakeTimers();
     const fakeDir = writeSilentFakeCursorCli();
-    const result = await adapter.runTurn(
+    const resultPromise = adapter.runTurn(
       input({ options: { noOutputGraceMs: 100 } }, fakeDir),
       { onSpawn: () => undefined, onEvent: () => undefined, onRaw: () => undefined },
       () => undefined,
     );
+    await vi.advanceTimersByTimeAsync(100);
+    const result = await resultPromise;
     expect(result.error?.code).toBe('no_output');
     expect(result.timedOut).toBe(false);
   });
 
-  it('a turn that produces output right away never trips the no-output check', async () => {
-    const result = await adapter.runTurn(
-      input({ model: 'auto', options: { noOutputGraceMs: 100 } }),
-      { onSpawn: () => undefined, onEvent: () => undefined, onRaw: () => undefined },
-      () => undefined,
+  it('does not interrupt a process that produced output before the deadline elapsed', async () => {
+    vi.useFakeTimers();
+    const fakeDir = writeFakeCursorCli({ holdOpen: true });
+    let resolveFirstEvent!: () => void;
+    const firstEvent = new Promise<void>((r) => { resolveFirstEvent = r; });
+    let handle: TurnHandle | undefined;
+    const resultPromise = adapter.runTurn(
+      input({ model: 'auto', options: { noOutputGraceMs: 100 } }, fakeDir),
+      {
+        onSpawn: () => undefined,
+        onEvent: () => resolveFirstEvent(),
+        onRaw: () => undefined,
+      },
+      (h) => { handle = h; },
     );
+    await firstEvent;                        // output seen; the frozen grace cannot have expired
+    await vi.advanceTimersByTimeAsync(100);  // let the deadline pass — it must not interrupt
+    await handle?.cancel('interrupt');       // end the held-open process ourselves, cleanly
+    const result = await resultPromise;
     expect(result.exitCode).toBe(0);
     expect(result.error).toBeUndefined();
   });

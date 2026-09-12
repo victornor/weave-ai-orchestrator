@@ -8,16 +8,20 @@ import { join } from 'node:path';
  * `Auto` when none was passed), like a correctly-functioning CLI would — a test that wants to
  * exercise the model-mismatch check passes `reportedModel` to override that. A test exercising the
  * unknown-model rejection path passes `unknownModelRejection` to have the CLI exit non-zero with
- * that text on stderr instead of responding normally.
+ * that text on stderr instead of responding normally. A test that needs the process to stay alive
+ * after answering (so it can observe the adapter against a running turn) passes `holdOpen`; that
+ * variant exits 0 on SIGINT, the same signal `spawnLines.cancel('interrupt')` sends.
  */
-export function writeFakeCursorCli(opts: { assistantText?: string; sessionId?: string; reportedModel?: string; unknownModelRejection?: string } = {}): string {
+export function writeFakeCursorCli(opts: { assistantText?: string; sessionId?: string; reportedModel?: string; unknownModelRejection?: string; holdOpen?: boolean } = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'ac-fake-cursor-'));
   const path = join(dir, 'cursor-agent');
   const sessionId = opts.sessionId ?? 'fake-cursor-session';
   const text = opts.assistantText ?? 'ack';
   const reportedModelOverride = opts.reportedModel;
   const rejection = opts.unknownModelRejection;
+  const holdOpen = opts.holdOpen === true;
   const script = `#!/usr/bin/env node
+${holdOpen ? "process.on('SIGINT', () => process.exit(0)); setInterval(() => {}, 3600_000);" : ''}
 const dash = process.argv.indexOf('--');
 const argvPrompt = dash >= 0 ? process.argv.slice(dash + 1).join(' ') : '';
 const modelFlag = process.argv.indexOf('--model');
@@ -31,7 +35,7 @@ function respond() {
   process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: ${JSON.stringify(sessionId)}, model: reportedModel, cwd: process.cwd(), permissionMode: 'default' }) + '\\n');
   process.stdout.write(JSON.stringify({ type: 'assistant', session_id: ${JSON.stringify(sessionId)}, message: { role: 'assistant', content: [{ type: 'text', text: ${JSON.stringify(text)} }] } }) + '\\n');
   process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: ${JSON.stringify(text)}, session_id: ${JSON.stringify(sessionId)} }) + '\\n');
-  process.exit(0);
+  ${holdOpen ? '/* stay alive until SIGINT */' : 'process.exit(0);'}
 }
 const finish = ${rejection !== undefined ? 'reject' : 'respond'};
 if (argvPrompt.length > 0) finish();

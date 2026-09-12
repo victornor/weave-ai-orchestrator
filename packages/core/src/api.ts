@@ -72,6 +72,26 @@ export interface TicketsService {
   stop(): Promise<void>;
 }
 
+// ---------- weaver artifacts ----------
+/**
+ * A weaver has no ticket to attach a published artifact to, so its artifacts live in a separate,
+ * workspace-scoped store (VS-297) rather than `ticket_documents`/`ticket_work_products` — both of
+ * which carry a `NOT NULL` ticket FK. Same validation and revisioning contract as
+ * `TicketsService.putDocument`/`putArtifactWorkProduct`, keyed by `(workspaceId, key)` instead of a
+ * ticket id. No read-back: there is no method here that returns a stored `body` to a caller other
+ * than the raw-serve route itself.
+ */
+export interface WeaverArtifactsService {
+  /** First publish under `key` returns revision 1; publishing again under the same key increments it and leaves exactly one artifact for that key. */
+  put(actor: Actor, workspaceId: string, key: string, html: string, opts?: { title?: string; kind?: string }): { revision: number };
+  /** `revision` omitted reads the current one. Null when the key or the named revision does not exist. */
+  getRevision(workspaceId: string, key: string, revision?: number): { body: string; revision: number } | null;
+  /** Metadata only (no `body`), most-recently-updated first — the workspace-level explorer listing and the in-app viewer page's own lookup. */
+  list(workspaceId: string): Array<{ key: string; title: string | null; kind: string | null; revision: number; updatedAt: string }>;
+  /** Every revision of one artifact, oldest first — the in-app viewer page's revision picker, mirroring `TicketsService.documentRevisions`. */
+  revisions(workspaceId: string, key: string): Array<{ revision: number; authorKind: string; createdAt: string }>;
+}
+
 // ---------- merge queue ----------
 /** One ticket's place in a project's merge queue. `position` is null for a ticket already merging. */
 export interface MergeQueueEntry { ticketId: string; identifier: string; title: string; projectId: string | null; position: number | null; queuedAt: string | null; startedAt: string | null; workerId: string | null }
@@ -623,7 +643,7 @@ export interface CoreServices {
   wake: WakeService; runs: RunsService; dispatcher: Dispatcher; supervisor: Supervisor; knowledge: KnowledgeService; specs: SpecsService;
   openspec: OpenSpecService; usage: UsageService; knowledgeUsage: KnowledgeUsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
   changelog: ChangelogService; models: ModelsService; secrets: SecretsService; pullRequests: PullRequestsService;
-  routines: RoutinesService;
+  routines: RoutinesService; weaverArtifacts: WeaverArtifactsService;
 }
 
 export interface RoutineCreateInput {

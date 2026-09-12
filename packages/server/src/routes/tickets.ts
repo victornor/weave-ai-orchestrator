@@ -4,12 +4,7 @@ import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, OcError } from '@weav
 import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
 import { requireOperator } from '../auth.js';
-
-/**
- * VS-269: an artifact is served in an opaque, sandboxed origin so agent-authored HTML can never read
- * the `ac_session` cookie or call back into the API — not negotiable, per captain's specification.
- */
-const ARTIFACT_CSP = "sandbox allow-scripts allow-forms allow-popups allow-downloads; default-src 'none'; style-src 'self' 'unsafe-inline'; img-src data: 'self'; font-src data:; connect-src 'none'";
+import { ARTIFACT_CSP } from '../artifact-csp.js';
 
 const CreateSchema = z.object({
   projectId: z.string().nullish(), kind: z.enum(TICKET_KINDS), title: z.string().min(1), description: z.string().default(''),

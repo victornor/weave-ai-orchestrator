@@ -823,4 +823,140 @@ describe('real core services over HTTP', () => {
       expect(unfiltered).toHaveLength(1);
     });
   });
+
+  describe('weaver artifacts (VS-297)', () => {
+    const SAMPLE_HTML = '<!doctype html><html><head><title>Test</title></head><body><h1>Hi</h1></body></html>';
+
+    async function callTool(app: ReturnType<typeof createApp>, ws: string, token: string, tool: string, input: Record<string, unknown>) {
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${ws}/agent/tools/${tool}`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input }),
+      }));
+      return res.json();
+    }
+
+    async function weaverToken(harness: ReturnType<typeof makeHarness>): Promise<string> {
+      return signRunToken(runTokenSecret(harness.ctx.db), {
+        workspaceId: harness.workspaceId, runId: 'run_weaver_artifact', agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
+      });
+    }
+
+    async function workerToken(harness: ReturnType<typeof makeHarness>, agentId: string): Promise<string> {
+      return signRunToken(runTokenSecret(harness.ctx.db), {
+        workspaceId: harness.workspaceId, runId: 'run_worker_artifact', agentId, agentKind: 'worker', projectId: harness.projectId, ticketId: null, roleId: harness.roleId,
+      });
+    }
+
+    it('a weaver publishes an artifact with no ticket, gets back an in-app URL, and it is listable', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const token = await weaverToken(harness);
+
+      const first = await callTool(app, harness.workspaceId, token, 'weave_artifact_put', { key: 'overview', html: SAMPLE_HTML, title: 'Overview', kind: 'diagram' });
+      expect(first.ok).toBe(true);
+      expect(first.data.revision).toBe(1);
+      expect(first.data.url).toBe(`/w/${harness.workspaceId}/artifacts/overview`);
+
+      const listed = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/artifacts`, { headers: H }))).json();
+      expect(listed).toHaveLength(1);
+      expect(listed[0]).toMatchObject({ key: 'overview', title: 'Overview', kind: 'diagram', revision: 1 });
+      expect(listed[0].body).toBeUndefined();
+
+      // Republishing under the same key updates in place rather than adding a second entry.
+      const second = await callTool(app, harness.workspaceId, token, 'weave_artifact_put', { key: 'overview', html: SAMPLE_HTML, title: 'Overview v2' });
+      expect(second.ok).toBe(true);
+      expect(second.data.revision).toBe(2);
+      expect(await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/artifacts`, { headers: H }))).json()).toHaveLength(1);
+    });
+
+    it('is unreachable by a worker: a worker session gets forbidden, never a ticket-shaped workaround', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const agentId = harness.addWorker(null);
+      const token = await workerToken(harness, agentId);
+
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_artifact_put`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { key: 'sneaky', html: SAMPLE_HTML } }),
+      }));
+      expect(res.status).toBe(403);
+      const rejected = await res.json();
+      expect(rejected.error.message).toMatch(/not available to a worker/);
+    });
+
+    it('rejects an empty, non-HTML, or oversized body, exactly like the ticket-scoped tool', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const token = await weaverToken(harness);
+
+      const empty = await callTool(app, harness.workspaceId, token, 'weave_artifact_put', { key: 'a', html: '   ' });
+      expect(empty.ok).toBe(false);
+      expect(empty.error.message).toMatch(/empty/);
+
+      const notHtml = await callTool(app, harness.workspaceId, token, 'weave_artifact_put', { key: 'b', html: 'just some text' });
+      expect(notHtml.ok).toBe(false);
+      expect(notHtml.error.message).toMatch(/does not look like an HTML document/);
+    });
+
+    it('serves the raw artifact over HTTP with the mandated sandbox CSP, verbatim bytes, for a human session only', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const token = await weaverToken(harness);
+      const published = await callTool(app, harness.workspaceId, token, 'weave_artifact_put', { key: 'view', html: SAMPLE_HTML });
+      expect(published.ok).toBe(true);
+
+      const rawUrl = `/api/w/${harness.workspaceId}/artifacts/view/raw`;
+      const res = await app.fetch(new Request(`http://127.0.0.1${rawUrl}`, { headers: H }));
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(SAMPLE_HTML);
+      expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(res.headers.get('content-security-policy')).toBe(
+        "sandbox allow-scripts allow-forms allow-popups allow-downloads; default-src 'none'; style-src 'self' 'unsafe-inline'; img-src data: 'self'; font-src data:; connect-src 'none'",
+      );
+
+      // A run token (an agent) cannot reach this route at all.
+      const rejected = await app.fetch(new Request(`http://127.0.0.1${rawUrl}`, { headers: { authorization: `Bearer ${token}` } }));
+      expect(rejected.status).toBe(403);
+    });
+
+    it('serves a superseded revision independently of the current one', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const token = await weaverToken(harness);
+      const HTML_V2 = '<!doctype html><html><body><h1>v2</h1></body></html>';
+      await callTool(app, harness.workspaceId, token, 'weave_artifact_put', { key: 'view', html: SAMPLE_HTML });
+      await callTool(app, harness.workspaceId, token, 'weave_artifact_put', { key: 'view', html: HTML_V2 });
+
+      const rawUrl = `/api/w/${harness.workspaceId}/artifacts/view/raw`;
+      const current = await app.fetch(new Request(`http://127.0.0.1${rawUrl}`, { headers: H }));
+      expect(await current.text()).toBe(HTML_V2);
+
+      const earlier = await app.fetch(new Request(`http://127.0.0.1${rawUrl}?revision=1`, { headers: H }));
+      expect(await earlier.text()).toBe(SAMPLE_HTML);
+
+      const revisions = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/artifacts/view/revisions`, { headers: H }))).json();
+      expect(revisions.map((r: { revision: number }) => r.revision)).toEqual([1, 2]);
+    });
+
+    it('the same key on a ticket artifact and a weaver artifact do not collide', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const ticket = services.tickets.create({ kind: 'human', id: null }, { projectId: harness.projectId, kind: 'task', title: 'Unrelated' });
+      const agentId = harness.addWorker(ticket.id);
+      const ticketToken = await signRunToken(runTokenSecret(harness.ctx.db), {
+        workspaceId: harness.workspaceId, runId: 'run_collide', agentId, agentKind: 'worker', projectId: harness.projectId, ticketId: ticket.id, roleId: harness.roleId,
+      });
+      await callTool(app, harness.workspaceId, ticketToken, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'report', html: '<html><body>ticket</body></html>' });
+
+      const token = await weaverToken(harness);
+      await callTool(app, harness.workspaceId, token, 'weave_artifact_put', { key: 'report', html: '<html><body>workspace</body></html>' });
+
+      const ticketRaw = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/tickets/${ticket.id}/artifacts/report/raw`, { headers: H }))).text();
+      const wsRaw = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/artifacts/report/raw`, { headers: H }))).text();
+      expect(ticketRaw).toBe('<html><body>ticket</body></html>');
+      expect(wsRaw).toBe('<html><body>workspace</body></html>');
+    });
+  });
 });

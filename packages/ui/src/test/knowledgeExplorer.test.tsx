@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { KnowledgeDocDetail, KnowledgeDocSummary, TicketArtifactSummary } from '../api/types';
+import type { KnowledgeDocDetail, KnowledgeDocSummary, TicketArtifactSummary, WeaverArtifactSummary } from '../api/types';
 
 const DOC_NESTED: KnowledgeDocSummary = {
   path: 'projects/api/docs/runbooks/incidents/retry-policy.md', scope: 'project', projectId: 'p1', projectSlug: 'api',
@@ -25,6 +25,7 @@ const state = vi.hoisted(() => ({
   archiveLoading: false,
   artifacts: [] as TicketArtifactSummary[],
   artifactsLoading: false,
+  weaverArtifacts: [] as WeaverArtifactSummary[],
 }));
 
 const linkState = vi.hoisted(() => ({ search: {} as Record<string, string | undefined>, go: vi.fn() }));
@@ -50,6 +51,7 @@ vi.mock('../api/hooks', () => ({
     roots.map(() => ({ data: state.archive, isLoading: state.archiveLoading })),
   useKnowledgeArchiveFile: () => ({ data: { path: 'a', body: '# Archived\n' }, isLoading: false }),
   useProjectArtifacts: () => ({ data: state.artifacts, isLoading: state.artifactsLoading }),
+  useWorkspaceArtifacts: () => ({ data: state.weaverArtifacts, isLoading: false }),
   useTicketDocumentRevisions: () => ({ data: [] }),
 }));
 
@@ -77,6 +79,7 @@ beforeEach(() => {
   state.archiveLoading = false;
   state.artifacts = [];
   state.artifactsLoading = false;
+  state.weaverArtifacts = [];
   linkState.search = {};
   linkState.go.mockClear();
 });
@@ -189,6 +192,46 @@ describe('KnowledgeExplorer artifacts entry (VS-270)', () => {
     state.artifacts = [];
     render(<KnowledgeExplorer project="p1" />);
     expect(screen.getByText('Nothing to browse yet.')).toBeInTheDocument();
+  });
+});
+
+describe('KnowledgeExplorer weaver artifacts entry (VS-297)', () => {
+  const WEAVER_ARTIFACT: WeaverArtifactSummary = { key: 'overview', title: 'Overview', kind: 'diagram', revision: 1, updatedAt: '2026-09-12T00:00:00Z' };
+
+  it('shows no Weaver Artifacts entry for a workspace with none', () => {
+    state.hubFiles = [{ id: 'h1', path: 'projects/api/PROJECT.md', scope: 'project', projectId: 'p1', projectSlug: 'api', kind: 'hub' }];
+    state.weaverArtifacts = [];
+    render(<KnowledgeExplorer project="p1" />);
+    expect(screen.queryByText('Weaver Artifacts')).toBeNull();
+  });
+
+  it('lists a weaver artifact as its own peer entry, distinct from the ticket-scoped Artifacts list, and navigates to its page on click', () => {
+    state.hubFiles = [{ id: 'h1', path: 'projects/api/PROJECT.md', scope: 'project', projectId: 'p1', projectSlug: 'api', kind: 'hub' }];
+    state.artifacts = [ARTIFACT];
+    state.weaverArtifacts = [WEAVER_ARTIFACT];
+    render(<KnowledgeExplorer project="p1" />);
+
+    expect(screen.getByText('Artifacts')).toBeInTheDocument();
+    expect(screen.getByText('Weaver Artifacts')).toBeInTheDocument();
+    // Both are titled "Overview" — the ticket-scoped row carries a ticket identifier badge, the
+    // weaver-scoped one does not, proving they render as genuinely separate rows.
+    const rows = screen.getAllByText('Overview').map((el) => el.closest('button')!);
+    expect(rows).toHaveLength(2);
+    expect(rows.some((r) => within(r).queryByText('ACME-42'))).toBe(true);
+    expect(rows.some((r) => !within(r).queryByText('ACME-42'))).toBe(true);
+
+    fireEvent.click(rows.find((r) => !within(r).queryByText('ACME-42'))!);
+    expect(linkState.go).toHaveBeenCalledWith('/w/$ws/artifacts/$key', { params: { ws: 'ws1', key: 'overview' } });
+  });
+
+  it('lists it even when the workspace has no documents, hubs, or ticket artifacts to browse', () => {
+    state.docs = [];
+    state.hubFiles = [];
+    state.artifacts = [];
+    state.weaverArtifacts = [WEAVER_ARTIFACT];
+    render(<KnowledgeExplorer project="p1" />);
+    expect(screen.getByText('Weaver Artifacts')).toBeInTheDocument();
+    expect(screen.queryByText('Nothing to browse yet.')).toBeNull();
   });
 });
 

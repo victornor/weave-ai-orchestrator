@@ -73,6 +73,10 @@ export const qk = {
   artifactsRoot: (ws: string) => ['w', ws, 'artifacts'] as const,
   artifacts: (ws: string, project?: string) => ['w', ws, 'artifacts', project ?? ''] as const,
 
+  /** A weaver's workspace-scoped artifacts (VS-297) — a separate store and list from the ticket-scoped one above. */
+  weaverArtifactsRoot: (ws: string) => ['w', ws, 'weaver-artifacts'] as const,
+  weaverArtifacts: (ws: string) => ['w', ws, 'weaver-artifacts', 'list'] as const,
+
   changelogRoot: (ws: string) => ['w', ws, 'changelog'] as const,
   changelog: (ws: string, project?: string) => ['w', ws, 'changelog', 'entries', project ?? ''] as const,
   changelogHeatmap: (ws: string, project: string | undefined, tz: string) => ['w', ws, 'changelog', 'heatmap', project ?? '', tz] as const,

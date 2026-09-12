@@ -202,6 +202,7 @@ const TRACKED: EventType[] = [
   'auth.logout',
   'auth.revoked',
   'presentation.updated',
+  'weaver_artifact.published',
 ];
 
 /**
@@ -387,6 +388,12 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
     case 'auth.logout':
     case 'auth.revoked':
       inv(qk.sessions());
+      break;
+    case 'weaver_artifact.published':
+      // Makes a newly published (or republished) weaver artifact appear, or move to the top, of the
+      // explorer's workspace-level entry with no reload — the ticket-artifact equivalent of the
+      // `ticket.work_product` case above, but for a store that carries no ticket id at all.
+      inv(qk.weaverArtifactsRoot(ws));
       break;
     default:
       break;

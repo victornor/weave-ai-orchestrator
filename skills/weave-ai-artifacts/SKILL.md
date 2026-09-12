@@ -41,6 +41,24 @@ An artifact is exactly one HTML file, and it has to stand on its own:
 - Cite real source locations as `path:line`, never a vague "in the config" — an artifact is meant
   to be checked against the repo, not taken on faith.
 
+## Publishing and reaching the human
+
+An artifact you've drafted has to actually be published — it never reaches anyone as a message
+attachment.
+
+- **A worker, with a ticket:** call `weave_ticket_artifact_put(id, key, html, { title?, kind? })`.
+  It returns a URL; share that URL (in a comment, or in your final report), never the raw HTML file.
+  Calling it again with the same `key` republishes a new revision — you republish, you never
+  read-modify-write, because there is no matching read tool: an artifact's body can never be read
+  back by any agent, including you.
+- **A weaver, with no ticket:** call `weave_artifact_put(key, html, { title?, kind? })` instead — the
+  ticketless sibling, scoped to the workspace rather than any ticket. It returns a URL that opens the
+  artifact rendered inside the web app; put that URL straight into your chat reply. Same rule: no
+  read-back, republish under the same `key` to revise.
+
+Either way, the returned URL is the thing that reaches the human — an attached HTML file is not a
+substitute and should never be sent alongside or instead of it.
+
 ## Diagram discipline
 
 Diagrams are where kits get abused into generic-looking output, so the rule is strict: **default to

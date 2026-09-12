@@ -184,6 +184,9 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: `${W}/routines/{id}/fires`, tag: 'routines', summary: 'Kept fires of a scheduled task, newest first, joined to the conductor run', auth: 'session' },
 
   { method: 'GET', path: `${W}/artifacts/kit.css`, tag: 'artifacts', summary: 'The AC Artifact Kit\'s CSS, verbatim, for inlining into a downloaded artifact (VS-269)', auth: 'session' },
+  { method: 'GET', path: `${W}/artifacts`, tag: 'artifacts', summary: 'Every published weaver artifact in the workspace, most-recently-updated first, no ticket involved (VS-297)', auth: 'session' },
+  { method: 'GET', path: `${W}/artifacts/{key}/revisions`, tag: 'artifacts', summary: 'Every revision of one weaver artifact, oldest first (VS-297)', auth: 'session' },
+  { method: 'GET', path: `${W}/artifacts/{key}/raw`, tag: 'artifacts', summary: 'A weaver artifact\'s raw HTML, verbatim, behind the same sandboxing CSP as a ticket artifact (VS-297); ?revision=N for an earlier revision', auth: 'session' },
 
   { method: 'GET', path: `${W}/agent/inbox`, tag: 'agent', summary: 'This run wakes, bundled', auth: 'run' },
   { method: 'GET', path: `${W}/agent/tools`, tag: 'agent', summary: 'Tools this agent may call, with JSON schemas', auth: 'run' },

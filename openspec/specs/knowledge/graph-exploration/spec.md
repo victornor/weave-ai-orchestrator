@@ -85,21 +85,20 @@ or opens the node.
 
 ### Requirement: The viewport can be zoomed and panned
 
-The graph SHALL be zoomable with the mouse wheel, with a two-finger pinch, and with
-zoom-in and zoom-out controls, and pannable by dragging the background with a mouse
-or a finger. Zooming with a pointer SHALL keep the point under the pointer in place.
-The zoom SHALL be bounded at both ends.
+The graph SHALL be zoomable with the mouse wheel, with a two-finger pinch, and pannable by
+dragging the background with a mouse or a finger. Zooming with a pointer SHALL keep the point
+under the pointer in place. The zoom SHALL be bounded at both ends.
 
 The canvas SHALL own wheel, pinch and drag input for zoom and pan from the moment it exists in the
 page, rather than attaching a listener after first paint that competes with the page for the
 gesture. A wheel gesture over the graph SHALL zoom the graph and SHALL NOT scroll the surrounding
 page.
 
-The view SHALL offer a **fit** control that frames every visible node, a **reset**
-control that returns the viewport to its default zoom and position, and **zoom in**
-and **zoom out** controls. Opening the graph SHALL start from a readable default
-zoom, centred on the layout, at which node titles are visible — not from a fitted
-overview that shrinks the whole graph into the frame.
+Opening the graph SHALL start from a readable default zoom, centred on the layout, at which node
+titles are visible — not from a fitted overview that shrinks the whole graph into the frame. The
+view SHALL NOT require a dedicated zoom-in, zoom-out, fit or reset control to be usable: wheel
+zoom, pinch zoom and background drag are sufficient on their own to reach and hold any view the
+reader needs.
 
 #### Scenario: Wheel zoom around the pointer
 
@@ -121,12 +120,6 @@ overview that shrinks the whole graph into the frame.
 - **WHEN** the background is dragged
 - **THEN** the whole graph translates with the pointer and no node is moved
 
-#### Scenario: Fit to view
-
-- **WHEN** the fit control is used
-- **THEN** every visible node is inside the viewport with a margin, at a zoom within the
-  allowed bounds
-
 #### Scenario: Zoom is bounded
 
 - **WHEN** zooming continues past the minimum or maximum
@@ -138,19 +131,32 @@ overview that shrinks the whole graph into the frame.
 - **THEN** the viewport is at a zoom where node titles are visible, not fitted so
   tightly that nodes read as unmarked blobs
 
+<!-- The three scenarios below are named for controls this change removes (see the requirement
+     text above). Names are kept for spec history per this project's convention; each now
+     describes the wheel/pinch/drag behaviour that makes the named control unnecessary, rather
+     than the control itself. -->
+
+#### Scenario: Fit to view
+
+- **WHEN** the graph is opened
+- **THEN** it starts at a zoom that already frames the settled layout closely enough to read,
+  with no separate fit action needed to reach that view
+
 #### Scenario: Zoom in control
 
-- **WHEN** the zoom-in control is used
-- **THEN** the view zooms in about the centre of the viewport, staying within the allowed bounds
+- **WHEN** the wheel is turned to zoom in, rather than a dedicated zoom-in control being used
+- **THEN** the view zooms in about the pointer, staying within the allowed bounds, with no
+  separate zoom-in control needed
 
 #### Scenario: Zoom out control
 
-- **WHEN** the zoom-out control is used
-- **THEN** the view zooms out about the centre of the viewport, staying within the allowed bounds
+- **WHEN** the wheel is turned to zoom out, rather than a dedicated zoom-out control being used
+- **THEN** the view zooms out about the pointer, staying within the allowed bounds, with no
+  separate zoom-out control needed
 
 ### Requirement: Label detail follows the zoom
 
-Node titles SHALL be drawn on the chip. The amount of title shown SHALL depend on
+Node titles SHALL be drawn near the node. The amount of title shown SHALL depend on
 the zoom: below a low threshold only the titles of hub nodes and of the selected or
 hovered node are shown; at intermediate zoom titles are shown truncated; above a
 high threshold titles are shown in full.
@@ -240,8 +246,8 @@ the legend SHALL hide or show that group's nodes. A hidden group's nodes and the
 touching them SHALL be excluded from the drawing and from the layout, and the remaining
 graph SHALL settle again.
 
-Each group of two or more visible nodes SHALL be drawn inside a translucent region in that
-group's colour, behind the edges and nodes, that follows the group's nodes as they move.
+Each node SHALL be filled with its group's colour, so that a group is legible as a cluster of
+same-coloured nodes drawn near each other, without a separate boundary shape drawn around it.
 
 #### Scenario: Hiding a group
 
@@ -252,8 +258,8 @@ group's colour, behind the edges and nodes, that follows the group's nodes as th
 #### Scenario: A group's cluster region
 
 - **WHEN** a group has two or more visible nodes
-- **THEN** a translucent region in that group's colour encloses them, behind the edges and
-  nodes, and follows them as they move
+- **THEN** its nodes share their group's fill colour and are laid out nearer each other than
+  to another group's nodes, rather than being enclosed by a separately drawn region
 
 #### Scenario: Every group hidden
 
@@ -262,29 +268,23 @@ group's colour, behind the edges and nodes, that follows the group's nodes as th
 
 ### Requirement: Nodes and edges carry their meaning
 
-A node SHALL be drawn as a labeled chip: the page title in the app's type scale,
-on a surface that uses the app's background and border tokens, with the node's
-group colour as an accent rather than as a filled blob. A node's size SHALL still
-encode its number of links, and a hub file SHALL be drawn so it is distinguishable
-from a document at a glance.
+A node SHALL be drawn as a circle filled with its group's colour. A node's radius SHALL encode
+its number of links, and a hub file SHALL be drawn so it is distinguishable from a document at
+a glance.
 
 An edge SHALL be drawn with an arrowhead at its target when the link exists in one
 direction only. When two pages link to each other, the pair SHALL be drawn as a
-single edge with no arrowhead. An edge's endpoint SHALL be trimmed to the chip's visible
-rectangle boundary — the point where the line to the other chip's centre actually crosses that
-chip's edge — rather than to a circle standing in for the chip's shape. This SHALL hold
-regardless of the angle the edge arrives from, including near-vertically above or below a chip,
-where a circular approximation is furthest from the chip's real boundary.
+single edge with no arrowhead. An edge's endpoint SHALL be trimmed to the target circle's
+visible boundary rather than terminating at or past its centre or its label.
 
-Two chips' rectangles SHALL NOT overlap once the layout has settled: collision uses the same
-axis-aligned rectangle test that decides whether two chips overlap for any other purpose, not a
-circular approximation of the chip. A node's chip, including its label, SHALL NOT be painted so
-that another node's chip covers it. While the layout is unsettled — moving under a fresh disturbance
-such as a drag or a reheat — two chips MAY transiently overlap before collision resolves them; for
-that transient case, the one judged less important to show — the smaller or lower-degree of the
-pair, with ties broken by keeping whichever is closer to the pointer or the current selection —
-SHALL have its label suppressed or faded rather than be silently painted over. A hub's label SHALL
-never be the one suppressed by a document sharing its position.
+Two nodes' circles SHALL NOT overlap once the layout has settled. A node's label SHALL NOT be
+painted so that another node's circle or label covers it. While the layout is unsettled — moving
+under a fresh disturbance such as a drag or a reheat — two nodes MAY transiently sit close enough
+that their labels would collide before collision has fully resolved them; for that transient case,
+the one judged less important to show — the lower-degree of the pair, with ties broken by keeping
+whichever is closer to the pointer or the current selection — SHALL have its label suppressed or
+faded rather than be silently painted over. A hub's label SHALL never be the one suppressed by a
+document sharing its position.
 
 #### Scenario: A one-way link
 
@@ -299,31 +299,33 @@ never be the one suppressed by a document sharing its position.
 #### Scenario: A hub among documents
 
 - **WHEN** a hub file and a document are both drawn
-- **THEN** they are distinguishable by the weight of the chip, each node's size
-  reflects its number of links, and each chip shows its title at the default zoom
+- **THEN** they are distinguishable by size or weight, each node's radius reflects its
+  number of links, and each node shows its title at the default zoom
 
 #### Scenario: An edge trims to the rectangle, not a circumscribed circle
 
-- **WHEN** an edge arrives at a wide, short chip from near-vertically above or below it
-- **THEN** the edge terminates at that chip's visible rectangle boundary rather than stopping
-  short of it at the distance a circumscribed circle would imply
+<!-- Name kept for spec history; the node this scenario trims edges against is itself now a
+     circle, so trimming to its boundary is exact rather than an approximation of a rectangle. -->
+- **WHEN** an edge arrives at a node from any angle
+- **THEN** the edge terminates at that node's own visible boundary — a real circle now, not a
+  circle standing in for some other shape — rather than at its centre or short of it
 
 #### Scenario: Chips do not overlap once the layout has settled
 
-- **WHEN** the layout has settled for a graph of chips of varied sizes
-- **THEN** no two chips' rectangles overlap, checked pairwise by the same axis-aligned box test
-  the rest of the graph's overlap handling uses
+<!-- Name kept for spec history; "chip" now means the circular node. -->
+- **WHEN** the layout has settled for a graph of nodes of varied sizes
+- **THEN** no two nodes' circles overlap
 
 #### Scenario: Two chips still end up close together
 
-- **WHEN** a chip is dragged so that it transiently overlaps a neighbour before collision has had a
-  chance to separate them again
-- **THEN** at most one of the two labels is drawn at that position, chosen by size or degree,
+- **WHEN** a node is dragged so that it transiently ends up close enough to a neighbour that
+  their labels would collide, before collision has had a chance to separate them again
+- **THEN** at most one of the two labels is drawn at that position, chosen by degree,
   and the other's label is suppressed or faded rather than drawn underneath the first
 
 #### Scenario: A hub is never hidden by a document
 
-- **WHEN** a hub chip and a document chip end up close enough that one label must be
+- **WHEN** a hub node and a document node end up close enough that one label must be
   suppressed
 - **THEN** the hub's label is the one that stays visible
 
@@ -365,7 +367,9 @@ pinning, filtering or refetching SHALL settle the layout in one step rather than
 
 #### Scenario: Fitting the view with reduced motion
 
-- **WHEN** the fit or reset control is used and the reader prefers reduced motion
+- **WHEN** a search brings a single matching node into the viewport — the one remaining
+  reader-triggered viewport change now that there is no separate fit or reset control — and
+  the reader prefers reduced motion
 - **THEN** the viewport changes in one step rather than animating
 
 ### Requirement: The graph stays responsive at workspace scale
@@ -387,41 +391,39 @@ renderer SHALL NOT be loaded by pages that do not draw the graph.
 
 ### Requirement: The graph follows the app's theme
 
-Every colour, type size and chrome the graph draws — nodes, edges, labels, cluster
-regions, highlight, dimming, zoom controls — SHALL come from the app's design
-tokens, so that switching between the light and dark themes restyles the graph with
-no other change. Nodes SHALL use the same surface, border and type language as the
-rest of the web app, not a one-off filled-blob look.
+Every colour and type size the graph draws — nodes, edges, labels, highlight and dimming —
+SHALL come from the app's design tokens, so that switching between the light and dark themes
+restyles the graph with no other change.
 
 #### Scenario: Switching theme
 
 - **WHEN** the app is switched between its light and dark themes with the graph open
-- **THEN** the graph's nodes, edges, labels and cluster regions take the new theme's colours
+- **THEN** the graph's nodes, edges and labels take the new theme's colours
 
 ### Requirement: The default layout is spread out
 
 The force layout SHALL space nodes so that at the default viewport neighbouring
-chips do not overlap and each visible title can be read without a first zoom.
+nodes do not overlap and each visible title can be read without a first zoom.
 Clustering by project or scope SHALL remain, but SHALL NOT pack a group's pages into a
 single unreadable clump.
 
 Siblings in the same group — nodes with no direct link between them, pulled together only by
 the shared cluster — SHALL be kept apart by at least the same margin as linked nodes. A
 group's clustering SHALL NOT be pulled so tightly that its own collision resolution cannot
-keep up: the layout SHALL still read as separated chips, not a blob, once the layout has
+keep up: the layout SHALL still read as separated nodes, not a blob, once the layout has
 settled, regardless of how many pages the group has.
 
 #### Scenario: Neighbours are separated
 
 - **WHEN** the graph view is opened with several linked nodes
-- **THEN** neighbouring chips are separated by a gap and their titles do not sit on
+- **THEN** neighbouring nodes are separated by a gap and their titles do not sit on
   top of one another
 
 #### Scenario: A crowded group stays legible
 
 - **WHEN** a group has enough pages that they would otherwise be pulled into a single dense
   clump
-- **THEN** the settled layout still keeps each chip in that group separated from its
+- **THEN** the settled layout still keeps each node in that group separated from its
   siblings by a visible gap
 
 ### Requirement: Stub workspace hubs are not drawn

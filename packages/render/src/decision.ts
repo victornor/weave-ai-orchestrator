@@ -111,6 +111,7 @@ export function decisionToCard(decision: Decision, ctx: DecisionCardContext = {}
     answer: d.status === 'answered' ? { key: d.answerKey ?? null, text: d.answerText ? redact(d.answerText) : null, at: d.answeredAt ?? null } : null,
     answerElsewhere,
     held: weaverReviewCopy(d)?.held ?? false,
+    awaitsReview: weaverReviewCopy(d)?.awaitsReview ?? false,
   };
   if (answerElsewhere) {
     // No options either: offering buttons that cannot carry the values would answer the decision
@@ -239,6 +240,8 @@ function body(variant: CardVariant, d: Decision, target: Record<string, unknown>
     if (review.note) push(null, review.note);
     // VS-266: in addition to the concern line and note, not a replacement for either.
     if (review.held) push(null, 'Approval is held until this is revised, or you override it.');
+    // VS-281: the unreviewed hold, distinct from the concern hold above.
+    if (review.awaitsReview) push(null, 'Approval waits on the weaver\u2019s review — you can override it.');
   }
   return lines;
 }

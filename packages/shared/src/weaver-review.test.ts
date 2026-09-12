@@ -80,25 +80,25 @@ describe('weaverReviewCopy', () => {
 
   it('uses the exact unanswered and after-the-fact copy (VS-234)', () => {
     expect(weaverReviewCopy(fields('plan_approval'))).toEqual({
-      line: "Weaver hasn't reviewed yet", note: null, tone: 'unseen', held: false,
+      line: "Weaver hasn't reviewed yet", note: null, tone: 'unseen', held: false, awaitsReview: true,
     });
     expect(weaverReviewCopy(fields('merge_approval', {
       weaverReviewStatus: 'looked', weaverReviewedAt: PRIOR, weaverReviewNote: 'migration matches the plan',
-    }))).toEqual({ line: 'Weaver reviewed — no concerns', note: 'migration matches the plan', tone: 'looked', held: false });
+    }))).toEqual({ line: 'Weaver reviewed — no concerns', note: 'migration matches the plan', tone: 'looked', held: false, awaitsReview: false });
     expect(weaverReviewCopy(fields('action_approval', {
       weaverReviewStatus: 'looked', weaverReviewedAt: LATER, answeredAt: PRIOR, weaverReviewNote: 'diff is exactly the plan',
-    }))).toEqual({ line: 'Weaver reviewed after you answered — no concerns', note: 'diff is exactly the plan', tone: 'after', held: false });
+    }))).toEqual({ line: 'Weaver reviewed after you answered — no concerns', note: 'diff is exactly the plan', tone: 'after', held: false, awaitsReview: false });
     expect(weaverReviewCopy(fields('plan_approval', {
       weaverReviewStatus: 'concerns', weaverReviewedAt: PRIOR,
       weaverReviewNote: 'split the migration',
     }))).toEqual({
-      line: 'Weaver reviewed — has concerns', note: 'split the migration', tone: 'concerns', held: true,
+      line: 'Weaver reviewed — has concerns', note: 'split the migration', tone: 'concerns', held: true, awaitsReview: false,
     });
     expect(weaverReviewCopy(fields('merge_approval', {
       status: 'answered', weaverReviewStatus: 'concerns', weaverReviewedAt: LATER, answeredAt: PRIOR,
       weaverReviewNote: 'CI is red',
     }))).toEqual({
-      line: 'Weaver reviewed after you answered — has concerns', note: 'CI is red', tone: 'concerns', held: false,
+      line: 'Weaver reviewed after you answered — has concerns', note: 'CI is red', tone: 'concerns', held: false, awaitsReview: false,
     });
   });
 
@@ -106,7 +106,40 @@ describe('weaverReviewCopy', () => {
     const copy = weaverReviewCopy(fields('plan_approval', {
       weaverReviewStatus: 'looked', weaverReviewedAt: PRIOR, weaverReviewNote: null,
     }));
-    expect(copy).toEqual({ line: 'Weaver reviewed — no concerns', note: null, tone: 'looked', held: false });
+    expect(copy).toEqual({ line: 'Weaver reviewed — no concerns', note: null, tone: 'looked', held: false, awaitsReview: false });
+  });
+
+  describe('awaitsReview (VS-281)', () => {
+    it('is true only for an open, unseen decision', () => {
+      expect(weaverReviewCopy(fields('plan_approval', { status: 'open', weaverReviewStatus: 'unseen' }))!.awaitsReview).toBe(true);
+      expect(weaverReviewCopy(fields('merge_approval', { status: 'open', weaverReviewStatus: 'unseen' }))!.awaitsReview).toBe(true);
+      expect(weaverReviewCopy(fields('action_approval', { status: 'open', weaverReviewStatus: 'unseen' }))!.awaitsReview).toBe(true);
+    });
+
+    it('is false for looked and concerns', () => {
+      expect(weaverReviewCopy(fields('plan_approval', {
+        status: 'open', weaverReviewStatus: 'looked', weaverReviewedAt: PRIOR, weaverReviewNote: 'clean',
+      }))!.awaitsReview).toBe(false);
+      expect(weaverReviewCopy(fields('plan_approval', {
+        status: 'open', weaverReviewStatus: 'concerns', weaverReviewedAt: PRIOR, weaverReviewNote: 'needs work',
+      }))!.awaitsReview).toBe(false);
+    });
+
+    it('is false once the decision is no longer open', () => {
+      for (const status of ['answered', 'superseded', 'withdrawn', 'expired'] as const) {
+        expect(weaverReviewCopy(fields('plan_approval', {
+          status, weaverReviewStatus: 'unseen',
+        }))!.awaitsReview, status).toBe(false);
+      }
+    });
+
+    it('does not make a concerns card look merely unreviewed', () => {
+      const copy = weaverReviewCopy(fields('merge_approval', {
+        status: 'open', weaverReviewStatus: 'concerns', weaverReviewedAt: PRIOR, weaverReviewNote: 'CI is red',
+      }));
+      expect(copy!.held).toBe(true);
+      expect(copy!.awaitsReview).toBe(false);
+    });
   });
 
   describe('held (VS-266)', () => {

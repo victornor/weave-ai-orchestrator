@@ -19,6 +19,13 @@ import { PlanPreview } from '../components/PlanPreview';
 import { MergeQueueBadge, MergeQueueStrip } from '../components/MergeQueue';
 import { agent, decision, ticket } from './factories';
 
+/**
+ * VS-281: a card the weaver has reviewed. Since an unreviewed card withholds its approve action,
+ * every test whose subject is not the review state uses this so its Approve/Approve merge is offered.
+ */
+const reviewed = (over: Partial<Decision> = {}): Decision =>
+  decision({ weaverReviewStatus: 'looked', weaverReviewedAt: '2026-09-11T03:01:00.000Z', weaverReviewNote: 'reviewed', ...over });
+
 const planDoc = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const docById = vi.hoisted(() => ({
   head: null as Record<string, unknown> | null,
@@ -345,7 +352,8 @@ const question = (over: Partial<Parameters<typeof decision>[0]> = {}): ReturnTyp
 
 describe('DecisionCard', () => {
   it('renders the plan variant with Approve / Revise / reject', () => {
-    render(<DecisionCard decision={decision()} ticketIdentifier="ACME-42" onAnswer={() => undefined} />);
+    // VS-281: an approve action is only offered on a card the weaver has reviewed.
+    render(<DecisionCard decision={reviewed()} ticketIdentifier="ACME-42" onAnswer={() => undefined} />);
     expect(screen.getByText('Needs you')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Revise/ })).toBeInTheDocument();
@@ -402,7 +410,7 @@ describe('DecisionCard', () => {
 
   it('answers with the approve key', () => {
     const onAnswer = vi.fn();
-    render(<DecisionCard decision={decision()} onAnswer={onAnswer} />);
+    render(<DecisionCard decision={reviewed()} onAnswer={onAnswer} />);
     fireEvent.click(screen.getByRole('button', { name: /Approve/ }));
     expect(onAnswer).toHaveBeenCalledWith({ key: 'approve' });
   });
@@ -516,7 +524,7 @@ describe('DecisionCard', () => {
 
     it('plan_approval: Approve and Reject', () => {
       const onAnswer = vi.fn();
-      render(<DecisionCard decision={decision({ kind: 'plan_approval' })} onAnswer={onAnswer} />);
+      render(<DecisionCard decision={reviewed({ kind: 'plan_approval' })} onAnswer={onAnswer} />);
       fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
       fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
       expect(onAnswer).toHaveBeenCalledTimes(2);
@@ -535,7 +543,7 @@ describe('DecisionCard', () => {
 
     it('action_approval: Approve and Reject', () => {
       const onAnswer = vi.fn();
-      render(<DecisionCard decision={decision({ kind: 'action_approval' })} onAnswer={onAnswer} />);
+      render(<DecisionCard decision={reviewed({ kind: 'action_approval' })} onAnswer={onAnswer} />);
       fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
       fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
       expect(onAnswer).toHaveBeenCalledTimes(2);
@@ -554,7 +562,7 @@ describe('DecisionCard', () => {
 
     it('merge_approval: Approve merge, and offers no Hold', () => {
       const onAnswer = vi.fn();
-      render(<DecisionCard decision={decision({ kind: 'merge_approval' })} onAnswer={onAnswer} />);
+      render(<DecisionCard decision={reviewed({ kind: 'merge_approval' })} onAnswer={onAnswer} />);
       expect(screen.queryByRole('button', { name: 'Hold' })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Approve merge' }));
       expect(onAnswer).toHaveBeenCalledTimes(1);
@@ -581,14 +589,17 @@ describe('DecisionCard', () => {
   });
 
   describe('conductor review line (VS-223, VS-234)', () => {
-    it('shows unseen on a plan card and still sends the real Approve/Revise/Reject keys', () => {
+    it('shows unseen on a plan card, withholds Approve, and keeps Reject (VS-281)', () => {
       const onAnswer = vi.fn();
       render(<DecisionCard decision={decision({ kind: 'plan_approval' })} onAnswer={onAnswer} />);
       const line = screen.getByText("Weaver hasn't reviewed yet");
       expect(line).toHaveClass('text-blocked');
-      fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
+      expect(screen.getByText('Approval waits on the weaver\u2019s review — you can override it.')).toBeInTheDocument();
+      // VS-281: the approving action is not offered at all — only the deliberate override is.
+      expect(screen.queryByRole('button', { name: /^Approve/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Override & approve/ })).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
-      expect(onAnswer.mock.calls.map((c) => c[0]?.key)).toEqual(['approve', 'reject']);
+      expect(onAnswer.mock.calls.map((c) => c[0]?.key)).toEqual(['reject']);
     });
 
     it('shows a reviewed merge card as its conclusion with its note, still Approve merge', () => {
@@ -772,8 +783,49 @@ describe('DecisionCard', () => {
     });
 
     it('offers no override control when the decision is not held', () => {
-      render(<DecisionCard decision={decision({ kind: 'plan_approval' })} onAnswer={() => undefined} />);
+      render(<DecisionCard decision={reviewed({ kind: 'plan_approval' })} onAnswer={() => undefined} />);
       expect(screen.queryByRole('button', { name: /Override & approve/ })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('unreviewed approval (VS-281)', () => {
+    const unreviewed = (kind: 'plan_approval' | 'action_approval' | 'merge_approval') =>
+      decision({ kind, status: 'open', weaverReviewStatus: 'unseen' });
+
+    it('withholds Approve on an unreviewed plan and action approval, keeping Revise and Reject', () => {
+      for (const kind of ['plan_approval', 'action_approval'] as const) {
+        const { unmount } = render(<DecisionCard decision={unreviewed(kind)} onAnswer={() => undefined} />);
+        expect(screen.getByText('Approval waits on the weaver\u2019s review — you can override it.'), kind).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^Approve/ }), kind).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Override & approve/ }), kind).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Revise/ }), kind).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Reject' }), kind).toBeInTheDocument();
+        unmount();
+      }
+    });
+
+    it('withholds Approve merge on an unreviewed merge approval, keeping the override', () => {
+      render(<DecisionCard decision={unreviewed('merge_approval')} onAnswer={() => undefined} />);
+      expect(screen.queryByRole('button', { name: 'Approve merge' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Override & approve/ })).toBeInTheDocument();
+    });
+
+    it('lets the human override with a stated reason, sending the approve key and the override pair', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={unreviewed('plan_approval')} ticketIdentifier="ACME-42" onAnswer={onAnswer} />);
+      fireEvent.click(screen.getByRole('button', { name: /Override & approve/ }));
+      const field = screen.getByLabelText('Why override the hold?');
+      fireEvent.keyDown(field, { key: 'Enter' });
+      expect(onAnswer).not.toHaveBeenCalled();
+      fireEvent.change(field, { target: { value: 'read it myself, ship it' } });
+      fireEvent.keyDown(field, { key: 'Enter' });
+      expect(onAnswer).toHaveBeenCalledExactlyOnceWith({ key: 'approve', overrideHold: true, overrideReason: 'read it myself, ship it' });
+    });
+
+    it('offers the normal Approve again once the card is marked looked', () => {
+      render(<DecisionCard decision={reviewed({ kind: 'plan_approval' })} onAnswer={() => undefined} />);
+      expect(screen.getByRole('button', { name: /^Approve/ })).toBeInTheDocument();
+      expect(screen.queryByText('Approval waits on the weaver\u2019s review — you can override it.')).not.toBeInTheDocument();
     });
   });
 
@@ -1012,13 +1064,13 @@ describe('DecisionCard', () => {
   });
 
   it('applies compact density classes only when compact is set', () => {
-    const { unmount } = render(<DecisionCard decision={decision()} compact onAnswer={() => undefined} />);
+    const { unmount } = render(<DecisionCard decision={reviewed()} compact onAnswer={() => undefined} />);
     const compactBody = screen.getByRole('article').querySelector(':scope > div:last-of-type');
     expect(compactBody).toHaveClass('p-3');
     expect(compactBody).not.toHaveClass('p-3.5');
     expect(screen.getByRole('button', { name: /Approve/ })).toHaveClass('px-3', 'text-ui', 'h-thumb');
     unmount();
-    render(<DecisionCard decision={decision()} onAnswer={() => undefined} />);
+    render(<DecisionCard decision={reviewed()} onAnswer={() => undefined} />);
     const defaultBody = screen.getByRole('article').querySelector(':scope > div:last-of-type');
     expect(defaultBody).toHaveClass('p-3.5');
     expect(screen.getByRole('button', { name: /Approve/ })).toHaveClass('px-4', 'text-body', 'h-thumb');
@@ -1474,7 +1526,7 @@ describe('PlanPreview', () => {
 
   it('opens the plan from the approval control without leaving it', () => {
     planDoc.current = doc('# Plan for dark-mode\n\n## Proposal\n\nSemantic tokens first.');
-    render(<DecisionCard decision={decision()} plan={<PlanPreview decision={decision()} />} onAnswer={() => undefined} />);
+    render(<DecisionCard decision={reviewed()} plan={<PlanPreview decision={reviewed()} />} onAnswer={() => undefined} />);
     const toggle = screen.getByRole('button', { name: /Read the plan/ });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('Semantic tokens first.')).not.toBeInTheDocument();
@@ -1553,7 +1605,7 @@ describe('the document a decision target points at (VS-224)', () => {
     docById.calls = [];
     render(
       <DecisionCard
-        decision={decision({ kind: 'merge_approval', target: { prUrl: 'https://git.example/acme/web/pull/12', prNumber: 12, ci: { passed: 2, total: 2 } } })}
+        decision={reviewed({ kind: 'merge_approval', target: { prUrl: 'https://git.example/acme/web/pull/12', prNumber: 12, ci: { passed: 2, total: 2 } } })}
         ws="ws1"
         onAnswer={() => undefined}
       />,

@@ -15,16 +15,22 @@ export interface StaleAnswerCopy {
 interface StaleDetails {
   status?: string;
   supersededBy?: string;
+  weaverReviewStatus?: string;
   weaverReviewNote?: string;
 }
 
 /** `null` for anything that is not a stale-decision refusal — the caller falls back to `e.message`. */
 export function staleAnswerCopy(e: unknown, ticketId: string | null): StaleAnswerCopy | null {
   if (!(e instanceof ApiError)) return null;
-  // VS-266: a distinct refusal from `wrong_status` — the decision is still open, just held by a
-  // weaver concern. Named here rather than left to the raw error message.
+  // VS-266 / VS-281: a distinct refusal from `wrong_status` — the decision is still open, held
+  // either by a weaver concern or because the weaver has not reviewed it yet. Named here rather
+  // than left to the raw error message, and the two are not allowed to read the same.
   if (e.code === 'revision_pending') {
-    const note = (e.details as StaleDetails | undefined)?.weaverReviewNote;
+    const details = e.details as StaleDetails | undefined;
+    if (details?.weaverReviewStatus === 'unseen') {
+      return { title: 'Waiting on the weaver', detail: 'The weaver has not reviewed this yet. It can be approved once they have, or you can override the hold with a reason.', ticketId: null };
+    }
+    const note = details?.weaverReviewNote;
     return { title: 'Approval is held', detail: note ? `The weaver has concerns: ${note}` : 'The weaver has concerns about this — revise it, or override the hold.', ticketId: null };
   }
   if (e.code !== 'wrong_status') return null;

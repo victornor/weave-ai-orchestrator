@@ -9,12 +9,20 @@ export type WeaverReviewCopy = {
   note: string | null;
   tone: 'unseen' | 'looked' | 'concerns' | 'after';
   /**
-   * VS-266: true exactly when this decision's approving answer is currently refused — a `concerns`
-   * mark on a still-`open` decision. False for every other state, including an `answered`/
-   * `superseded`/`withdrawn`/`expired` decision that carries a `concerns` mark: there is nothing
-   * left to approve on those, for reasons unrelated to this hold.
+   * VS-266: true exactly when this decision's approving answer is currently refused under the
+   * concerns hold — a `concerns` mark on a still-`open` decision. False for every other state,
+   * including an `answered`/`superseded`/`withdrawn`/`expired` decision that carries a `concerns`
+   * mark: there is nothing left to approve on those, for reasons unrelated to this hold.
    */
   held: boolean;
+  /**
+   * VS-281: true exactly when the approving answer is refused under the *unreviewed* hold — the
+   * default `unseen` state on a still-`open` decision. Distinct from `held`, which is the concerns
+   * hold: the copy differs ("waiting on the weaver's review" vs "waiting for a revision"), and the
+   * unseen hold is lifted by a `looked` mark rather than by supersession. False once the decision
+   * is no longer `open`, for the same reason `held` is.
+   */
+  awaitsReview: boolean;
 };
 
 export type WeaverReviewFields = Pick<
@@ -45,7 +53,12 @@ export function weaverReviewCopy(d: WeaverReviewFields): WeaverReviewCopy | null
   const reviewStatus: WeaverReviewStatus = d.weaverReviewStatus ?? 'unseen';
   const after = reviewIsAfterAnswer(d);
   if (reviewStatus === 'unseen') {
-    return { line: "Weaver hasn't reviewed yet", note: null, tone: 'unseen', held: false };
+    return {
+      line: "Weaver hasn't reviewed yet", note: null, tone: 'unseen', held: false,
+      // VS-281: only an open decision is still waiting on an answer at all — an answered or
+      // superseded one has nothing left to hold.
+      awaitsReview: d.status === 'open',
+    };
   }
   if (reviewStatus === 'looked') {
     // VS-234: the line states the outcome, the required note carries the reasoning. Marks made
@@ -55,6 +68,7 @@ export function weaverReviewCopy(d: WeaverReviewFields): WeaverReviewCopy | null
       note: d.weaverReviewNote ?? null,
       tone: after ? 'after' : 'looked',
       held: false,
+      awaitsReview: false,
     };
   }
   return {
@@ -64,5 +78,6 @@ export function weaverReviewCopy(d: WeaverReviewFields): WeaverReviewCopy | null
     // VS-266: only an open decision is still waiting on an answer at all — held is moot once it is
     // answered, superseded, withdrawn or expired.
     held: d.status === 'open',
+    awaitsReview: false,
   };
 }

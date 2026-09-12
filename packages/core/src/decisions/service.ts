@@ -407,17 +407,26 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       const supersededBy = d.status === 'superseded' ? replacementFor(d) : null;
       throw new OcError('wrong_status', `decision ${id} is ${d.status}`, { status: d.status, ...(supersededBy ? { supersededBy } : {}) });
     }
-    // VS-266: a decision the weaver marked `concerns` refuses its approving answer, from any
-    // actor, until it stops being the live question (answered, or superseded by a fresh one raised
-    // through a real revision cycle) or a human deliberately overrides the hold. Every other answer
-    // — revise, reject, the non-approving merge option, any answer on a decision that is not held —
-    // is untouched by this check.
-    const held = d.weaverReviewStatus === 'concerns' && ans.key != null && ans.key === approvingKeyOf(d.kind);
+    // VS-266 / VS-281: an approving answer on a still-open review-carrying decision is held in two
+    // cases. The weaver marked `concerns` (VS-266 — every actor, including the system actor, so an
+    // unattended merge cannot silently override a stated objection). Or the weaver has not reviewed
+    // it yet (VS-281 — every actor except the daemon's own `system` grant: a YOLO plan approval is
+    // always `unseen` at the instant it is answered, so holding the system actor would break YOLO
+    // entirely). Every other answer — revise, reject, the non-approving merge option, any answer on
+    // a decision that is not held — is untouched by this check.
+    const approving = ans.key != null && ans.key === approvingKeyOf(d.kind);
+    const reviewStatus = d.weaverReviewStatus ?? 'unseen';
+    const hasConcerns = reviewStatus === 'concerns';
+    const unreviewed = reviewStatus === 'unseen';
+    const held = approving && (hasConcerns || (unreviewed && actor.kind !== 'system'));
     const overrideReason = (ans.overrideReason ?? '').trim();
     const overridden = held && ans.overrideHold === true && overrideReason !== '';
     if (held && !overridden) {
-      throw new OcError('revision_pending', `decision ${id} is held: the weaver has concerns and no revision has landed`, {
-        weaverReviewNote: d.weaverReviewNote, weaverReviewedAt: d.weaverReviewedAt,
+      throw new OcError('revision_pending', hasConcerns
+        ? `decision ${id} is held: the weaver has concerns and no revision has landed`
+        : `decision ${id} is held: the weaver has not reviewed it yet`, {
+        weaverReviewStatus: reviewStatus,
+        ...(hasConcerns ? { weaverReviewNote: d.weaverReviewNote, weaverReviewedAt: d.weaverReviewedAt } : {}),
       });
     }
     const suppliedInputs = ans.inputs ?? {};
@@ -447,7 +456,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       });
       const next = get(d.id);
       recordActivity(db, ws, actor, 'decision.answer', 'decision', d.id, { key, kind: d.kind }, d.ticketId);
-      if (overridden) recordActivity(db, ws, actor, 'decision.hold_overridden', 'decision', d.id, { reason: overrideReason }, d.ticketId);
+      if (overridden) recordActivity(db, ws, actor, 'decision.hold_overridden', 'decision', d.id, { reason: overrideReason, weaverReviewStatus: reviewStatus }, d.ticketId);
       ctx.events.emit('decision.answered', 'decision', d.id, next);
       return next;
     });
@@ -455,7 +464,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     // Recorded in the audit trail above; also surfaced in-place on the ticket, since that is where a
     // human reading back "why did this merge/approve without a revision" would look first (VS-266).
     if (overridden && d.ticketId) {
-      deps().tickets.comment(actor, d.ticketId, `Approval held by a weaver concern was overridden: ${overrideReason}`, 'comment', 'trusted');
+      deps().tickets.comment(actor, d.ticketId, `Approval held by the weaver's ${hasConcerns ? 'concerns' : 'pending review'} was overridden: ${overrideReason}`, 'comment', 'trusted');
     }
 
     // Verbatim answer text is already recorded; side effects come second so a failure never loses the answer.

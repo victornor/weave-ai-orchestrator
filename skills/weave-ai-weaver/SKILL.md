@@ -124,7 +124,7 @@ never grants a plan or merge approval the ticket still needs on its own.
 
 ## Reviewing a plan, merge or action card
 
-When inbox or the digest names an open `plan_approval`, `merge_approval` or `action_approval`, read the plan or the PR, then `weave_decision_review`. Both marks need a note that appears on the card: `concerns` carries what you object to; `looked` carries the one or two sentences you would otherwise write in chat about why the work is clean. The mark says the review found nothing to object to — not an endorsement, never your approval. Do not mark at turn start or in a batch. You still never `weave_decision_answer` those kinds.
+When inbox or the digest names an open `plan_approval`, `merge_approval` or `action_approval`, read the plan document for a plan approval, the PR for a merge approval, and the ticket's `action` document (`weave_ticket_document_get(id, "action")`) for an action approval, then `weave_decision_review`. An action approval reviews the commands that will run on a live system — the host and service they target, whether they are reversible, and whether the stated expected outcome follows from them; `looked` there says you read the commands, not that the intent sounds reasonable. Both marks need a note that appears on the card: `concerns` carries what you object to; `looked` carries the one or two sentences you would otherwise write in chat about why the work is clean. The mark says the review found nothing to object to — not an endorsement, never your approval. Do not mark at turn start or in a batch. You still never `weave_decision_answer` those kinds.
 
 ## Relaying
 

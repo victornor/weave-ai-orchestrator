@@ -17,6 +17,7 @@ import { recordActivity } from '../events.js';
 import { git } from '../util/git.js';
 import { createSerializer } from '../util/serialize.js';
 import * as cli from './cli.js';
+import { findUndeclaredCapabilityRetirements } from './retirement.js';
 
 const SYSTEM: Actor = { kind: 'system', id: null };
 
@@ -134,10 +135,15 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
         return { ok: false, issues: [{ level: 'error', message: 'the openspec binary is not installed' }] };
       }
       const errors = validation.issues.filter((i) => i.level === 'error');
-      if (change?.isPlanningComplete === true && errors.length === 0) {
+      // `openspec validate --strict` validates a delta's own shape, never what merging it would
+      // leave behind — a change that empties a capability without declaring `retire_capabilities`
+      // validates clean here and only fails once `openspec archive` runs, after the PR has merged
+      // and closed (VS-293). Catch it at the one point a worker can still fix it.
+      const retirementIssues = findUndeclaredCapabilityRetirements(cwd, changeName);
+      if (change?.isPlanningComplete === true && errors.length === 0 && retirementIssues.length === 0) {
         return { ok: true, plan: renderPlan(join(cwd, 'openspec', 'changes', changeName), changeName) };
       }
-      const issues = [...validation.issues];
+      const issues = [...validation.issues, ...retirementIssues];
       if (change?.isPlanningComplete !== true) {
         const pending = (change?.artifacts ?? []).filter((a) => a.status !== 'done' && a.status !== 'skipped').map((a) => a.id);
         issues.unshift({ level: 'error', message: `planning is not complete for ${changeName}${pending.length ? `: ${pending.join(', ')} still ${pending.length === 1 ? 'is' : 'are'} outstanding` : ''}` });

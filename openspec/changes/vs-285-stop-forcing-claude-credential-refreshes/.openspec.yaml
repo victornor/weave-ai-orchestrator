@@ -2,3 +2,4 @@ schema: spec-driven
 created: 2026-09-12
 goal: Stop forcing Claude credential refreshes and stop writing the host
   credential file
+retire_capabilities: true

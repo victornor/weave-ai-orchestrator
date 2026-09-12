@@ -138,6 +138,41 @@ describe('OpenSpecService.validateForProposed', () => {
       { level: 'error', message: 'no spec deltas', path: 'specs/' },
     ]);
   });
+
+  // VS-293: `openspec validate --strict` validates a delta's own shape, not what merging it would
+  // leave behind, so a change that empties a capability without declaring `retire_capabilities`
+  // reports clean here (READY_CASES's fake `validate` case) and only fails once `openspec archive`
+  // runs, after the PR has merged and closed. These fixtures reuse VS-285's own shape: a delta
+  // that `## REMOVED Requirements`-lists every requirement its capability's main spec has.
+  const ALL_REMOVED_DELTA = '## REMOVED Requirements\n\n### Requirement: Only one\n\n**Reason**: retired.\n\n**Migration**: none.\n';
+  const ONE_REQUIREMENT_MAIN = '# a-capability Specification\n\n## Purpose\n\nOne requirement.\n\n## Requirements\n\n### Requirement: Only one\nThe system SHALL do the one thing.\n\n#### Scenario: It happens\n- **WHEN** asked\n- **THEN** it does the thing\n';
+
+  it('rejects a change that would empty a capability without retire_capabilities set, even though validate itself is clean', async () => {
+    const { harness, ticketId, clone } = setup(READY_CASES);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    writeChange(join(clone, 'openspec', 'changes', CHANGE, 'specs', 'a-capability'), { 'spec.md': ALL_REMOVED_DELTA });
+    writeChange(join(clone, 'openspec', 'specs', 'a-capability'), { 'spec.md': ONE_REQUIREMENT_MAIN });
+
+    const r = await createOpenSpecService(harness.ctx, harness.deps).validateForProposed(ticketId);
+    expect(r.ok).toBe(false);
+    const issues = (r as { issues: Array<{ level: string; message: string }> }).issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.message).toContain("'a-capability'");
+    expect(issues[0]?.message).toContain('retire_capabilities: true');
+  });
+
+  it('accepts the same change once its .openspec.yaml declares retire_capabilities: true', async () => {
+    const { harness, ticketId, clone } = setup(READY_CASES);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), {
+      'proposal.md': 'p\n',
+      '.openspec.yaml': 'schema: spec-driven\nretire_capabilities: true\n',
+    });
+    writeChange(join(clone, 'openspec', 'changes', CHANGE, 'specs', 'a-capability'), { 'spec.md': ALL_REMOVED_DELTA });
+    writeChange(join(clone, 'openspec', 'specs', 'a-capability'), { 'spec.md': ONE_REQUIREMENT_MAIN });
+
+    const r = await createOpenSpecService(harness.ctx, harness.deps).validateForProposed(ticketId);
+    expect(r.ok).toBe(true);
+  });
 });
 
 describe('OpenSpecService.archiveAfterMerge', () => {

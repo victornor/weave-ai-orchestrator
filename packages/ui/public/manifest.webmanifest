@@ -1,11 +1,10 @@
 {
   "name": "Weave AI",
-  "short_name": "Conductor",
+  "short_name": "Weave",
   "description": "Control plane for AI coding agents",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait-primary",
   "background_color": "#08090B",
   "theme_color": "#08090B",
   "icons": [

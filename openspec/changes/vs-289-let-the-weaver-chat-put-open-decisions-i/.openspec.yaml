@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+goal: Let the weaver chat put open decisions in a right-hand rail instead of
+  above the composer

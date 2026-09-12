@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { Decision, DecisionAnswerInputs, Project, RunTrace, ThreadMessage, Ticket } from '@weave-ai/shared';
 import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
+import { Button } from '../components/Button';
 import { Composer } from '../components/Composer';
 import { DecisionCard } from '../components/DecisionCard';
 import { PlanPreview } from '../components/PlanPreview';
@@ -44,6 +45,7 @@ import { useShowSilentTurns } from '../lib/chatPrefs';
 import { readExpandedTraces, toggleExpandedTrace } from '../lib/traceExpansion';
 import { draftKey, useDraft } from '../lib/drafts';
 import { isHiddenFromChat, useHiddenDecisions } from '../lib/hiddenDecisions';
+import { useDecisionLayout } from '../lib/decisionLayout';
 import { MIN_PX, STEP_PX, clampHeight, maxHeight, readDecisionHeight, writeDecisionHeight } from '../lib/decisionHeight';
 import type { HeightBounds } from '../lib/decisionHeight';
 import { isAtBottom, useStickToBottom } from '../lib/stickToBottom';
@@ -85,6 +87,19 @@ function MessageBody({
       <Markdown source={source} className="ac-chat-prose text-body" breaks />
     </div>
   );
+}
+
+/** A media query as a boolean that follows changes (same local-hook pattern as KnowledgeExplorer). */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => (typeof window !== 'undefined' ? window.matchMedia(query).matches : false));
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = (): void => setMatches(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [query]);
+  return matches;
 }
 
 export function ChatRoute(): React.ReactElement {
@@ -274,6 +289,11 @@ export function ChatPage({
   const traces = useRunTraces({ ids: messageRuns, agent: tracesReady ? conductorId : null, since: oldestLoaded });
 
   const showSilent = useShowSilentTurns();
+  // Where the open decisions render, and whether this viewport has room for the split layout at all:
+  // below `md` the chat is a phone surface and the stored choice is ignored (VS-289).
+  const [layout, setLayout] = useDecisionLayout();
+  const narrow = useMediaQuery('(max-width: 767px)');
+  const effectiveLayout = narrow ? 'bottom' : layout;
   const rows = useMemo(
     () => chatRows(entries, traces.data ?? [], { showSilent }),
     [entries, traces.data, showSilent],
@@ -314,6 +334,10 @@ export function ChatPage({
   const { hidden, hide, showMany } = useHiddenDecisions(ws);
   const shown = useMemo(() => pinned.filter((d) => !isHiddenFromChat(d, hidden)), [pinned, hidden]);
   const hiddenOpen = useMemo(() => pinned.filter((d) => isHiddenFromChat(d, hidden)), [pinned, hidden]);
+  // One predicate for both regions: a layout choice with nothing to show must not leave a dead
+  // column, so a region renders only when there is an open card or the hidden-count line.
+  const hasDecisions = shown.length > 0 || hiddenOpen.length > 0;
+  const rail = effectiveLayout === 'split' && hasDecisions;
   // A follow-up comment on the ticket a hidden decision hangs off changes what is being asked, so
   // the card comes back rather than staying hidden against a conversation that has moved on. The
   // other re-pin triggers need no listener: an edited decision stops matching the fingerprint it was
@@ -624,6 +648,41 @@ export function ChatPage({
   const running = (workers.data ?? []).filter((w) => w.status === 'running').length;
   const answered = Math.min(5, (messages.data ?? []).filter((m) => m.direction === 'inbound').length);
 
+  // The open cards and the hidden-count line, rendered in whichever region the layout chose. Built
+  // once and placed in either the bottom strip or the rail, so the two can never drift.
+  const decisionContent = (
+    <>
+      {/* What was hidden is still counted, so the region never quietly under-reports what is waiting:
+          one press brings every one of them back. */}
+      {hiddenOpen.length ? (
+        <button
+          type="button"
+          onClick={() => showMany(hiddenOpen.map((d) => d.id))}
+          className="self-start rounded-r6 border border-dashed border-line-2 px-3 py-1.5 text-micro text-text-3 hover:bg-bg-2 hover:text-text-1"
+        >
+          {hiddenOpen.length} hidden from chat — show {hiddenOpen.length === 1 ? 'it' : 'them'} again
+        </button>
+      ) : null}
+      {shown.map((d) => (
+        <DecisionCard
+          key={d.id}
+          decision={d}
+          {...(askedByConductor(d) ? { asker: 'weaver' as const } : {})}
+          ticketIdentifier={ticketOf(d)?.identifier ?? d.ticketId}
+          projectSlug={projectSlugOf(d)}
+          ws={ws}
+          busy={answer.isPending}
+          plan={<PlanPreview decision={d} />}
+          ticketFiledByConductor={ticketOf(d)?.createdByKind === 'agent'}
+          ticketSummary={ticketOf(d)?.summary}
+          compact
+          onHide={() => hide(d)}
+          onAnswer={(a) => answerDecision(d.id, a)}
+        />
+      ))}
+    </>
+  );
+
   return (
     <Page>
       <PageHeader
@@ -633,6 +692,27 @@ export function ChatPage({
         meta={<span className="hidden md:inline">{`${running} workers running · ${(decisions.data ?? []).filter((d) => d.status === 'open').length} need you`}</span>}
         actions={
           <div className="flex min-w-0 items-center gap-2.5">
+            {/* A phone has no room for two panes, so the option is not offered there (VS-289). */}
+            {!narrow ? (
+              <div className="flex items-center gap-1" role="group" aria-label="Open decisions layout">
+                <Button
+                  variant={effectiveLayout === 'bottom' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  aria-pressed={effectiveLayout === 'bottom'}
+                  onClick={() => setLayout('bottom')}
+                >
+                  Bottom
+                </Button>
+                <Button
+                  variant={effectiveLayout === 'split' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  aria-pressed={effectiveLayout === 'split'}
+                  onClick={() => setLayout('split')}
+                >
+                  Side
+                </Button>
+              </div>
+            ) : null}
             <ContextMeter view={context} />
             {context && hasPlanMeter ? <span className="h-3 w-px bg-line-2" aria-hidden /> : null}
             <SessionLimit accounts={accounts.data} runtimeId={conductorRuntime} sync={planSync} />
@@ -650,246 +730,238 @@ export function ChatPage({
         </div>
       ) : null}
 
-      {/* The button floats over the list, so it is anchored to this wrapper rather than to the
-          scrolled content, which would carry it away with the rest. */}
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <PageBody scrollRef={attachScroll} className="px-4 py-5 md:px-7">
-          <div className="mx-auto flex max-w-3xl flex-col gap-5">
-            {/* Above the history, where the page being fetched will appear. Nothing marks the start
-                of the thread: the loads simply stop once the API has answered with a short page. */}
-            {messages.isLoadingOlder ? (
-              <div role="status" className="flex justify-center">
-                <span className="ac-mono text-micro text-text-4">Loading earlier messages…</span>
-              </div>
-            ) : null}
-
-            {/* No history yet — including the renders before the thread id is known, where the query
-                is disabled and so reports neither loading nor data. Claiming an empty thread there
-                would put the opening pitch on screen for a moment on every visit. */}
-            {messages.data === undefined && !messages.isError ? (
-              <>
-                <Skeleton className="ml-auto h-12 w-2/3 rounded-r10" />
-                <Skeleton className="h-16 w-4/5 rounded-r6" />
-                <Skeleton className="h-24 w-full rounded-r8" />
-              </>
-            ) : messages.isError && fetchId ? (
-              <ErrorState code="CONDUCTOR_UNREACHABLE" message="Could not load the thread; the history below is the last known state." onRetry={() => void messages.refetch()} />
-            ) : rows.length === 0 ? (
-              <EmptyState
-                title="Tell me what you need."
-                detail={
-                  <>
-                    Try “add dark mode to the dashboard in web”, “why is ACME-42 blocked?”
-                    <br />
-                    or “what is everyone working on?”
-                    <br />
-                    <span className="text-micro text-text-4">
-                      The mic is push-to-talk on ⌘⇧M at a desk and tap-to-toggle on a phone.
-                    </span>
-                  </>
-                }
-              />
-            ) : (
-              rows.map((row) =>
-                row.kind === 'trace' ? (
-                  /* A turn that said nothing. Secondary to the conversation, and collapsed until asked. */
-                  <div key={row.key} className="opacity-80">
-                    <TurnTrace
-                      trace={row.trace}
-                      standalone
-                      open={expanded.includes(row.trace.runId)}
-                      onToggle={() => toggleTrace(row.trace.runId)}
-                      contextWindowTokens={resolveModel(conductorModels.data, row.trace.model)?.contextWindowTokens}
-                      compactionAt={compactionAt}
-                    />
+      {/* The horizontal frame: the conversation and composer keep the left column, and the split
+          layout adds the open decisions as a rail beside them (VS-289). */}
+      <div className="flex min-h-0 flex-1" style={{ '--rail-w': 'min(30rem, 34%)' } as React.CSSProperties}>
+        <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+          {/* The button floats over the list, so it is anchored to this wrapper rather than to the
+              scrolled content, which would carry it away with the rest. */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <PageBody scrollRef={attachScroll} className="px-4 py-5 md:px-7">
+              <div className="mx-auto flex max-w-3xl flex-col gap-5">
+                {/* Above the history, where the page being fetched will appear. Nothing marks the start
+                    of the thread: the loads simply stop once the API has answered with a short page. */}
+                {messages.isLoadingOlder ? (
+                  <div role="status" className="flex justify-center">
+                    <span className="ac-mono text-micro text-text-4">Loading earlier messages…</span>
                   </div>
+                ) : null}
+
+                {/* No history yet — including the renders before the thread id is known, where the query
+                    is disabled and so reports neither loading nor data. Claiming an empty thread there
+                    would put the opening pitch on screen for a moment on every visit. */}
+                {messages.data === undefined && !messages.isError ? (
+                  <>
+                    <Skeleton className="ml-auto h-12 w-2/3 rounded-r10" />
+                    <Skeleton className="h-16 w-4/5 rounded-r6" />
+                    <Skeleton className="h-24 w-full rounded-r8" />
+                  </>
+                ) : messages.isError && fetchId ? (
+                  <ErrorState code="CONDUCTOR_UNREACHABLE" message="Could not load the thread; the history below is the last known state." onRetry={() => void messages.refetch()} />
+                ) : rows.length === 0 ? (
+                  <EmptyState
+                    title="Tell me what you need."
+                    detail={
+                      <>
+                        Try “add dark mode to the dashboard in web”, “why is ACME-42 blocked?”
+                        <br />
+                        or “what is everyone working on?”
+                        <br />
+                        <span className="text-micro text-text-4">
+                          The mic is push-to-talk on ⌘⇧M at a desk and tap-to-toggle on a phone.
+                        </span>
+                      </>
+                    }
+                  />
                 ) : (
-                  <div key={row.key} className="flex flex-col gap-2">
-                    <ChatMessage
-                      message={row.entry.message}
-                      ws={ws}
-                      onTicket={openTicket}
-                      ticketStatus={ticketStatus}
-                      projectName={projectName}
-                      onReply={row.entry.message.direction === 'outbound' ? () => patch({ replyToId: row.entry.message.id }) : undefined}
-                      usage={row.trace?.usage ?? null}
-                    />
-                    {/* Under the reply, above the work it filed: what the turn did, then what it left. */}
-                    {row.trace ? (
-                      <TurnTrace
-                        trace={row.trace}
-                        open={expanded.includes(row.trace.runId)}
-                        onToggle={() => toggleTrace(row.trace!.runId)}
-                        contextWindowTokens={resolveModel(conductorModels.data, row.trace.model)?.contextWindowTokens}
-                        compactionAt={compactionAt}
-                      />
-                    ) : null}
-                    {row.entry.dispatches.map((d) => (
-                      <DispatchLabel
-                        key={d.ticket.id}
-                        identifier={d.ticket.identifier}
-                        name={d.worker?.name ?? d.ticket.title}
-                        status={d.status}
-                        projectColorVar={d.ticket.projectId ? projectColorVar(d.ticket.projectId, projectIds) : undefined}
-                        onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
+                  rows.map((row) =>
+                    row.kind === 'trace' ? (
+                      /* A turn that said nothing. Secondary to the conversation, and collapsed until asked. */
+                      <div key={row.key} className="opacity-80">
+                        <TurnTrace
+                          trace={row.trace}
+                          standalone
+                          open={expanded.includes(row.trace.runId)}
+                          onToggle={() => toggleTrace(row.trace.runId)}
+                          contextWindowTokens={resolveModel(conductorModels.data, row.trace.model)?.contextWindowTokens}
+                          compactionAt={compactionAt}
+                        />
+                      </div>
+                    ) : (
+                      <div key={row.key} className="flex flex-col gap-2">
+                        <ChatMessage
+                          message={row.entry.message}
+                          ws={ws}
+                          onTicket={openTicket}
+                          ticketStatus={ticketStatus}
+                          projectName={projectName}
+                          onReply={row.entry.message.direction === 'outbound' ? () => patch({ replyToId: row.entry.message.id }) : undefined}
+                          usage={row.trace?.usage ?? null}
+                        />
+                        {/* Under the reply, above the work it filed: what the turn did, then what it left. */}
+                        {row.trace ? (
+                          <TurnTrace
+                            trace={row.trace}
+                            open={expanded.includes(row.trace.runId)}
+                            onToggle={() => toggleTrace(row.trace!.runId)}
+                            contextWindowTokens={resolveModel(conductorModels.data, row.trace.model)?.contextWindowTokens}
+                            compactionAt={compactionAt}
+                          />
+                        ) : null}
+                        {row.entry.dispatches.map((d) => (
+                          <DispatchLabel
+                            key={d.ticket.id}
+                            identifier={d.ticket.identifier}
+                            name={d.worker?.name ?? d.ticket.title}
+                            status={d.status}
+                            projectColorVar={d.ticket.projectId ? projectColorVar(d.ticket.projectId, projectIds) : undefined}
+                            onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
+                          />
+                        ))}
+                        {/* Answered here, open in the strip or the rail: an open card is pinned in the
+                            region the layout chose, and the record of what was decided takes its place
+                            here once it has been answered. */}
+                        {row.entry.decisions
+                          .filter((d) => d.status !== 'open')
+                          .map((d) => (
+                            <DecisionCard
+                              key={d.id}
+                              decision={d}
+                              asker="weaver"
+                              ticketIdentifier={ticketOf(d)?.identifier ?? d.ticketId}
+                              projectSlug={projectSlugOf(d)}
+                              ws={ws}
+                              busy={answer.isPending}
+                              plan={<PlanPreview decision={d} />}
+                              ticketFiledByConductor={ticketOf(d)?.createdByKind === 'agent'}
+                              ticketSummary={ticketOf(d)?.summary}
+                              compact
+                              onAnswer={(a) => answerDecision(d.id, a)}
+                            />
+                          ))}
+                      </div>
+                    ),
+                  )
+                )}
+
+                {/* The turn in flight, and the moment after it: the block stays until the row that
+                    replaces it is on screen, so the end of a turn is a fold rather than a blink. The
+                    streamed reply text is still never left behind — the thread message is the record. */}
+                {working || live ? (
+                  <section aria-label="Weaver is working" className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <StatusGlyph status="working" size="xs" />
+                      <span className="ac-mono text-micro text-text-3">{runId ? 'working' : 'starting…'}</span>
+                    </div>
+                    {/* Where the streaming output itself is, per `conductor-chat/live-turn-stream` — not
+                        only the app-level `ConnectionBanner`, which a human on a flaky connection may not
+                        associate with this one turn having gone quiet. */}
+                    {runId ? <StreamStatusNotice status={runStreamStatus} onRetry={retryRunStream} /> : null}
+                    {liveEvents.length ? <Transcript events={liveEvents} className="gap-2 p-0 opacity-90" /> : null}
+                  </section>
+                ) : null}
+
+                {/* Live work no message in this thread accounts for: a worker the human started, or a
+                    ticket filed before the chat recorded creating runs. Everything else is a label above. */}
+                {unattributed.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {unattributed.map((w) => (
+                      <WorkerChip
+                        key={w.id}
+                        name={w.name}
+                        status={agentUiStatus(w.status)}
+                        projectColorVar={w.projectId ? projectColorVar(w.projectId, projectIds) : undefined}
+                        onClick={() => openWorker(w.id)}
                       />
                     ))}
-                    {/* Answered here, open below: an open card is pinned above the composer, and the
-                        record of what was decided takes its place here once it has been answered. */}
-                    {row.entry.decisions
-                      .filter((d) => d.status !== 'open')
-                      .map((d) => (
-                        <DecisionCard
-                          key={d.id}
-                          decision={d}
-                          asker="weaver"
-                          ticketIdentifier={ticketOf(d)?.identifier ?? d.ticketId}
-                          projectSlug={projectSlugOf(d)}
-                          ws={ws}
-                          busy={answer.isPending}
-                          plan={<PlanPreview decision={d} />}
-                          ticketFiledByConductor={ticketOf(d)?.createdByKind === 'agent'}
-                          ticketSummary={ticketOf(d)?.summary}
-                          compact
-                          onAnswer={(a) => answerDecision(d.id, a)}
-                        />
-                      ))}
                   </div>
-                ),
-              )
-            )}
+                ) : null}
 
-            {/* The turn in flight, and the moment after it: the block stays until the row that
-                replaces it is on screen, so the end of a turn is a fold rather than a blink. The
-                streamed reply text is still never left behind — the thread message is the record. */}
-            {working || live ? (
-              <section aria-label="Weaver is working" className="flex flex-col gap-2">
-                <div className="flex items-center gap-2.5">
-                  <StatusGlyph status="working" size="xs" />
-                  <span className="ac-mono text-micro text-text-3">{runId ? 'working' : 'starting…'}</span>
-                </div>
-                {/* Where the streaming output itself is, per `conductor-chat/live-turn-stream` — not
-                    only the app-level `ConnectionBanner`, which a human on a flaky connection may not
-                    associate with this one turn having gone quiet. */}
-                {runId ? <StreamStatusNotice status={runStreamStatus} onRetry={retryRunStream} /> : null}
-                {liveEvents.length ? <Transcript events={liveEvents} className="gap-2 p-0 opacity-90" /> : null}
-              </section>
-            ) : null}
-
-            {/* Live work no message in this thread accounts for: a worker the human started, or a
-                ticket filed before the chat recorded creating runs. Everything else is a label above. */}
-            {unattributed.length ? (
-              <div className="flex flex-wrap gap-2">
-                {unattributed.map((w) => (
-                  <WorkerChip
-                    key={w.id}
-                    name={w.name}
-                    status={agentUiStatus(w.status)}
-                    projectColorVar={w.projectId ? projectColorVar(w.projectId, projectIds) : undefined}
-                    onClick={() => openWorker(w.id)}
-                  />
-                ))}
+                <div ref={stick.bottomRef} />
               </div>
-            ) : null}
-
-            <div ref={stick.bottomRef} />
+            </PageBody>
+            {stick.atBottom ? null : <ScrollToBottomButton unread={stick.unread} onClick={stick.toBottom} />}
           </div>
-        </PageBody>
-        {stick.atBottom ? null : <ScrollToBottomButton unread={stick.unread} onClick={stick.toBottom} />}
-      </div>
 
-      {/* Outside the scrolling body, so nothing the human has to answer can be scrolled away, and the
-          follow-the-bottom button keeps the list it belongs to. Capped and scrolled internally: a pile
-          of open decisions must never push the composer off screen. */}
-      {shown.length || hiddenOpen.length ? (
-        <section
-          ref={decisionsRef}
-          aria-label="Open decisions"
-          className="ac-scroll flex-none border-t border-line-1 bg-bg-0 px-4 pb-3 md:px-7"
-          // Always as tall as its contents, up to a cap — never padded out to fill it, so a strip
-          // holding only the hidden-card count is never taller than that line. Unresized, the cap
-          // is the app's own share of the height. Resized, it is the chosen height, but never past
-          // `--ac-app-h`'s larger share either, so a height chosen before a keyboard opened is
-          // still brought back inside the viewport it left.
-          style={
-            decisionHeight === null
-              ? { maxHeight: 'calc(var(--ac-app-h) * 0.45)' }
-              : { maxHeight: `min(${decisionHeight}px, calc(var(--ac-app-h) * 0.75))` }
-          }
-        >
-          {/* The top edge, as a handle. Sticky rather than absolute: the area scrolls within itself,
-              and a grip that scrolled away with the cards would be unreachable exactly when there
-              are enough of them to want it. `touch-action: none` is what stops a finger drag from
-              scrolling the page instead of moving the edge. */}
-          <div
-            role="separator"
-            aria-orientation="horizontal"
-            aria-label="Resize the decisions area"
-            aria-valuenow={decisionHeight ?? gauge.height}
-            aria-valuemin={MIN_PX}
-            aria-valuemax={gauge.max}
-            tabIndex={0}
-            title="Drag to resize · double-click to reset"
-            onPointerDown={startDrag}
-            onDoubleClick={resetHeight}
-            onKeyDown={onHandleKey}
-            className="sticky top-0 z-10 -mx-4 mb-2 flex h-3 cursor-ns-resize touch-none items-center justify-center bg-bg-0 outline-none focus-visible:bg-bg-2 md:-mx-7"
-          >
-            <span className={cx('h-0.5 w-10 rounded-full', dragging ? 'bg-text-3' : 'bg-line-2')} />
-          </div>
-          <div className="mx-auto flex max-w-3xl flex-col gap-3">
-            {/* What was hidden is still counted here, so the pinned area never quietly under-reports
-                what is waiting: one press brings every one of them back. */}
-            {hiddenOpen.length ? (
-              <button
-                type="button"
-                onClick={() => showMany(hiddenOpen.map((d) => d.id))}
-                className="self-start rounded-r6 border border-dashed border-line-2 px-3 py-1.5 text-micro text-text-3 hover:bg-bg-2 hover:text-text-1"
+          {/* Outside the scrolling body, so nothing the human has to answer can be scrolled away, and
+              the follow-the-bottom button keeps the list it belongs to. Capped and scrolled internally:
+              a pile of open decisions must never push the composer off screen. This is the `bottom`
+              layout; `split` renders the same cards in the rail instead. */}
+          {!rail && hasDecisions ? (
+            <section
+              ref={decisionsRef}
+              aria-label="Open decisions"
+              className="ac-scroll flex-none border-t border-line-1 bg-bg-0 px-4 pb-3 md:px-7"
+              // Always as tall as its contents, up to a cap — never padded out to fill it, so a strip
+              // holding only the hidden-card count is never taller than that line. Unresized, the cap
+              // is the app's own share of the height. Resized, it is the chosen height, but never past
+              // `--ac-app-h`'s larger share either, so a height chosen before a keyboard opened is
+              // still brought back inside the viewport it left.
+              style={
+                decisionHeight === null
+                  ? { maxHeight: 'calc(var(--ac-app-h) * 0.45)' }
+                  : { maxHeight: `min(${decisionHeight}px, calc(var(--ac-app-h) * 0.75))` }
+              }
+            >
+              {/* The top edge, as a handle. Sticky rather than absolute: the area scrolls within itself,
+                  and a grip that scrolled away with the cards would be unreachable exactly when there
+                  are enough of them to want it. `touch-action: none` is what stops a finger drag from
+                  scrolling the page instead of moving the edge. */}
+              <div
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize the decisions area"
+                aria-valuenow={decisionHeight ?? gauge.height}
+                aria-valuemin={MIN_PX}
+                aria-valuemax={gauge.max}
+                tabIndex={0}
+                title="Drag to resize · double-click to reset"
+                onPointerDown={startDrag}
+                onDoubleClick={resetHeight}
+                onKeyDown={onHandleKey}
+                className="sticky top-0 z-10 -mx-4 mb-2 flex h-3 cursor-ns-resize touch-none items-center justify-center bg-bg-0 outline-none focus-visible:bg-bg-2 md:-mx-7"
               >
-                {hiddenOpen.length} hidden from chat — show {hiddenOpen.length === 1 ? 'it' : 'them'} again
-              </button>
-            ) : null}
-            {shown.map((d) => (
-              <DecisionCard
-                key={d.id}
-                decision={d}
-                {...(askedByConductor(d) ? { asker: 'weaver' as const } : {})}
-                ticketIdentifier={ticketOf(d)?.identifier ?? d.ticketId}
-                projectSlug={projectSlugOf(d)}
-                ws={ws}
-                busy={answer.isPending}
-                plan={<PlanPreview decision={d} />}
-                ticketFiledByConductor={ticketOf(d)?.createdByKind === 'agent'}
-                ticketSummary={ticketOf(d)?.summary}
-                compact
-                onHide={() => hide(d)}
-                onAnswer={(a) => answerDecision(d.id, a)}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
+                <span className={cx('h-0.5 w-10 rounded-full', dragging ? 'bg-text-3' : 'bg-line-2')} />
+              </div>
+              <div className="mx-auto flex max-w-3xl flex-col gap-3">{decisionContent}</div>
+            </section>
+          ) : null}
 
-      <div className="flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-7">
-        <div className="mx-auto max-w-3xl">
-          <Composer
-            placeholder="Message the conductor…"
-            queuedReason={offline ? 'Offline — your message is queued' : working ? 'Conductor is replying — your message is queued' : null}
-            queuedCount={queuedCount}
-            value={draft.text}
-            onChange={(text) => patch({ text })}
-            scope={
-              <>
-                {replyTo ? <ReplyQuote body={replyTo.body} onDismiss={() => patch({ replyToId: null })} /> : null}
-                <ProjectPicker projects={projects.data ?? []} value={projectId} onChange={(id) => patch({ projectId: id })} />
-              </>
-            }
-            onSubmit={send}
-            allowAttachments
-            attachments={attachments}
-            onAttachmentsChange={setAttachments}
-          />
+          <div className="flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-7">
+            <div className="mx-auto max-w-3xl">
+              <Composer
+                placeholder="Message the conductor…"
+                queuedReason={offline ? 'Offline — your message is queued' : working ? 'Conductor is replying — your message is queued' : null}
+                queuedCount={queuedCount}
+                value={draft.text}
+                onChange={(text) => patch({ text })}
+                scope={
+                  <>
+                    {replyTo ? <ReplyQuote body={replyTo.body} onDismiss={() => patch({ replyToId: null })} /> : null}
+                    <ProjectPicker projects={projects.data ?? []} value={projectId} onChange={(id) => patch({ projectId: id })} />
+                  </>
+                }
+                onSubmit={send}
+                allowAttachments
+                attachments={attachments}
+                onAttachmentsChange={setAttachments}
+              />
+            </div>
+          </div>
         </div>
+
+        {/* The split rail: the same open cards, full-height and scrolling on its own, so a long list
+            never moves the conversation and the composer keeps the left pane. No resize handle here —
+            `lib/decisionHeight.ts` is a top-edge drag measured against the composer below it, which
+            only the bottom strip has. */}
+        {rail ? (
+          <aside
+            aria-label="Open decisions"
+            className="min-w-0 min-h-0 ac-scroll w-[var(--rail-w)] flex-none border-l border-line-1 bg-bg-0 px-4 py-5 md:px-5"
+          >
+            <div className="flex flex-col gap-3">{decisionContent}</div>
+          </aside>
+        ) : null}
       </div>
     </Page>
   );

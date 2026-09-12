@@ -1,5 +1,5 @@
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Agent, Decision, Project, RunEvent, RunTrace, RuntimeAccount, ThreadMessage, Ticket, WorkspaceEvent } from '@weave-ai/shared';
 import { agent, decision, project, ticket } from './factories';
 import { projectColorVar } from '../lib/projectColor';
@@ -2811,5 +2811,137 @@ describe('ChatRoute workspace switch (VS-166)', () => {
     expect(screen.getByText(/Could not load the thread/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
     expect(screen.queryByText('Tell me what you need.')).not.toBeInTheDocument();
+  });
+});
+
+describe('ChatRoute open-decision layout (VS-289)', () => {
+  const LAYOUT_KEY = 'conductor.decisions.layout';
+  const asked = (over: Partial<Decision> = {}): Decision =>
+    decision({
+      id: 'd1', kind: 'question', ticketId: 'tk_1', askedInRunId: 'run_1', title: 'File this as a ticket?',
+      context: 'It is a one-line fix.', recommendation: null, target: null,
+      options: [
+        { key: 'file', label: 'File it', description: 'A ticket, routed to the engineer.' },
+        { key: 'skip', label: 'Leave it', description: 'Nothing is filed.' },
+      ],
+      ...over,
+    });
+
+  /** jsdom answers every media query `false`, which is the desk; a phone case has to say so. */
+  const phoneWidth = (isPhone: boolean): void => {
+    const real = window.matchMedia;
+    window.matchMedia = ((q: string) => ({
+      matches: q.includes('max-width: 767px') ? isPhone : false,
+      media: q, onchange: null,
+      addEventListener: () => undefined, removeEventListener: () => undefined,
+      addListener: () => undefined, removeListener: () => undefined, dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    onTestFinished(() => { window.matchMedia = real; });
+  };
+
+  it('defaults to the bottom strip and offers the layout control on a wide screen', () => {
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+    expect(screen.getByLabelText('Open decisions').tagName).toBe('SECTION');
+    expect(screen.getByRole('button', { name: 'Bottom', pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Side', pressed: false })).toBeInTheDocument();
+  });
+
+  it('moves the open cards from the strip into the rail when split is chosen, and back', () => {
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+    fireEvent.click(screen.getByRole('button', { name: 'Side' }));
+
+    const rail = screen.getByLabelText('Open decisions');
+    expect(rail.tagName).toBe('ASIDE');
+    expect(rail).toContainElement(screen.getByLabelText('Weaver asks: File this as a ticket?'));
+    expect(screen.queryByRole('separator', { name: 'Resize the decisions area' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bottom' }));
+    expect(screen.getByLabelText('Open decisions').tagName).toBe('SECTION');
+  });
+
+  it('remembers the split choice across a reload', () => {
+    state.decisions = [asked()];
+    const view = render(<ChatRoute />);
+    fireEvent.click(screen.getByRole('button', { name: 'Side' }));
+    expect(screen.getByLabelText('Open decisions').tagName).toBe('ASIDE');
+
+    view.unmount();
+    render(<ChatRoute />);
+    expect(screen.getByLabelText('Open decisions').tagName).toBe('ASIDE');
+  });
+
+  it('honours a split stored before the first render', () => {
+    localStorage.setItem(LAYOUT_KEY, 'split');
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+    expect(screen.getByLabelText('Open decisions').tagName).toBe('ASIDE');
+  });
+
+  it('keeps an answered decision in the transcript, not the rail', () => {
+    state.messages = [
+      message({ id: 'm1', body: 'One thing before I start.' }),
+      message({ id: 'm2', body: 'Done.', runId: 'run_2' }),
+    ];
+    state.decisions = [
+      asked({ id: 'd_open', title: 'Still open?', createdAt: '2026-09-01T09:05:00.000Z' }),
+      asked({ id: 'd_done', title: 'Answered one?', status: 'answered', answerKey: 'file', answeredAt: '2026-09-01T09:30:00.000Z' }),
+    ];
+    localStorage.setItem(LAYOUT_KEY, 'split');
+    render(<ChatRoute />);
+
+    const rail = screen.getByLabelText('Open decisions');
+    expect(within(rail).getByLabelText('Weaver asks: Still open?')).toBeInTheDocument();
+    expect(within(rail).queryByLabelText('Answered: Answered one?')).toBeNull();
+    expect(screen.getByLabelText('Answered: Answered one?')).toBeInTheDocument();
+  });
+
+  it('keeps the hidden-from-chat count and its restore in the rail', () => {
+    state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
+    state.decisions = [asked()];
+    localStorage.setItem(LAYOUT_KEY, 'split');
+    render(<ChatRoute />);
+
+    fireEvent.click(within(screen.getByLabelText('Open decisions')).getByRole('button', { name: /Hide from chat/ }));
+    const restore = within(screen.getByLabelText('Open decisions')).getByRole('button', { name: /1 hidden from chat/ });
+    fireEvent.click(restore);
+    expect(within(screen.getByLabelText('Open decisions')).getByLabelText('Weaver asks: File this as a ticket?')).toBeInTheDocument();
+  });
+
+  it('renders no rail when nothing needs the human, and keeps the control to switch back', () => {
+    localStorage.setItem(LAYOUT_KEY, 'split');
+    render(<ChatRoute />);
+    expect(screen.queryByLabelText('Open decisions')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Side', pressed: true })).toBeInTheDocument();
+  });
+
+  it('renders the bottom strip on a narrow viewport even with split stored, and offers no split', () => {
+    phoneWidth(true);
+    localStorage.setItem(LAYOUT_KEY, 'split');
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+
+    expect(screen.getByLabelText('Open decisions').tagName).toBe('SECTION');
+    expect(screen.queryByRole('button', { name: 'Side' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Bottom' })).toBeNull();
+  });
+
+  it('keeps the composer in the left pane beside an independently scrolling rail', () => {
+    localStorage.setItem(LAYOUT_KEY, 'split');
+    state.decisions = [asked()];
+    render(<ChatRoute />);
+
+    const rail = screen.getByLabelText('Open decisions');
+    expect(rail.className).toContain('ac-scroll');
+    expect(rail.className).toContain('min-w-0');
+    expect(rail.className).toContain('min-h-0');
+    expect(rail.closest('.ac-scroll')).toBe(rail);
+
+    const left = rail.previousElementSibling as HTMLElement;
+    expect(left.className).toContain('min-w-0');
+    expect(left.contains(screen.getByPlaceholderText('Message the conductor…'))).toBe(true);
+    expect(left.contains(rail)).toBe(false);
   });
 });

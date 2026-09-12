@@ -11,6 +11,7 @@ import { BoardRoute } from './routes/Board';
 import { LiveRoute } from './routes/Live';
 import { MergeQueueRoute } from './routes/MergeQueue';
 import { TicketRoute } from './routes/TicketPage';
+import { WeaverArtifactRoute } from './routes/WeaverArtifactPage';
 import { TeamRoute } from './routes/Team';
 import { WorkerRoute } from './routes/WorkerPage';
 import { RunsRoute } from './routes/Runs';
@@ -158,6 +159,7 @@ const boardRoute = child('/board', BoardRoute, searchPassthrough);
 const liveRoute = child('/live', LiveRoute);
 const mergeQueueRoute = child('/merge-queue', MergeQueueRoute, searchPassthrough);
 const ticketRoute = child('/tickets/$ticketId', TicketRoute, searchPassthrough);
+const weaverArtifactRoute = child('/artifacts/$key', WeaverArtifactRoute);
 const teamRoute = child('/team', TeamRoute, searchPassthrough);
 const workerRoute = child('/workers/$workerId', WorkerRoute);
 const runsRoute = child('/runs', RunsRoute, searchPassthrough);
@@ -200,6 +202,7 @@ const routeTree = rootRoute.addChildren([
     liveRoute,
     mergeQueueRoute,
     ticketRoute,
+    weaverArtifactRoute,
     teamRoute,
     workerRoute,
     runsRoute,

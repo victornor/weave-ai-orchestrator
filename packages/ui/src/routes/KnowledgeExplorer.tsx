@@ -18,10 +18,10 @@ import { Markdown } from '../components/Markdown';
 import { ArtifactViewer } from '../components/ArtifactViewer';
 import {
   useKnowledgeArchiveFile, useKnowledgeArchiveMany, useKnowledgeDocs, useKnowledgeIndex, useProjects,
-  useProjectArtifacts, useTicketDocumentRevisions,
+  useProjectArtifacts, useTicketDocumentRevisions, useWorkspaceArtifacts,
 } from '../api/hooks';
 import { useWs } from '../api/context';
-import type { TicketArtifactSummary } from '../api/types';
+import type { TicketArtifactSummary, WeaverArtifactSummary } from '../api/types';
 import {
   buildExplorerTree, clampTreeWidth, parseDocParam, serializeDocParam, TREE_WIDTH_DEFAULT, TREE_WIDTH_MAX,
   TREE_WIDTH_MIN, type ExplorerHub, type ExplorerNode,
@@ -61,6 +61,9 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
   const index = useKnowledgeIndex();
   const projects = useProjects();
   const artifacts = useProjectArtifacts(project);
+  // Workspace-scoped, never filtered by `project` (VS-297): a weaver artifact has no ticket, so no
+  // project to scope it to either.
+  const weaverArtifacts = useWorkspaceArtifacts();
   const narrow = useMediaQuery('(max-width: 767px)');
   const rootRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -169,12 +172,13 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
   };
 
   const artifactRows = artifacts.data ?? [];
+  const weaverArtifactRows = weaverArtifacts.data ?? [];
 
   if (docs.isLoading || index.isLoading) return <SkeletonRows rows={5} />;
   if (docs.isError || index.isError) return <ErrorState code="KNOWLEDGE_EXPLORER_FAILED" message="The knowledge base could not be read." onRetry={() => { void docs.refetch(); void index.refetch(); }} />;
   // A project with no documents/hubs but with artifacts still has something to browse (VS-270) — the
   // "nothing to browse" state only applies once artifacts have loaded and are also empty.
-  if (!tree.length && !artifactRows.length && !artifacts.isLoading) {
+  if (!tree.length && !artifactRows.length && !weaverArtifactRows.length && !artifacts.isLoading && !weaverArtifacts.isLoading) {
     return <EmptyState title="Nothing to browse yet." detail="A knowledge base and its documents are created as soon as a worker or the conductor writes to them." />;
   }
 
@@ -220,6 +224,11 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
                 entirely, not shown empty, when the scope has no artifacts. */}
             {artifactRows.length ? (
               <ArtifactsSection artifacts={artifactRows} openId={selection?.kind === 'artifact' ? selection.artifact.id : null} onOpen={openArtifact} />
+            ) : null}
+            {/* A weaver artifact has no ticket to be scoped to, so it is its own peer entry here —
+                never merged into the ticket-scoped Artifacts list above (design.md Decision 6). */}
+            {weaverArtifactRows.length ? (
+              <WeaverArtifactsSection artifacts={weaverArtifactRows} onOpen={(a) => go('/w/$ws/artifacts/$key', { params: { ws, key: a.key } })} />
             ) : null}
           </div>
         </div>
@@ -454,6 +463,43 @@ function ArtifactsSection({
             <span className="min-w-0 flex-1 truncate text-meta text-text-1">{a.title ?? a.key}</span>
             {typeof a.metadata['kind'] === 'string' ? <Badge tone="neutral">{a.metadata['kind'] as string}</Badge> : null}
             <span className="ac-mono flex-none text-nano text-text-4">{a.ticketIdentifier}</span>
+            <span className="ac-mono flex-none text-nano text-text-4">{ago(a.updatedAt)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The weaver's own workspace-scoped artifacts (VS-297): a peer entry to `ArtifactsSection` above,
+ * never merged into it — a weaver artifact carries no ticket identifier to show. Selecting a row
+ * navigates to its standalone `/w/:ws/artifacts/:key` page (the same one `weave_artifact_put`'s
+ * returned URL opens) rather than opening a second inline viewer here.
+ */
+function WeaverArtifactsSection({
+  artifacts, onOpen,
+}: {
+  artifacts: WeaverArtifactSummary[];
+  onOpen: (artifact: WeaverArtifactSummary) => void;
+}): React.ReactElement {
+  return (
+    <div>
+      <div className="flex items-center gap-2 bg-bg-2 px-3.5 py-2">
+        <span className="ac-mono text-nano uppercase tracking-wide text-text-4">Weaver Artifacts</span>
+      </div>
+      <div>
+        {artifacts.map((a) => (
+          <button
+            key={a.key}
+            type="button"
+            onClick={() => onOpen(a)}
+            style={{ paddingLeft: '0.875rem' }}
+            className="flex w-full items-center gap-2.5 py-1.5 pr-3.5 text-left hover:bg-bg-2"
+          >
+            <ArtifactGlyph />
+            <span className="min-w-0 flex-1 truncate text-meta text-text-1">{a.title ?? a.key}</span>
+            {a.kind ? <Badge tone="neutral">{a.kind}</Badge> : null}
             <span className="ac-mono flex-none text-nano text-text-4">{ago(a.updatedAt)}</span>
           </button>
         ))}

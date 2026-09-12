@@ -1229,6 +1229,23 @@ export function useProjectArtifacts(project?: string): UseQueryResult<T.TicketAr
   return useQuery({ queryKey: qk.artifacts(ws, project), queryFn: () => api.ws<unknown>(ws, `/knowledge/artifacts${qs({ project })}`).then((r) => listOf<T.TicketArtifactSummary>(r)) });
 }
 
+/** A weaver's workspace-scoped artifacts (VS-297) — the explorer's workspace-level peer section to
+ * `useProjectArtifacts` above, and the source the standalone `/w/:ws/artifacts/:key` page reads from. */
+export function useWorkspaceArtifacts(): UseQueryResult<T.WeaverArtifactSummary[]> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.weaverArtifacts(ws), queryFn: () => api.ws<unknown>(ws, '/artifacts').then((r) => listOf<T.WeaverArtifactSummary>(r)) });
+}
+
+export function useWorkspaceArtifactRevisions(key: string): UseQueryResult<T.DocumentRevision[]> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: [...qk.weaverArtifactsRoot(ws), key, 'revisions'],
+    queryFn: () => api.ws<Array<{ revision: number; authorKind: string; createdAt: string }>>(ws, `/artifacts/${key}/revisions`)
+      .then((rows) => rows.map((r) => ({ ...r, reason: null }))),
+    enabled: Boolean(key),
+  });
+}
+
 export function useKnowledgeDocMutation(): UseMutationResult<unknown, Error, { scope: string; slug: string; project?: string; op: 'put' | 'delete'; body?: string }> {
   const ws = useWs();
   const qc = useQueryClient();

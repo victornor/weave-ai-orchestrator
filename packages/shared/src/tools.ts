@@ -14,6 +14,7 @@ export const WEAVER_TOOLS = [
   'weave_run_inspect', 'weave_run_list', 'weave_worker_models',
   'weave_routine_list', 'weave_routine_create', 'weave_routine_update', 'weave_routine_remove',
   'weave_incident_list', 'weave_incident_get', 'weave_incident_resolve',
+  'weave_artifact_put',
 ] as const;
 export const WORKER_ONLY_TOOLS = ['weave_ticket_create'] as const; // project-scoped creation for workers
 export type ToolName = (typeof COMMON_TOOLS)[number] | (typeof WEAVER_TOOLS)[number];

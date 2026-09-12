@@ -259,6 +259,16 @@ export interface TicketArtifactSummary {
   updatedAt: string;
 }
 
+/** One row of `GET /artifacts` (VS-297): a weaver's workspace-scoped artifact — no ticket at all, so
+ * no `ticketId`/`ticketIdentifier` the way `TicketArtifactSummary` above carries. */
+export interface WeaverArtifactSummary {
+  key: string;
+  title: string | null;
+  kind: string | null;
+  revision: number;
+  updatedAt: string;
+}
+
 export interface OpenSpecState {
   changeName: string | null;
   state: string | null;

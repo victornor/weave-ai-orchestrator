@@ -12,19 +12,23 @@ import { Button } from './Button';
 import { cx } from '../lib/cx';
 
 export interface ArtifactViewerArtifact {
-  /** The artifact's key (work product `externalId`) — used to reconstruct the download fetch path. */
+  /** The artifact's key (work product `externalId`) — display use only; the download fetch reads `url` directly (VS-297). */
   key: string;
   title: string | null;
-  /** The stored raw-serve URL (`/api/w/:ws/tickets/:id/artifacts/:key/raw`) — used verbatim for the
-   * iframe, open-in-new-tab and copy-link actions. */
+  /** The raw-serve URL, already carrying its full `/api/w/:ws/...` prefix (`/tickets/:id/artifacts/:key/raw`
+   * for a ticket artifact, `/artifacts/:key/raw` for a workspace-scoped one) — used verbatim for the
+   * iframe, open-in-new-tab, copy-link *and* download actions. Never re-prefix it through `api.ws`. */
   url: string;
 }
 
 export function ArtifactViewer({
-  ws, ticketId, artifact, revisions,
+  ws, artifact, revisions,
 }: {
   ws: string;
-  ticketId: string;
+  /** Omitted for a workspace-scoped artifact (VS-297), which has no ticket at all; unused by this
+   * component itself (kept on the prop type for callers that still pass it, e.g. the ticket Artifact
+   * tab), since `download()` now reads `artifact.url` directly instead of reconstructing a ticket path. */
+  ticketId?: string;
   artifact: ArtifactViewerArtifact;
   revisions: DocumentRevision[] | undefined;
 }): React.ReactElement {
@@ -33,12 +37,17 @@ export function ArtifactViewer({
   const [copied, setCopied] = useState(false);
 
   const src = `${artifact.url}${qs({ revision })}`;
+  // `artifact.url` already carries the `/api/w/:ws` prefix `api.ws` itself adds — strip it back off so
+  // a fetch-based read goes through the same helper (auth headers, error handling) without doubling
+  // the prefix (see [[ticket-artifacts]] knowledge doc). Works unchanged for either artifact shape,
+  // since it derives the path from the URL rather than reconstructing one from a ticket id.
+  const relativePath = artifact.url.startsWith(`/api/w/${ws}`) ? artifact.url.slice(`/api/w/${ws}`.length) : artifact.url;
 
   async function download(): Promise<void> {
     setDownloading(true);
     try {
       const [html, kitCss] = await Promise.all([
-        api.ws<string>(ws, `/tickets/${ticketId}/artifacts/${artifact.key}/raw${qs({ revision })}`),
+        api.ws<string>(ws, `${relativePath}${qs({ revision })}`),
         api.ws<string>(ws, '/artifacts/kit.css'),
       ]);
       const inlined = html.includes(kitCss)

@@ -174,6 +174,20 @@ describe("the document explorer's Artifacts entry (VS-270)", () => {
   });
 });
 
+describe("the document explorer's Weaver Artifacts entry (VS-297)", () => {
+  it('is made stale by a published/republished weaver artifact, with no ticket id involved', () => {
+    expect(invalidated(event('weaver_artifact.published', { entityId: 'ws1', entityType: 'workspace' }))).toContain(
+      JSON.stringify(qk.weaverArtifactsRoot('ws1')),
+    );
+  });
+
+  it('never touches the ticket-scoped artifacts root — the two stores are invalidated independently', () => {
+    expect(invalidated(event('weaver_artifact.published', { entityId: 'ws1', entityType: 'workspace' }))).not.toContain(
+      JSON.stringify(qk.artifactsRoot('ws1')),
+    );
+  });
+});
+
 describe("a project's commit graph (VS-96)", () => {
   it.each(['ticket.work_product', 'ticket.status', 'ticket.merged', 'worker.spawned', 'worker.retired', 'project.updated'] as const)(
     'is made stale by %s',

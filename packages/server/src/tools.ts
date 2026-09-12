@@ -606,6 +606,25 @@ export const TOOLS: ToolDef[] = [
       return { url, revision };
     },
   },
+  {
+    name: 'weave_artifact_put', scope: 'weaver', input: z.object({
+      key: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'lowercase letters, digits and hyphens only, starting with a letter or digit, max 64 chars'),
+      html: z.string(),
+      title: z.string().max(200).optional(),
+      kind: z.string().max(40).optional(),
+    }),
+    description:
+      'Publish a self-contained HTML artifact with no ticket involved — for the weaver answering a human directly, in chat. '
+      + 'Stores it in the workspace\'s own artifact store, scoped by `key` (see weave_ticket_artifact_put for the ticket-scoped version a worker uses instead). '
+      + 'Returns a URL that renders the artifact inside the web app; share that URL with the human, never an attached HTML file. '
+      + 'There is no matching read tool: an artifact\'s body can never be read back by any agent, including you. To revise one, call this again with the same `key`.',
+    handler: (ctx, i) => {
+      validateArtifactHtml(i.html);
+      const { revision } = svc(ctx).weaverArtifacts.put(ctx.actor, ctx.ws.id, i.key, i.html, { title: i.title, kind: i.kind });
+      const url = `/w/${ctx.ws.id}/artifacts/${i.key}`;
+      return { url, revision };
+    },
+  },
 
   // ---------- conductor ----------
   {

@@ -64,6 +64,22 @@ if (!window.PointerEvent) {
   window.PointerEvent = FakePointerEvent as unknown as typeof window.PointerEvent;
 }
 
+// jsdom has no DOMMatrixReadOnly, which @xyflow/react's internal `updateNodeInternals` (run from
+// its own ResizeObserver callback, so any test that fires `resizeObserved()` on a React Flow-based
+// page reaches it) parses out of the viewport's own `transform` CSS to read the current zoom. React
+// Flow only ever writes that string as `translate(Xpx,Ypx) scale(Z)` (`toTransformString`), so a
+// narrow parser for exactly that shape is enough — this is not a general CSS matrix implementation.
+if (!window.DOMMatrixReadOnly) {
+  class FakeDOMMatrixReadOnly {
+    readonly m22: number;
+    constructor(transform = '') {
+      const m = /scale\(([\d.]+)\)/.exec(transform);
+      this.m22 = m?.[1] ? Number(m[1]) : 1;
+    }
+  }
+  window.DOMMatrixReadOnly = FakeDOMMatrixReadOnly as unknown as typeof DOMMatrixReadOnly;
+}
+
 class FakeEventSource {
   close = vi.fn();
   addEventListener = vi.fn();

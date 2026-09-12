@@ -124,6 +124,11 @@ export function Composer({
   const [submitFailed, setSubmitFailed] = useState(false);
   const lastFailed = useRef<{ key: string; text: string; fileNames: string } | null>(null);
   const inFlightLabel = useRef<'Sending…' | 'Uploading and sending…'>('Sending…');
+  // A non-streaming (Voxtype) send is queued until its transcript lands: the ref makes a second press
+  // in the same tick a no-op before a re-render, and the state drives the queued UI (VS-282).
+  const [pendingSend, setPendingSend] = useState(false);
+  const pendingSendRef = useRef(false);
+  const [pendingNotice, setPendingNotice] = useState<string | null>(null);
 
   const addFiles = useCallback((incoming: File[]): void => {
     const accepted = incoming.filter((f) => (ACCEPTED_ATTACHMENT_TYPES as readonly string[]).includes(f.type));
@@ -155,6 +160,7 @@ export function Composer({
       return;
     }
     base.current = text;
+    setPendingNotice(null);
     dictation.start();
   }, [dictation, text]);
 
@@ -207,15 +213,9 @@ export function Composer({
     el.scrollTop = atEnd ? el.scrollHeight : prev;
   }, [text]);
 
-  const send = useCallback(() => {
-    const t = text.trim();
-    if (!t || disabled || submittingRef.current) return;
-    // Sending ends the utterance. A mic left open would keep appending to an input the human has
-    // already sent, so it closes here — button and ⏎ alike — before the input is cleared.
-    if (dictation.listening) {
-      startedByKey.current = false;
-      dictation.stop();
-    }
+  // The single submit path, shared by a normal send and a queued finish-and-send, so the idempotency
+  // key, the in-flight lock, the progress label and the failure retention cannot drift between them.
+  const doSend = useCallback((t: string) => {
     const fileNames = files.map((f) => f.name).join('\0');
     const reused = lastFailed.current && lastFailed.current.text === t && lastFailed.current.fileNames === fileNames
       ? lastFailed.current.key
@@ -240,7 +240,52 @@ export function Composer({
       submittingRef.current = false;
       setSubmitting(false);
     });
-  }, [text, disabled, onSubmit, set, dictation, files, setFiles]);
+  }, [files, onSubmit, set, setFiles]);
+
+  const send = useCallback(() => {
+    if (disabled || submittingRef.current) return;
+    setPendingNotice(null);
+    // Non-streaming (Voxtype): send means "finish the dictation and send it". While recording it
+    // stops; either way it queues here until the transcript lands, and the effect below submits it
+    // then. A second press while queued is a no-op, so one press sequence is one message (VS-282).
+    if (dictation.mode === 'upload' && (dictation.listening || dictation.transcribing)) {
+      if (pendingSendRef.current) return;
+      pendingSendRef.current = true;
+      setPendingSend(true);
+      if (dictation.listening) {
+        startedByKey.current = false;
+        dictation.stop();
+      }
+      return;
+    }
+    const t = text.trim();
+    if (!t) return;
+    // Sending ends the utterance. A mic left open would keep appending to an input the human has
+    // already sent, so it closes here — button and ⏎ alike — before the input is cleared.
+    if (dictation.listening) {
+      startedByKey.current = false;
+      dictation.stop();
+    }
+    doSend(t);
+  }, [disabled, text, dictation, doSend]);
+
+  // A queued non-streaming send submits when the attempt settles. `transcribing` going false is the
+  // one signal the attempt is over (VS-195); reading `text` here — not a value captured when the
+  // button was pressed — is what keeps the transcript rather than the pre-press text (VS-282).
+  useEffect(() => {
+    if (!pendingSend || dictation.transcribing) return;
+    pendingSendRef.current = false;
+    setPendingSend(false);
+    // A failed or empty transcript submits nothing: the hook's own alert says why, and the composer
+    // keeps whatever text exists.
+    if (dictation.error) return;
+    const t = text.trim();
+    if (t) {
+      doSend(t);
+      return;
+    }
+    setPendingNotice('Nothing was recognized, so nothing was sent.');
+  }, [pendingSend, dictation.transcribing, dictation.error, text, doSend]);
 
   const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
     if (!allowAttachments) return;
@@ -314,6 +359,10 @@ export function Composer({
   // back live, so there is nothing stale on screen to protect (VS-195).
   const transcribing = dictation.mode === 'upload' && dictation.transcribing;
   const locked = dictation.mode === 'upload' && (dictating || transcribing);
+  // `locked` covers text entry and attaching only. Sending is deliberately not locked by it: on the
+  // non-streaming backend it is the one control that finishes the dictation (VS-282), so it stays
+  // available throughout and is disabled only while a send is pending or in flight.
+  const canSend = Boolean(text.trim()) || locked;
 
   return (
     <div className={cx('flex flex-col gap-1.5', className)}>
@@ -432,15 +481,21 @@ export function Composer({
           </button>
           <button
             type="button"
-            aria-label={submitLabel}
-            disabled={!text.trim() || disabled || submitting || locked}
+            aria-label={pendingSend ? 'Send queued' : submitLabel}
+            disabled={!canSend || disabled || submitting || pendingSend}
             onClick={send}
             className={cx(
               'inline-flex size-8 flex-none items-center justify-center rounded-r6 transition-colors duration-(--dur-fast) ease-ac',
-              text.trim() && !disabled && !submitting && !locked ? 'bg-accent text-accent-on' : 'bg-bg-3 text-text-4',
+              pendingSend
+                ? 'border border-accent text-accent-link opacity-60'
+                : canSend && !disabled && !submitting ? 'bg-accent text-accent-on' : 'bg-bg-3 text-text-4',
             )}
           >
-            <SendIcon />
+            {pendingSend ? (
+              <span className="size-3 animate-spin rounded-pill border border-current border-t-transparent" aria-hidden />
+            ) : (
+              <SendIcon />
+            )}
           </button>
         </div>
 
@@ -478,7 +533,7 @@ export function Composer({
           // Not hidden below a breakpoint like the hint above: a non-streaming backend's "silence
           // on screen doesn't mean it failed" message matters most on a phone.
           <p className="border-t border-line-1 px-3.5 py-1.5 text-micro text-text-3">
-            Recording — this is transcribed once you stop; the composer stays locked until then.
+            Recording — this is transcribed once you stop; press send to finish and send it.
           </p>
         ) : null}
       </div>
@@ -486,6 +541,17 @@ export function Composer({
       {dictation.error ? (
         <p className="rounded-r6 border border-blocked/35 bg-blocked/8 px-3 py-2 text-micro leading-relaxed text-text-1" role="alert">
           {dictation.error}
+        </p>
+      ) : null}
+      {pendingSend ? (
+        <p className="flex items-center gap-2 text-micro text-text-2" role="status" aria-live="polite">
+          <span className="size-2.5 animate-spin rounded-pill border border-current border-t-transparent" aria-hidden />
+          Waiting for the transcript — this sends as soon as it lands.
+        </p>
+      ) : null}
+      {pendingNotice && !dictation.error ? (
+        <p className="rounded-r6 border border-blocked/35 bg-blocked/8 px-3 py-2 text-micro leading-relaxed text-text-1" role="alert">
+          {pendingNotice}
         </p>
       ) : null}
       {attachError ? (

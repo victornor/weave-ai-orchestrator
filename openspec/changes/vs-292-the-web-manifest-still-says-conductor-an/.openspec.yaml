@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+goal: The web manifest still says Conductor and pins portrait orientation
+skip_specs: true

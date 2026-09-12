@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+goal: Make an existing worker option's description editable in place, with the
+  id immutable and the character cap visible

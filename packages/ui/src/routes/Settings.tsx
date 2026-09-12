@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented, Tabs } from '../components/Tabs';
@@ -814,7 +814,7 @@ function ModelsSection(): React.ReactElement {
       <WorkerOptionsEditor
         current={current}
         runtimes={runtimes.data ?? []}
-        onSave={(next) => save.mutate(next)}
+        onSave={(next) => save.mutateAsync(next).then(() => undefined)}
       />
       {save.error ? <ErrorState code="MODELS_NOT_SAVED" message={save.error.message} /> : null}
       <p className="text-micro leading-relaxed text-text-3">
@@ -1005,7 +1005,7 @@ function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave 
   current: T.WorkspaceModels;
   runtimes: T.RuntimeInfo[];
   disabled?: boolean;
-  onSave: (next: T.WorkspaceModels) => void;
+  onSave: (next: T.WorkspaceModels) => Promise<void> | void;
 }): React.ReactElement {
   const configured = option.runtime != null;
   const models = useRuntimeModels(option.runtime);
@@ -1017,21 +1017,59 @@ function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave 
   // A model change can discard the stored effort; the notice names what went, and clears on the
   // next model change (VS-252).
   const [discarded, setDiscarded] = useState<string | null>(null);
-  const patch = (next: T.WorkerModelOption): void => {
-    onSave({ ...current, workerOptions: options.map((x) => x.id === option.id ? next : x) });
+  const patch = (next: T.WorkerModelOption): Promise<void> | void => {
+    return onSave({ ...current, workerOptions: options.map((x) => x.id === option.id ? next : x) });
   };
+  // The description is the weaver's only signal for picking a tier, so it is editable in place
+  // once an option exists (VS-299). The cap comes from the shared schema the add form reads.
+  // `removing` stops the unmount flush (useCommittableField) from racing the Remove write and
+  // putting the option back.
+  const removing = useRef(false);
+  const descMax = WorkerModelOptionSchema.shape.description.maxLength;
+  const description = useCommittableField({
+    value: option.description,
+    onCommit: async (raw) => {
+      if (removing.current) return;
+      const next = raw.trim();
+      if (!next) throw new Error('A when-to-use description is required');
+      if (descMax != null && next.length > descMax) throw new Error(`At most ${descMax} characters — now ${next.length}.`);
+      await patch({ ...option, description: next });
+    },
+  });
+  const descLength = description.draft.trim().length;
+  const descOverflow = descMax != null && descLength > descMax ? `At most ${descMax} characters — now ${descLength}.` : undefined;
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
-        <span className="ac-mono min-w-0 flex-1 text-meta text-text-1">{option.id} — {option.description}</span>
+        <span className="ac-mono min-w-0 flex-1 text-meta text-text-1">{option.id}</span>
         <Button
           aria-label={`Remove worker option ${option.id}`}
           disabled={disabled}
-          onClick={() => onSave({ ...current, workerOptions: options.filter((x) => x.id !== option.id) })}
+          onClick={() => {
+            removing.current = true;
+            onSave({ ...current, workerOptions: options.filter((x) => x.id !== option.id) });
+          }}
         >
           Remove
         </Button>
       </div>
+      <Field label="When to use" error={description.status === 'error' ? undefined : descOverflow} hint={descMax != null ? `${descLength}/${descMax} characters` : undefined}>
+        <div className="flex items-center gap-2">
+          <input
+            className={inputCx}
+            aria-label={`${option.id} description`}
+            value={description.draft}
+            disabled={disabled}
+            onChange={(e) => {
+              if (disabled) return;
+              description.onChange(e.target.value);
+            }}
+            onBlur={description.onBlur}
+            onKeyDown={description.onKeyDown}
+          />
+          {disabled ? null : <CommitStatus status={description.status} error={description.error} onSave={description.commitNow} />}
+        </div>
+      </Field>
       <Field label="Runtime">
         <select
           className={cx(inputCx, 'ac-mono')}
@@ -1132,7 +1170,7 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
   current: T.WorkspaceModels;
   runtimes: T.RuntimeInfo[];
   disabled?: boolean;
-  onSave: (next: T.WorkspaceModels) => void;
+  onSave: (next: T.WorkspaceModels) => Promise<void> | void;
 }): React.ReactElement {
   const options = current.workerOptions ?? [];
   const [id, setId] = useState('');
@@ -1330,7 +1368,7 @@ function DaemonModelsSection(): React.ReactElement {
         options={current.workerOptions}
         runtimes={list}
         fallback={emptyFallback}
-        onSave={(next) => save.mutate({ workerOptions: next })}
+        onSave={(next) => save.mutateAsync({ workerOptions: next }).then(() => undefined)}
       />
       {save.error ? <ErrorState code="MODELS_NOT_SAVED" message={save.error.message} /> : null}
     </div>
@@ -1383,7 +1421,7 @@ function DaemonWorkerOptions({ options, runtimes, fallback, onSave }: {
   options: T.WorkerModelOption[] | null;
   runtimes: T.RuntimeInfo[];
   fallback: T.ModelSetting;
-  onSave: (next: T.WorkerModelOption[] | null) => void;
+  onSave: (next: T.WorkerModelOption[] | null) => Promise<void> | void;
 }): React.ReactElement {
   const list = options ?? [];
   return (

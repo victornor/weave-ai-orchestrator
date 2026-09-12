@@ -59,6 +59,7 @@ vi.mock('../api/hooks', () => ({
   useDaemonModels: () => ({ data: state.daemonModels, isLoading: false }),
   useSetDaemonModels: () => ({
     mutate: (v: Partial<typeof state.daemonModels>) => { state.daemonSaved.push(v); state.daemonModels = { ...state.daemonModels, ...v }; },
+    mutateAsync: async (v: Partial<typeof state.daemonModels>) => { state.daemonSaved.push(v); state.daemonModels = { ...state.daemonModels, ...v }; return state.daemonModels; },
     isPending: false,
     error: null,
   }),
@@ -195,7 +196,7 @@ describe('Settings — the two model settings', () => {
     const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
     state.models = { ...state.models, workerOptions: [cheap] };
     openModels();
-    expect(screen.getByText(/cheap — Scouts/)).toBeInTheDocument();
+    expect(screen.getByLabelText('cheap description')).toHaveValue('Scouts.');
     fireEvent.click(screen.getByRole('button', { name: 'Remove worker option cheap' }));
     expect(state.saved.at(-1)!.workerOptions).toEqual([]);
     state.saved = [];
@@ -210,7 +211,7 @@ describe('Settings — the two model settings', () => {
       workerOptions: [{ id: 'quick', description: 'Fastest.', runtime: null, model: null }],
     };
     openModels();
-    expect(screen.getByText(/quick — Fastest/)).toBeInTheDocument();
+    expect(screen.getByLabelText('quick description')).toHaveValue('Fastest.');
     const runtime = screen.getByLabelText('quick runtime');
     expect(runtime).toHaveValue('');
     expect(within(runtime).getByRole('option', { name: 'Not chosen' })).toBeInTheDocument();
@@ -487,7 +488,7 @@ describe('Settings — an existing worker option row shows its thinking level (V
     state.models = { ...state.models, workerOptions: [{ id: 'quick', description: 'Fastest.', runtime: null, model: null }] };
     state.runtimeModels = fableAndOpus;
     openModels();
-    expect(screen.getByText(/quick — Fastest/)).toBeInTheDocument();
+    expect(screen.getByLabelText('quick description')).toHaveValue('Fastest.');
     expect(screen.queryByLabelText('quick thinking level')).not.toBeInTheDocument();
   });
 
@@ -511,5 +512,89 @@ describe('Settings — an existing worker option row shows its thinking level (V
       { id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: 'claude-opus-5', effort: 'low' },
     ]);
     expect(screen.queryByText(/was cleared/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Settings — an existing worker option's description is editable in place (VS-299)", () => {
+  it('saves a reworded description, keeping the id, runtime and model, and offers no id control', async () => {
+    state.models = {
+      ...state.models,
+      workerOptions: [{ id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: 'claude-fable-5-1', effort: 'high' }],
+    };
+    openModels();
+    // The id is a read-only heading: there is no input that could change it.
+    expect(screen.getByText('tier')).toBeInTheDocument();
+    expect(screen.queryByLabelText('tier id')).not.toBeInTheDocument();
+
+    const box = screen.getByLabelText('tier description');
+    expect(box).toHaveValue('Hard tickets.');
+    fireEvent.change(box, { target: { value: 'Deep, ambiguous, production-facing work.' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'tier', description: 'Deep, ambiguous, production-facing work.', runtime: 'claude', model: 'claude-fable-5-1', effort: 'high' },
+    ]));
+  });
+
+  it('shows the schema cap and refuses an over-length description before saving, then accepts a corrected one', async () => {
+    const max = WorkerModelOptionSchema.shape.description.maxLength as number;
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: null }] };
+    openModels();
+    const box = screen.getByLabelText('tier description');
+    fireEvent.change(box, { target: { value: 'x'.repeat(max + 1) } });
+    expect(screen.getByText(`${max + 1}/${max} characters`)).toBeInTheDocument();
+    expect(screen.getByText(`At most ${max} characters — now ${max + 1}.`)).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(state.saved).toHaveLength(0);
+
+    fireEvent.change(box, { target: { value: 'x'.repeat(max) } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'tier', description: 'x'.repeat(max), runtime: 'claude', model: null },
+    ]));
+  });
+
+  it('leaves the description alone when the runtime changes', () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: 'claude-fable-5-1' }] };
+    openModels();
+    fireEvent.change(screen.getByLabelText('tier runtime'), { target: { value: 'codex' } });
+    expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'tier', description: 'Hard tickets.', runtime: 'codex', model: 'claude-fable-5-1' },
+    ]);
+  });
+
+  it('leaves the description alone when the model changes', () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: 'claude-fable-5-1' }] };
+    openModels();
+    fireEvent.change(screen.getByLabelText('tier model'), { target: { value: 'claude-opus-5' } });
+    expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: 'claude-opus-5' },
+    ]);
+  });
+
+  it('does not let a dirty description resurrect an option that is removed', () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: null }] };
+    openModels();
+    fireEvent.change(screen.getByLabelText('tier description'), { target: { value: 'Renamed.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove worker option tier' }));
+    expect(state.saved.at(-1)!.workerOptions).toEqual([]);
+    // The unmount flush must not write the catalog back with the removed option.
+    expect(state.saved.some((s) => (s.workerOptions ?? []).some((o) => o.id === 'tier'))).toBe(false);
+  });
+
+  it('offers the same edit on the daemon catalog rows, writing the daemon catalog', async () => {
+    state.search = { section: 'daemon-models' };
+    state.daemonModels = {
+      weaver: null,
+      workers: null,
+      workerOptions: [{ id: 'deep', description: 'Cause unknown.', runtime: 'claude', model: null }],
+    };
+    openDaemonModels();
+    const box = screen.getByLabelText('deep description');
+    expect(box).toHaveValue('Cause unknown.');
+    fireEvent.change(box, { target: { value: 'Cause unknown, or production-facing.' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(state.daemonSaved.at(-1)).toEqual({
+      workerOptions: [{ id: 'deep', description: 'Cause unknown, or production-facing.', runtime: 'claude', model: null }],
+    }));
   });
 });

@@ -1079,7 +1079,7 @@ function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave 
           onChange={(e) => {
             const runtime = e.target.value === '' ? null : e.target.value;
             setFreeText(false);
-            patch({ id: option.id, description: option.description, runtime, model: runtime == null ? null : option.model });
+            patch({ ...option, runtime, model: runtime == null ? null : option.model });
           }}
         >
           <option value="">Not chosen</option>

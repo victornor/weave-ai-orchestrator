@@ -222,6 +222,18 @@ describe('Settings — the two model settings', () => {
     ]);
   });
 
+  it("changing an existing option's runtime keeps the effort stored on it (VS-302)", () => {
+    state.models = {
+      ...state.models,
+      workerOptions: [{ id: 'deep', description: 'Hard tickets.', runtime: 'claude', model: 'claude-opus-5', effort: 'high' }],
+    };
+    openModels();
+    fireEvent.change(screen.getByLabelText('deep runtime'), { target: { value: 'codex' } });
+    expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'deep', description: 'Hard tickets.', runtime: 'codex', model: 'claude-opus-5', effort: 'high' },
+    ]);
+  });
+
   it('a workspace control is never disabled, even while a daemon overlay is filled for it (VS-284)', () => {
     // `useModels()` already returns the effective value; a filled daemon overlay for weaver would
     // surface here as `current.weaver` reflecting the overlay, never as a `locked` flag.

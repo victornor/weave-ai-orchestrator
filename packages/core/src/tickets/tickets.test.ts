@@ -548,6 +548,66 @@ describe('tickets', () => {
       });
     });
 
+    describe('artifacts (VS-270)', () => {
+      const otherProject = (): string => {
+        const id = newId();
+        const now = nowIso();
+        h.db.insert('projects', {
+          id, workspaceId: h.workspaceId, slug: 'other', name: 'Other', gitUrl: 'git@example.com:acme/other.git',
+          defaultBranch: 'main', clonePath: join(h.root, 'other'), maxWorkers: 4, worktreeProvider: 'git',
+          openspecEnabled: 1, policiesJson: {}, status: 'ready', createdAt: now, updatedAt: now,
+        });
+        return id;
+      };
+
+      it('lists only the artifacts belonging to the given project, joined with each ticket', () => {
+        const a = make({ title: 'Ticket A' });
+        const other = otherProject();
+        const b = tickets.create(HUMAN, { kind: 'change', title: 'Ticket B', projectId: other, assigneeRoleId: null });
+        tickets.putArtifactWorkProduct(AGENT, a.id, 'overview', { url: '/raw/a-overview', title: 'A overview' });
+        tickets.putArtifactWorkProduct(AGENT, b.id, 'overview', { url: '/raw/b-overview', title: 'B overview' });
+
+        const forA = tickets.artifacts(h.projectId);
+        expect(forA).toHaveLength(1);
+        expect(forA[0]).toMatchObject({ ticketId: a.id, ticketIdentifier: a.identifier, ticketTitle: 'Ticket A', key: 'overview', title: 'A overview', url: '/raw/a-overview' });
+
+        const forAll = tickets.artifacts(null);
+        expect(forAll.map((r) => r.ticketId).sort()).toEqual([a.id, b.id].sort());
+      });
+
+      it('excludes a project-less ticket from a specific-project call and includes it when unfiltered', () => {
+        const a = make({ title: 'Has a project' });
+        const orphan = tickets.create(HUMAN, { kind: 'change', title: 'No project', projectId: null, assigneeRoleId: null });
+        tickets.putArtifactWorkProduct(AGENT, a.id, 'overview', { url: '/raw/a' });
+        tickets.putArtifactWorkProduct(AGENT, orphan.id, 'overview', { url: '/raw/orphan' });
+
+        expect(tickets.artifacts(h.projectId).map((r) => r.ticketId)).toEqual([a.id]);
+        expect(tickets.artifacts(null).map((r) => r.ticketId).sort()).toEqual([a.id, orphan.id].sort());
+      });
+
+      it('republishing under the same key yields exactly one row, reflecting the latest publish', () => {
+        const t = make();
+        tickets.putArtifactWorkProduct(AGENT, t.id, 'overview', { url: '/raw/1', title: 'v1' });
+        tickets.putArtifactWorkProduct(AGENT, t.id, 'overview', { url: '/raw/2', title: 'v2' });
+        const rows = tickets.artifacts(h.projectId).filter((r) => r.ticketId === t.id);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ url: '/raw/2', title: 'v2' });
+      });
+
+      it('sorts most-recently-updated first and carries kind through metadata', () => {
+        // Real-clock timestamps can tie within the same millisecond (the project's own ULID/timestamp-tie
+        // flake, VS-191) — set updated_at explicitly rather than relying on call order to produce distinct ones.
+        const t = make();
+        const first = tickets.putArtifactWorkProduct(AGENT, t.id, 'first', { url: '/raw/first', kind: 'diagram' });
+        const second = tickets.putArtifactWorkProduct(AGENT, t.id, 'second', { url: '/raw/second' });
+        h.db.update('ticket_work_products', first.id, { updatedAt: '2026-09-12T00:00:00.000Z' });
+        h.db.update('ticket_work_products', second.id, { updatedAt: '2026-09-12T00:00:01.000Z' });
+        const rows = tickets.artifacts(h.projectId);
+        expect(rows.map((r) => r.key)).toEqual(['second', 'first']);
+        expect(rows.find((r) => r.key === 'first')!.metadata['kind']).toBe('diagram');
+      });
+    });
+
     it('lists the documents on a ticket with their current revision', () => {
       const t = make();
       tickets.putDocument(AGENT, t.id, 'report', 'r1');

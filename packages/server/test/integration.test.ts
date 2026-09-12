@@ -679,5 +679,41 @@ describe('real core services over HTTP', () => {
       expect(res.headers.get('content-type')).toBe('text/css; charset=utf-8');
       expect(await res.text()).toBe(ARTIFACT_KIT_CSS);
     });
+
+    // VS-270: the document explorer's Artifacts entry must land on the exact same route and CSP as
+    // the ticket page's own viewer — this fetches the `url` the *new* project-wide listing itself
+    // returns, not one the test constructs, so it proves the explorer's own read path is unrelaxed
+    // rather than assuming so because the URL string looks right (design.md's stated reason).
+    it('lists a published artifact across the project, and its listed URL still serves the mandated sandbox CSP', async () => {
+      const { harness, app, ticket, agentId } = bootWithWorkerTicket();
+      const token = await workerToken(harness, agentId, ticket.id);
+      const published = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: SAMPLE_HTML, title: 'Overview', kind: 'diagram' });
+      expect(published.ok).toBe(true);
+
+      const listed = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/knowledge/artifacts?project=${harness.projectId}`, { headers: H }))).json();
+      expect(listed).toHaveLength(1);
+      expect(listed[0]).toMatchObject({ ticketId: ticket.id, ticketIdentifier: ticket.identifier, key: 'overview', title: 'Overview', url: published.data.url });
+
+      const res = await app.fetch(new Request(`http://127.0.0.1${listed[0].url}`, { headers: H }));
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(SAMPLE_HTML);
+      expect(res.headers.get('content-security-policy')).toBe(
+        "sandbox allow-scripts allow-forms allow-popups allow-downloads; default-src 'none'; style-src 'self' 'unsafe-inline'; img-src data: 'self'; font-src data:; connect-src 'none'",
+      );
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+
+      // A different project sees none of it; the unfiltered call sees it regardless.
+      const otherProjectId = 'other-proj';
+      const now = new Date().toISOString();
+      harness.db.insert('projects', {
+        id: otherProjectId, workspaceId: harness.workspaceId, slug: 'other', name: 'Other', gitUrl: '', defaultBranch: 'main',
+        clonePath: '/tmp/other', maxWorkers: 4, worktreeProvider: 'git', openspecEnabled: 1, policiesJson: {},
+        status: 'ready', createdAt: now, updatedAt: now,
+      });
+      const forOther = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/knowledge/artifacts?project=${otherProjectId}`, { headers: H }))).json();
+      expect(forOther).toEqual([]);
+      const unfiltered = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/knowledge/artifacts`, { headers: H }))).json();
+      expect(unfiltered).toHaveLength(1);
+    });
   });
 });

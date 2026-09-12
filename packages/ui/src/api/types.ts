@@ -245,6 +245,20 @@ export interface WorkProduct {
   updatedAt: string;
 }
 
+/** One row of `GET /knowledge/artifacts` (VS-270): a published artifact joined with its own ticket's
+ * identifier/title, for the document explorer's Artifacts entry. Not a knowledge document — no slug. */
+export interface TicketArtifactSummary {
+  id: string;
+  ticketId: string;
+  ticketIdentifier: string;
+  ticketTitle: string;
+  key: string;
+  title: string | null;
+  metadata: Record<string, unknown>;
+  url: string | null;
+  updatedAt: string;
+}
+
 export interface OpenSpecState {
   changeName: string | null;
   state: string | null;

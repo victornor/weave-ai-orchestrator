@@ -65,6 +65,14 @@ export const qk = {
   knowledgeRevisions: (ws: string, scope: string, project?: string) => ['w', ws, 'knowledge', scope, project ?? '', 'revisions'] as const,
   search: (ws: string, q: string, project?: string) => ['w', ws, 'search', q, project ?? ''] as const,
 
+  /**
+   * Deliberately not under `knowledge` (VS-270) — same trap `pullRequestsRoot`/`historyRoot` avoid
+   * (VS-95/VS-97): an artifact publish is a ticket event (`ticket.work_product`), never a knowledge-
+   * write event, so nesting this under `qk.knowledge` would leave it invalidated by nothing.
+   */
+  artifactsRoot: (ws: string) => ['w', ws, 'artifacts'] as const,
+  artifacts: (ws: string, project?: string) => ['w', ws, 'artifacts', project ?? ''] as const,
+
   changelogRoot: (ws: string) => ['w', ws, 'changelog'] as const,
   changelog: (ws: string, project?: string) => ['w', ws, 'changelog', 'entries', project ?? ''] as const,
   changelogHeatmap: (ws: string, project: string | undefined, tz: string) => ['w', ws, 'changelog', 'heatmap', project ?? '', tz] as const,

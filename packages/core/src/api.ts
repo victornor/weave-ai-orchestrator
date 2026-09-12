@@ -52,6 +52,11 @@ export interface TicketsService {
   workProducts(id: string): Array<Record<string, unknown>>;
   /** Publishes (or, called again with the same `key`, updates) the one `type: 'artifact'` work product for that key, keyed by `externalId === key` — used only by `ac_ticket_artifact_put`, never by the general work-product tool. */
   putArtifactWorkProduct(actor: Actor, id: string, key: string, wp: { url: string; title?: string; kind?: string }): { id: string };
+  /** Every published artifact across the given project's tickets (every ticket when `projectId` is
+   * null), most-recently-updated first, joined with its own ticket's identifier/title — VS-270's
+   * document-explorer listing. Reads `ticket_work_products`/`tickets` only; an artifact stays a ticket
+   * work product, never a knowledge document. */
+  artifacts(projectId: string | null): Array<{ id: string; ticketId: string; ticketIdentifier: string; ticketTitle: string; key: string; title: string | null; metadata: Record<string, unknown>; url: string | null; updatedAt: string }>;
   /** Async: archives the OpenSpec change after the merge is verified (PLAN §12.2). */
   mergeDone(actor: Actor, id: string, info: { mergeCommit?: string; method?: string }): Promise<S.Ticket>;
   /** The per-project merge queue that decides which approved ticket merges now (PLAN §11.4). */

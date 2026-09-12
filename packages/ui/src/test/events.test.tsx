@@ -157,6 +157,23 @@ describe("a project's pull requests (VS-97)", () => {
   });
 });
 
+describe("the document explorer's Artifacts entry (VS-270)", () => {
+  it('is made stale by a published/republished artifact work product', () => {
+    expect(invalidated(event('ticket.work_product', { entityId: 'tk_1', entityType: 'ticket' }))).toContain(JSON.stringify(qk.artifactsRoot('ws1')));
+  });
+
+  it('is left alone by a ticket event that cannot change an artifact', () => {
+    expect(invalidated(event('ticket.updated', { entityId: 'tk_1', entityType: 'ticket' }))).not.toContain(JSON.stringify(qk.artifactsRoot('ws1')));
+  });
+
+  // A per-project artifacts query keys under the same root, so the one invalidation above reaches it
+  // too, the same way pull requests and history already rely on this shape (VS-95/VS-97).
+  it('keys a project-scoped artifacts query under the same root', () => {
+    const root = JSON.stringify(qk.artifactsRoot('ws1')).slice(0, -1);
+    expect(JSON.stringify(qk.artifacts('ws1', 'p1')).startsWith(root)).toBe(true);
+  });
+});
+
 describe("a project's commit graph (VS-96)", () => {
   it.each(['ticket.work_product', 'ticket.status', 'ticket.merged', 'worker.spawned', 'worker.retired', 'project.updated'] as const)(
     'is made stale by %s',

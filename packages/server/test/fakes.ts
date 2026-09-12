@@ -169,7 +169,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       stop: async () => {},
       get: getTicket,
       list: () => ({ items: [...tickets.values()], total: tickets.size }),
-      blockers: () => [], children: () => [], workProducts: () => [],
+      blockers: () => [], children: () => [], workProducts: () => [], artifacts: () => [],
       mergeQueue: {
         positionOf: (id: string) => (getTicket(id).status === 'merging' && !getTicket(id).mergeStartedAt ? 1 : null),
         limitFor: () => 1,

@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-12
+goal: Land the retire_capabilities marker VS-285 needs and gate a future
+  wholesale-retirement change at the proposed step, before it can reach a
+  merged/closed PR that cannot take a follow-up commit

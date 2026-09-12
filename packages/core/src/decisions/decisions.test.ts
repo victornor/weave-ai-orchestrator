@@ -1136,4 +1136,104 @@ describe('decisions', () => {
       expect(tickets.get(t.id).status).toBe('approved');
     });
   });
+
+  // VS-310: the weaver may record a human's prose answer to an askable, human-owned decision,
+  // naming the message it came from. Every approval stays out of reach; only the weaver may relay.
+  describe('relayed answers (VS-310)', () => {
+    const WEAVER = (): Actor => ({ kind: 'agent', id: h.conductorId, runId: 'run-weaver' });
+    const askedByWeaver = () => decisions.create(WEAVER(), {
+      kind: 'question', title: 'Which store?', askedByAgentId: h.conductorId, correlationKey: newId(),
+      options: [{ key: 'sqlite', label: 'SQLite' }],
+    });
+    const otherWorkspace = () => {
+      const id = newId();
+      h.db.insert('workspaces', { id, slug: `other-${id.slice(0, 6)}`, name: 'Other', ticketPrefix: 'OTH', rootPath: '/tmp/other', createdAt: '2026-09-12T00:00:00.000Z', updatedAt: '2026-09-12T00:00:00.000Z' });
+      return id;
+    };
+    const message = (over: Partial<{ workspaceId: string; direction: 'inbound' | 'outbound'; authorKind: string; body: string }> = {}) => {
+      const channelId = newId();
+      h.db.insert('channels', { id: channelId, workspaceId: over.workspaceId ?? h.workspaceId, kind: channelId, configJson: {}, status: 'active' });
+      const threadId = newId();
+      h.db.insert('channel_threads', { id: threadId, channelId, agentId: h.conductorId, createdAt: '2026-09-12T00:00:00.000Z' });
+      const id = newId();
+      h.db.insert('thread_messages', {
+        id, threadId, direction: over.direction ?? 'inbound', authorKind: over.authorKind ?? 'human', authorId: 'victor',
+        body: over.body ?? 'go with sqlite', createdAt: '2026-09-12T00:00:01.000Z',
+      });
+      return id;
+    };
+
+    it('stores the words verbatim, marking the weaver as writer and the human as author, linked to the message', async () => {
+      const d = askedByWeaver();
+      const msg = message({ body: 'go with sqlite, and keep the tests' });
+      const answered = await decisions.answer(WEAVER(), d.id, { text: 'go with sqlite, and keep the tests', relayFromMessageId: msg });
+      expect(answered.status).toBe('answered');
+      expect(answered.answerText).toBe('go with sqlite, and keep the tests');
+      expect(answered.answeredByKind).toBe('agent');
+      expect(answered.answeredById).toBe(h.conductorId);
+      expect(answered.answerAuthorKind).toBe('human');
+      expect(answered.relayedFromMessageId).toBe(msg);
+    });
+
+    it('stores a mapped option key alongside the verbatim words', async () => {
+      const d = askedByWeaver();
+      const answered = await decisions.answer(WEAVER(), d.id, { key: 'sqlite', text: 'yes, sqlite please', relayFromMessageId: message() });
+      expect(answered.answerKey).toBe('sqlite');
+      expect(answered.answerText).toBe('yes, sqlite please');
+    });
+
+    it('leaves a direct answer carrying no relay provenance', async () => {
+      const d = decisions.create(AGENT, { kind: 'question', title: 'q', options: [{ key: 'a', label: 'A' }] });
+      const answered = await decisions.answer(HUMAN, d.id, { key: 'a' });
+      expect(answered.answeredByKind).toBe('human');
+      expect(answered.answerAuthorKind).toBeNull();
+      expect(answered.relayedFromMessageId).toBeNull();
+    });
+
+    it('wakes the asker and emits decision.answered', async () => {
+      const d = askedByWeaver();
+      const msg = message();
+      await decisions.answer(WEAVER(), d.id, { text: 'go with sqlite', relayFromMessageId: msg });
+      await new Promise((r) => setImmediate(r));
+      const w = wake.calls.find((c) => c.input.source === 'decision_answered');
+      expect(w?.agentId).toBe(h.conductorId);
+      expect(w?.input.payload).toMatchObject({ decisionId: d.id, answer: { text: 'go with sqlite' } });
+      expect(h.events.some((e) => e.type === 'decision.answered')).toBe(true);
+    });
+
+    it('refuses an option key the decision does not offer', async () => {
+      const d = askedByWeaver();
+      await expect(decisions.answer(WEAVER(), d.id, { key: 'nope', relayFromMessageId: message() })).rejects.toMatchObject({ code: 'validation' });
+      expect(decisions.get(d.id).status).toBe('open');
+    });
+
+    it('refuses a message that does not exist, from another workspace, outbound, or not the human\'s, leaving the card open', async () => {
+      const d = askedByWeaver();
+      await expect(decisions.answer(WEAVER(), d.id, { text: 'x', relayFromMessageId: 'nope' })).rejects.toMatchObject({ code: 'not_found' });
+      await expect(decisions.answer(WEAVER(), d.id, { text: 'x', relayFromMessageId: message({ workspaceId: otherWorkspace() }) })).rejects.toMatchObject({ code: 'not_found' });
+      await expect(decisions.answer(WEAVER(), d.id, { text: 'x', relayFromMessageId: message({ direction: 'outbound' }) })).rejects.toMatchObject({ code: 'validation' });
+      await expect(decisions.answer(WEAVER(), d.id, { text: 'x', relayFromMessageId: message({ authorKind: 'agent' }) })).rejects.toMatchObject({ code: 'validation' });
+      const after = decisions.get(d.id);
+      expect(after.status).toBe('open');
+      expect(after.answeredAt).toBeNull();
+      expect(after.relayedFromMessageId).toBeNull();
+    });
+
+    it('refuses a relay on a decision the weaver owns', async () => {
+      const workerId = h.addWorker(null);
+      const d = decisions.create(WEAVER(), { kind: 'question', title: 'worker question', askedByAgentId: workerId, correlationKey: newId() });
+      expect(d.owner).toBe('weaver');
+      await expect(decisions.answer(WEAVER(), d.id, { text: 'x', relayFromMessageId: message() })).rejects.toMatchObject({ code: 'validation' });
+      expect(decisions.get(d.id).status).toBe('open');
+    });
+
+    it('refuses a relay from any actor other than the workspace weaver', async () => {
+      const d = askedByWeaver();
+      const msg = message();
+      await expect(decisions.answer(HUMAN, d.id, { text: 'x', relayFromMessageId: msg })).rejects.toMatchObject({ code: 'forbidden' });
+      await expect(decisions.answer({ kind: 'agent', id: 'some-worker' }, d.id, { text: 'x', relayFromMessageId: msg })).rejects.toMatchObject({ code: 'forbidden' });
+      expect(decisions.get(d.id).status).toBe('open');
+      expect(decisions.get(d.id).relayedFromMessageId).toBeNull();
+    });
+  });
 });

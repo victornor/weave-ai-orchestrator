@@ -459,6 +459,24 @@ describe('knowledge', () => {
     expect(body).toContain('approve — yes, variables');
   });
 
+  it('marks a relayed answer in the durable line but leaves a direct one unmarked (VS-310)', () => {
+    const base = {
+      id: 'd2', workspaceId: h.workspaceId, ticketId: null, kind: 'question', owner: 'human', askedByAgentId: null,
+      askedInRunId: null, title: 'Deploy target', context: '', options: [], allowFreeText: true,
+      recommendation: null, status: 'answered', answerKey: null, answerText: 'go with sqlite please', answeredByKind: 'agent',
+      answeredById: 'weaver', answeredAt: new Date().toISOString(), expiresAt: null, target: null, correlationKey: null,
+      answerAuthorKind: 'human', relayedFromMessageId: 'msg_1', createdAt: new Date().toISOString(),
+    } as never;
+    knowledge.appendDecision(base);
+    expect(knowledge.get('decisions').body).toContain("go with sqlite please (relayed from the human's message)");
+
+    const direct = { ...(base as Record<string, unknown>), id: 'd3', title: 'Backup window', answerText: 'keep it at 02:00', relayedFromMessageId: null, answerAuthorKind: null } as never;
+    knowledge.appendDecision(direct);
+    const body = knowledge.get('decisions').body;
+    expect(body).toContain('Backup window → keep it at 02:00');
+    expect(body).not.toContain('Backup window → keep it at 02:00 (relayed');
+  });
+
   it('linked documents: put, links, backlinks, catalogue, graph, delete', () => {
     const first = knowledge.putDoc(WORKER, 'project', 'payments-webhooks', '# Payments webhooks\n\nStripe events land in the API and are applied by a worker. Billing state: [[billing-data-model]].\n\n## Flow\n- verify, queue, apply\n', h.projectId);
     expect(first.unresolvedLinks).toEqual(['billing-data-model']);

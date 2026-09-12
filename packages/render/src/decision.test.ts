@@ -11,6 +11,7 @@ function decision(over: Partial<Decision> & { kind: DecisionKind }): Decision {
     answeredByKind: null, answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null,
     createdAt: '2026-09-04T11:56:00.000Z',
     weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null,
+    answerAuthorKind: null, relayedFromMessageId: null,
     ...over,
   } as Decision;
 }
@@ -193,7 +194,12 @@ describe('decisionToCard', () => {
   it('carries the answer and the answered ui status once answered', () => {
     const card = decisionToCard(decision({ kind: 'plan_approval', status: 'answered', answerKey: 'approve', answerText: 'go', answeredAt: '2026-09-04T11:58:00.000Z' }), { now });
     expect(card.uiStatus).toBe('done');
-    expect(card.answer).toEqual({ key: 'approve', text: 'go', at: '2026-09-04T11:58:00.000Z' });
+    expect(card.answer).toEqual({ key: 'approve', text: 'go', at: '2026-09-04T11:58:00.000Z', relayedFromMessageId: null });
+  });
+
+  it('carries the relay link on an answer recorded from the human\'s message (VS-310)', () => {
+    const card = decisionToCard(decision({ kind: 'question', status: 'answered', answerText: 'go with sqlite', answeredAt: '2026-09-04T11:58:00.000Z', relayedFromMessageId: 'msg_1' }), { now });
+    expect(card.answer).toMatchObject({ text: 'go with sqlite', relayedFromMessageId: 'msg_1' });
   });
 
   it('redacts secrets in titles, context and options', () => {

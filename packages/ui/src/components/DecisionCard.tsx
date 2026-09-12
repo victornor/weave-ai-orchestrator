@@ -451,6 +451,9 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
                 {r.value}
               </p>
             ))}
+            {decision.relayedFromMessageId ? (
+              <p className="mt-1 text-micro leading-relaxed text-text-3">The human's words, recorded by the weaver from their message.</p>
+            ) : null}
             {decision.answeredAt ? <p className="ac-mono mt-1 text-micro text-text-4">{clock(decision.answeredAt)}</p> : null}
           </div>
         ) : null}

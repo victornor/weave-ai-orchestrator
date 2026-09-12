@@ -498,6 +498,17 @@ describe('DecisionCard', () => {
     expect(screen.getByText('neither — put it behind a flag')).toBeInTheDocument();
   });
 
+  it('says a relayed answer is the human\'s words recorded by the weaver (VS-310)', () => {
+    render(
+      <DecisionCard
+        decision={question({ status: 'answered', answerKey: null, answerText: 'go with sqlite', relayedFromMessageId: 'msg_1' })}
+        onAnswer={() => undefined}
+      />,
+    );
+    expect(screen.getByText('go with sqlite')).toBeInTheDocument();
+    expect(screen.getByText("The human's words, recorded by the weaver from their message.")).toBeInTheDocument();
+  });
+
   it('offers nothing to answer on an answered plan approval', () => {
     render(<DecisionCard decision={decision({ status: 'answered', answerKey: 'approve' })} onAnswer={() => undefined} />);
     expect(screen.queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument();

@@ -82,6 +82,18 @@ export interface Decision {
   weaverReviewedAt: string | null;
   weaverReviewNote: string | null;
   weaverReviewedByAgentId: string | null;
+  /**
+   * VS-310: a relayed answer is the human's words recorded by the weaver from the message they were
+   * sent in. `answeredByKind`/`answeredById` stay the *writer* (the weaver agent); this is the
+   * *author* — always `'human'` on a relay, `null` on a direct answer, whose author is its writer.
+   */
+  answerAuthorKind: string | null;
+  /**
+   * VS-310: the inbound human thread message the answer was transcribed from. Non-null exactly when
+   * the answer was relayed, and the one thing a query or surface checks to tell a relay from the
+   * human's own tap.
+   */
+  relayedFromMessageId: string | null;
 }
 /** A workspace secret as any surface may see it (VS-92): the name, where it is exposed, and whether a value is held. Never the value. */
 export interface WorkspaceSecret { name: string; envVarName: string; scope: E.SecretScope; scopeId: string | null; hasValue: boolean }

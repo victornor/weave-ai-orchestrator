@@ -66,20 +66,20 @@ describe('GlobalIncidentsRoute', () => {
   it('shows both kinds labelled', () => {
     state.items = [
       incident({ id: 'w', title: 'Worker fail', reporterKind: 'worker' }),
-      incident({ id: 'c', title: 'Conductor fail', reporterKind: 'conductor' }),
+      incident({ id: 'c', title: 'Weaver fail', reporterKind: 'weaver' }),
     ];
     render(<GlobalIncidentsRoute />);
     expect(screen.getByText('Worker fail')).toBeInTheDocument();
-    expect(screen.getByText('Conductor fail')).toBeInTheDocument();
+    expect(screen.getByText('Weaver fail')).toBeInTheDocument();
     expect(screen.getByText('worker')).toBeInTheDocument();
-    expect(screen.getByText('conductor')).toBeInTheDocument();
+    expect(screen.getByText('weaver')).toBeInTheDocument();
   });
 
-  it('conductor filter navigates with ?reporter=conductor', () => {
+  it('weaver filter navigates with ?reporter=weaver', () => {
     state.items = [incident()];
     render(<GlobalIncidentsRoute />);
-    fireEvent.click(screen.getByRole('button', { name: 'Conductor' }));
-    expect(state.go).toHaveBeenCalledWith('/incidents', { search: { reporter: 'conductor' }, replace: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Weaver' }));
+    expect(state.go).toHaveBeenCalledWith('/incidents', { search: { reporter: 'weaver' }, replace: true });
   });
 
   it('worker filter navigates with ?reporter=worker', () => {
@@ -95,11 +95,11 @@ describe('GlobalIncidentsRoute', () => {
     expect(screen.getByText('No incidents have been filed.')).toBeInTheDocument();
   });
 
-  it('says so when the conductor filter matches nothing', () => {
-    state.search = { reporter: 'conductor' };
+  it('says so when the weaver filter matches nothing', () => {
+    state.search = { reporter: 'weaver' };
     state.items = [];
     render(<GlobalIncidentsRoute />);
-    expect(screen.getByText('No conductor incidents.')).toBeInTheDocument();
+    expect(screen.getByText('No weaver incidents.')).toBeInTheDocument();
   });
 
   it('shows an error, not the empty wording, when the list fails', () => {

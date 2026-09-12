@@ -187,7 +187,7 @@ describe('run engine', () => {
     expect(runtime.inputs).toHaveLength(2);
     expect(runtime.inputs[0]!.session.isFirstTurn).toBe(true);
     expect(runtime.inputs[0]!.systemPrompt.mode).toBe('inject');
-    expect(runtime.inputs[0]!.systemPrompt.text).toContain('conductor');
+    expect(runtime.inputs[0]!.systemPrompt.text).toContain('weaver');
     expect(runtime.inputs[1]!.session.isFirstTurn).toBe(false);
     expect(runtime.inputs[1]!.systemPrompt.mode).toBe('skip');
     expect(runtime.inputs[1]!.session.ref).toEqual(runtime.inputs[0]!.session.ref ?? expect.anything());
@@ -203,11 +203,11 @@ describe('run engine', () => {
     expect(authHeader.startsWith('Bearer rt_')).toBe(true);
     expect(input.env.AC_RUN_TOKEN).toBe(authHeader.slice('Bearer '.length));
     expect(input.env.AC_RUN_ID).toBe(run.id);
-    expect(input.env.AC_AGENT_KIND).toBe('conductor');
+    expect(input.env.AC_AGENT_KIND).toBe('weaver');
     expect(input.env.AC_WORKSPACE_ID).toBe(h.workspaceId);
     expect(input.outputSchema).toBeTruthy();
     const claims = await verifyRunToken(runTokenSecret(h.db), input.env.AC_RUN_TOKEN!);
-    expect(claims).toMatchObject({ workspaceId: h.workspaceId, runId: run.id, agentId: h.conductorId, agentKind: 'conductor' });
+    expect(claims).toMatchObject({ workspaceId: h.workspaceId, runId: run.id, agentId: h.conductorId, agentKind: 'weaver' });
   });
 
   it('bundles every queued wake for one agent into a single run', async () => {
@@ -474,7 +474,7 @@ describe('run engine', () => {
     const runId = newId();
     h.db.insert('runs', {
       id: runId, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: [], runtimeId: 'fake',
-      status: 'queued', turnEpoch: 1, cwd: h.ctx.paths.conductor, createdAt: nowIso(),
+      status: 'queued', turnEpoch: 1, cwd: h.ctx.paths.weaver, createdAt: nowIso(),
     });
     const handleReady = runtime.nextHandle();
     const done = executeRun(h.ctx, h.deps, runId);
@@ -499,7 +499,7 @@ describe('run engine', () => {
     const runId = newId();
     h.db.insert('runs', {
       id: runId, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: [], runtimeId: 'fake',
-      status: 'queued', turnEpoch: 7, cwd: h.ctx.paths.conductor, createdAt: nowIso(),
+      status: 'queued', turnEpoch: 7, cwd: h.ctx.paths.weaver, createdAt: nowIso(),
     });
     const run = await executeRun(h.ctx, h.deps, runId);
     expect(run.status).toBe('succeeded');
@@ -514,7 +514,7 @@ describe('run engine', () => {
       const runId = newId();
       h.db.insert('runs', {
         id: runId, workspaceId: h.workspaceId, agentId, wakeupIdsJson: [], runtimeId: 'fake',
-        status: 'queued', turnEpoch: 1, cwd: h.ctx.paths.conductor, createdAt: nowIso(),
+        status: 'queued', turnEpoch: 1, cwd: h.ctx.paths.weaver, createdAt: nowIso(),
       });
       runState(h.ctx).active.set(runId, { runId, agentId, startedAt: Date.now(), pid: null, cancel: async () => undefined, cancelled });
       return runId;
@@ -978,14 +978,14 @@ describe('run engine', () => {
 
         it('withdraws the per-ticket gate_finding once the ticket moves again', async () => {
           const { ticketId, workerId } = await failAuth();
-          expect(openFor(ticketId).some((d) => d.kind === 'gate_finding' && d.owner === 'conductor')).toBe(true);
+          expect(openFor(ticketId).some((d) => d.kind === 'gate_finding' && d.owner === 'weaver')).toBe(true);
 
           ungateRuntime(h.ctx, h.deps, 'fake');
           runtime.queue.push(resultFor(workerId, { structured: { state: 'done', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } }));
           await runOnce(workerId);
           await tick();
 
-          expect(openFor(ticketId).some((d) => d.kind === 'gate_finding' && d.owner === 'conductor')).toBe(false);
+          expect(openFor(ticketId).some((d) => d.kind === 'gate_finding' && d.owner === 'weaver')).toBe(false);
         });
 
         it('a success between two authentication failures resets the streak', async () => {
@@ -1687,7 +1687,7 @@ describe('run engine', () => {
       expect(runtime.inputs).toHaveLength(0);
       const ticket = h.services.tickets!.get(ticketId);
       expect(ticket.status).toBe('blocked');
-      expect(ticket.unblock?.owner).toBe('conductor');
+      expect(ticket.unblock?.owner).toBe('weaver');
       expect(ticket.unblock?.action).toContain(h.projectSlug);
       expect(ticket.unblock?.action).toContain('diverged');
     });
@@ -1705,7 +1705,7 @@ describe('run engine', () => {
       expect(runtime.inputs).toHaveLength(0);
       const ticket = h.services.tickets!.get(ticketId);
       expect(ticket.status).toBe('blocked');
-      expect(ticket.unblock?.owner).toBe('conductor');
+      expect(ticket.unblock?.owner).toBe('weaver');
       expect(ticket.unblock?.action).toContain('could not fetch');
     });
 

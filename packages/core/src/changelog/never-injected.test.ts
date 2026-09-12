@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId } from '@agent-conductor/db';
-import { COMMON_TOOLS, CONDUCTOR_TOOLS } from '@agent-conductor/shared';
+import { COMMON_TOOLS, WEAVER_TOOLS } from '@agent-conductor/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createKnowledgeService } from '../knowledge/service.js';
 import { renderBrief } from '../prompts/index.js';
@@ -101,7 +101,7 @@ describe('the changelog never reaches an agent', () => {
   });
 
   it('has no agent-facing tool that could reach it', () => {
-    const tools = [...COMMON_TOOLS, ...CONDUCTOR_TOOLS];
+    const tools = [...COMMON_TOOLS, ...WEAVER_TOOLS];
     expect(tools.filter((t) => /changelog|activity/i.test(t))).toEqual([]);
   });
 

@@ -159,7 +159,7 @@ export function createUsageService(ctx: WorkspaceContext): UsageService {
   const agentLabel = (agentId: string): string => {
     const a = ctx.db.get<{ name: string; kind: S.AgentKind }>('SELECT name, kind FROM agents WHERE id = ? AND workspace_id = ?', [agentId, ctx.workspaceId]);
     if (!a) return 'unknown';
-    return a.kind === 'conductor' ? `${a.name} chat` : `${a.name} · no ticket`;
+    return a.kind === 'weaver' ? `${a.name} chat` : `${a.name} · no ticket`;
   };
 
   const label = (by: 'model' | 'ticket' | 'role' | 'worker' | 'project', key: string): string => {

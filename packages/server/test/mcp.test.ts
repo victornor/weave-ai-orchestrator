@@ -48,7 +48,7 @@ describe('MCP endpoint', () => {
   });
 
   it('exposes the conductor toolset for a conductor run token', async () => {
-    const { client } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const { client } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null });
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names).toContain('ac_role_hire');
     expect(names).toContain('ac_human_send');
@@ -86,7 +86,7 @@ describe('MCP endpoint', () => {
     expect(workerPayload.data.playbooks).toBeTypeOf('object');
     await worker.client.close();
 
-    const conductor = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const conductor = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null });
     const conductorRes = await conductor.client.callTool({ name: 'ac_artifact_kit', arguments: {} });
     const conductorPayload = JSON.parse((conductorRes.content as Array<{ text: string }>)[0]!.text);
     expect(conductorPayload.ok).toBe(true);
@@ -124,7 +124,7 @@ describe('MCP endpoint', () => {
     expect(worker.h.runtime.services.decisions.get('dec_1')).toEqual(before);
     await worker.client.close();
 
-    const conductor = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null, agentId: 'ag_conductor' });
+    const conductor = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null, agentId: 'ag_conductor' });
     const created = conductor.h.runtime.services.decisions.create(
       { kind: 'agent', id: 'ag_conductor' },
       { title: 'Approve the plan', kind: 'plan_approval' },
@@ -135,8 +135,8 @@ describe('MCP endpoint', () => {
     });
     const okPayload = JSON.parse((okRes.content as Array<{ text: string }>)[0]!.text);
     expect(okPayload.ok).toBe(true);
-    expect(okPayload.data.conductorReviewStatus).toBe('looked');
-    expect(okPayload.data.conductorReviewNote).toBe('plan matches the ticket');
+    expect(okPayload.data.weaverReviewStatus).toBe('looked');
+    expect(okPayload.data.weaverReviewNote).toBe('plan matches the ticket');
     await conductor.client.close();
   });
 
@@ -211,7 +211,7 @@ describe('MCP endpoint', () => {
   });
 
   it('lets the conductor read a document in any project', async () => {
-    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', projectId: null, ticketId: null });
+    const { client, h } = await connect({ ...WORKER, agentKind: 'weaver', projectId: null, ticketId: null });
     h.tickets.set('tk_other', { ...h.tickets.get('tk_1')!, id: 'tk_other', identifier: 'ZED-7', projectId: 'proj2', parentId: null });
     h.documents.set('tk_other\0report', ['cross-project finding']);
     const res = await client.callTool({ name: 'ac_ticket_document_get', arguments: { id: 'ZED-7' } });
@@ -295,7 +295,7 @@ describe('agent REST mirror', () => {
   });
 
   it('lets the asker name the project a question is about', async () => {
-    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null, projectId: null });
+    const { client, h } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null, projectId: null });
     await client.callTool({ name: 'ac_ask', arguments: { title: 'Which region?', projectId: 'proj9' } });
     expect(h.decisionInputs.at(-1)).toMatchObject({ projectId: 'proj9' });
     await client.close();
@@ -315,7 +315,7 @@ describe('agent REST mirror', () => {
     expect((await worker.client.listTools()).tools.map((t) => t.name)).not.toContain('ac_role_set_secrets');
     await worker.client.close();
 
-    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const { client, h } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null });
     const refused = await client.callTool({ name: 'ac_role_set_secrets', arguments: { id: 'role_1', names: ['NOPE'], reason: 'needs it' } });
     expect(JSON.parse((refused.content as Array<{ text: string }>)[0]!.text).ok).toBe(false);
     expect(h.roleSecrets.size).toBe(0);
@@ -331,7 +331,7 @@ describe('agent REST mirror', () => {
   // ---------- VS-103 ----------
 
   it('ac_worker_message defaults to live delivery when the conductor omits `live`', async () => {
-    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const { client, h } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null });
     const calledWith: unknown[][] = [];
     h.impls.workers!['message'] = async (...args: unknown[]) => {
       calledWith.push(args);
@@ -346,7 +346,7 @@ describe('agent REST mirror', () => {
   });
 
   it('ac_worker_message queues on request even when the caller could have asked for live delivery', async () => {
-    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const { client, h } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null });
     const calledWith: unknown[][] = [];
     h.impls.workers!['message'] = async (...args: unknown[]) => {
       calledWith.push(args);
@@ -363,7 +363,7 @@ describe('agent REST mirror', () => {
   // ---------- VS-101 ----------
 
   it('ac_worker_message surfaces the refusal when the ticket is an interactive session', async () => {
-    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const { client, h } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null });
     h.impls.workers!['message'] = async () => {
       throw new OcError('forbidden', "Session #1's ticket is an interactive session; the conductor cannot message it directly");
     };
@@ -377,7 +377,7 @@ describe('agent REST mirror', () => {
   // ---------- VS-106 ----------
 
   it('ac_worker_message surfaces wrong_status rather than ok:true for a retired worker', async () => {
-    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const { client, h } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null });
     h.impls.workers!['message'] = async () => {
       throw new OcError('wrong_status', 'Backend Engineer #1 has retired; reply on the ticket to reopen it instead');
     };
@@ -509,7 +509,7 @@ describe('scheduled task MCP (VS-220)', () => {
   const CREATE = { name: 'Morning review', trigger: TRIGGER, instruction: 'Look at incidents' };
 
   it('lets the conductor create a row', async () => {
-    const { client } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const { client } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null });
     const res = await client.callTool({ name: 'ac_routine_create', arguments: CREATE });
     const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
     expect(payload.ok).toBe(true);
@@ -531,7 +531,7 @@ describe('scheduled task MCP (VS-220)', () => {
   });
 
   it('ac_inbox lists a routine fire under routines, not other', async () => {
-    const { client, h } = await connect({ ...WORKER, agentKind: 'conductor', ticketId: null });
+    const { client, h } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null });
     h.impls.wake!['listForAgent'] = () => [wakeup({
       id: 'wk_1',
       source: 'routine',

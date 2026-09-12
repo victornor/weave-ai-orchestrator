@@ -59,7 +59,7 @@ export interface TurnHandle {
   /** Deliver text to this turn while it runs. Omitted by an adapter whose turn cannot take live input. */
   send?(text: string): Promise<InputDelivery>;
 }
-export interface AgentHome { path: string; kind: 'conductor' | 'worker' }
+export interface AgentHome { path: string; kind: 'weaver' | 'worker' }
 
 /** Input to `describeAccount`: the workspace's per-runtime credential home, the env the CLI would run under, and how long the probe may take. */
 export interface AccountProbeInput { configHome?: string; env: Record<string, string>; timeoutMs: number }

@@ -24,7 +24,7 @@ export function toAgentView(input: unknown, workspaceId: string): AgentView | nu
     agentId,
     workspaceId: str(src.workspaceId) ?? workspaceId,
     name: str(src.name) ?? agentId,
-    kind: (str(src.kind) === 'conductor' ? 'conductor' : 'worker') as AgentView['kind'],
+    kind: (str(src.kind) === 'weaver' ? 'weaver' : 'worker') as AgentView['kind'],
     projectId: str(src.projectId) ?? str(src.project) ?? null,
     ticketIdentifier: str(src.ticketIdentifier) ?? (ticket ? str(ticket.identifier) : null),
     roleName: str(src.roleName) ?? (role ? str(role.name) : null),

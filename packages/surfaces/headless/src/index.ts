@@ -14,7 +14,7 @@ export function createHeadlessSurface(): SurfaceAdapter {
       return { kind: 'headless', agentId: agent.agentId } satisfies HeadlessHandle;
     },
     async ensureConductorView() {
-      return { kind: 'headless', agentId: 'conductor' } satisfies HeadlessHandle;
+      return { kind: 'headless', agentId: 'weaver' } satisfies HeadlessHandle;
     },
     async updateAgentView() { /* no-op */ },
     async focusAgentView() { /* no-op */ },

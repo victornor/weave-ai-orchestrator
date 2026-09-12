@@ -134,7 +134,7 @@ export async function startPresenter(opts: StartPresenterOptions): Promise<Runni
     onChange: persist,
   });
 
-  const liveAgentIds = new Set<string>([...desired.workers.filter((w) => w.status !== 'retired').map((w) => w.agentId), ...(desired.conductor ? [desired.conductor.agentId] : [])]);
+  const liveAgentIds = new Set<string>([...desired.workers.filter((w) => w.status !== 'retired').map((w) => w.agentId), ...(desired.weaver ? [desired.weaver.agentId] : [])]);
   await reconciler.restore((await store.load()).filter((h) => liveAgentIds.has(h.agentId)));
   await reconciler.sync(desired);
 

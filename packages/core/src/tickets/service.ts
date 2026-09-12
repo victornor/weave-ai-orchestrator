@@ -218,7 +218,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   }
 
   function conductorId(): string | null {
-    return db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND kind = 'conductor'", [ws])?.id ?? null;
+    return db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND kind = 'weaver'", [ws])?.id ?? null;
   }
 
   /** Reject a blocker graph cycle: `id` must not be reachable from any of `blockedBy`. */
@@ -255,10 +255,15 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     return name;
   }
 
-  function approvalOwner(t: Ticket): 'human' | 'conductor' | 'none' {
+  // `proposalApproval` is `APPROVAL_OWNERS` (workspace.yaml policy, still spelled 'conductor' —
+  // VS-263's deferred config-key surface), but this function's callers hand its result straight to
+  // `decisions.create({ owner, ... })`, whose `owner` is `DECISION_OWNERS` ('human'|'weaver'). The
+  // translation happens here, once, rather than at every call site.
+  function approvalOwner(t: Ticket): 'human' | 'weaver' | 'none' {
     const p = project(t.projectId);
     const fromProject = (p?.policies as { proposalApproval?: 'human' | 'conductor' | 'none' } | null)?.proposalApproval;
-    return fromProject ?? ctx.config.defaults.proposalApproval;
+    const raw = fromProject ?? ctx.config.defaults.proposalApproval;
+    return raw === 'conductor' ? 'weaver' : raw;
   }
 
   /**
@@ -602,7 +607,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     // A ticket blocked on the conductor is not left for the next digest to notice (VS-127): the
     // digest is a periodic, batched sweep, and a stuck worker's unblock action deserves the same
     // immediate wake a gate finding already gets the moment it is raised.
-    if (to === 'blocked' && input.unblock?.owner === 'conductor') {
+    if (to === 'blocked' && input.unblock?.owner === 'weaver') {
       wake(conductorId(), 'ticket_blocked', `${next.identifier} is blocked on you: ${input.unblock.action}`, { ticketId: t.id });
     }
     // Entering `merging` joins the project's merge queue instead of starting the merge (PLAN §11.4);
@@ -1061,7 +1066,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       } catch (e) {
         const action = `openspec archive failed: ${e instanceof Error ? e.message : String(e)}`;
         tx(db, () => {
-          touch(t.id, { unblockJson: { owner: 'conductor', action } });
+          touch(t.id, { unblockJson: { owner: 'weaver', action } });
           systemComment(t.id, action, actor);
           recordActivity(db, ws, actor, 'ticket.merge_archive_failed', 'ticket', t.id, { error: action }, t.id);
           ctx.events.emit('ticket.updated', 'ticket', t.id, get(t.id));
@@ -1124,10 +1129,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           else await service.transition({ kind: 'system', id: null }, t.id, { to: 'merging', note: 'auto-merge: no approval required for this ticket' });
           advanced++;
         } catch (e) {
-          // VS-266: a YOLO ticket's merge approval can be held by a conductor concern exactly like a
+          // VS-266: a YOLO ticket's merge approval can be held by a weaver concern exactly like a
           // human-owned one — surfaced on the ticket the same way the CI-red wait is, rather than
           // only a log line, so the human sees why auto-merge stalled here.
-          if (e instanceof OcError && e.code === 'revision_pending') { systemComment(t.id, 'auto-merge is waiting: the conductor has concerns', { kind: 'system', id: null }); continue; }
+          if (e instanceof OcError && e.code === 'revision_pending') { systemComment(t.id, 'auto-merge is waiting: the weaver has concerns', { kind: 'system', id: null }); continue; }
           log.warn({ ticket: t.identifier, err: String(e) }, 'auto-merge advance failed');
         }
       }

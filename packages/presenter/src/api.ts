@@ -29,9 +29,9 @@ export function createHttpPresenterApi(opts: HttpApiOptions): PresenterApi {
     async getDesired(): Promise<DesiredPresentation> {
       const res = await authFetch(`${base}/presenter/desired`, { headers: { accept: 'application/json' } });
       if (!res.ok) throw new Error(`presenter: GET ${base}/presenter/desired failed with ${res.status}`);
-      const body = (await res.json()) as { conductor?: unknown; workers?: unknown[]; config?: Record<string, unknown> };
+      const body = (await res.json()) as { weaver?: unknown; workers?: unknown[]; config?: Record<string, unknown> };
       return {
-        conductor: toAgentView(body.conductor, opts.workspaceId),
+        weaver: toAgentView(body.weaver, opts.workspaceId),
         workers: (Array.isArray(body.workers) ? body.workers : [])
           .map((w) => toAgentView(w, opts.workspaceId))
           .filter((w): w is NonNullable<typeof w> => !!w),

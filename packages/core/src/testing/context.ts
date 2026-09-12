@@ -44,7 +44,7 @@ export interface HarnessOptions {
 export function makeHarness(opts: HarnessOptions = {}): TestHarness {
   const root = mkdtempSync(join(tmpdir(), 'ac-test-'));
   const paths = workspacePaths(root);
-  for (const d of [paths.state, paths.knowledge, paths.conductor, paths.roles, paths.workers, paths.projects]) mkdirSync(d, { recursive: true });
+  for (const d of [paths.state, paths.knowledge, paths.weaver, paths.roles, paths.workers, paths.projects]) mkdirSync(d, { recursive: true });
 
   const config = WorkspaceConfigSchema.parse({
     version: 1,
@@ -74,14 +74,14 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
     db.insert('roles', {
       id: roleId, workspaceId, projectId, slug: 'backend', name: 'Backend Engineer', charterSummary: 'Owns the api service.',
       scopeText: 'Backend work in the api repo.', sessionPolicy: 'per_ticket', maxWorkers: 2,
-      status: 'active', specRevision: 1, createdBy: 'conductor', createdAt: now, updatedAt: now,
+      status: 'active', specRevision: 1, createdBy: 'weaver', createdAt: now, updatedAt: now,
     });
   }
 
   const conductorId = newId();
   db.insert('agents', {
-    id: conductorId, workspaceId, kind: 'conductor', name: 'Conductor', runtimeId: 'claude', status: 'active',
-    homePath: paths.conductor, turnEpoch: 0, turnCount: 0, spawnedBy: 'system', briefRevision: 1, createdAt: now, updatedAt: now,
+    id: conductorId, workspaceId, kind: 'weaver', name: 'Weaver', runtimeId: 'claude', status: 'active',
+    homePath: paths.weaver, turnEpoch: 0, turnCount: 0, spawnedBy: 'system', briefRevision: 1, createdAt: now, updatedAt: now,
   });
 
   const events: WorkspaceEvent[] = [];

@@ -23,7 +23,7 @@ describe('modelSettingFor', () => {
   };
 
   it('gives the conductor its own setting and every worker the other', () => {
-    expect(modelSettingFor(config, 'conductor')).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
+    expect(modelSettingFor(config, 'weaver')).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
     expect(modelSettingFor(config, 'worker')).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
   });
 
@@ -40,7 +40,7 @@ describe('modelSettingFor', () => {
     expect(modelSettingFor(withOpts, 'worker', { workerModelId: 'cheap' })).toEqual({ runtime: 'opencode', model: 'glm-4.6' });
     expect(modelSettingFor(withOpts, 'worker', { workerModelId: 'gone' })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
     expect(modelSettingFor(withOpts, 'worker', { workerModelId: null })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
-    expect(modelSettingFor(withOpts, 'conductor', { workerModelId: 'cheap' })).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
+    expect(modelSettingFor(withOpts, 'weaver', { workerModelId: 'cheap' })).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
   });
 
   it('refuses an unconfigured catalog option rather than falling back to claude (VS-236)', () => {

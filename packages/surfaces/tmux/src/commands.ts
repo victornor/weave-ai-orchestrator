@@ -24,8 +24,8 @@ export function sanitizeName(value: string): string {
 
 export const sessionName = (workspaceId: string): string => `ac-${sanitizeName(workspaceId)}`;
 
-export const CONDUCTOR_AGENT_ID = 'conductor';
-export const CONDUCTOR_WINDOW_NAME = 'conductor';
+export const CONDUCTOR_AGENT_ID = 'weaver';
+export const CONDUCTOR_WINDOW_NAME = 'weaver';
 export const AGENT_OPTION = '@ac_agent';
 export const LIST_FORMAT = '#{window_id}\t#{window_name}\t#{@ac_agent}';
 

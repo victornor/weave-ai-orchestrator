@@ -214,7 +214,7 @@ describe('end to end: a sent attachment reaches ac_inbox as real content (VS-133
    * between the two ends of the seam. */
   function withRealThreadsAndWake(): { h: Harness; fetch: (path: string, init?: RequestInit) => Promise<Response>; conductorId: string } {
     const { h, fetch } = withRealThreads({ listener: 'loopback' });
-    const conductorId = h.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND kind = 'conductor'", [h.runtime.id])!.id;
+    const conductorId = h.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND kind = 'weaver'", [h.runtime.id])!.id;
     const queue: Wakeup[] = [];
     h.impls.wake!['enqueue'] = (agentId: string, input: EnqueueInput): Wakeup => {
       const w: Wakeup = {
@@ -241,7 +241,7 @@ describe('end to end: a sent attachment reaches ac_inbox as real content (VS-133
 
     const app = createApp(h.deps);
     const token = await signRunToken(runTokenSecret(h.runtime.ctx.db), {
-      workspaceId: 'ws1', runId: 'run_1', agentId: conductorId, agentKind: 'conductor', projectId: null, ticketId: null, roleId: null,
+      workspaceId: 'ws1', runId: 'run_1', agentId: conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
     });
     const client = new Client({ name: 'test', version: '0.0.0' }, { capabilities: {} });
     const transport = new StreamableHTTPClientTransport(new URL('http://127.0.0.1/mcp/runs/run_1'), {

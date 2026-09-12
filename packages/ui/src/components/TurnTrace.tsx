@@ -69,7 +69,7 @@ export function TurnTrace({
       <button
         type="button"
         aria-expanded={open}
-        aria-label={standalone ? `What the conductor did at ${clock(trace.finishedAt ?? trace.createdAt)}` : 'What I did'}
+        aria-label={standalone ? `What the weaver did at ${clock(trace.finishedAt ?? trace.createdAt)}` : 'What I did'}
         onClick={onToggle}
         // `py-1.5` and the full-width hit area are the phone affordance: the row is the control.
         className="-mx-1 flex items-center gap-2 rounded-r4 px-1 py-1.5 text-left hover:bg-bg-2"
@@ -84,7 +84,7 @@ export function TurnTrace({
       {standalone && trace.summary ? <p className="text-micro leading-relaxed text-text-3">{trace.summary}</p> : null}
       {open ? (
         <div className="ac-card overflow-hidden">
-          <RunTranscript events={events.data ?? []} label={`What the conductor did in run ${trace.runId}`} />
+          <RunTranscript events={events.data ?? []} label={`What the weaver did in run ${trace.runId}`} />
         </div>
       ) : null}
     </div>

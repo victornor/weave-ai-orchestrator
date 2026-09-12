@@ -87,7 +87,7 @@ describe('GlobalLiveRoute', () => {
   });
 
   it('excludes the conductor', () => {
-    state.workers = { alpha: [agent({ id: 'c1', kind: 'conductor', status: 'running', ticketId: null, name: 'Conductor' })], beta: [] };
+    state.workers = { alpha: [agent({ id: 'c1', kind: 'weaver', status: 'running', ticketId: null, name: 'Weaver' })], beta: [] };
     render(<GlobalLiveRoute />);
     expect(screen.queryByText('Conductor')).not.toBeInTheDocument();
     expect(screen.getByText('Nobody is working.')).toBeInTheDocument();

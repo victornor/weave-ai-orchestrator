@@ -6,7 +6,7 @@ import { Page, PageBody, PageHeader } from '../components/Page';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import {
-  useConductorMany,
+  useWeaverMany,
   useKnowledgeIndexMany,
   useRolesMany,
   useTicketsMany,
@@ -29,7 +29,7 @@ export function GlobalMapRoute(): React.ReactElement {
   const roleQueries = useRolesMany(ids);
   const ticketQueries = useTicketsMany(ids, { limit: 300 });
   const knowledgeQueries = useKnowledgeIndexMany(ids);
-  const conductorQueries = useConductorMany(ids);
+  const conductorQueries = useWeaverMany(ids);
   const workerQueries = useWorkersMany(ids);
 
   const liveWorkers = useMemo(
@@ -62,7 +62,7 @@ export function GlobalMapRoute(): React.ReactElement {
       roles: roleQueries[i]?.data ?? [],
       tickets: ticketQueries[i]?.data ?? [],
       knowledge: knowledgeQueries[i]?.data?.files ?? [],
-      conductor: conductorQueries[i]?.data?.agent
+      weaver: conductorQueries[i]?.data?.agent
         ? { id: conductorQueries[i]!.data!.agent.id, name: conductorQueries[i]!.data!.agent.name }
         : null,
     };
@@ -95,7 +95,7 @@ export function GlobalMapRoute(): React.ReactElement {
       go('/w/$ws/team', { params: { ws } });
       return;
     }
-    if (node.kind === 'conductor') {
+    if (node.kind === 'weaver') {
       go('/w/$ws/chat', { params: { ws } });
       return;
     }

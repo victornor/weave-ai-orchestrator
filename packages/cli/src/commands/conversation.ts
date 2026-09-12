@@ -35,7 +35,7 @@ export function register(program: Command): void {
 
   program
     .command('attach')
-    .argument('<agent>', 'worker id, or "conductor"')
+    .argument('<agent>', 'worker id, or "weaver"')
     .description('live transcript and steering for one agent')
     .action(async (agent: string, _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);

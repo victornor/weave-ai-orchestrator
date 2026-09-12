@@ -4,11 +4,11 @@ function makeEnum<const T extends readonly string[]>(values: T) {
   return { values, ...obj } as const;
 }
 
-export const AGENT_KINDS = ['conductor', 'worker'] as const;
+export const AGENT_KINDS = ['weaver', 'worker'] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
 /** Who filed a system incident (VS-174). Same values as AgentKind; a separate name so a call site cannot mix them up with an agent's live kind. */
-export const INCIDENT_REPORTER_KINDS = ['conductor', 'worker'] as const;
+export const INCIDENT_REPORTER_KINDS = ['weaver', 'worker'] as const;
 export type IncidentReporterKind = (typeof INCIDENT_REPORTER_KINDS)[number];
 
 export const AGENT_STATUSES = ['provisioning', 'active', 'running', 'paused', 'error', 'done', 'retired'] as const;
@@ -53,22 +53,22 @@ export type DecisionKind = (typeof DECISION_KINDS)[number];
 export const ASKABLE_DECISION_KINDS = ['question', 'concern', 'gate_finding'] as const;
 export type AskableDecisionKind = (typeof ASKABLE_DECISION_KINDS)[number];
 
-export const DECISION_OWNERS = ['human', 'conductor'] as const;
+export const DECISION_OWNERS = ['human', 'weaver'] as const;
 export type DecisionOwner = (typeof DECISION_OWNERS)[number];
 
 export const DECISION_STATUSES = ['open', 'answered', 'expired', 'withdrawn', 'superseded'] as const;
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];
 
 /**
- * Conductor review of a human-owned plan/merge/action card (VS-223). Asserted by
+ * Weaver review of a human-owned plan/merge/action card (VS-223). Asserted by
  * `ac_decision_review`, never derived. Default is `unseen` — absence is not a fourth state.
  */
-export const CONDUCTOR_REVIEW_STATUSES = ['unseen', 'looked', 'concerns'] as const;
-export type ConductorReviewStatus = (typeof CONDUCTOR_REVIEW_STATUSES)[number];
+export const WEAVER_REVIEW_STATUSES = ['unseen', 'looked', 'concerns'] as const;
+export type WeaverReviewStatus = (typeof WEAVER_REVIEW_STATUSES)[number];
 
-/** The only decision kinds that carry conductor review. A mark against any other kind is `validation`. */
-export const CONDUCTOR_REVIEW_KINDS = ['plan_approval', 'merge_approval', 'action_approval'] as const;
-export type ConductorReviewKind = (typeof CONDUCTOR_REVIEW_KINDS)[number];
+/** The only decision kinds that carry weaver review. A mark against any other kind is `validation`. */
+export const WEAVER_REVIEW_KINDS = ['plan_approval', 'merge_approval', 'action_approval'] as const;
+export type WeaverReviewKind = (typeof WEAVER_REVIEW_KINDS)[number];
 
 /**
  * The option keys a "named variant" decision card (packages/ui's DecisionCard: `plan_approval`,

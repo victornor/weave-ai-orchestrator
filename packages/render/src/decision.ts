@@ -4,7 +4,7 @@
  * identical so the two never drift.
  */
 import type { Decision } from '@agent-conductor/shared';
-import { conductorReviewCopy, decisionUiStatus } from '@agent-conductor/shared';
+import { weaverReviewCopy, decisionUiStatus } from '@agent-conductor/shared';
 import { formatAge, formatDiffStat, joinMeta, oneLine } from './format.js';
 
 /** What a decision belonging to no project is called, on every surface. */
@@ -38,7 +38,7 @@ const DEFAULTS: Record<CardVariant, CardOption[]> = {
   plan_approval: [
     opt('approve', 'Approve', 'primary', 'The worker starts implementing the plan.'),
     opt('revise', 'Revise…', 'default', 'Send the plan back with a note; the composer opens pre-scoped to it.'),
-    opt('reject', 'Reject', 'default', 'Drop the plan; the ticket goes back to the conductor.'),
+    opt('reject', 'Reject', 'default', 'Drop the plan; the ticket goes back to the weaver.'),
   ],
   action_approval: [
     opt('approve', 'Approve', 'primary', 'The worker runs the stated action.'),
@@ -91,7 +91,7 @@ export function decisionToCard(decision: Decision, ctx: DecisionCardContext = {}
     id: d.id ?? '',
     kind: d.kind,
     variant,
-    header: d.owner === 'conductor' ? 'Conductor decides' : 'Needs you',
+    header: d.owner === 'weaver' ? 'Weaver decides' : 'Needs you',
     title: oneLine(redact(d.title ?? ''), 160) || 'Decision',
     subtitle,
     rationale: rationale(d),
@@ -110,7 +110,7 @@ export function decisionToCard(decision: Decision, ctx: DecisionCardContext = {}
     age: formatAge(d.createdAt, ctx.now ?? new Date()),
     answer: d.status === 'answered' ? { key: d.answerKey ?? null, text: d.answerText ? redact(d.answerText) : null, at: d.answeredAt ?? null } : null,
     answerElsewhere,
-    held: conductorReviewCopy(d)?.held ?? false,
+    held: weaverReviewCopy(d)?.held ?? false,
   };
   if (answerElsewhere) {
     // No options either: offering buttons that cannot carry the values would answer the decision
@@ -233,7 +233,7 @@ function body(variant: CardVariant, d: Decision, target: Record<string, unknown>
     if (ctx && ctx !== rationale(d)) push(null, oneLine(ctx, 1200));
   }
 
-  const review = conductorReviewCopy(d);
+  const review = weaverReviewCopy(d);
   if (review) {
     push('Review', review.line);
     if (review.note) push(null, review.note);

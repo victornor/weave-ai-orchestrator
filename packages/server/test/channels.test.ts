@@ -88,11 +88,11 @@ describe('ChannelManager', () => {
     expect(h.db.get('SELECT body, direction FROM thread_messages WHERE direction = ?', ['inbound'])).toMatchObject({ body: 'add dark mode' });
   });
 
-  it('binds a thread with /talk and unbinds with /conductor', async () => {
+  it('binds a thread with /talk and unbinds with /weaver', async () => {
     const { h, adapter } = await boot();
     await adapter.inbound!({ externalThreadId: 'chat1', externalUserId: 'u1', text: '/talk ACME-42' });
     expect(h.db.get<{ ticketId: string }>('SELECT ticket_id FROM channel_threads LIMIT 1')?.ticketId).toBe('tk_1');
-    await adapter.inbound!({ externalThreadId: 'chat1', externalUserId: 'u1', text: '/conductor' });
+    await adapter.inbound!({ externalThreadId: 'chat1', externalUserId: 'u1', text: '/weaver' });
     expect(h.db.get<{ ticketId: string | null }>('SELECT ticket_id FROM channel_threads LIMIT 1')?.ticketId).toBeNull();
   });
 
@@ -135,7 +135,7 @@ describe('ChannelManager', () => {
     h.runtime.services.threads.bindOrGet('test', 'chat1', 'u1');
     const plan = decision({
       id: 'dec_rev', kind: 'plan_approval', owner: 'human', status: 'open',
-      title: 'Approve the plan for ACME-42', conductorReviewStatus: 'unseen',
+      title: 'Approve the plan for ACME-42', weaverReviewStatus: 'unseen',
     });
     (h.impls.decisions!.get as unknown) = () => plan;
     h.bus.emit('decision.created', 'decision', 'dec_rev', plan);
@@ -145,7 +145,7 @@ describe('ChannelManager', () => {
     expect(afterCreate).toBeGreaterThan(0);
     expect(adapter.sent.at(-1)!.message.text).toContain('Approve the plan for ACME-42');
 
-    const looked = { ...plan, conductorReviewStatus: 'looked' as const, conductorReviewedAt: '2026-09-11T03:01:00.000Z' };
+    const looked = { ...plan, weaverReviewStatus: 'looked' as const, weaverReviewedAt: '2026-09-11T03:01:00.000Z' };
     (h.impls.decisions!.get as unknown) = () => looked;
     h.bus.emit('decision.updated', 'decision', 'dec_rev', looked);
     await new Promise((r) => setTimeout(r, 20));
@@ -154,9 +154,9 @@ describe('ChannelManager', () => {
 
     const concerns = {
       ...plan,
-      conductorReviewStatus: 'concerns' as const,
-      conductorReviewedAt: '2026-09-11T03:02:00.000Z',
-      conductorReviewNote: 'the migration contradicts itself',
+      weaverReviewStatus: 'concerns' as const,
+      weaverReviewedAt: '2026-09-11T03:02:00.000Z',
+      weaverReviewNote: 'the migration contradicts itself',
     };
     (h.impls.decisions!.get as unknown) = () => concerns;
     h.bus.emit('decision.updated', 'decision', 'dec_rev', concerns);
@@ -281,21 +281,21 @@ describe('manager commands on every channel kind', () => {
     const { adapters } = await bootKinds();
     const text = await replyOn(kind, adapters[kind]!, '/help');
     expect(text).toContain('/talk <ticket>');
-    expect(text).toContain('/conductor');
+    expect(text).toContain('/weaver');
     expect(text).toContain('/d <id> <answer>');
     expect(text).toContain('/help');
     // /help never reaches the agent as a message.
     expect(harness!.db.get('SELECT id FROM thread_messages WHERE direction = ?', ['inbound'])).toBeUndefined();
   });
 
-  it.each(KINDS)('binds and unbinds a thread with /talk and /conductor on %s', async (kind) => {
+  it.each(KINDS)('binds and unbinds a thread with /talk and /weaver on %s', async (kind) => {
     const { h, adapters } = await bootKinds();
     const threadId = (): string | null =>
       h.db.get<{ ticketId: string | null }>('SELECT ticket_id FROM channel_threads WHERE external_thread_id = ?', [`chat-${kind}`])?.ticketId ?? null;
 
     expect(await replyOn(kind, adapters[kind]!, '/talk ACME-42')).toContain('ACME-42');
     expect(threadId()).toBe('tk_1');
-    expect(await replyOn(kind, adapters[kind]!, '/conductor')).toContain('Back to the conductor');
+    expect(await replyOn(kind, adapters[kind]!, '/weaver')).toContain('Back to the weaver');
     expect(threadId()).toBeNull();
   });
 

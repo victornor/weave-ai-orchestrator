@@ -141,7 +141,7 @@ export function gateRuntimeForLogin(
       const open = deps().decisions.list({ status: ['open'], ticketId: input.ticketId! }).find((d) => d.correlationKey === key);
       if (open) return;
       deps().decisions.create({ kind: 'system', id: null }, {
-        kind: 'gate_finding', owner: 'conductor', ticketId: input.ticketId!,
+        kind: 'gate_finding', owner: 'weaver', ticketId: input.ticketId!,
         title: authOutageTitle(input.agentName ?? 'the worker'),
         context: authOutageContext(runtimeId, detail),
         target: { runtimeId, agentId: input.agentId ?? null },
@@ -225,7 +225,7 @@ export function loginPauseRuntime(agent: Agent): string | null {
 export function releaseLoginPausesForAbandonedRuntimes(ctx: WorkspaceContext, deps: () => CoreServices): number {
   const log = ctx.log('daemon');
   const governing = new Set([
-    modelSettingFor(modelsFor(ctx), 'conductor').runtime,
+    modelSettingFor(modelsFor(ctx), 'weaver').runtime,
     modelSettingFor(modelsFor(ctx), 'worker').runtime,
     ...workerOptionRuntimes(ctx.config, ctx.daemon),
   ]);

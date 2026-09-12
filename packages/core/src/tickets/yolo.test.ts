@@ -92,7 +92,7 @@ describe('YOLO mode', () => {
       expect(d?.answerKey).toBe('approve');
       expect(d?.answeredByKind).toBe('system');
       expect(d?.answerText).toContain('YOLO mode');
-      expect(d?.conductorReviewStatus).toBe('unseen');
+      expect(d?.weaverReviewStatus).toBe('unseen');
       expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'ticket_assigned')).toBe(true);
     });
 
@@ -166,7 +166,7 @@ describe('YOLO mode', () => {
       expect(tickets.comments(t.id).some((c) => c.body.includes('CI is red'))).toBe(true);
     });
 
-    it('does not silently approve an unattended merge the conductor has concerns about (VS-266)', async () => {
+    it('does not silently approve an unattended merge the weaver has concerns about (VS-266)', async () => {
       const t = change();
       h.addWorker(t.id);
       await deliver(t);
@@ -176,7 +176,7 @@ describe('YOLO mode', () => {
       expect(await tickets.autoMergeSweep()).toBe(0);
       expect(only(t.id, 'merge_approval')?.status).toBe('open');
       expect(tickets.get(t.id).status).toBe('in_review');
-      expect(tickets.comments(t.id).some((c) => c.body.includes('the conductor has concerns'))).toBe(true);
+      expect(tickets.comments(t.id).some((c) => c.body.includes('the weaver has concerns'))).toBe(true);
     });
 
     it('does not wait for checks when the project does not require them', async () => {
@@ -239,10 +239,10 @@ describe('YOLO mode', () => {
 
       await tickets.autoMergeSweep();
       for (const d of raised) expect(decisions.get(d.id).status).toBe('open');
-      expect(decisions.get(raised[2]!.id).owner).toBe('conductor');
+      expect(decisions.get(raised[2]!.id).owner).toBe('weaver');
       // VS-127: a worker's `question` now resolves to the conductor, never the human, whichever
       // askable kind it names — YOLO does not touch this path either way.
-      expect(decisions.get(raised[3]!.id).owner).toBe('conductor');
+      expect(decisions.get(raised[3]!.id).owner).toBe('weaver');
     });
   });
 

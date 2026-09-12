@@ -1,6 +1,6 @@
 /**
  * `conductor chat` — the conductor thread with inline decision cards and a composer (PLAN §21.2).
- * Commands: `/talk <ticket>` binds the thread to a ticket, `/conductor` goes back,
+ * Commands: `/talk <ticket>` binds the thread to a ticket, `/weaver` goes back,
  * `/d <decision> <key|number>` answers a decision, `/quit` leaves.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -20,7 +20,7 @@ export interface ChatOptions { ticketId?: string }
 
 const HELP = [
   '/talk <ticket>   bind this thread to a ticket and talk to its worker',
-  '/conductor       go back to the conductor',
+  '/weaver          go back to the weaver',
   '/d <id> <n|key>  answer a decision (a number picks the numbered option)',
   '/refresh         reload messages and decisions',
   '/quit            leave',
@@ -79,7 +79,7 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
     let cancelled = false;
     void (async () => {
       try {
-        const payload = await client.wget<unknown>('/conductor');
+        const payload = await client.wget<unknown>('/weaver');
         if (cancelled) return;
         const agent = unwrap<Agent>(payload, 'agent', 'worker');
         setConductorId(agent?.id ?? null);
@@ -196,12 +196,12 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
       return;
     }
 
-    if (text === '/conductor') {
+    if (text === '/weaver') {
       if (!thread?.id) return;
       try {
         await client.wpost(`/threads/${encodeURIComponent(thread.id)}/bind`, { ticketId: null });
         setBoundTicket(null);
-        setNotice('talking to the conductor');
+        setNotice('talking to the weaver');
       } catch (cause) { setNotice((cause as Error).message); }
       return;
     }
@@ -229,7 +229,7 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
         {messages.slice(-40).map((message) => (
           <Box key={message.id ?? `${message.createdAt}-${message.direction}`} flexDirection="column" marginBottom={1}>
             <Text dimColor>
-              {message.direction === 'inbound' ? 'you' : 'conductor'} · {formatRelative(message.createdAt)}
+              {message.direction === 'inbound' ? 'you' : 'weaver'} · {formatRelative(message.createdAt)}
             </Text>
             <Text>{String(message.body ?? '')}</Text>
           </Box>
@@ -244,7 +244,7 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
           messages stand alone, so the reply is never on screen twice. */}
       {working ? (
         <Box flexDirection="column" marginBottom={1}>
-          <Text dimColor>{runId ? 'conductor is working…' : 'conductor is starting…'}</Text>
+          <Text dimColor>{runId ? 'weaver is working…' : 'weaver is starting…'}</Text>
           {blocks.length ? <TranscriptView blocks={blocks} maxLines={12} /> : null}
         </Box>
       ) : null}
@@ -253,11 +253,11 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
         value={input}
         onChange={setInput}
         onSubmit={(text) => { void submit(text); }}
-        placeholder={boundTicket ? `message ${boundTicket} · /conductor to go back` : 'message the conductor · /help'}
+        placeholder={boundTicket ? `message ${boundTicket} · /weaver to go back` : 'message the weaver · /help'}
         history={history}
       />
       <StatusBar
-        left={`${boundTicket ? `ticket ${boundTicket}` : 'conductor'} · ${client.workspace ?? 'no workspace'}`}
+        left={`${boundTicket ? `ticket ${boundTicket}` : 'weaver'} · ${client.workspace ?? 'no workspace'}`}
         right={`${cards.length} needs you · esc quit`}
         connection={connection}
       />

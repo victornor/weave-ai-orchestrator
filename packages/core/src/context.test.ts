@@ -28,7 +28,7 @@ describe('workspacePaths', () => {
       const p = workspacePaths(root);
       expect(p.state).toBe(join(root, '.agent-conductor'));
       expect(p.db).toBe(join(root, '.agent-conductor', 'db.sqlite'));
-      expect(p.conductor).toBe(join(root, 'conductor'));
+      expect(p.weaver).toBe(join(root, 'conductor'));
     });
 
     it('finds an existing workspace under the new name', () => {
@@ -38,14 +38,14 @@ describe('workspacePaths', () => {
       const p = workspacePaths(root);
       expect(p.state).toBe(join(root, '.weave'));
       expect(p.db).toBe(join(root, '.weave', 'db.sqlite'));
-      expect(p.conductor).toBe(join(root, 'weaver'));
+      expect(p.weaver).toBe(join(root, 'weaver'));
     });
 
     it('gives a fresh workspace (neither name present) the new name', () => {
       const root = tmp('ac-wp-fresh-');
       const p = workspacePaths(root);
       expect(p.state).toBe(join(root, '.weave'));
-      expect(p.conductor).toBe(join(root, 'weaver'));
+      expect(p.weaver).toBe(join(root, 'weaver'));
     });
 
     it('refuses an ambiguous workspace (db.sqlite under both names) rather than silently picking one', () => {

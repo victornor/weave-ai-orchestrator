@@ -142,7 +142,7 @@ describe('liveWorkingAgents (VS-152)', () => {
         agent({ id: 'idle', status: 'active', ticketId: null, kind: 'worker' }),
         agent({ id: 'retired', status: 'retired' }),
         agent({ id: 'finished', status: 'done', ticketId: 'tk_1' }),
-        agent({ id: 'cond', kind: 'conductor', status: 'running', ticketId: 'tk_1' }),
+        agent({ id: 'cond', kind: 'weaver', status: 'running', ticketId: 'tk_1' }),
         agent({ id: 'loose', status: 'running', ticketId: null }),
       ]),
     ).toEqual([]);

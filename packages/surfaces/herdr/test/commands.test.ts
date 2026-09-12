@@ -10,7 +10,7 @@ const paneListJson = JSON.stringify({
   result: {
     type: 'pane_list',
     panes: [
-      { pane_id: 'w6:p1', tab_id: 'w6:t1', workspace_id: 'w6', agent_status: 'working', terminal_title: 'conductor:conductor conductor' },
+      { pane_id: 'w6:p1', tab_id: 'w6:t1', workspace_id: 'w6', agent_status: 'working', terminal_title: 'conductor:weaver weaver' },
       { pane_id: 'w6:p2', tab_id: 'w6:t2', workspace_id: 'w6', agent_status: 'idle', terminal_title: 'conductor:w-1 ◑ ACME-42' },
       { pane_id: 'w9:p1', tab_id: 'w9:t1', workspace_id: 'w9', agent_status: 'unknown' },
     ],
@@ -54,7 +54,7 @@ describe('herdr command building', () => {
     const panes = parsePaneList(paneListJson);
     expect(agentMarker('w-1')).toBe('conductor:w-1');
     expect(findPaneForAgent(panes, 'w-1', 'w6')?.paneId).toBe('w6:p2');
-    expect(findPaneForAgent(panes, 'conductor', 'w6')?.paneId).toBe('w6:p1');
+    expect(findPaneForAgent(panes, 'weaver', 'w6')?.paneId).toBe('w6:p1');
     expect(findPaneForAgent(panes, 'w-9', 'w6')).toBeUndefined();
   });
 

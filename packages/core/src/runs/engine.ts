@@ -78,7 +78,7 @@ function boundPayload(payload: unknown): Record<string, unknown> {
 export async function mintRunToken(ctx: WorkspaceContext, claims: { agentId: string; runId: string; ticketId: string | null; kind: string; projectId: string | null; roleId: string | null }): Promise<string> {
   return signRunToken(runTokenSecret(ctx.db), {
     workspaceId: ctx.workspaceId, runId: claims.runId, agentId: claims.agentId,
-    agentKind: claims.kind === 'conductor' ? 'conductor' : 'worker',
+    agentKind: claims.kind === 'weaver' ? 'weaver' : 'worker',
     projectId: claims.projectId, ticketId: claims.ticketId, roleId: claims.roleId,
   });
 }
@@ -173,7 +173,7 @@ function ticketStatusAsOf(ctx: WorkspaceContext, ticketId: string, atIso: string
 }
 
 function sessionPolicyFor(agent: Agent, role: Role | null): SessionPolicy {
-  if (agent.kind === 'conductor') return 'persistent';
+  if (agent.kind === 'weaver') return 'persistent';
   return (role?.sessionPolicy ?? 'per_ticket') as SessionPolicy;
 }
 
@@ -271,7 +271,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
         await deps().tickets.transition({ kind: 'system', id: null }, ticket.id, {
           to: 'blocked',
           unblock: {
-            owner: 'conductor',
+            owner: 'weaver',
             action: `curation for ${project.slug} needs a checkout verified current before it can run safely — ${freshnessError}. Bring the primary clone in sync, then retry curation.`,
           },
         });
@@ -397,7 +397,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       limits: { timeoutMs: turnTimeoutMs },
       permission: {
         // VS-171: Claude auto-mode can classify away ac_*; skip-permissions is only on for bypass.
-        mode: agent.kind === 'conductor' ? 'bypass' : (permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto'),
+        mode: agent.kind === 'weaver' ? 'bypass' : (permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto'),
         allowedTools,
         deniedTools: permission.denied,
       },
@@ -664,7 +664,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
     if (recent.length === 3 && recent.every(countsAgainst)) {
       try {
         deps().decisions.create({ kind: 'system', id: null }, {
-          ticketId: f.agent.ticketId, kind: 'gate_finding', owner: 'conductor',
+          ticketId: f.agent.ticketId, kind: 'gate_finding', owner: 'weaver',
           title: `${f.agent.name} produced three empty turns in a row`,
           context: 'The worker ended three consecutive turns without advancing its ticket. Steer it, relaunch it, or cancel the ticket.',
           correlationKey: `empty-turns:${f.agent.id}`,
@@ -746,7 +746,7 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
     // the override the two settings replaced. Where the runtime is the problem, the way out is the
     // workspace setting, so the card names it instead of offering to change it for one worker.
     const runtime = f.run.runtimeId;
-    const setting = f.agent.kind === 'conductor' ? 'models.conductor' : 'models.workers';
+    const setting = f.agent.kind === 'weaver' ? 'models.conductor' : 'models.workers';
     deps().decisions.create({ kind: 'system', id: null }, {
       kind: 'retry_approval', owner: 'human', ticketId: ticketId ?? null,
       title: quota
@@ -758,7 +758,7 @@ function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: Finali
         quota
           ? `${resetAt ? `The runtime says the limit resets at ${fmtUtc(resetAt)} UTC. ` : ''}A usage limit is not retried automatically, so nothing will run until you answer: retry now, ${resetAt ? 'retry when it resets' : 'retry in an hour'}, or cancel.`
           : 'Automatic retries are spent. Retry or cancel the ticket.',
-        `This ran on ${runtime}. The runtime is the workspace's ${setting} setting — change it there and retry, and every ${f.agent.kind === 'conductor' ? 'conductor turn' : 'worker'} follows.`,
+        `This ran on ${runtime}. The runtime is the workspace's ${setting} setting — change it there and retry, and every ${f.agent.kind === 'weaver' ? 'weaver turn' : 'worker'} follows.`,
         'Retrying resumes the same session on the same branch.',
       ].filter(Boolean).join('\n\n'),
       options: [

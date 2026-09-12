@@ -1,5 +1,5 @@
 ---
-name: agent-conductor-conductor
+name: agent-conductor-weaver
 description: Intake, routing, supervision and outcome language for the AgentConductor conductor — how to turn a human message into the right ticket, keep workers moving, and say what happened. Load whenever a human message or a supervisor digest needs handling.
 ---
 

@@ -33,7 +33,7 @@ vi.mock('../api/hooks', () => ({
   useRolesMany: (ids: string[]) => ids.map((id) => ({ data: state.roles[id], isError: Boolean(state.errors[id]), refetch: vi.fn() })),
   useTicketsMany: (ids: string[]) => ids.map((id) => ({ data: state.tickets[id], isError: Boolean(state.errors[id]), refetch: vi.fn() })),
   useKnowledgeIndexMany: (ids: string[]) => ids.map((id) => ({ data: state.knowledge[id], isError: Boolean(state.errors[id]), refetch: vi.fn() })),
-  useConductorMany: (ids: string[]) => ids.map((id) => ({ data: state.conductors[id], isError: false })),
+  useWeaverMany: (ids: string[]) => ids.map((id) => ({ data: state.conductors[id], isError: false })),
   useWorkersMany: (ids: string[]) => ids.map((id) => ({ data: state.workers[id] ?? [], isError: false })),
 }));
 

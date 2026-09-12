@@ -42,22 +42,22 @@ const HALO_SCALE = 2.6;
 const KIND_LABEL: Record<MapNodeKind, string> = {
   workspace: 'Workspace',
   project: 'Project',
-  conductor: 'Conductor',
+  weaver: 'Weaver',
   role: 'Role',
   ticket: 'Ticket',
   knowledge: 'Knowledge',
 };
 
-const KINDS: MapNodeKind[] = ['workspace', 'project', 'conductor', 'role', 'ticket', 'knowledge'];
+const KINDS: MapNodeKind[] = ['workspace', 'project', 'weaver', 'role', 'ticket', 'knowledge'];
 
 /** Core dot radius per kind, graph units — small, per the brief, not the old chip sizes. */
 const CORE_RADIUS: Record<MapNodeKind, number> = {
-  workspace: 10, project: 7, conductor: 7, role: 5, ticket: 3.5, knowledge: 3.5,
+  workspace: 10, project: 7, weaver: 7, role: 5, ticket: 3.5, knowledge: 3.5,
 };
 
 /** Label priority: lower wins when two labels would overlap (design.md §3). */
 const LABEL_PRIORITY: Record<MapNodeKind, number> = {
-  workspace: 0, project: 1, conductor: 1, role: 2, ticket: 3, knowledge: 3,
+  workspace: 0, project: 1, weaver: 1, role: 2, ticket: 3, knowledge: 3,
 };
 
 function useMediaQuery(query: string): boolean {
@@ -94,7 +94,7 @@ function hueFor(node: MapNode, model: MapModel): string {
     }
     case 'ticket':
       return STATUS_VAR[ticketUiStatus(node.ticketStatus ?? 'in_progress')];
-    case 'conductor':
+    case 'weaver':
     case 'role':
     case 'knowledge':
     default: {

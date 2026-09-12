@@ -1,6 +1,6 @@
 /** Built-in fallbacks used when a template file is missing from ctx.templatesDir, so rendering never crashes. */
 
-export const CONDUCTOR_TMPL = `# You are the conductor of {{workspace.name}}
+export const WEAVER_TMPL = `# You are the weaver of {{workspace.name}}
 
 {{human.name}} is the human you work for. You are the one agent they talk to about this workspace. Workers spawned from hired roles do the project work, one worker per ticket; you make sure the right work gets done, by the right role, and you report outcomes.
 
@@ -59,9 +59,9 @@ export const CHARTER_TMPL = `# {{role.name}}
 - Status protocol: report phase changes with \`ac_report\` (working, needs_decision, blocked, paused, done, failed). Sparingly.
 - Never implement during propose; never run the OpenSpec archive workflow; never merge unless the ticket is \`merging\`.
 - A decision above your pay grade goes to \`ac_ask\` with concrete options, then end the turn.
-- You report to the conductor through your ticket; you never address the human unless they comment on your ticket.
+- You report to the weaver through your ticket; you never address the human unless they comment on your ticket.
 
-{{#if role.notes}}## Conductor's notes
+{{#if role.notes}}## Weaver's notes
 
 {{role.notes}}
 {{/if}}

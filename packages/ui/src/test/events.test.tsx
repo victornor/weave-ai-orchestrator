@@ -14,7 +14,7 @@ const fakeDecision = (id: string, status: Decision['status'], over: Partial<Deci
   allowFreeText: false, recommendation: null, status, answerKey: null, answerText: null,
   answerInputs: null, answeredByKind: null, answeredById: null, answeredAt: null, expiresAt: null,
   target: null, correlationKey: `plan_approval:tk_1`, createdAt: '2026-09-05T10:00:00.000Z',
-  conductorReviewStatus: 'unseen', conductorReviewedAt: null, conductorReviewNote: null, conductorReviewedByAgentId: null,
+  weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null,
   ...over,
 });
 
@@ -37,7 +37,7 @@ describe('decision events', () => {
     expect(invalidated(event('decision.answered'))).toContain(JSON.stringify(qk.workspaces()));
   });
 
-  it('treats a conductor-review update the same as an answer (VS-223)', () => {
+  it('treats a weaver-review update the same as an answer (VS-223)', () => {
     const keys = invalidated(event('decision.updated'));
     expect(keys).toContain(JSON.stringify(qk.decisions('ws1')));
     expect(keys).toContain(JSON.stringify(qk.decision('ws1', 'dec_1')));
@@ -97,7 +97,7 @@ describe('decision cache patching', () => {
 describe('run events', () => {
   it('makes the conductor detail stale, so the chat header reads the turn that just ended', () => {
     const keys = invalidated(event('run.finished', { entityId: 'run_1', entityType: 'run' }));
-    expect(keys).toContain(JSON.stringify(qk.conductor('ws1')));
+    expect(keys).toContain(JSON.stringify(qk.weaver('ws1')));
     expect(keys).toContain(JSON.stringify(qk.runs('ws1')));
   });
 });

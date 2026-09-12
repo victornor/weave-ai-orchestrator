@@ -1,5 +1,5 @@
 /** Minimal OpenAPI 3.1 document and the agent-readable `llms/api.txt`, both generated from ROUTES. */
-import { ERROR_CODES, EVENT_TYPES, COMMON_TOOLS, CONDUCTOR_TOOLS } from '@agent-conductor/shared';
+import { ERROR_CODES, EVENT_TYPES, COMMON_TOOLS, WEAVER_TOOLS } from '@agent-conductor/shared';
 import { ROUTES, type RouteRow } from './routetable.js';
 
 const PARAM = /\{([^}]+)\}/g;
@@ -75,7 +75,7 @@ export function llmsApiText(version: string, publicUrl: string): string {
     '',
     'Agent tools (MCP at /mcp/runs/<runId>, or POST /api/w/<ws>/agent/tools/<tool> with {"input": {...}}):',
     `  all agents: ${COMMON_TOOLS.join(', ')}`,
-    `  conductor:  ${CONDUCTOR_TOOLS.join(', ')}`,
+    `  conductor:  ${WEAVER_TOOLS.join(', ')}`,
     '  Every tool answers { ok: true, data } or { ok: false, error } — unknown ids are not_found, never a throw.',
     '',
     '## Routes',

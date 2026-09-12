@@ -23,7 +23,7 @@ export interface PresentationConfigView {
 
 /** `GET /api/w/:ws/presenter/desired` */
 export interface DesiredPresentation {
-  conductor: AgentView | null;
+  weaver: AgentView | null;
   workers: AgentView[];
   config: PresentationConfigView;
 }
@@ -34,7 +34,7 @@ export interface StoredHandle {
   handle: SurfaceHandle;
   /** Kept so a handle that failed verification can be recreated on presenter start. */
   view?: AgentView;
-  kindOfAgent?: 'conductor' | 'worker';
+  kindOfAgent?: 'weaver' | 'worker';
 }
 
 export interface EventSubscription { close(): void }

@@ -336,7 +336,7 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       inv(qk.workers(ws));
       // The conductor detail carries its last run, and that run's usage is what the chat header's
       // context meter is computed from — without this it would only move on a remount.
-      inv(qk.conductor(ws));
+      inv(qk.weaver(ws));
       // The ticket's own list of turns is keyed under the ticket, not under runs, so it would
       // otherwise learn about a turn starting or ending only on a remount — and a live transcript
       // that never hears the turn ended goes on waiting for a stream that has closed.

@@ -142,7 +142,7 @@ describe('prompt rendering', () => {
     });
   });
 
-  it('renders the conductor instructions with the live portfolio', () => {
+  it('renders the weaver instructions with the live portfolio', () => {
     const out = renderConductorInstructions(h.ctx, h.deps);
     expect(out).toContain('Test Workspace');
     expect(out).toContain('`api`');
@@ -293,7 +293,7 @@ describe('prompt rendering', () => {
       expect(brief()).toContain('YOLO mode is on for this project');
     });
 
-    it('states the policy in the conductor instructions, both ways', () => {
+    it('states the policy in the weaver instructions, both ways', () => {
       expect(renderConductorInstructions(h.ctx, h.deps)).toContain('Merge approval is always');
       h.ctx.config.defaults.yolo = true;
       const on = renderConductorInstructions(h.ctx, h.deps);
@@ -440,7 +440,7 @@ describe('prompt rendering', () => {
     expect(recorded).toEqual([['run-1', worker.id, ticketId, []]]);
   });
 
-  it('still pastes the bootstrap digest into the conductor first-turn prompt (VS-161)', async () => {
+  it('still pastes the bootstrap digest into the weaver first-turn prompt (VS-161)', async () => {
     const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
     const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [{ id: 'w2', source: 'system', reason: 'digest', payload: {} } as never], { isFirstTurn: true });
     expect(prompt).toContain('SHARED.md + PROJECT.md digest');
@@ -512,7 +512,7 @@ describe('prompt rendering', () => {
     expect(prompt).not.toContain('You hold the merge slot');
   });
 
-  it('lists open work and pending decisions for the conductor', async () => {
+  it('lists open work and pending decisions for the weaver', async () => {
     const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
     h.db.insert('decisions', {
       id: 'd2', workspaceId: h.workspaceId, ticketId, kind: 'merge_approval', owner: 'human', title: 'Merge TST-42?',
@@ -525,7 +525,7 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('Merge TST-42?');
   });
 
-  // A worker parked after a failure is waiting on the human, not stalled: the conductor must not
+  // A worker parked after a failure is waiting on the human, not stalled: the weaver must not
   // answer a usage limit by relaunching into it (VS-56).
   it('names why a paused worker stopped, and who owns the resume', async () => {
     const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
@@ -568,7 +568,7 @@ describe('prompt rendering', () => {
 
   it.runIf(existsSync(SHIPPED_TEMPLATES))('tells agents not to pin Node via mise in a way that hides openspec (VS-170)', () => {
     h.ctx.templatesDir = SHIPPED_TEMPLATES;
-    for (const name of ['conductor.AGENTS.md.tmpl', 'worker.AGENTS.md.tmpl'] as const) {
+    for (const name of ['weaver.AGENTS.md.tmpl', 'worker.AGENTS.md.tmpl'] as const) {
       const src = readFileSync(join(SHIPPED_TEMPLATES, name), 'utf8');
       expect(src).toContain('mise.toml');
       expect(src).toContain('openspec');
@@ -583,7 +583,7 @@ describe('prompt rendering', () => {
     }
   });
 
-  it.runIf(existsSync(SHIPPED_TEMPLATES))('tells the conductor to mark plan/merge/action cards after reading them (VS-223)', () => {
+  it.runIf(existsSync(SHIPPED_TEMPLATES))('tells the weaver to mark plan/merge/action cards after reading them (VS-223)', () => {
     h.ctx.templatesDir = SHIPPED_TEMPLATES;
     const conductor = renderConductorInstructions(h.ctx, h.deps);
     expect(conductor).toContain('ac_decision_review');
@@ -592,7 +592,7 @@ describe('prompt rendering', () => {
     expect(worker0).not.toContain('ac_decision_review');
   });
 
-  it.runIf(existsSync(SHIPPED_TEMPLATES))('tells the conductor to ask with options when the answer is a closed set', () => {
+  it.runIf(existsSync(SHIPPED_TEMPLATES))('tells the weaver to ask with options when the answer is a closed set', () => {
     h.ctx.templatesDir = SHIPPED_TEMPLATES;
     const conductor = renderConductorInstructions(h.ctx, h.deps);
     expect(conductor).toContain('Ask with options when the answer is a closed set');
@@ -614,6 +614,6 @@ describe('prompt rendering', () => {
     const worker0 = renderWorkerInstructions(h.ctx, h.deps, worker);
     expect(worker0).toContain(recipe);
     expect(worker0).toContain('gh auth login');
-    expect(worker0).toContain('Do not ask the human or the conductor to authorize GitHub');
+    expect(worker0).toContain('Do not ask the human or the weaver to authorize GitHub');
   });
 });

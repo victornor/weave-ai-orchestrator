@@ -58,7 +58,7 @@ export function decision(over: Partial<Decision> = {}): Decision {
     title: 'CSS variables or Tailwind?', context: 'Dark mode needs a token strategy.', options: [{ key: 'vars', label: 'CSS variables', recommended: true }, { key: 'tw', label: 'Tailwind' }],
     inputs: [], allowFreeText: true, recommendation: 'CSS variables', status: 'open', answerKey: null, answerText: null, answerInputs: null, answeredByKind: null,
     answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null, createdAt: '2026-09-01T00:00:00.000Z',
-    conductorReviewStatus: 'unseen', conductorReviewedAt: null, conductorReviewNote: null, conductorReviewedByAgentId: null,
+    weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null,
     ...over,
   };
 }
@@ -129,7 +129,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   db.run('INSERT INTO workspaces (id, slug, name, ticket_prefix, status, root_path, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
     [workspaceId, workspaceId, 'Test workspace', 'ACME', 'active', '/tmp/ws', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z']);
   db.insert('agents', {
-    id: 'ag_conductor', workspaceId, kind: 'conductor', name: 'Conductor', runtimeId: 'claude', status: 'active',
+    id: 'ag_conductor', workspaceId, kind: 'weaver', name: 'Weaver', runtimeId: 'claude', status: 'active',
     homePath: '/tmp/c', turnEpoch: 0, turnCount: 0, spawnedBy: 'system', briefRevision: 1,
     createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
   });
@@ -256,11 +256,11 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
         if (!cur) throw new OcError('not_found', `decision ${id} not found`);
         const d = {
           ...cur,
-          conductorReviewStatus: input.status,
-          conductorReviewedAt: new Date().toISOString(),
+          weaverReviewStatus: input.status,
+          weaverReviewedAt: new Date().toISOString(),
           // VS-234: both marks carry the note (the tool schema enforces its presence).
-          conductorReviewNote: (input.note ?? '').trim() || null,
-          conductorReviewedByAgentId: _actor.id,
+          weaverReviewNote: (input.note ?? '').trim() || null,
+          weaverReviewedByAgentId: _actor.id,
         };
         decisions.set(id, d);
         return d;
@@ -269,7 +269,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     wake: impl('wake', { listForAgent: () => [wakeup()] }),
     runs: impl('runs', { get: () => ({ wakeupIds: ['wk_1'] }), list: () => ({ items: [], total: 0 }), events: () => [], onEvent: () => () => undefined }),
     briefing: impl('briefing', { snapshot: (): Briefing => ({ needsYou: [], landed: [], underway: [], queued: [], warnings: [], generatedAt: '2026-09-01T00:00:00.000Z' }) }),
-    workers: impl('workers', { list: () => [], conductor: () => ({ id: 'ag_conductor', kind: 'conductor' }) }),
+    workers: impl('workers', { list: () => [], conductor: () => ({ id: 'ag_conductor', kind: 'weaver' }) }),
     dispatcher: impl('dispatcher', { start: () => undefined, stop: async () => true, running: () => 0 }),
     supervisor: impl('supervisor', { start: () => undefined, stop: () => undefined, running: () => true }),
     projects: impl('projects', {

@@ -163,7 +163,7 @@ describe('Live page membership', () => {
       agent({ id: 'paused', name: 'Paused #1', status: 'paused' }),
       agent({ id: 'done', name: 'Done #1', status: 'done' }),
       agent({ id: 'retired', name: 'Retired #1', status: 'retired' }),
-      agent({ id: 'cond', name: 'Conductor', kind: 'conductor', status: 'running', ticketId: 'tk_1' }),
+      agent({ id: 'cond', name: 'Weaver', kind: 'weaver', status: 'running', ticketId: 'tk_1' }),
     ];
     state.tickets = [ticket({ id: 'tk_1', identifier: 'ACME-42' })];
     render(<LiveRoute />);

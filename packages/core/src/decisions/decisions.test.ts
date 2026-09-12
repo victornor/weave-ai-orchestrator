@@ -53,8 +53,8 @@ describe('decisions', () => {
     expect(decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'x' }).owner).toBe('human');
     h.db.update('projects', h.projectId, { policiesJson: { proposalApproval: 'conductor' } });
     const t2 = ticket({ title: 'second' });
-    expect(decisions.create(AGENT, { ticketId: t2.id, kind: 'plan_approval', title: 'y' }).owner).toBe('conductor');
-    expect(decisions.create(AGENT, { kind: 'gate_finding', title: 'z' }).owner).toBe('conductor');
+    expect(decisions.create(AGENT, { ticketId: t2.id, kind: 'plan_approval', title: 'y' }).owner).toBe('weaver');
+    expect(decisions.create(AGENT, { kind: 'gate_finding', title: 'z' }).owner).toBe('weaver');
   });
 
   it('resolves a worker-asked question or concern to the conductor, and wakes it immediately', () => {
@@ -62,7 +62,7 @@ describe('decisions', () => {
     const workerId = h.addWorker(t.id);
     for (const kind of ['question', 'concern'] as const) {
       const d = decisions.create(AGENT, { ticketId: t.id, kind, title: kind, askedByAgentId: workerId, correlationKey: `${kind}:${newId()}` });
-      expect(d.owner).toBe('conductor');
+      expect(d.owner).toBe('weaver');
       const w = wake.calls.find((c) => c.agentId === h.conductorId && (c.input.payload as { decisionId?: string })?.decisionId === d.id);
       expect(w).toBeDefined();
     }
@@ -79,8 +79,8 @@ describe('decisions', () => {
   it('keeps gate_finding owned by the conductor regardless of who asks', () => {
     const t = ticket();
     const workerId = h.addWorker(t.id);
-    expect(decisions.create(AGENT, { ticketId: t.id, kind: 'gate_finding', title: 'x', askedByAgentId: workerId, correlationKey: newId() }).owner).toBe('conductor');
-    expect(decisions.create(AGENT, { ticketId: t.id, kind: 'gate_finding', title: 'y', askedByAgentId: h.conductorId, correlationKey: newId() }).owner).toBe('conductor');
+    expect(decisions.create(AGENT, { ticketId: t.id, kind: 'gate_finding', title: 'x', askedByAgentId: workerId, correlationKey: newId() }).owner).toBe('weaver');
+    expect(decisions.create(AGENT, { ticketId: t.id, kind: 'gate_finding', title: 'y', askedByAgentId: h.conductorId, correlationKey: newId() }).owner).toBe('weaver');
   });
 
   it('records the answer verbatim and wakes the asking agent', async () => {
@@ -560,10 +560,10 @@ describe('decisions', () => {
       const t = ticket();
       for (const kind of ['plan_approval', 'merge_approval', 'action_approval'] as const) {
         const d = decisions.create(AGENT, { ticketId: t.id, kind, title: kind, correlationKey: `${kind}:${t.id}` });
-        expect(d.conductorReviewStatus).toBe('unseen');
-        expect(d.conductorReviewedAt).toBeNull();
-        expect(d.conductorReviewNote).toBeNull();
-        expect(d.conductorReviewedByAgentId).toBeNull();
+        expect(d.weaverReviewStatus).toBe('unseen');
+        expect(d.weaverReviewedAt).toBeNull();
+        expect(d.weaverReviewNote).toBeNull();
+        expect(d.weaverReviewedByAgentId).toBeNull();
       }
     });
 
@@ -571,20 +571,20 @@ describe('decisions', () => {
       const t = ticket();
       const openPlan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
       const looked = decisions.review(conductor(), openPlan.id, { status: 'looked', note: '  plan matches the ticket  ' });
-      expect(looked.conductorReviewStatus).toBe('looked');
-      expect(looked.conductorReviewedAt).toBeTruthy();
-      expect(looked.conductorReviewNote).toBe('plan matches the ticket');
-      expect(looked.conductorReviewedByAgentId).toBe(h.conductorId);
+      expect(looked.weaverReviewStatus).toBe('looked');
+      expect(looked.weaverReviewedAt).toBeTruthy();
+      expect(looked.weaverReviewNote).toBe('plan matches the ticket');
+      expect(looked.weaverReviewedByAgentId).toBe(h.conductorId);
 
       const merge = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Merge', correlationKey: `merge:${t.id}` });
       const concerns = decisions.review(conductor(), merge.id, { status: 'concerns', note: '  CI is red  ' });
-      expect(concerns.conductorReviewStatus).toBe('concerns');
-      expect(concerns.conductorReviewNote).toBe('CI is red');
+      expect(concerns.weaverReviewStatus).toBe('concerns');
+      expect(concerns.weaverReviewNote).toBe('CI is red');
 
       const action = decisions.create(AGENT, { ticketId: t.id, kind: 'action_approval', title: 'Action', correlationKey: `action:${t.id}` });
       await decisions.answer(HUMAN, action.id, { key: 'approve' });
       const after = decisions.review(conductor(), action.id, { status: 'looked', note: 'ran the action steps' });
-      expect(after.conductorReviewStatus).toBe('looked');
+      expect(after.weaverReviewStatus).toBe('looked');
       expect(after.status).toBe('answered');
     });
 
@@ -594,8 +594,8 @@ describe('decisions', () => {
       expect(() => decisions.review(conductor(), d.id, { status: 'looked' })).toThrow(/looked requires a note/);
       expect(() => decisions.review(conductor(), d.id, { status: 'looked', note: '   ' })).toThrow(/looked requires a note/);
       expect(() => decisions.review(conductor(), d.id, { status: 'looked', note: 'x'.repeat(501) })).toThrow(/500/);
-      expect(decisions.get(d.id).conductorReviewStatus).toBe('unseen');
-      expect(decisions.get(d.id).conductorReviewNote).toBeNull();
+      expect(decisions.get(d.id).weaverReviewStatus).toBe('unseen');
+      expect(decisions.get(d.id).weaverReviewNote).toBeNull();
     });
 
     it('refuses concerns without a note and a note over 500 characters', () => {
@@ -604,7 +604,7 @@ describe('decisions', () => {
       expect(() => decisions.review(conductor(), d.id, { status: 'concerns' })).toThrow(/requires a note/);
       expect(() => decisions.review(conductor(), d.id, { status: 'concerns', note: '   ' })).toThrow(/requires a note/);
       expect(() => decisions.review(conductor(), d.id, { status: 'concerns', note: 'x'.repeat(501) })).toThrow(/500/);
-      expect(decisions.get(d.id).conductorReviewStatus).toBe('unseen');
+      expect(decisions.get(d.id).weaverReviewStatus).toBe('unseen');
     });
 
     it('refuses a worker actor and leaves the row unchanged', () => {
@@ -616,7 +616,7 @@ describe('decisions', () => {
       } catch (e) {
         expect(e).toMatchObject({ code: 'forbidden' });
       }
-      expect(decisions.get(d.id).conductorReviewStatus).toBe('unseen');
+      expect(decisions.get(d.id).weaverReviewStatus).toBe('unseen');
       try {
         decisions.review(HUMAN, d.id, { status: 'looked' });
         expect.unreachable('human must be forbidden');
@@ -651,12 +651,12 @@ describe('decisions', () => {
       const t = ticket();
       const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
       const first = decisions.review(conductor(), d.id, { status: 'concerns', note: 'split the migration' });
-      expect(first.conductorReviewNote).toBe('split the migration');
+      expect(first.weaverReviewNote).toBe('split the migration');
       vi.setSystemTime(new Date('2026-09-11T03:00:01.000Z'));
       const second = decisions.review(conductor(), d.id, { status: 'looked', note: 'migration was split, all clear now' });
-      expect(second.conductorReviewStatus).toBe('looked');
-      expect(second.conductorReviewNote).toBe('migration was split, all clear now');
-      expect(second.conductorReviewedAt! > first.conductorReviewedAt!).toBe(true);
+      expect(second.weaverReviewStatus).toBe('looked');
+      expect(second.weaverReviewNote).toBe('migration was split, all clear now');
+      expect(second.weaverReviewedAt! > first.weaverReviewedAt!).toBe(true);
       vi.useRealTimers();
     });
 
@@ -670,8 +670,8 @@ describe('decisions', () => {
       const ev = h.events.find((e) => e.type === 'decision.updated')!;
       expect(ev.payload).toMatchObject({
         id: marked.id,
-        conductorReviewStatus: 'looked',
-        conductorReviewedByAgentId: h.conductorId,
+        weaverReviewStatus: 'looked',
+        weaverReviewedByAgentId: h.conductorId,
       });
       expect(wake.calls.length).toBe(before);
     });
@@ -684,13 +684,13 @@ describe('decisions', () => {
         ticketId: t.id, kind: 'plan_approval', title: 'Approve the plan', askedByAgentId: workerId,
         options: [{ key: 'approve', label: 'Approve' }, { key: 'revise', label: 'Revise' }, { key: 'reject', label: 'Reject' }],
       });
-      expect(plan.conductorReviewStatus).toBe('unseen');
+      expect(plan.weaverReviewStatus).toBe('unseen');
       await decisions.answer(HUMAN, plan.id, { key: 'approve' });
       expect(tickets.get(t.id).status).toBe('approved');
       expect(decisions.get(plan.id)).toMatchObject({
         answerKey: 'approve',
-        conductorReviewStatus: 'unseen',
-        conductorReviewedAt: null,
+        weaverReviewStatus: 'unseen',
+        weaverReviewedAt: null,
       });
 
       const t2 = ticket({ title: 'Merge this' });
@@ -702,13 +702,13 @@ describe('decisions', () => {
         options: [{ key: 'approve', label: 'Approve' }, { key: 'changes', label: 'Changes' }],
       });
       const flagged = decisions.review(conductor(), merge.id, { status: 'concerns', note: 'screenshot is cropped' });
-      expect(flagged.conductorReviewStatus).toBe('concerns');
+      expect(flagged.weaverReviewStatus).toBe('concerns');
       // VS-266: a concern holds the approving answer — overriding it is required to still take this path.
       await decisions.answer(HUMAN, merge.id, { key: 'approve', overrideHold: true, overrideReason: 'merging anyway, the screenshot is unrelated' });
       const answered = decisions.get(merge.id);
       expect(answered.answerKey).toBe('approve');
-      expect(answered.conductorReviewStatus).toBe('concerns');
-      expect(answered.conductorReviewNote).toBe('screenshot is cropped');
+      expect(answered.weaverReviewStatus).toBe('concerns');
+      expect(answered.weaverReviewNote).toBe('screenshot is cropped');
       expect(tickets.get(t2.id).status).toBe('merging');
     });
   });
@@ -722,7 +722,7 @@ describe('decisions', () => {
       decisions.review(conductor(), plan.id, { status: 'concerns', note: 'the migration needs splitting' });
       await expect(decisions.answer(HUMAN, plan.id, { key: 'approve' })).rejects.toMatchObject({
         code: 'revision_pending',
-        details: { conductorReviewNote: 'the migration needs splitting' },
+        details: { weaverReviewNote: 'the migration needs splitting' },
       });
       expect(decisions.get(plan.id).status).toBe('open');
     });
@@ -828,7 +828,7 @@ describe('decisions', () => {
       await tickets.transition(AGENT, t.id, { to: 'proposed' });
       const secondPlan = decisions.list({ ticketId: t.id, status: ['open'] }).find((d) => d.kind === 'plan_approval')!;
       expect(secondPlan.id).not.toBe(firstPlan.id);
-      expect(secondPlan.conductorReviewStatus).toBe('unseen');
+      expect(secondPlan.weaverReviewStatus).toBe('unseen');
       await decisions.answer(HUMAN, secondPlan.id, { key: 'approve' });
       expect(tickets.get(t.id).status).toBe('approved');
     });
@@ -849,7 +849,7 @@ describe('decisions', () => {
       await tickets.transition(AGENT, t.id, { to: 'in_review' });
       const secondMerge = decisions.list({ ticketId: t.id, status: ['open'] }).find((d) => d.kind === 'merge_approval')!;
       expect(secondMerge.id).not.toBe(firstMerge.id);
-      expect(secondMerge.conductorReviewStatus).toBe('unseen');
+      expect(secondMerge.weaverReviewStatus).toBe('unseen');
       await decisions.answer(HUMAN, secondMerge.id, { key: 'approve' });
       expect(tickets.get(t.id).status).toBe('merging');
     });

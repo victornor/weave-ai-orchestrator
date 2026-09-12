@@ -70,7 +70,7 @@ export function SessionLimit({
         data-testid="session-limit"
         onClick={() => setOpen(true)}
         title={title}
-        aria-label={`Conductor plan limits — ${label}`}
+        aria-label={`Weaver plan limits — ${label}`}
         className={cx(
           'flex min-w-0 flex-none items-center gap-1.5 rounded-r4 px-1.5 py-1 whitespace-nowrap hover:bg-bg-2',
           className,
@@ -90,7 +90,7 @@ export function SessionLimit({
           <span className="text-micro text-text-3">{view.reason}</span>
         )}
       </button>
-      <Sheet open={open} onClose={() => setOpen(false)} title="Conductor plan limits">
+      <Sheet open={open} onClose={() => setOpen(false)} title="Weaver plan limits">
         {/* The block carries the age, the sync control and the daemon's own cadence — the same
             block the usage page renders, so the two surfaces cannot drift apart. */}
         {account ? <PlanLimits accounts={accountLimits([account], now)} sync={sync} /> : null}

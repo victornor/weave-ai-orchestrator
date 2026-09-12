@@ -453,9 +453,9 @@ describe('DecisionCard', () => {
     expect(screen.queryByText('Write your own…')).not.toBeInTheDocument();
   });
 
-  it('names the conductor as the asker of a conductor question', () => {
-    render(<DecisionCard decision={question()} asker="conductor" onAnswer={() => undefined} />);
-    expect(screen.getByText('Conductor asks')).toBeInTheDocument();
+  it('names the weaver as the asker of a weaver question', () => {
+    render(<DecisionCard decision={question()} asker="weaver" onAnswer={() => undefined} />);
+    expect(screen.getByText('Weaver asks')).toBeInTheDocument();
   });
 
   it('keeps the worker heading for a worker question', () => {
@@ -468,7 +468,7 @@ describe('DecisionCard', () => {
     render(
       <DecisionCard
         decision={question({ status: 'answered', answerKey: 'user', answeredAt: '2026-09-01T10:15:00.000Z' })}
-        asker="conductor"
+        asker="weaver"
         onAnswer={onAnswer}
       />,
     );
@@ -584,7 +584,7 @@ describe('DecisionCard', () => {
     it('shows unseen on a plan card and still sends the real Approve/Revise/Reject keys', () => {
       const onAnswer = vi.fn();
       render(<DecisionCard decision={decision({ kind: 'plan_approval' })} onAnswer={onAnswer} />);
-      const line = screen.getByText("Conductor hasn't reviewed yet");
+      const line = screen.getByText("Weaver hasn't reviewed yet");
       expect(line).toHaveClass('text-blocked');
       fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
       fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
@@ -597,25 +597,25 @@ describe('DecisionCard', () => {
         <DecisionCard
           decision={decision({
             kind: 'merge_approval',
-            conductorReviewStatus: 'looked',
-            conductorReviewedAt: '2026-09-11T03:01:00.000Z',
-            conductorReviewNote: 'squash diff matches the approved plan',
+            weaverReviewStatus: 'looked',
+            weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+            weaverReviewNote: 'squash diff matches the approved plan',
           })}
           onAnswer={onAnswer}
         />,
       );
-      const looked = screen.getByText('Conductor reviewed — no concerns');
+      const looked = screen.getByText('Weaver reviewed — no concerns');
       expect(looked).toHaveClass('text-text-3');
       expect(looked).not.toHaveClass('text-blocked');
       expect(screen.getByText('squash diff matches the approved plan')).toBeInTheDocument();
-      expect(screen.queryByText("Conductor hasn't reviewed yet")).not.toBeInTheDocument();
+      expect(screen.queryByText("Weaver hasn't reviewed yet")).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Approve merge' }));
       expect(onAnswer).toHaveBeenCalledWith(expect.objectContaining({ key: 'approve' }));
       unmount();
 
       render(<DecisionCard decision={decision({ kind: 'merge_approval' })} onAnswer={() => undefined} />);
-      expect(screen.getByText("Conductor hasn't reviewed yet")).toBeInTheDocument();
-      expect(screen.queryByText('Conductor reviewed — no concerns')).not.toBeInTheDocument();
+      expect(screen.getByText("Weaver hasn't reviewed yet")).toBeInTheDocument();
+      expect(screen.queryByText('Weaver reviewed — no concerns')).not.toBeInTheDocument();
     });
 
     it('renders a legacy clean mark (no note) as the line alone (VS-234)', () => {
@@ -623,15 +623,15 @@ describe('DecisionCard', () => {
         <DecisionCard
           decision={decision({
             kind: 'merge_approval',
-            conductorReviewStatus: 'looked',
-            conductorReviewedAt: '2026-09-11T03:01:00.000Z',
-            conductorReviewNote: null,
+            weaverReviewStatus: 'looked',
+            weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+            weaverReviewNote: null,
           })}
           onAnswer={() => undefined}
         />,
       );
-      expect(screen.getByText('Conductor reviewed — no concerns')).toBeInTheDocument();
-      const review = screen.getByText('Conductor reviewed — no concerns').parentElement!;
+      expect(screen.getByText('Weaver reviewed — no concerns')).toBeInTheDocument();
+      const review = screen.getByText('Weaver reviewed — no concerns').parentElement!;
       expect(review.querySelectorAll('p')).toHaveLength(1);
     });
 
@@ -641,9 +641,9 @@ describe('DecisionCard', () => {
         <DecisionCard
           decision={decision({
             kind: 'plan_approval',
-            conductorReviewStatus: 'looked',
-            conductorReviewedAt: '2026-09-11T03:01:00.000Z',
-            conductorReviewNote: 'plan covers the scope',
+            weaverReviewStatus: 'looked',
+            weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+            weaverReviewNote: 'plan covers the scope',
           })}
           onAnswer={onAnswer}
         />,
@@ -659,17 +659,17 @@ describe('DecisionCard', () => {
         <DecisionCard
           decision={decision({
             kind: 'plan_approval',
-            conductorReviewStatus: 'concerns',
-            conductorReviewedAt: '2026-09-11T03:01:00.000Z',
-            conductorReviewNote: 'the migration contradicts itself',
+            weaverReviewStatus: 'concerns',
+            weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+            weaverReviewNote: 'the migration contradicts itself',
           })}
           onAnswer={() => undefined}
         />,
       );
-      expect(screen.getByText('Conductor reviewed — has concerns')).toBeInTheDocument();
+      expect(screen.getByText('Weaver reviewed — has concerns')).toBeInTheDocument();
       const note = screen.getByText('the migration contradicts itself');
       expect(note.tagName).toBe('P');
-      const review = container.querySelector('[data-conductor-review="concerns"]');
+      const review = container.querySelector('[data-weaver-review="concerns"]');
       expect(review?.querySelector('[class*="uppercase"]')).toBeNull();
     });
 
@@ -681,14 +681,14 @@ describe('DecisionCard', () => {
             status: 'answered',
             answerKey: 'approve',
             answeredAt: '2026-09-11T03:01:00.000Z',
-            conductorReviewStatus: 'looked',
-            conductorReviewedAt: '2026-09-11T03:02:00.000Z',
-            conductorReviewNote: 'looked again after the merge',
+            weaverReviewStatus: 'looked',
+            weaverReviewedAt: '2026-09-11T03:02:00.000Z',
+            weaverReviewNote: 'looked again after the merge',
           })}
           onAnswer={() => undefined}
         />,
       );
-      expect(screen.getByText('Conductor reviewed after you answered — no concerns')).toBeInTheDocument();
+      expect(screen.getByText('Weaver reviewed after you answered — no concerns')).toBeInTheDocument();
     });
 
     it('puts no review line on a question card', () => {
@@ -698,7 +698,7 @@ describe('DecisionCard', () => {
 
     it('still shows the line on a compact chat card, not behind an expander', () => {
       render(<DecisionCard decision={decision({ kind: 'plan_approval' })} compact onAnswer={() => undefined} />);
-      expect(screen.getByText("Conductor hasn't reviewed yet")).toBeInTheDocument();
+      expect(screen.getByText("Weaver hasn't reviewed yet")).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
     });
   });
@@ -706,8 +706,8 @@ describe('DecisionCard', () => {
   describe('held approval (VS-266)', () => {
     const held = (kind: 'plan_approval' | 'action_approval' | 'merge_approval') =>
       decision({
-        kind, status: 'open', conductorReviewStatus: 'concerns',
-        conductorReviewedAt: '2026-09-11T03:01:00.000Z', conductorReviewNote: 'the migration needs splitting',
+        kind, status: 'open', weaverReviewStatus: 'concerns',
+        weaverReviewedAt: '2026-09-11T03:01:00.000Z', weaverReviewNote: 'the migration needs splitting',
       });
 
     it('disables Approve on a held plan_approval and shows the held sentence', () => {
@@ -732,7 +732,7 @@ describe('DecisionCard', () => {
     it('does not disable Approve, or show the held sentence, once looked replaces the concern', () => {
       render(
         <DecisionCard
-          decision={decision({ kind: 'plan_approval', conductorReviewStatus: 'looked', conductorReviewedAt: '2026-09-11T03:01:00.000Z', conductorReviewNote: 'clean now' })}
+          decision={decision({ kind: 'plan_approval', weaverReviewStatus: 'looked', weaverReviewedAt: '2026-09-11T03:01:00.000Z', weaverReviewNote: 'clean now' })}
           onAnswer={() => undefined}
         />,
       );

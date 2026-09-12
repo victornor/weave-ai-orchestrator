@@ -8,7 +8,7 @@ export const IN_FLIGHT_TICKET_STATUSES = [
   'proposing', 'proposed', 'approved', 'in_progress', 'in_review', 'merging', 'blocked',
 ] as const;
 
-export type MapNodeKind = 'workspace' | 'project' | 'conductor' | 'role' | 'ticket' | 'knowledge';
+export type MapNodeKind = 'workspace' | 'project' | 'weaver' | 'role' | 'ticket' | 'knowledge';
 
 export interface MapNode {
   id: string;
@@ -48,7 +48,7 @@ export interface MapWorkspaceInput {
   roles: readonly Role[];
   tickets: readonly Ticket[];
   knowledge: readonly { projectId: string | null; updatedAt: string }[];
-  conductor: { id: string; name: string } | null;
+  weaver: { id: string; name: string } | null;
 }
 
 const EMPTY: MapModel = { nodes: [], edges: [], byId: new Map(), neighbours: new Map() };
@@ -98,12 +98,12 @@ export function buildMapModel(workspaces: readonly MapWorkspaceInput[]): MapMode
     };
     push(wsNode);
 
-    if (w.conductor) {
-      const cid = nodeId('conductor', w.conductor.id);
+    if (w.weaver) {
+      const cid = nodeId('weaver', w.weaver.id);
       push({
         id: cid,
-        kind: 'conductor',
-        title: w.conductor.name,
+        kind: 'weaver',
+        title: w.weaver.name,
         workspaceId: w.id,
         workspaceName: w.name,
         href: `/w/${encodeURIComponent(w.id)}/chat`,

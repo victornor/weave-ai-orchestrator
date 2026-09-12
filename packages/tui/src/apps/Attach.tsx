@@ -52,14 +52,14 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
   const [history, setHistory] = useState<string[]>([]);
   const [nonce, setNonce] = useState(0);
 
-  const isConductor = agentId === 'conductor';
+  const isConductor = agentId === 'weaver';
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const payload = isConductor
-          ? await client.wget<unknown>('/conductor')
+          ? await client.wget<unknown>('/weaver')
           : await client.wget<unknown>(`/workers/${encodeURIComponent(agentId)}`);
         if (cancelled) return;
         const agent = unwrap<Agent>(payload, 'agent', 'worker');
@@ -207,7 +207,7 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
           value={input}
           onChange={setInput}
           onSubmit={(text) => { void submit(text); }}
-          placeholder={isConductor ? 'message the conductor' : 'steer the worker'}
+          placeholder={isConductor ? 'message the weaver' : 'steer the worker'}
           history={history}
           focus
         />

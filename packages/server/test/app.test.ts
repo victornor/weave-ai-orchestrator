@@ -366,17 +366,17 @@ describe('routes', () => {
     const run = { id: 'run_live', agentId: 'ag_conductor', status: 'running' };
     h.impls['runs']!['list'] = () => ({ items: [run], total: 1 });
 
-    const res = await fetch('/api/w/ws1/conductor', { headers: authed() });
+    const res = await fetch('/api/w/ws1/weaver', { headers: authed() });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.worker).toMatchObject({ id: 'ag_conductor', kind: 'conductor' });
+    expect(body.worker).toMatchObject({ id: 'ag_conductor', kind: 'weaver' });
     expect(body.lastRun).toMatchObject({ id: 'run_live', status: 'running' });
     expect(h.calls.some((c) => c.service === 'runs' && c.method === 'list' && (c.args[0] as { agentId?: string })?.agentId === 'ag_conductor')).toBe(true);
   });
 
   it('serves a null lastRun when the conductor has never run', async () => {
     const { fetch } = app();
-    const res = await fetch('/api/w/ws1/conductor', { headers: authed() });
+    const res = await fetch('/api/w/ws1/weaver', { headers: authed() });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.worker).toMatchObject({ id: 'ag_conductor' });
@@ -645,7 +645,7 @@ describe('the workspace list', () => {
     addDecision(h, 'd_1');
     addDecision(h, 'd_2');
     addDecision(h, 'd_3', { status: 'answered' });
-    addDecision(h, 'd_4', { owner: 'conductor' });
+    addDecision(h, 'd_4', { owner: 'weaver' });
 
     const body = await (await fetch('/api/workspaces', { headers: authed() })).json() as Array<Record<string, unknown>>;
     expect(body).toHaveLength(1);

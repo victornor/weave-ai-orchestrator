@@ -1,5 +1,5 @@
 import { decisionRow, newId, nowIso, type Db } from '@agent-conductor/db';
-import { OcError, CONDUCTOR_REVIEW_KINDS, CONDUCTOR_REVIEW_NOTE_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type TicketStatus } from '@agent-conductor/shared';
+import { OcError, WEAVER_REVIEW_KINDS, WEAVER_REVIEW_NOTE_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type TicketStatus } from '@agent-conductor/shared';
 import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -26,7 +26,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     return d;
   }
   function conductorId(): string | null {
-    return db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND kind = 'conductor'", [ws])?.id ?? null;
+    return db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND kind = 'weaver'", [ws])?.id ?? null;
   }
   /** Whether the agent asking is a worker (VS-127) — a worker's ask is never the human's to answer. */
   function askedByWorker(askedByAgentId: string | null | undefined): boolean {
@@ -52,22 +52,27 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
   function defaultOwner(kind: DecisionKind, ticketId: string | null | undefined, askedByAgentId?: string | null): DecisionOwner {
     switch (kind) {
       case 'gate_finding':
-        return 'conductor';
+        return 'weaver';
       case 'question':
       case 'concern':
-        return askedByWorker(askedByAgentId) ? 'conductor' : 'human';
+        return askedByWorker(askedByAgentId) ? 'weaver' : 'human';
       case 'merge_approval':
       case 'action_approval':
         return 'human';
       case 'hire_approval':
-        return ctx.config.defaults.hireApproval === 'conductor' ? 'conductor' : 'human';
+        // `hireApproval` is `APPROVAL_OWNERS` (still 'conductor' — VS-263's deferred config-key
+        // surface); translated to `DECISION_OWNERS` here, at the one point it becomes a decision.
+        return ctx.config.defaults.hireApproval === 'conductor' ? 'weaver' : 'human';
       case 'plan_approval': {
+        // Same translation: `proposalApproval` is `APPROVAL_OWNERS`, not `DecisionOwner` — the type
+        // here was wrong before this rename (it happened to share values with DecisionOwner; it no
+        // longer does), so it is spelled out rather than reusing a type that has since diverged.
         const p = ticketId
-          ? db.get<{ policies: { proposalApproval?: DecisionOwner | 'none' } | null }>(
+          ? db.get<{ policies: { proposalApproval?: 'human' | 'conductor' | 'none' } | null }>(
               'SELECT p.policies_json FROM tickets t JOIN projects p ON p.id = t.project_id WHERE t.id = ?', [ticketId])
           : null;
         const owner = p?.policies?.proposalApproval ?? ctx.config.defaults.proposalApproval;
-        return owner === 'conductor' ? 'conductor' : 'human';
+        return owner === 'conductor' ? 'weaver' : 'human';
       }
       default:
         return 'human';
@@ -178,7 +183,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       const d = get(id);
       recordActivity(db, ws, actor, 'decision.create', 'decision', id, { kind: input.kind, owner, correlationKey }, ticketId);
       ctx.events.emit('decision.created', 'decision', id, d);
-      if (owner === 'conductor') wake(conductorId(), 'system', `decision ${input.kind} awaits you`, { decisionId: id, ticketId });
+      if (owner === 'weaver') wake(conductorId(), 'system', `decision ${input.kind} awaits you`, { decisionId: id, ticketId });
       return d;
     });
   }
@@ -384,7 +389,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
 
   /** The option key that moves a review-carrying kind's ticket forward — the one this hold applies to. Every carrying kind currently names it `approve`, but this reads the contract rather than assuming it stays that way. */
   function approvingKeyOf(kind: DecisionKind): string | null {
-    if (!(CONDUCTOR_REVIEW_KINDS as readonly string[]).includes(kind)) return null;
+    if (!(WEAVER_REVIEW_KINDS as readonly string[]).includes(kind)) return null;
     return (NAMED_CARD_OPTION_KEYS as Record<string, { approve?: string }>)[kind]?.approve ?? null;
   }
 
@@ -398,17 +403,17 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       const supersededBy = d.status === 'superseded' ? replacementFor(d) : null;
       throw new OcError('wrong_status', `decision ${id} is ${d.status}`, { status: d.status, ...(supersededBy ? { supersededBy } : {}) });
     }
-    // VS-266: a decision the conductor marked `concerns` refuses its approving answer, from any
+    // VS-266: a decision the weaver marked `concerns` refuses its approving answer, from any
     // actor, until it stops being the live question (answered, or superseded by a fresh one raised
     // through a real revision cycle) or a human deliberately overrides the hold. Every other answer
     // — revise, reject, the non-approving merge option, any answer on a decision that is not held —
     // is untouched by this check.
-    const held = d.conductorReviewStatus === 'concerns' && ans.key != null && ans.key === approvingKeyOf(d.kind);
+    const held = d.weaverReviewStatus === 'concerns' && ans.key != null && ans.key === approvingKeyOf(d.kind);
     const overrideReason = (ans.overrideReason ?? '').trim();
     const overridden = held && ans.overrideHold === true && overrideReason !== '';
     if (held && !overridden) {
-      throw new OcError('revision_pending', `decision ${id} is held: the conductor has concerns and no revision has landed`, {
-        conductorReviewNote: d.conductorReviewNote, conductorReviewedAt: d.conductorReviewedAt,
+      throw new OcError('revision_pending', `decision ${id} is held: the weaver has concerns and no revision has landed`, {
+        weaverReviewNote: d.weaverReviewNote, weaverReviewedAt: d.weaverReviewedAt,
       });
     }
     const suppliedInputs = ans.inputs ?? {};
@@ -446,7 +451,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     // Recorded in the audit trail above; also surfaced in-place on the ticket, since that is where a
     // human reading back "why did this merge/approve without a revision" would look first (VS-266).
     if (overridden && d.ticketId) {
-      deps().tickets.comment(actor, d.ticketId, `Approval held by a conductor concern was overridden: ${overrideReason}`, 'comment', 'trusted');
+      deps().tickets.comment(actor, d.ticketId, `Approval held by a weaver concern was overridden: ${overrideReason}`, 'comment', 'trusted');
     }
 
     // Verbatim answer text is already recorded; side effects come second so a failure never loses the answer.
@@ -492,10 +497,10 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     const d = get(id);
     const cid = conductorId();
     if (actor.kind !== 'agent' || !actor.id || actor.id !== cid) {
-      throw new OcError('forbidden', 'only the workspace conductor can mark a decision reviewed');
+      throw new OcError('forbidden', 'only the workspace weaver can mark a decision reviewed');
     }
-    if (!(CONDUCTOR_REVIEW_KINDS as readonly string[]).includes(d.kind)) {
-      throw new OcError('validation', `decision kind ${d.kind} does not carry conductor review`);
+    if (!(WEAVER_REVIEW_KINDS as readonly string[]).includes(d.kind)) {
+      throw new OcError('validation', `decision kind ${d.kind} does not carry weaver review`);
     }
     if (d.status !== 'open' && d.status !== 'answered') {
       throw new OcError('wrong_status', `decision ${id} is ${d.status}`, { status: d.status });
@@ -512,16 +517,16 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
         ? 'looked requires a note: state why the work is clean'
         : 'concerns requires a note');
     }
-    if (trimmed.length > CONDUCTOR_REVIEW_NOTE_MAX) {
-      throw new OcError('validation', `review note is at most ${CONDUCTOR_REVIEW_NOTE_MAX} characters`);
+    if (trimmed.length > WEAVER_REVIEW_NOTE_MAX) {
+      throw new OcError('validation', `review note is at most ${WEAVER_REVIEW_NOTE_MAX} characters`);
     }
     const note = trimmed;
     return tx(db, () => {
       db.update('decisions', d.id, {
-        conductorReviewStatus: input.status,
-        conductorReviewedAt: nowIso(),
-        conductorReviewNote: note,
-        conductorReviewedByAgentId: actor.id,
+        weaverReviewStatus: input.status,
+        weaverReviewedAt: nowIso(),
+        weaverReviewNote: note,
+        weaverReviewedByAgentId: actor.id,
       });
       const next = get(d.id);
       recordActivity(db, ws, actor, 'decision.review', 'decision', d.id, { status: input.status }, d.ticketId);
@@ -586,7 +591,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
           ctx.events.emit('decision.expired', 'decision', d.id, get(d.id));
         });
         out.push(get(d.id));
-        const unblock = { owner: (d.owner === 'conductor' ? 'conductor' : 'human') as 'conductor' | 'human', action: `answer the expired decision "${d.title}"` };
+        const unblock = { owner: (d.owner === 'weaver' ? 'weaver' : 'human') as 'weaver' | 'human', action: `answer the expired decision "${d.title}"` };
         if (d.ticketId) {
           try {
             await deps().tickets.transition(actor, d.ticketId, { to: 'blocked', note: `Decision expired: ${d.title}`, unblock });

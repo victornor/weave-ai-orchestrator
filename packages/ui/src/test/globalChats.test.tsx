@@ -138,6 +138,6 @@ describe('GlobalChatsRoute', () => {
     const invalidated = spy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey);
     expect(invalidated).toContainEqual(['w', 'beta', 'threads']);
     expect(invalidated).toContainEqual(['w', 'beta', 'decisions']);
-    expect(invalidated).toContainEqual(['w', 'beta', 'conductor']);
+    expect(invalidated).toContainEqual(['w', 'beta', 'weaver']);
   });
 });

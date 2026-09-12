@@ -20,7 +20,7 @@ export interface Registries {
 export function createRegistries(): Registries { return { runtimes: new Map(), channels: new Map(), surfaces: new Map(), worktreeProviders: new Map(), forges: new Map(), agentTools: [] }; }
 
 export interface WorkspacePaths {
-  root: string; state: string; db: string; runs: string; conductor: string; roles: string; workers: string; archive: string; projects: string; knowledge: string; runtimesHome: string; wtConfig: string;
+  root: string; state: string; db: string; runs: string; weaver: string; roles: string; workers: string; archive: string; projects: string; knowledge: string; runtimesHome: string; wtConfig: string;
   /** VS-92: the encrypted secret values and the key that opens them. Both `0600`, both inside `state`, neither exported nor backed up. */
   secretsFile: string; secretsKey: string;
   /** VS-133: chat message attachments — never under anything `packages/ui`'s dist serves. */
@@ -44,7 +44,7 @@ export function workspacePaths(root: string): WorkspacePaths {
   }
   const js = (...p: string[]) => [state, ...p].join('/');
   return {
-    root, state, db: js('db.sqlite'), runs: js('runs'), conductor: j(status === 'old' ? 'conductor' : 'weaver'),
+    root, state, db: js('db.sqlite'), runs: js('runs'), weaver: j(status === 'old' ? 'conductor' : 'weaver'),
     roles: j('roles'), workers: j('workers'), archive: j('archive', 'workers'), projects: j('projects'), knowledge: j('knowledge'),
     runtimesHome: js('runtimes'), wtConfig: js('wt.toml'), secretsFile: js('secrets.enc'), secretsKey: js('secrets.key'), attachments: js('attachments'),
   };

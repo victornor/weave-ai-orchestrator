@@ -148,7 +148,7 @@ describe('routines (VS-220)', () => {
     const runId = 'run-fire';
     h.ctx.db.insert('runs', {
       id: runId, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: [wake.id], runtimeId: 'claude',
-      turnEpoch: 1, cwd: h.ctx.paths.conductor, createdAt: '2026-09-11T07:00:06.000Z',
+      turnEpoch: 1, cwd: h.ctx.paths.weaver, createdAt: '2026-09-11T07:00:06.000Z',
     });
     h.ctx.db.update('wakeups', wake.id, { runId, status: 'claimed' });
     recordUsage(h.ctx, {
@@ -230,7 +230,7 @@ describe('routine fire history (VS-231)', () => {
       runtimeId: 'claude',
       status: over.status ?? 'succeeded',
       turnEpoch: 1,
-      cwd: h.ctx.paths.conductor,
+      cwd: h.ctx.paths.weaver,
       summary: over.summary ?? null,
       createdAt: over.createdAt,
     });

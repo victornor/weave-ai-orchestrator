@@ -71,7 +71,7 @@ vi.mock('../api/context', async () => {
 
 vi.mock('../api/hooks', () => ({
   ACCOUNTS_REFRESH_MS: 300_000,
-  useConductor: () => ({ data: state.conductor }),
+  useWeaver: () => ({ data: state.conductor }),
   useUsageAccounts: () => ({ data: state.accounts }),
   useSyncUsageAccounts: () => ({ mutate: vi.fn(), isPending: false }),
   useRuntimes: () => ({ data: state.runtimes }),
@@ -237,7 +237,7 @@ afterEach(() => vi.clearAllMocks());
 describe('ChatRoute live turn', () => {
   it('shows nothing live while the conductor is idle', () => {
     render(<ChatRoute />);
-    expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Weaver is working')).not.toBeInTheDocument();
     expect(FakeEventSource.open).toHaveLength(0);
   });
 
@@ -245,7 +245,7 @@ describe('ChatRoute live turn', () => {
     render(<ChatRoute />);
     emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
 
-    expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+    expect(screen.getByLabelText('Weaver is working')).toBeInTheDocument();
     expect(stream().url).toBe('/api/w/ws1/runs/run_1/events/stream');
 
     act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
@@ -261,7 +261,7 @@ describe('ChatRoute live turn', () => {
   it('ignores a run belonging to a worker', () => {
     render(<ChatRoute />);
     emit({ type: 'run.started', entityId: 'run_worker', payload: { agentId: 'ag_worker' } });
-    expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Weaver is working')).not.toBeInTheDocument();
     expect(FakeEventSource.open).toHaveLength(0);
   });
 
@@ -270,7 +270,7 @@ describe('ChatRoute live turn', () => {
     state.persisted = [ev({ id: 'p1', seq: 1, type: 'assistant.text', payload: { text: 'Already working on it.' } })];
 
     render(<ChatRoute />);
-    expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+    expect(screen.getByLabelText('Weaver is working')).toBeInTheDocument();
     expect(screen.getByText('Already working on it.')).toBeInTheDocument();
     expect(stream().url).toBe('/api/w/ws1/runs/run_live/events/stream');
 
@@ -281,7 +281,7 @@ describe('ChatRoute live turn', () => {
   it('does not resume a run that already finished', () => {
     state.conductor.lastRun = { id: 'run_old', status: 'succeeded' };
     render(<ChatRoute />);
-    expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Weaver is working')).not.toBeInTheDocument();
     expect(FakeEventSource.open).toHaveLength(0);
   });
 
@@ -367,7 +367,7 @@ describe('ChatRoute live turn', () => {
     // or the phone bottom bar, which are laid out after it, outside the scroll region.
     const scrollBody = notice.closest('.ac-scroll');
     expect(scrollBody).not.toBeNull();
-    expect(notice.closest('[aria-label="Conductor is working"]')).not.toBeNull();
+    expect(notice.closest('[aria-label="Weaver is working"]')).not.toBeNull();
 
     const composer = screen.getByPlaceholderText('Message the conductor…');
     expect(scrollBody!.contains(composer)).toBe(false);
@@ -379,7 +379,7 @@ describe('ChatPage focused prop (VS-199)', () => {
     render(<ChatPage focused={false} />);
     emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
 
-    expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+    expect(screen.getByLabelText('Weaver is working')).toBeInTheDocument();
     expect(FakeEventSource.open).toHaveLength(0);
   });
 
@@ -387,7 +387,7 @@ describe('ChatPage focused prop (VS-199)', () => {
     state.conductor.lastRun = { id: 'run_live', status: 'running' };
     render(<ChatPage focused={false} />);
 
-    expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+    expect(screen.getByLabelText('Weaver is working')).toBeInTheDocument();
     expect(FakeEventSource.open).toHaveLength(0);
   });
 
@@ -395,7 +395,7 @@ describe('ChatPage focused prop (VS-199)', () => {
     render(<ChatPage />);
     emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
 
-    expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+    expect(screen.getByLabelText('Weaver is working')).toBeInTheDocument();
     expect(stream().url).toBe('/api/w/ws1/runs/run_1/events/stream');
   });
 });
@@ -894,7 +894,7 @@ describe('ChatRoute sending while the daemon is unreachable', () => {
 
     // A real network failure arrives after "working" already shows; this mock rejects
     // synchronously, so what is observable here is that the indicator never sticks around.
-    expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Weaver is working')).not.toBeInTheDocument();
     expect(state.posted).toHaveLength(0);
     expect(vi.mocked(enqueue).mock.calls[0]?.[0]).toMatchObject({
       path: '/threads/th_1/messages',
@@ -963,7 +963,7 @@ describe('ChatRoute send lifecycle (VS-148)', () => {
     fireEvent.click(screen.getByLabelText('Send'));
     await waitFor(() => expect(state.posted).toHaveLength(1));
     expect(screen.queryByText('Sending…')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Weaver is working')).not.toBeInTheDocument();
   });
 
   it('a failed plain-text send keeps the text, reply reference and project pick', async () => {
@@ -1194,9 +1194,9 @@ describe('ChatRoute decision cards', () => {
     state.decisions = [asked()];
 
     render(<ChatRoute />);
-    const card = screen.getByLabelText('Conductor asks: File this as a ticket?');
+    const card = screen.getByLabelText('Weaver asks: File this as a ticket?');
     // Exactly one card: pinned instead of anchored, never both.
-    expect(screen.getAllByLabelText('Conductor asks: File this as a ticket?')).toHaveLength(1);
+    expect(screen.getAllByLabelText('Weaver asks: File this as a ticket?')).toHaveLength(1);
     expect(screen.getByLabelText('Open decisions')).toContainElement(card);
     expect(precedes(screen.getByText('Anything else?'), card)).toBe(true);
     expect(screen.getByRole('radio', { name: /File it/ })).toBeInTheDocument();
@@ -1215,7 +1215,7 @@ describe('ChatRoute decision cards', () => {
     ];
     rerender(<ChatRoute />);
 
-    const card = screen.getByLabelText('Conductor asks: File this as a ticket?');
+    const card = screen.getByLabelText('Weaver asks: File this as a ticket?');
     expect(precedes(screen.getByText('Go ahead.'), card)).toBe(true);
     expect(precedes(screen.getByText('Done.'), card)).toBe(true);
   });
@@ -1242,7 +1242,7 @@ describe('ChatRoute decision cards', () => {
     render(<ChatRoute />);
     const area = screen.getByLabelText('Open decisions');
     const cards = Array.from(area.querySelectorAll('article')).map((a) => a.getAttribute('aria-label'));
-    expect(cards).toEqual(['Conductor asks: First question?', 'Conductor asks: Second question?']);
+    expect(cards).toEqual(['Weaver asks: First question?', 'Weaver asks: Second question?']);
   });
 
   it('answers the card that was sent from the pinned area', () => {
@@ -1250,7 +1250,7 @@ describe('ChatRoute decision cards', () => {
     state.decisions = [asked({ id: 'd_a', title: 'First question?', createdAt: '2026-09-01T09:00:00.000Z' }), asked({ id: 'd_b', title: 'Second question?', createdAt: '2026-09-01T09:05:00.000Z' })];
 
     render(<ChatRoute />);
-    const second = screen.getByLabelText('Conductor asks: Second question?');
+    const second = screen.getByLabelText('Weaver asks: Second question?');
     fireEvent.click(within(second).getByRole('radio', { name: /File it/ }));
     fireEvent.click(within(second).getByRole('button', { name: 'Send answer' }));
     expect(state.answer).toHaveBeenCalledWith({ id: 'd_b', key: 'file' }, expect.anything());
@@ -1496,7 +1496,7 @@ describe('ChatRoute decision cards', () => {
     expect(within(humanCard).queryByText('Captain asked for this.')).toBeInTheDocument();
   });
 
-  it('shows the conductor-review line on an unseen plan card (VS-223)', () => {
+  it('shows the weaver-review line on an unseen plan card (VS-223)', () => {
     state.messages = [message({ id: 'm1', body: 'Plan is ready.' })];
     state.tickets = [ticket({ id: 'tk_1', identifier: 'VS-223' })];
     state.decisions = [
@@ -1507,7 +1507,7 @@ describe('ChatRoute decision cards', () => {
     ];
     render(<ChatRoute />);
     const card = screen.getByLabelText(/Plan: review state on the card/);
-    expect(within(card).getByText("Conductor hasn't reviewed yet")).toBeInTheDocument();
+    expect(within(card).getByText("Weaver hasn't reviewed yet")).toBeInTheDocument();
   });
 
   it('shows no provenance tag on a card that concerns no ticket (VS-146)', () => {
@@ -2392,7 +2392,7 @@ describe('ChatRoute turns that said nothing', () => {
 
     render(<ChatRoute />);
 
-    const row = screen.getByRole('button', { name: /^What the conductor did at / });
+    const row = screen.getByRole('button', { name: /^What the weaver did at / });
     expect(row).toHaveAttribute('aria-expanded', 'false');
     expect(row).toHaveTextContent('3 tool calls');
     expect(screen.getByText('filed VS-9')).toBeInTheDocument();
@@ -2418,7 +2418,7 @@ describe('ChatRoute turns that said nothing', () => {
 
     render(<ChatRoute />);
 
-    expect(screen.queryByRole('button', { name: /^What the conductor did at / })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^What the weaver did at / })).not.toBeInTheDocument();
   });
 
   it('hides the rows when the device preference is off, keeping the sections on replies', () => {
@@ -2428,7 +2428,7 @@ describe('ChatRoute turns that said nothing', () => {
 
     render(<ChatRoute />);
 
-    expect(screen.queryByRole('button', { name: /^What the conductor did at / })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^What the weaver did at / })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'What I did' })).toBeInTheDocument();
   });
 });
@@ -2440,14 +2440,14 @@ describe('ChatRoute live turn folding into its trace', () => {
     act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
 
     emit({ type: 'run.finished', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
-    expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+    expect(screen.getByLabelText('Weaver is working')).toBeInTheDocument();
 
     // The thread and the traces catch up; only then does the live block let go.
     state.messages = [message({ id: 'm1', body: 'The briefing is clear.', runId: 'run_1' })];
     state.traces = [runTrace({ runId: 'run_1' })];
     rerender(<ChatRoute />);
 
-    expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Weaver is working')).not.toBeInTheDocument();
     expect(screen.getByText('The briefing is clear.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'What I did' })).toBeInTheDocument();
   });
@@ -2458,11 +2458,11 @@ describe('ChatRoute live turn folding into its trace', () => {
       render(<ChatRoute />);
       emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
       emit({ type: 'run.finished', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
-      expect(screen.getByLabelText('Conductor is working')).toBeInTheDocument();
+      expect(screen.getByLabelText('Weaver is working')).toBeInTheDocument();
 
       act(() => { vi.advanceTimersByTime(5000); });
 
-      expect(screen.queryByLabelText('Conductor is working')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Weaver is working')).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -2701,7 +2701,7 @@ describe('ChatRoute resizable decisions area', () => {
     state.decisions = [asked()];
     render(<ChatRoute />);
 
-    expect(area()).toContainElement(screen.getByLabelText('Conductor asks: File this as a ticket?'));
+    expect(area()).toContainElement(screen.getByLabelText('Weaver asks: File this as a ticket?'));
     expect(area().style.height).toBe('');
     expect(area().style.maxHeight).toBe(capOf(500));
   });
@@ -2715,7 +2715,7 @@ describe('ChatRoute resizable decisions area', () => {
     fireEvent.click(screen.getByRole('button', { name: /Hide from chat/ }));
     fireEvent.click(screen.getByRole('button', { name: /1 hidden from chat/ }));
 
-    expect(screen.getByLabelText('Conductor asks: File this as a ticket?')).toBeInTheDocument();
+    expect(screen.getByLabelText('Weaver asks: File this as a ticket?')).toBeInTheDocument();
     expect(area().style.height).toBe('');
     expect(area().style.maxHeight).toBe(capOf(500));
   });
@@ -2743,7 +2743,7 @@ describe('ChatRoute resizable decisions area', () => {
 
     expect(state.answer).not.toHaveBeenCalled();
     expect(state.posted).toEqual([]);
-    expect(area()).toContainElement(screen.getByLabelText('Conductor asks: File this as a ticket?'));
+    expect(area()).toContainElement(screen.getByLabelText('Weaver asks: File this as a ticket?'));
   });
 });
 

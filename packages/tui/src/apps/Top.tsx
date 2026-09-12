@@ -45,7 +45,7 @@ export function Top({ client }: { client: TuiClient }): React.ReactElement {
     const byKey = new Map<string, Group>();
     for (const card of cards) {
       const project = card.project ?? '—';
-      const role = card.role ?? (card.kind === 'conductor' ? 'conductor' : '—');
+      const role = card.role ?? (card.kind === 'weaver' ? 'weaver' : '—');
       const key = `${project}/${role}`;
       const group = byKey.get(key) ?? { key, project, role, workers: [] };
       group.workers.push(card);

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NAMED_CARD_OPTION_KEYS, conductorReviewCopy, documentTarget } from '@agent-conductor/shared';
+import { NAMED_CARD_OPTION_KEYS, weaverReviewCopy, documentTarget } from '@agent-conductor/shared';
 import type { Decision, DecisionAnswerInputs, DecisionInput, UiStatus } from '@agent-conductor/shared';
 import { A } from '../app/link';
 import { Button } from './Button';
@@ -20,8 +20,8 @@ export interface DecisionCardProps {
   /** The workspace slug — needed to link a merge-approval card to its ticket's conversation (VS-106) and to its pull request's diff (VS-107). */
   ws?: string | null;
   askedBy?: string | null;
-  /** Who raised a question: the conductor asking the human reads differently from a worker asking. */
-  asker?: 'conductor' | 'worker';
+  /** Who raised a question: the weaver asking the human reads differently from a worker asking. */
+  asker?: 'weaver' | 'worker';
   busy?: boolean;
   queued?: boolean;
   /** The plan under approval, rendered above the buttons on a `plan_approval` card. */
@@ -92,11 +92,11 @@ const HEAD_TEXT: Partial<Record<UiStatus, string>> = {
 
 /** VS-223: three states, three visible renderings. Quiet means dimmer type, not missing type. */
 export function ConductorReviewLine({ decision }: { decision: Decision }): React.ReactElement | null {
-  const copy = conductorReviewCopy(decision);
+  const copy = weaverReviewCopy(decision);
   if (!copy) return null;
   const toneClass = copy.tone === 'looked' || copy.tone === 'after' ? 'text-text-3' : 'text-blocked';
   return (
-    <div className="mb-2" data-conductor-review={copy.tone}>
+    <div className="mb-2" data-weaver-review={copy.tone}>
       <p className={cx('text-micro', copy.tone === 'concerns' ? 'font-medium' : null, toneClass)}>{copy.line}</p>
       {copy.note ? <p className="mt-1 whitespace-pre-wrap text-meta text-text-1">{copy.note}</p> : null}
       {/* VS-266: in addition to the concern line and note, not a replacement for either. */}
@@ -236,8 +236,8 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
   const auto = !inert && autoApproving === true && (decision.kind === 'plan_approval' || decision.kind === 'merge_approval');
   const head = inert
     ? { label: answered ? 'Answered' : statusLabel(decision.status), status: (answered ? 'done' : 'blocked') as UiStatus }
-    : decision.kind === 'question' && asker === 'conductor'
-      ? { label: 'Conductor asks', status: 'needs-you' as UiStatus }
+    : decision.kind === 'question' && asker === 'weaver'
+      ? { label: 'Weaver asks', status: 'needs-you' as UiStatus }
       : (HEAD[decision.kind] ?? HEAD['approval']!);
 
   // Every required input filled is what unlocks the send; the card names the first one still missing
@@ -253,9 +253,9 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
     inputs.length ? { ...a, inputs: collected() } : a;
 
   const answer = (key: string, text?: string): void => onAnswer(withInputs(text === undefined ? { key } : { key, text }));
-  // VS-266: the conductor has concerns on this open decision — its approving option is refused
+  // VS-266: the weaver has concerns on this open decision — its approving option is refused
   // server-side without a deliberate override, so the button reflects the rule rather than being it.
-  const held = conductorReviewCopy(decision)?.held ?? false;
+  const held = weaverReviewCopy(decision)?.held ?? false;
   const why = decision.kind === 'plan_approval' ? ticketSummary?.trim() : '';
   const section = compact ? 'mb-2' : 'mb-3';
   // The plan itself, so nothing is approved unread. Doubles as the document-preview suppression

@@ -100,7 +100,7 @@ describe('surface context', () => {
 
 describe('reconciler', () => {
   const desired = (workers: AgentView[], config: DesiredPresentation['config'] = { workers: { surface: 'fake' } }): DesiredPresentation =>
-    ({ conductor: null, workers, config });
+    ({ weaver: null, workers, config });
 
   it('ensures a view per live worker and lays out when configured', async () => {
     const surface = fakeSurface();
@@ -111,11 +111,11 @@ describe('reconciler', () => {
     expect(r.handles().map((h) => h.agentId)).toEqual(['w-1', 'w-2']);
   });
 
-  it('ensures the conductor through its own hook when a conductor block exists', async () => {
+  it('ensures the weaver through its own hook when a conductor block exists', async () => {
     const surface = fakeSurface();
     const r = createReconciler({ surface, ctx: ctxOf(), log: vi.fn() });
     await r.sync({
-      conductor: worker('c-1', { kind: 'conductor', ticketIdentifier: null }),
+      weaver: worker('c-1', { kind: 'weaver', ticketIdentifier: null }),
       workers: [],
       config: { workers: { surface: 'fake' }, conductor: { surface: 'fake', terminal: 'foot' } },
     });
@@ -189,7 +189,7 @@ describe('reconciler', () => {
 });
 
 describe('startPresenter', () => {
-  const baseDesired = (): DesiredPresentation => ({ conductor: null, workers: [worker('w-1')], config: { workers: { surface: 'fake' } } });
+  const baseDesired = (): DesiredPresentation => ({ weaver: null, workers: [worker('w-1')], config: { workers: { surface: 'fake' } } });
 
   const start = async (api: ReturnType<typeof fakeApi>, surface: FakeSurface, over: Record<string, unknown> = {}) =>
     startPresenter({
@@ -234,11 +234,11 @@ describe('startPresenter', () => {
     const api = fakeApi(baseDesired());
     const presenter = await start(api, surface);
 
-    api.desired = { conductor: null, workers: [worker('w-1'), worker('w-9')], config: { workers: { surface: 'fake' } } };
+    api.desired = { weaver: null, workers: [worker('w-1'), worker('w-9')], config: { workers: { surface: 'fake' } } };
     api.emit({ type: 'presentation.updated', entityId: 'acme', payload: {} });
     await vi.waitFor(() => expect(surface.calls.some((c) => c.op === 'ensure' && c.agentId === 'w-9')).toBe(true));
 
-    api.desired = { conductor: null, workers: [worker('w-1')], config: { workers: { surface: 'other' } } };
+    api.desired = { weaver: null, workers: [worker('w-1')], config: { workers: { surface: 'other' } } };
     api.emit({ type: 'presentation.updated', entityId: 'acme', payload: {} });
     await vi.waitFor(() => expect(surface.calls.some((c) => c.op === 'close' && c.reason === 'presentation_changed')).toBe(true));
     await presenter.stop();

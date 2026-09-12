@@ -31,9 +31,9 @@ describe('IncidentsService', () => {
   it('stores a worker incident and a conductor incident separately', () => {
     const { incidents, close } = service();
     const worker = incidents.create({ ...base, reporterKind: 'worker' });
-    const conductor = incidents.create({ ...base, reporterKind: 'conductor', title: 'Cannot spawn' });
+    const conductor = incidents.create({ ...base, reporterKind: 'weaver', title: 'Cannot spawn' });
     expect(worker.reporterKind).toBe('worker');
-    expect(conductor.reporterKind).toBe('conductor');
+    expect(conductor.reporterKind).toBe('weaver');
     expect(incidents.list().items.map((i) => i.id)).toEqual([conductor.id, worker.id]);
     close();
   });
@@ -59,9 +59,9 @@ describe('IncidentsService', () => {
   it('filters by reporter kind', () => {
     const { incidents, close } = service();
     incidents.create({ ...base, reporterKind: 'worker' });
-    incidents.create({ ...base, reporterKind: 'conductor', title: 'conductor' });
-    expect(incidents.list({ reporterKind: 'conductor' }).items).toHaveLength(1);
-    expect(incidents.list({ reporterKind: 'conductor' }).items[0]?.reporterKind).toBe('conductor');
+    incidents.create({ ...base, reporterKind: 'weaver', title: 'conductor' });
+    expect(incidents.list({ reporterKind: 'weaver' }).items).toHaveLength(1);
+    expect(incidents.list({ reporterKind: 'weaver' }).items[0]?.reporterKind).toBe('weaver');
     expect(incidents.list({ reporterKind: 'worker' }).items).toHaveLength(1);
     close();
   });
@@ -131,7 +131,7 @@ describe('incident reads (VS-222)', () => {
     const { incidents, close } = service();
     const ws1a = incidents.create({ ...seedBase, reporterKind: 'worker', title: 'ws1 a', workspaceId: 'ws1' });
     const ws2 = incidents.create({ ...seedBase, reporterKind: 'worker', title: 'ws2', workspaceId: 'ws2' });
-    const global = incidents.create({ ...seedBase, reporterKind: 'conductor', title: 'daemon-global', workspaceId: null });
+    const global = incidents.create({ ...seedBase, reporterKind: 'weaver', title: 'daemon-global', workspaceId: null });
     const ws1b = incidents.create({ ...seedBase, reporterKind: 'worker', title: 'ws1 b', workspaceId: 'ws1' });
 
     const alpha = incidents.list({ workspaceId: 'ws1' });
@@ -151,7 +151,7 @@ describe('incident reads (VS-222)', () => {
     const { incidents, close } = service();
     const ws1 = incidents.create({ ...seedBase, reporterKind: 'worker', title: 'ws1', workspaceId: 'ws1' });
     const ws2 = incidents.create({ ...seedBase, reporterKind: 'worker', title: 'ws2', workspaceId: 'ws2' });
-    const global = incidents.create({ ...seedBase, reporterKind: 'conductor', title: 'daemon-global', workspaceId: null });
+    const global = incidents.create({ ...seedBase, reporterKind: 'weaver', title: 'daemon-global', workspaceId: null });
 
     expect(incidents.get(ws1.id, { workspaceId: 'ws1' }).id).toBe(ws1.id);
     expect(incidents.get(global.id, { workspaceId: 'ws1' }).id).toBe(global.id);

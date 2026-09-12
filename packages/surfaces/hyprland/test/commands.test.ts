@@ -30,9 +30,9 @@ describe('hyprctl command building', () => {
     expect(args).toEqual(['dispatch', 'exec', '[workspace 5 silent] foot -a ac-acme-w-1 -e conductor attach w-1']);
   });
 
-  it('omits the workspace rule when none is configured (conductor terminal)', () => {
-    const args = execArgs({ terminal: ghostty, cls: 'ac-acme-conductor', command: ['conductor', 'chat'], hyprWorkspace: null });
-    expect(args[2]).toBe('ghostty --class=ac-acme-conductor -e conductor chat');
+  it('omits the workspace rule when none is configured (weaver terminal)', () => {
+    const args = execArgs({ terminal: ghostty, cls: 'ac-acme-weaver', command: ['conductor', 'chat'], hyprWorkspace: null });
+    expect(args[2]).toBe('ghostty --class=ac-acme-weaver -e conductor chat');
   });
 
   it('quotes command arguments that need it', () => {

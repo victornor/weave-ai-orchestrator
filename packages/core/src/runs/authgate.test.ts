@@ -250,7 +250,7 @@ describe('a ticket whose worker pauses for a login outage tells the conductor (V
     const onTicket = created.filter((d) => d['ticketId'] === 'tkt_1');
     expect(onTicket).toHaveLength(1);
     expect(onTicket[0]!['kind']).toBe('gate_finding');
-    expect(onTicket[0]!['owner']).toBe('conductor');
+    expect(onTicket[0]!['owner']).toBe('weaver');
     expect(onTicket[0]!['correlationKey']).toBe(authOutageCorrelationKey('tkt_1'));
     // The runtime-wide, human-owned card is unaffected: this is additional, not a replacement.
     expect(created.filter((d) => d['ticketId'] === null)).toHaveLength(1);

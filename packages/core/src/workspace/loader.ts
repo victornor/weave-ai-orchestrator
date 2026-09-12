@@ -172,7 +172,7 @@ function ensureLayout(root: string, stateDir?: string): void {
   const state = stateDir ?? p.state;
   for (const dir of [
     root, state, join(state, 'runs'), join(state, 'runtimes'), join(state, 'sessions'),
-    p.conductor, p.roles, p.workers, p.archive, p.projects,
+    p.weaver, p.roles, p.workers, p.archive, p.projects,
     join(p.knowledge, 'workspace'), join(p.knowledge, 'projects'),
   ]) mkdirSync(dir, { recursive: true });
 }

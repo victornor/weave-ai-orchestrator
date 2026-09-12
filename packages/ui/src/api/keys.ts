@@ -31,7 +31,7 @@ export const qk = {
   workerBrief: (ws: string, id: string) => ['w', ws, 'workers', id, 'brief'] as const,
   /** VS-249: the resume command a worker would offer, kept separate from `worker()` so polling it does not thrash the worker detail query. */
   workerHandoverCommand: (ws: string, id: string) => ['w', ws, 'workers', id, 'handover-command'] as const,
-  conductor: (ws: string) => ['w', ws, 'conductor'] as const,
+  weaver: (ws: string) => ['w', ws, 'weaver'] as const,
   models: (ws: string) => ['w', ws, 'models'] as const,
 
   tickets: (ws: string) => ['w', ws, 'tickets'] as const,

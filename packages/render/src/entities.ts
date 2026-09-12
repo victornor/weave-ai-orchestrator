@@ -101,7 +101,7 @@ export function workerToCard(agent: Agent, ctx: WorkerCardContext = {}): WorkerC
   const tokens = ctx.usage?.tokens ?? null;
   const tokensLabel = tokens === null ? null : `${formatTokens(tokens)} tok`;
   const cost = ctx.usage?.costCents === undefined ? null : formatCost(ctx.usage?.costCents ?? null, ctx.usage?.costStatus ?? null);
-  const name = a.name ?? (a.kind === 'conductor' ? 'Conductor' : 'Worker');
+  const name = a.name ?? (a.kind === 'weaver' ? 'Weaver' : 'Worker');
   // Without a joined ticket we still know its id, which is better than an empty column.
   const ticket = ctx.ticket ?? (a.ticketId ? { id: a.ticketId, identifier: a.ticketId, title: '' } : null);
 
@@ -109,7 +109,7 @@ export function workerToCard(agent: Agent, ctx: WorkerCardContext = {}): WorkerC
     id: a.id ?? '',
     name,
     initials: initials(name),
-    kind: a.kind === 'conductor' ? 'conductor' : 'worker',
+    kind: a.kind === 'weaver' ? 'weaver' : 'worker',
     role: ctx.roleName ?? a.roleId ?? null,
     project: ctx.projectName ?? a.projectId ?? null,
     ticket,

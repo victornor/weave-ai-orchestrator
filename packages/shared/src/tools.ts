@@ -4,7 +4,7 @@ export const COMMON_TOOLS = [
   'ac_ticket_document_put', 'ac_ticket_document_get', 'ac_ticket_transition', 'ac_ticket_work_product', 'ac_ask', 'ac_report', 'ac_incident', 'ac_knowledge_get', 'ac_knowledge_note',
   'ac_knowledge_replace', 'ac_knowledge_docs', 'ac_knowledge_doc_get', 'ac_knowledge_doc_put', 'ac_knowledge_search', 'ac_openspec_status', 'ac_spec_list', 'ac_spec_get', 'ac_spec_search', 'ac_spec_change_get', 'ac_ticket_merge_done', 'ac_worktree_status', 'ac_artifact_kit',
 ] as const;
-export const CONDUCTOR_TOOLS = [
+export const WEAVER_TOOLS = [
   'ac_ticket_create', 'ac_ticket_assign', 'ac_ticket_set_priority', 'ac_role_list', 'ac_role_get', 'ac_role_hire', 'ac_role_update_charter', 'ac_role_set_secrets',
   'ac_role_set_max_workers', 'ac_role_pause', 'ac_role_resume', 'ac_role_retire', 'ac_worker_list', 'ac_worker_get', 'ac_worker_message', 'ac_worker_relaunch', 'ac_worker_cancel',
   'ac_decision_answer', 'ac_decision_review', 'ac_human_send', 'ac_thread_message_get', 'ac_briefing', 'ac_project_list', 'ac_project_add', 'ac_usage',
@@ -13,7 +13,7 @@ export const CONDUCTOR_TOOLS = [
   'ac_incident_list', 'ac_incident_get',
 ] as const;
 export const WORKER_ONLY_TOOLS = ['ac_ticket_create'] as const; // project-scoped creation for workers
-export type ToolName = (typeof COMMON_TOOLS)[number] | (typeof CONDUCTOR_TOOLS)[number];
+export type ToolName = (typeof COMMON_TOOLS)[number] | (typeof WEAVER_TOOLS)[number];
 
 /** The only tool whose words reach the human; its body is the reply itself. */
 export const HUMAN_REPLY_TOOL = 'ac_human_send' satisfies ToolName;

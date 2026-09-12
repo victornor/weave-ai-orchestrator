@@ -33,7 +33,7 @@ export function GlobalChatsRoute(): React.ReactElement {
       // the one being looked at now (VS-199).
       void qc.invalidateQueries({ queryKey: qk.threads(id) });
       void qc.invalidateQueries({ queryKey: qk.decisions(id) });
-      void qc.invalidateQueries({ queryKey: qk.conductor(id) });
+      void qc.invalidateQueries({ queryKey: qk.weaver(id) });
     },
     [qc],
   );

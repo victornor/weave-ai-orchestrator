@@ -135,7 +135,7 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
              AND a.runtime_id NOT IN (SELECT runtime_id FROM runtime_credentials WHERE workspace_id = ? AND needs_login = 1)
              AND (a.kind != 'worker' OR a.role_id IS NULL OR EXISTS (SELECT 1 FROM roles r WHERE r.id = a.role_id AND r.status = 'active'))
              AND EXISTS (SELECT 1 FROM wakeups w WHERE w.agent_id = a.id AND w.status = 'queued' AND (w.not_before IS NULL OR w.not_before <= ?))
-           ORDER BY a.kind = 'conductor' DESC, a.last_run_at IS NULL DESC, a.last_run_at`,
+           ORDER BY a.kind = 'weaver' DESC, a.last_run_at IS NULL DESC, a.last_run_at`,
           [ctx.workspaceId, ...IDLE_AGENT_STATUSES, ctx.workspaceId, now],
         );
         for (const agent of candidates) {

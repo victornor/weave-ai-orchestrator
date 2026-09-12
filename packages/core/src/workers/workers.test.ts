@@ -646,8 +646,8 @@ describe('workers', () => {
     const a = await workers.ensureConductor();
     const b = await workers.ensureConductor();
     expect(b.id).toBe(a.id);
-    expect(a.kind).toBe('conductor');
-    expect(readFileSync(join(h.ctx.paths.conductor, 'AGENTS.md'), 'utf8')).toContain('conductor');
+    expect(a.kind).toBe('weaver');
+    expect(readFileSync(join(h.ctx.paths.weaver, 'AGENTS.md'), 'utf8')).toContain('weaver');
   });
 
   it('pauses and resumes a worker', async () => {

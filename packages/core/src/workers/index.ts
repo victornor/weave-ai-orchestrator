@@ -88,7 +88,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     const n = (ctx.db.get<{ n: number }>('SELECT COUNT(*) n FROM agents WHERE role_id = ?', [role.id])?.n ?? 0) + 1;
     const now = nowIso();
     const branch = ticketBranch(ticket);
-    const spawnedBy = actor.kind === 'human' ? 'human' : actor.kind === 'agent' ? 'conductor' : 'system';
+    const spawnedBy = actor.kind === 'human' ? 'human' : actor.kind === 'agent' ? 'weaver' : 'system';
 
     ctx.db.insert('agents', {
       id, workspaceId: ctx.workspaceId, kind: 'worker', projectId: project.id, roleId: role.id, roleRevision: role.specRevision,
@@ -195,26 +195,26 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     get,
 
     conductor(): Agent {
-      const a = ctx.db.get<Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'conductor'", [ctx.workspaceId]);
-      if (!a) throw new OcError('not_found', 'no conductor for this workspace');
+      const a = ctx.db.get<Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'weaver'", [ctx.workspaceId]);
+      if (!a) throw new OcError('not_found', 'no weaver for this workspace');
       return a;
     },
 
     async ensureConductor(): Promise<Agent> {
-      let a = ctx.db.get<Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'conductor'", [ctx.workspaceId]);
-      const setting = modelSettingFor(modelsFor(ctx), 'conductor');
+      let a = ctx.db.get<Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'weaver'", [ctx.workspaceId]);
+      const setting = modelSettingFor(modelsFor(ctx), 'weaver');
       if (!a) {
         const id = newId();
         const now = nowIso();
-        mkdirSync(ctx.paths.conductor, { recursive: true });
+        mkdirSync(ctx.paths.weaver, { recursive: true });
         ctx.db.insert('agents', {
-          id, workspaceId: ctx.workspaceId, kind: 'conductor', projectId: null, roleId: null, roleRevision: null, ticketId: null,
-          name: 'Conductor', runtimeId: setting.runtime,
-          status: 'active', homePath: ctx.paths.conductor, turnEpoch: 0, turnCount: 0, spawnedBy: 'system', spawnReason: 'workspace bootstrap',
+          id, workspaceId: ctx.workspaceId, kind: 'weaver', projectId: null, roleId: null, roleRevision: null, ticketId: null,
+          name: 'Weaver', runtimeId: setting.runtime,
+          status: 'active', homePath: ctx.paths.weaver, turnEpoch: 0, turnCount: 0, spawnedBy: 'system', spawnReason: 'workspace bootstrap',
           briefRevision: 1, createdAt: now, updatedAt: now,
         });
         a = get(id);
-        ctx.events.emit('worker.spawned', 'agent', id, { name: 'Conductor', kind: 'conductor' });
+        ctx.events.emit('worker.spawned', 'agent', id, { name: 'Weaver', kind: 'weaver' });
       } else if (a.runtimeId !== setting.runtime) {
         // The row records what the conductor is on; the setting decides. `forTurn` below retires a
         // session that belonged to the runtime we are moving away from (VS-77).
@@ -222,7 +222,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         a = get(a.id);
       }
       await renderHome(ctx, deps, a);
-      sessions.forTurn({ id: a.id, kind: 'conductor', runtimeId: a.runtimeId }, 'persistent');
+      sessions.forTurn({ id: a.id, kind: 'weaver', runtimeId: a.runtimeId }, 'persistent');
       return get(a.id);
     },
 

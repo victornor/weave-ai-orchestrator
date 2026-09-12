@@ -5,7 +5,9 @@ import type { UpdateChecker } from './release-info.js';
 import type { UpgradeService } from './upgrade.js';
 import type { ChannelManager } from './channels.js';
 import type { WebhookDispatcher } from './webhooks.js';
+import type { PushDispatcher } from './pushDispatcher.js';
 import type { VoxtypeProbe } from './voxtype.js';
+import type { PushKeys } from './vapid.js';
 
 /** One loaded workspace: its context (db, config, events) plus the assembled core services. */
 export interface WorkspaceRuntime {
@@ -14,6 +16,7 @@ export interface WorkspaceRuntime {
   services: CoreServices;
   channels: ChannelManager | null;
   webhooks: WebhookDispatcher | null;
+  push: PushDispatcher | null;
 }
 
 /** Which listener a request arrived on. Run tokens are only honoured on `loopback`. */
@@ -41,6 +44,12 @@ export interface AppDeps {
   voxtype?: VoxtypeProbe;
   /** Directory holding the built web UI (packages/ui/dist). */
   uiDir?: string | null;
+  /**
+   * The daemon's VAPID key pair (VS-295), `null` when none could be generated or loaded. Kept off
+   * `DaemonConfigSchema`/`daemon` deliberately — that type can end up in `daemon.yaml` or a config-
+   * echoing route, and the private key must never be reachable through either.
+   */
+  pushKeys?: PushKeys | null;
   /** Called on daemon shutdown / used by tests to freeze time. */
   now?: () => Date;
   /** Set by the daemon when the public listener is held for lack of an operator; `POST /api/auth/setup` calls it. */

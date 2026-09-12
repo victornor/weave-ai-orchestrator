@@ -664,6 +664,54 @@ describe('Settings — daemon dictation', () => {
   });
 });
 
+describe('Settings — device push categories (VS-295)', () => {
+  const openDevice = (): void => {
+    state.search = { section: 'device' };
+    render(<DaemonSettingsRoute />);
+  };
+
+  it('says decisions works and landed/everything do not send yet', () => {
+    openDevice();
+    expect(screen.getByText(/Plans, merges, hires, worker questions/).textContent).not.toMatch(/not sent yet/);
+    expect(screen.getByText(/A PR merged, a ticket closed/).textContent).toMatch(/not sent yet/);
+    expect(screen.getByText(/Status changes, run starts, curation/).textContent).toMatch(/not sent yet/);
+  });
+
+  it('pushes the new category set to the daemon when a toggle changes while subscribed', async () => {
+    localStorage.setItem('conductor.push.ws1', 'sub_1');
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return new Response(JSON.stringify({ id: 'sub_1' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    vi.stubGlobal('Notification', { requestPermission: async () => 'granted', permission: 'granted' });
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: {
+        ready: Promise.resolve({
+          pushManager: { getSubscription: async () => ({ toJSON: () => ({ endpoint: 'https://push.example/dev-1', keys: { p256dh: 'k', auth: 'a' } }) }) },
+        }),
+      },
+    });
+    (window as unknown as { PushManager: unknown }).PushManager = class {};
+
+    try {
+      openDevice();
+      fireEvent.click(screen.getByRole('switch', { name: 'Landed work' }));
+
+      await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+      const post = calls.find((c) => c.method === 'POST');
+      expect(post?.url).toContain('/push/subscriptions');
+      expect(post?.body).toMatchObject({ endpoint: 'https://push.example/dev-1', categories: ['decisions'] });
+    } finally {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(navigator, 'serviceWorker');
+      localStorage.clear();
+    }
+  });
+});
+
 function readyProject(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: 'p1',

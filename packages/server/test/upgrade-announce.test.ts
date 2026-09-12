@@ -94,7 +94,7 @@ function fixture(): Fixture {
           },
         },
       },
-      channels: null, webhooks: null,
+      channels: null, webhooks: null, push: null,
     } as unknown as WorkspaceRuntime;
 
     workspaces.set(id, ws.runtime);

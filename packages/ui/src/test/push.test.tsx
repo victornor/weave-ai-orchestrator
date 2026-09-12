@@ -3,7 +3,7 @@
  * for. `packages/server/test/push.test.ts` asks for the same paths and gets a route.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { disablePush, enablePush, subscriptionId } from '../lib/push';
+import { disablePush, enablePush, subscriptionId, updatePushCategories } from '../lib/push';
 
 interface Call { url: string; method: string; body: unknown }
 
@@ -80,6 +80,35 @@ describe('enablePush', () => {
     permission = 'denied';
     vi.stubGlobal('Notification', { requestPermission: async () => permission, permission });
     await expect(enablePush('ws1')).rejects.toThrow(/blocked/i);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('registers with the caller`s category selection', async () => {
+    await enablePush('ws1', ['decisions']);
+    expect(calls[1]?.body).toMatchObject({ categories: ['decisions'] });
+  });
+
+  it('defaults to the Settings toggle defaults when no categories are given', async () => {
+    await enablePush('ws1');
+    expect(calls[1]?.body).toMatchObject({ categories: ['decisions', 'landed'] });
+  });
+});
+
+describe('updatePushCategories', () => {
+  it('re-registers the existing subscription with a new category set', async () => {
+    await enablePush('ws1');
+    calls.length = 0;
+    existing = { toJSON: () => ({ endpoint: 'https://push.example/dev-1', keys: { p256dh: 'k', auth: 'a' } }) };
+
+    await updatePushCategories('ws1', ['decisions']);
+
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(['POST /api/w/ws1/push/subscriptions']);
+    expect(calls[0]?.body).toMatchObject({ endpoint: 'https://push.example/dev-1', categories: ['decisions'] });
+  });
+
+  it('is a no-op when this device is not subscribed', async () => {
+    existing = null;
+    await updatePushCategories('ws1', ['decisions']);
     expect(calls).toHaveLength(0);
   });
 });

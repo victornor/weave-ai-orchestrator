@@ -364,7 +364,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   (services as { knowledgeUsage: CoreServices['knowledgeUsage'] }).knowledgeUsage = createKnowledgeUsageService(ctx, () => services as unknown as CoreServices);
   (services as { routines: CoreServices['routines'] }).routines = createRoutinesService(ctx, () => services as unknown as CoreServices);
 
-  const runtime: WorkspaceRuntime = { id: workspaceId, ctx, services, channels: null, webhooks: null };
+  const runtime: WorkspaceRuntime = { id: workspaceId, ctx, services, channels: null, webhooks: null, push: null };
 
   const tokens = new Map<string, { sessionId: string; operatorId: string; kind: 'web' | 'cli' | 'presenter' }>([
     ['sess-token', { sessionId: 'sess1', operatorId: 'op1', kind: 'cli' }],

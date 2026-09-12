@@ -1,5 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeRuntime, type AccountDescription } from '@weave-ai/runtime-sdk';
 import { newId, nowIso } from '@weave-ai/db';
@@ -357,5 +358,34 @@ describe('credential state', () => {
     const state = JSON.stringify(accounts.credentials().concat(accounts.credential('claude')));
     expect(state).not.toContain('sk-ant-oat01-SECRET');
     expect(state).not.toContain('accessToken');
+  });
+
+  /**
+   * VS-285: a billing/plan probe has no business repairing a credential — that stays on the
+   * turn-spawn path only. Run entirely against a scratch `HOME`, never the real one.
+   */
+  it('does not reconcile a forked credential as a side effect of a probe', async () => {
+    const previousHome = process.env.HOME;
+    const scratchHome = mkdtempSync(join(tmpdir(), 'ac-accounts-home-'));
+    process.env.HOME = scratchHome;
+    try {
+      const hostPath = join(scratchHome, '.claude', '.credentials.json');
+      const wsPath = join(h.ctx.paths.runtimesHome, 'claude', '.credentials.json');
+      mkdirSync(dirname(hostPath), { recursive: true });
+      mkdirSync(dirname(wsPath), { recursive: true });
+      // A genuine fork: the workspace side is a real file (not a symlink) with a later expiry —
+      // exactly the shape `reconcileRuntimeCredential` would repair if it were still called here.
+      writeFileSync(hostPath, JSON.stringify({ expiresAt: Date.parse('2026-09-08T10:00:00Z'), marker: 'host' }));
+      writeFileSync(wsPath, JSON.stringify({ expiresAt: Date.parse('2026-09-09T10:00:00Z'), marker: 'workspace-newer' }));
+      const hostBefore = readFileSync(hostPath, 'utf8');
+
+      await accounts.refresh(['claude']);
+
+      expect(readFileSync(hostPath, 'utf8')).toBe(hostBefore);
+      expect((JSON.parse(readFileSync(wsPath, 'utf8')) as { marker: string }).marker).toBe('workspace-newer');
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+      rmSync(scratchHome, { recursive: true, force: true });
+    }
   });
 });

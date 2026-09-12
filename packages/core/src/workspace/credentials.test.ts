@@ -121,6 +121,23 @@ describe('reconciling a forked credential', () => {
     expect(statSync(wsPath()).ino).toBe(statSync(hostPath()).ino);
   });
 
+  // VS-285: this is the case a turn spawn hits almost every time, and it must cost nothing — no
+  // process, no write, not even a re-created symlink. Inode identity is the strongest available
+  // proof that neither path was touched: any write, including recreating an equivalent symlink,
+  // would hand back a new one.
+  it('touches neither path when the link is already intact', () => {
+    writeHost(credential('2026-09-08T10:00:00Z', 'host'));
+    link();
+    const hostInoBefore = statSync(hostPath()).ino;
+    const wsLinkInoBefore = lstatSync(wsPath()).ino;
+
+    reconcileRuntimeCredential('claude', wsHome, { readCredential: read });
+
+    expect(statSync(hostPath()).ino).toBe(hostInoBefore);
+    expect(lstatSync(wsPath()).ino).toBe(wsLinkInoBefore);
+    expect(markerOf(hostPath())).toBe('host');
+  });
+
   // The other write style: straight through the symlink. There is nothing to reconcile.
   it('leaves a write that went through the link untouched', () => {
     writeHost(credential('2026-09-08T10:00:00Z', 'host'));

@@ -152,15 +152,30 @@ When the card collected values as well as a choice, those values SHALL travel wi
 
 ### Requirement: An answered card stays in place and becomes inert
 
-Once a decision has been answered, its card SHALL leave the pinned region and SHALL be rendered in the conversation at the point it was raised — directly after the conductor message of the turn that raised it — rather than disappearing. It SHALL show what was answered: the label of the option that was chosen, or the words that were written, together with when it was answered. It SHALL keep that position as the conversation grows.
+Once a decision has been answered, its card SHALL leave the pinned region and SHALL be rendered in
+the conversation at the point it was raised — directly after the conductor message of the turn that
+raised it — rather than disappearing. It SHALL show what was answered: the label of the option that
+was chosen, or the words that were written, together with when it was answered. It SHALL keep that
+position as the conversation grows.
 
-This SHALL hold however the answer was given: from the pinned card, or from anywhere else the same decision is offered.
+When the answer was recorded by the weaver from the human's own message rather than given by the
+human directly, the card SHALL show that: it SHALL say the words are the human's, that the weaver
+recorded them from the human's message, and it SHALL NOT present the answer in a way that is
+indistinguishable from the human's own tap. This SHALL hold everywhere the answered decision is
+shown, including the card in the conductor chat and in Needs you and the shared card model the TUI
+and CLI render.
 
-An answered card SHALL offer no way to answer again: its options SHALL NOT be selectable and its send action SHALL NOT be offered.
+This SHALL hold however the answer was given: from the pinned card, from anywhere else the same
+decision is offered, or recorded by the weaver from a message the human sent.
 
-An answered decision that cannot be attributed to a message in the open conversation SHALL NOT be rendered in the conversation.
+An answered card SHALL offer no way to answer again: its options SHALL NOT be selectable and its
+send action SHALL NOT be offered.
 
-Positions SHALL be derived from durable records, so that reloading the chat reproduces the same answered cards in the same positions.
+An answered decision that cannot be attributed to a message in the open conversation SHALL NOT be
+rendered in the conversation.
+
+Positions SHALL be derived from durable records, so that reloading the chat reproduces the same
+answered cards in the same positions.
 
 #### Scenario: After answering
 
@@ -181,6 +196,18 @@ Positions SHALL be derived from durable records, so that reloading the chat repr
 
 - **WHEN** the human reloads the chat after answering
 - **THEN** the answered card is in its position in the conversation, still showing the answer
+
+#### Scenario: A relayed answer is shown as relayed
+
+- **WHEN** a card shows a decision whose answer the weaver recorded from the human's message
+- **THEN** the card shows the human's words as the answer and states that the weaver recorded them
+  from the human's message, rather than showing them as the human's own tap
+
+#### Scenario: A directly answered card is unchanged
+
+- **WHEN** a card shows a decision the human answered directly
+- **THEN** it shows the answer exactly as it did before a relayed-answer path existed, with no relay
+  statement
 
 ### Requirement: The same question waits in Needs you
 

@@ -3,7 +3,7 @@
  * present, in this order, each with an empty-state line, so the layout never jumps between renders.
  */
 import type { Briefing } from '@weave-ai/shared';
-import { formatRelative, joinMeta, oneLine } from './format.js';
+import { formatAge, formatRelative, joinMeta, oneLine } from './format.js';
 import { redact } from './redact.js';
 import { statusGlyph } from './status.js';
 import type { BriefingItem, BriefingSection, BriefingSections } from './types.js';
@@ -20,6 +20,10 @@ export function briefingToSections(briefing: Briefing | null | undefined, ctx: B
 
   const workersRunning = underway.length;
 
+  // VS-308: the snapshot's total is the whole open-human set; anything beyond the items carried was
+  // dropped by a cap and is stated rather than silently omitted.
+  const needsYouHidden = Math.max(0, (b.needsYouTotal ?? needsYou.length) - needsYou.length);
+
   const sections: [BriefingSection, BriefingSection, BriefingSection, BriefingSection] = [
     section('needs-you', 'Needs you', needsYou.map((d) => ({
       id: str(d?.decisionId) ?? '',
@@ -27,9 +31,9 @@ export function briefingToSections(briefing: Briefing | null | undefined, ctx: B
       glyph: statusGlyph('needs-you'),
       primary: oneLine(redact(str(d?.title) ?? 'Decision'), 100),
       secondary: str(d?.recommendation) ? `Recommended: ${oneLine(redact(str(d?.recommendation)!), 80)}` : null,
-      meta: joinMeta(str(d?.kind)?.replace(/_/g, ' '), formatRelative(str(d?.createdAt), now)) || null,
+      meta: joinMeta(str(d?.kind)?.replace(/_/g, ' '), formatAge(str(d?.createdAt), now)) || null,
       ref: str(d?.decisionId) ?? null,
-    })), workersRunning === 0 ? 'Nothing needs you right now.' : `Nothing needs you right now. ${workersRunning} worker${workersRunning === 1 ? '' : 's'} running.`),
+    })), workersRunning === 0 ? 'Nothing needs you right now.' : `Nothing needs you right now. ${workersRunning} worker${workersRunning === 1 ? '' : 's'} running.`, needsYouHidden, needsYouHidden > 0 ? `${needsYouHidden} more waiting` : null),
 
     section('landed', 'Landed', landed.map((l) => ({
       id: str(l?.ticketId) ?? '',
@@ -78,8 +82,8 @@ export function briefingToSections(briefing: Briefing | null | undefined, ctx: B
   };
 }
 
-function section(key: BriefingSection['key'], title: string, items: BriefingItem[], emptyLine: string): BriefingSection {
-  return { key, title, count: items.length, empty: items.length === 0, emptyLine, items };
+function section(key: BriefingSection['key'], title: string, items: BriefingItem[], emptyLine: string, hidden = 0, hiddenLine: string | null = null): BriefingSection {
+  return { key, title, count: items.length, empty: items.length === 0, emptyLine, hidden, hiddenLine, items };
 }
 
 function arr<T>(value: T[] | null | undefined): T[] {

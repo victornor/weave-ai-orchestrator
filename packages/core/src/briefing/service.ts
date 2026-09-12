@@ -24,9 +24,16 @@ export function createBriefingService(ctx: WorkspaceContext): BriefingService {
   const needsYou = (): S.Briefing['needsYou'] =>
     ctx.db.all<{ id: string; ticketId: string | null; title: string; kind: string; recommendation: string | null; createdAt: string }>(
       `SELECT id, ticket_id, title, kind, recommendation, created_at FROM decisions
-       WHERE workspace_id = ? AND status = 'open' AND owner = 'human' ORDER BY created_at DESC LIMIT ?`,
+       WHERE workspace_id = ? AND status = 'open' AND owner = 'human' ORDER BY created_at ASC LIMIT ?`,
       [ctx.workspaceId, NEEDS_YOU_LIMIT],
     ).map((d) => ({ decisionId: d.id, ticketId: d.ticketId, title: d.title, kind: d.kind, recommendation: d.recommendation, createdAt: d.createdAt }));
+
+  /** All open human-owned decisions, whether or not the cap carried them (VS-308). */
+  const needsYouTotal = (): number =>
+    ctx.db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM decisions WHERE workspace_id = ? AND status = 'open' AND owner = 'human'",
+      [ctx.workspaceId],
+    )?.n ?? 0;
 
   const landed = (cutoff: string): S.Briefing['landed'] =>
     ctx.db.all<{ id: string; identifier: string; title: string; completedAt: string }>(
@@ -108,7 +115,7 @@ export function createBriefingService(ctx: WorkspaceContext): BriefingService {
     snapshot(): S.Briefing {
       const generatedAt = nowIso();
       const cutoff = new Date(Date.parse(generatedAt) - LANDED_WINDOW_DAYS * 86400e3).toISOString();
-      const snap: S.Briefing = { needsYou: needsYou(), landed: landed(cutoff), underway: underway(), queued: queued(), warnings: warnings(cutoff), generatedAt };
+      const snap: S.Briefing = { needsYou: needsYou(), needsYouTotal: needsYouTotal(), landed: landed(cutoff), underway: underway(), queued: queued(), warnings: warnings(cutoff), generatedAt };
       log.debug({ needsYou: snap.needsYou.length, landed: snap.landed.length, underway: snap.underway.length, queued: snap.queued.length, warnings: snap.warnings.length }, 'briefing snapshot');
       return snap;
     },

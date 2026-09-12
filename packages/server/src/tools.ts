@@ -772,7 +772,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_briefing', scope: 'weaver', input: z.object({}),
-    description: 'Deterministic snapshot: what needs the human, what landed, what is underway, what is queued. Use it verbatim for status reports rather than recomputing.',
+    description: 'Deterministic snapshot: what needs the human, what landed, what is underway, what is queued. Use it verbatim for status reports rather than recomputing. needsYou is capped; needsYouTotal is the full count, so say how many more are waiting when they differ.',
     handler: (ctx) => svc(ctx).briefing.snapshot(),
   },
   {

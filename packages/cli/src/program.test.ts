@@ -235,6 +235,18 @@ describe('running commands against a stubbed daemon', () => {
     expect(text).toContain('Queued');
   });
 
+  it('prints how many Needs-you cards the cap hid (VS-308)', async () => {
+    stubFetch({
+      '/api/w/acme/briefing': {
+        needsYou: [{ decisionId: 'dec_1', ticketId: null, title: 'Waiting three days', kind: 'question', recommendation: null, createdAt: '2026-09-01T12:00:00.000Z' }],
+        needsYouTotal: 4, landed: [], underway: [], queued: [], warnings: [], generatedAt: '2026-09-04T12:00:00.000Z',
+      },
+    });
+    configureOutput({ json: false, color: false });
+    await buildProgram().parseAsync([...base.filter((a) => a !== '--json'), 'briefing']);
+    expect(written.join('')).toContain('3 more waiting');
+  });
+
   it('answers a decision by option number', async () => {
     const seen = stubFetch({
       '/api/w/acme/decisions/dec_1/answer': { ok: true },

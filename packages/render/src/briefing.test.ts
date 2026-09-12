@@ -27,17 +27,36 @@ describe('briefingToSections', () => {
     expect(out.headline).toBe('1 decision waiting · 1 running · 1 landed');
     const [needs, landed, underway, queued] = out.sections;
     expect(needs.count).toBe(1);
+    expect(needs.hidden).toBe(0);
+    expect(needs.hiddenLine).toBeNull();
     expect(needs.items[0]).toEqual({
       id: 'dec_1', uiStatus: 'needs-you', glyph: '◆',
       primary: 'Approve the plan for ACME-42',
       secondary: 'Recommended: Approve: the tasks match the proposal',
-      meta: 'plan approval · 2m ago', ref: 'dec_1',
+      meta: 'plan approval · 2m', ref: 'dec_1',
     });
     expect(landed.items[0]!.glyph).toBe('●');
     expect(underway.items[0]!.meta).toBe('ACME-42 · Backend Engineer #7 · in_progress · active');
     expect(underway.items[0]!.secondary).toBe('running vitest');
     expect(queued.items[0]!.ref).toBe('ACME-43');
     expect(out.warnings).toEqual(['project KB over budget']);
+  });
+
+  it('keeps the oldest card and states how many the cap hid (VS-308)', () => {
+    const overLimit: Briefing = {
+      ...full,
+      needsYouTotal: 5,
+      needsYou: [
+        { decisionId: 'dec_old', ticketId: null, title: 'Sat for three days', kind: 'question', recommendation: null, createdAt: '2026-09-01T12:00:00.000Z' },
+        { decisionId: 'dec_fresh', ticketId: null, title: 'Raised a minute ago', kind: 'question', recommendation: null, createdAt: '2026-09-04T11:59:00.000Z' },
+      ],
+    };
+    const out = briefingToSections(overLimit, { now });
+    const needs = out.sections[0]!;
+    expect(needs.items.map((i) => i.id)).toEqual(['dec_old', 'dec_fresh']);
+    expect(needs.items[0]!.meta).toBe('question · 3d');
+    expect(needs.hidden).toBe(3);
+    expect(needs.hiddenLine).toBe('3 more waiting');
   });
 
   it('names a paused worker\'s reason ahead of its last status comment (VS-137)', () => {
@@ -59,6 +78,8 @@ describe('briefingToSections', () => {
     const out = briefingToSections({ ...full, needsYou: [] }, { now });
     expect(out.sections[0]!.empty).toBe(true);
     expect(out.sections[0]!.emptyLine).toBe('Nothing needs you right now. 1 worker running.');
+    expect(out.sections[0]!.hidden).toBe(0);
+    expect(out.sections[0]!.hiddenLine).toBeNull();
     expect(out.headline).toBe('Nothing needs you · 1 running · 1 landed');
   });
 

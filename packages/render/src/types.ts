@@ -233,6 +233,10 @@ export interface BriefingSection {
   empty: boolean;
   /** Shown instead of items when empty; never blank (design contract §4). */
   emptyLine: string;
+  /** How many items a cap dropped from this section; 0 when nothing was hidden (VS-308). */
+  hidden: number;
+  /** Shown after the items when `hidden > 0` (e.g. `3 more waiting`); null otherwise. */
+  hiddenLine: string | null;
   items: BriefingItem[];
 }
 

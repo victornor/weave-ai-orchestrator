@@ -132,6 +132,7 @@ export function register(program: Command): void {
             write(`  ${item.glyph} ${oneLine(item.primary, 80)}${item.meta ? style.dim(`  ${item.meta}`) : ''}`);
             if (item.secondary) write(`     ${style.dim(oneLine(item.secondary, 90))}`);
           }
+          if (section.hiddenLine) write(style.dim(`  ${section.hiddenLine}`));
         }
         if (model.warnings.length) {
           write('');

@@ -35,7 +35,7 @@ function mkDecision(over: Record<string, unknown> = {}): string {
 }
 
 describe('briefing needsYou', () => {
-  it('lists open human decisions newest first and ignores the rest', () => {
+  it('lists open human decisions oldest first and ignores the rest', () => {
     h = makeHarness();
     const t = mkTicket();
     mkDecision({ title: 'older', createdAt: ago(2) });
@@ -44,10 +44,22 @@ describe('briefing needsYou', () => {
     mkDecision({ title: 'already answered', status: 'answered' });
 
     const snap = briefing().snapshot();
-    expect(snap.needsYou.map((d) => d.title)).toEqual(['newer', 'older']);
-    expect(snap.needsYou[0]).toMatchObject({ ticketId: t.id, kind: 'merge_approval', recommendation: 'ship it' });
-    expect(snap.needsYou[1]).toMatchObject({ ticketId: null, recommendation: null });
+    expect(snap.needsYou.map((d) => d.title)).toEqual(['older', 'newer']);
+    expect(snap.needsYou[0]).toMatchObject({ ticketId: null, recommendation: null });
+    expect(snap.needsYou[1]).toMatchObject({ ticketId: t.id, kind: 'merge_approval', recommendation: 'ship it' });
+    expect(snap.needsYouTotal).toBe(2);
     expect(snap.generatedAt).toBeTypeOf('string');
+  });
+
+  it('keeps the oldest decisions when more exist than the cap, and reports the total (VS-308)', () => {
+    h = makeHarness();
+    for (let i = 0; i < 25; i++) mkDecision({ title: `d-${i}`, createdAt: ago(i) });
+
+    const snap = briefing().snapshot();
+    expect(snap.needsYou).toHaveLength(20);
+    expect(snap.needsYou[0]!.title).toBe('d-24');
+    expect(snap.needsYou.some((d) => d.title === 'd-0')).toBe(false);
+    expect(snap.needsYouTotal).toBe(25);
   });
 });
 

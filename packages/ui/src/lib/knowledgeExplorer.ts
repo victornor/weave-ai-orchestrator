@@ -17,6 +17,41 @@ export interface ExplorerNode {
   hub?: { scope: string; project?: string };
 }
 
+/** A selected document as carried by the explorer's `?doc=` parameter. */
+export interface ExplorerDocRef {
+  scope: string;
+  slug: string;
+  project?: string;
+}
+
+const DOC_SCOPES = new Set(['project', 'shared', 'workspace']);
+
+/** `<scope>:<slug>` — the project id travels in `?project=`, not in the parameter. */
+export function serializeDocParam(ref: { scope: string; slug: string }): string {
+  return `${ref.scope}:${ref.slug}`;
+}
+
+/** Parse `?doc=`. Returns null for anything that is not a known scope plus a non-empty slug. */
+export function parseDocParam(param: string | undefined, projectId?: string): ExplorerDocRef | null {
+  if (!param) return null;
+  const i = param.indexOf(':');
+  if (i <= 0) return null;
+  const scope = param.slice(0, i);
+  const slug = param.slice(i + 1);
+  if (!DOC_SCOPES.has(scope) || !slug || slug.includes(':')) return null;
+  return { scope, slug, ...(scope === 'project' && projectId ? { project: projectId } : {}) };
+}
+
+/** The tree pane's share of the split, clamped so a drag can never collapse either pane. */
+export const TREE_WIDTH_DEFAULT = 20;
+export const TREE_WIDTH_MIN = 15;
+export const TREE_WIDTH_MAX = 40;
+
+export function clampTreeWidth(pct: number): number {
+  if (!Number.isFinite(pct)) return TREE_WIDTH_DEFAULT;
+  return Math.min(TREE_WIDTH_MAX, Math.max(TREE_WIDTH_MIN, pct));
+}
+
 export function hubFileName(scope: string): string {
   switch (scope) {
     case 'project': return 'PROJECT.md';

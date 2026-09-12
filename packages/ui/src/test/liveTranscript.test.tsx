@@ -21,7 +21,7 @@ vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) =
 vi.mock('../app/link', () => ({ useGo: () => vi.fn(), useSearchParams: () => ({}) }));
 
 vi.mock('../api/hooks', () => ({
-  useTicket: () => ({ data: { ticket: ticket({ id: 'tk_1' }), project: null, worker: agent(), blockers: [], mergeQueue: { position: null }, openspecState: null }, isLoading: false, isError: false }),
+  useTicket: () => ({ data: { ticket: ticket({ id: 'tk_1' }), project: null, worker: agent(), blockers: [], workProducts: [], mergeQueue: { position: null }, openspecState: null }, isLoading: false, isError: false }),
   useTicketComments: () => ({ data: [], isLoading: false }),
   useTicketRuns: () => ({ data: state.runs, isLoading: false }),
   useTicketDocument: () => ({ data: undefined, isLoading: false, isError: true }),

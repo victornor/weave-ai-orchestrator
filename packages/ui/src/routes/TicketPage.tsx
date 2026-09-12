@@ -18,6 +18,7 @@ import { Table } from '../components/Table';
 import { StatTile } from '../components/Chart';
 import { RunTranscript } from '../components/RunTranscript';
 import { useRunEventStream } from '../api/runStream';
+import { api, qs } from '../api/client';
 import {
   usePatchTicket,
   usePostComment,
@@ -48,6 +49,7 @@ const TABS = [
   { key: 'plan', label: 'Plan' },
   { key: 'activity', label: 'Activity' },
   { key: 'work', label: 'Work' },
+  { key: 'artifacts', label: 'Artifacts' },
   { key: 'usage', label: 'Usage' },
   { key: 'knowledge', label: 'Knowledge' },
 ] as const;
@@ -103,6 +105,8 @@ export function TicketRoute(): React.ReactElement {
 
   const { ticket, project, worker } = detail.data;
   const ui = ticketUiStatus(ticket.status);
+  const hasArtifacts = detail.data.workProducts.some((p) => p.type === 'artifact');
+  const visibleTabs = TABS.filter((t) => t.key !== 'artifacts' || hasArtifacts);
   // A parked worker is why this ticket stopped. Retrying relaunches it, and relaunching a parked
   // worker is a resume — same session, same worktree — so the button says what it does.
   const pauseDetail = worker ? workerPauseDetail(worker) : null;
@@ -175,13 +179,14 @@ export function TicketRoute(): React.ReactElement {
           </label>
           </span>
         }
-        tabs={<Tabs items={TABS} active={tab} onChange={chooseTab} className="px-3 md:px-4" />}
+        tabs={<Tabs items={visibleTabs} active={tab} onChange={chooseTab} className="px-3 md:px-4" />}
       />
       <PageBody className="p-4 md:p-5">
         {tab === 'overview' ? <Overview ticketId={ticketId} /> : null}
         {tab === 'plan' ? <PlanTab ticketId={ticketId} ticketIdentifier={ticket.identifier} /> : null}
         {tab === 'activity' ? <ActivityTab ticketId={ticket.id} ticketIdentifier={ticket.identifier} /> : null}
         {tab === 'work' ? <WorkTab ticketId={ticket.id} /> : null}
+        {tab === 'artifacts' ? <ArtifactsTab ticketId={ticket.id} ws={ws} /> : null}
         {tab === 'usage' ? <UsageTab ticketId={ticket.id} /> : null}
         {tab === 'knowledge' ? <KnowledgeUsageTab ticketId={ticket.id} /> : null}
       </PageBody>
@@ -582,7 +587,7 @@ function WorkTab({ ticketId }: { ticketId: string }): React.ReactElement {
             {(products.data ?? []).map((p) => (
               <div key={p.id} className="flex items-center gap-3 px-3.5 py-2.5">
                 <Badge>{p.type}</Badge>
-                <span className="ac-mono ac-truncate flex-1 text-micro text-text-2">{p.ref ?? p.url ?? '—'}</span>
+                <span className="ac-mono ac-truncate flex-1 text-micro text-text-2">{p.title ?? p.externalId ?? p.url ?? '—'}</span>
                 {p.state ? <span className={cx('ac-mono text-nano', p.state === 'success' || p.state === 'merged' ? 'text-done' : p.state === 'failure' ? 'text-failed' : 'text-working')}>{p.state}</span> : null}
                 {p.url ? (
                   <a href={p.url} target="_blank" rel="noreferrer" className="text-micro">
@@ -638,6 +643,124 @@ function WorkTab({ ticketId }: { ticketId: string }): React.ReactElement {
           ]}
         />
       </section>
+    </div>
+  );
+}
+
+/** A published artifact is a `type: 'artifact'` work product; `externalId` is its stable key (VS-269). */
+function ArtifactsTab({ ticketId, ws }: { ticketId: string; ws: string }): React.ReactElement {
+  const products = useTicketWorkProducts(ticketId);
+  const artifacts = (products.data ?? []).filter((p) => p.type === 'artifact');
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [revision, setRevision] = useState<number | undefined>(undefined);
+  const [downloading, setDownloading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const selected = artifacts.find((a) => a.externalId === selectedKey) ?? artifacts[0] ?? null;
+  const revisions = useTicketDocumentRevisions(ticketId, selected ? `artifact:${selected.externalId}` : '');
+
+  if (products.isLoading) return <SkeletonRows rows={3} />;
+  if (!selected) return <EmptyState title="No artifacts yet." detail="They appear here once an agent publishes one." />;
+
+  const src = `${selected.url}${qs({ revision })}`;
+
+  async function download(): Promise<void> {
+    if (!selected) return;
+    setDownloading(true);
+    try {
+      const [html, kitCss] = await Promise.all([
+        api.ws<string>(ws, `/tickets/${ticketId}/artifacts/${selected.externalId}/raw${qs({ revision })}`),
+        api.ws<string>(ws, '/artifacts/kit.css'),
+      ]);
+      const inlined = html.includes(kitCss)
+        ? html
+        : /<\/head>/i.test(html)
+          ? html.replace(/<\/head>/i, `<style>${kitCss}</style></head>`)
+          : /<html[^>]*>/i.test(html)
+            ? html.replace(/<html[^>]*>/i, (m) => `${m}<head><style>${kitCss}</style></head>`)
+            : `<style>${kitCss}</style>${html}`;
+      const blob = new Blob([inlined], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${selected.title || selected.externalId}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {artifacts.map((a) => (
+          <button
+            key={a.externalId}
+            type="button"
+            onClick={() => { setSelectedKey(a.externalId); setRevision(undefined); }}
+            className={cx(
+              'rounded-r6 border px-3 py-1.5 text-left text-meta',
+              a.externalId === selected.externalId ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-2',
+            )}
+          >
+            <div className="ac-truncate max-w-[16rem]">{a.title ?? a.externalId}</div>
+            <div className="ac-mono text-nano text-text-3">
+              {(a.metadata['kind'] as string | undefined) ?? 'artifact'} · {ago(a.updatedAt)}
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {(revisions.data?.length ?? 0) > 1 ? (
+          <>
+            <span className="ac-label">Revisions</span>
+            {(revisions.data ?? []).map((r) => (
+              <button
+                key={r.revision}
+                type="button"
+                onClick={() => setRevision(r.revision)}
+                className={cx(
+                  'ac-mono rounded-r4 border px-2 py-1 text-nano',
+                  (revision ?? revisions.data![revisions.data!.length - 1]!.revision) === r.revision
+                    ? 'border-accent-edge bg-accent-tint text-accent-link'
+                    : 'border-line-2 text-text-3',
+                )}
+              >
+                r{r.revision}
+              </button>
+            ))}
+          </>
+        ) : null}
+        <span className="flex-1" />
+        <a href={src} target="_blank" rel="noreferrer" className="text-micro">
+          Open in new tab ↗
+        </a>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            if (typeof navigator.clipboard?.writeText !== 'function') return;
+            navigator.clipboard.writeText(`${window.location.origin}${src}`).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }).catch(() => {});
+          }}
+        >
+          {copied ? 'Copied' : 'Copy link'}
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => void download()} disabled={downloading}>
+          {downloading ? 'Downloading…' : 'Download'}
+        </Button>
+      </div>
+
+      <iframe
+        key={src}
+        src={src}
+        sandbox="allow-scripts allow-forms allow-popups allow-downloads"
+        title={selected.title ?? selected.externalId ?? 'artifact'}
+        className="h-[75vh] w-full rounded-r6 border border-line-1 bg-bg-0"
+      />
     </div>
   );
 }

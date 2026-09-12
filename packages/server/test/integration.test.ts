@@ -539,4 +539,145 @@ describe('real core services over HTTP', () => {
     expect(existsSync(join(result.path, 'db.sqlite'))).toBe(false);
   });
 
+  describe('ticket artifacts (VS-269)', () => {
+    const SAMPLE_HTML = '<!doctype html><html><head><title>Test</title></head><body><h1>Hi</h1></body></html>';
+
+    function bootWithWorkerTicket() {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const ticket = services.tickets.create({ kind: 'human', id: null }, { projectId: harness.projectId, kind: 'task', title: 'Publish an artifact' });
+      const agentId = harness.addWorker(ticket.id);
+      return { deps, harness, app, services, ticket, agentId };
+    }
+
+    async function workerToken(harness: ReturnType<typeof makeHarness>, agentId: string, ticketId: string): Promise<string> {
+      return signRunToken(runTokenSecret(harness.ctx.db), {
+        workspaceId: harness.workspaceId, runId: 'run_artifact', agentId, agentKind: 'worker', projectId: harness.projectId, ticketId, roleId: harness.roleId,
+      });
+    }
+
+    async function callTool(app: ReturnType<typeof createApp>, ws: string, token: string, tool: string, input: Record<string, unknown>) {
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${ws}/agent/tools/${tool}`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input }),
+      }));
+      return res.json();
+    }
+
+    it('publishes an artifact and it shows up as a work product with a stable URL', async () => {
+      const { harness, app, services, ticket, agentId } = bootWithWorkerTicket();
+      const token = await workerToken(harness, agentId, ticket.id);
+
+      const first = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: SAMPLE_HTML, title: 'Overview', kind: 'diagram' });
+      expect(first.ok).toBe(true);
+      expect(first.data.revision).toBe(1);
+      expect(first.data.url).toBe(`/api/w/${harness.workspaceId}/tickets/${ticket.id}/artifacts/overview/raw`);
+
+      const products = services.tickets.workProducts(ticket.id);
+      expect(products).toHaveLength(1);
+      expect(products[0]).toMatchObject({ type: 'artifact', externalId: 'overview', url: first.data.url, title: 'Overview' });
+
+      // Republishing under the same key updates the one row rather than adding another.
+      const second = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: SAMPLE_HTML, title: 'Overview v2' });
+      expect(second.ok).toBe(true);
+      expect(second.data.revision).toBe(2);
+      expect(services.tickets.workProducts(ticket.id)).toHaveLength(1);
+      expect(services.tickets.workProducts(ticket.id)[0]).toMatchObject({ title: 'Overview v2' });
+
+      // Both revisions remain independently readable.
+      expect(services.tickets.getDocument(ticket.id, 'artifact:overview', 1)?.body).toBe(SAMPLE_HTML);
+      expect(services.tickets.getDocument(ticket.id, 'artifact:overview', 2)?.body).toBe(SAMPLE_HTML);
+    });
+
+    it('rejects an empty body, a non-HTML body, and an oversized body', async () => {
+      const { harness, app, ticket, agentId } = bootWithWorkerTicket();
+      const token = await workerToken(harness, agentId, ticket.id);
+
+      const empty = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'a', html: '   ' });
+      expect(empty.ok).toBe(false);
+      expect(empty.error.message).toMatch(/empty/);
+
+      const notHtml = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'b', html: 'just some text' });
+      expect(notHtml.ok).toBe(false);
+      expect(notHtml.error.message).toMatch(/does not look like an HTML document/);
+
+      const oversized = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'c', html: `<html>${'x'.repeat(2_000_001)}</html>` });
+      expect(oversized.ok).toBe(false);
+      expect(oversized.error.message).toMatch(/over the 2,000,000-character cap|over the 2000000-character cap/);
+
+      const accepted = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'd', html: SAMPLE_HTML });
+      expect(accepted.ok).toBe(true);
+    });
+
+    it('never lets an agent read an artifact body back through the ordinary document tool', async () => {
+      const { harness, app, ticket, agentId } = bootWithWorkerTicket();
+      const token = await workerToken(harness, agentId, ticket.id);
+      await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'secret-ish', html: SAMPLE_HTML });
+      await callTool(app, harness.workspaceId, token, 'ac_ticket_document_put', { id: ticket.identifier, key: 'report', body: 'plain notes' });
+
+      const readAttempt = await callTool(app, harness.workspaceId, token, 'ac_ticket_document_get', { id: ticket.identifier, key: 'artifact:secret-ish' });
+      expect(readAttempt.ok).toBe(false);
+      expect(readAttempt.error.message).toMatch(/not readable by agents/);
+      expect(readAttempt.error.message).not.toContain('<html');
+
+      // The author of the artifact gets refused identically to anyone else, in the same run.
+      const authorReadAttempt = await callTool(app, harness.workspaceId, token, 'ac_ticket_document_get', { id: ticket.identifier, key: 'artifact:secret-ish' });
+      expect(authorReadAttempt.ok).toBe(false);
+
+      // A wrong-key guess must not leak the artifact's key as a hint, but a plain document's key is fine.
+      const guess = await callTool(app, harness.workspaceId, token, 'ac_ticket_document_get', { id: ticket.identifier, key: 'nonexistent' });
+      expect(guess.ok).toBe(false);
+      expect(guess.error.details.availableKeys).toContain('report');
+      expect(guess.error.details.availableKeys).not.toContain('artifact:secret-ish');
+
+      // Writing an artifact-shaped key through the general document tool is refused too.
+      const directWrite = await callTool(app, harness.workspaceId, token, 'ac_ticket_document_put', { id: ticket.identifier, key: 'artifact:sneaky', body: SAMPLE_HTML });
+      expect(directWrite.ok).toBe(false);
+      expect(directWrite.error.message).toMatch(/ac_ticket_artifact_put/);
+    });
+
+    it('serves the raw artifact over HTTP with the mandated sandbox CSP, verbatim bytes, for a human session only', async () => {
+      const { harness, app, ticket, agentId } = bootWithWorkerTicket();
+      const token = await workerToken(harness, agentId, ticket.id);
+      const published = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'view', html: SAMPLE_HTML });
+      expect(published.ok).toBe(true);
+
+      const res = await app.fetch(new Request(`http://127.0.0.1${published.data.url}`, { headers: H }));
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(SAMPLE_HTML);
+      expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(res.headers.get('content-security-policy')).toBe(
+        "sandbox allow-scripts allow-forms allow-popups allow-downloads; default-src 'none'; style-src 'self' 'unsafe-inline'; img-src data: 'self'; font-src data:; connect-src 'none'",
+      );
+
+      // A run token (an agent) cannot reach this route at all.
+      const rejected = await app.fetch(new Request(`http://127.0.0.1${published.data.url}`, { headers: { authorization: `Bearer ${token}` } }));
+      expect(rejected.status).toBe(403);
+    });
+
+    it('serves a superseded revision independently of the current one', async () => {
+      const { harness, app, ticket, agentId } = bootWithWorkerTicket();
+      const token = await workerToken(harness, agentId, ticket.id);
+      const HTML_V2 = '<!doctype html><html><body><h1>v2</h1></body></html>';
+      const first = await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'view', html: SAMPLE_HTML });
+      await callTool(app, harness.workspaceId, token, 'ac_ticket_artifact_put', { id: ticket.identifier, key: 'view', html: HTML_V2 });
+
+      const current = await app.fetch(new Request(`http://127.0.0.1${first.data.url}`, { headers: H }));
+      expect(await current.text()).toBe(HTML_V2);
+
+      const earlier = await app.fetch(new Request(`http://127.0.0.1${first.data.url}?revision=1`, { headers: H }));
+      expect(await earlier.text()).toBe(SAMPLE_HTML);
+    });
+
+    it('serves the AC Artifact Kit CSS verbatim at a stable asset path', async () => {
+      const { harness, app } = bootWithWorkerTicket();
+      const { ARTIFACT_KIT_CSS } = await import('@agent-conductor/core');
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/artifacts/kit.css`, { headers: H }));
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('text/css; charset=utf-8');
+      expect(await res.text()).toBe(ARTIFACT_KIT_CSS);
+    });
+  });
 });

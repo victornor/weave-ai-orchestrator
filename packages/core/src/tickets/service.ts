@@ -444,13 +444,18 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
 
   /**
    * `opts.system` is set only by `transition()`'s own write of the generated plan digest — the one
-   * legitimate writer of the `plan` key. Every external entry point (the agent tool, the HTTP route)
-   * rejects `key: 'plan'` before it reaches here, so this is not an authorization check on `actor`;
-   * `actorFor()` never produces a `system` actor for a real request in the first place.
+   * legitimate writer of the `plan` key — and by `putArtifactWorkProduct`'s caller,
+   * `ac_ticket_artifact_put`, the one legitimate writer of an `artifact:`-prefixed key. Every other
+   * external entry point (the agent tool, the HTTP route) rejects both before reaching here, so this
+   * is not an authorization check on `actor`; `actorFor()` never produces a `system` actor for a real
+   * request in the first place.
    */
   function putDocument(actor: Actor, id: string, key: string, body: string, opts?: { system?: boolean }): { documentId: string; revision: number } {
     if (key === 'plan' && !opts?.system) {
       throw new OcError('forbidden', "the `plan` document key is reserved for the daemon-generated plan digest; use `report` (or another key) for your own notes", { key });
+    }
+    if (key.startsWith('artifact:') && !opts?.system) {
+      throw new OcError('forbidden', 'the `artifact:` key prefix is reserved for published artifacts; use `ac_ticket_artifact_put` instead of writing this key directly', { key });
     }
     const t = get(id);
     const written = tx(db, () => {
@@ -1005,6 +1010,34 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     workProducts(id) {
       const t = get(id);
       return db.all<Record<string, unknown>>('SELECT * FROM ticket_work_products WHERE ticket_id = ? ORDER BY created_at', [t.id]);
+    },
+
+    putArtifactWorkProduct(actor, id, key, wp) {
+      const t = get(id);
+      const now = nowIso();
+      return tx(db, () => {
+        const existing = db.get<{ id: string }>(
+          "SELECT id FROM ticket_work_products WHERE ticket_id = ? AND type = 'artifact' AND external_id = ?",
+          [t.id, key],
+        );
+        if (existing) {
+          db.update('ticket_work_products', existing.id, {
+            url: wp.url, title: wp.title ?? null, metadataJson: { kind: wp.kind ?? null }, updatedAt: now,
+          });
+          recordActivity(db, ws, actor, 'ticket.work_product', 'ticket_work_product', existing.id, { type: 'artifact', url: wp.url }, t.id);
+          ctx.events.emit('ticket.work_product', 'ticket', t.id, { ticketId: t.id, id: existing.id, type: 'artifact', url: wp.url, title: wp.title ?? null });
+          return { id: existing.id };
+        }
+        const wpId = newId();
+        db.insert('ticket_work_products', {
+          id: wpId, ticketId: t.id, runId: actor.runId ?? null, type: 'artifact', provider: null,
+          externalId: key, url: wp.url, title: wp.title ?? null, state: null,
+          isPrimary: false, metadataJson: { kind: wp.kind ?? null }, createdAt: now, updatedAt: now,
+        });
+        recordActivity(db, ws, actor, 'ticket.work_product', 'ticket_work_product', wpId, { type: 'artifact', url: wp.url }, t.id);
+        ctx.events.emit('ticket.work_product', 'ticket', t.id, { ticketId: t.id, id: wpId, type: 'artifact', url: wp.url, title: wp.title ?? null });
+        return { id: wpId };
+      });
     },
 
     async mergeDone(actor, id, info) {

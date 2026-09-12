@@ -227,14 +227,22 @@ export interface MergeQueue {
   recent: MergeQueueOutcome[];
 }
 
+/** Matches `workProducts()`'s real wire shape (`ticket_work_products` row, camelCased) — VS-269 fixed
+ * a drift here: `ref`/`meta` never existed on the wire, and `title` existed but was untyped. */
 export interface WorkProduct {
   id: string;
+  ticketId: string;
+  runId: string | null;
   type: string;
+  provider: string | null;
+  externalId: string | null;
   url: string | null;
-  ref: string | null;
+  title: string | null;
   state: string | null;
-  meta: Record<string, unknown> | null;
+  isPrimary: boolean;
+  metadata: Record<string, unknown>;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface OpenSpecState {

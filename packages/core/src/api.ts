@@ -40,7 +40,7 @@ export interface TicketsService {
   /** The most recent worker to have held this ticket, even after it retired — `ticket.workerId` is
    * nulled on retirement, so this is the only way to name who built a ticket that has since landed. */
   lastWorker(id: string): S.Agent | null;
-  /** `opts.system` is for the daemon's own internal write of the `plan` digest only — never set it from a tool or route handling external input; every other write to `key: 'plan'` is refused. */
+  /** `opts.system` is for the daemon's own internal write of the `plan` digest, and for `putArtifactWorkProduct`'s caller writing an `artifact:`-prefixed key — never set it from a tool or route handling external input directly; every other write to `key: 'plan'` or an `artifact:`-prefixed key is refused. */
   putDocument(actor: Actor, id: string, key: string, body: string, opts?: { system?: boolean }): { documentId: string; revision: number };
   getDocument(id: string, key: string, revision?: number): { documentId: string; revision: number; body: string; createdAt: string } | null;
   /** Read one of the ticket's documents by its id (VS-224) — how a decision's document target is followed; scoped to the ticket. */
@@ -50,6 +50,8 @@ export interface TicketsService {
   documents(id: string): Array<{ key: string; revision: number; updatedAt: string }>;
   addWorkProduct(actor: Actor, id: string, wp: { type: S.WorkProductType; url?: string; title?: string; state?: string; provider?: string; externalId?: string; isPrimary?: boolean; metadata?: Record<string, unknown> }): { id: string };
   workProducts(id: string): Array<Record<string, unknown>>;
+  /** Publishes (or, called again with the same `key`, updates) the one `type: 'artifact'` work product for that key, keyed by `externalId === key` — used only by `ac_ticket_artifact_put`, never by the general work-product tool. */
+  putArtifactWorkProduct(actor: Actor, id: string, key: string, wp: { url: string; title?: string; kind?: string }): { id: string };
   /** Async: archives the OpenSpec change after the merge is verified (PLAN §12.2). */
   mergeDone(actor: Actor, id: string, info: { mergeCommit?: string; method?: string }): Promise<S.Ticket>;
   /** The per-project merge queue that decides which approved ticket merges now (PLAN §11.4). */

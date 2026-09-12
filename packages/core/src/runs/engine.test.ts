@@ -50,7 +50,7 @@ describe('run engine', () => {
     runtime = new FakeRuntime();
     h.ctx.registries.runtimes.set('fake', runtime);
     // Both settings, because a suite here runs conductor turns and worker turns (VS-77).
-    h.ctx.config.models = { conductor: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null }, workerOptions: [] };
+    h.ctx.config.models = { weaver: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null }, workerOptions: [] };
     h.services.wake = createWakeService(h.ctx, h.deps);
     h.services.runs = createRunsService(h.ctx, h.deps);
     dispatcher = createDispatcher(h.ctx, h.deps);
@@ -269,7 +269,7 @@ describe('run engine', () => {
   });
 
   it('fails cleanly when the runtime is not registered', async () => {
-    h.ctx.config.models = { ...h.ctx.config.models, conductor: { runtime: 'nope', model: null } };
+    h.ctx.config.models = { ...h.ctx.config.models, weaver: { runtime: 'nope', model: null } };
     h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
     const run = await runOnce();
     expect(run.status).toBe('failed');
@@ -570,7 +570,7 @@ describe('run engine', () => {
     beforeEach(() => { other = new FakeRuntime(); h.ctx.registries.runtimes.set('other', other); });
 
     it('launches the conductor on the conductor setting', async () => {
-      h.ctx.config.models.conductor = { runtime: 'fake', model: 'claude-fable-5-1', effort: 'low' };
+      h.ctx.config.models.weaver = { runtime: 'fake', model: 'claude-fable-5-1', effort: 'low' };
       h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
       await runOnce();
       expect(runtime.inputs.at(-1)).toMatchObject({ model: 'claude-fable-5-1', effort: 'low' });
@@ -587,10 +587,10 @@ describe('run engine', () => {
 
     it('launches on a filled daemon overlay (VS-185)', async () => {
       h.ctx.config.models.workers = { runtime: 'fake', model: 'workspace-workers' };
-      h.ctx.config.models.conductor = { runtime: 'fake', model: 'workspace-conductor' };
+      h.ctx.config.models.weaver = { runtime: 'fake', model: 'workspace-conductor' };
       h.ctx.daemon.models = {
         workers: { runtime: 'fake', model: 'daemon-workers' },
-        conductor: { runtime: 'fake', model: 'daemon-conductor' },
+        weaver: { runtime: 'fake', model: 'daemon-conductor' },
       };
       h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
       await runOnce();
@@ -633,7 +633,7 @@ describe('run engine', () => {
 
     it('sends the two kinds to their own settings in the same workspace', async () => {
       h.ctx.config.models = {
-        conductor: { runtime: 'fake', model: 'the-conductor-model' },
+        weaver: { runtime: 'fake', model: 'the-conductor-model' },
         workers: { runtime: 'other', model: 'the-worker-model' },
         workerOptions: [],
       };
@@ -667,7 +667,7 @@ describe('run engine', () => {
       await runOnce();
       expect(runtime.inputs.at(-1)!.model).toBeNull();
 
-      h.ctx.config.models.conductor = { runtime: 'other', model: 'the-new-model' };
+      h.ctx.config.models.weaver = { runtime: 'other', model: 'the-new-model' };
       h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'second' });
       const second = await runOnce();
 
@@ -676,12 +676,12 @@ describe('run engine', () => {
     });
 
     it('records on the run what it really ran on, and leaves it there when the setting moves on', async () => {
-      h.ctx.config.models.conductor = { runtime: 'fake', model: 'the-model-it-ran-on' };
+      h.ctx.config.models.weaver = { runtime: 'fake', model: 'the-model-it-ran-on' };
       h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
       const run = await runOnce();
       expect(run.runtimeId).toBe('fake');
 
-      h.ctx.config.models.conductor = { runtime: 'other', model: 'something-else' };
+      h.ctx.config.models.weaver = { runtime: 'other', model: 'something-else' };
       const stored = h.db.get<Run>('SELECT * FROM runs WHERE id = ?', [run.id])!;
       expect(stored.runtimeId).toBe('fake');
       // The adapter reported `fake-1`, and what the runtime says beats what the setting asked for.
@@ -689,7 +689,7 @@ describe('run engine', () => {
     });
 
     it('fails the turn naming the runtime the setting points at, rather than using another', async () => {
-      h.ctx.config.models.conductor = { runtime: 'nope', model: null };
+      h.ctx.config.models.weaver = { runtime: 'nope', model: null };
       h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
       const run = await runOnce();
       expect(run.status).toBe('failed');
@@ -703,7 +703,7 @@ describe('run engine', () => {
       const first = h.db.get<{ id: string; runtimeId: string }>("SELECT id, runtime_id FROM agent_sessions WHERE agent_id = ? AND status = 'active'", [h.conductorId])!;
       expect(first.runtimeId).toBe('fake');
 
-      h.ctx.config.models.conductor = { runtime: 'other', model: null };
+      h.ctx.config.models.weaver = { runtime: 'other', model: null };
       h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'second' });
       await runOnce();
 
@@ -721,7 +721,7 @@ describe('run engine', () => {
       await runOnce();
       const before = h.db.get<{ id: string }>("SELECT id FROM agent_sessions WHERE agent_id = ? AND status = 'active'", [h.conductorId])!;
 
-      h.ctx.config.models.conductor = { runtime: 'fake', model: 'a-different-model' };
+      h.ctx.config.models.weaver = { runtime: 'fake', model: 'a-different-model' };
       h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'second' });
       await runOnce();
 

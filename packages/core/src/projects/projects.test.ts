@@ -114,6 +114,17 @@ describe('projects', () => {
     expect(project.policies.autoMergeDefault).not.toBe(true);
   });
 
+  it('stores proposalApproval/taskApproval under the legacy spelling, on add and on update (VS-263 Decision 6)', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, cfg(src, { policies: { proposalApproval: 'weaver', taskApproval: 'weaver' } }));
+    expect(project.policies.proposalApproval).toBe('conductor');
+    expect(project.policies.taskApproval).toBe('conductor');
+
+    const updated = await projects.update(HUMAN, project.id, { policies: { proposalApproval: 'weaver', taskApproval: 'human' } });
+    expect(updated.policies.proposalApproval).toBe('conductor');
+    expect(updated.policies.taskApproval).toBe('human');
+  });
+
   it('sets, changes and clears a landing branch after creation (VS-122)', async () => {
     const src = await sourceRepo();
     await git(['checkout', '-b', 'edge'], src);

@@ -99,6 +99,19 @@ describe('exportWorkspace', () => {
     expect(exportWorkspace(h.ctx, { out }).path).toBe(out);
     expect(existsSync(join(out, 'workspace.yaml'))).toBe(true);
   });
+
+  // VS-263 Decision 6: when there is no workspace.yaml to copy verbatim (the common path), the
+  // fallback serializes `ctx.config` fresh — and must still write the legacy spelling, since an
+  // export is exactly the artifact most likely to travel to an older daemon.
+  it('serializes a fresh workspace.yaml under the legacy spelling when there is nothing on disk to copy', () => {
+    h.ctx.config = { ...h.ctx.config, weaver: { ...h.ctx.config.weaver, humanName: 'captain' } };
+    expect(existsSync(join(h.root, 'workspace.yaml'))).toBe(false);
+    const result = exportWorkspace(h.ctx);
+    const raw = readFileSync(join(result.path, 'workspace.yaml'), 'utf8');
+    expect(raw).toContain('humanName: captain');
+    expect(raw).toMatch(/^conductor:/m);
+    expect(raw).not.toMatch(/^weaver:/m);
+  });
 });
 
 describe('parseTicketFile', () => {

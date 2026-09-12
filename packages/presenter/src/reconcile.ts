@@ -116,7 +116,7 @@ export function createReconciler(opts: ReconcilerOptions): Reconciler {
 
   const sync = async (desired: DesiredPresentation, o: { force?: boolean } = {}): Promise<void> => {
     workersCfg = { ...(desired.config.workers ?? {}) };
-    conductorCfg = desired.config.conductor ? { ...desired.config.conductor } : null;
+    conductorCfg = desired.config.weaver ? { ...desired.config.weaver } : null;
 
     if (desired.weaver && conductorCfg) await ensure(desired.weaver, o);
     const live = desired.workers.filter((w) => w.status !== 'retired');

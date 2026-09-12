@@ -313,7 +313,7 @@ describe('a login pause outliving a runtime the workspace abandoned', () => {
       ...h.ctx.config,
       models: {
         ...h.ctx.config.models,
-        conductor: { ...h.ctx.config.models.conductor, runtime },
+        weaver: { ...h.ctx.config.models.weaver, runtime },
         workers: { ...h.ctx.config.models.workers, runtime },
       },
     });

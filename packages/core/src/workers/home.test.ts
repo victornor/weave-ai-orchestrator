@@ -14,7 +14,7 @@ function fakeRuntimeWithInstallSpy(install: RuntimeAdapter['installInstructions'
   return runtime;
 }
 
-interface ManifestSkill { name: string; audience: 'worker' | 'conductor' | 'all' }
+interface ManifestSkill { name: string; audience: 'worker' | 'weaver' | 'all' }
 interface Manifest { skills: ManifestSkill[]; runtimes: Record<string, { path: string }> }
 
 const manifest: Manifest = JSON.parse(
@@ -42,10 +42,10 @@ describe('skillsFor (VS-189)', () => {
     expect(skillsFor(h.ctx, 'worker').map((s) => s.name).sort()).toEqual(expected);
   });
 
-  it('returns exactly the conductor- and all-audience skills, never a worker-only one', () => {
+  it('returns exactly the weaver- and all-audience skills, never a worker-only one', () => {
     h = makeHarness();
     seedSkills(h.ctx);
-    const expected = manifest.skills.filter((s) => s.audience === 'conductor' || s.audience === 'all').map((s) => s.name).sort();
+    const expected = manifest.skills.filter((s) => s.audience === 'weaver' || s.audience === 'all').map((s) => s.name).sort();
     expect(skillsFor(h.ctx, 'weaver').map((s) => s.name).sort()).toEqual(expected);
   });
 });

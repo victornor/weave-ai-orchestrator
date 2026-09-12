@@ -986,7 +986,7 @@ describe('daemon model overlays (VS-185)', () => {
     const { fetch } = app();
     const res = await fetch('/api/daemon/models', { headers: authed() });
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ conductor: null, workers: null, workerOptions: null });
+    await expect(res.json()).resolves.toEqual({ weaver: null, workers: null, workerOptions: null });
   });
 
   it('PUTs conductor, persists, and GET /models is locked without rebuilding deps', async () => {
@@ -996,17 +996,17 @@ describe('daemon model overlays (VS-185)', () => {
     const setting = { runtime: 'claude', model: 'claude-fable-5-1' };
     const put = await fetch('/api/daemon/models', {
       method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
-      body: JSON.stringify({ conductor: setting }),
+      body: JSON.stringify({ weaver: setting }),
     });
     expect(put.status).toBe(200);
-    await expect(put.json()).resolves.toEqual({ conductor: setting, workers: null, workerOptions: null });
-    expect(h.deps.daemon.models.conductor).toEqual(setting);
+    await expect(put.json()).resolves.toEqual({ weaver: setting, workers: null, workerOptions: null });
+    expect(h.deps.daemon.models.weaver).toEqual(setting);
 
     const got = await fetch('/api/daemon/models', { headers: authed() });
-    await expect(got.json()).resolves.toEqual({ conductor: setting, workers: null, workerOptions: null });
+    await expect(got.json()).resolves.toEqual({ weaver: setting, workers: null, workerOptions: null });
 
     const ws = await fetch('/api/w/ws1/models', { headers: authed() });
-    await expect(ws.json()).resolves.toMatchObject({ conductor: setting, locked: { conductor: true, workers: false, workerOptions: false } });
+    await expect(ws.json()).resolves.toMatchObject({ weaver: setting, locked: { weaver: true, workers: false, workerOptions: false } });
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -1014,14 +1014,14 @@ describe('daemon model overlays (VS-185)', () => {
     const { fetch } = app();
     await fetch('/api/daemon/models', {
       method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
-      body: JSON.stringify({ conductor: { runtime: 'claude', model: 'a' }, workers: { runtime: 'codex', model: 'b' } }),
+      body: JSON.stringify({ weaver: { runtime: 'claude', model: 'a' }, workers: { runtime: 'codex', model: 'b' } }),
     });
     const left = await fetch('/api/daemon/models', {
       method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
-      body: JSON.stringify({ conductor: null }),
+      body: JSON.stringify({ weaver: null }),
     });
     await expect(left.json()).resolves.toEqual({
-      conductor: null,
+      weaver: null,
       workers: { runtime: 'codex', model: 'b' },
       workerOptions: null,
     });

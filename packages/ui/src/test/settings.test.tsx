@@ -128,7 +128,7 @@ vi.mock('../api/hooks', () => ({
     },
     isPending: false,
   }),
-  useDaemonModels: () => ({ data: { conductor: null, workers: null, workerOptions: null }, isLoading: false }),
+  useDaemonModels: () => ({ data: { weaver: null, workers: null, workerOptions: null }, isLoading: false }),
   useSetDaemonModels: () => ({ mutate: vi.fn(), isPending: false, error: null }),
   useRoutines: () => ({ data: [], isLoading: false, isError: false, refetch: vi.fn() }),
   useRoutineUsage: () => ({ data: { tokensIn: 0, tokensOut: 0, tokensCached: 0, runs: 0, costCents: 0, costReportedCents: 0, window: '7d' }, isLoading: false }),

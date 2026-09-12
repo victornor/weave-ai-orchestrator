@@ -205,8 +205,8 @@ export function OnboardingRoute(): React.ReactElement {
       // One choice, both settings: the conductor and every worker start on the same runtime and
       // model, and Settings → Models is where they are told apart later (VS-77).
       const setting = { runtime, model: model || null };
-      await api.ws(wsId, '/models', { method: 'PUT', body: { conductor: setting, workers: setting } });
-      if (humanName.trim()) await api.ws(wsId, '/config', { method: 'PATCH', body: { conductor: { humanName: humanName.trim() } } });
+      await api.ws(wsId, '/models', { method: 'PUT', body: { weaver: setting, workers: setting } });
+      if (humanName.trim()) await api.ws(wsId, '/config', { method: 'PATCH', body: { weaver: { humanName: humanName.trim() } } });
       mark(1, { state: 'done', endedAt: Date.now() }, wsId);
     } catch (e) {
       mark(1, { state: 'failed', detail: describe(e), endedAt: Date.now() }, wsId);

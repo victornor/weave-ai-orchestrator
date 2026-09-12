@@ -161,6 +161,49 @@ describe('workspace loader', () => {
     expect(toml).toContain('setup = "pnpm install"');
   });
 
+  describe('config key rename: writes keep the legacy spelling on disk (VS-263 Decision 6)', () => {
+    it('initWorkspace writes conductor:, not weaver:, even though the returned config is weaver-keyed', async () => {
+      const config = await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      expect(config).toHaveProperty('weaver');
+      expect(config).not.toHaveProperty('conductor');
+      const raw = YAML.parse(readFileSync(join(root, 'workspace.yaml'), 'utf8')) as Record<string, unknown>;
+      expect(raw).toHaveProperty('conductor');
+      expect(raw).not.toHaveProperty('weaver');
+    });
+
+    it('saveConfig reverts weaver back to conductor on write, and the file still loads', async () => {
+      await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      const ctx = await load();
+      await ctx.saveConfig({
+        ...ctx.config,
+        weaver: { ...ctx.config.weaver, humanName: 'captain' },
+        models: { ...ctx.config.models, weaver: { runtime: 'codex', model: 'gpt-5' } },
+        defaults: { ...ctx.config.defaults, weaverDigestIntervalSec: 5 },
+      });
+      const raw = YAML.parse(readFileSync(join(root, 'workspace.yaml'), 'utf8')) as Record<string, unknown>;
+      expect((raw['conductor'] as Record<string, unknown>)['humanName']).toBe('captain');
+      expect((raw['models'] as Record<string, unknown>)['conductor']).toEqual({ runtime: 'codex', model: 'gpt-5' });
+      expect((raw['defaults'] as Record<string, unknown>)['conductorDigestIntervalSec']).toBe(5);
+      expect(raw).not.toHaveProperty('weaver');
+
+      // A pre-VS-263 daemon (which only ever knew `conductor`) reads exactly the same file back
+      // correctly — this is the literal rollback-safety claim.
+      const reloaded = await load();
+      expect(reloaded.config.weaver.humanName).toBe('captain');
+      expect(reloaded.config.models.weaver).toEqual({ runtime: 'codex', model: 'gpt-5' });
+      expect(reloaded.config.defaults.weaverDigestIntervalSec).toBe(5);
+    });
+
+    it('writeDaemonConfig reverts models.weaver back to models.conductor on write', () => {
+      loader.writeDaemonConfig(DaemonConfigSchema.parse({ models: { weaver: { runtime: 'claude', model: 'x' } } }), cfgDir);
+      const raw = YAML.parse(readFileSync(join(cfgDir, 'daemon.yaml'), 'utf8')) as Record<string, unknown>;
+      expect((raw['models'] as Record<string, unknown>)['conductor']).toEqual({ runtime: 'claude', model: 'x' });
+      expect(raw['models']).not.toHaveProperty('weaver');
+      // A pre-VS-263 daemon reads this back correctly too.
+      expect(loader.readDaemonConfig(cfgDir).models.weaver).toEqual({ runtime: 'claude', model: 'x' });
+    });
+  });
+
   // VS-77: a workspace written under the layered scheme is migrated on load, once, using the roles
   // the database still holds — migration 0012 stashes them before it drops the columns.
   describe('migrating onto the two model settings', () => {
@@ -197,14 +240,16 @@ describe('workspace loader', () => {
 
       const ctx = await load();
       expect(ctx.config.models).toEqual({
-        conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+        weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
         workers: { runtime: 'codex', model: 'gpt-5' },
         workerOptions: [],
       });
 
-      // Written back, and the layered keys are gone from the file for good.
+      // Written back, and the layered keys are gone from the file for good. The file itself keeps
+      // the legacy `conductor` spelling (VS-263 Decision 6 — rollback safety); only the in-memory
+      // config is `weaver`.
       const written = yamlOf();
-      expect(written['models']).toEqual(ctx.config.models);
+      expect(written['models']).toEqual({ conductor: ctx.config.models.weaver, workers: ctx.config.models.workers, workerOptions: ctx.config.models.workerOptions });
       expect(written['defaults']).not.toHaveProperty('runtime');
       expect(written['defaults']).not.toHaveProperty('model');
       expect(written['conductor']).not.toHaveProperty('runtime');
@@ -233,7 +278,7 @@ describe('workspace loader', () => {
       writeFileSync(file, YAML.stringify({ ...raw, defaults: { ...(raw['defaults'] as object), runtime: 'codex' }, models: { conductor: { runtime: 'opencode', model: 'grok' }, workers: { runtime: 'gemini', model: null } } }), 'utf8');
 
       const ctx = await load();
-      expect(ctx.config.models).toEqual({ conductor: { runtime: 'opencode', model: 'grok' }, workers: { runtime: 'gemini', model: null }, workerOptions: [] });
+      expect(ctx.config.models).toEqual({ weaver: { runtime: 'opencode', model: 'grok' }, workers: { runtime: 'gemini', model: null }, workerOptions: [] });
     });
 
     it('writes the most used runtime and leaves the question open when the roles disagreed', async () => {
@@ -368,7 +413,7 @@ describe('workspace loader', () => {
         expect(existsSync(join(dir, 'daemon.yaml'))).toBe(true);
         expect(cfg.models.workerOptions?.map((o) => o.id)).toEqual(['quick', 'standard', 'deep']);
         expect(cfg.models.workerOptions?.every((o) => o.runtime === null && o.model === null)).toBe(true);
-        expect(cfg.models.conductor).toBeUndefined();
+        expect(cfg.models.weaver).toBeUndefined();
         expect(cfg.models.workers).toBeUndefined();
         expect(cfg.models.workerOptions?.[0]?.description).toContain('Fastest. The fix is already located');
         expect(cfg.models.workerOptions?.[1]?.description).toContain('Default for specified work');
@@ -386,7 +431,7 @@ describe('workspace loader', () => {
         writeFileSync(join(dir, 'daemon.yaml'), 'version: 1\n', 'utf8');
         const cfg = loader.ensureFreshDaemonConfig(dir);
         expect(cfg.models.workerOptions).toBeUndefined();
-        expect(cfg.models.conductor).toBeUndefined();
+        expect(cfg.models.weaver).toBeUndefined();
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

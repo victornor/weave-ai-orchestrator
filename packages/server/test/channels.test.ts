@@ -68,7 +68,7 @@ async function boot(): Promise<{ h: Harness; adapter: ReturnType<typeof fakeAdap
   const adapter = fakeAdapter();
   harness.runtime.ctx.registries.channels.set('test', adapter);
   harness.runtime.ctx.config.channels = { test: {} };
-  harness.runtime.ctx.config.conductor.channels = ['test'];
+  harness.runtime.ctx.config.weaver.channels = ['test'];
   wireThreads(harness);
   manager = new ChannelManager(harness.runtime.ctx, harness.runtime.services);
   await manager.start();
@@ -263,7 +263,7 @@ describe('manager commands on every channel kind', () => {
     // only because ChannelManager now resolves one for the literal kind 'telegram' before starting
     // it (VS-125); the fake adapter itself does not care what the value is.
     harness.runtime.ctx.config.channels = Object.fromEntries(KINDS.map((k) => [k, k === 'telegram' ? { botToken: 'test-token' } : {}]));
-    harness.runtime.ctx.config.conductor.channels = [...KINDS];
+    harness.runtime.ctx.config.weaver.channels = [...KINDS];
     wireThreads(harness);
     manager = new ChannelManager(harness.runtime.ctx, harness.runtime.services);
     await manager.start();

@@ -11,7 +11,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import YAML from 'yaml';
-import { OcError, TICKET_KINDS, TICKET_PRIORITIES, type TicketKind, type TicketPriority } from '@agent-conductor/shared';
+import { OcError, TICKET_KINDS, TICKET_PRIORITIES, toLegacySpelling, type TicketKind, type TicketPriority } from '@agent-conductor/shared';
 import type { Actor, CoreServices } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { WORKSPACE_FILE } from './loader.js';
@@ -36,7 +36,10 @@ export function exportWorkspace(ctx: WorkspaceContext, opts: { out?: string; now
 
   const source = join(ctx.paths.root, WORKSPACE_FILE);
   if (existsSync(source)) copyFileSync(source, join(out, WORKSPACE_FILE));
-  else writeFileSync(join(out, WORKSPACE_FILE), YAML.stringify(ctx.config, { lineWidth: 0 }), 'utf8');
+  // VS-263 Decision 6: the common path above copies the real file byte-for-byte (whatever spelling
+  // it already has); this fallback serializes `ctx.config` fresh and must keep the same legacy
+  // spelling on disk — an export is exactly the artifact most likely to travel to an older daemon.
+  else writeFileSync(join(out, WORKSPACE_FILE), YAML.stringify(toLegacySpelling(ctx.config), { lineWidth: 0 }), 'utf8');
 
   const roles = copyRoles(ctx.paths.roles, join(out, 'roles'));
   const knowledgeFiles = copyKnowledge(ctx.paths.knowledge, join(out, 'knowledge'));

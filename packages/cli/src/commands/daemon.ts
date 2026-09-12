@@ -357,7 +357,9 @@ when the daemon is not answering and has to be replaced from here.`)
   const daemonModels = daemon.command('models').description('optional overlays for conductor, workers, and worker-options on every workspace (VS-185)');
   interface OverlaySetting { runtime?: string; model?: string | null; effort?: string }
   interface OverlayOption extends OverlaySetting { id?: string; description?: string }
-  interface DaemonModelsView { conductor: OverlaySetting | null; workers: OverlaySetting | null; workerOptions: OverlayOption[] | null }
+  interface DaemonModelsView { weaver: OverlaySetting | null; workers: OverlaySetting | null; workerOptions: OverlayOption[] | null }
+  // The CLI's own argument spelling ('conductor'/'workers') to the wire field it reads/writes (VS-263).
+  const wireField = (setting: 'conductor' | 'workers'): 'weaver' | 'workers' => (setting === 'conductor' ? 'weaver' : 'workers');
   const describeSetting = (s: OverlaySetting | null): string => {
     if (!s) return '(per workspace)';
     const parts = [s.runtime ?? '(unset)', s.model ?? '(runtime default)'];
@@ -372,7 +374,7 @@ when the daemon is not answering and has to be replaced from here.`)
       const current = await client.get<DaemonModelsView>('/api/daemon/models');
       emit(current, () => {
         fields([
-          ['conductor', describeSetting(current.conductor)],
+          ['conductor', describeSetting(current.weaver)],
           ['workers', describeSetting(current.workers)],
           ...((current.workerOptions ?? []).map((o) => ['option', o.runtime ? `${o.id ?? '?'} — ${o.description ?? ''} (${describeSetting(o)})` : `${o.id ?? '?'} — ${o.description ?? ''} (no runtime chosen)`] as [string, string])),
         ]);
@@ -389,14 +391,15 @@ when the daemon is not answering and has to be replaced from here.`)
     .description('fill or clear one daemon overlay')
     .action(async (setting: string, opts: Record<string, string | boolean | undefined>, command: Command) => run(async () => {
       if (setting !== 'conductor' && setting !== 'workers') throw new Error(`unknown setting ${setting}: expected conductor or workers`);
+      const field = wireField(setting);
       const { client } = await session(command, { workspace: 'none' });
       if (opts['clear'] === true) {
-        const result = await client.put<DaemonModelsView>('/api/daemon/models', { [setting]: null });
+        const result = await client.put<DaemonModelsView>('/api/daemon/models', { [field]: null });
         emit(result, () => write(`${style.ok('cleared')} ${setting} overlay`));
         return;
       }
       const current = await client.get<DaemonModelsView>('/api/daemon/models');
-      const next: OverlaySetting = { ...(current[setting] ?? {}) };
+      const next: OverlaySetting = { ...(current[field] ?? {}) };
       if (typeof opts['runtime'] === 'string') next.runtime = opts['runtime'];
       if (typeof opts['model'] === 'string') next.model = opts['model'] === 'default' ? null : opts['model'];
       if (typeof opts['effort'] === 'string') {
@@ -404,8 +407,8 @@ when the daemon is not answering and has to be replaced from here.`)
         else next.effort = opts['effort'];
       }
       if (!next.runtime) throw new Error('pass --runtime (or --clear)');
-      const result = await client.put<DaemonModelsView>('/api/daemon/models', { [setting]: next });
-      emit(result, () => write(`${style.ok('updated')} ${setting} overlay = ${describeSetting(result[setting])}`));
+      const result = await client.put<DaemonModelsView>('/api/daemon/models', { [field]: next });
+      emit(result, () => write(`${style.ok('updated')} ${setting} overlay = ${describeSetting(result[field])}`));
     }));
   const overlayOptions = daemonModels.command('options').description('named worker-model options that override every workspace catalog');
   overlayOptions

@@ -23,7 +23,7 @@ const spec: RoleSpec = {
   id: 'api-backend', name: 'Backend Engineer', project: 'api', charterSummary: 'Owns the api service.',
   scope: 'Backend work in the api repo.', responsibilities: ['Implement handlers'], capabilities: ['node'],
   exclusions: ['frontend'], rules: ['Run the tests'], runtime: 'claude', model: null, sessionPolicy: 'per_ticket',
-  maxWorkers: 2, permission: { mode: 'auto', allowed: [], denied: [] }, secrets: [], createdBy: 'conductor',
+  maxWorkers: 2, permission: { mode: 'auto', allowed: [], denied: [] }, secrets: [], createdBy: 'weaver',
 } as RoleSpec;
 
 describe('prompt rendering', () => {
@@ -32,7 +32,7 @@ describe('prompt rendering', () => {
   let ticketId: string;
 
   beforeEach(() => {
-    h = makeHarness({ config: { conductor: { runtime: 'claude', model: null, channels: ['web'], humanName: 'Victor' } as never } });
+    h = makeHarness({ config: { weaver: { runtime: 'claude', model: null, channels: ['web'], humanName: 'Victor' } as never } });
     ticketId = newId();
     const now = nowIso();
     h.db.insert('tickets', {
@@ -50,7 +50,7 @@ describe('prompt rendering', () => {
 
   it('addresses the human by the configured name, else captain', () => {
     expect(humanName(h.ctx)).toBe('Victor');
-    h.ctx.config = { ...h.ctx.config, conductor: { ...h.ctx.config.conductor, humanName: undefined } };
+    h.ctx.config = { ...h.ctx.config, weaver: { ...h.ctx.config.weaver, humanName: undefined } };
     expect(humanName(h.ctx)).toBe('captain');
   });
 

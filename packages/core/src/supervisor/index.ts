@@ -482,7 +482,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   }
 
   function conductorDigest(): void {
-    const interval = (ctx.config.defaults.conductorDigestIntervalSec ?? 120) * 1000;
+    const interval = (ctx.config.defaults.weaverDigestIntervalSec ?? 120) * 1000;
     if (Date.now() - lastDigestAt < interval) return;
     const lastSeq = Number(meta('supervisor:digest_seq') ?? 0);
     const events = ctx.events.since(lastSeq, 200);

@@ -62,7 +62,7 @@ export function workspaceRoutes(deps: AppDeps): Hono<AppEnv> {
 
 /**
  * Merge a config patch key by key. A shallow spread would replace a whole block — `defaults`,
- * `conductor`, `presentation` — and the schema would then refill the keys the client did not send
+ * `weaver`, `presentation` — and the schema would then refill the keys the client did not send
  * with their defaults, silently resetting settings nobody touched. Lists are replaced wholesale.
  */
 function deepMerge(base: unknown, patch: unknown): unknown {

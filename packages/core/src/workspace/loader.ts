@@ -6,6 +6,7 @@ import { openDb, newId, nowIso } from '@agent-conductor/db';
 import { configDir as resolveConfigDir } from '@agent-conductor/release';
 import {
   DaemonConfigSchema, DEFAULT_KNOWLEDGE_BUDGETS, DEFAULT_WORKER_TIERS, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, WorkspaceRegistrySchema, OcError,
+  daemonConfigToLegacySpelling, toLegacySpelling,
   type DaemonConfig, type KnowledgeBudgets, type WorkspaceConfig, type WorkspaceRegistry,
 } from '@agent-conductor/shared';
 import type { Registries, WorkspaceContext } from '../context.js';
@@ -64,6 +65,16 @@ function readYamlFile(path: string): unknown {
 function writeYamlFile(path: string, value: unknown): void {
   mkdirSync(join(path, '..'), { recursive: true });
   writeFileSync(path, YAML.stringify(value, { lineWidth: 0 }), 'utf8');
+}
+
+/**
+ * VS-263 Decision 6: every write of `workspace.yaml` funnels through here, so the on-disk bytes keep
+ * the pre-VS-263 spelling (`toLegacySpelling`) even though `config` itself, and everything derived
+ * from it, is canonically `weaver`. Keeps `initWorkspace`, the two one-time migrations below, and
+ * `saveConfig` from having to remember this individually.
+ */
+function writeWorkspaceYaml(file: string, config: WorkspaceConfig): void {
+  writeYamlFile(file, toLegacySpelling(config));
 }
 
 // ---------- ${ENV} indirection ----------
@@ -189,9 +200,9 @@ class Loader implements WorkspaceLoader {
     if (existsSync(file)) throw new OcError('conflict', `workspace.yaml already exists at ${file}`);
     const config = WorkspaceConfigSchema.parse({ version: 1, id: init.id, name: init.name, ticketPrefix: init.ticketPrefix });
     ensureLayout(root);
-    writeYamlFile(file, config);
+    writeWorkspaceYaml(file, config);
 
-    const humanName = config.conductor.humanName ?? 'captain';
+    const humanName = config.weaver.humanName ?? 'captain';
     for (const [rel, body] of KNOWLEDGE_SKELETONS) {
       const path = join(root, 'knowledge', rel);
       if (!existsSync(path)) { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, body({ name: config.name, humanName, budgets: config.defaults.knowledgeBudgetTokens }), 'utf8'); }
@@ -245,7 +256,7 @@ class Loader implements WorkspaceLoader {
         try { roleRows = JSON.parse(stashed.value) as RoleRuntimeRow[]; } catch { roleRows = []; }
         const migration = deriveModelSettings(raw as Record<string, unknown>, roleRows);
         config.models = migration.models;
-        writeYamlFile(file, unresolveEnvRefs(config, envBack));
+        writeWorkspaceYaml(file, unresolveEnvRefs(config, envBack));
         log.info(migrationLogFields(migration), `model settings derived: ${migrationSummary(migration)}`);
         if (migration.ambiguous) recordPendingMigration(db, ws.id, migration);
       }
@@ -268,7 +279,7 @@ class Loader implements WorkspaceLoader {
       }
       if (plan.patch) {
         config.channels['telegram'] = { ...(config.channels['telegram'] ?? {}), ...plan.patch };
-        writeYamlFile(file, unresolveEnvRefs(config, envBack));
+        writeWorkspaceYaml(file, unresolveEnvRefs(config, envBack));
         log.info({ patch: plan.patch }, 'telegram allowlist migrated');
       }
       db.run('INSERT INTO meta (key, value) VALUES (?, ?)', ['telegram_allowlist_migrated', '1']);
@@ -278,7 +289,7 @@ class Loader implements WorkspaceLoader {
     const models = effectiveModels(opts.daemon, config);
     const runtimeIds = new Set<string>([
       ...opts.registries.runtimes.keys(),
-      models.conductor.runtime,
+      models.weaver.runtime,
       models.workers.runtime,
       ...models.workerOptions.map((o) => o.runtime).filter((id): id is string => id != null),
     ]);
@@ -311,7 +322,7 @@ class Loader implements WorkspaceLoader {
       daemonConfigDir: opts.daemonConfigDir,
       async saveConfig(next: WorkspaceConfig): Promise<void> {
         const validated = WorkspaceConfigSchema.parse(next);
-        writeYamlFile(file, unresolveEnvRefs(validated, envBack));
+        writeWorkspaceYaml(file, unresolveEnvRefs(validated, envBack));
         ctx.config = validated;
         writeWtConfig(paths.wtConfig, validated.projects);
         ctx.db.update('workspaces', ctx.workspaceId, { name: validated.name, ticketPrefix: validated.ticketPrefix, updatedAt: nowIso() });
@@ -342,7 +353,9 @@ class Loader implements WorkspaceLoader {
   }
 
   writeDaemonConfig(cfg: DaemonConfig, dir?: string): void {
-    writeYamlFile(join(dir ?? configDir(), 'daemon.yaml'), DaemonConfigSchema.parse(cfg));
+    // VS-263 Decision 6: daemon.yaml keeps the legacy `conductor` spelling on disk for now
+    // (rollback safety) — see `daemonConfigToLegacySpelling`'s doc comment before removing this.
+    writeYamlFile(join(dir ?? configDir(), 'daemon.yaml'), daemonConfigToLegacySpelling(DaemonConfigSchema.parse(cfg)));
   }
 
   ensureFreshDaemonConfig(dir?: string): DaemonConfig {

@@ -64,9 +64,9 @@ export class ChannelManager {
 
   constructor(private ctx: WorkspaceContext, private services: CoreServices) {}
 
-  /** Every channel named under `channels:` or in `conductor.channels`. */
+  /** Every channel named under `channels:` or in `weaver.channels`. */
   configuredKinds(): string[] {
-    return [...new Set([...Object.keys(this.ctx.config.channels), ...this.ctx.config.conductor.channels])];
+    return [...new Set([...Object.keys(this.ctx.config.channels), ...this.ctx.config.weaver.channels])];
   }
 
   async start(): Promise<void> {

@@ -354,14 +354,14 @@ describe('running commands against a stubbed daemon', () => {
   });
 
   it('shows both model settings', async () => {
-    const models = { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'codex', model: null, effort: 'high' } };
+    const models = { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'codex', model: null, effort: 'high' } };
     const seen = stubFetch({ '/api/w/acme/models': models });
     await buildProgram().parseAsync([...base, 'models']);
     expect(seen).toContain('GET /api/w/acme/models');
   });
 
   it('sends the whole block with one setting changed, so the other is not dropped', async () => {
-    const models = { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } };
+    const models = { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } };
     let put: unknown = null;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       if ((init?.method ?? 'GET') === 'PUT') { put = JSON.parse(String(init?.body)); return new Response(JSON.stringify(put), { status: 200 }); }
@@ -369,13 +369,13 @@ describe('running commands against a stubbed daemon', () => {
     }) as typeof fetch;
     await buildProgram().parseAsync([...base, 'models', 'set', 'workers', '--runtime', 'codex', '--model', 'gpt-5']);
     expect(put).toEqual({
-      conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+      weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
       workers: { runtime: 'codex', model: 'gpt-5' },
     });
   });
 
   it('adds a worker option by GET-then-PUT of the whole block (VS-162)', async () => {
-    const models = { conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] as unknown[] };
+    const models = { weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] as unknown[] };
     let put: unknown = null;
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
       if ((init?.method ?? 'GET') === 'PUT') { put = JSON.parse(String(init?.body)); return new Response(JSON.stringify(put), { status: 200 }); }
@@ -383,7 +383,7 @@ describe('running commands against a stubbed daemon', () => {
     }) as typeof fetch;
     await buildProgram().parseAsync([...base, 'models', 'options', 'add', '--id', 'cheap', '--description', 'Scouts.', '--runtime', 'opencode', '--model', 'glm-4.6']);
     expect(put).toEqual({
-      conductor: { runtime: 'claude', model: null },
+      weaver: { runtime: 'claude', model: null },
       workers: { runtime: 'claude', model: null },
       workerOptions: [{ id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' }],
     });
@@ -405,9 +405,9 @@ describe('running commands against a stubbed daemon', () => {
   it('refuses models set when the control is locked by a daemon overlay (VS-185)', async () => {
     stubFetch({
       '/api/w/acme/models': {
-        conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+        weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
         workers: { runtime: 'claude', model: null },
-        locked: { conductor: true, workers: false, workerOptions: false },
+        locked: { weaver: true, workers: false, workerOptions: false },
       },
     });
     await buildProgram().parseAsync([...base, 'models', 'set', 'conductor', '--model', 'claude-opus-5']);
@@ -417,7 +417,7 @@ describe('running commands against a stubbed daemon', () => {
 
   it('daemon models set sends the overlay (VS-185)', async () => {
     const seen = stubFetch({
-      '/api/daemon/models': { conductor: null, workers: null, workerOptions: null },
+      '/api/daemon/models': { weaver: null, workers: null, workerOptions: null },
     });
     let put: unknown = null;
     const inner = globalThis.fetch;
@@ -429,14 +429,14 @@ describe('running commands against a stubbed daemon', () => {
       return inner(input, init);
     }) as typeof fetch;
     await buildProgram().parseAsync([...base, 'daemon', 'models', 'set', 'conductor', '--runtime', 'claude', '--model', 'claude-fable-5-1']);
-    expect(put).toEqual({ conductor: { runtime: 'claude', model: 'claude-fable-5-1' } });
+    expect(put).toEqual({ weaver: { runtime: 'claude', model: 'claude-fable-5-1' } });
     expect(seen.some((s) => s.includes('/api/daemon/models'))).toBe(true);
   });
 
   it('prints that an unconfigured worker option has no runtime chosen (VS-236)', async () => {
     stubFetch({
       '/api/w/acme/models': {
-        conductor: { runtime: 'claude', model: null },
+        weaver: { runtime: 'claude', model: null },
         workers: { runtime: 'claude', model: null },
         workerOptions: [{ id: 'quick', description: 'Fastest.', runtime: null, model: null }],
       },
@@ -452,7 +452,7 @@ describe('running commands against a stubbed daemon', () => {
   it('prints the same for a daemon overlay option with runtime null (VS-236)', async () => {
     stubFetch({
       '/api/daemon/models': {
-        conductor: null,
+        weaver: null,
         workers: null,
         workerOptions: [{ id: 'deep', description: 'Cause unknown.', runtime: null, model: null }],
       },
@@ -466,7 +466,7 @@ describe('running commands against a stubbed daemon', () => {
   });
 
   it('clears a model back to the runtime default', async () => {
-    const models = { conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: 'claude-opus-5' } };
+    const models = { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: 'claude-opus-5' } };
     let put: { workers?: { model?: string | null } } | null = null;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       if ((init?.method ?? 'GET') === 'PUT') { put = JSON.parse(String(init?.body)); return new Response(JSON.stringify(put), { status: 200 }); }

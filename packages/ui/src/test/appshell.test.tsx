@@ -103,7 +103,7 @@ vi.mock('../api/hooks', () => ({
   useTransitionTicket: () => ({ mutate: vi.fn() }),
   useWorkspaceSummary: () => ({ data: { workspace: { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME' }, config: state.config }, isError: false, error: null, refetch: vi.fn() }),
   useWorkspaces: () => ({ data: state.workspaces }),
-  useDaemonModels: () => ({ data: { conductor: null, workers: null, workerOptions: state.daemonWorkerOptions }, isLoading: false }),
+  useDaemonModels: () => ({ data: { weaver: null, workers: null, workerOptions: state.daemonWorkerOptions }, isLoading: false }),
 }));
 
 const { AppShell } = await import('../app/AppShell');

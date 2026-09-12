@@ -495,12 +495,12 @@ describe('real core services over HTTP', () => {
     const app = createApp(deps);
     const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
 
-    const unlocked = { conductor: false, workers: false, workerOptions: false };
+    const unlocked = { weaver: false, workers: false, workerOptions: false };
     const before = await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json();
-    expect(before).toEqual({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [], locked: unlocked });
+    expect(before).toEqual({ weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [], locked: unlocked });
 
     const next = {
-      conductor: { runtime: 'claude', model: 'claude-fable-5-1' },
+      weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
       workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' },
     };
     const put = await app.fetch(new Request(`${base}/models`, { method: 'PUT', headers: H, body: JSON.stringify(next) }));
@@ -509,26 +509,47 @@ describe('real core services over HTTP', () => {
     expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json()).toEqual({ ...next, workerOptions: [], locked: unlocked });
   });
 
+  it('accepts a legacy conductor-keyed body and responds with weaver (VS-263)', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+
+    const put = await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H,
+      body: JSON.stringify({ conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'codex', model: 'gpt-5' } }),
+    }));
+    expect(put.status).toBe(200);
+    const body = await put.json();
+    expect(body).toMatchObject({ weaver: { runtime: 'claude', model: 'claude-fable-5-1' } });
+    expect(body).not.toHaveProperty('conductor');
+
+    const both = await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H,
+      body: JSON.stringify({ conductor: { runtime: 'claude' }, weaver: { runtime: 'codex' }, workers: { runtime: 'codex' } }),
+    }));
+    expect(both.status).toBe(400);
+  });
+
   it('keeps workerOptions when PUT omits them and replaces when they are sent (VS-162)', async () => {
     const { deps, harness } = boot();
     const app = createApp(deps);
     const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
     const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
     const withOpt = {
-      conductor: { runtime: 'claude', model: null },
+      weaver: { runtime: 'claude', model: null },
       workers: { runtime: 'claude', model: null },
       workerOptions: [cheap],
     };
     expect((await app.fetch(new Request(`${base}/models`, { method: 'PUT', headers: H, body: JSON.stringify(withOpt) }))).status).toBe(200);
     const omitted = await app.fetch(new Request(`${base}/models`, {
       method: 'PUT', headers: H,
-      body: JSON.stringify({ conductor: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } }),
+      body: JSON.stringify({ weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } }),
     }));
     expect(omitted.status).toBe(200);
     expect(await omitted.json()).toMatchObject({ workerOptions: [cheap] });
     const cleared = await app.fetch(new Request(`${base}/models`, {
       method: 'PUT', headers: H,
-      body: JSON.stringify({ conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] }),
+      body: JSON.stringify({ weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] }),
     }));
     expect(await cleared.json()).toMatchObject({ workerOptions: [] });
   });
@@ -541,7 +562,7 @@ describe('real core services over HTTP', () => {
     const res = await app.fetch(new Request(`${base}/models`, {
       method: 'PUT', headers: H,
       body: JSON.stringify({
-        conductor: { runtime: 'claude', model: null },
+        weaver: { runtime: 'claude', model: null },
         workers: { runtime: 'claude', model: null },
         workerOptions: [dup, { ...dup, description: 'b' }],
       }),
@@ -555,11 +576,11 @@ describe('real core services over HTTP', () => {
     const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
     const res = await app.fetch(new Request(`${base}/models`, {
       method: 'PUT', headers: H,
-      body: JSON.stringify({ conductor: { runtime: '', model: null }, workers: { runtime: 'claude', model: null } }),
+      body: JSON.stringify({ weaver: { runtime: '', model: null }, workers: { runtime: 'claude', model: null } }),
     }));
     expect(res.status).toBe(400);
     expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json())
-      .toMatchObject({ conductor: { runtime: 'claude' } });
+      .toMatchObject({ weaver: { runtime: 'claude' } });
   });
 
   it('routes no way to set a runtime or a model anywhere else', async () => {

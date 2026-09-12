@@ -11,7 +11,7 @@ vi.mock('../lib/theme', () => ({ useTheme: () => ['dark', vi.fn()] }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
   useRuntimes: () => ({ data: state.runtimes }),
-  useModels: () => ({ data: { conductor: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } }, isLoading: false }),
+  useModels: () => ({ data: { weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } }, isLoading: false }),
   useSetModels: () => ({ mutate: vi.fn(), isPending: false, error: null }),
   useRuntimeModels: () => ({ data: [] }),
   useProjects: () => ({ data: [], isLoading: false }),
@@ -27,7 +27,7 @@ vi.mock('../api/hooks', () => ({
   useDaemonUpgrade: () => ({ data: undefined, isError: false }),
   useTranscription: () => ({ data: { backend: 'chrome', model: null, voxtype: { installed: false, models: [] } }, isLoading: false }),
   useSetTranscription: () => ({ mutate: vi.fn(), isPending: false }),
-  useDaemonModels: () => ({ data: { conductor: null, workers: null, workerOptions: null }, isLoading: false }),
+  useDaemonModels: () => ({ data: { weaver: null, workers: null, workerOptions: null }, isLoading: false }),
   useSetDaemonModels: () => ({ mutate: vi.fn(), isPending: false, error: null }),
   useRoutines: () => ({ data: [], isLoading: false, isError: false, refetch: vi.fn() }),
   useRoutineUsage: () => ({ data: { tokensIn: 0, tokensOut: 0, tokensCached: 0, runs: 0, costCents: 0, costReportedCents: 0, window: '7d' }, isLoading: false }),

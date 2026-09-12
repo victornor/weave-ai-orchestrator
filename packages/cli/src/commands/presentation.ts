@@ -40,7 +40,7 @@ export function register(program: Command): void {
       emit({ presentation: config, desired }, () => {
         fields([
           ['default', String(config?.['default'] ?? 'headless')],
-          ['conductor', JSON.stringify(config?.['conductor'] ?? {})],
+          ['conductor', JSON.stringify(config?.['weaver'] ?? {})],
           ['workers', JSON.stringify(config?.['workers'] ?? {})],
         ]);
         const workers = items<Record<string, unknown>>(desired['workers']);

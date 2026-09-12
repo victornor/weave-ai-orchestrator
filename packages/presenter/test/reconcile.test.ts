@@ -111,13 +111,13 @@ describe('reconciler', () => {
     expect(r.handles().map((h) => h.agentId)).toEqual(['w-1', 'w-2']);
   });
 
-  it('ensures the weaver through its own hook when a conductor block exists', async () => {
+  it('ensures the weaver through its own hook when a weaver block exists', async () => {
     const surface = fakeSurface();
     const r = createReconciler({ surface, ctx: ctxOf(), log: vi.fn() });
     await r.sync({
       weaver: worker('c-1', { kind: 'weaver', ticketIdentifier: null }),
       workers: [],
-      config: { workers: { surface: 'fake' }, conductor: { surface: 'fake', terminal: 'foot' } },
+      config: { workers: { surface: 'fake' }, weaver: { surface: 'fake', terminal: 'foot' } },
     });
     expect(surface.calls[0]).toMatchObject({ op: 'ensureConductor', cfg: { terminal: 'foot' } });
   });

@@ -255,13 +255,16 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     return name;
   }
 
-  // `proposalApproval` is `APPROVAL_OWNERS` (workspace.yaml policy, still spelled 'conductor' —
-  // VS-263's deferred config-key surface), but this function's callers hand its result straight to
-  // `decisions.create({ owner, ... })`, whose `owner` is `DECISION_OWNERS` ('human'|'weaver'). The
-  // translation happens here, once, rather than at every call site.
+  // `proposalApproval` is `APPROVAL_OWNERS`, not `DECISION_OWNERS` ('human'|'weaver'), so this
+  // function's callers hand its result straight to `decisions.create({ owner, ... })` only after this
+  // translation. `fromProject` (a project's `policies_json`) can still be the legacy `'conductor'`
+  // spelling — VS-263 deliberately keeps writing it under that spelling for rollback safety (Decision
+  // 6) — while `ctx.config.defaults.proposalApproval` is always schema-normalized to `'weaver'`
+  // already. This one line handles both: unchanged since before VS-263, because it was already
+  // correct for both sources.
   function approvalOwner(t: Ticket): 'human' | 'weaver' | 'none' {
     const p = project(t.projectId);
-    const fromProject = (p?.policies as { proposalApproval?: 'human' | 'conductor' | 'none' } | null)?.proposalApproval;
+    const fromProject = (p?.policies as { proposalApproval?: 'human' | 'conductor' | 'weaver' | 'none' } | null)?.proposalApproval;
     const raw = fromProject ?? ctx.config.defaults.proposalApproval;
     return raw === 'conductor' ? 'weaver' : raw;
   }

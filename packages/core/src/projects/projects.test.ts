@@ -125,6 +125,27 @@ describe('projects', () => {
     expect(updated.policies.taskApproval).toBe('human');
   });
 
+  it('a policies patch leaves the project\'s other fields alone (VS-303)', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, cfg(src, {
+      setupCommand: 'pnpm install',
+      maxWorkers: 6,
+      landingBranch: 'main',
+      policies: { requireCi: true, mergeMethod: 'rebase', deliveryMode: 'local-branch' },
+    }));
+
+    // The UI spreads the existing policies into every change (a PATCH replaces `policies` wholesale),
+    // so the body carries the siblings; the fields outside `policies` are never in the body at all.
+    const updated = await projects.update(HUMAN, project.id, {
+      policies: { requireCi: false, mergeMethod: 'rebase', deliveryMode: 'local-branch' },
+    });
+
+    expect(updated.policies).toEqual({ requireCi: false, mergeMethod: 'rebase', deliveryMode: 'local-branch' });
+    expect(updated.setupCommand).toBe('pnpm install');
+    expect(updated.maxWorkers).toBe(6);
+    expect(updated.landingBranch).toBe('main');
+  });
+
   it('sets, changes and clears a landing branch after creation (VS-122)', async () => {
     const src = await sourceRepo();
     await git(['checkout', '-b', 'edge'], src);

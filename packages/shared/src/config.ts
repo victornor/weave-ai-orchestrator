@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DELIVERY_MODES, MERGE_METHODS, APPROVAL_OWNERS, SESSION_POLICIES, PERMISSION_MODES, WORKTREE_PROVIDERS } from './enums.js';
+import { DELIVERY_MODES, MERGE_METHODS, APPROVAL_OWNERS, ARCHIVE_COMMITS, SESSION_POLICIES, PERMISSION_MODES, WORKTREE_PROVIDERS } from './enums.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'kebab-case slug');
 const envRef = z.string().regex(/^\$\{[A-Z0-9_]+\}$/, 'must be an ${ENV_VAR} reference, never a literal secret');
@@ -43,7 +43,7 @@ export const ProjectPoliciesSchema = z.object({
   deliveryMode: z.enum(DELIVERY_MODES).default('pr'),
   autoMergeDefault: z.boolean().default(false),
   taskApproval: legacyApprovalOwner.default('none'),
-  archiveCommit: z.enum(['push', 'pr', 'local']).default('push'),
+  archiveCommit: z.enum(ARCHIVE_COMMITS).default('push'),
   requireCi: z.boolean().default(true),
   /** How many of this project's tickets may be in the active merge step at once (PLAN §11.4). */
   mergeConcurrency: z.number().int().min(1).max(8).default(1),

@@ -453,6 +453,16 @@ export function usePatchProject(): UseMutationResult<Project, Error, { id: strin
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, patch }) => api.ws<Project>(ws, `/projects/${id}`, { method: 'PATCH', body: patch }),
+    // A project PATCH replaces `policies` wholesale, so two edits made before a refetch lands would
+    // both be computed from the same stale row and the second would drop the first (VS-303). Advance
+    // the cached row on success, and roll it back on error so a rejected edit does not linger.
+    onMutate: async ({ id, patch }) => {
+      await qc.cancelQueries({ queryKey: qk.projects(ws) });
+      const prev = qc.getQueryData<Project[]>(qk.projects(ws));
+      if (prev) qc.setQueryData(qk.projects(ws), prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(qk.projects(ws), ctx.prev); },
     onSuccess: () => void qc.invalidateQueries({ queryKey: qk.projects(ws) }),
   });
 }

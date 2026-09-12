@@ -12,7 +12,6 @@
  * positions out itself; these node objects are the single source of truth for where things are.
  */
 import {
-  forceCollide,
   forceLink,
   forceManyBody,
   forceSimulation,
@@ -57,6 +56,12 @@ const CHIP_PAD_X = 20;
 const CHIP_CHAR_W = 6.5;
 const CHIP_ACCENT = 3;
 
+/** `rectCollide`'s breathing room and correction strength — see `simulation.test.ts`'s
+ *  zero-overlap-after-settle assertion, which is what these were tuned against. */
+const COLLIDE_PADDING = 16;
+const COLLIDE_STRENGTH = 1.4;
+const COLLIDE_ITERATIONS = 6;
+
 /** Labeled-chip dimensions in graph units. Width follows a truncated title; hubs are taller. */
 export function chipSize(node: Pick<GraphNode, 'kind' | 'degree' | 'title'>): { width: number; height: number } {
   const height = node.kind === 'hub' ? CHIP_H_HUB : CHIP_H_DOC;
@@ -76,6 +81,75 @@ export function chipsOverlap(a: SimNode, b: SimNode): boolean {
   const wa = chipSize(a);
   const wb = chipSize(b);
   return Math.abs(a.x - b.x) < (wa.width + wb.width) / 2 && Math.abs(a.y - b.y) < (wa.height + wb.height) / 2;
+}
+
+/**
+ * Where the line from a chip's centre `(cx, cy)` toward `(tx, ty)` crosses that chip's own
+ * rectangle boundary — the replacement for trimming an edge by `nodeRadius()`'s circle. Whichever
+ * axis the ray reaches its half-extent first decides the crossing point, so a near-vertical
+ * approach into a wide, short chip trims at the real half-height rather than at a much larger
+ * circle radius derived from the chip's longer dimension.
+ */
+export function rectIntersection(cx: number, cy: number, halfW: number, halfH: number, tx: number, ty: number): Point {
+  const dx = tx - cx;
+  const dy = ty - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  const scale = Math.min(
+    dx !== 0 ? halfW / Math.abs(dx) : Infinity,
+    dy !== 0 ? halfH / Math.abs(dy) : Infinity,
+  );
+  return { x: cx + dx * scale, y: cy + dy * scale };
+}
+
+/**
+ * Pairwise axis-aligned separation: push two overlapping chips apart along the axis of least
+ * penetration (the standard AABB minimum-translation-vector choice), using the same rectangle
+ * test `chipsOverlap` already runs — but as a correction each tick rather than only a check.
+ * Replaces `forceCollide`'s circular radius, which under-resolved overlap for wide, short chips.
+ *
+ * Applies directly to position, the same way `forceCollide`'s own constraint solver does (rather
+ * than only nudging velocity), for `iterations` passes per tick — `forceCollide`'s default is 1,
+ * but this project already found that too few for many same-group siblings converging on one
+ * centroid at once (see `clusterForce`'s doc comment), which is why it raised `forceCollide` to 4;
+ * this keeps that same iteration count.
+ */
+function rectCollide(padding: number, strength: number, iterations: number): Force<SimNode, undefined> {
+  let nodes: SimNode[] = [];
+  const force = (alpha: number): void => {
+    for (let pass = 0; pass < iterations; pass++) {
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i]!;
+          const b = nodes[j]!;
+          if (a.fx != null && a.fy != null && b.fx != null && b.fy != null) continue;
+          const wa = chipSize(a);
+          const wb = chipSize(b);
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const overlapX = (wa.width + wb.width) / 2 + padding - Math.abs(dx);
+          const overlapY = (wa.height + wb.height) / 2 + padding - Math.abs(dy);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          const aFixed = a.fx != null && a.fy != null;
+          const bFixed = b.fx != null && b.fy != null;
+          const share = aFixed || bFixed ? 1 : 0.5;
+          const k = alpha * strength;
+          if (overlapX < overlapY) {
+            const push = (overlapX * k) || 0.01;
+            if (!aFixed) a.x -= push * share * (dx < 0 ? -1 : 1);
+            if (!bFixed) b.x += push * share * (dx < 0 ? -1 : 1);
+          } else {
+            const push = (overlapY * k) || 0.01;
+            if (!aFixed) a.y -= push * share * (dy < 0 ? -1 : 1);
+            if (!bFixed) b.y += push * share * (dy < 0 ? -1 : 1);
+          }
+        }
+      }
+    }
+  };
+  force.initialize = (ns: SimNode[]): void => {
+    nodes = ns;
+  };
+  return force;
 }
 
 /**
@@ -280,10 +354,11 @@ export function createSimulation(model: GraphModel, size: Size, options: Simulat
   const sim: Simulation<SimNode, SimLink> = forceSimulation<SimNode, SimLink>(nodes)
     .force('link', forceLink<SimNode, SimLink>(links).id((d) => d.id).distance(linkDistance).strength(0.5))
     .force('charge', forceManyBody<SimNode>().strength(-420).distanceMax(800))
-    // More margin and more relaxation passes than d3's defaults: with many same-group siblings
-    // converging on one centroid at once (see `clusterForce`), two iterations were not enough
-    // to keep their chips apart before the layout settled.
-    .force('collide', forceCollide<SimNode>((d) => d.radius + 20).iterations(4))
+    // Rectangle-aware separation (VS-267), not `forceCollide`'s circular radius: a wide, short
+    // chip's real boundary is nothing like the circle that used to approximate it, so overlap
+    // between such chips went under-resolved. Same padding and iteration count `forceCollide`
+    // used, tuned against `simulation.test.ts`'s zero-overlap-after-settle assertion.
+    .force('collide', rectCollide(COLLIDE_PADDING, COLLIDE_STRENGTH, COLLIDE_ITERATIONS))
     // A pull towards the centre rather than `forceCenter`, which recentres the whole mean each tick
     // and so drags every node whenever one of them is pinned.
     .force('x', forceX<SimNode>(centre.x).strength(0.02))

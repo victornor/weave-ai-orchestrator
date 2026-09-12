@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildModel } from './model';
-import { chipsOverlap, createSimulation, reconcileNodes, suppressedLabels, type SimNode } from './simulation';
+import { chipsOverlap, createSimulation, reconcileNodes, rectIntersection, suppressedLabels, type SimNode } from './simulation';
 import type { KnowledgeGraph } from '../../api/types';
 
 /**
@@ -129,5 +129,48 @@ describe('which label a backstop suppresses when two chips still overlap', () =>
     const b = suppressedLabels([at('x', 'doc', 3, 0, 0), at('y', 'doc', 3, 0, 0)]);
     expect(a).toEqual(b);
     expect(a.size).toBe(1);
+  });
+});
+
+describe('where an edge crosses a chip boundary', () => {
+  // A wide, short chip: halfW 96.5, halfH 12 — the exact shape VS-264 measured (a 20-character
+  // document chip, ~193x24 units) where a circumscribed circle is furthest from the truth.
+  const halfW = 96.5;
+  const halfH = 12;
+
+  it('trims at the half-width for a purely horizontal approach', () => {
+    const p = rectIntersection(0, 0, halfW, halfH, 500, 0);
+    expect(p.x).toBeCloseTo(halfW, 6);
+    expect(p.y).toBeCloseTo(0, 6);
+  });
+
+  it('trims at the half-height for a purely vertical approach', () => {
+    const p = rectIntersection(0, 0, halfW, halfH, 0, 500);
+    expect(p.x).toBeCloseTo(0, 6);
+    expect(p.y).toBeCloseTo(halfH, 6);
+  });
+
+  it('trims at the real half-height for a near-vertical approach, not at a circle\'s radius', () => {
+    // Mostly vertical (a small horizontal nudge) into a wide/short chip: the case the ticket
+    // named as the one a circular `nodeRadius()` approximation fails worst — a circle derived
+    // from `max(width, height)/2` would trim at ~96.5, leaving the edge ~84 units short.
+    const p = rectIntersection(0, 0, halfW, halfH, 5, 500);
+    expect(p.y).toBeCloseTo(halfH, 6);
+    expect(Math.abs(p.x)).toBeLessThan(halfW);
+    // Explicitly not the old circle-radius distance from the centre.
+    expect(Math.hypot(p.x, p.y)).not.toBeCloseTo(Math.max(halfW, halfH), 1);
+  });
+
+  it('trims at whichever axis a diagonal approach reaches first', () => {
+    // A 45-degree approach reaches the (much closer) vertical half-height boundary first for
+    // this chip's proportions, exactly the axis a circle's uniform radius cannot distinguish.
+    const p = rectIntersection(0, 0, halfW, halfH, 500, 500);
+    expect(p.y).toBeCloseTo(halfH, 6);
+    expect(p.x).toBeCloseTo(halfH, 6);
+    expect(p.x).toBeLessThan(halfW);
+  });
+
+  it('returns the centre when the target is the centre itself', () => {
+    expect(rectIntersection(10, 20, halfW, halfH, 10, 20)).toEqual({ x: 10, y: 20 });
   });
 });

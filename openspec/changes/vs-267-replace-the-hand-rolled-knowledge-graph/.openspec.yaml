@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-12
+goal: Replace the hand-rolled knowledge graph with React Flow, and fix the
+  geometry it can't fix

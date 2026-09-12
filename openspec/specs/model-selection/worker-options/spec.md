@@ -55,11 +55,11 @@ offered on that card: that answer SHALL store that option's id on the ticket so 
 runs on it.
 
 When the id is omitted, the ticket SHALL store none and its worker SHALL use the effective
-workers setting. When the id is supplied, it SHALL match an option in the effective catalog
-(the daemon catalog overlay if filled, otherwise the workspace catalog) at the moment of the
-write; otherwise the write SHALL be rejected rather than storing an unknown id or falling back
-silently. A request SHALL NOT accept a raw runtime, model or effort on a ticket — only a
-catalog option id.
+workers setting. When the id is supplied, it SHALL match an option in the effective catalog (the
+workspace's own catalog when it is non-empty, otherwise the daemon catalog overlay if filled) at
+the moment of the write; otherwise the write SHALL be rejected rather than storing an unknown id
+or falling back silently. A request SHALL NOT accept a raw runtime, model or effort on a ticket —
+only a catalog option id.
 
 The same fields SHALL be available on the HTTP create and assign paths that humans use, and on
 the CLI create command.
@@ -103,8 +103,8 @@ the CLI create command.
 A conductor-only tool SHALL list the effective workers default setting and every worker option
 in the effective catalog, each option with its id, description, runtime (or the fact that none
 is chosen), model and effort. The list SHALL NOT require the conductor to know the ids in
-advance. Workers SHALL NOT be offered this tool. The effective catalog SHALL be the daemon
-catalog overlay when that overlay is filled, otherwise the workspace catalog. The tool's
+advance. Workers SHALL NOT be offered this tool. The effective catalog SHALL be the workspace's
+own catalog when it is non-empty, otherwise the daemon catalog overlay when filled. The tool's
 description SHALL tell the conductor not to file a ticket onto an option that has no runtime.
 
 #### Scenario: The conductor lists options

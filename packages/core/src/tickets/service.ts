@@ -901,6 +901,16 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           // A reply with nobody listening: reopen a finished ticket, bring a worker back, or tell the conductor.
           const followUp = { ticketId: t.id, commentId: c.id, ...wakeBody };
           setImmediate(() => { void followUpWithoutWorker(actor, t.id, followUp).catch((e) => log.warn({ err: String(e), ticket: t.identifier }, 'follow-up after a comment failed')); });
+        } else if (actor.kind === 'agent' && actor.id && actor.id !== conductorId()) {
+          // VS-275: a held review (VS-266) is answered by the worker's fix, which arrives as an
+          // ordinary comment. Wake the weaver so it can re-read and mark the decision; the mark
+          // itself stays the weaver's judgement, so nothing here touches the review state. One wake
+          // per comment however many decisions are marked — the wake makes the weaver look, not enumerate.
+          const held = db.get<{ id: string; title: string }>(
+            "SELECT id, title FROM decisions WHERE ticket_id = ? AND status = 'open' AND weaver_review_status = 'concerns' ORDER BY created_at DESC LIMIT 1",
+            [t.id],
+          );
+          if (held) wake(conductorId(), 'ticket_comment', `${t.identifier}: a worker answered the held review "${held.title}"`, { ticketId: t.id, commentId: c.id, decisionId: held.id });
         }
         return c;
       });

@@ -4,7 +4,7 @@ import type { Actor, CoreServices, ThreadsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
-import { readAttachmentBytes, sanitizeAttachmentFilename, writeAttachment } from './attachmentStorage.js';
+import { readAttachmentBytes, sanitizeAttachmentFilename, writeAttachment, writeGeneratedAttachment } from './attachmentStorage.js';
 
 interface ThreadRow extends ChannelThread { isPrimary: boolean; channelKind?: string }
 
@@ -248,6 +248,25 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
           replyToExcerpt: repliedTo ? excerpt(repliedTo.body) : null,
           deliveryStatus: kind === 'web' ? 'delivered' : 'pending',
         });
+        // Same posture as inbound's own block: written inside this transaction, so an attachment row
+        // never exists without the message that owns it (VS-273, mirroring design.md Decision 3 for
+        // the inbound side). Bytes are already resolved and size-checked by the caller
+        // (`resolveOutboundAttachments`) — this only stores and links them.
+        const attachmentParts: AttachmentPart[] = (opts.attachments ?? []).map((a) => {
+          const dot = a.filename.lastIndexOf('.');
+          const extension = dot > 0 ? a.filename.slice(dot + 1).toLowerCase() : 'bin';
+          const stored = writeGeneratedAttachment(ctx, extension, a.bytes);
+          const filename = sanitizeAttachmentFilename(a.filename);
+          db.insert('attachments', {
+            id: stored.id, threadId: t.id, messageId: msg.id, filename, mediaType: a.mediaType,
+            byteSize: stored.byteSize, storageKey: stored.storageKey, createdAt: msg.createdAt,
+          });
+          return { type: 'attachment', id: stored.id, filename, mediaType: a.mediaType, byteSize: stored.byteSize };
+        });
+        if (attachmentParts.length) {
+          db.update('thread_messages', msg.id, { partsJson: attachmentParts });
+          msg.parts = attachmentParts;
+        }
         recordActivity(db, ws, actor, 'thread.outbound', 'thread_message', msg.id, { threadId: t.id, channel: kind }, t.ticketId);
         ctx.events.emit('thread.message', 'thread_message', msg.id, { ...msg, channelKind: kind, ticketId: t.ticketId });
         return msg;
@@ -308,7 +327,10 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     async notifyHuman(actor, message) {
       let thread = service.primaryThread();
       if (!thread) thread = service.bindOrGet('web', `web-${newId()}`, null, 'Web');
-      await service.outbound(actor, thread.id, message.text, message.parts ? { parts: message.parts } : {});
+      await service.outbound(actor, thread.id, message.text, {
+        ...(message.parts ? { parts: message.parts } : {}),
+        ...(message.attachments ? { attachments: message.attachments } : {}),
+      });
     },
   };
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ATTACHMENT_MAX_IMAGE_BYTES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_MAX_TEXT_BYTES,
-  attachmentMaxBytes, isAttachmentImageType, isAttachmentTextType, sniffImageType,
+  ATTACHMENT_MAX_IMAGE_BYTES, ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_MAX_TEXT_BYTES,
+  ATTACHMENT_MAX_ZIP_INPUT_BYTES, ATTACHMENT_ZIP_MEDIA_TYPE,
+  attachmentMaxBytes, guessOutboundMediaType, isAttachmentImageType, isAttachmentTextType, sniffImageType,
 } from './attachments.js';
 
 describe('attachment policy constants', () => {
@@ -37,5 +38,28 @@ describe('sniffImageType', () => {
   it('returns null for a mislabelled or unrecognised file', () => {
     expect(sniffImageType(Uint8Array.from([0x25, 0x50, 0x44, 0x46]))).toBeNull(); // %PDF
     expect(sniffImageType(new Uint8Array(0))).toBeNull();
+  });
+});
+
+describe('outbound-only additions (VS-273) leave the inbound policy untouched', () => {
+  it('attachmentMaxBytes is unchanged for every existing input — zip is still not an inbound type', () => {
+    expect(attachmentMaxBytes('image/png')).toBe(ATTACHMENT_MAX_IMAGE_BYTES);
+    expect(attachmentMaxBytes('text/markdown')).toBe(ATTACHMENT_MAX_TEXT_BYTES);
+    expect(attachmentMaxBytes('application/zip')).toBeNull(); // a human still cannot upload a zip
+    expect(attachmentMaxBytes('application/pdf')).toBeNull();
+  });
+
+  it('defines the zip media type and outbound caps as new, separate constants', () => {
+    expect(ATTACHMENT_ZIP_MEDIA_TYPE).toBe('application/zip');
+    expect(ATTACHMENT_MAX_OUTBOUND_FILE_BYTES).toBeGreaterThan(0);
+    expect(ATTACHMENT_MAX_ZIP_INPUT_BYTES).toBeGreaterThan(ATTACHMENT_MAX_OUTBOUND_FILE_BYTES);
+  });
+
+  it('guesses a media type from the extension, reusing the existing image/text classification', () => {
+    expect(guessOutboundMediaType('screenshot.png')).toBe('image/png');
+    expect(guessOutboundMediaType('notes.md')).toBe('text/markdown');
+    expect(guessOutboundMediaType('report.TXT')).toBe('text/plain'); // case-insensitive
+    expect(guessOutboundMediaType('index.css')).toBe('application/octet-stream');
+    expect(guessOutboundMediaType('no-extension')).toBe('application/octet-stream');
   });
 });

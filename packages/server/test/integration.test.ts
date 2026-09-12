@@ -2,7 +2,7 @@
  * End-to-end against the real core services (not the fakes), so route wiring and service
  * signatures stay honest. Uses core's own test harness for the temp workspace.
  */
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createCore, initLogger } from '@agent-conductor/core';
@@ -295,6 +295,63 @@ describe('real core services over HTTP', () => {
 
       const sent = services.threads.messages(threadId).at(-1);
       expect(sent?.replyToMessageId).toBeNull();
+    });
+  });
+
+  describe('ac_human_send attachments (VS-273)', () => {
+    async function weaverToken(harness: ReturnType<typeof makeHarness>): Promise<string> {
+      return signRunToken(runTokenSecret(harness.ctx.db), {
+        workspaceId: harness.workspaceId, runId: 'run_attach', agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
+      });
+    }
+
+    it('attaches a single file and a named zip of several files in the same reply', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const thread = services.threads.bindOrGet('web', 'web-attach1', null, 'Victor');
+      const token = await weaverToken(harness);
+
+      const knowledge = harness.ctx.paths.knowledge;
+      mkdirSync(knowledge, { recursive: true });
+      const contractPath = join(knowledge, 'design-contract.md');
+      const briefPath = join(knowledge, 'brief-one.md');
+      writeFileSync(contractPath, 'the design contract');
+      writeFileSync(briefPath, 'the first brief');
+
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_human_send`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          input: {
+            threadId: thread.id, body: 'here is the handoff',
+            attachments: [{ path: contractPath }, { paths: [briefPath, contractPath], zipName: 'handoff' }],
+          },
+        }),
+      }));
+      const payload = await res.json();
+      expect(payload.ok).toBe(true);
+
+      const sent = services.threads.messages(thread.id).at(-1);
+      expect(sent?.parts).toHaveLength(2);
+      expect(sent?.parts?.[0]).toEqual(expect.objectContaining({ filename: 'design-contract.md', mediaType: 'text/markdown' }));
+      expect(sent?.parts?.[1]).toEqual(expect.objectContaining({ filename: 'handoff.zip', mediaType: 'application/zip' }));
+    });
+
+    it('refuses a path outside the allowlist, naming it, and sends no message at all', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const thread = services.threads.bindOrGet('web', 'web-attach2', null, 'Victor');
+      const token = await weaverToken(harness);
+
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/ac_human_send`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { threadId: thread.id, body: 'oops', attachments: [{ path: harness.ctx.paths.secretsFile }] } }),
+      }));
+      const payload = await res.json();
+      expect(payload.ok).toBe(false);
+      expect(payload.error.message).toContain(harness.ctx.paths.secretsFile);
+      expect(services.threads.messages(thread.id)).toHaveLength(0);
     });
   });
 

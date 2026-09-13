@@ -8,6 +8,7 @@ import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { useModelsMany, useRunsMany, useTicketsMany, useWorkersMany, useWorkspaces } from '../api/hooks';
 import { liveWorkingAgents } from '../lib/board';
+import { orderByRunning, useRunningWorkerIds } from '../lib/liveOrder';
 import { liveRunTailSlots } from '../lib/liveStreams';
 import {
   type CellSize,
@@ -87,6 +88,16 @@ export function GlobalLiveRoute(): React.ReactElement {
   }, [listed, workerQueries, ticketQueries, runningQueries, queuedQueries, recentQueries, modelQueries]);
 
   const liveIds = useMemo(() => cells.map((c) => c.agent.id), [cells]);
+  // VS-337: running cells first across the whole page (there are no per-workspace sections), with a
+  // grace window so a handoff does not move the cell.
+  const activeIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const c of cells) if (c.run && isActiveRun(c.run.status)) ids.add(c.agent.id);
+    return ids;
+  }, [cells]);
+  const runningIds = useRunningWorkerIds(activeIds);
+  const orderedCells = useMemo(() => orderByRunning(cells, (c) => c.agent, runningIds), [cells, runningIds]);
+  // The tail slots read the canonical cell order, before the running-first reorder.
   const tailSlots = useMemo(
     () => liveRunTailSlots(cells.filter((c) => c.run && isActiveRun(c.run.status)).map((c) => c.agent.id)),
     [cells],
@@ -132,7 +143,7 @@ export function GlobalLiveRoute(): React.ReactElement {
             ))}
             {n > 0 ? (
               <div className="grid grid-flow-dense gap-3 sm:grid-cols-8 xl:grid-cols-12">
-                {cells.map((c) => (
+                {orderedCells.map((c) => (
                   <LiveCell
                     key={c.agent.id}
                     agent={c.agent}

@@ -101,7 +101,7 @@ worker chip — SHALL all use this assignment, so they stay consistent with one 
 ### Requirement: Project colour is the identifying text, never a circle
 
 A surface that shows a project's colour SHALL apply that colour to the identifying text for
-that work — the project slug or name where a project is named, the ticket identifier on a
+that work — the project's display label where a project is named, the ticket identifier on a
 dispatch label, the worker name on a worker chip. It SHALL NOT show a separate circle, disc,
 dot, or swatch filled with the project colour. Status glyphs and sync-state markers that
 already exist on those surfaces SHALL remain, and SHALL remain visually distinguishable from
@@ -110,7 +110,7 @@ the project-coloured text.
 #### Scenario: Sidebar names the project in colour
 
 - **WHEN** a sidebar group lists a project
-- **THEN** that project's slug is shown in that project's colour, and no project-colour
+- **THEN** that project's display label is shown in that project's colour, and no project-colour
   circle is shown on the row
 
 #### Scenario: A composer project tag names the project in colour

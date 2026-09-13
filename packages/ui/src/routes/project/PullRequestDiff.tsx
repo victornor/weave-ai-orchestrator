@@ -130,7 +130,7 @@ function FileBody({
         <div key={`${hunk.oldStart}-${hunk.newStart}`}>
           {i > 0 ? <Gap projectId={projectId} number={number} path={path} prev={hunks[i - 1]!} next={hunk} highlight={highlight} /> : null}
           <HunkHeader hunk={hunk} />
-          {layout === 'unified' ? <UnifiedHunk hunk={hunk} highlight={highlight} /> : <SplitHunk hunk={hunk} highlight={highlight} />}
+          {layout === 'unified' ? <UnifiedHunk hunk={hunk} highlight={highlight} wrap={false} /> : <SplitHunk hunk={hunk} highlight={highlight} />}
         </div>
       ))}
     </div>

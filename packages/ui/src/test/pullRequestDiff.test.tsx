@@ -211,14 +211,25 @@ describe('unified vs. side-by-side', () => {
     const { container } = render(<PullRequestDiff projectId="p1" number={12} />);
     fireEvent.click(screen.getByRole('button', { expanded: false }));
     expect(container.querySelector('.grid-cols-2')).toBeNull();
+    // VS-344: the pull-request view keeps horizontal scrolling, so its unified rows do not wrap.
+    const row = container.querySelector('.ac-diff-code div.flex')!;
+    expect(row.className).toContain('whitespace-pre');
+    expect(row.className).not.toContain('whitespace-pre-wrap');
   });
 
   it('switches to side-by-side, remembered for the device', () => {
     const { container } = render(<PullRequestDiff projectId="p1" number={12} />);
     fireEvent.click(screen.getByRole('button', { name: 'Side-by-side' }));
     fireEvent.click(screen.getByRole('button', { expanded: false }));
-    expect(container.querySelector('.grid-cols-2')).toBeTruthy();
+    const grid = container.querySelector('.grid-cols-2');
+    expect(grid).toBeTruthy();
     expect(localStorage.getItem('conductor.diffLayout')).toBe('split');
+    // VS-344: a side-by-side column wraps rather than bleeding over the divider.
+    for (const col of Array.from(grid!.children) as HTMLElement[]) {
+      expect(col.className).toContain('min-w-0');
+      expect(col.className).toContain('overflow-hidden');
+    }
+    expect(grid!.querySelector('span.whitespace-pre-wrap')).not.toBeNull();
   });
 
   it('is always unified at a phone width, with no layout control offered', () => {

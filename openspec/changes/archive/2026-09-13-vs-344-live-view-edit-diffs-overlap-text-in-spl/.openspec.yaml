@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-13
+goal: "Live view edit diffs overlap text in split mode and switch to split too
+  early: show before/after side by side only when both columns fit, otherwise
+  one column"

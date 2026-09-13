@@ -231,10 +231,16 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
           activePlugins={summary.data?.plugins}
         />
 
-        <button type="button" onClick={() => setPaletteOpen(true)} className="flex items-center gap-2 border-t border-line-1 px-2.5 py-2.5 text-left">
-          <span className="ac-mono text-micro text-text-nav">⌘K</span>
-          <span className="text-micro text-text-nav">everything</span>
-        </button>
+        <div className="flex items-center border-t border-line-1">
+          <button type="button" onClick={() => setPaletteOpen(true)} className="flex flex-1 items-center gap-2 px-2.5 py-2.5 text-left">
+            <span className="ac-mono text-micro text-text-nav">⌘K</span>
+            <span className="text-micro text-text-nav">everything</span>
+          </button>
+          {/* VS-343: the one additive V1 control — the way into the V2 preview. */}
+          <A to="/v2" className="px-2.5 py-2.5 text-micro text-text-nav hover:text-text-1">
+            V2
+          </A>
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">

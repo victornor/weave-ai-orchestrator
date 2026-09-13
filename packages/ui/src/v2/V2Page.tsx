@@ -1,0 +1,100 @@
+/**
+ * The V2 page frame — the 38px header (HANDOFF §3) every destination renders, and the one-source
+ * counts behind it. Screen tickets fill the body; this ticket ships the frame with a placeholder.
+ */
+import type { ReactNode } from 'react';
+import { useRouterState } from '@tanstack/react-router';
+import { useIncidents, useWorkers, useWorkspaces } from '../api/hooks';
+import { workspaceFromV2Path, type V2Scope } from './nav';
+
+export function useV2Scope(): V2Scope {
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const ws = workspaceFromV2Path(path);
+  return ws ? { kind: 'workspace', ws } : { kind: 'everywhere' };
+}
+
+export function useV2WorkspaceName(scope: V2Scope): string {
+  const workspaces = useWorkspaces();
+  if (scope.kind !== 'workspace') return 'Everywhere';
+  const found = (workspaces.data ?? []).find((w) => w.id === scope.ws);
+  return found?.name ?? scope.ws;
+}
+
+export interface V2Counts {
+  needs: number;
+  live: number;
+  incidents: number;
+}
+
+/** Every count a V2 header can show, derived from the same hooks the screens use (HANDOFF §15). */
+export function useV2Counts(scope: V2Scope): V2Counts {
+  const workspaces = useWorkspaces();
+  const workers = useWorkers({});
+  const incidents = useIncidents();
+
+  const needs =
+    scope.kind === 'workspace'
+      ? (workspaces.data?.find((w) => w.id === scope.ws)?.needsYou ?? 0)
+      : (workspaces.data ?? []).reduce((n, w) => n + w.needsYou, 0);
+
+  const live = (workers.data ?? []).filter(
+    (w) => w.status === 'provisioning' || w.status === 'active' || w.status === 'running',
+  ).length;
+
+  const openIncidents = (incidents.data?.items ?? []).filter((i) => i.resolvedAt === null).length;
+
+  return { needs, live, incidents: openIncidents };
+}
+
+function Pill({ tone, label }: { tone: 'working' | 'needs-you' | 'blocked'; label: string }): React.ReactElement {
+  const dot = tone === 'working' ? 'bg-working' : tone === 'needs-you' ? 'bg-needs-you' : 'bg-blocked';
+  return (
+    <span className="flex flex-none items-center gap-1.5 rounded-r4 border border-line-1 bg-bg-2 px-2 py-1">
+      <span className={`size-1.5 flex-none rounded-pill ${dot}`} aria-hidden />
+      <span className="ac-mono whitespace-nowrap text-micro text-text-2">{label}</span>
+    </span>
+  );
+}
+
+export interface V2PageProps {
+  title: string;
+  subtitle?: string;
+  children?: ReactNode;
+}
+
+export function V2Page({ title, subtitle, children }: V2PageProps): React.ReactElement {
+  const scope = useV2Scope();
+  const root = useV2WorkspaceName(scope);
+  const counts = useV2Counts(scope);
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="flex h-[38px] flex-none items-center gap-3 border-b border-line-1 bg-bg-0 px-4">
+        <span className="text-ui text-text-3">{root}</span>
+        <span className="text-ui text-text-4" aria-hidden>
+          ›
+        </span>
+        <h1 className="text-ui font-medium tracking-[-0.005em] text-text-1">{title}</h1>
+        {subtitle ? <span className="truncate text-meta text-text-3">{subtitle}</span> : null}
+        <div className="ml-auto flex flex-none items-center gap-2">
+          {counts.live > 0 ? <Pill tone="working" label={`${counts.live} running`} /> : null}
+          {counts.needs > 0 ? <Pill tone="needs-you" label={`${counts.needs} need you`} /> : null}
+        </div>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {children ?? <V2Placeholder title={title} />}
+      </div>
+    </div>
+  );
+}
+
+/** What a destination shows until its screen ticket fills it. */
+export function V2Placeholder({ title }: { title: string }): React.ReactElement {
+  return (
+    <div className="flex h-full items-center justify-center p-8">
+      <p className="max-w-md text-center text-ui text-text-3">
+        {title} — the V2 shell is in place. This screen is filled by its own ticket.
+      </p>
+    </div>
+  );
+}

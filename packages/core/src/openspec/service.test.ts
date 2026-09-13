@@ -1,9 +1,11 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
+import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 import type { ProjectsService, TicketsService } from '../api.js';
 import { makeHarness, type TestHarness } from '../testing/context.js';
+import { git } from '../util/git.js';
 import { writeFakeOpenspec, type FakeCase } from './fakeBin.js';
 import { createOpenSpecService } from './index.js';
 
@@ -196,11 +198,15 @@ describe('OpenSpecService.archiveAfterMerge', () => {
       .resolves.toEqual({ archivedAs: null, skipped: 'change directory not present' });
   });
 
-  it('archives, records activity and emits an event', async () => {
+  // VS-327: archiving moved into the merge itself for `pr`-delivery projects (see
+  // merge-done-lands.test.ts and archive-before-merge.test.ts). What's left of this direct,
+  // fake-bin, no-real-git path is exactly `local-branch` delivery's backfill, which still commits
+  // in place with no push and no forge involved — unchanged behavior, just narrowed scope.
+  it('archives, records activity and emits an event (local-branch delivery backfill)', async () => {
     const { harness, ticketId, clone } = setup([
       ...READY_CASES,
       { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: ['dark-mode'], warnings: [] } } },
-    ]);
+    ], { policies: { deliveryMode: 'local-branch' } });
     writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
     const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
     expect(r).toEqual({ archivedAs: `2026-09-04-${CHANGE}`, skipped: null });
@@ -210,16 +216,157 @@ describe('OpenSpecService.archiveAfterMerge', () => {
     expect(harness.events.some((e) => e.type === 'ticket.updated')).toBe(true);
   });
 
-  it('serialises archives per project', async () => {
+  it('serialises archives per project (local-branch delivery backfill)', async () => {
     const { harness, ticketId, clone, bin } = setup([
       ...READY_CASES,
       { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: [], warnings: [] } } },
-    ]);
+    ], { policies: { deliveryMode: 'local-branch' } });
     writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
     const svc = createOpenSpecService(harness.ctx, harness.deps);
     const results = await Promise.all([svc.archiveAfterMerge(ticketId), svc.archiveAfterMerge(ticketId), svc.archiveAfterMerge(ticketId)]);
     expect(results.every((r) => r.archivedAs !== null)).toBe(true);
     expect(bin.calls().filter((c) => c.argv[0] === 'archive')).toHaveLength(3);
+  });
+});
+
+describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () => {
+  async function realGitProject(harness: TestHarness, clone: string): Promise<{ origin: string }> {
+    const origin = join(harness.root, 'origin-api');
+    await git(['init', '-b', 'main', origin], harness.root);
+    await git(['config', 'user.email', 'test@example.com'], origin);
+    await git(['config', 'user.name', 'Test'], origin);
+    writeFileSync(join(origin, 'README.md'), '# api\n');
+    await git(['add', '.'], origin);
+    await git(['commit', '-m', 'init'], origin);
+    await git(['clone', origin, clone], harness.root);
+    await git(['config', 'user.email', 'test@example.com'], clone);
+    await git(['config', 'user.name', 'Test'], clone);
+    return { origin };
+  }
+
+  it('opens a pull request carrying the archive instead of pushing to the landing branch', async () => {
+    const { harness, ticketId, clone } = setup([
+      ...READY_CASES,
+      { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: ['dark-mode'], warnings: [] } } },
+    ], { policies: { deliveryMode: 'pr' } });
+    const { origin } = await realGitProject(harness, clone);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    await git(['add', '.'], clone);
+    await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
+
+    const createPullRequestCalls: Array<{ branch: string; base: string; title: string }> = [];
+    harness.ctx.registries.forges.set('github', {
+      id: 'github',
+      detect: async () => true,
+      prState: async () => ({ state: 'open' as const, ciState: 'none' as const }),
+      mergePr: async () => ({}),
+      createPullRequest: async (_cwd: string, opts: { branch: string; base: string; title: string }) => {
+        createPullRequestCalls.push(opts);
+        return { url: 'https://example.com/pr/99', number: 99 };
+      },
+    } satisfies ForgeAdapter);
+
+    const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
+    // Not `archivedAs` — the spec is not on the landing branch until the backfill PR merges.
+    expect(r).toEqual({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/99' });
+    expect(createPullRequestCalls).toEqual([expect.objectContaining({ branch: `ac/archive-${CHANGE}`, base: 'main' })]);
+    // The landing branch itself never gained a direct commit — only the new branch did.
+    const mainLog = await git(['log', '--oneline', 'main'], origin);
+    expect(mainLog.stdout.trim().split('\n')).toHaveLength(1);
+    const remoteBranches = await git(['branch'], origin);
+    expect(remoteBranches.stdout).toMatch(new RegExp(`ac/archive-${CHANGE}`));
+  });
+
+  it('does not open a second pull request while an earlier backfill branch is still pending (VS-327 review, PR #272)', async () => {
+    const { harness, ticketId, clone } = setup([
+      ...READY_CASES,
+      { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: [], warnings: [] } } },
+    ], { policies: { deliveryMode: 'pr' } });
+    const { origin } = await realGitProject(harness, clone);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    await git(['add', '.'], clone);
+    await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
+    // A previous sweep already opened the backfill branch (and, on the forge, its PR).
+    await git(['checkout', '-b', `ac/archive-${CHANGE}`], origin);
+    await git(['checkout', 'main'], origin);
+
+    const createPullRequest = vi.fn(async () => ({ url: 'https://example.com/pr/99', number: 99 }));
+    harness.ctx.registries.forges.set('github', {
+      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const, ciState: 'none' as const }), mergePr: async () => ({}), createPullRequest,
+    } satisfies ForgeAdapter);
+
+    const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
+    expect(r.archivedAs).toBeNull();
+    expect(r.pendingPrUrl).toBeUndefined();
+    expect(r.skipped).toMatch(/already pending/);
+    expect(createPullRequest).not.toHaveBeenCalled();
+  });
+
+  it('propagates a real archive failure rather than reporting it as a missing binary (VS-327 review, PR #272)', async () => {
+    const { harness, ticketId, clone } = setup([
+      ...READY_CASES,
+      { match: ['archive'], exit: 1, json: { status: [{ severity: 'error', code: 'archive_spec_validation_failed', message: 'boom' }] } },
+    ], { policies: { deliveryMode: 'pr' } });
+    await realGitProject(harness, clone);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    await git(['add', '.'], clone);
+    await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
+    harness.ctx.registries.forges.set('github', {
+      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const, ciState: 'none' as const }), mergePr: async () => ({}),
+      createPullRequest: async () => ({ url: 'https://example.com/pr/99', number: 99 }),
+    } satisfies ForgeAdapter);
+
+    await expect(createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId))
+      .rejects.toMatchObject({ code: 'openspec_archive_blocked' });
+  });
+
+  it('reports a genuinely missing binary as skipped, not thrown (VS-327 review, PR #272)', async () => {
+    const { harness, ticketId, clone } = setup([...READY_CASES], { policies: { deliveryMode: 'pr' } });
+    await realGitProject(harness, clone);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    await git(['add', '.'], clone);
+    await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
+    process.env.AC_OPENSPEC_BIN = join(clone, 'no-such-openspec');
+
+    await expect(createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId))
+      .resolves.toEqual({ archivedAs: null, skipped: 'the openspec binary was not found on the daemon\'s PATH' });
+  });
+
+  it('surfaces a failure to open the backfill pull request, never as a silent info log (acceptance #4)', async () => {
+    const { harness, ticketId, clone } = setup([
+      ...READY_CASES,
+      { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: [], warnings: [] } } },
+    ], { policies: { deliveryMode: 'pr' } });
+    await realGitProject(harness, clone);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    await git(['add', '.'], clone);
+    await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
+
+    harness.ctx.registries.forges.set('github', {
+      id: 'github',
+      detect: async () => true,
+      prState: async () => ({ state: 'open' as const, ciState: 'none' as const }),
+      mergePr: async () => ({}),
+      createPullRequest: async () => { throw new Error('forge rejected the pull request'); },
+    } satisfies ForgeAdapter);
+
+    await expect(createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId)).rejects.toThrow();
+  });
+
+  it('reports failure rather than pushing when no forge can open a pull request', async () => {
+    const { harness, ticketId, clone } = setup([
+      ...READY_CASES,
+      { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: [], warnings: [] } } },
+    ], { policies: { deliveryMode: 'pr' } });
+    const { origin } = await realGitProject(harness, clone);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    await git(['add', '.'], clone);
+    await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
+    // No forge registered at all.
+
+    await expect(createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId)).rejects.toThrow();
+    const mainLog = await git(['log', '--oneline', 'main'], origin);
+    expect(mainLog.stdout.trim().split('\n')).toHaveLength(1);
   });
 });
 

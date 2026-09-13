@@ -8,26 +8,27 @@
  * keeps working on it. A change that exists on disk but whose `openspec` binary cannot be run is not
  * that case: since VS-318 it raises the real host-tool error rather than reporting an empty plan.
  */
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nowIso, type Db } from '@weave-ai/db';
-import { OcError } from '@weave-ai/shared';
+import { OcError, landingBranchOf } from '@weave-ai/shared';
 import type { Actor, CoreServices, OpenSpecService, OpenSpecStatus } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { git } from '../util/git.js';
-import { createSerializer } from '../util/serialize.js';
+import { landLock } from '../util/land-lock.js';
+import { scratchBranchFrom } from '../tickets/archive-before-merge.js';
 import * as cli from './cli.js';
 import { findUndeclaredCapabilityRetirements } from './retirement.js';
 
 const SYSTEM: Actor = { kind: 'system', id: null };
 
-export interface ProjectRow { id: string; clonePath: string; defaultBranch: string; openspecEnabled: number; policies: Record<string, unknown> }
+export interface ProjectRow { id: string; clonePath: string; defaultBranch: string; landingBranch: string | null; openspecEnabled: number; policies: Record<string, unknown> }
 
 /** The project row read straight from the db (camelCased, `policies_json` decoded). */
 export function projectRow(db: Db, projectId: string | null | undefined): ProjectRow | undefined {
   if (!projectId) return undefined;
-  return db.get<ProjectRow>('SELECT id, clone_path, default_branch, openspec_enabled, policies_json FROM projects WHERE id = ? OR slug = ?', [projectId, projectId]);
+  return db.get<ProjectRow>('SELECT id, clone_path, default_branch, landing_branch, openspec_enabled, policies_json FROM projects WHERE id = ? OR slug = ?', [projectId, projectId]);
 }
 
 /** The live worker's worktree for a ticket, when it exists on disk. */
@@ -44,14 +45,7 @@ export function zeroStatus(changeName: string): OpenSpecStatus {
   return { changeName, planningComplete: false, artifacts: [], tasks: null, applyState: null, validation: null, archived: false };
 }
 
-/** `openspec/changes/archive/YYYY-MM-DD-<change>` in the primary clone. */
-export function archivedDirFor(clonePath: string, changeName: string): string | null {
-  const dir = join(clonePath, 'openspec', 'changes', 'archive');
-  if (!existsSync(dir)) return null;
-  const re = new RegExp(`^\\d{4}-\\d{2}-\\d{2}-${changeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
-  for (const e of readdirSync(dir, { withFileTypes: true })) if (e.isDirectory() && re.test(e.name)) return e.name;
-  return null;
-}
+export const archivedDirFor = cli.archivedDirFor;
 
 /** proposal + tasks + design of a change directory, rendered as the plan document (PLAN §12.2 step 2). */
 export function renderPlan(changeDir: string, changeName: string): string {
@@ -70,8 +64,9 @@ function isMissingBinary(e: unknown): boolean { return e instanceof OcError && e
 
 export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreServices): OpenSpecService {
   const log = ctx.log('openspec');
-  /** One archive at a time per project: `openspec archive` rewrites openspec/specs in the primary clone. */
-  const serialize = createSerializer();
+  /** One archive at a time per project, shared with `tickets.mergeDone`'s land lock (VS-327): `openspec
+   * archive` rewrites openspec/specs in the primary clone, which mergeDone's landing also touches. */
+  const serialize = landLock;
 
   const resolve = (ticketId: string): { ticket: ReturnType<CoreServices['tickets']['get']>; project: ProjectRow; changeName: string; cwd: string } | null => {
     const ticket = deps().tickets.get(ticketId);
@@ -145,6 +140,14 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
       return { ok: false, issues };
     },
 
+    /**
+     * VS-327: since archiving moved into the merge itself (`tickets.mergeDone`), this now runs only
+     * as backfill — a change a ticket merged before that shipped, or one merged out of band, left
+     * behind. For a `pr`-delivery project it never pushes to the landing branch: it commits the
+     * archive on a new branch off the current landing tip and opens a PR carrying it, so the same
+     * "no direct push to a protected branch" guarantee holds for backfill too. A `local-branch`
+     * project has no forge and no protected-branch risk, so it still commits directly, unchanged.
+     */
     async archiveAfterMerge(ticketId) {
       const ticket = deps().tickets.get(ticketId);
       const changeName = ticket.openspecChangeName;
@@ -161,21 +164,64 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
           return { archivedAs: null, skipped: 'change directory not present' };
         }
 
-        const o = { cwd: project.clonePath, root: project.clonePath };
-        let result: cli.ArchiveResult;
-        try { result = await cli.archive(o, changeName); }
-        catch (e) {
-          if (!isMissingBinary(e)) throw e;
-          return { archivedAs: null, skipped: 'the openspec binary was not found on the daemon\'s PATH' };
+        const mode = ((project.policies as { deliveryMode?: string } | null)?.deliveryMode ?? ctx.config.defaults.deliveryMode) as 'pr' | 'local-branch';
+        if (mode === 'local-branch') {
+          const o = { cwd: project.clonePath, root: project.clonePath };
+          let result: cli.ArchiveResult;
+          try { result = await cli.archive(o, changeName); }
+          catch (e) {
+            if (!isMissingBinary(e)) throw e;
+            return { archivedAs: null, skipped: 'the openspec binary was not found on the daemon\'s PATH' };
+          }
+          const archivedAs = result.archivedAs ?? archivedDirFor(project.clonePath, changeName);
+          await commitArchive(project.clonePath, changeName, log, false);
+          recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archived', 'ticket', ticket.id, { changeName, archivedAs, specsUpdated: result.specsUpdated, warnings: result.warnings }, ticket.id);
+          ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivedAs: archivedAs });
+          return { archivedAs, skipped: null };
         }
-        const archivedAs = result.archivedAs ?? archivedDirFor(project.clonePath, changeName);
 
-        const archiveCommit = ((project.policies ?? {}) as { archiveCommit?: string }).archiveCommit ?? 'push';
-        if (archiveCommit === 'push' || archiveCommit === 'local') await commitArchive(project.clonePath, changeName, log, archiveCommit === 'push');
-
-        recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archived', 'ticket', ticket.id, { changeName, archivedAs, specsUpdated: result.specsUpdated, warnings: result.warnings }, ticket.id);
-        ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivedAs: archivedAs });
-        return { archivedAs, skipped: null };
+        // `pr` delivery: archive on a fresh branch off the current landing tip, never on the landing
+        // branch itself, and open a PR carrying it rather than pushing directly. The spec is not on
+        // the landing branch until a human merges that PR (VS-327 review, PR #272), so this never
+        // reports `archivedAs` — only that a PR is pending — and never opens a second PR for the
+        // same change while an earlier one is still open.
+        const landing = landingBranchOf(project, ticket);
+        const newBranch = `ac/archive-${changeName}`;
+        const existingBranch = await git(['ls-remote', '--exit-code', '--heads', 'origin', newBranch], project.clonePath, 60_000);
+        if (existingBranch.ok && existingBranch.stdout.trim()) {
+          return { archivedAs: null, skipped: `a backfill pull request for ${changeName} is already pending on branch ${newBranch}` };
+        }
+        const scratch = await scratchBranchFrom(project.clonePath, 'HEAD', newBranch);
+        try {
+          const o = { cwd: scratch.path, root: scratch.path };
+          let result: cli.ArchiveResult;
+          try { result = await cli.archive(o, changeName); }
+          catch (e) {
+            if (!isMissingBinary(e)) throw e;
+            return { archivedAs: null, skipped: 'the openspec binary was not found on the daemon\'s PATH' };
+          }
+          const add = await git(['add', '-A', 'openspec'], scratch.path, 30_000);
+          if (!add.ok) throw new OcError('internal', `git add of the backfill archive failed: ${add.stderr.trim().slice(0, 300)}`, { changeName });
+          const commit = await git(['commit', '-m', `chore(openspec): archive ${changeName}`], scratch.path, 30_000);
+          if (!commit.ok && !/nothing to commit|no changes added/i.test(`${commit.stdout} ${commit.stderr}`)) {
+            throw new OcError('internal', `git commit of the backfill archive failed: ${commit.stderr.trim().slice(0, 300)}`, { changeName });
+          }
+          const push = await git(['push', '-u', 'origin', newBranch], scratch.path, 120_000);
+          if (!push.ok) throw new OcError('internal', `push of backfill branch ${newBranch} failed: ${push.stderr.trim().slice(0, 300)}`, { changeName, branch: newBranch });
+          const forge = ctx.registries.forges.get('github');
+          if (!forge?.createPullRequest) {
+            throw new OcError('internal', 'no forge available that can open a backfill pull request', { changeName, branch: newBranch });
+          }
+          const pr = await forge.createPullRequest(project.clonePath, {
+            branch: newBranch, base: landing, title: `chore(openspec): archive ${changeName}`,
+            body: `Backfills the OpenSpec archive for ${ticket.identifier}, left behind when it merged before archiving moved into the merge itself.`,
+          });
+          recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archive_pr_opened', 'ticket', ticket.id, { changeName, specsUpdated: result.specsUpdated, warnings: result.warnings, pendingPrUrl: pr.url }, ticket.id);
+          ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivePendingPrUrl: pr.url });
+          return { archivedAs: null, skipped: null, pendingPrUrl: pr.url };
+        } finally {
+          await scratch.dispose();
+        }
       });
     },
 
@@ -192,7 +238,12 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
   };
 }
 
-/** policy `archiveCommit: push` — commit the archived specs on the default branch and push them. */
+/**
+ * Commits the archived specs directly in `clonePath`'s current checkout. `push` is only ever
+ * `false` now (VS-327): a `local-branch`-delivery project's backfill, which has no forge and no
+ * protected-branch risk, so a direct local commit is fine. A `pr`-delivery project's backfill uses
+ * `archiveAfterMerge`'s branch-and-PR path below instead — this function no longer pushes anything.
+ */
 async function commitArchive(clonePath: string, changeName: string, log: ReturnType<WorkspaceContext['log']>, push = true): Promise<void> {
   const add = await git(['add', '-A', 'openspec'], clonePath, 30_000);
   if (!add.ok) { log.warn({ clonePath, stderr: add.stderr.slice(0, 300) }, 'git add of the archive failed'); return; }

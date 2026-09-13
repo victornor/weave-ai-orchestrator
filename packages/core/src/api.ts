@@ -463,7 +463,8 @@ export interface OpenSpecStatus { changeName: string; planningComplete: boolean;
 export interface OpenSpecService {
   statusFor(ticketId: string): Promise<OpenSpecStatus>;
   validateForProposed(ticketId: string): Promise<{ ok: true; plan: string } | { ok: false; issues: Array<{ level: string; message: string; path?: string }> }>;
-  archiveAfterMerge(ticketId: string): Promise<{ archivedAs: string | null; skipped: string | null }>;
+  /** `pendingPrUrl` is set instead of `archivedAs` when a backfill opened a PR that hasn't merged yet (VS-327): the spec is not on the landing branch until it does. */
+  archiveAfterMerge(ticketId: string): Promise<{ archivedAs: string | null; skipped: string | null; pendingPrUrl?: string }>;
   version(projectId: string): Promise<string | null>;
 }
 

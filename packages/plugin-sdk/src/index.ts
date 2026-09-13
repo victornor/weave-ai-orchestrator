@@ -52,6 +52,14 @@ export interface ForgeAdapter {
    * forge has no such pull request.
    */
   pullRequestDiff?(cwd: string, number: number): Promise<string | null>;
+  /**
+   * Optional (VS-327): opens a pull request from a branch already pushed to the remote. Used only by
+   * OpenSpec archive backfill, to land a change left behind by a ticket merged before archiving moved
+   * into the merge itself — never for a ticket's own PR, which a worker still opens with `gh pr create`.
+   * A forge that cannot do this simply omits it; the backfill then reports itself unable to open a PR
+   * rather than falling back to a direct push.
+   */
+  createPullRequest?(cwd: string, opts: { branch: string; base: string; title: string; body?: string }): Promise<{ url: string; number: number }>;
 }
 export interface Logger { debug(msg: string, data?: Record<string, unknown>): void; info(msg: string, data?: Record<string, unknown>): void; warn(msg: string, data?: Record<string, unknown>): void; error(msg: string, data?: Record<string, unknown>): void }
 export interface PluginHost {

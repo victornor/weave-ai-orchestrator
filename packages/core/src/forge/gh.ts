@@ -174,6 +174,17 @@ export class GhForge implements ForgeAdapter {
     return pullRequestDetailFromGh(doc);
   }
 
+  /** Opens a PR from a branch already on the remote (VS-327 backfill). */
+  async createPullRequest(cwd: string, opts: { branch: string; base: string; title: string; body?: string }): Promise<{ url: string; number: number }> {
+    const args = ['pr', 'create', '--base', opts.base, '--head', opts.branch, '--title', opts.title, '--body', opts.body ?? '', '--json', 'url,number'];
+    const r = await sh('gh', args, { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
+    if (!r.ok) throw new OcError('internal', `gh pr create failed: ${(r.stderr || r.stdout).trim().slice(0, 300)}`, { branch: opts.branch, base: opts.base });
+    let doc: { url?: string; number?: number };
+    try { doc = JSON.parse(r.stdout) as { url?: string; number?: number }; } catch { throw new OcError('internal', 'gh pr create returned invalid JSON', { branch: opts.branch }); }
+    if (!doc.url || !doc.number) throw new OcError('internal', 'gh pr create did not report a url and number', { branch: opts.branch });
+    return { url: doc.url, number: doc.number };
+  }
+
   /** One pull request's unified diff, exactly as `git diff` would print it. `null` when it has none. */
   async pullRequestDiff(cwd: string, number: number): Promise<string | null> {
     const r = await sh('gh', ['pr', 'diff', String(number)], { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });

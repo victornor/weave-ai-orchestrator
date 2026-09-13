@@ -605,7 +605,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_ticket_merge_done', scope: 'all', input: z.object({ id: ticketId, mergeCommit: z.string().optional(), method: z.string().optional() }),
-    description: 'Report that you merged your approved PR. The daemon verifies against the forge and the default branch before accepting — do not call it hopefully.',
+    description: 'Request landing for your ticket once its branch is synced, conflict-free and pushed — do not call it hopefully. The daemon archives any OpenSpec change onto your branch and performs the merge itself; you do not run `gh pr merge`. `mergeCommit`/`method` are only a cross-check for a PR merged out of band, not a report of one you performed. A rejection (a real conflict, an archive failure, or a pending required check) means re-sync or resolve and call this again — the same way you already handle a rebase conflict.',
     handler: async (ctx, i) => svc(ctx).tickets.mergeDone(ctx.actor, writeTicket(ctx, i.id).id, { mergeCommit: i.mergeCommit, method: i.method }),
   },
   {

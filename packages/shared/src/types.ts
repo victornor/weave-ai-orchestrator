@@ -190,8 +190,12 @@ export interface UpgradeRelease { path: string | null; sha: string | null; versi
 export interface UpgradeAnnouncement {
   kind: 'daemon.upgraded';
   upgradeId: string;
-  /** `rolled_back` is a failure whose target is not the release now executing. */
-  outcome: 'completed' | 'failed' | 'rolled_back';
+  /**
+   * `rolled_back` is a failure whose target is not the release now executing; `recorded_completed` is a
+   * row recorded `completed` that the announcing daemon is not actually running, so the announcement
+   * never reads as a successful upgrade (VS-315).
+   */
+  outcome: 'completed' | 'failed' | 'rolled_back' | 'recorded_completed';
   from: UpgradeRelease;
   to: UpgradeRelease;
   /** The release the daemon making the announcement is executing. */
@@ -208,6 +212,11 @@ export interface UpgradeAnnouncement {
   runs: { drained: number; interrupted: number; resumed: number };
   /** Work that landed between the previous release being built and the new one being built. */
   tickets: Array<{ identifier: string; title: string; at: string }>;
+  /**
+   * How many landed tickets the cap left out of `tickets` (VS-315). The list is one entry per ticket,
+   * newest first; a non-zero value is stated in the announcement line too, so the cap is never silent.
+   */
+  ticketsOmitted: number;
   /**
    * Ticket-referencing commits in the release window with no matching entry in `tickets` (VS-239):
    * `count` is the true total, `identifiers` a possibly-bounded list of them. Diagnostic only — never

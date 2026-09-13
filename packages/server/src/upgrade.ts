@@ -22,8 +22,8 @@ import {
 } from '@weave-ai/shared';
 import { getLogger, recordActivity } from '@weave-ai/core';
 import {
-  buildRelease, cliBinIn, commitSubjectsInRange, currentLink, inOwnScope, planRestart, pruneReleases,
-  readLink, releaseSha, resolveWorkspaceStateDir, switchRelease, SERVICE_NAME,
+  buildRelease, cliBinIn, commitSubjectsInRange, currentLink, inOwnScope, migrationsIn, planRestart,
+  pruneReleases, readLink, releaseSha, resolveWorkspaceStateDir, switchRelease, SERVICE_NAME,
 } from '@weave-ai/release';
 import type { WorkspaceRuntime } from './types.js';
 import type { UpdateChecker } from './release-info.js';
@@ -296,7 +296,7 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
       `SELECT t.identifier AS identifier, t.title AS title, a.created_at AS at
          FROM activity a JOIN tickets t ON t.id = a.ticket_id
         WHERE a.workspace_id = ? AND a.action = ? AND a.created_at > ? AND a.created_at <= ?
-        ORDER BY a.created_at`,
+        ORDER BY a.created_at DESC`,
       [w.ctx.workspaceId, CHANGELOG_SOURCES.landed.action, window.since, window.until],
     );
   }
@@ -322,8 +322,16 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
     return [...seen];
   }
 
+  /**
+   * The migrations a database records as applied, read from its durable `meta` rows — never the
+   * in-memory `appliedMigrations`, which is empty when an earlier boot ran `migrate` (VS-315).
+   */
+  function durableMigrations(database: Db): string[] {
+    return database.all<{ value: string }>("SELECT value FROM meta WHERE key LIKE 'migration:%'").map((r) => r.value);
+  }
+
   function facts(w: WorkspaceRuntime, row: Upgrade): AnnouncementFacts {
-    const migrations = [...new Set([...db.appliedMigrations, ...w.ctx.db.appliedMigrations])];
+    const migrationsApplied = [...new Set([...durableMigrations(db), ...durableMigrations(w.ctx.db)])];
     const prefix = workspaceTicketPrefix(w);
     return {
       running: { path: deps.releaseRoot, sha: releaseSha(deps.releaseRoot), version: deps.version },
@@ -337,7 +345,8 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
       },
       queuedWakes: () => w.ctx.db.get<{ n: number }>(
         "SELECT COUNT(*) AS n FROM wakeups WHERE workspace_id = ? AND status = 'queued'", [w.ctx.workspaceId])?.n ?? 0,
-      migrations,
+      migrationsIn: (release) => migrationsIn(release),
+      migrationsApplied,
       checks: healthChecks(w),
       now: nowIso(),
     };

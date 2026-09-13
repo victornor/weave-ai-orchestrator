@@ -11,13 +11,13 @@ export interface NavItem {
   hint?: string;
 }
 
-/** Desktop rail: Chat 1 · Needs you 2 · Board 3 · Live 4 · Team 5 · Runs 6 · Usage 7 · Knowledge 8 · Settings , */
+/** Desktop rail: Chat 1 · Needs you 2 · Board 3 · Live 4 · Roles 5 · Runs 6 · Usage 7 · Knowledge 8 · Settings , */
 export const RAIL: NavItem[] = [
   { key: 'chat', label: 'Chat', to: '/w/$ws/chat', kbd: '1', glyph: 'chat' },
   { key: 'needs', label: 'Needs you', to: '/w/$ws/needs', kbd: '2', glyph: 'needs-you' },
   { key: 'board', label: 'Board', to: '/w/$ws/board', kbd: '3', glyph: 'board' },
   { key: 'live', label: 'Live', to: '/w/$ws/live', kbd: '4', glyph: 'working' },
-  { key: 'team', label: 'Team', to: '/w/$ws/team', kbd: '5', glyph: 'blocked' },
+  { key: 'roles', label: 'Roles', to: '/w/$ws/roles', kbd: '5', glyph: 'blocked' },
   { key: 'runs', label: 'Runs', to: '/w/$ws/runs', kbd: '6', glyph: 'working' },
   { key: 'usage', label: 'Usage', to: '/w/$ws/usage', kbd: '7', glyph: 'merging' },
   { key: 'kb', label: 'Knowledge', to: '/w/$ws/knowledge', kbd: '8', glyph: 'done' },
@@ -28,7 +28,7 @@ export const RAIL: NavItem[] = [
 export const TABS: NavItem[] = [
   { key: 'chat', label: 'Chat', to: '/w/$ws/chat', kbd: '1', glyph: 'chat' },
   { key: 'board', label: 'Board', to: '/w/$ws/board', kbd: '3', glyph: 'board' },
-  { key: 'team', label: 'Team', to: '/w/$ws/team', kbd: '5', glyph: 'blocked' },
+  { key: 'roles', label: 'Roles', to: '/w/$ws/roles', kbd: '5', glyph: 'blocked' },
   { key: 'needs', label: 'Needs you', to: '/w/$ws/needs', kbd: '2', glyph: 'needs-you' },
   { key: 'more', label: 'More', to: '/w/$ws/settings', kbd: ',', glyph: 'more' },
 ];

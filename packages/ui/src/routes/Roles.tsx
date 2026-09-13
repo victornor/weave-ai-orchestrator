@@ -13,7 +13,10 @@ import { useWs } from '../api/context';
 import { useGo } from '../app/link';
 import { ago } from '../lib/format';
 
-export function TeamRoute(): React.ReactElement {
+/** The statuses that count as a worker actually being an instance of a role right now (VS-333). */
+const LIVE_WORKER_STATUSES = new Set(['provisioning', 'active', 'running', 'paused', 'error']);
+
+export function RolesRoute(): React.ReactElement {
   const ws = useWs();
   const go = useGo();
   const projects = useProjects();
@@ -25,12 +28,15 @@ export function TeamRoute(): React.ReactElement {
   const [openRole, setOpenRole] = useState<string | null>(null);
   const [startingFor, setStartingFor] = useState<string | null>(null);
 
+  const allWorkers = workers.data ?? [];
+  const liveWorkers = allWorkers.filter((w) => LIVE_WORKER_STATUSES.has(w.status));
+
   return (
     <Page>
-      <PageHeader title="Team" meta={`${roles.data?.length ?? 0} roles · ${workers.data?.length ?? 0} workers`} />
+      <PageHeader title="Roles" meta={`${roles.data?.length ?? 0} roles · ${liveWorkers.length} workers`} />
       <PageBody className="p-4 md:p-5">
         <div className="mx-auto flex max-w-4xl flex-col gap-6">
-          {/* conductor */}
+          {/* weaver */}
           <section>
             <div className="ac-label mb-2">Weaver</div>
             {conductor.isLoading ? (
@@ -48,7 +54,7 @@ export function TeamRoute(): React.ReactElement {
             ) : null}
           </section>
 
-          {/* projects → roles → workers */}
+          {/* projects → roles → live instances */}
           {roles.isError ? (
             <ErrorState code="ROLES_QUERY_FAILED" message="Could not list roles." onRetry={() => void roles.refetch()} />
           ) : (projects.data ?? []).length === 0 ? (
@@ -64,7 +70,10 @@ export function TeamRoute(): React.ReactElement {
                   ) : (
                     <div className="flex flex-col gap-3">
                       {projectRoles.map((r) => {
-                        const roleWorkers = (workers.data ?? []).filter((w) => w.roleId === r.id);
+                        const roleLive = allWorkers.filter((w) => w.roleId === r.id && LIVE_WORKER_STATUSES.has(w.status));
+                        // A `done` worker is shown only when its work has not landed and it is being
+                        // kept for a discard decision (VS-333): the daemon records that reason on it.
+                        const roleKept = allWorkers.filter((w) => w.roleId === r.id && w.status === 'done' && w.errorText);
                         return (
                           <div key={r.id} className="ac-card p-3.5">
                             <div className="mb-2.5 flex flex-wrap items-center gap-2.5">
@@ -72,7 +81,7 @@ export function TeamRoute(): React.ReactElement {
                               <Badge>{r.status === 'pending_activation' ? 'awaiting hire approval' : r.status.replace(/_/g, ' ')}</Badge>
                               <div className="flex-1" />
                               <span className="ac-mono text-nano text-text-4">
-                                {roleWorkers.length} {roleWorkers.length === 1 ? 'worker' : 'workers'}
+                                {roleLive.length} {roleLive.length === 1 ? 'worker' : 'workers'}
                               </span>
                               <Button variant="ghost" size="sm" onClick={() => setOpenRole(r.id)}>
                                 Charter
@@ -94,9 +103,9 @@ export function TeamRoute(): React.ReactElement {
                                 }}
                               />
                             ) : null}
-                            {roleWorkers.length ? (
+                            {roleLive.length ? (
                               <div className="grid gap-2 sm:grid-cols-2">
-                                {roleWorkers.map((w) => (
+                                {roleLive.map((w) => (
                                   <WorkerCard
                                     key={w.id}
                                     agent={w}
@@ -109,6 +118,24 @@ export function TeamRoute(): React.ReactElement {
                                     resuming={workerAction.isPending}
                                   />
                                 ))}
+                              </div>
+                            ) : null}
+                            {roleKept.length ? (
+                              <div className="mt-3 border-t border-line-1 pt-3">
+                                <div className="ac-label mb-2">Finished, work kept ({roleKept.length})</div>
+                                <div className="flex flex-col gap-2">
+                                  {roleKept.map((w) => (
+                                    <div key={w.id} className="flex flex-wrap items-center gap-2.5 rounded-r4 border border-line-2 bg-bg-2 px-3 py-2">
+                                      <StatusBadge status="done" />
+                                      <span className="text-meta text-text-1">{w.name}</span>
+                                      {w.ticketId ? <span className="ac-mono text-nano text-text-4">{w.ticketId}</span> : null}
+                                      <span className="flex-1 text-meta text-text-3">{w.errorText}</span>
+                                      <Button variant="ghost" size="sm" onClick={() => go('/w/$ws/workers/$workerId', { params: { ws, workerId: w.id } })}>
+                                        Open
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             ) : null}
                           </div>

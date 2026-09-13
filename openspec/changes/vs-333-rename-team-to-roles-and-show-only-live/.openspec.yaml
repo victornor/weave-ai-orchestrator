@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Rename Team to Roles and show only live role instances; fix the landed
+  check that keeps finished workers forever

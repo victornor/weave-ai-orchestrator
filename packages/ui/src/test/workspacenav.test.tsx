@@ -80,7 +80,7 @@ describe('listing workspaces', () => {
   it('nests the rail sections under an expanded workspace', () => {
     render(nav({ expanded: ['beta'] }));
     const beta = group('Beta');
-    for (const label of ['Chat', 'Needs you', 'Board', 'Live', 'Team', 'Runs', 'Usage', 'Knowledge', 'Settings']) {
+    for (const label of ['Chat', 'Needs you', 'Board', 'Live', 'Roles', 'Runs', 'Usage', 'Knowledge', 'Settings']) {
       expect(within(beta).getByText(label)).toBeInTheDocument();
     }
   });

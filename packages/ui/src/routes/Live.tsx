@@ -120,7 +120,7 @@ export function LiveRoute(): React.ReactElement {
         ) : !loaded ? (
           <SkeletonCards count={4} className="grid gap-3 sm:grid-cols-8 xl:grid-cols-12" />
         ) : n === 0 ? (
-          <EmptyState title="Nobody is working." detail="Live workers on a ticket show up here. Paused and idle ones stay on Team and the board." />
+          <EmptyState title="Nobody is working." detail="Live workers on a ticket show up here. Paused and idle ones stay on Roles and the board." />
         ) : (
           <div className="grid grid-flow-dense gap-3 sm:grid-cols-8 xl:grid-cols-12">
             {live.map((w) => (

@@ -88,7 +88,7 @@ export function WorkerRoute(): React.ReactElement {
       <Page>
         <PageHeader title="Worker" />
         <PageBody className="p-5">
-          <ErrorState code="WORKER_NOT_FOUND" message="That worker has been archived." actions={<Button variant="link" onClick={() => go('/w/$ws/team', { params: { ws } })}>Back to Team</Button>} />
+          <ErrorState code="WORKER_NOT_FOUND" message="That worker has been archived." actions={<Button variant="link" onClick={() => go('/w/$ws/roles', { params: { ws } })}>Back to Roles</Button>} />
         </PageBody>
       </Page>
     );

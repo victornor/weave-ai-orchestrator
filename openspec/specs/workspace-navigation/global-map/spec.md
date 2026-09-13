@@ -135,7 +135,7 @@ that workspace the active one — the human has left the global page.
 
 - A workspace node SHALL open that workspace's Needs you page.
 - A project node SHALL open that project's overview.
-- A role node SHALL open that workspace's Team page.
+- A role node SHALL open that workspace's Roles page.
 - A conductor node SHALL open that workspace's Chat page.
 - A ticket node SHALL open that ticket.
 - A knowledge node SHALL open that workspace's Knowledge page; a project knowledge node SHALL open
@@ -152,6 +152,11 @@ Closing the panel SHALL clear the selection. Opening SHALL NOT edit knowledge.
 
 - **WHEN** the human double-clicks project `api`'s node in workspace Alpha
 - **THEN** the app shows `api`'s overview in Alpha
+
+#### Scenario: Opening a role from the map
+
+- **WHEN** the human opens a role node whose workspace is Alpha
+- **THEN** the app shows Alpha's Roles page
 
 #### Scenario: Knowledge is not edited from the map
 

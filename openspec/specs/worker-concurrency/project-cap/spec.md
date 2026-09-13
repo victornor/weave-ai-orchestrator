@@ -35,13 +35,17 @@ WHEN the project is at its max-workers value, spawn SHALL refuse with the same e
 
 ### Requirement: Hire and role max-workers controls do not create a tighter spawn limit
 
-Hiring a role, changing a role's stored max-workers value (the conductor tool, the CLI command, or a Team editor if one remains), and the hire-approval card SHALL NOT create a concurrency limit tighter than the project's Settings max-workers value. The project's Settings field SHALL remain the control that sets how many workers of that project may be live.
+Hiring a role, changing a role's stored max-workers value (the weaver tool, the CLI command, or a
+Roles editor if one remains), and the hire-approval card SHALL NOT create a concurrency limit
+tighter than the project's Settings max-workers value. The project's Settings field SHALL remain the
+control that sets how many workers of that project may be live.
 
-The Team page SHALL NOT offer a per-role max-workers editor, and SHALL NOT present a role's stored max-workers number as the denominator of how many workers that role may run.
+The Roles page SHALL NOT offer a per-role max-workers editor, and SHALL NOT present a role's stored
+max-workers number as the denominator of how many workers that role may run.
 
 #### Scenario: Team no longer edits a per-role spawn cap
 
-- **WHEN** the operator opens a role on the Team page
+- **WHEN** the operator opens a role on the Roles page
 - **THEN** there is no max-workers editor on that role, and the role is not shown as `live/roleMax` workers
 
 #### Scenario: Raising or lowering a role's stored max-workers does not change who spawns

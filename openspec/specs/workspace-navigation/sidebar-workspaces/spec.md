@@ -36,7 +36,7 @@ The sidebar SHALL NOT present a workspace switcher that hides the other workspac
 
 Each workspace group SHALL carry a control that expands and collapses it, and SHALL report whether
 it is currently expanded to assistive technology. An expanded group SHALL contain a link to each of
-that workspace's sections — Chat, Needs you, Board, Live, Team, Runs, Usage, Knowledge and Settings
+that workspace's sections — Chat, Needs you, Board, Live, Roles, Runs, Usage, Knowledge and Settings
 — in the same order the app uses for the active workspace, each addressing that section of that
 workspace.
 

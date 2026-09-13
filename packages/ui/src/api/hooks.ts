@@ -1077,12 +1077,14 @@ export function useTicketDocumentRevisions(id: string, key: string): UseQueryRes
   });
 }
 
-export function useTicketWorkProducts(id: string): UseQueryResult<T.WorkProduct[]> {
-  const ws = useWs();
+export function useTicketWorkProducts(id: string, wsOverride?: string): UseQueryResult<T.WorkProduct[]> {
+  // VS-345: a V2 decision card may render outside a workspace route (global Needs you), so it names
+  // the ticket's workspace explicitly; V1 callers pass none and keep using the provider's.
+  const ws = useHookWs(wsOverride);
   return useQuery({
     queryKey: qk.ticketWorkProducts(ws, id),
     queryFn: () => api.ws<T.WorkProduct[] | { workProducts: T.WorkProduct[] }>(ws, `/tickets/${id}/work-products`).then((r) => listOf(r, 'workProducts')),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && Boolean(ws),
   });
 }
 

@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   context: [] as ThreadMessage[],
   events: [] as unknown[],
   runStreams: [] as Array<{ id: string | null; live: boolean }>,
+  runState: 'connected' as 'connected' | 'offline' | 'unreachable',
   lastRun: null as { id: string; status: string } | null,
   answer: vi.fn(),
   post: vi.fn(),
@@ -46,7 +47,7 @@ vi.mock('../api/context', () => ({
 vi.mock('../api/runStream', () => ({
   useRunEventStream: (id: string | null, opts?: { live?: boolean }) => {
     state.runStreams.push({ id, live: opts?.live ?? false });
-    return { events: [], status: { state: 'connected' }, retryNow: vi.fn() };
+    return { events: [], status: { state: state.runState }, retryNow: vi.fn() };
   },
 }));
 vi.mock('../v2/chatSplit', async (importOriginal) => {
@@ -192,6 +193,7 @@ beforeEach(() => {
   state.context = [];
   state.events = [];
   state.runStreams = [];
+  state.runState = 'connected';
   state.lastRun = null;
   state.answer.mockReset();
   state.post.mockReset().mockResolvedValue(undefined);
@@ -219,6 +221,18 @@ describe('the V2 Chat screen', () => {
     state.runStreams = [];
     render(<V2ChatPage />);
     expect(state.runStreams.at(-1)).toEqual({ id: 'r9', live: true });
+  });
+
+  it('shows no Refresh under "working" while the live stream is healthy, and one when it drops (VS-370)', async () => {
+    state.lastRun = { id: 'r9', status: 'running' };
+    const utils = render(<V2ChatPage />);
+    await screen.findByText('working');
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+
+    state.runState = 'offline';
+    utils.rerender(<V2ChatPage />);
+    expect(screen.getByText(/The live stream dropped/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
   });
 
   it('keeps the decisions pane on desktop when nothing is waiting, and drops it below the threshold', async () => {

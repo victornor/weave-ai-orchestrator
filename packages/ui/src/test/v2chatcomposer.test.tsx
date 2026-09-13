@@ -120,4 +120,19 @@ describe('the V2 chat composer', () => {
     });
     expect(screen.getByRole('alert')).toHaveTextContent(/Only images/);
   });
+
+  it('shows no focus outline or ring on the text field, but keeps it on the controls (VS-370)', () => {
+    render(<Harness onSubmit={vi.fn()} />);
+    const box = screen.getByLabelText('Message the weaver') as HTMLTextAreaElement;
+    act(() => box.focus());
+    expect(box).toHaveFocus();
+    // `outline-none` kills the browser outline; `focus-visible:[box-shadow:none]` opts out of the
+    // global `:focus-visible` ring the app applies to everything else.
+    expect(box.className).toMatch(/outline-none/);
+    expect(box.className).toMatch(/focus-visible:\[box-shadow:none\]/);
+    // The three controls keep the global focus-visible ring: they do not opt out of it.
+    for (const name of ['Attach a file', 'Dictate', 'Send']) {
+      expect(screen.getByRole('button', { name }).className).not.toMatch(/box-shadow:none/);
+    }
+  });
 });

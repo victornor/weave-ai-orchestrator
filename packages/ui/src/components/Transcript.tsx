@@ -251,7 +251,7 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
  * for every visible edit on every live event; the id alone is enough, since the same id can only
  * ever carry the same edits (VS-324 review).
  */
-function EditPayloadBody({ id, path, payload }: { id: string; path: string; payload: EditPayload }): React.ReactElement {
+export function EditPayloadBody({ id, path, payload }: { id: string; path: string; payload: EditPayload }): React.ReactElement {
   const hljs = useHighlighter();
   const lang = languageForPath(path);
   const highlight = useCallback<Highlighter>((text) => highlightLine(hljs, text, lang), [hljs, lang]);

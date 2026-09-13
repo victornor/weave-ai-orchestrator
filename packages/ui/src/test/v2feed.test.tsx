@@ -78,4 +78,16 @@ describe('the shared worker feed', () => {
     const feed = document.querySelector('[data-worker-feed]');
     expect(feed!.querySelector('div[style*="240px"]')).not.toBeNull();
   });
+
+  it('renders an edit tool call as a highlighted diff through the shared transcript (VS-370)', () => {
+    state.events = [
+      {
+        id: 'e2', runId: 'run_active', seq: 2, ts: '2026-09-13T10:01:00.000Z', type: 'tool.call', stream: 'stdout', level: 'info',
+        payload: { name: 'Edit', callId: 'c1', input: { file_path: 'src/a.ts', old_string: 'const x = 1;', new_string: 'const x = 2;' } },
+      },
+    ];
+    render(<WorkerFeed agentId="a1" ws="ws1" />);
+    expect(screen.getAllByText('const x = 1;').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('const x = 2;').length).toBeGreaterThan(0);
+  });
 });

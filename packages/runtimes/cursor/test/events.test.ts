@@ -42,3 +42,21 @@ describe('cursor-agent stream-json parser', () => {
     expect(run('synthetic-turn-simple', true).types[0]).toBe('session.resumed');
   });
 });
+
+describe('cursor command events (VS-328)', () => {
+  it('carries the parsed test tally on command.executed before truncating', () => {
+    const p = createCursorParser();
+    const evs = p.handle(JSON.stringify({
+      type: 'tool_call', subtype: 'completed', call_id: 'c1',
+      tool_call: { bashToolCall: { name: 'bash', args: { command: 'pnpm test' }, result: { success: { content: ' Test Files  2 passed (2)\n      Tests  28 passed (28)\n   Duration  1.20s' } } } },
+    }));
+    const cmd = evs.find((e) => e.type === 'command.executed')!;
+    expect(cmd.payload['tests']).toEqual({ passed: 28, total: 28 });
+
+    const plain = p.handle(JSON.stringify({
+      type: 'tool_call', subtype: 'completed', call_id: 'c2',
+      tool_call: { bashToolCall: { name: 'bash', args: { command: 'echo pong' }, result: { success: { content: 'pong' } } } },
+    })).find((e) => e.type === 'command.executed')!;
+    expect(plain.payload['tests']).toBeUndefined();
+  });
+});

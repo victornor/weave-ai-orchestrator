@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearch } from '@tanstack/react-router';
-import type { Ticket, TicketStatus } from '@weave-ai/shared';
+import type { Ticket, TicketStatus, WorkerActivitySummary } from '@weave-ai/shared';
 import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, ticketUiStatus } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented } from '../components/Tabs';
@@ -12,8 +12,8 @@ import { Table } from '../components/Table';
 import { StatusGlyph, Badge } from '../components/StatusGlyph';
 import { Button } from '../components/Button';
 import { MergeQueueStrip } from '../components/MergeQueue';
-import { useDecisions, useModels, useProjects, useRoles, useTickets, useWorkers, useWorkspaceSummary } from '../api/hooks';
-import { useWs } from '../api/context';
+import { useDecisions, useModels, useProjects, useRoles, useTickets, useWorkers, useWorkspaceSummary, type WorkerListItem } from '../api/hooks';
+import { useWs, useWorkspaceEvents } from '../api/context';
 import { useGo } from '../app/link';
 import type { FinishedMode } from '../lib/board';
 import {
@@ -94,6 +94,41 @@ export function BoardRoute(): React.ReactElement {
   // `paused` is never in `live` (VS-137: a paused worker is, by definition, not live), so this needs
   // its own lookup rather than falling out of the same map `live` uses for column placement.
   const paused = useMemo(() => pausedWorkersByTicket(workers.data ?? []), [workers.data]);
+  // VS-328: the daemon pushes each live worker's activity summary on the workspace stream the board
+  // already holds; the workers query is the base a fresh load reads. A frame patches only that
+  // worker's entry, coalesced to one state update per animation frame so a burst cannot re-render
+  // the board many times a second, and no run-event stream is opened per card.
+  const [liveSummaries, setLiveSummaries] = useState<Map<string, WorkerActivitySummary>>(new Map());
+  const pendingSummaries = useRef<Map<string, WorkerActivitySummary>>(new Map());
+  const rafHandle = useRef<number | null>(null);
+  useWorkspaceEvents((e) => {
+    if (String(e.type) !== 'worker.activity') return;
+    const summary = e.payload as WorkerActivitySummary;
+    if (!summary?.agentId) return;
+    pendingSummaries.current.set(summary.agentId, summary);
+    if (rafHandle.current !== null) return;
+    rafHandle.current = requestAnimationFrame(() => {
+      rafHandle.current = null;
+      const batch = pendingSummaries.current;
+      pendingSummaries.current = new Map();
+      setLiveSummaries((prev) => {
+        const next = new Map(prev);
+        for (const [id, s] of batch) next.set(id, s);
+        return next;
+      });
+    });
+  });
+  useEffect(() => () => { if (rafHandle.current !== null) cancelAnimationFrame(rafHandle.current); }, []);
+  /** The activity line and test tally for a ticket's live worker: the pushed override, else the query. */
+  const summaryOf = (worker: WorkerListItem): { activity: WorkerActivitySummary['activity']; tests: WorkerActivitySummary['tests'] } => {
+    const override = liveSummaries.get(worker.id);
+    // A pushed frame always wins once it exists, including when its `activity` is null (the turn
+    // ended): falling back to the query's older line would show a stale activity the daemon cleared.
+    return {
+      activity: override ? override.activity : worker.activity ?? null,
+      tests: override ? override.tests : worker.tests ?? null,
+    };
+  };
   // The board card's preview stays capped; its tooltip carries the complete message (VS-201).
   const pausedFor = (ticketId: string): { summary: string; full: string } | null => {
     const w = paused.get(ticketId);
@@ -204,9 +239,13 @@ export function BoardRoute(): React.ReactElement {
           <>
             {/* phone list */}
             <div className="md:hidden">
-              {filtered.map((t, i) => (
-                <TicketRow key={t.id} ticket={t} workerOptions={workerOptions} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)?.summary ?? null} autoApproving={autoApproving.has(t.id)} selected={i === nav.index} onOpen={() => open(t)} />
-              ))}
+              {filtered.map((t, i) => {
+                const w = live.get(t.id);
+                const s = w ? summaryOf(w) : { activity: null, tests: null };
+                return (
+                  <TicketRow key={t.id} ticket={t} workerOptions={workerOptions} working={live.has(t.id)} workerName={w?.name} workerPausedFor={pausedFor(t.id)?.summary ?? null} activity={s.activity} tests={s.tests} autoApproving={autoApproving.has(t.id)} selected={i === nav.index} onOpen={() => open(t)} />
+                );
+              })}
             </div>
 
             {/* desktop */}
@@ -233,9 +272,13 @@ export function BoardRoute(): React.ReactElement {
                         ) : null}
                       </header>
                       <div className="ac-scroll flex flex-col gap-2 px-2 pb-4">
-                        {c.items.map((t) => (
-                          <TicketCard key={t.id} ticket={t} workerOptions={workerOptions} working={live.has(t.id)} workerName={live.get(t.id)?.name} workerPausedFor={pausedFor(t.id)?.summary ?? null} workerPausedForFull={pausedFor(t.id)?.full ?? null} autoApproving={autoApproving.has(t.id)} onOpen={() => open(t)} />
-                        ))}
+                        {c.items.map((t) => {
+                          const w = live.get(t.id);
+                          const s = w ? summaryOf(w) : { activity: null, tests: null };
+                          return (
+                            <TicketCard key={t.id} ticket={t} workerOptions={workerOptions} working={live.has(t.id)} workerName={w?.name} workerPausedFor={pausedFor(t.id)?.summary ?? null} workerPausedForFull={pausedFor(t.id)?.full ?? null} activity={s.activity} tests={s.tests} autoApproving={autoApproving.has(t.id)} onOpen={() => open(t)} />
+                          );
+                        })}
                       </div>
                     </section>
                   ))}

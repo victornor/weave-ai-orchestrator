@@ -333,6 +333,8 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       value: (name: string) => secretValues.get(name) ?? null,
       clear: (_actor: Actor, name: string) => { secretValues.delete(name); },
     }),
+    // VS-328: the workers route reads the live activity summary; a test stubs it when it cares.
+    activity: impl('activity', { summaryFor: () => null }),
   } as unknown as CoreServices;
 
   const ctx = {

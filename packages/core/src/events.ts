@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { Db } from '@weave-ai/db';
 import { newId, nowIso } from '@weave-ai/db';
-import type { EventType, WorkspaceEvent } from '@weave-ai/shared';
+import type { EphemeralEventType, EventType, WorkspaceEvent } from '@weave-ai/shared';
 
 /** Durable outbox + in-process bus. Every domain change appends here; SSE/hooks/webhooks consume by seq. */
 export class EventBus {
@@ -12,6 +12,17 @@ export class EventBus {
     const id = newId();
     const r = this.db.run('INSERT INTO events (id, workspace_id, type, entity_type, entity_id, payload_json, created_at) VALUES (?,?,?,?,?,?,?)', [id, this.workspaceId, type, entityType, entityId, JSON.stringify(payload ?? {}), createdAt]);
     const ev: WorkspaceEvent<T> = { seq: Number(r.lastInsertRowid), workspaceId: this.workspaceId, type, entityType, entityId, payload, createdAt };
+    queueMicrotask(() => this.emitter.emit('event', ev));
+    return ev;
+  }
+  /**
+   * Emit a live-only frame to in-process subscribers without writing an outbox row (VS-328). Used by
+   * the per-worker activity summary, which changes many times a turn and has a read behind it, so the
+   * durable events table must not grow one row per tool call. `seq` is 0: a frame never advances a
+   * client's replay cursor.
+   */
+  broadcast<T>(type: EphemeralEventType, entityType: string, entityId: string, payload: T): WorkspaceEvent<T> {
+    const ev: WorkspaceEvent<T> = { seq: 0, workspaceId: this.workspaceId, type: type as unknown as EventType, entityType, entityId, payload, createdAt: nowIso() };
     queueMicrotask(() => this.emitter.emit('event', ev));
     return ev;
   }

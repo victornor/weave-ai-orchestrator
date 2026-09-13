@@ -5,6 +5,7 @@
 import type * as S from '@weave-ai/shared';
 import type { ForgeChangedFile, ForgeCheck, ForgePullRequest } from '@weave-ai/plugin-sdk';
 import type { DiffFileStatus, DiffHunk } from '@weave-ai/render';
+import type { WorkerActivityService } from './activity/index.js';
 
 export interface Actor { kind: 'human' | 'agent' | 'system'; id: string | null; runId?: string | null }
 export interface Page<T> { items: T[]; total: number }
@@ -667,6 +668,8 @@ export interface CoreServices {
   openspec: OpenSpecService; usage: UsageService; knowledgeUsage: KnowledgeUsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
   changelog: ChangelogService; models: ModelsService; secrets: SecretsService; pullRequests: PullRequestsService;
   routines: RoutinesService; weaverArtifacts: WeaverArtifactsService;
+  /** VS-328: the live per-worker activity line and last test tally the board reads and streams. */
+  activity: WorkerActivityService;
 }
 
 export interface RoutineCreateInput {

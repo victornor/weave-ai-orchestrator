@@ -21,6 +21,7 @@ import { createSecretsService } from './secrets/index.js';
 import { createPullRequestsService } from './pull-requests/index.js';
 import { createRoutinesService } from './routines/index.js';
 import { createWeaverArtifactsService } from './artifacts/service.js';
+import { createWorkerActivityService } from './activity/index.js';
 
 /** Assemble all services for one workspace. Services receive a lazy accessor to the full set to avoid construction-order cycles. */
 export function createCore(ctx: WorkspaceContext): CoreServices {
@@ -37,6 +38,7 @@ export function createCore(ctx: WorkspaceContext): CoreServices {
     pullRequests: createPullRequestsService(ctx, deps),
     routines: createRoutinesService(ctx, deps),
     weaverArtifacts: createWeaverArtifactsService(ctx),
+    activity: createWorkerActivityService(ctx),
   };
   return services;
 }

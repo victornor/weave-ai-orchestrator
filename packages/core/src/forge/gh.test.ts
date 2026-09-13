@@ -10,7 +10,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GhForge, pullRequestDetailFromGh, pullRequestFromGh } from './gh.js';
+import { GhForge, checkTally, pullRequestDetailFromGh, pullRequestFromGh } from './gh.js';
 
 let home: string;
 
@@ -89,6 +89,18 @@ describe('mapping gh JSON to a pull request', () => {
   it('is pending while any check is still running', () => {
     const rollup = [{ name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' }, { name: 'b', status: 'IN_PROGRESS' }];
     expect(pullRequestFromGh({ ...DRAFT, statusCheckRollup: rollup }).checks).toBe('pending');
+  });
+
+  it('tallies the checks that passed out of those reported (VS-328)', () => {
+    const rollup = [
+      { name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'b', status: 'COMPLETED', conclusion: 'NEUTRAL' },
+      { name: 'c', status: 'COMPLETED', conclusion: 'FAILURE' },
+      { name: 'd', status: 'IN_PROGRESS' },
+    ];
+    expect(checkTally(rollup)).toEqual({ passed: 2, total: 4 });
+    expect(checkTally([])).toBeUndefined();
+    expect(checkTally(null)).toBeUndefined();
   });
 
   it('survives a pull request gh answered with almost nothing', () => {

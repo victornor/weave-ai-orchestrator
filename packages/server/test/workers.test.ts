@@ -47,6 +47,29 @@ describe('GET /workers — interactiveSession (VS-101)', () => {
   });
 });
 
+describe('GET /workers — activity summary (VS-328)', () => {
+  it('carries the live activity line and last test tally', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['list'] = () => [worker({ id: 'ag_1' })];
+    h.impls.activity!['summaryFor'] = (id: string) => id === 'ag_1'
+      ? { agentId: 'ag_1', ticketId: 'tk_1', activity: { verb: 'editing', label: 'Editing src/a.ts', target: 'src/a.ts', since: '2026-09-13T10:00:00.000Z' }, tests: { passed: 28, total: 28 } }
+      : null;
+
+    const res = await fetch('/api/w/ws1/workers', { headers: authed() });
+    const list: Array<Record<string, unknown>> = await res.json();
+    expect(list[0]).toMatchObject({ activity: { verb: 'editing', label: 'Editing src/a.ts' }, tests: { passed: 28, total: 28 } });
+  });
+
+  it('reports nulls when the worker has no summary', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['list'] = () => [worker({ id: 'ag_1' })];
+
+    const res = await fetch('/api/w/ws1/workers', { headers: authed() });
+    const list: Array<Record<string, unknown>> = await res.json();
+    expect(list[0]).toMatchObject({ activity: null, tests: null });
+  });
+});
+
 describe('POST /workers/start-session (VS-101)', () => {
   it('starts a session against an existing ticket', async () => {
     const { h, fetch } = app();

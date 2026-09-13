@@ -20,6 +20,21 @@ async function readFrames(res: Response, count: number, timeoutMs = 4000): Promi
   return buffer;
 }
 
+/** Reads SSE frames off a live stream until `needle` appears, then cancels (for id-less frames). */
+async function readUntil(res: Response, needle: string, timeoutMs = 4000): Promise<string> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const deadline = Date.now() + timeoutMs;
+  while (!buffer.includes(needle) && Date.now() < deadline) {
+    const chunk = await Promise.race([reader.read(), new Promise<{ done: true; value: undefined }>((r) => setTimeout(() => r({ done: true, value: undefined }), deadline - Date.now()))]);
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+  }
+  await reader.cancel().catch(() => undefined);
+  return buffer;
+}
+
 describe('workspace SSE', () => {
   it('replays the outbox from ?after= and frames carry id: seq', async () => {
     harness = makeHarness();
@@ -58,5 +73,23 @@ describe('workspace SSE', () => {
     const text = await readFrames(res, 1);
     expect(text).toContain('event: ticket.comment');
     expect(text).not.toContain('event: ticket.created');
+  });
+
+  it('forwards an ephemeral frame without an id and without moving the cursor (VS-328)', async () => {
+    harness = makeHarness();
+    harness.bus.emit('ticket.created', 'ticket', 'tk_1', ticket());
+    harness.bus.emit('ticket.comment', 'ticket', 'tk_1', { id: 'c1' });
+    const [first, second] = harness.bus.since(0);
+    const res = await createApp(harness.deps).fetch(new Request('http://127.0.0.1/api/w/ws1/events?after=' + first!.seq, { headers: authed() }));
+
+    const pending = readUntil(res, 'worker.activity');
+    setTimeout(() => harness!.bus.broadcast('worker.activity', 'worker', 'ag_1', { agentId: 'ag_1', ticketId: null, activity: null, tests: null }), 20);
+    const text = await pending;
+
+    const ephemeral = text.split('\n\n').find((f) => f.includes('event: worker.activity'))!;
+    expect(ephemeral).toBeTruthy();
+    expect(ephemeral).not.toContain('id:');
+    // The replay cursor was not disturbed: the persisted frame after `after` still arrived by seq.
+    expect(text).toContain(`id: ${second!.seq}`);
   });
 });

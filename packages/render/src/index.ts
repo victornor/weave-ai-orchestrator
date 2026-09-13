@@ -13,5 +13,6 @@ export * from './usage.js';
 export * from './changelog.js';
 export * from './diff.js';
 export * from './editDiff.js';
+export * from './activity.js';
 export * from './attachments.js';
 export * from './parts.js';

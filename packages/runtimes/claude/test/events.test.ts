@@ -53,6 +53,8 @@ describe('claude stream-json parser', () => {
     expect(call.payload).toMatchObject({ name: 'Bash', input: { command: 'echo pong' } });
     const cmd = events.find((e) => e.type === 'command.executed')!;
     expect(cmd.payload).toMatchObject({ tool: 'Bash', stdout: 'pong', isError: false });
+    // A command with no test summary carries no tally (VS-328).
+    expect(cmd.payload['tests']).toBeUndefined();
 
     expect(state.structured).toEqual({ state: 'done', summary: 'said pong' });
     expect(state.finalText).toBe('{"state":"done","summary":"said pong"}');
@@ -120,5 +122,20 @@ describe('claude stream-json parser', () => {
     }));
     expect(evs.map((e) => e.type)).toEqual(['tool.call', 'file.changed']);
     expect(evs[1]!.payload).toMatchObject({ path: '/w/a.ts', tool: 'Edit' });
+  });
+
+  it('carries the parsed test tally on command.executed before truncating (VS-328)', () => {
+    const p = createClaudeParser();
+    p.handle(JSON.stringify({
+      type: 'assistant', session_id: 's1',
+      message: { model: 'm', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'pnpm test' } }] },
+    }));
+    const evs = p.handle(JSON.stringify({
+      type: 'user', session_id: 's1',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] },
+      tool_use_result: { stdout: ' Test Files  2 passed (2)\n      Tests  28 passed (28)\n   Duration  1.20s' },
+    }));
+    const cmd = evs.find((e) => e.type === 'command.executed')!;
+    expect(cmd.payload['tests']).toEqual({ passed: 28, total: 28 });
   });
 });

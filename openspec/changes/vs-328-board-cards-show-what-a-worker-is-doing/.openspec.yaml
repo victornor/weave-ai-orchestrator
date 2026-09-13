@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Board cards show what a worker is doing right now, and how its latest test
+  run went

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Ticket, WorkerModelOption } from '@weave-ai/shared';
 import { agent, ticket } from './factories';
@@ -13,10 +13,11 @@ const state = vi.hoisted(() => ({
   decisions: [] as Array<Record<string, unknown>>,
   config: {} as Record<string, unknown>,
   go: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  onEvent: undefined as ((e: unknown) => void) | undefined,
 }));
 
 vi.mock('@tanstack/react-router', () => ({ useSearch: () => state.search }));
-vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1', useWorkspaceEvents: (fn: (e: unknown) => void) => { state.onEvent = fn; } }));
 vi.mock('../app/link', () => ({ useGo: () => state.go }));
 vi.mock('../api/hooks', () => ({
   useTickets: (params: Record<string, unknown> = {}, opts: { enabled?: boolean } = {}) => {
@@ -188,5 +189,87 @@ describe('BoardRoute merge queue', () => {
     render(<BoardRoute />);
     fireEvent.click(screen.getByText('Merge queue'));
     expect(state.go).toHaveBeenCalledWith('/w/$ws/merge-queue', { params: { ws: 'ws1' }, search: { project: 'p1' } });
+  });
+});
+
+describe('BoardRoute worker activity (VS-328)', () => {
+  const liveWorker = (over: Record<string, unknown> = {}): Agent =>
+    Object.assign(agent({ id: 'a1', ticketId: 'tk_1', status: 'running' }), over);
+
+  it('shows a live worker\'s activity line and test tally on its card', () => {
+    state.workers = [liveWorker({
+      activity: { verb: 'editing', label: 'Editing Board.tsx', target: 'Board.tsx', since: '2026-09-10T11:59:45.000Z' },
+      tests: { passed: 24, total: 28 },
+    })];
+    render(<BoardRoute />);
+    expect(screen.getAllByText('Editing Board.tsx').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('24/28 tests').length).toBeGreaterThan(0);
+  });
+
+  it('shows no activity line and no tally when neither is known', () => {
+    state.workers = [liveWorker({ activity: null, tests: null })];
+    render(<BoardRoute />);
+    expect(screen.queryByText(/tests$/)).toBeNull();
+    expect(screen.queryByText('Working')).toBeNull();
+  });
+
+  it('shows an open pull request\'s checks from the ticket delivery', () => {
+    state.active = [ticket({ id: 'tk_1', identifier: 'VS-1', title: 'Still going', status: 'in_review', delivery: { prUrl: 'https://github.com/acme/api/pull/326', prState: 'open', prChecks: { passed: 5, total: 6 } } })];
+    render(<BoardRoute />);
+    expect(screen.getAllByText(/Checks 5\/6/).length).toBeGreaterThan(0);
+  });
+
+  it('shows nothing for a pull request with an empty check rollup', () => {
+    state.active = [ticket({ id: 'tk_1', identifier: 'VS-1', title: 'Still going', status: 'in_review', delivery: { prUrl: 'https://github.com/acme/api/pull/326', prState: 'open' } })];
+    render(<BoardRoute />);
+    expect(screen.queryByText(/Checks/)).toBeNull();
+  });
+
+  it('applies a pushed activity frame to the changed card without a reload', async () => {
+    state.workers = [liveWorker({ activity: { verb: 'reading', label: 'Reading code', target: null, since: '2026-09-10T11:59:00.000Z' }, tests: null })];
+    render(<BoardRoute />);
+    expect(screen.queryByText('Running tests')).toBeNull();
+
+    await act(async () => {
+      state.onEvent?.({
+        type: 'worker.activity', seq: 0, workspaceId: 'ws1', entityType: 'worker', entityId: 'a1', createdAt: '2026-09-10T12:00:00.000Z',
+        payload: {
+          agentId: 'a1', ticketId: 'tk_1',
+          activity: { verb: 'testing', label: 'Running tests', target: null, since: '2026-09-10T12:00:00.000Z' },
+          tests: { passed: 30, total: 30 },
+        },
+      });
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+    });
+
+    expect(screen.getAllByText('Running tests').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('30/30 tests').length).toBeGreaterThan(0);
+  });
+
+  it('a pushed frame with no activity clears the query\'s stale line', async () => {
+    state.workers = [liveWorker({ activity: { verb: 'editing', label: 'Editing stale.ts', target: 'stale.ts', since: '2026-09-10T11:59:00.000Z' }, tests: { passed: 1, total: 1 } })];
+    render(<BoardRoute />);
+    expect(screen.queryAllByText('Editing stale.ts').length).toBeGreaterThan(0);
+
+    await act(async () => {
+      state.onEvent?.({
+        type: 'worker.activity', seq: 0, workspaceId: 'ws1', entityType: 'worker', entityId: 'a1', createdAt: '2026-09-10T12:00:00.000Z',
+        payload: { agentId: 'a1', ticketId: 'tk_1', activity: null, tests: null },
+      });
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+    });
+
+    expect(screen.queryByText('Editing stale.ts')).toBeNull();
+    expect(screen.queryByText('1/1 tests')).toBeNull();
+  });
+
+  it('does not open a run-event stream for any card', () => {
+    const open = vi.fn();
+    const Original = globalThis.EventSource;
+    (globalThis as { EventSource: unknown }).EventSource = open;
+    state.workers = [liveWorker({ activity: { verb: 'editing', label: 'Editing a.ts', target: 'a.ts', since: '2026-09-10T11:59:00.000Z' }, tests: { passed: 1, total: 1 } })];
+    render(<BoardRoute />);
+    expect(open).not.toHaveBeenCalled();
+    (globalThis as { EventSource: unknown }).EventSource = Original;
   });
 });

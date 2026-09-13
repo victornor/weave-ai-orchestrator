@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
 import { truncate } from '@weave-ai/runtime-sdk';
+import { parseTestSummary } from '@weave-ai/shared';
 
 export interface GeminiParseState {
   sessionId: string | null;
@@ -56,7 +57,11 @@ export function createGeminiParser(opts: { resumed: boolean } = { resumed: false
         const isError = str(msg['status']) === 'error';
         const output = str(msg['output']) ?? '';
         const out: RuntimeEvent[] = [{ ts, type: 'tool.result', payload: { id, name, isError, content: truncate(output) } }];
-        if (name && SHELL_TOOLS.has(name)) out.push({ ts, type: 'command.executed', payload: { id, tool: name, output: truncate(output), isError } });
+        if (name && SHELL_TOOLS.has(name)) {
+          // VS-328: read the test tally from the whole output, before it is size-bounded.
+          const tests = parseTestSummary(output);
+          out.push({ ts, type: 'command.executed', payload: { id, tool: name, output: truncate(output), isError, ...(tests ? { tests } : {}) } });
+        }
         if (name && EDIT_TOOLS.has(name)) out.push({ ts, type: 'file.changed', payload: { id, tool: name, detail: truncate(output, 500) } });
         return out;
       }

@@ -433,6 +433,26 @@ describe('supervisor scheduled passes', () => {
       expect(transition).not.toHaveBeenCalled();
     });
 
+    it('updates the check tally while the PR stays open, and refreshes the board (VS-328)', async () => {
+      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+      h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, transition: vi.fn(async () => ({})) } as never;
+      type PrState = { state: 'open' | 'merged' | 'closed'; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number } };
+      const prState = vi.fn(async (): Promise<PrState> => ({ state: 'open' as const, ciState: 'pending', checks: { passed: 1, total: 3 } }));
+      h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState, mergePr: async () => ({}) });
+      const ticketId = seedPrTicket();
+
+      await supervisor.tick();
+      expect(h.db.get<{ delivery: { prChecks: unknown; ciState: unknown } }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId])?.delivery).toMatchObject({ prChecks: { passed: 1, total: 3 }, ciState: 'pending' });
+
+      // The PR is still open; only the checks moved. Reset the reconcile throttle and tick again.
+      h.db.run("UPDATE meta SET value = '0' WHERE key = 'supervisor:reconcile_at'");
+      prState.mockResolvedValue({ state: 'open' as const, ciState: 'success', checks: { passed: 3, total: 3 } });
+      const before = h.events.filter((e) => e.type === 'ticket.updated').length;
+      await supervisor.tick();
+      expect(h.db.get<{ delivery: { prChecks: unknown; ciState: unknown } }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId])?.delivery).toMatchObject({ prChecks: { passed: 3, total: 3 }, ciState: 'success' });
+      expect(h.events.filter((e) => e.type === 'ticket.updated').length).toBeGreaterThan(before);
+    });
+
     it('moves a merged PR to merging and wakes the live worker to report only', async () => {
       h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
       const transition = vi.fn(async () => ({}));

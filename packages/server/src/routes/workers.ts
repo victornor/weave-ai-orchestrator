@@ -21,12 +21,18 @@ export function workerRoutes(): Hono<AppEnv> {
     const interactive = ticketIds.length
       ? new Set(ws.ctx.db.all<{ id: string }>(`SELECT id FROM tickets WHERE interactive_session = 1 AND id IN (${ticketIds.map(() => '?').join(',')})`, ticketIds).map((r) => r.id))
       : new Set<string>();
-    return c.json(workers.map((w) => ({
-      ...w,
-      interactiveSession: w.ticketId ? interactive.has(w.ticketId) : false,
-      // VS-317: a worker waiting on its own scheduled wake is not idle.
-      scheduledWake: scheduledWake(ws.services, w.id),
-    })));
+    return c.json(workers.map((w) => {
+      // VS-328: what the worker is doing now and its last test tally, so a fresh board load is correct.
+      const activity = ws.services.activity.summaryFor(w.id);
+      return {
+        ...w,
+        interactiveSession: w.ticketId ? interactive.has(w.ticketId) : false,
+        // VS-317: a worker waiting on its own scheduled wake is not idle.
+        scheduledWake: scheduledWake(ws.services, w.id),
+        activity: activity?.activity ?? null,
+        tests: activity?.tests ?? null,
+      };
+    }));
   });
 
   app.get('/:id', (c) => {
@@ -34,11 +40,15 @@ export function workerRoutes(): Hono<AppEnv> {
     const s = ws.services;
     const worker = s.workers.get(c.req.param('id'));
     const runs = safe(() => s.runs.list({ agentId: worker.id, limit: 1 }));
+    const activity = s.activity.summaryFor(worker.id);
     return c.json({
       worker,
       ticket: worker.ticketId ? safe(() => s.tickets.get(worker.ticketId!)) : null,
       lastRun: runs?.items[0] ?? null,
       usage: safe(() => s.usage.series({ scope: `worker:${worker.id}`, window: '7d' })),
+      // VS-328: the same live activity line and last test tally the worker list carries.
+      activity: activity?.activity ?? null,
+      tests: activity?.tests ?? null,
       // Whether the human's next message right now would reach a running turn (VS-99), so a
       // composer can say so before anyone types rather than guessing from the runtime's name.
       input: safe(() => describeLiveInput(ws.ctx, worker)) ?? { midTurn: false },

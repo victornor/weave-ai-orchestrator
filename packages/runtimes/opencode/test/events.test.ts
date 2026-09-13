@@ -36,6 +36,8 @@ describe('opencode run --format json parser', () => {
     expect(types).toContain('command.executed');
     const cmd = events.find((e) => e.type === 'command.executed')!;
     expect(cmd.payload).toMatchObject({ command: 'echo pong', exitCode: 0, output: 'pong\n' });
+    // A command with no test summary carries no tally (VS-328).
+    expect(cmd.payload['tests']).toBeUndefined();
     // usage is summed across both steps
     expect(state.usage).toEqual({ inputTokens: 4551, outputTokens: 61, cachedInputTokens: 18944 });
     expect(state.finalText).toBe('```json\n{"state":"done","summary":"said pong"}\n```');
@@ -71,5 +73,17 @@ describe('opencode models parsing', () => {
       { id: 'opencode/big-pickle', label: 'opencode/big-pickle', provider: 'opencode', source: 'detected' },
       { id: 'anthropic/claude-sonnet-5', label: 'anthropic/claude-sonnet-5', provider: 'anthropic', source: 'detected' },
     ]);
+  });
+});
+
+describe('opencode command events (VS-328)', () => {
+  it('carries the parsed test tally on command.executed before truncating', () => {
+    const p = createOpenCodeParser();
+    const evs = p.handle(JSON.stringify({
+      type: 'tool_use', sessionID: 's1',
+      part: { tool: 'bash', callID: 'c1', state: { status: 'completed', input: { command: 'pnpm test' }, output: ' Test Files  2 passed (2)\n      Tests  28 passed (28)\n   Duration  1.20s', metadata: { exit: 0 } } },
+    }));
+    const cmd = evs.find((e) => e.type === 'command.executed')!;
+    expect(cmd.payload['tests']).toEqual({ passed: 28, total: 28 });
   });
 });

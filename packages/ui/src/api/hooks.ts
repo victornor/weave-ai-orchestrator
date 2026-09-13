@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, Routine, RoutineFire, RoutineListItem, RoutineUsage } from '@weave-ai/shared';
+import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary } from '@weave-ai/shared';
 import { dayKey } from '@weave-ai/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -616,9 +616,15 @@ export function useRollbackCharter(): UseMutationResult<unknown, Error, { id: st
 
 /* --------------------------------------------------------------- workers */
 
-/** `GET /workers` marks which ticket is an interactive session (VS-101) and carries the worker's own
- *  pending scheduled wakeup (VS-317) — both joined server-side, neither part of `Agent` itself. */
-export type WorkerListItem = Agent & { interactiveSession: boolean; scheduledWake: T.WorkerScheduledWake | null };
+/** `GET /workers` marks which ticket is an interactive session (VS-101), carries the worker's own
+ *  pending scheduled wakeup (VS-317), and the live activity summary (VS-328) — all joined
+ *  server-side, none part of `Agent` itself. */
+export type WorkerListItem = Agent & {
+  interactiveSession: boolean;
+  scheduledWake: T.WorkerScheduledWake | null;
+  activity?: WorkerActivitySummary['activity'];
+  tests?: WorkerActivitySummary['tests'];
+};
 
 export function useWorkers(params: { status?: string; project?: string; role?: string; includeRetired?: boolean } = {}, wsOverride?: string): UseQueryResult<WorkerListItem[]> {
   const ws = useHookWs(wsOverride);

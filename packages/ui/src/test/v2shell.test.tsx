@@ -152,4 +152,18 @@ describe('the V2 page header', () => {
     expect(screen.getByText('1 running')).toBeInTheDocument();
     expect(screen.getByText('2 need you')).toBeInTheDocument();
   });
+
+  it('renders a screen-supplied action in the header without changing the label or counts', () => {
+    render(<V2Page title="Usage" actions={<button type="button">week · day</button>} />);
+    expect(screen.getByRole('heading', { name: 'Usage' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'week · day' })).toBeInTheDocument();
+    expect(screen.getByText('Acme')).toBeInTheDocument();
+    expect(screen.getByText('1 running')).toBeInTheDocument();
+    expect(screen.getByText('2 need you')).toBeInTheDocument();
+  });
+
+  it('renders no controls when a screen supplies no actions', () => {
+    render(<V2Page title="Work" />);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
 });

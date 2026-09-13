@@ -121,4 +121,16 @@ describe('the V2 route tree (VS-343, VS-353)', () => {
       expect(src).not.toMatch(/^\s*import\s+['"][^'"]*v2\//m);
     }
   });
+
+  it('serves the real kept-V1 screens, not placeholders (VS-352)', () => {
+    const pages = readFileSync(resolve(process.cwd(), 'src/v2/pages.tsx'), 'utf8');
+    expect(pages).toContain("export { V2ChatsScreen as V2ChatsPage } from './chats/ChatsPage'");
+    expect(pages).toContain("export { V2UsageScreen as V2UsagePage } from './usage/UsagePage'");
+    expect(pages).toContain("export { V2ChangelogScreen as V2ChangelogPage } from './changelog/ChangelogPage'");
+    expect(pages).toContain("export { V2ProjectScreen as V2ProjectPage } from './project/ProjectPage'");
+    // No bare placeholder function is left behind for those four.
+    for (const title of ['Chats', 'Usage', 'Changelog', 'Project']) {
+      expect(pages).not.toMatch(new RegExp(`<V2Page title="${title}"`));
+    }
+  });
 });

@@ -26,6 +26,10 @@ export const MIN_SPLIT = 0.2;
 
 const KEY = 'conductor.globalChats.layout';
 
+/** V1's storage key, and the default for a caller that does not name its own (V2 uses its own so the
+ *  two versions never read each other's layout). */
+export const GLOBAL_CHAT_LAYOUT_KEY = KEY;
+
 export function emptyLayout(): GlobalChatLayout {
   return { order: [], widths: {}, collapsed: {} };
 }
@@ -185,10 +189,10 @@ function sanitizeLayout(value: unknown): GlobalChatLayout {
 }
 
 /** The saved layout, or an empty one when there is none, it is unreadable, or storage is refused. */
-export function readGlobalChatLayout(): GlobalChatLayout {
+export function readGlobalChatLayout(key: string = KEY): GlobalChatLayout {
   let raw: string | null;
   try {
-    raw = localStorage.getItem(KEY);
+    raw = localStorage.getItem(key);
   } catch {
     return emptyLayout();
   }
@@ -208,11 +212,12 @@ export function readGlobalChatLayout(): GlobalChatLayout {
 export function writeGlobalChatLayout(
   layout: GlobalChatLayout,
   listedIds: readonly string[],
+  key: string = KEY,
 ): GlobalChatLayout {
   const pruned = reconcileLayout(layout, listedIds);
   try {
-    if (pruned.order.length === 0) localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, JSON.stringify(pruned));
+    if (pruned.order.length === 0) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(pruned));
   } catch {
     /* private mode: the visit honours the layout, the browser just does not remember it */
   }

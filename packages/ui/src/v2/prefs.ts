@@ -4,6 +4,9 @@
  */
 const KEY = 'weave.v2.rail';
 
+/** Where V2's Global Chats remembers its pane layout; V1's own key is left to V1. */
+export const V2_CHATS_LAYOUT_KEY = 'weave.v2.chats.layout';
+
 export function readRailCollapsed(): boolean {
   try {
     return localStorage.getItem(KEY) === 'collapsed';

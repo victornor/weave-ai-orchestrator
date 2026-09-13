@@ -9,9 +9,22 @@
  * is defensive: unknown or missing fields degrade to null / empty rather than throwing.
  */
 import { execa } from 'execa';
-import { resolve } from 'node:path';
-import { realpathSync } from 'node:fs';
+import { resolve, join } from 'node:path';
+import { realpathSync, existsSync, readdirSync } from 'node:fs';
 import { OcError } from '@weave-ai/shared';
+
+/**
+ * `openspec/changes/archive/YYYY-MM-DD-<change>` in some checkout. A leaf helper (no service
+ * dependencies) so both `openspec/index.ts` and `tickets/archive-before-merge.ts` can use it without
+ * importing each other.
+ */
+export function archivedDirFor(clonePath: string, changeName: string): string | null {
+  const dir = join(clonePath, 'openspec', 'changes', 'archive');
+  if (!existsSync(dir)) return null;
+  const re = new RegExp(`^\\d{4}-\\d{2}-\\d{2}-${changeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+  for (const e of readdirSync(dir, { withFileTypes: true })) if (e.isDirectory() && re.test(e.name)) return e.name;
+  return null;
+}
 
 export const OPENSPEC_TIMEOUT_MS = 30_000;
 

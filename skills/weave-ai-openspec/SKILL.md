@@ -52,7 +52,7 @@ The daemon runs `openspec status --change <c> --json` and `openspec validate <c>
 
 ## Never
 
-- **Never run `openspec archive` or `/opsx:archive`.** The daemon archives, in the primary clone, after it has verified the merge. Running it yourself corrupts that.
+- **Never run `openspec archive` or `/opsx:archive`.** The daemon archives your change onto your own branch as part of landing it, before the merge — not you, and not after a merge that already happened. Running it yourself corrupts that.
 - **Never run `openspec update`** — it overwrites the generated skill files, which are OpenSpec's, not ours.
 - Never run the `explore` workflow unattended; it requires confirmation before any write and there is nobody to confirm.
 - Never implement during propose, and never re-plan during apply.

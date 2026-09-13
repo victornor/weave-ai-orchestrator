@@ -11,8 +11,9 @@ import { checkTransition, openspecChangeName, type GuardFacts } from './guards.j
 import { unlandedCommitCount } from '../worktrees/landed.js';
 import { tx } from './tx.js';
 import { landDelivery, type LandResult } from './land.js';
+import { attemptArchiveThenMerge } from './archive-before-merge.js';
 import { createMergeQueue } from './merge-queue.js';
-import { createSerializer } from '../util/serialize.js';
+import { landLock } from '../util/land-lock.js';
 import { effectiveModels } from '../models/resolve.js';
 import { existsSync } from 'node:fs';
 import { flattenWakes } from '../prompts/index.js';
@@ -78,7 +79,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   const ws = ctx.workspaceId;
   const mergeQueue = createMergeQueue(ctx, deps);
   /** One delivery landing at a time per project: it mutates the clone every ticket shares (§11.4). */
-  const serialize = createSerializer();
+  const serialize = landLock;
 
   function resolveWorkerModelId(id: string | null | undefined): string | null {
     if (id == null || id === '') return null;
@@ -1082,6 +1083,11 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       // Land the delivery into the primary clone first (ff for local-branch; verify containment for pr). Not landed → the worker keeps the ticket in merging.
       let landInfo: LandResult | null = null;
       let trustedMerge: string | undefined;
+      // VS-327: true once the archive-then-merge sequence below has already archived (or determined
+      // there was nothing to archive for) this ticket, so the old post-merge `archiveAfterMerge` path
+      // — which pushes straight to the landing branch — is only reached for a PR merged out of band.
+      let archivedByNewFlow = false;
+      let newFlowArchivedAs: string | null = null;
       if (t.projectId) {
         let project: Project | null = null;
         try { project = deps().projects.get(t.projectId); } catch { project = null; }
@@ -1092,46 +1098,95 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           // ticket of the project shares, and reconciliation can call mergeDone outside the queue.
           const p = project;
           const mode = ((p.policies as { deliveryMode?: string } | null)?.deliveryMode ?? ctx.config.defaults.deliveryMode) as 'pr' | 'local-branch';
-          let mergeCommit: string | undefined;
-          if (mode === 'pr') {
-            const pr = db.get<{ url: string | null }>("SELECT url FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' ORDER BY created_at DESC LIMIT 1", [t.id]);
-            if (pr?.url) {
-              const forge = ctx.registries.forges.get('github');
-              const state = forge ? await forge.prState(p.clonePath, pr.url).catch(() => null) : null;
-              if (state && state.state !== 'merged') {
-                throw new OcError(
-                  'merge_unverified',
-                  `pull request is ${state.state}, not merged; merge the PR first (or wait for the forge), then report again`,
-                  { forgeState: state.state, prUrl: pr.url, reported: info.mergeCommit ?? null },
-                );
-              }
-              if (state?.state === 'merged' && state.mergeCommit) {
-                if (info.mergeCommit && !sameGitSha(info.mergeCommit, state.mergeCommit)) {
-                  throw new OcError(
-                    'merge_unverified',
-                    `reported merge commit ${info.mergeCommit.slice(0, 12)} is not the forge's ${state.mergeCommit.slice(0, 12)} for this pull request`,
-                    { reported: info.mergeCommit, forge: state.mergeCommit, prUrl: pr.url },
-                  );
+          // VS-327 design.md Decision 2: freshness check, daemon rebase, archive, push, merge,
+          // verify and fast-forward are all one project-serialized critical section — never two
+          // separate ones either side of the merge, or a ticket landing on the same project
+          // concurrently could archive against a base this ticket's own merge has since moved past.
+          landInfo = await serialize(project.id, async () => {
+            let mergeCommit: string | undefined;
+            if (mode === 'pr') {
+              const pr = db.get<{ url: string | null }>("SELECT url FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' ORDER BY created_at DESC LIMIT 1", [t.id]);
+              if (pr?.url) {
+                const forge = ctx.registries.forges.get('github');
+                const state = forge ? await forge.prState(p.clonePath, pr.url).catch(() => null) : null;
+                if (state && state.state === 'closed') {
+                  throw new OcError('merge_unverified', `pull request is closed, not merged`, { forgeState: state.state, prUrl: pr.url });
                 }
-                mergeCommit = state.mergeCommit;
-                trustedMerge = state.mergeCommit;
+                if (forge && state && state.state !== 'merged') {
+                  // Not yet merged: the daemon lands it now (VS-327), archiving the ticket's own
+                  // OpenSpec change onto its branch first (if it has one) and merging with the
+                  // project's configured method — the worker no longer runs `gh pr merge` itself.
+                  const method = info.method ?? String((p.policies as { mergeMethod?: string } | null)?.mergeMethod ?? 'squash');
+                  // A landing failure other than "checks still pending" is real: the worker already
+                  // learns of it synchronously (this call's own thrown error), but a comment leaves a
+                  // durable trail for anyone reviewing the ticket later too (task 2.7). No `unblock`
+                  // and no weaver wake — the worker is expected to resolve and retry on its own, the
+                  // same way it already handles a plain rebase conflict.
+                  const failLanding = (action: string): never => {
+                    systemComment(t.id, action, actor);
+                    recordActivity(db, ws, actor, 'ticket.merge_archive_failed', 'ticket', t.id, { error: action }, t.id);
+                    throw new OcError('merge_unverified', action, { branch, prUrl: pr.url });
+                  };
+                  let outcome: Awaited<ReturnType<typeof attemptArchiveThenMerge>>;
+                  try {
+                    outcome = await attemptArchiveThenMerge({
+                      clonePath: p.clonePath, branch, landingBranch: landingBranchOf(p, t), changeName: t.openspecChangeName, forge, prUrl: pr.url, method,
+                    });
+                  } catch (e) {
+                    const action = `landing failed: ${e instanceof Error ? e.message : String(e)}`;
+                    systemComment(t.id, action, actor);
+                    recordActivity(db, ws, actor, 'ticket.merge_archive_failed', 'ticket', t.id, { error: action }, t.id);
+                    throw e instanceof OcError ? new OcError(e.code, action, { ...(e.details ?? {}), ticketId: t.id }) : new OcError('internal', action, { ticketId: t.id });
+                  }
+                  if (outcome.kind === 'conflict') {
+                    return failLanding(`branch ${branch} conflicts with ${landingBranchOf(p, t)}; re-sync and retry. ${outcome.detail}`);
+                  }
+                  if (outcome.kind === 'checks_pending') {
+                    throw new OcError('merge_checks_pending', 'required checks are pending on the archived branch; retry once they resolve', { prUrl: pr.url }, true);
+                  }
+                  if (outcome.kind === 'checks_failed') {
+                    return failLanding('required checks failed on the archived branch');
+                  }
+                  mergeCommit = outcome.mergeCommit;
+                  trustedMerge = outcome.mergeCommit;
+                  archivedByNewFlow = true;
+                  newFlowArchivedAs = outcome.archivedAs;
+                } else if (state?.state === 'merged' && state.mergeCommit) {
+                  // Already merged out of band, or a previous attempt reached the merge but crashed
+                  // before finishing the bookkeeping below — trust the forge, same as before VS-327.
+                  if (info.mergeCommit && !sameGitSha(info.mergeCommit, state.mergeCommit)) {
+                    throw new OcError(
+                      'merge_unverified',
+                      `reported merge commit ${info.mergeCommit.slice(0, 12)} is not the forge's ${state.mergeCommit.slice(0, 12)} for this pull request`,
+                      { reported: info.mergeCommit, forge: state.mergeCommit, prUrl: pr.url },
+                    );
+                  }
+                  mergeCommit = state.mergeCommit;
+                  trustedMerge = state.mergeCommit;
+                }
               }
             }
-          }
-          // VS-232 — both halves are load-bearing, do not simplify:
-          // 1. Use the forge's merge commit for this PR (caller SHA is a cross-check; omitting it is fine).
-          // 2. When the forge is unreachable, do not forward the worker's SHA: ancestry of any
-          //    commit already on the landing branch would close a ticket that never merged.
-          landInfo = await serialize(project.id, () => landDelivery(ctx.config, p, t, branch, mergeCommit ? { mergeCommit } : undefined));
+            // VS-232 — both halves are load-bearing, do not simplify:
+            // 1. Use the forge's merge commit for this PR (caller SHA is a cross-check; omitting it is fine).
+            // 2. When the forge is unreachable, do not forward the worker's SHA: ancestry of any
+            //    commit already on the landing branch would close a ticket that never merged.
+            return landDelivery(ctx.config, p, t, branch, mergeCommit ? { mergeCommit } : undefined);
+          });
           recordActivity(db, ws, actor, 'ticket.delivery_landed', 'ticket', t.id, { ...landInfo }, t.id);
         } else log.warn({ ticketId: t.id }, 'mergeDone: no project clone available; skipping delivery landing');
       }
-      let archivedAs: string | null = null;
+      let archivedAs: string | null = archivedByNewFlow ? newFlowArchivedAs : null;
       let skipped: string | null = null;
+      // VS-327: the sequence above already archived this ticket's change (or established it had
+      // none) as part of landing it. Only a PR merged out of band — the one case that sequence never
+      // ran for — still needs the old primary-clone archive path, kept for that edge case and for
+      // reconciliation's backfill of tickets merged before this change shipped.
       try {
-        const res = await deps().openspec.archiveAfterMerge(t.id);
-        archivedAs = res.archivedAs;
-        skipped = res.skipped;
+        if (!archivedByNewFlow) {
+          const res = await deps().openspec.archiveAfterMerge(t.id);
+          archivedAs = res.archivedAs;
+          skipped = res.skipped;
+        }
       } catch (e) {
         const action = `openspec archive failed: ${e instanceof Error ? e.message : String(e)}`;
         tx(db, () => {

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: "Land each ticket as one commit: archive the OpenSpec change inside the PR
+  before merging, not as a separate unreviewed push to main"

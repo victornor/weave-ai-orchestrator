@@ -61,6 +61,10 @@ jobs:
           node-version: "26"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # A host tool, not a project dependency (see openspec/specs/host-tools/): several
+      # core tests shell out to the real binary rather than a fake one (VS-327), the same
+      # way this repo already does for `git`.
+      - run: npm install -g @fission-ai/openspec@1.12.0
       # No prior build: vitest.config.ts aliases every @weave-ai/* package onto its
       # src/index.ts, so the core/server suite runs against sources.
       - run: pnpm exec vitest run

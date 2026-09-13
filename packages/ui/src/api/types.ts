@@ -262,6 +262,15 @@ export interface WorkProduct {
   updatedAt: string;
 }
 
+/** `POST /tickets/:id/discard` (VS-346): `discarded: false` with the raised approval's id when the
+ * daemon had to ask first, `discarded: true` once an approval lets the work go. */
+export interface DiscardResult {
+  discarded: boolean;
+  decisionId?: string;
+  force?: boolean;
+  ticket?: Ticket;
+}
+
 /** One row of `GET /knowledge/artifacts` (VS-270): a published artifact joined with its own ticket's
  * identifier/title, for the document explorer's Artifacts entry. Not a knowledge document — no slug. */
 export interface TicketArtifactSummary {

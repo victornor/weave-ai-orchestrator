@@ -8,6 +8,9 @@ import { V2Page } from './V2Page';
 import { KnowledgeHome } from './knowledge/KnowledgeHome';
 import { KnowledgeGraphPage } from './knowledge/KnowledgeGraphPage';
 import { KnowledgeExplorerPage } from './knowledge/KnowledgeExplorerPage';
+import { V2WorkScreen } from './work/Work';
+import { V2TicketScreen } from './ticket/Ticket';
+import { V2TicketArtifactReader, V2WorkspaceArtifactReader } from './artifact/Artifact';
 
 // VS-345: Needs you is a real screen, not a placeholder; its module owns the page component.
 export { V2NeedsPage } from './NeedsYouPage';
@@ -41,7 +44,7 @@ export function V2ChatPage(): React.ReactElement {
   return <V2Page title="Chat" />;
 }
 export function V2WorkPage(): React.ReactElement {
-  return <V2Page title="Work" />;
+  return <V2WorkScreen />;
 }
 export function V2RolesPage(): React.ReactElement {
   return <V2Page title="Roles" />;
@@ -78,13 +81,12 @@ export function V2ProjectPage(): React.ReactElement {
   return <V2Page title="Project" subtitle={params.project} />;
 }
 export function V2TicketPage(): React.ReactElement {
-  const params = useParams({ strict: false }) as { ticketId?: string };
-  return <V2Page title={params.ticketId ?? 'Ticket'} />;
+  return <V2TicketScreen />;
 }
 export function V2ArtifactPage(): React.ReactElement {
-  const params = useParams({ strict: false }) as { key?: string };
-  return <V2Page title="Artifact" subtitle={params.key} />;
+  return <V2WorkspaceArtifactReader />;
 }
+export { V2TicketArtifactReader };
 export function V2WorkerPage(): React.ReactElement {
   const params = useParams({ strict: false }) as { workerId?: string };
   return <V2Page title="Worker" subtitle={params.workerId} />;

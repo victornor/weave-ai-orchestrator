@@ -1030,6 +1030,47 @@ export function useRetryTicket(): UseMutationResult<Ticket, Error, { id: string;
   });
 }
 
+/** Cancel a ticket (VS-346): the V2 ticket header's action. Existing endpoint, previously CLI-only. */
+export function useCancelTicket(): UseMutationResult<Ticket, Error, { id: string; reason: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }) => api.ws<Ticket>(ws, `/tickets/${id}/cancel`, { method: 'POST', body: { reason } }),
+    onSuccess: (_r, v) => { void qc.invalidateQueries({ queryKey: qk.ticket(ws, v.id) }); void qc.invalidateQueries({ queryKey: qk.tickets(ws) }); },
+  });
+}
+
+/** Discard a ticket's unlanded work (VS-346). The daemon gates it on a discard approval: 202 with
+ * `discarded: false` and a `decisionId` when one had to be raised, `discarded: true` once approved. */
+export function useDiscardTicket(): UseMutationResult<T.DiscardResult, Error, { id: string; reason?: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }) => api.ws<T.DiscardResult>(ws, `/tickets/${id}/discard`, { method: 'POST', body: { force: true, ...(reason ? { reason } : {}) } }),
+    onSuccess: (_r, v) => { void qc.invalidateQueries({ queryKey: qk.ticket(ws, v.id) }); void qc.invalidateQueries({ queryKey: qk.tickets(ws) }); },
+  });
+}
+
+/** Reassign a ticket to a role (VS-346). */
+export function useAssignTicket(): UseMutationResult<Ticket, Error, { id: string; roleId: string; workerModelId?: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, roleId, workerModelId }) => api.ws<Ticket>(ws, `/tickets/${id}/assign`, { method: 'POST', body: workerModelId ? { roleId, workerModelId } : { roleId } }),
+    onSuccess: (_r, v) => { void qc.invalidateQueries({ queryKey: qk.ticket(ws, v.id) }); void qc.invalidateQueries({ queryKey: qk.tickets(ws) }); },
+  });
+}
+
+/** Replace a ticket's blockers (VS-346): `blockedBy` is the full list of ticket ids. */
+export function useSetTicketBlockers(): UseMutationResult<Ticket, Error, { id: string; blockedBy: string[] }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, blockedBy }) => api.ws<Ticket>(ws, `/tickets/${id}/blockers`, { method: 'PUT', body: { blockedBy } }),
+    onSuccess: (_r, v) => { void qc.invalidateQueries({ queryKey: qk.ticket(ws, v.id) }); void qc.invalidateQueries({ queryKey: qk.tickets(ws) }); },
+  });
+}
+
 export function useTicketComments(id: string): UseQueryResult<TicketComment[]> {
   const ws = useWs();
   return useQuery({

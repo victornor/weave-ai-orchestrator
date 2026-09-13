@@ -5,6 +5,7 @@
  * exercises this view's own rendering, not `highlight.js`'s grammars — those are `lib/highlight.test.ts`'s
  * job (ADR 0013).
  */
+import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { DiffFileContent, DiffFileSummary, PullRequestDiffContextResult, PullRequestDiffFileResult, PullRequestDiffFilesResult } from '../api/types';
@@ -227,6 +228,49 @@ describe('unified vs. side-by-side', () => {
     expect(screen.queryByRole('button', { name: 'Side-by-side' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { expanded: false }));
     expect(container.querySelector('.grid-cols-2')).toBeNull();
+  });
+});
+
+describe('a re-render of the diff', () => {
+  it('does not rebuild a line whose content is unchanged, so the text node and its selection survive', () => {
+    state.files = filesResult([summary({ path: 'src/a.ts' })]);
+    state.fileByPath['src/a.ts'] = fileResult({
+      path: 'src/a.ts',
+      hunks: [{
+        oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, header: '@@ -1 +1 @@',
+        lines: [{ kind: 'context', oldLine: 1, newLine: 1, text: 'const keep = 1;' }],
+      }],
+    });
+
+    // An unrelated parent re-render — a sibling's state, not the diff's — is enough to re-render the
+    // diff; the line's `dangerouslySetInnerHTML` must not rewrite its DOM when the text is identical.
+    function Harness() {
+      const [n, setN] = useState(0);
+      return (
+        <>
+          <button type="button" onClick={() => setN((v) => v + 1)}>re-render {n}</button>
+          <PullRequestDiff projectId="p1" number={12} />
+        </>
+      );
+    }
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    const line = screen.getByText('const keep = 1;');
+    const textNode = line.firstChild;
+    expect(textNode).toBeTruthy();
+
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    expect(selection?.toString()).toBe('const keep = 1;');
+
+    fireEvent.click(screen.getByRole('button', { name: /re-render/ }));
+
+    expect(screen.getByText('const keep = 1;').firstChild).toBe(textNode);
+    expect(window.getSelection()?.toString()).toBe('const keep = 1;');
   });
 });
 

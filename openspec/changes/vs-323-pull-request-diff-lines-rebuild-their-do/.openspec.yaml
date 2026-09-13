@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Pull request diff lines rebuild their DOM on every re-render, so a
+  selection in the diff is cleared
+skip_specs: true

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: A daemon upgrade never restarts the service it replaces, then records
+  itself completed

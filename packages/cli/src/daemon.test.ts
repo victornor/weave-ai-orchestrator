@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SHUTDOWN_KILL_GRACE_MS } from '@weave-ai/shared';
 import { isRunning, pidFile, renderServiceUnit, stopDaemon } from './daemon.js';
 
@@ -89,5 +89,18 @@ describe('stopDaemon (VS-262)', () => {
     // confirm the kill landed, so give the OS a moment before checking.
     expect(existsSync(marker)).toBe(false);
     await until(() => !isRunning(pid));
+  });
+
+  it('throws if the process is still running after SIGKILL (VS-316)', async () => {
+    mkdirSync(dirname(pidFile()), { recursive: true });
+    writeFileSync(pidFile(), '999999');
+    // Every `process.kill` call — the SIGTERM, the probing 0-signal, and the SIGKILL — "succeeds" and
+    // never throws ESRCH, so `isRunning` reports true forever, simulating a kill that did not land.
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true);
+    try {
+      await expect(stopDaemon(10)).rejects.toThrow(/still running/);
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 });

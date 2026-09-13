@@ -45,6 +45,8 @@ describe('startDaemon', () => {
     const payload = await health.json();
     expect(payload.ok).toBe(true);
     expect(payload.workspaces.map((w: { id: string }) => w.id)).toContain('smoke');
+    // VS-316: so an upgrade's restart runner can tell this process apart from a stray one.
+    expect(payload.pid).toBe(process.pid);
 
     const pidFile = join(configDir, 'daemon.json');
     expect(existsSync(pidFile)).toBe(true);

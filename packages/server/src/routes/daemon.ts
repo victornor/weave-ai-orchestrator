@@ -48,6 +48,9 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   app.get('/health', async (c) => c.json({
     ok: true,
     version: deps.version,
+    // VS-316: lets an upgrade's restart runner tell this process apart from a stray one that happens to
+    // answer on the target release — see `confirmsReplacement` in `packages/cli/src/upgrade-runner.ts`.
+    pid: process.pid,
     // The release this process is executing, so an upgrade's restart runner can tell whether the daemon
     // that answered is the one it switched to. Derived from the process, never from `current`.
     release: deps.updates.running(),

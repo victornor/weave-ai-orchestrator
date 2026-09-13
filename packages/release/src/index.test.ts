@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   LAUNCHD_LABEL, SERVICE_NAME, commitSubjectsInRange, configDir, dataHome, inOwnScope, migrationsIn, planRestart,
-  releaseStamp, releaseVersion, stateHome,
+  releaseStamp, releaseVersion, resolveInstalledLaunchdAgent, resolveInstalledUnit, stateHome,
 } from './index.js';
 
 const tmps: string[] = [];
@@ -58,25 +58,91 @@ describe('dataHome / configDir / stateHome (VS-258)', () => {
   });
 });
 
+describe('resolveInstalledUnit / resolveInstalledLaunchdAgent (VS-316)', () => {
+  const savedEnv = { ...process.env };
+  beforeEach(() => { delete process.env['XDG_CONFIG_HOME']; delete process.env['HOME']; });
+  afterEach(() => {
+    for (const k of ['XDG_CONFIG_HOME', 'HOME']) {
+      if (savedEnv[k] === undefined) delete process.env[k]; else process.env[k] = savedEnv[k];
+    }
+  });
+
+  it('resolves nothing when neither name is installed', () => {
+    process.env['XDG_CONFIG_HOME'] = tmp('ac-unit-none-');
+    expect(resolveInstalledUnit()).toBeNull();
+  });
+
+  it('resolves the legacy name when only it is installed', () => {
+    const base = tmp('ac-unit-legacy-');
+    process.env['XDG_CONFIG_HOME'] = base;
+    const dir = join(base, 'systemd', 'user');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'agent-conductor.service'), '[Service]\n');
+    expect(resolveInstalledUnit()).toEqual({ name: 'agent-conductor.service', path: join(dir, 'agent-conductor.service'), legacy: true });
+  });
+
+  it('resolves the current name when only it is installed', () => {
+    const base = tmp('ac-unit-current-');
+    process.env['XDG_CONFIG_HOME'] = base;
+    const dir = join(base, 'systemd', 'user');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, SERVICE_NAME), '[Service]\n');
+    expect(resolveInstalledUnit()).toEqual({ name: SERVICE_NAME, path: join(dir, SERVICE_NAME), legacy: false });
+  });
+
+  it('prefers the legacy name when both are installed (PR #265 review: an interrupted migration must not look finished)', () => {
+    const base = tmp('ac-unit-both-');
+    process.env['XDG_CONFIG_HOME'] = base;
+    const dir = join(base, 'systemd', 'user');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, SERVICE_NAME), '[Service]\n');
+    writeFileSync(join(dir, 'agent-conductor.service'), '[Service]\n');
+    expect(resolveInstalledUnit()).toMatchObject({ name: 'agent-conductor.service', legacy: true });
+  });
+
+  it('resolves the launchd agent the same way, legacy label preferred when both exist', () => {
+    const base = tmp('ac-agent-');
+    process.env['HOME'] = base;
+    const dir = join(base, 'Library', 'LaunchAgents');
+    mkdirSync(dir, { recursive: true });
+    expect(resolveInstalledLaunchdAgent()).toBeNull();
+    writeFileSync(join(dir, 'com.agent-conductor.daemon.plist'), '<plist/>');
+    expect(resolveInstalledLaunchdAgent()).toEqual({ label: 'com.agent-conductor.daemon', path: join(dir, 'com.agent-conductor.daemon.plist'), legacy: true });
+    // Both now exist (as after an interrupted migration): still the legacy one, not the new file's
+    // mere presence.
+    writeFileSync(join(dir, `${LAUNCHD_LABEL}.plist`), '<plist/>');
+    expect(resolveInstalledLaunchdAgent()).toMatchObject({ label: 'com.agent-conductor.daemon', legacy: true });
+  });
+});
+
 describe('planRestart', () => {
-  const base = { platform: 'linux' as NodeJS.Platform, unitInstalled: false, launchdInstalled: false, systemdRunAvailable: false };
+  const base = { platform: 'linux' as NodeJS.Platform, unit: null, launchdAgent: null, systemdRunAvailable: false };
+  const currentUnit = { name: SERVICE_NAME, path: `/x/${SERVICE_NAME}`, legacy: false };
+  const legacyUnit = { name: 'agent-conductor.service', path: '/x/agent-conductor.service', legacy: true };
+  const currentAgent = { label: LAUNCHD_LABEL, path: `/x/${LAUNCHD_LABEL}.plist`, legacy: false };
 
   it('restarts through systemd and gives the runner its own scope when it can', () => {
-    const plan = planRestart({ ...base, unitInstalled: true, systemdRunAvailable: true });
+    const plan = planRestart({ ...base, unit: currentUnit, systemdRunAvailable: true });
     expect(plan.restart).toEqual({ cmd: 'systemctl', args: ['--user', 'restart', SERVICE_NAME] });
     expect(plan.launch).toBe('systemd-run');
     expect(plan.runnerSurvives).toBe(true);
   });
 
   it('still restarts through systemd without systemd-run, but says the runner will not survive', () => {
-    const plan = planRestart({ ...base, unitInstalled: true, systemdRunAvailable: false });
+    const plan = planRestart({ ...base, unit: currentUnit, systemdRunAvailable: false });
     expect(plan.restart).toEqual({ cmd: 'systemctl', args: ['--user', 'restart', SERVICE_NAME] });
     expect(plan.launch).toBe('detached');
     expect(plan.runnerSurvives).toBe(false);
   });
 
+  it('targets the unit that is actually installed, not the current name, when only the legacy one is present', () => {
+    const plan = planRestart({ ...base, unit: legacyUnit, systemdRunAvailable: true });
+    expect(plan.restart).toEqual({ cmd: 'systemctl', args: ['--user', 'restart', 'agent-conductor.service'] });
+    expect(plan.how).toBe('systemctl --user restart agent-conductor.service');
+  });
+
   it('kickstarts the launchd agent on macOS, where a detached child survives', () => {
-    const plan = planRestart({ ...base, platform: 'darwin', launchdInstalled: true, uid: 501 });
+    const plan = planRestart({ ...base, platform: 'darwin', launchdAgent: currentAgent, uid: 501 });
     expect(plan.restart).toEqual({ cmd: 'launchctl', args: ['kickstart', '-k', `gui/501/${LAUNCHD_LABEL}`] });
     expect(plan.launch).toBe('detached');
     expect(plan.runnerSurvives).toBe(true);
@@ -88,7 +154,7 @@ describe('planRestart', () => {
     expect(plan.launch).toBe('detached');
     expect(plan.runnerSurvives).toBe(true);
     expect(planRestart({ ...base, platform: 'darwin' }).restart).toBeNull();
-    expect(planRestart({ ...base, platform: 'win32', unitInstalled: true }).restart).toBeNull();
+    expect(planRestart({ ...base, platform: 'win32', unit: currentUnit }).restart).toBeNull();
   });
 
   it('wraps a command into a transient scope', () => {

@@ -452,6 +452,56 @@ describe('handing off the restart', () => {
   });
 });
 
+// ---------- resuming dispatch if the restart never replaces this process (VS-316, Decision 6) ----------
+
+describe('the still-serving watchdog', () => {
+  it('fails the upgrade and resumes dispatch when this process is still serving past the verification window', async () => {
+    const a = fx.addWorkspace('ws1');
+    let check: (() => void) | null = null;
+    const svc = fx.service({ armRestartWatchdog: (o) => { check = o.check; } });
+    svc.request({ requestedBy: 'op1' });
+    await svc.settled();
+    expect(row(svc).state).toBe('restarting');
+    expect(a.starts).toBe(0);
+    expect(check).not.toBeNull();
+
+    check!();
+
+    expect(row(svc)).toMatchObject({ state: 'failed', reason: 'restart_unverified' });
+    expect(row(svc).message).toContain('never replaced');
+    expect(a.starts).toBe(1);
+  });
+
+  it('leaves a genuine verdict that already landed unchanged, and does not resume dispatch a second time', async () => {
+    const a = fx.addWorkspace('ws1');
+    let check: (() => void) | null = null;
+    const svc = fx.service({ armRestartWatchdog: (o) => { check = o.check; } });
+    svc.request({ requestedBy: 'op1' });
+    await svc.settled();
+    // Simulates the runner's own verdict (or the daemon's boot-time reconcile()) landing an instant
+    // before the watchdog fires.
+    fx.db.update('upgrades', row(svc).id, { state: 'completed', finishedAt: nowIso(), cameBackVersion: '1.1.0' });
+
+    check!();
+
+    expect(row(svc)).toMatchObject({ state: 'completed', cameBackVersion: '1.1.0' });
+    expect(a.starts).toBe(0);
+  });
+
+  it('does not resume a workspace that was already paused in its own right', async () => {
+    const a = fx.addWorkspace('ws1', { paused: true });
+    let check: (() => void) | null = null;
+    const svc = fx.service({ armRestartWatchdog: (o) => { check = o.check; } });
+    svc.request({ requestedBy: 'op1' });
+    await svc.settled();
+
+    check!();
+
+    expect(row(svc)).toMatchObject({ state: 'failed', reason: 'restart_unverified' });
+    expect(a.starts).toBe(0);
+  });
+});
+
 // ---------- 4.8 reconciliation at startup ----------
 
 describe('reconciling at startup', () => {

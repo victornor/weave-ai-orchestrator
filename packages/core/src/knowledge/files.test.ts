@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { docFolderOf, docPathFor, docSlugOf, isDocPath, isHubStub, seedBody } from './files.js';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, afterEach } from 'vitest';
+import { docFolderOf, docPathFor, docSlugOf, isDocPath, isHubStub, mergeEntries, readMirrorFile, repoKnowledgePath, seedBody } from './files.js';
 
 describe('isHubStub', () => {
   it('treats seed decisions.md as a stub', () => {
@@ -73,5 +76,85 @@ describe('isDocPath / docSlugOf / docFolderOf with nested folders (VS-265)', () 
     expect(isDocPath('projects/acme/PROJECT.md')).toBe(false);
     expect(docSlugOf('projects/acme/PROJECT.md')).toBeNull();
     expect(docFolderOf('projects/acme/PROJECT.md')).toBeNull();
+  });
+});
+
+describe('repoKnowledgePath (VS-358)', () => {
+  it('strips the project prefix from a project-scoped path', () => {
+    expect(repoKnowledgePath('projects/acme/PROJECT.md', 'acme')).toBe('PROJECT.md');
+    expect(repoKnowledgePath('projects/acme/docs/run-engine.md', 'acme')).toBe('docs/run-engine.md');
+  });
+
+  it('refuses a workspace-scope path', () => {
+    expect(() => repoKnowledgePath('workspace/WORKSPACE.md', 'acme')).toThrow(/not under projects\/acme\//);
+  });
+
+  it('refuses the shared file', () => {
+    expect(() => repoKnowledgePath('workspace/SHARED.md', 'acme')).toThrow();
+  });
+
+  it('refuses the decisions log', () => {
+    expect(() => repoKnowledgePath('workspace/decisions.md', 'acme')).toThrow();
+  });
+
+  it('refuses a different project\'s path', () => {
+    expect(() => repoKnowledgePath('projects/other/PROJECT.md', 'acme')).toThrow();
+  });
+});
+
+describe('readMirrorFile (VS-358)', () => {
+  const tmps: string[] = [];
+  afterEach(() => { while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
+  const worktree = (): string => { const d = mkdtempSync(join(tmpdir(), 'ac-mirror-')); tmps.push(d); return d; };
+
+  it('returns the seed when the mirror file does not exist yet', () => {
+    expect(readMirrorFile(worktree(), 'PROJECT.md', '# Project\n')).toBe('# Project\n');
+  });
+
+  it('returns the file\'s current content when it exists', () => {
+    const dir = worktree();
+    mkdirSync(join(dir, '.weave', 'knowledge'), { recursive: true });
+    writeFileSync(join(dir, '.weave', 'knowledge', 'PROJECT.md'), '# Project\n\n## Learnings\n- already here\n', 'utf8');
+    expect(readMirrorFile(dir, 'PROJECT.md', '# Project\n')).toBe('# Project\n\n## Learnings\n- already here\n');
+  });
+});
+
+describe('mergeEntries (VS-358)', () => {
+  const doc = (...entries: string[]): string => ['# API', '', '## Landmines', ...entries.map((e) => `- ${e}`)].join('\n') + '\n';
+
+  it('folds in an entry landed added, not already in the workspace', () => {
+    const base = doc('2026-01-01 · original');
+    const landed = doc('2026-01-01 · original', '2026-01-02 · landed this');
+    const workspace = doc('2026-01-01 · original');
+    const merged = mergeEntries(base, landed, workspace);
+    expect(merged).toContain('landed this');
+  });
+
+  it('drops an entry landed removed, even though the workspace still has it', () => {
+    const base = doc('2026-01-01 · original', '2026-01-02 · to be archived');
+    const landed = doc('2026-01-01 · original');
+    const workspace = doc('2026-01-01 · original', '2026-01-02 · to be archived');
+    const merged = mergeEntries(base, landed, workspace);
+    expect(merged).not.toContain('to be archived');
+    expect(merged).toContain('original');
+  });
+
+  it('keeps an entry present only in the workspace (a still-unmerged write)', () => {
+    const base = doc('2026-01-01 · original');
+    const landed = doc('2026-01-01 · original'); // this landing never touched the hub's content
+    const workspace = doc('2026-01-01 · original', '2026-01-03 · unmerged ticket note');
+    const merged = mergeEntries(base, landed, workspace);
+    expect(merged).toContain('unmerged ticket note');
+  });
+
+  it('combines an add, a remove and a kept unmerged entry in one call', () => {
+    const base = doc('2026-01-01 · original', '2026-01-02 · to be archived');
+    const landed = doc('2026-01-01 · original', '2026-01-04 · landed addition');
+    const workspace = doc('2026-01-01 · original', '2026-01-02 · to be archived', '2026-01-03 · unmerged ticket note');
+    const merged = mergeEntries(base, landed, workspace);
+    expect(merged).toContain('original');
+    expect(merged).toContain('landed addition');
+    expect(merged).toContain('unmerged ticket note');
+    expect(merged).not.toContain('to be archived');
   });
 });

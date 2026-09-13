@@ -310,6 +310,46 @@ describe('Settings — add project Auto-merge default (VS-153)', () => {
   });
 });
 
+describe('Settings — add project knowledge-repo opt-in (VS-358)', () => {
+  function openProjects(): void {
+    render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+  }
+
+  it('posts knowledgeRepo.enabled false when the checkbox is left unchecked', () => {
+    openProjects();
+    fireEvent.change(screen.getByPlaceholderText('git@github.com:acme/api.git'), { target: { value: 'git@github.com:acme/api.git' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add project' }));
+    expect(state.addCalls).toHaveLength(1);
+    expect(state.addCalls[0]!['knowledgeRepo']).toEqual({ enabled: false });
+  });
+
+  it('posts knowledgeRepo.enabled true when the checkbox is checked', () => {
+    openProjects();
+    fireEvent.change(screen.getByPlaceholderText('git@github.com:acme/api.git'), { target: { value: 'git@github.com:acme/api.git' } });
+    fireEvent.click(screen.getByLabelText('Commit knowledge to repo'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add project' }));
+    expect(state.addCalls).toHaveLength(1);
+    expect(state.addCalls[0]!['knowledgeRepo']).toEqual({ enabled: true });
+  });
+});
+
+describe('Settings — a project knowledge-repo toggle (VS-358)', () => {
+  beforeEach(() => {
+    state.projects = [{ id: 'p1', slug: 'api', status: 'ready', gitUrl: 'g', maxWorkers: 2, defaultBranch: 'main', landingBranch: null, policies: {}, knowledgeRepoEnabled: false }];
+  });
+
+  it('shows the toggle off by default and switches it on', () => {
+    render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delivery and setup for api' }));
+    const select = screen.getByLabelText('commit knowledge to repo for api');
+    expect(select).toHaveValue('off');
+    fireEvent.change(select, { target: { value: 'on' } });
+    expect(state.projectPatches).toContainEqual({ id: 'p1', patch: { knowledgeRepo: { enabled: true } } });
+  });
+});
+
 describe('Settings — add project Max workers follows the project schema (VS-212)', () => {
   function openProjects(): void {
     render(<WorkspaceSettingsRoute />);

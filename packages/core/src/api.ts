@@ -413,10 +413,18 @@ export interface Dispatcher {
 export interface Supervisor { tick(): Promise<void>; start(): void; stop(): void; running(): boolean }
 
 // ---------- knowledge / specs ----------
+/**
+ * VS-358: an opted-in project's worktree to also mirror this write into, alongside the workspace
+ * copy. Each method computes what to mirror itself — `note()` derives it from the worktree's own
+ * current file plus its own new entry, never from the workspace body, which may already carry
+ * another ticket's or the weaver's unmerged edit; `replace`/`putDoc` reuse their own already-computed
+ * final body, which was never derived from ambient workspace state in the first place.
+ */
+export interface KnowledgeMirror { worktreePath: string; projectSlug: string }
 export interface KnowledgeService {
   get(scope: S.KnowledgeScope, projectId?: string | null): { path: string; body: string; tokenEstimate: number; budgetTokens: number; lastCuratedAt: string | null; curationPending: boolean; revision: number };
-  note(actor: Actor, scope: S.KnowledgeScope, section: string, text: string, projectId?: string | null, doc?: string): { remainingTokens: number; revision: number };
-  replace(actor: Actor, scope: S.KnowledgeScope, body: string, reason: S.KnowledgeRevisionReason, projectId?: string | null, removed?: string[]): { revision: number };
+  note(actor: Actor, scope: S.KnowledgeScope, section: string, text: string, projectId?: string | null, doc?: string, mirror?: KnowledgeMirror): { remainingTokens: number; revision: number };
+  replace(actor: Actor, scope: S.KnowledgeScope, body: string, reason: S.KnowledgeRevisionReason, projectId?: string | null, removed?: string[], mirror?: KnowledgeMirror): { revision: number };
   revisions(scope: S.KnowledgeScope, projectId?: string | null): Array<{ revision: number; authorKind: string; reason: string; createdAt: string; ticketId: string | null; ticketIdentifier: string | null }>;
   revert(actor: Actor, scope: S.KnowledgeScope, revision: number, projectId?: string | null): { revision: number };
   lint(): Array<{ path: string; scope: string; projectId: string | null; tokenEstimate: number; budgetTokens: number; pct: number; lastCuratedAt: string | null; curationPending: boolean }>;
@@ -429,7 +437,7 @@ export interface KnowledgeService {
   listDocs(filter?: { scope?: S.KnowledgeScope; projectId?: string | null }): KnowledgeDocSummary[];
   getDoc(scope: S.KnowledgeScope, slug: string, projectId?: string | null): KnowledgeDocDetail;
   /** `folder` places a *new* document; it is ignored when `slug` already resolves somewhere (VS-265). */
-  putDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, body: string, projectId?: string | null, reason?: S.KnowledgeRevisionReason, folder?: string | null): KnowledgeDocWriteResult;
+  putDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, body: string, projectId?: string | null, reason?: S.KnowledgeRevisionReason, folder?: string | null, mirror?: KnowledgeMirror): KnowledgeDocWriteResult;
   deleteDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, projectId?: string | null): void;
   /** Move an existing document to a different folder (or the scope root when `folder` is omitted). No link changes: addressing is by slug, never by path (VS-265). */
   moveDoc(actor: Actor, scope: S.KnowledgeScope, slug: string, projectId: string | null | undefined, folder: string | null | undefined): { path: string };

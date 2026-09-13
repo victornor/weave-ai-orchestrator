@@ -102,6 +102,20 @@ describe('projects', () => {
     expect(project.landingBranch).toBeNull();
   });
 
+  it('defaults knowledgeRepo to disabled, persists an explicit opt-in on add, and update can flip it (VS-358)', async () => {
+    const src = await sourceRepo();
+    const off = await projects.add(HUMAN, cfg(src));
+    expect(off.knowledgeRepoEnabled).toBeFalsy();
+
+    const src2 = await sourceRepo();
+    const on = await projects.add(HUMAN, cfg(src2, { id: 'api', knowledgeRepo: { enabled: true } }));
+    expect(on.knowledgeRepoEnabled).toBeTruthy();
+    expect(saved.at(-1)!.projects.find((p) => p.id === 'api')!.knowledgeRepo).toEqual({ enabled: true });
+
+    const flipped = await projects.update(HUMAN, on.id, { knowledgeRepo: { enabled: false } });
+    expect(flipped.knowledgeRepoEnabled).toBeFalsy();
+  });
+
   it('persists autoMergeDefault on add (VS-153)', async () => {
     const src = await sourceRepo();
     const on = await projects.add(HUMAN, cfg(src, { policies: { autoMergeDefault: true } }));
@@ -509,7 +523,7 @@ describe('adding a project to an isolated daemon (VS-143, daemon-isolation/dispa
   afterEach(async () => { await jobs().stop(); h.cleanup(); while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
   const jobs = (): JobsService => h.services.jobs!;
   const quick = (url: string): ProjectConfig => ({
-    id: 'web', url, defaultBranch: 'main', maxWorkers: 4, warmPaths: [], openspec: { enabled: false }, policies: {},
+    id: 'web', url, defaultBranch: 'main', maxWorkers: 4, warmPaths: [], openspec: { enabled: false }, knowledgeRepo: { enabled: false }, policies: {},
   } as ProjectConfig);
 
   it('creates the scout ticket and the conductor wake as usual, but dispatches neither', async () => {

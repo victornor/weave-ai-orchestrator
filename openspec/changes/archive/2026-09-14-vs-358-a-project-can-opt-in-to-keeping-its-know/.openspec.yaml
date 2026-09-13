@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-13
+goal: "A project can opt in to keeping its knowledge in its own repo
+  (.weave/knowledge/): worker edits ride the ticket PR, weaver and curation
+  edits get their own PR, and the workspace copy syncs on merge"

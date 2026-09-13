@@ -14,6 +14,18 @@ describe('project config: landingBranch (VS-119)', () => {
   });
 });
 
+describe('project config: knowledgeRepo (VS-358)', () => {
+  it('defaults to disabled when omitted', () => {
+    const cfg = ProjectConfigSchema.parse({ id: 'api', url: 'git@example.com:acme/api.git' });
+    expect(cfg.knowledgeRepo).toEqual({ enabled: false });
+  });
+
+  it('parses an explicit opt-in', () => {
+    const cfg = ProjectConfigSchema.parse({ id: 'api', url: 'git@example.com:acme/api.git', knowledgeRepo: { enabled: true } });
+    expect(cfg.knowledgeRepo).toEqual({ enabled: true });
+  });
+});
+
 describe('project policies: mergeConcurrency', () => {
   it('leaves the value unset when the policies block does not mention it', () => {
     expect(ProjectPoliciesSchema.parse({}).mergeConcurrency).toBeUndefined();

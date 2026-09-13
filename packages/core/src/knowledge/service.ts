@@ -5,14 +5,18 @@ import {
   estimateTokens, OcError, projectLabel,
   type Decision, type KnowledgeRevisionReason, type KnowledgeScope,
 } from '@weave-ai/shared';
-import type { Actor, CoreServices, KnowledgeBootstrapPart, KnowledgeDocDetail, KnowledgeDocSummary, KnowledgeService } from '../api.js';
+import type { Actor, CoreServices, KnowledgeBootstrapPart, KnowledgeDocDetail, KnowledgeDocSummary, KnowledgeMirror, KnowledgeService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
+import { requestKnowledgeRepoPr } from './repoDelivery.js';
 import { tx } from '../tickets/tx.js';
 import {
-  CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, appendEntry, budgetOf, countWords, docFolderOf, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
-  isDocPath, isHubStub, normalize, parseDoc, parseLinks, relPathFor, renderDoc, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated,
+  CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, SECRET_SHAPED_RE, appendEntry, budgetOf, countWords, docFolderOf, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
+  isDocPath, isHubStub, normalize, parseDoc, parseLinks, readMirrorFile, relPathFor, renderDoc, repoKnowledgePath, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated,
 } from './files.js';
+
+/** VS-358: `write()`'s own mirror parameter — the target plus the fully-computed content to write there. */
+type MirrorWrite = KnowledgeMirror & { body: string };
 
 interface FileRow {
   id: string; workspaceId: string; projectId: string | null; path: string; scope: KnowledgeScope;
@@ -219,6 +223,11 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     return m ? m[1]!.trim() : null;
   }
 
+  /** VS-358: `mirror` (just a target) plus a lazily-computed body → `write()`'s own `MirrorWrite`, or `undefined` when there is no mirror target. `computeBody` is not called at all when `mirror` is absent. */
+  function mirrorFor(mirror: KnowledgeMirror | undefined, computeBody: () => string): MirrorWrite | undefined {
+    return mirror ? { worktreePath: mirror.worktreePath, projectSlug: mirror.projectSlug, body: computeBody() } : undefined;
+  }
+
   /** Persist a new body: revision row, file row, disk, FTS. Returns the new revision number. */
   function write(
     actor: Actor,
@@ -227,6 +236,15 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     next: string,
     reason: KnowledgeRevisionReason,
     removed: string[] = [],
+    mirror?: MirrorWrite,
+    /**
+     * VS-358 (plan review round 2): what an out-of-ticket write commits to the repo, applied against
+     * that branch's *own* current copy of the file — never the shared workspace `body` computed
+     * below, which (for `note()`) may already carry another ticket's still-unmerged entry on the same
+     * hub or document. Defaults to the workspace body verbatim, correct for `putDoc`/`replace`, whose
+     * content was never derived from ambient workspace state in the first place.
+     */
+    repoBody?: (current: string) => string,
   ): number {
     const budget = budgetOfRow(row);
     const body = isDocPath(row.path) ? next : withBudgetStated(next, budget);
@@ -234,7 +252,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     // actor — a ticket is a property of this particular run (`runs.ticket_id`), not of who is calling.
     // A human or system write has no run and records no ticket.
     const ticketId = actor.runId ? db.get<{ ticketId: string | null }>('SELECT ticket_id FROM runs WHERE id = ?', [actor.runId])?.ticketId ?? null : null;
-    return tx(db, () => {
+    const newRevision = tx(db, () => {
       const revision = currentRevision(row.id) + 1;
       const tokens = estimateTokens(body);
       db.insert('knowledge_revisions', {
@@ -256,6 +274,15 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       }
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, body, 'utf8');
+      if (mirror) {
+        // VS-358: the mechanical half only — `mirror.body` is already this call's own, fully
+        // computed content; `repoKnowledgePath` is the single enforcement point that refuses
+        // anything outside this project's own `projects/<projectSlug>/**`.
+        const mirrorRel = repoKnowledgePath(row.path, mirror.projectSlug);
+        const mirrorAbs = join(mirror.worktreePath, '.weave', 'knowledge', mirrorRel);
+        mkdirSync(dirname(mirrorAbs), { recursive: true });
+        writeFileSync(mirrorAbs, mirror.body, 'utf8');
+      }
       const fresh = fileRow(row.path)!;
       indexFile(fresh, body);
       recordActivity(db, ws, actor, 'knowledge.write', 'knowledge_file', row.id, { path: row.path, reason, revision, tokens });
@@ -264,6 +291,25 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       });
       return revision;
     });
+    fireKnowledgeRepoPr(actor, row, ticketId, repoBody ?? (() => body));
+    return newRevision;
+  }
+
+  /**
+   * VS-358: an out-of-ticket write (no `ticketId` — a weaver edit, or a human editing directly
+   * through the HTTP route) to an opted-in project's own scope gets a daemon-managed pull request,
+   * fired and forgotten so a forge outage or a slow push never delays the write itself. Routine
+   * daemon-internal writes (`system` actor: seeding, expiry pruning, merge-sync reconciliation) are
+   * excluded — they are not a deliberate edit and already have their own path to the repo, or none.
+   */
+  function fireKnowledgeRepoPr(actor: Actor, row: FileRow, ticketId: string | null, computeBody: (current: string) => string): void {
+    if (actor.kind === 'system' || ticketId || row.scope !== 'project' || !row.projectId) return;
+    let project: ReturnType<CoreServices['projects']['get']>;
+    try { project = deps().projects.get(row.projectId); } catch (e) { log.warn({ err: e, projectId: row.projectId }, 'out-of-ticket knowledge write: project lookup failed'); return; }
+    if (!project.knowledgeRepoEnabled) return;
+    const repoRel = repoKnowledgePath(row.path, project.slug);
+    void requestKnowledgeRepoPr(ctx, deps, project, repoRel, computeBody)
+      .catch((e: unknown) => log.warn({ err: e, project: project.slug, path: row.path }, 'out-of-ticket knowledge pull request failed'));
   }
 
   function archiveEntries(row: FileRow, abs: string, removed: string[], reason: string): void {
@@ -366,13 +412,14 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       };
     },
 
-    note(actor, scope, section, text, projectId, doc) {
+    note(actor, scope, section, text, projectId, doc, mirror) {
       const trimmed = text.trim();
       if (!trimmed) throw new OcError('validation', 'an entry needs text');
       const words = countWords(trimmed);
       if (words > 60) {
         throw new OcError('entry_too_long', `entries are at most 60 words; this one has ${words}`, { words, limit: 60 });
       }
+      if (SECRET_SHAPED_RE.test(trimmed)) throw new OcError('validation', 'knowledge entries never carry secrets, tokens or credentialed URLs');
       const { row, abs, body } = doc ? ensureDoc(scope, doc, projectId) : ensure(scope, projectId);
       const norm = normalize(trimmed);
       for (const e of entriesOf(body)) {
@@ -393,19 +440,32 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
           tokenEstimate: tokens, budgetTokens: budget, sectionsOverBudget: over,
         });
       }
-      const revision = write(actor, row, abs, next, 'note');
+      // VS-358 (plan review round 2): a repo commit's own delta — this entry applied to *that
+      // branch's* current copy of the file, seeded fresh if it has none yet — never the workspace
+      // `body` above, which by the time this call runs may already carry another ticket's or the
+      // weaver's unmerged note on the same hub or document. Shared by the worker's own worktree
+      // mirror and the weaver's out-of-ticket pull request: each reads a different "current copy",
+      // but applies the identical entry the identical way.
+      const seedForRepo = doc ? '' : seedBody(scope, { projectName: projectId ? projectLabel(projectOf(projectId)) : undefined, budgetTokens: budgetFor(scope, row.path) });
+      const applyEntry = (current: string): string => appendEntry(current || seedForRepo, section, entry);
+      const revision = write(
+        actor, row, abs, next, 'note', [],
+        mirrorFor(mirror, () => applyEntry(readMirrorFile(mirror!.worktreePath, repoKnowledgePath(row.path, mirror!.projectSlug), seedForRepo))),
+        applyEntry,
+      );
       if (tokens > budget * CURATION_BUDGET_FRACTION) fireCuration(scope, projectId);
       return { remainingTokens: budget - tokens, revision };
     },
 
-    replace(actor, scope, body, reason, projectId, removed) {
+    replace(actor, scope, body, reason, projectId, removed, mirror) {
       const { row, abs, body: before } = ensure(scope, projectId);
       const beforeEntries = entriesOf(before);
       const afterNorm = new Set(entriesOf(body).map((e) => e.normalized));
       const gone = beforeEntries.filter((e) => !afterNorm.has(e.normalized)).map((e) => `${e.section}: ${e.line.trim()}`);
       const all = [...new Set([...gone, ...(removed ?? [])])];
       archiveEntries(row, abs, all, reason);
-      const revision = write(actor, row, abs, body.endsWith('\n') ? body : `${body}\n`, reason, all);
+      const normalized = body.endsWith('\n') ? body : `${body}\n`;
+      const revision = write(actor, row, abs, normalized, reason, all, mirrorFor(mirror, () => normalized));
       const tokens = estimateTokens(body);
       if (reason !== 'curation' && tokens > budgetOfRow(row)) fireCuration(scope, projectId);
       return { revision };
@@ -605,13 +665,13 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       return detail;
     },
 
-    putDoc(actor, scope, slug, body, projectId, reason = 'note', folder) {
+    putDoc(actor, scope, slug, body, projectId, reason = 'note', folder, mirror) {
       const text = body.replace(/\r\n/g, '\n').trim() + '\n';
       if (!docTitle(text)) throw new OcError('validation', 'a document starts with a `# Title` line');
       const tokens = estimateTokens(text);
       const budget = ctx.config.defaults.knowledgeBudgetTokens.document;
       if (tokens > budget) throw new OcError('budget_exceeded', `a document is at most ${budget} tokens; this one is ${tokens}. Split it into linked documents.`, { tokenEstimate: tokens, budgetTokens: budget });
-      if (/(?:sk|ghp|xox[bp])-[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\s/]+:[^\s@/]+@/i.test(text)) throw new OcError('validation', 'documents never carry secrets, tokens or credentialed URLs');
+      if (SECRET_SHAPED_RE.test(text)) throw new OcError('validation', 'documents never carry secrets, tokens or credentialed URLs');
       // `folder` only decides where a *new* document is created; locateDoc finds an existing one by
       // slug first, so a folder disagreeing with where it already lives is ignored, not a move (VS-265).
       const { rel, abs, projectRowId } = locateDoc(scope, slug, projectId, folder);
@@ -624,7 +684,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         });
         row = fileRow(rel)!;
       }
-      const revision = write(actor, row, abs, text, reason);
+      const revision = write(actor, row, abs, text, reason, [], mirrorFor(mirror, () => text));
       const fresh = fileRow(rel)!;
       const unresolved = db.all<{ toSlug: string }>('SELECT to_slug FROM knowledge_links WHERE workspace_id = ? AND from_path = ? AND to_path IS NULL', [ws, rel]).map((l) => l.toSlug);
       const backlinks = backlinksOf(rel).length;

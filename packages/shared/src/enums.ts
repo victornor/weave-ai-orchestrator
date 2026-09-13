@@ -206,7 +206,7 @@ export type WorkProductType = (typeof WORK_PRODUCT_TYPES)[number];
 export const KNOWLEDGE_SCOPES = ['workspace', 'shared', 'decisions', 'project'] as const;
 export type KnowledgeScope = (typeof KNOWLEDGE_SCOPES)[number];
 
-export const KNOWLEDGE_REVISION_REASONS = ['note', 'curation', 'human', 'expiry', 'seed'] as const;
+export const KNOWLEDGE_REVISION_REASONS = ['note', 'curation', 'human', 'expiry', 'seed', 'merge-sync'] as const;
 export type KnowledgeRevisionReason = (typeof KNOWLEDGE_REVISION_REASONS)[number];
 
 export const CHANNEL_KINDS = ['web', 'cli', 'telegram'] as const;

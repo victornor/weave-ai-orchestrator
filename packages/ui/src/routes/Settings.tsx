@@ -23,6 +23,8 @@ import {
   useSetTranscription,
   useDaemonModels,
   useSetDaemonModels,
+  useDaemonHostTools,
+  useSetDaemonHostTools,
   useTranscription,
   useDaemonUpdate,
   useDaemonUpgrade,
@@ -187,6 +189,7 @@ export function DaemonSettingsRoute(): React.ReactElement {
         <div className="mx-auto max-w-3xl">
           <UpdateBanner entry={entry} hidden={section === 'updates'} onOpen={() => choose('updates')} />
           {section === 'daemon-models' ? <DaemonModelsSection /> : null}
+          {section === 'host-tools' ? <HostToolsSection /> : null}
           {section === 'security' ? <SecuritySection /> : null}
           {section === 'device' ? <DeviceSection /> : null}
           {section === 'dictation' ? <DictationSection /> : null}
@@ -1639,6 +1642,59 @@ function OverlaySetting({ label, setting, fallback, runtimes, onFill, onClear }:
         </Field>
       }
     />
+  );
+}
+
+/**
+ * VS-318: whether the daemon can find the host tools it needs, and the escape hatch for a layout the
+ * user's login shell does not cover. Zero configuration is the norm; this only helps the exception.
+ * Saving persists `hostToolPaths` to daemon.yaml and re-resolves live, no restart.
+ */
+function HostToolsSection(): React.ReactElement {
+  const hostTools = useDaemonHostTools();
+  const save = useSetDaemonHostTools();
+  const [draft, setDraft] = useState<string | null>(null);
+
+  if (hostTools.isLoading) return <SkeletonRows rows={3} />;
+  if (!hostTools.data) return <ErrorState code="HOST_TOOLS_UNREACHABLE" message="The daemon host tools could not be read." />;
+
+  const { tools, paths } = hostTools.data;
+  const value = draft ?? paths.join('\n');
+  const parsed = value.split('\n').map((p) => p.trim()).filter(Boolean);
+  const dirty = draft !== null && parsed.join('\n') !== paths.join('\n');
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-micro leading-relaxed text-text-3">
+        The daemon resolves these from the login shell of the user it runs as, so it needs no configuration. Add a directory below only when your tools live somewhere that shell does not know about.
+      </p>
+      <div className="flex flex-col divide-y divide-line-1 rounded-r6 border border-line-2">
+        {tools.map((t) => (
+          <div key={t.id} className="flex items-center gap-3 px-3 py-2.5">
+            <span className="ac-mono w-20 text-body text-text-1">{t.id}</span>
+            <Badge tone={t.available ? 'added' : t.need === 'required' ? 'removed' : 'modified'}>
+              {t.available ? (t.version ?? 'available') : `${t.need}, missing`}
+            </Badge>
+            <span className="truncate text-micro text-text-3">{t.path ?? t.purpose}</span>
+          </div>
+        ))}
+      </div>
+      <Field label="Tool directories" hint="One absolute directory per line. Searched before the login-shell PATH.">
+        <textarea
+          className={cx(inputCx, 'ac-mono h-24 py-2')}
+          aria-label="Tool directories"
+          value={value}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="/opt/tools/bin"
+        />
+      </Field>
+      {save.error ? <ErrorState code="HOST_TOOLS_NOT_SAVED" message={save.error.message} /> : null}
+      <div className="flex justify-end">
+        <Button onClick={() => save.mutate({ paths: parsed }, { onSuccess: () => setDraft(null) })} disabled={!dirty || save.isPending}>
+          {save.isPending ? 'Saving…' : 'Save directories'}
+        </Button>
+      </div>
+    </div>
   );
 }
 

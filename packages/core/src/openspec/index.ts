@@ -4,8 +4,9 @@
  * ticket's worktree while a worker holds it, the primary clone otherwise. The daemon never writes into a
  * worktree; the only mutation here is `openspec archive` in the primary clone after a merge.
  *
- * A missing `openspec` binary is never fatal: status degrades to a zeroed record so the rest of the daemon
- * keeps working on projects that do not have OpenSpec installed.
+ * A project that simply does not use OpenSpec degrades to a zeroed record, so the rest of the daemon
+ * keeps working on it. A change that exists on disk but whose `openspec` binary cannot be run is not
+ * that case: since VS-318 it raises the real host-tool error rather than reporting an empty plan.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -93,29 +94,22 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
       }
       const { ticket, project, changeName, cwd } = r;
       const o = { cwd, root: cwd };
-      let status = zeroStatus(changeName);
-      try {
-        const [change, counts, apply, validation] = await Promise.all([
-          cli.statusChange(o, changeName),
-          cli.list(o).catch(() => []),
-          cli.instructionsApply(o, changeName),
-          cli.validate(o, changeName),
-        ]);
-        const entry = counts.find((c) => c.name === changeName);
-        status = {
-          changeName,
-          planningComplete: change?.isPlanningComplete === true,
-          artifacts: (change?.artifacts ?? []).map((a) => ({ id: a.id, status: a.status })),
-          tasks: entry ? { total: entry.totalTasks, complete: entry.completedTasks } : apply.progress ? { total: apply.progress.total, complete: apply.progress.completed } : null,
-          applyState: apply.state,
-          validation: { ok: validation.ok, issues: validation.issues },
-          archived: archivedDirFor(project.clonePath, changeName) !== null,
-        };
-      } catch (e) {
-        if (!isMissingBinary(e)) throw e;
-        log.warn({ ticketId, changeName }, 'openspec binary missing; reporting an empty status');
-        return zeroStatus(changeName);
-      }
+      const [change, counts, apply, validation] = await Promise.all([
+        cli.statusChange(o, changeName),
+        cli.list(o).catch(() => []),
+        cli.instructionsApply(o, changeName),
+        cli.validate(o, changeName),
+      ]);
+      const entry = counts.find((c) => c.name === changeName);
+      const status = {
+        changeName,
+        planningComplete: change?.isPlanningComplete === true,
+        artifacts: (change?.artifacts ?? []).map((a) => ({ id: a.id, status: a.status })),
+        tasks: entry ? { total: entry.totalTasks, complete: entry.completedTasks } : apply.progress ? { total: apply.progress.total, complete: apply.progress.completed } : null,
+        applyState: apply.state,
+        validation: { ok: validation.ok, issues: validation.issues },
+        archived: archivedDirFor(project.clonePath, changeName) !== null,
+      };
       ctx.db.update('tickets', ticket.id, { openspecStateJson: status, updatedAt: nowIso() });
       ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecState: status });
       return status;
@@ -132,7 +126,7 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
         [change, validation] = await Promise.all([cli.statusChange(o, changeName), cli.validate(o, changeName)]);
       } catch (e) {
         if (!isMissingBinary(e)) throw e;
-        return { ok: false, issues: [{ level: 'error', message: 'the openspec binary is not installed' }] };
+        return { ok: false, issues: [{ level: 'error', message: (e as OcError).message }] };
       }
       const errors = validation.issues.filter((i) => i.level === 'error');
       // `openspec validate --strict` validates a delta's own shape, never what merging it would
@@ -172,7 +166,7 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
         try { result = await cli.archive(o, changeName); }
         catch (e) {
           if (!isMissingBinary(e)) throw e;
-          return { archivedAs: null, skipped: 'the openspec binary is not installed' };
+          return { archivedAs: null, skipped: 'the openspec binary was not found on the daemon\'s PATH' };
         }
         const archivedAs = result.archivedAs ?? archivedDirFor(project.clonePath, changeName);
 

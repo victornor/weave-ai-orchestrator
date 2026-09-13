@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
 import { OcError, type Agent } from '@weave-ai/shared';
+import { clearHostToolCache } from '@weave-ai/core';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import { authed, makeHarness, ticket, type Harness } from './fakes.js';
@@ -1072,5 +1073,69 @@ describe('daemon model overlays (VS-185)', () => {
     await expect(next.json()).resolves.toMatchObject({
       workerOptions: [configured, tiers[1], tiers[2]],
     });
+  });
+});
+
+describe('daemon host tools (VS-318)', () => {
+  it('GETs the detected tools and the configured directories', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/daemon/host-tools', { headers: authed() });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { paths: string[]; tools: Array<{ id: string; available: boolean; path: string | null }> };
+    expect(body.paths).toEqual([]);
+    expect(body.tools.map((t) => t.id).sort()).toEqual(['gh', 'git', 'openspec', 'wt']);
+    expect(body.tools.every((t) => typeof t.available === 'boolean')).toBe(true);
+  });
+
+  it('persists a host tool directory and detects a tool found only there, without a restart', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'ac-ht-cfg-'));
+    const toolDir = mkdtempSync(join(tmpdir(), 'ac-ht-bin-'));
+    writeFileSync(join(configDir, 'daemon.yaml'), 'version: 1\n');
+    writeFileSync(join(toolDir, 'openspec'), '#!/bin/sh\necho 1.12.0\n', { mode: 0o755 });
+    const { h, fetch } = app({ daemonConfigDir: configDir });
+    const original = process.env['PATH'];
+    process.env['PATH'] = '/nonexistent-a:/nonexistent-b';
+    try {
+      const put = await fetch('/api/daemon/host-tools', {
+        method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+        body: JSON.stringify({ paths: [toolDir] }),
+      });
+      expect(put.status).toBe(200);
+      expect(h.deps.daemon.hostToolPaths).toEqual([toolDir]);
+      const body = await put.json() as { paths: string[]; tools: Array<{ id: string; available: boolean; path: string | null }> };
+      expect(body.paths).toEqual([toolDir]);
+      const openspec = body.tools.find((t) => t.id === 'openspec');
+      expect(openspec?.available).toBe(true);
+      expect(openspec?.path).toBe(join(toolDir, 'openspec'));
+    } finally {
+      process.env['PATH'] = original;
+      clearHostToolCache();
+      rmSync(configDir, { recursive: true, force: true });
+      rmSync(toolDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a relative host tool path and accepts an absolute one', async () => {
+    const { h, fetch } = app();
+    const original = process.env['PATH'];
+    try {
+      const bad = await fetch('/api/daemon/host-tools', {
+        method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+        body: JSON.stringify({ paths: ['bin'] }),
+      });
+      expect(bad.status).toBe(400);
+      const badBody = await bad.json() as { error: { code: string } };
+      expect(badBody.error.code).toBe('validation');
+
+      const good = await fetch('/api/daemon/host-tools', {
+        method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+        body: JSON.stringify({ paths: ['/opt/tools/bin'] }),
+      });
+      expect(good.status).toBe(200);
+      expect(h.deps.daemon.hostToolPaths).toEqual(['/opt/tools/bin']);
+    } finally {
+      process.env['PATH'] = original;
+      clearHostToolCache();
+    }
   });
 });

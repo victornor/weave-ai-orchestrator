@@ -30,6 +30,7 @@ export const SETTINGS_SECTIONS = [
   { key: 'updates', label: 'Updates', area: 'daemon' },
   { key: 'daemon-models', label: 'Models', area: 'daemon' },
   { key: 'dictation', label: 'Dictation', area: 'daemon' },
+  { key: 'host-tools', label: 'Host tools', area: 'daemon' },
   { key: 'security', label: 'Security & Devices', area: 'daemon' },
   { key: 'device', label: 'This device', area: 'daemon' },
 ] as const satisfies ReadonlyArray<{ key: string; label: string; area: SettingsAreaKey }>;

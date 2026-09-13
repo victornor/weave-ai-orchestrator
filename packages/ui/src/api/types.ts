@@ -49,7 +49,7 @@ export interface Health {
     hostname: string;
     home: string;
     defaultWorkspaceRoot: string;
-    tools: Record<string, { id: string; available: boolean; version: string | null; need: 'required' | 'recommended'; purpose: string }>;
+    tools: Record<string, HostToolInfo>;
   };
 }
 
@@ -116,6 +116,11 @@ export interface WorkerModelOption { id: string; description: string; runtime: s
 /** VS-284: the effective settings — the workspace's own configured value, else a filled daemon overlay, else the schema default. Never locked; always editable. */
 export interface WorkspaceModels { weaver: ModelSetting; workers: ModelSetting; workerOptions?: WorkerModelOption[] }
 export interface DaemonModels { weaver: ModelSetting | null; workers: ModelSetting | null; workerOptions: WorkerModelOption[] | null }
+
+/** VS-318: one host tool the daemon needs, as `/api/daemon/host-tools` and `/api/health` report it. */
+export interface HostToolInfo { id: string; available: boolean; version: string | null; path: string | null; need: 'required' | 'recommended'; purpose: string }
+/** VS-318: the daemon host's detected tools plus the configured extra directories. */
+export interface DaemonHostTools { paths: string[]; tools: HostToolInfo[] }
 
 export interface LoginResponse {
   token?: string;

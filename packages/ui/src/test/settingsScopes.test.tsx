@@ -21,6 +21,8 @@ const state = vi.hoisted(() => ({
   navigations: [] as Array<{ to: string; opts?: Record<string, unknown> }>,
   ctxWs: 'ws1' as string,
   update: null as Record<string, unknown> | null,
+  savedPaths: [] as string[],
+  hostToolSaveError: null as Error | null,
 }));
 
 vi.mock('../api/context', () => ({
@@ -68,6 +70,8 @@ vi.mock('../api/hooks', () => ({
   useSetTranscription: () => ({ mutate: vi.fn(), isPending: false }),
   useDaemonModels: () => ({ data: { weaver: null, workers: null, workerOptions: null }, isLoading: false }),
   useSetDaemonModels: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+  useDaemonHostTools: () => ({ data: { paths: [], tools: [{ id: 'openspec', available: true, version: '1.12.0', path: '/usr/bin/openspec', need: 'recommended', purpose: 'change tickets' }] }, isLoading: false }),
+  useSetDaemonHostTools: () => ({ mutate: (v: { paths: string[] }) => { state.savedPaths.push(...v.paths); }, isPending: false, error: state.hostToolSaveError }),
   useRoutines: () => ({ data: [], isLoading: false, isError: false, refetch: vi.fn() }),
   useRoutineUsage: () => ({ data: { tokensIn: 0, tokensOut: 0, tokensCached: 0, runs: 0, costCents: 0, costReportedCents: 0, window: '7d' }, isLoading: false }),
   useCreateRoutine: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
@@ -96,6 +100,8 @@ beforeEach(() => {
   state.navigations = [];
   state.ctxWs = 'ws1';
   state.update = null;
+  state.savedPaths = [];
+  state.hostToolSaveError = null;
   localStorage.clear();
 });
 
@@ -258,7 +264,7 @@ describe('the workspace settings page', () => {
 describe('the daemon settings page', () => {
   it('lists only the daemon sections, and offers no area switcher', () => {
     openDaemonSettings();
-    expect(tabNames()).toEqual(['Updates', 'Models', 'Dictation', 'Security & Devices', 'This device']);
+    expect(tabNames()).toEqual(['Updates', 'Models', 'Dictation', 'Host tools', 'Security & Devices', 'This device']);
     for (const label of SETTINGS_AREAS.map((a) => a.label)) {
       expect(screen.queryByRole('radio', { name: label })).not.toBeInTheDocument();
     }
@@ -267,6 +273,22 @@ describe('the daemon settings page', () => {
   it('reads as daemon-wide', () => {
     openDaemonSettings();
     expect(screen.getByText('This daemon · applies to every workspace')).toBeInTheDocument();
+  });
+
+  it('offers the Host tools section, listing each tool and saving directories (VS-318)', () => {
+    state.search = { section: 'host-tools' };
+    openDaemonSettings();
+    expect(screen.getByText('openspec')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Tool directories'), { target: { value: '/opt/tools/bin\n/snap/bin' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save directories' }));
+    expect(state.savedPaths).toEqual(['/opt/tools/bin', '/snap/bin']);
+  });
+
+  it('shows the daemon validation error for a relative host tool directory (VS-318)', () => {
+    state.search = { section: 'host-tools' };
+    state.hostToolSaveError = new Error('host tool paths must be absolute');
+    openDaemonSettings();
+    expect(screen.getByText(/must be absolute/)).toBeInTheDocument();
   });
 
   it('opens the Updates section when the URL names no section, and walks every section from one render', () => {

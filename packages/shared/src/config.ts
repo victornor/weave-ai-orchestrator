@@ -455,6 +455,12 @@ export const DaemonConfigSchema = z.object({
    * Empty (the default) leaves every workspace on its own `models` block.
    */
   models: DaemonModelsSchema.default({}),
+  /**
+   * Extra directories prepended to host tool resolution (`git`, `gh`, `openspec`, `wt`), for an
+   * unusual layout the daemon user's login shell does not cover (VS-318). Empty is the normal case:
+   * a deployment resolves its host tools with no configuration, from the user's login-shell PATH.
+   */
+  hostToolPaths: z.array(z.string()).default([]),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   otlpEndpoint: z.string().optional(),
 });

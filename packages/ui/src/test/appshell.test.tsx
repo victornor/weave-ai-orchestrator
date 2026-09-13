@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   projectsByWs: {} as Record<string, { status: 'pending' | 'error' | 'success'; projects: Array<Record<string, unknown>> }>,
   path: '/w/ws1/chat',
   daemonWorkerOptions: null as Array<{ id: string; description: string; runtime: string | null; model: string | null }> | null,
+  hostTools: [] as Array<{ id: string; available: boolean; version: string | null; path: string | null; need: 'required' | 'recommended'; purpose: string }>,
 }));
 
 /** Every `ids` array the mocked `FanInStreams` was rendered with, in render order (VS-199). */
@@ -104,6 +105,7 @@ vi.mock('../api/hooks', () => ({
   useWorkspaceSummary: () => ({ data: { workspace: { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME' }, config: state.config }, isError: false, error: null, refetch: vi.fn() }),
   useWorkspaces: () => ({ data: state.workspaces }),
   useDaemonModels: () => ({ data: { weaver: null, workers: null, workerOptions: state.daemonWorkerOptions }, isLoading: false }),
+  useDaemonHostTools: () => ({ data: { paths: [], tools: state.hostTools }, isLoading: false }),
 }));
 
 const { AppShell } = await import('../app/AppShell');
@@ -147,8 +149,8 @@ beforeEach(() => {
   fanIn.calls = [];
   localStorage.clear();
   state.daemonWorkerOptions = null;
+  state.hostTools = [];
 });
-
 describe('FanInStreams gating on global pages', () => {
   it('is not rendered on /chats, which manages its own per-pane subscriptions (VS-199)', () => {
     state.path = '/chats';
@@ -467,6 +469,28 @@ describe('AppShell — unconfigured worker-tier banner (VS-236)', () => {
 
   it('is absent when the daemon overlay is empty', () => {
     state.daemonWorkerOptions = null;
+    render(<AppShell />);
+    expect(banner()).not.toBeInTheDocument();
+  });
+});
+
+describe('AppShell — unavailable host tool banner (VS-318)', () => {
+  const banner = (): HTMLElement | null => screen.queryByRole('status', { name: 'Host tools are missing' });
+  const tool = (over: Partial<{ id: string; available: boolean; version: string | null; path: string | null; need: 'required' | 'recommended'; purpose: string }>) => ({
+    id: 'gh', available: false, version: null, path: null, need: 'recommended' as const, purpose: 'pull-request delivery', ...over,
+  });
+
+  it('shows an unavailable required/recommended tool without a health probe', () => {
+    state.hostTools = [tool({}), tool({ id: 'openspec', available: true, version: '1.12.0', path: '/usr/bin/openspec' })];
+    render(<AppShell />);
+    expect(banner()).toBeInTheDocument();
+    expect(banner()).toHaveTextContent('gh');
+    const link = within(banner() as HTMLElement).getByRole('link', { name: 'Open Host tools' });
+    expect(JSON.parse(link.getAttribute('data-search') ?? '{}')).toEqual({ section: 'host-tools' });
+  });
+
+  it('clears when every tool is available', () => {
+    state.hostTools = [tool({ available: true, version: '2.100.0' })];
     render(<AppShell />);
     expect(banner()).not.toBeInTheDocument();
   });

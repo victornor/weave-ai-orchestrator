@@ -10,7 +10,7 @@ import { CommandPalette } from '../components/CommandPalette';
 import type { Command } from '../components/CommandPalette';
 import { ConnectionBanner, UnreachableScreen } from '../components/ConnectionBanner';
 import { FanInStreams, useConnection, useOptionalWorkspace, useWorkspaceEvents } from '../api/context';
-import { useDaemonModels, useDaemonUpdate, useDaemonUpgrade, useDecisions, useTickets, useTransitionTicket, useWorkspaceProjects, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
+import { useDaemonModels, useDaemonHostTools, useDaemonUpdate, useDaemonUpgrade, useDecisions, useTickets, useTransitionTicket, useWorkspaceProjects, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
 import { useToast } from '../components/Toast';
 import { useHotkeys } from '../lib/hotkeys';
 import { flushQueue, useQueueCount } from '../lib/queue';
@@ -238,6 +238,7 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
       <div className="flex min-w-0 flex-1 flex-col">
         <ConnectionBanner state={conn.state} capturedAt={conn.capturedAt} queuedCount={queuedCount} />
         <ModelsUnconfiguredBanner />
+        <HostToolsUnavailableBanner />
         {!onGlobalPage && workspaceYolo(summary.data?.config) ? (
           <div
             role="status"
@@ -289,6 +290,29 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
         isActive={isActive}
         onNewWorkspace={() => go('/onboarding')}
       />
+    </div>
+  );
+}
+
+/**
+ * VS-318: a required or recommended host tool the daemon cannot find is unmissable here, and the
+ * link goes to the section that shows which one and where to add a directory.
+ */
+function HostToolsUnavailableBanner(): React.ReactElement | null {
+  const hostTools = useDaemonHostTools();
+  const missing = (hostTools.data?.tools ?? []).filter((t) => !t.available);
+  if (missing.length === 0) return null;
+  return (
+    <div
+      role="status"
+      aria-label="Host tools are missing"
+      className="flex h-banner items-center gap-2 bg-failed/10 px-4 text-micro text-failed"
+    >
+      <span className="size-1.5 rounded-pill bg-current" aria-hidden />
+      <span>{`The daemon cannot find host tools it needs: ${missing.map((t) => t.id).join(', ')}. Check daemon Settings → Host tools.`}</span>
+      <A to="/settings" search={{ section: 'host-tools' }} className="ml-auto font-medium">
+        Open Host tools
+      </A>
     </div>
   );
 }

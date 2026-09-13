@@ -8,6 +8,7 @@ import { TERMINAL_TICKET_STATUSES } from '@weave-ai/shared';
 import { nowIso } from '@weave-ai/db';
 import type { BriefingService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
+import { hostToolWarnings } from '../tools/host.js';
 
 const LANDED_WINDOW_DAYS = 7;
 const NEEDS_YOU_LIMIT = 20;
@@ -107,6 +108,10 @@ export function createBriefingService(ctx: WorkspaceContext): BriefingService {
       "SELECT title FROM decisions WHERE workspace_id = ? AND status = 'expired' AND COALESCE(expires_at, created_at) >= ? ORDER BY COALESCE(expires_at, created_at) DESC",
       [ctx.workspaceId, cutoff],
     )) out.push(`decision expired: ${d.title}`);
+
+    // VS-318: a required/recommended host tool the daemon cannot find is a warning the weaver reads,
+    // read synchronously from the last detection snapshot rather than probing on every briefing.
+    out.push(...hostToolWarnings());
 
     return out;
   };

@@ -82,7 +82,7 @@ describe('OpenSpecService.statusFor', () => {
     for (const c of bin.calls()) expect(c.cwd).toBe(worktree);
   });
 
-  it('returns a zeroed status when the ticket has no change, when openspec/ is absent and when the binary is missing', async () => {
+  it('returns a zeroed status when the ticket has no change and when openspec/ is absent', async () => {
     const zero = { planningComplete: false, artifacts: [], tasks: null, applyState: null, validation: null, archived: false };
 
     const a = setup(READY_CASES, { changeName: null });
@@ -92,12 +92,14 @@ describe('OpenSpecService.statusFor', () => {
     const b = setup(READY_CASES);   // no openspec/ directory in the clone
     expect(await createOpenSpecService(b.harness.ctx, b.harness.deps).statusFor(b.ticketId)).toEqual({ changeName: CHANGE, ...zero });
     expect(b.bin.calls()).toEqual([]);
-    b.harness.cleanup(); h = null;
+  });
 
+  it('raises the host-tool error, not an empty plan, when the change exists but the binary cannot run (VS-318)', async () => {
     const c = setup(READY_CASES);
     mkdirSync(join(c.clone, 'openspec'), { recursive: true });
     process.env.AC_OPENSPEC_BIN = join(c.clone, 'no-such-openspec');
-    expect(await createOpenSpecService(c.harness.ctx, c.harness.deps).statusFor(c.ticketId)).toEqual({ changeName: CHANGE, ...zero });
+    await expect(createOpenSpecService(c.harness.ctx, c.harness.deps).statusFor(c.ticketId))
+      .rejects.toMatchObject({ code: 'openspec_not_found' });
   });
 });
 
@@ -137,6 +139,17 @@ describe('OpenSpecService.validateForProposed', () => {
       { level: 'error', message: `planning is not complete for ${CHANGE}: tasks still is outstanding` },
       { level: 'error', message: 'no spec deltas', path: 'specs/' },
     ]);
+  });
+
+  it('names the daemon PATH when the binary cannot run, rather than saying "not installed" (VS-318)', async () => {
+    const { harness, ticketId, clone } = setup(READY_CASES);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    process.env.AC_OPENSPEC_BIN = join(clone, 'no-such-openspec');
+    const r = await createOpenSpecService(harness.ctx, harness.deps).validateForProposed(ticketId);
+    expect(r.ok).toBe(false);
+    const issues = (r as { issues: Array<{ level: string; message: string }> }).issues;
+    expect(issues[0]?.message).toContain("not found on the daemon's PATH");
+    expect(issues[0]?.message).not.toContain('not installed');
   });
 
   // VS-293: `openspec validate --strict` validates a delta's own shape, not what merging it would

@@ -84,8 +84,15 @@ export async function run(cwd: string, args: string[], opts: RunOptions = {}): P
 function failed(argv: string[], exitCode: number | null, stderr: string, cwd: string): OcError {
   return new OcError('internal', `openspec ${argv.join(' ')} exited ${exitCode ?? '?'}: ${stderr.trim().slice(0, 300)}`, { argv, cwd, exitCode });
 }
+/**
+ * VS-318: state the real condition and the PATH that was searched. A tool merely absent from the
+ * daemon's PATH is not "not installed", and saying so sends people to reinstall a working binary.
+ */
+export function hostToolNotFoundMessage(name: string, bin: string, pathValue: string = process.env['PATH'] ?? ''): string {
+  return `the ${name} binary (${bin}) was not found on the daemon's PATH: ${pathValue}`;
+}
 function notFound(bin: string, e: unknown): OcError {
-  return new OcError('openspec_not_found', `the openspec binary (${bin}) is not installed or not on PATH`, { bin, detail: e instanceof Error ? e.message : String(e) });
+  return new OcError('openspec_not_found', hostToolNotFoundMessage('openspec', bin), { bin, path: process.env['PATH'] ?? '', detail: e instanceof Error ? e.message : String(e) });
 }
 function isEnoent(e: unknown): boolean {
   if (!e || typeof e !== 'object') return false;

@@ -369,6 +369,25 @@ export function useSetDaemonModels(): UseMutationResult<T.DaemonModels, Error, P
   });
 }
 
+export function useDaemonHostTools(): UseQueryResult<T.DaemonHostTools> {
+  return useQuery({
+    queryKey: qk.daemonHostTools(),
+    queryFn: () => api.root<T.DaemonHostTools>('/daemon/host-tools'),
+    retry: false,
+  });
+}
+
+export function useSetDaemonHostTools(): UseMutationResult<T.DaemonHostTools, Error, { paths: string[] }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => api.root<T.DaemonHostTools>('/daemon/host-tools', { method: 'PUT', body }),
+    onSuccess: (data) => {
+      qc.setQueryData(qk.daemonHostTools(), data);
+      void qc.invalidateQueries({ queryKey: qk.health() });
+    },
+  });
+}
+
 export function useSetTranscription(): UseMutationResult<T.TranscriptionStatus, Error, { backend: 'chrome' | 'voxtype'; model?: string }> {
   const qc = useQueryClient();
   return useMutation({

@@ -16,7 +16,7 @@ import { openDb } from '@weave-ai/db';
 import type { Db } from '@weave-ai/db';
 import {
   createRegistries, createCore, createAuthService, createIncidentsService, getLogger, initLogger, workspaceLoader,
-  stageWorkspaceImport, importTickets,
+  stageWorkspaceImport, importTickets, ensureHostToolPath, startHostToolProbe,
   type Registries, type WorkspaceContext,
 } from '@weave-ai/core';
 import type { AuthService, CoreServices } from '@weave-ai/core';
@@ -86,6 +86,13 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   await mkdir(configDir, { recursive: true });
   const daemonCfg = withListen(workspaceLoader.ensureFreshDaemonConfig(configDir), opts.listen);
   initLogger(daemonCfg.logLevel);
+
+  // VS-318: the service manager's PATH is not the user's. Resolve the daemon user's login-shell
+  // PATH before any workspace loads or host tool spawns, then keep the detection snapshot fresh so
+  // an unavailable tool is visible without anyone probing /api/health.
+  try { await ensureHostToolPath(daemonCfg.hostToolPaths); }
+  catch (e) { log.warn({ err: String(e) }, 'host tool PATH resolution failed; using the inherited PATH'); }
+  const hostToolProbe = startHostToolProbe();
 
   // Generated once per installation, never written back to daemon.yaml — see vapid.ts and
   // AppDeps.pushKeys for why the private half stays off DaemonConfigSchema entirely.
@@ -197,6 +204,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
       await cancelRunningRuns(ws);
     }));
     await Promise.all([publicServer ? close(publicServer) : Promise.resolve(), close(loopback.server)]);
+    hostToolProbe.stop();
     for (const ws of new Set(workspaces.values())) { try { ws.ctx.db.close(); } catch (e) { log.warn({ err: e }, 'db close failed'); } }
     try { daemonDb.close(); } catch (e) { log.warn({ err: e }, 'daemon db close failed'); }
     await rm(pidFile, { force: true }).catch(() => undefined);

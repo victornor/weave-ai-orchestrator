@@ -14,17 +14,22 @@ import * as cli from '../openspec/cli.js';
 import { fillArchivedCapabilityPurposes } from '../openspec/purpose.js';
 
 export interface ScratchLand {
-  /** The scratch worktree's path — a checkout of the ticket's branch, outside the primary clone. */
+  /**
+   * The scratch worktree's path — a detached checkout at `origin/<branch>`, outside the primary clone.
+   * Commit in it and push `HEAD` to `refs/heads/<branch>`; no local branch of that name is created,
+   * so it works even while another worktree (the requesting worker's) has the branch checked out.
+   */
   path: string;
-  /** Removes the scratch worktree and its branch. Safe to call once; idempotent on later calls. */
+  /** Removes the scratch worktree. Safe to call once; idempotent on later calls. */
   dispose(): Promise<void>;
 }
 
 /**
- * Checks out a ticket's own branch into a throwaway worktree of the project's primary clone
- * (design.md Decision 3), so archiving and rebasing it never disturbs the primary clone's own
- * checkout on the landing branch. The primary clone's object store is reused — no re-clone — only
- * its working tree is not touched.
+ * Creates a throwaway detached worktree of the project's primary clone at `origin/<branch>`
+ * (design.md Decision 3), so archiving and rebasing a ticket's branch never disturbs the primary
+ * clone's own checkout on the landing branch — and never requires a local checkout of `<branch>`,
+ * which git refuses while the requesting worker's worktree holds it (VS-363). The primary clone's
+ * object store is reused — no re-clone — only its working tree is not touched.
  */
 export async function scratchLandWorktree(repoPath: string, branch: string): Promise<ScratchLand> {
   const dir = mkdtempSync(join(tmpdir(), 'ac-land-'));
@@ -32,8 +37,6 @@ export async function scratchLandWorktree(repoPath: string, branch: string): Pro
   if (!fetch.ok) throw new OcError('internal', `fetch of ${branch} failed: ${fetch.stderr.trim().slice(0, 300)}`, { branch });
   const add = await git(['worktree', 'add', '--detach', dir, `origin/${branch}`], repoPath, 120_000);
   if (!add.ok) throw new OcError('internal', `git worktree add for ${branch} failed: ${add.stderr.trim().slice(0, 300)}`, { branch, dir });
-  const checkout = await git(['checkout', '-B', branch], dir, 30_000);
-  if (!checkout.ok) throw new OcError('internal', `checkout of ${branch} in the scratch worktree failed: ${checkout.stderr.trim().slice(0, 300)}`, { branch });
   let disposed = false;
   return {
     path: dir,
@@ -85,9 +88,9 @@ export async function isFreshAgainstLanding(cwd: string, branchRef: string, land
 export type RebaseOutcome = { ok: true } | { ok: false; conflict: true; detail: string };
 
 /**
- * Brings a scratch worktree's checked-out branch up to date with `landingRef` (design.md Decision 5).
+ * Brings a scratch worktree's detached HEAD up to date with `landingRef` (design.md Decision 5).
  * A clean rebase leaves the worktree ready to archive and push; a conflict aborts the rebase (leaving
- * the worktree's branch exactly where it started) and reports it — the only case that goes back to
+ * the worktree's HEAD exactly where it started) and reports it — the only case that goes back to
  * the worker.
  */
 export async function rebaseOntoLanding(worktreePath: string, landingRef: string): Promise<RebaseOutcome> {
@@ -100,9 +103,9 @@ export async function rebaseOntoLanding(worktreePath: string, landingRef: string
 export interface ArchiveOnBranchResult { archivedAs: string | null; specsUpdated: string[]; warnings: string[] }
 
 /**
- * Runs `openspec archive` in the scratch worktree and commits the result onto the checked-out
- * branch (design.md Decision 3) — never onto the landing branch, and never pushed by this function;
- * the caller pushes once every step here has succeeded. Throws `openspec_archive_blocked` (or
+ * Runs `openspec archive` in the scratch worktree and commits the result onto the worktree's HEAD
+ * (design.md Decision 3) — never onto the landing branch, and never pushed by this function; the
+ * caller pushes once every step here has succeeded. Throws `openspec_archive_blocked` (or
  * `internal`) exactly as `openspec/cli.ts`'s `archive` does when the CLI refuses (VS-298's
  * error-code/detail preservation) — the caller treats that as an archive failure that blocks the
  * merge (archive-before-merge spec's archive-failure requirement).
@@ -190,7 +193,11 @@ export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promi
       }
     }
     if (changed) {
-      const push = await git(['push', '--force-with-lease', 'origin', `HEAD:${branch}`], scratch.path, 120_000);
+      // The scratch worktree is detached (VS-363), so push its HEAD to the remote branch by explicit
+      // refspec — never via a local branch, which git would refuse to check out while the worker's
+      // worktree holds it. `--force-with-lease` checks against the `origin/<branch>` the fetch above
+      // left current, exactly as it did when the scratch worktree was on the branch.
+      const push = await git(['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${branch}`], scratch.path, 120_000);
       if (!push.ok) throw new OcError('internal', `push of ${branch} failed: ${push.stderr.trim().slice(0, 300)}`, { branch });
     }
     const state = await forge.prState(clonePath, prUrl);

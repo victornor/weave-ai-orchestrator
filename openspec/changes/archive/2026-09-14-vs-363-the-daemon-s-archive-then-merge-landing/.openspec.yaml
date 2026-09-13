@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Land a ticket whose worker worktree still holds the branch by keeping the
+  scratch landing worktree detached instead of git checkout -B

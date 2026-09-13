@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Wake the weaver when a held merge card's PR head moves

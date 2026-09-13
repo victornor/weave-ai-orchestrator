@@ -433,6 +433,18 @@ describe('supervisor scheduled passes', () => {
       expect(transition).not.toHaveBeenCalled();
     });
 
+    it('checks a held merge review against the PR head (VS-365)', async () => {
+      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+      const noteHeldReviewHead = vi.fn(async () => ({ woken: true }));
+      h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, transition: vi.fn(async () => ({})), noteHeldReviewHead } as never;
+      h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const, headSha: 'sha-2' }), mergePr: async () => ({}) });
+      const ticketId = seedPrTicket();
+
+      await supervisor.tick();
+
+      expect(noteHeldReviewHead).toHaveBeenCalledWith({ kind: 'system', id: null }, ticketId, 'sha-2');
+    });
+
     it('updates the check tally while the PR stays open, and refreshes the board (VS-328)', async () => {
       h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
       h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, transition: vi.fn(async () => ({})) } as never;

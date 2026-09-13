@@ -169,6 +169,7 @@ function question(over: Partial<Decision> = {}): Decision {
     weaverReviewedAt: null,
     weaverReviewNote: null,
     weaverReviewedByAgentId: null,
+    weaverReviewedHeadSha: null,
     answerAuthorKind: null,
     relayedFromMessageId: null,
     ...over,

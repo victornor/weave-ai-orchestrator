@@ -802,8 +802,14 @@ export const TOOLS: ToolDef[] = [
       status: z.enum(['looked', 'concerns']),
       note: z.string().min(1),
     }),
-    description: 'Mark that you have reviewed a plan, merge or action approval. Both marks need a note shown on the card: concerns = what you object to; looked = the one or two sentences you would otherwise write in chat about why the work is clean. Do not mark at turn start or in a batch. A clean mark says the review found nothing to object to — it is not an endorsement and never your approval. Never use this to answer those decisions.',
-    handler: (ctx, i) => svc(ctx).decisions.review(ctx.actor, i.decisionId, { status: i.status, note: i.note }),
+    description: 'Mark that you have reviewed a plan, merge or action approval. Both marks need a note shown on the card: concerns = what you object to; looked = the one or two sentences you would otherwise write in chat about why the work is clean. Do not mark at turn start or in a batch. A clean mark says the review found nothing to object to — it is not an endorsement and never your approval. Never use this to answer those decisions. On a merge approval the head you are reviewing is recorded, so a later push to the same card wakes you.',
+    handler: async (ctx, i) => {
+      // VS-365: record the delivery head this review is made against, so a commit pushed afterwards can
+      // wake the weaver without a comment. Only a merge approval has a delivery head worth recording.
+      const d = svc(ctx).decisions.get(i.decisionId);
+      const reviewedHead = d.kind === 'merge_approval' && d.ticketId ? await svc(ctx).tickets.deliveryHead(d.ticketId) : null;
+      return svc(ctx).decisions.review(ctx.actor, i.decisionId, { status: i.status, note: i.note, reviewedHead });
+    },
   },
   {
     name: 'weave_human_send', scope: 'weaver',

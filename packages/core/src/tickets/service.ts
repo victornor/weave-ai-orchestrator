@@ -14,6 +14,7 @@ import { landDelivery, type LandResult } from './land.js';
 import { attemptArchiveThenMerge } from './archive-before-merge.js';
 import { createMergeQueue } from './merge-queue.js';
 import { landLock } from '../util/land-lock.js';
+import { git } from '../util/git.js';
 import { effectiveModels } from '../models/resolve.js';
 import { existsSync } from 'node:fs';
 import { flattenWakes } from '../prompts/index.js';
@@ -214,10 +215,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
    * ticket only for a wake a resolving source requested, so a human `ticket_comment` must carry its
    * requester rather than defaulting to `system`.
    */
-  function wake(agentId: string | null | undefined, source: Parameters<CoreServices['wake']['enqueue']>[1]['source'], reason: string, payload: Record<string, unknown> = {}, requestedBy?: Actor): void {
+  function wake(agentId: string | null | undefined, source: Parameters<CoreServices['wake']['enqueue']>[1]['source'], reason: string, payload: Record<string, unknown> = {}, requestedBy?: Actor, idempotencyKey?: string): void {
     if (!agentId) return;
     try {
-      deps().wake.enqueue(agentId, { source, reason, payload, ...(requestedBy ? { requestedBy } : {}) });
+      deps().wake.enqueue(agentId, { source, reason, payload, ...(requestedBy ? { requestedBy } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) });
     } catch (e) {
       log.warn({ err: e, agentId, source }, 'wake enqueue failed');
     }
@@ -682,6 +683,46 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     } catch { /* no conductor yet */ }
   }
 
+  /**
+   * VS-365: a ticket's current delivery head, resolved generally so a fix pushed to a held merge card
+   * can be noticed without a comment. In order: the pull request's head when the ticket has a PR and
+   * its forge reports one; else the worker worktree's `HEAD` (covers `local-branch` delivery and a
+   * committed-but-unpushed fix); else the project clone's branch ref, local then `origin/`. Returns
+   * null when nothing resolves and never throws — the caller is a notification, not a gate.
+   */
+  async function resolveDeliveryHead(t: Ticket): Promise<string | null> {
+    try {
+      const wt = db.get<{ path: string; branch: string }>(
+        "SELECT path, branch FROM worktrees WHERE ticket_id = ? AND status != 'removed' ORDER BY created_at DESC LIMIT 1",
+        [t.id],
+      );
+      const p = project(t.projectId);
+      const wp = db.get<{ url: string }>(
+        "SELECT url FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' AND url IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+        [t.id],
+      );
+      if (wp?.url && p && existsSync(p.clonePath)) {
+        const forge = ctx.registries.forges.get('github');
+        const state = forge ? await forge.prState(p.clonePath, wp.url).catch(() => null) : null;
+        if (state?.headSha) return state.headSha;
+      }
+      if (wt && existsSync(wt.path)) {
+        const r = await git(['rev-parse', 'HEAD'], wt.path, 15_000);
+        if (r.ok && r.stdout.trim()) return r.stdout.trim();
+      }
+      const branch = wt?.branch ?? ticketBranchFor(t);
+      if (p && existsSync(p.clonePath)) {
+        for (const ref of [branch, `origin/${branch}`]) {
+          const r = await git(['rev-parse', '--verify', '--quiet', ref], p.clonePath, 15_000);
+          if (r.ok && r.stdout.trim()) return r.stdout.trim();
+        }
+      }
+    } catch (e) {
+      log.warn({ err: String(e), ticketId: t.id }, 'delivery head resolution failed');
+    }
+    return null;
+  }
+
   const service: TicketsService = {
     create(actor, input: TicketCreateInput) {
       if (input.projectId) {
@@ -976,6 +1017,60 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       if (after) { sql += ' AND created_at > ?'; params.push(after); }
       sql += ' ORDER BY created_at, rowid';
       return db.all<TicketComment>(sql, params);
+    },
+
+    deliveryHead(id) {
+      return resolveDeliveryHead(get(id));
+    },
+
+    /**
+     * VS-365: a fix pushed to a merge card the weaver holds under concerns must wake the weaver by
+     * itself — a comment was the only wake before this. When the ticket has an open `merge_approval`
+     * marked **looked at, with concerns** and its delivery head differs from the head recorded at
+     * review, wake the weaver once per new head. `head` defaults to `deliveryHead(ticketId)`; a
+     * decision with no recorded head is baselined without waking. Notification only: no review state
+     * is touched, and the wake is idempotent under `held-review:<decisionId>:<sha>`.
+     */
+    async noteHeldReviewHead(actor, id, head) {
+      const t = get(id);
+      try {
+        const held = db.get<{ id: string; title: string; reviewedHead: string | null }>(
+          "SELECT id, title, weaver_reviewed_head_sha AS reviewedHead FROM decisions WHERE ticket_id = ? AND kind = 'merge_approval' AND status = 'open' AND weaver_review_status = 'concerns' ORDER BY created_at DESC LIMIT 1",
+          [t.id],
+        );
+        if (!held) return { woken: false };
+        const current = head === undefined ? await resolveDeliveryHead(t) : head;
+        if (!current) return { woken: false, decisionId: held.id };
+        if (held.reviewedHead === null) {
+          // The mark could not resolve a head: the first head seen afterwards is the baseline, so a
+          // card held at upgrade time does not wake on a head that has not moved.
+          db.update('decisions', held.id, { weaverReviewedHeadSha: current });
+          return { woken: false, decisionId: held.id };
+        }
+        if (sameGitSha(held.reviewedHead, current)) return { woken: false, decisionId: held.id };
+        const cid = conductorId();
+        if (!cid) return { woken: false, decisionId: held.id };
+        const key = `held-review:${held.id}:${current}`;
+        // Mirror the wake service's Gate 0 so the result is honest: a live wake already carrying this
+        // (decision, head) key means the weaver has been told about this commit, however many times the
+        // turn-end and reconcile checks run. A dead one (skipped/cancelled/failed) does not.
+        const live = db.get<{ status: string }>('SELECT status FROM wakeups WHERE agent_id = ? AND idempotency_key = ?', [cid, key]);
+        if (live && ['queued', 'claimed', 'coalesced', 'completed'].includes(live.status)) {
+          return { woken: false, decisionId: held.id, headSha: current };
+        }
+        wake(
+          cid,
+          'system',
+          `${t.identifier}: the merge review moved to ${current.slice(0, 12)} since your concerns on "${held.title}"`,
+          { ticketId: t.id, decisionId: held.id, headSha: current },
+          actor,
+          key,
+        );
+        return { woken: true, decisionId: held.id, headSha: current };
+      } catch (e) {
+        log.warn({ err: String(e), ticketId: t.id }, 'held-review head check failed');
+        return { woken: false };
+      }
     },
 
     lastWorker(id) {

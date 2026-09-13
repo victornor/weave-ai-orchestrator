@@ -613,7 +613,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
    * Asserted conductor review (VS-223). The mark is a dedicated write, never inferred from a digest
    * or a turn. `answer()` does not read these columns.
    */
-  function review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string }): Decision {
+  function review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null }): Decision {
     const d = get(id);
     const cid = conductorId();
     if (actor.kind !== 'agent' || !actor.id || actor.id !== cid) {
@@ -647,6 +647,9 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
         weaverReviewedAt: nowIso(),
         weaverReviewNote: note,
         weaverReviewedByAgentId: actor.id,
+        // VS-365: the delivery head this review was made against, so a held merge approval whose head
+        // later moves can wake the weaver. Null when the caller could not resolve one.
+        weaverReviewedHeadSha: input.reviewedHead ?? null,
       });
       const next = get(d.id);
       recordActivity(db, ws, actor, 'decision.review', 'decision', d.id, { status: input.status }, d.ticketId);

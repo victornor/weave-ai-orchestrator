@@ -268,12 +268,14 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     ctx.events.emit('run.started', 'run', runId, { agentId: agent.id, ticketId: agent.ticketId, turnEpoch: run.turnEpoch });
     record('run.started', { agentId: agent.id, turnEpoch: run.turnEpoch, wakeups: run.wakeupIds ?? [] }, 'system');
     record('error', { message: e.message, code: e.code }, 'system', 'error');
-    return finalize(ctx, deps, sessions, {
+    const finished = finalize(ctx, deps, sessions, {
       run, agent, role, project, ticket, wakes, result: null,
       failure: { code: e.code, family: 'tooling', message: e.message },
       report: null, durationMs: Date.now() - started, sessionId: null,
       cancelled: null, record,
     });
+    await checkHeldReviewAfterTurn(ctx, deps, agent, ticket);
+    return finished;
   }
 
   // VS-256: a curation turn fact-checks the knowledge base against the project's primary clone —
@@ -311,12 +313,14 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       } catch (e) {
         log.warn({ err: String(e) }, 'could not transition curation ticket to blocked after a checkout freshness failure');
       }
-      return finalize(ctx, deps, sessions, {
+      const finished = finalize(ctx, deps, sessions, {
         run, agent, role, project, ticket, wakes, result: null,
         failure: { code: 'checkout_stale', family: 'tooling', message: freshnessError },
         report: null, durationMs: Date.now() - started, sessionId: null,
         cancelled: null, record,
       });
+      await checkHeldReviewAfterTurn(ctx, deps, agent, ticket);
+      return finished;
     }
   }
 
@@ -504,13 +508,30 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   });
 
   // 7. finalize
-  return finalize(ctx, deps, sessions, {
+  const finished = finalize(ctx, deps, sessions, {
     run, agent, role, project, ticket, wakes, result, failure, report,
     durationMs: Date.now() - started,
     sessionId: sessions.active(agent.id)?.id ?? null,
     cancelled: state.active.get(runId)?.cancelled ?? null,
     record,
   });
+  await checkHeldReviewAfterTurn(ctx, deps, agent, ticket);
+  return finished;
+}
+
+/**
+ * VS-365: a worker can push a fix to a merge approval the weaver holds under concerns and end its
+ * turn without a comment, which used to wake nobody. At the end of a worker's turn, ask the tickets
+ * service whether the held card's delivery head has moved since the review — it wakes the weaver once
+ * per new head. Only worker turns with a ticket; never lets the check fail the run.
+ */
+async function checkHeldReviewAfterTurn(ctx: WorkspaceContext, deps: () => CoreServices, agent: Agent, ticket: Ticket | null): Promise<void> {
+  if (agent.kind !== 'worker' || !ticket) return;
+  try {
+    await deps().tickets.noteHeldReviewHead({ kind: 'system', id: null }, ticket.id);
+  } catch (e) {
+    ctx.log('run').warn({ err: String(e), ticketId: ticket.id }, 'held-review head check failed');
+  }
 }
 
 interface FinalizeInput {

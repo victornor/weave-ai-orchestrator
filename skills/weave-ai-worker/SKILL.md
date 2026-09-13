@@ -37,6 +37,7 @@ For `change` tickets also load `weave-ai-openspec` — it holds the propose/appl
 ## A task's ending matches what it produced
 
 - **You produced a diff that should land** → deliver per `references/delivery.md` → `in_review`, exactly as always.
+- **You pushed a fix to a merge card the weaver holds under concerns:** leave a short ticket comment naming the fix commit (e.g. `fix pushed: 15dc6f31`). The daemon wakes the weaver by itself when the card's head moves, but the comment is a second, cheap path that still works when the forge is unreachable — and it is what the weaver reads to see what you changed.
 - **You produced nothing that needs landing** (a config tweak, a cleanup, the answer is the ticket) → finish at `done`: state the ending and why in the transition note, `weave_ticket_transition(id, "done", {note: "ending: done — <why nothing needs landing>"})`. No PR, no merge approval.
 
 The daemon enforces the boundary rather than trusting the vibe: `done` is refused with `worktree_not_landed` while your branch carries commits its landing branch does not contain, and with `validation` when the note is missing. A rejection is information: `worktree_not_landed` means you produced a diff — deliver it through `in_review`.

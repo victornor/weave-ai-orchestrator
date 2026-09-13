@@ -10,6 +10,7 @@ interface GhPrView {
   state?: string;
   mergeCommit?: { oid?: string } | null;
   statusCheckRollup?: GhCheck[] | null;
+  headRefOid?: string;
 }
 
 /** One pull request exactly as `gh pr list --json` / `gh pr view --json` spells it. */
@@ -140,14 +141,14 @@ export class GhForge implements ForgeAdapter {
     return r.ok;
   }
 
-  async prState(cwd: string, url: string): Promise<{ state: 'open' | 'merged' | 'closed'; mergeCommit?: string; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number } }> {
-    const r = await sh('gh', ['pr', 'view', url, '--json', 'state,mergeCommit,statusCheckRollup'], { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
+  async prState(cwd: string, url: string): Promise<{ state: 'open' | 'merged' | 'closed'; mergeCommit?: string; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number }; headSha?: string }> {
+    const r = await sh('gh', ['pr', 'view', url, '--json', 'state,mergeCommit,statusCheckRollup,headRefOid'], { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
     if (!r.ok) throw new OcError('internal', `gh pr view failed: ${r.stderr.trim().slice(0, 300)}`, { url });
     let doc: GhPrView;
     try { doc = JSON.parse(r.stdout) as GhPrView; } catch { throw new OcError('internal', 'gh pr view returned invalid JSON', { url }); }
     const raw = (doc.state ?? 'OPEN').toUpperCase();
     const state = raw === 'MERGED' ? 'merged' : raw === 'CLOSED' ? 'closed' : 'open';
-    return { state, mergeCommit: doc.mergeCommit?.oid, ciState: rollupState(doc.statusCheckRollup), checks: checkTally(doc.statusCheckRollup) };
+    return { state, mergeCommit: doc.mergeCommit?.oid, ciState: rollupState(doc.statusCheckRollup), checks: checkTally(doc.statusCheckRollup), headSha: doc.headRefOid };
   }
 
   async mergePr(cwd: string, url: string, method: string): Promise<{ mergeCommit?: string }> {

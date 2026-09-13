@@ -744,6 +744,14 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         // What the board reads its delivery from is the tickets query, so a checks-only change still needs this.
         if (ciChanged) ctx.events.emit('ticket.updated', 'ticket', row.ticketId, { ticketId: row.ticketId });
       }
+      // VS-365: reconcile is where the daemon already refreshes a pull request's head, so a held
+      // (`concerns`) merge card whose head moved since the review is noticed here too — the turn-end
+      // check catches the worker's own push, this catches one made out of band. Idempotent per head.
+      try {
+        await deps().tickets.noteHeldReviewHead(SYSTEM, row.ticketId, pr.headSha);
+      } catch (e) {
+        log.warn({ ticket: row.identifier, err: String(e) }, 'held-review head check failed during reconcile');
+      }
       if (pr.state !== 'merged') continue;
 
       const note = `the pull request was merged on the forge${pr.mergeCommit ? ` (${pr.mergeCommit.slice(0, 12)})` : ''}`;

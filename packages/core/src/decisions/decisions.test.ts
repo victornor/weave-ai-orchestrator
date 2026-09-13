@@ -901,6 +901,18 @@ describe('decisions', () => {
       vi.useRealTimers();
     });
 
+    it('records the delivery head the review was made against, and null without one (VS-365)', () => {
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Merge?' });
+      const head = 'deadbeef'.repeat(5);
+      const withHead = decisions.review(conductor(), d.id, { status: 'concerns', note: 'the retry loop can hang', reviewedHead: head });
+      expect(withHead.weaverReviewedHeadSha).toBe(head);
+      expect(decisions.get(d.id).weaverReviewedHeadSha).toBe(head);
+
+      const noHead = decisions.review(conductor(), d.id, { status: 'looked', note: 'all clear now' });
+      expect(noHead.weaverReviewedHeadSha).toBeNull();
+    });
+
     it('emits decision.updated with the full Decision and enqueues no wake', async () => {
       const t = ticket();
       const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });

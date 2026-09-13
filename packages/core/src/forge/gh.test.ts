@@ -256,3 +256,18 @@ describe('pullRequestDiff', () => {
     await expect(new GhForge().pullRequestDiff(home, 1)).rejects.toThrow(/gh pr diff failed/);
   });
 });
+
+describe('prState', () => {
+  it('reports the pull request head when gh returns one (VS-365)', async () => {
+    fakeGh(JSON.stringify({ state: 'OPEN', headRefOid: 'abc123def456' }));
+    const state = await new GhForge().prState(home, 'https://github.com/acme/api/pull/77');
+    expect(state).toMatchObject({ state: 'open', headSha: 'abc123def456' });
+    expect(args()).toContain('headRefOid');
+  });
+
+  it('omits the head when the forge reports none', async () => {
+    fakeGh(JSON.stringify({ state: 'OPEN' }));
+    const state = await new GhForge().prState(home, 'https://github.com/acme/api/pull/77');
+    expect(state.headSha).toBeUndefined();
+  });
+});

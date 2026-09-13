@@ -104,6 +104,13 @@ export interface Decision {
   weaverReviewNote: string | null;
   weaverReviewedByAgentId: string | null;
   /**
+   * VS-365: the delivery head (a pull request's head, else the ticket branch's head, else the project
+   * clone's branch ref) the review mark was made against, recorded when a `merge_approval` is marked.
+   * Null when no head could be resolved. A held merge approval whose head later differs from this
+   * wakes the weaver once per new head.
+   */
+  weaverReviewedHeadSha: string | null;
+  /**
    * VS-310: a relayed answer is the human's words recorded by the weaver from the message they were
    * sent in. `answeredByKind`/`answeredById` stay the *writer* (the weaver agent); this is the
    * *author* — always `'human'` on a relay, `null` on a direct answer, whose author is its writer.

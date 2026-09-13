@@ -277,7 +277,7 @@ describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () 
     expect(remoteBranches.stdout).toMatch(new RegExp(`ac/archive-${CHANGE}`));
   });
 
-  it('does not open a second pull request while an earlier backfill branch is still pending (VS-327 review, PR #272)', async () => {
+  it('recognises an open backfill pull request on the pushed branch and opens nothing (VS-340)', async () => {
     const { harness, ticketId, clone } = setup([
       ...READY_CASES,
       { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: [], warnings: [] } } },
@@ -286,20 +286,52 @@ describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () 
     writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
     await git(['add', '.'], clone);
     await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
-    // A previous sweep already opened the backfill branch (and, on the forge, its PR).
+    // A previous sweep already pushed the backfill branch (and, on the forge, its PR).
     await git(['checkout', '-b', `ac/archive-${CHANGE}`], origin);
     await git(['checkout', 'main'], origin);
 
     const createPullRequest = vi.fn(async () => ({ url: 'https://example.com/pr/99', number: 99 }));
     harness.ctx.registries.forges.set('github', {
-      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const, ciState: 'none' as const }), mergePr: async () => ({}), createPullRequest,
+      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const, ciState: 'none' as const }), mergePr: async () => ({}),
+      pullRequestForBranch: vi.fn(async () => ({ url: 'https://example.com/pr/99', number: 99 })),
+      createPullRequest,
     } satisfies ForgeAdapter);
 
     const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
-    expect(r.archivedAs).toBeNull();
-    expect(r.pendingPrUrl).toBeUndefined();
-    expect(r.skipped).toMatch(/already pending/);
+    expect(r).toEqual({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/99' });
     expect(createPullRequest).not.toHaveBeenCalled();
+    const act = harness.db.get<{ action: string; details: Record<string, unknown> }>('SELECT action, details_json FROM activity WHERE entity_id = ?', [ticketId]);
+    expect(act?.action).toBe('openspec.archive_pr_opened');
+    expect(act?.details).toMatchObject({ changeName: CHANGE, pendingPrUrl: 'https://example.com/pr/99' });
+    // No second archive was attempted: the branch already carries it.
+    expect(harness.events.some((e) => e.type === 'ticket.updated')).toBe(true);
+  });
+
+  it('opens the pull request from a pushed branch that has no open one yet (VS-340 retry converges)', async () => {
+    const { harness, ticketId, clone, bin } = setup([
+      ...READY_CASES,
+      { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: [], warnings: [] } } },
+    ], { policies: { deliveryMode: 'pr' } });
+    const { origin } = await realGitProject(harness, clone);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    await git(['add', '.'], clone);
+    await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
+    // The earlier sweep pushed the branch and then failed before opening a PR.
+    await git(['checkout', '-b', `ac/archive-${CHANGE}`], origin);
+    await git(['checkout', 'main'], origin);
+
+    const createPullRequest = vi.fn(async () => ({ url: 'https://example.com/pr/100', number: 100 }));
+    harness.ctx.registries.forges.set('github', {
+      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const, ciState: 'none' as const }), mergePr: async () => ({}),
+      pullRequestForBranch: vi.fn(async () => null),
+      createPullRequest,
+    } satisfies ForgeAdapter);
+
+    const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
+    expect(r).toEqual({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/100' });
+    expect(createPullRequest).toHaveBeenCalledWith(clone, expect.objectContaining({ branch: `ac/archive-${CHANGE}`, base: 'main' }));
+    // The archive was not re-run or re-pushed — the existing branch was reused.
+    expect(bin.calls().filter((c) => c.argv[0] === 'archive')).toHaveLength(0);
   });
 
   it('propagates a real archive failure rather than reporting it as a missing binary (VS-327 review, PR #272)', async () => {

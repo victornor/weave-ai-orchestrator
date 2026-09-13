@@ -10,13 +10,13 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GhForge, checkTally, pullRequestDetailFromGh, pullRequestFromGh } from './gh.js';
+import { GhForge, checkTally, parsePullRequestUrl, pullRequestDetailFromGh, pullRequestFromGh } from './gh.js';
 
 let home: string;
 
 /**
  * A `gh` that prints `stdout.txt` and exits with the contents of `exit.txt`. Its own arguments go to
- * `args.txt`, so a test can assert what was asked for without a process double.
+ * `args.txt`, one per line, so a test can assert the exact argv without a process double.
  */
 function fakeGh(stdout: string, exitCode = 0, stderr = ''): void {
   const dir = join(home, 'bin');
@@ -24,13 +24,15 @@ function fakeGh(stdout: string, exitCode = 0, stderr = ''): void {
   writeFileSync(join(dir, 'stdout.txt'), stdout);
   writeFileSync(join(dir, 'stderr.txt'), stderr);
   const path = join(dir, 'gh');
-  writeFileSync(path, `#!/bin/sh\nprintf '%s' "$@" > "${dir}/args.txt"\ncat "${dir}/stdout.txt"\ncat "${dir}/stderr.txt" >&2\nexit ${exitCode}\n`);
+  writeFileSync(path, `#!/bin/sh\nprintf '%s\\n' "$@" > "${dir}/args.txt"\ncat "${dir}/stdout.txt"\ncat "${dir}/stderr.txt" >&2\nexit ${exitCode}\n`);
   chmodSync(path, 0o755);
   // Prepended, not replaced: the script itself needs `cat`, and this dir's `gh` still wins.
   vi.stubEnv('PATH', `${dir}${delimiter}${process.env['PATH'] ?? ''}`);
 }
 
 const args = (): string => readFileSync(join(home, 'bin', 'args.txt'), 'utf8');
+/** The exact argv the fake `gh` was handed, one argument per element. */
+const argsList = (): string[] => args().trim().split('\n');
 
 /** One pull request as `gh pr list --json …` prints it, fields and all. */
 const MERGED = {
@@ -178,6 +180,59 @@ describe('pullRequest', () => {
   it('throws when gh prints something that is not JSON', async () => {
     fakeGh('<html>');
     await expect(new GhForge().pullRequest(home, 1)).rejects.toThrow(/invalid JSON/);
+  });
+});
+
+describe('parsePullRequestUrl', () => {
+  it('reads the number out of the URL gh pr create prints on its own', () => {
+    expect(parsePullRequestUrl('https://github.com/acme/api/pull/283\n')).toEqual({ url: 'https://github.com/acme/api/pull/283', number: 283 });
+  });
+
+  it('finds the URL when gh prints it among other lines', () => {
+    expect(parsePullRequestUrl('warning: something\nhttps://github.com/acme/api/pull/7\n')).toEqual({ url: 'https://github.com/acme/api/pull/7', number: 7 });
+  });
+
+  it('returns null when there is no pull request URL', () => {
+    expect(parsePullRequestUrl('created pull request\n')).toBeNull();
+    expect(parsePullRequestUrl('')).toBeNull();
+  });
+});
+
+describe('createPullRequest', () => {
+  it('passes only the flags gh pr create accepts and parses the URL it prints', async () => {
+    fakeGh('https://github.com/acme/api/pull/283\n');
+    const pr = await new GhForge().createPullRequest(home, { branch: 'ac/archive-x', base: 'main', title: 'chore(openspec): archive x', body: 'Backfill.' });
+    expect(pr).toEqual({ url: 'https://github.com/acme/api/pull/283', number: 283 });
+    expect(argsList()).toEqual(['pr', 'create', '--base', 'main', '--head', 'ac/archive-x', '--title', 'chore(openspec): archive x', '--body', 'Backfill.']);
+    expect(argsList()).not.toContain('--json');
+  });
+
+  it('throws when gh fails', async () => {
+    fakeGh('', 1, 'a pull request for branch already exists');
+    await expect(new GhForge().createPullRequest(home, { branch: 'b', base: 'main', title: 't' })).rejects.toThrow(/gh pr create failed/);
+  });
+
+  it('throws when gh prints no usable pull request URL', async () => {
+    fakeGh('something unexpected\n');
+    await expect(new GhForge().createPullRequest(home, { branch: 'b', base: 'main', title: 't' })).rejects.toThrow(/did not print a pull request URL/);
+  });
+});
+
+describe('pullRequestForBranch', () => {
+  it('asks only for open pull requests on the branch, with the supported JSON flag', async () => {
+    fakeGh(JSON.stringify([{ url: 'https://github.com/acme/api/pull/283', number: 283 }]));
+    await expect(new GhForge().pullRequestForBranch(home, 'ac/archive-x')).resolves.toEqual({ url: 'https://github.com/acme/api/pull/283', number: 283 });
+    expect(argsList()).toEqual(['pr', 'list', '--head', 'ac/archive-x', '--state', 'open', '--limit', '1', '--json', 'url,number']);
+  });
+
+  it('answers null when there is no open pull request on the branch', async () => {
+    fakeGh('[]');
+    await expect(new GhForge().pullRequestForBranch(home, 'ac/archive-x')).resolves.toBeNull();
+  });
+
+  it('throws when gh fails rather than reporting no pull request', async () => {
+    fakeGh('', 1, 'HTTP 500');
+    await expect(new GhForge().pullRequestForBranch(home, 'ac/archive-x')).rejects.toThrow(/gh pr list failed/);
   });
 });
 

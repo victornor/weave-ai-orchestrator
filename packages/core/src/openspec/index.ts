@@ -187,9 +187,28 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
         // same change while an earlier one is still open.
         const landing = landingBranchOf(project, ticket);
         const newBranch = `ac/archive-${changeName}`;
+        const forge = ctx.registries.forges.get('github');
+        const title = `chore(openspec): archive ${changeName}`;
+        const body = `Backfills the OpenSpec archive for ${ticket.identifier}, left behind when it merged before archiving moved into the merge itself.`;
         const existingBranch = await git(['ls-remote', '--exit-code', '--heads', 'origin', newBranch], project.clonePath, 60_000);
         if (existingBranch.ok && existingBranch.stdout.trim()) {
-          return { archivedAs: null, skipped: `a backfill pull request for ${changeName} is already pending on branch ${newBranch}` };
+          // A sweep may have pushed this branch and then failed before recording a PR (VS-340). The
+          // branch's existence alone is not proof one is pending: find the open PR on it and record
+          // it, or open one from the pushed branch. Only a real PR stops a retry, so a partial
+          // failure converges instead of skipping forever.
+          const pending = forge?.pullRequestForBranch ? await forge.pullRequestForBranch(project.clonePath, newBranch) : null;
+          if (pending) {
+            recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archive_pr_opened', 'ticket', ticket.id, { changeName, pendingPrUrl: pending.url }, ticket.id);
+            ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivePendingPrUrl: pending.url });
+            return { archivedAs: null, skipped: null, pendingPrUrl: pending.url };
+          }
+          if (!forge?.createPullRequest) {
+            throw new OcError('internal', 'no forge available that can open a backfill pull request', { changeName, branch: newBranch });
+          }
+          const pr = await forge.createPullRequest(project.clonePath, { branch: newBranch, base: landing, title, body });
+          recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archive_pr_opened', 'ticket', ticket.id, { changeName, pendingPrUrl: pr.url }, ticket.id);
+          ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivePendingPrUrl: pr.url });
+          return { archivedAs: null, skipped: null, pendingPrUrl: pr.url };
         }
         const scratch = await scratchBranchFrom(project.clonePath, 'HEAD', newBranch);
         try {
@@ -208,14 +227,10 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
           }
           const push = await git(['push', '-u', 'origin', newBranch], scratch.path, 120_000);
           if (!push.ok) throw new OcError('internal', `push of backfill branch ${newBranch} failed: ${push.stderr.trim().slice(0, 300)}`, { changeName, branch: newBranch });
-          const forge = ctx.registries.forges.get('github');
           if (!forge?.createPullRequest) {
             throw new OcError('internal', 'no forge available that can open a backfill pull request', { changeName, branch: newBranch });
           }
-          const pr = await forge.createPullRequest(project.clonePath, {
-            branch: newBranch, base: landing, title: `chore(openspec): archive ${changeName}`,
-            body: `Backfills the OpenSpec archive for ${ticket.identifier}, left behind when it merged before archiving moved into the merge itself.`,
-          });
+          const pr = await forge.createPullRequest(project.clonePath, { branch: newBranch, base: landing, title, body });
           recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archive_pr_opened', 'ticket', ticket.id, { changeName, specsUpdated: result.specsUpdated, warnings: result.warnings, pendingPrUrl: pr.url }, ticket.id);
           ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivePendingPrUrl: pr.url });
           return { archivedAs: null, skipped: null, pendingPrUrl: pr.url };

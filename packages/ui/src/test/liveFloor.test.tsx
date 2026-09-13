@@ -17,7 +17,9 @@ const state = vi.hoisted(() => ({
   workerOptions: undefined as WorkerModelOption[] | undefined,
   running: [] as Run[],
   queued: [] as Run[],
+  recent: [] as Run[],
   persisted: [] as RunEvent[],
+  persistedNewest: [] as RunEvent[],
 }));
 
 vi.mock('@tanstack/react-router', () => ({ useParams: () => ({}) }));
@@ -39,10 +41,10 @@ vi.mock('../api/hooks', () => ({
   useTickets: () => ({ data: state.tickets, isLoading: false, isError: false }),
   useModels: () => ({ data: state.workerOptions === undefined ? undefined : { workerOptions: state.workerOptions } }),
   useRuns: (params: { status?: string } = {}) => ({
-    data: params.status === 'queued' ? state.queued : params.status === 'running' ? state.running : [...state.queued, ...state.running],
+    data: params.status === 'queued' ? state.queued : params.status === 'running' ? state.running : state.recent,
     isLoading: false,
   }),
-  useRunEvents: (id: string) => ({ data: id ? state.persisted : [], isLoading: false }),
+  useRunEvents: (id: string, _after?: number, _ws?: string, opts?: { newest?: boolean }) => ({ data: id ? (opts?.newest ? state.persistedNewest : state.persisted) : [], isLoading: false }),
 }));
 
 const { LiveRoute, LiveCell } = await import('../routes/Live');
@@ -86,7 +88,9 @@ beforeEach(() => {
   state.workerOptions = undefined;
   state.running = [];
   state.queued = [];
+  state.recent = [];
   state.persisted = [];
+  state.persistedNewest = [];
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
   window.matchMedia = ((q: string) => ({ ...phoneMedia(), media: q })) as unknown as typeof window.matchMedia;
@@ -123,6 +127,10 @@ function layout(el: HTMLElement, width = 200, height = 150): void {
 
 function cellOf(name: string): HTMLElement {
   return screen.getByText(name).closest('article') as HTMLElement;
+}
+
+function evt(seq: number, text: string, runId = 'run_1'): RunEvent {
+  return { id: `e${seq}`, runId, seq, ts: '2026-09-01T09:00:00.000Z', type: 'assistant.text', stream: 'stdout', level: 'info', payload: { text } };
 }
 
 const DEFAULT_COLS = 4;
@@ -446,6 +454,110 @@ describe('Live page phone expand', () => {
     expect(screen.getByText('Nobody is working.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Expand' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Resize/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Live page keeps the last turn (VS-332)', () => {
+  function finishedWorker(): void {
+    state.workers = [agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'active' })];
+    state.tickets = [ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode' })];
+  }
+
+  it('shows the most recent finished run with the waiting footer, and opens no stream', () => {
+    finishedWorker();
+    state.recent = [makeRun({ id: 'run_1', agentId: 'a1', status: 'succeeded', finishedAt: '2026-09-01T09:05:00.000Z' })];
+    state.persistedNewest = [evt(1, 'Reading the failing test.')];
+    render(<LiveRoute />);
+
+    expect(live()).toEqual([]);
+    expect(within(cellOf('Frontend Engineer #7')).getByText('Reading the failing test.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Transcript of Frontend Engineer #7')).toHaveClass('ac-live-transcript');
+    expect(screen.getByText('Waiting for the next turn.')).toBeInTheDocument();
+  });
+
+  it('shows only the waiting line for a worker that has never run', () => {
+    finishedWorker();
+    render(<LiveRoute />);
+    expect(screen.getByText('Waiting for the next turn.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Transcript of Frontend Engineer #7')).not.toBeInTheDocument();
+    expect(live()).toEqual([]);
+  });
+
+  it('renders the ending of a finished run longer than one page, not its first events', () => {
+    finishedWorker();
+    state.recent = [makeRun({ id: 'run_1', agentId: 'a1', status: 'succeeded', finishedAt: '2026-09-01T09:05:00.000Z' })];
+    // The head page is what an unfixed read would show; the newest page is what must render.
+    state.persisted = [evt(1, 'Opening line.')];
+    state.persistedNewest = [evt(999, 'Final line.')];
+    render(<LiveRoute />);
+
+    expect(screen.getByText('Final line.')).toBeInTheDocument();
+    expect(screen.queryByText('Opening line.')).not.toBeInTheDocument();
+  });
+
+  it('keeps the transcript on screen and adds the footer when a run finishes', () => {
+    finishedWorker();
+    state.running = [makeRun({ id: 'run_1', agentId: 'a1', status: 'running' })];
+    const { rerender } = render(<LiveRoute />);
+    live()[0]!.emit(evt(1, 'Still working.'));
+    expect(screen.getByText('Still working.')).toBeInTheDocument();
+    expect(screen.queryByText('Waiting for the next turn.')).not.toBeInTheDocument();
+
+    state.running = [];
+    state.recent = [makeRun({ id: 'run_1', agentId: 'a1', status: 'succeeded', finishedAt: '2026-09-01T09:05:00.000Z' })];
+    rerender(<LiveRoute />);
+
+    expect(screen.getByText('Still working.')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for the next turn.')).toBeInTheDocument();
+    expect(live()).toEqual([]);
+  });
+
+  it('keeps the finished transcript while the next run warms up, then switches to its stream', () => {
+    finishedWorker();
+    state.recent = [makeRun({ id: 'run_1', agentId: 'a1', status: 'succeeded', finishedAt: '2026-09-01T09:05:00.000Z' })];
+    state.persistedNewest = [evt(1, 'First turn.')];
+    const { rerender } = render(<LiveRoute />);
+    expect(screen.getByText('First turn.')).toBeInTheDocument();
+
+    state.running = [makeRun({ id: 'run_2', agentId: 'a1', status: 'running' })];
+    state.recent = [makeRun({ id: 'run_2', agentId: 'a1', status: 'running' })];
+    state.persisted = [];
+    rerender(<LiveRoute />);
+
+    expect(live().map((s) => s.url)).toEqual(['/api/w/ws1/runs/run_2/events/stream']);
+    expect(screen.getByText('First turn.')).toBeInTheDocument();
+    expect(screen.queryByText('Waiting for the next turn.')).not.toBeInTheDocument();
+
+    live()[0]!.emit(evt(1, 'New turn.', 'run_2'));
+    expect(screen.getByText('New turn.')).toBeInTheDocument();
+  });
+
+  it('never gives a finished-run cell a run-tail slot (VS-227)', () => {
+    state.workers = [
+      agent({ id: 'a1', name: 'Finished #1', ticketId: 'tk_1', status: 'active', createdAt: '2026-09-01T09:03:00.000Z' }),
+      agent({ id: 'a2', name: 'Running #1', ticketId: 'tk_2', status: 'running', createdAt: '2026-09-01T09:02:00.000Z' }),
+      agent({ id: 'a3', name: 'Running #2', ticketId: 'tk_3', status: 'running', createdAt: '2026-09-01T09:01:00.000Z' }),
+    ];
+    state.tickets = [
+      ticket({ id: 'tk_1', identifier: 'ACME-42' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-7' }),
+      ticket({ id: 'tk_3', identifier: 'ACME-9' }),
+    ];
+    state.recent = [
+      makeRun({ id: 'run_1', agentId: 'a1', status: 'succeeded', createdAt: '2026-09-01T09:03:00.000Z' }),
+      makeRun({ id: 'run_2', agentId: 'a2', status: 'running', createdAt: '2026-09-01T09:02:00.000Z' }),
+      makeRun({ id: 'run_3', agentId: 'a3', status: 'running', createdAt: '2026-09-01T09:01:00.000Z' }),
+    ];
+    state.running = [
+      makeRun({ id: 'run_2', agentId: 'a2', status: 'running' }),
+      makeRun({ id: 'run_3', agentId: 'a3', status: 'running' }),
+    ];
+    render(<LiveRoute />);
+
+    expect(live().map((s) => s.url)).toEqual([
+      '/api/w/ws1/runs/run_2/events/stream',
+      '/api/w/ws1/runs/run_3/events/stream',
+    ]);
   });
 });
 

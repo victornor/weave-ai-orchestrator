@@ -10,6 +10,8 @@
  * A finished run has no tail to follow: `live: false` keeps the persisted query and opens no
  * stream, so the same hook serves a turn being watched and a turn being read back, and a turn that
  * finishes under a surface simply stops streaming while keeping everything it already showed.
+ * `newest` reads that finished run's last events rather than its first (VS-332): a surface that never
+ * watched the turn still shows its ending.
  *
  * The connection state and manual retry come from `useLiveStream` (`sseStream.ts`), the same
  * state machine the workspace event stream uses. See `live-streams/connection-state`.
@@ -48,9 +50,9 @@ export function mergeRunEvents(persisted: readonly RunEvent[], live: readonly Ru
   return out.sort((a, b) => a.seq - b.seq);
 }
 
-export function useRunEventStream(runId: string | null, { live = true, ws: wsOverride }: { live?: boolean; ws?: string } = {}): RunEventStream {
+export function useRunEventStream(runId: string | null, { live = true, newest = false, ws: wsOverride }: { live?: boolean; newest?: boolean; ws?: string } = {}): RunEventStream {
   const ws = useHookWs(wsOverride);
-  const persisted = useRunEvents(runId ?? '', 0, wsOverride);
+  const persisted = useRunEvents(runId ?? '', 0, wsOverride, { newest });
   const [tail, setTail] = useState<RunEvent[]>([]);
   /** Highest seq rendered, so a reconnect asks for `?after=` it rather than replaying the turn. */
   const seq = useRef(0);

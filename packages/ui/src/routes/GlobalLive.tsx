@@ -40,6 +40,8 @@ export function GlobalLiveRoute(): React.ReactElement {
   const ticketQueries = useTicketsMany(ids, { limit: 300 });
   const runningQueries = useRunsMany(ids, { status: 'running', limit: 200 });
   const queuedQueries = useRunsMany(ids, { status: 'queued', limit: 200 });
+  // VS-332: each workspace's most recent runs, so a cell between turns keeps showing the last turn.
+  const recentQueries = useRunsMany(ids, { limit: 200 });
   // Per-workspace effective catalogs (VS-217) so a global cell carries the same tier tag as the
   // workspace Live page's.
   const modelQueries = useModelsMany(ids);
@@ -48,7 +50,7 @@ export function GlobalLiveRoute(): React.ReactElement {
   const colsMax = columnCount(minSm, minXl);
   const [sizes, setSizes] = useState(() => readLiveCellSizes(GLOBAL_SIZE_KEY));
 
-  type Cell = { ws: string; name: string; agent: Agent; ticket: Ticket | undefined; run: Run | null; options?: WorkerModelOption[] };
+  type Cell = { ws: string; name: string; agent: Agent; ticket: Ticket | undefined; run: Run | null; lastRun: Run | null; options?: WorkerModelOption[] };
   const cells = useMemo<Cell[]>(() => {
     const out: Cell[] = [];
     for (let i = 0; i < listed.length; i++) {
@@ -63,6 +65,12 @@ export function GlobalLiveRoute(): React.ReactElement {
         const seen = runByAgent.get(r.agentId);
         if (!seen || r.createdAt > seen.createdAt) runByAgent.set(r.agentId, r);
       }
+      // VS-332: the newest run per agent (active or finished), for a cell between turns.
+      const lastRunByAgent = new Map<string, Run>();
+      for (const r of recentQueries[i]?.data ?? []) {
+        const seen = lastRunByAgent.get(r.agentId);
+        if (!seen || r.createdAt > seen.createdAt) lastRunByAgent.set(r.agentId, r);
+      }
       for (const agent of liveWorkingAgents(workers)) {
         out.push({
           ws: w.id,
@@ -70,12 +78,13 @@ export function GlobalLiveRoute(): React.ReactElement {
           agent,
           ticket: agent.ticketId ? ticketsById.get(agent.ticketId) : undefined,
           run: runByAgent.get(agent.id) ?? null,
+          lastRun: lastRunByAgent.get(agent.id) ?? null,
           options: modelQueries[i]?.data?.workerOptions,
         });
       }
     }
     return out;
-  }, [listed, workerQueries, ticketQueries, runningQueries, queuedQueries, modelQueries]);
+  }, [listed, workerQueries, ticketQueries, runningQueries, queuedQueries, recentQueries, modelQueries]);
 
   const liveIds = useMemo(() => cells.map((c) => c.agent.id), [cells]);
   const tailSlots = useMemo(
@@ -129,6 +138,7 @@ export function GlobalLiveRoute(): React.ReactElement {
                     agent={c.agent}
                     ticket={c.ticket}
                     run={c.run}
+                    lastRun={c.lastRun}
                     size={sizeOf(sizes, c.agent.id, minSm, colsMax)}
                     colsMax={colsMax}
                     desktop={minSm}

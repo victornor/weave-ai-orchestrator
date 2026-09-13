@@ -27,7 +27,7 @@ export { humanName, buildTurnPrompt, renderTemplate, renderCharter, renderBrief,
 export { createSessions, type SessionsService, type SessionRow } from './sessions/index.js';
 export { createModelsService, modelSettingFor, workerOptionRuntimes, deriveModelSettings, hasModelSettings, migrationSummary, MIGRATION_SETTINGS_KEY, WORKERS_RUNTIME_CORRELATION, type ModelMigration, type RoleRuntimeRow } from './models/index.js';
 export { ticketBranch, openspecChangeName, skillsFor } from './workers/index.js';
-export { detectHostTools, detectHostTool, detectHostToolsCached, HOST_TOOL_IDS, type HostTool, type HostToolId } from './tools/host.js';
+export { detectHostTools, detectHostTool, detectHostToolsCached, clearHostToolCache, hostToolsSnapshot, hostToolWarnings, startHostToolProbe, ensureHostToolPath, loginShellPath, shellFor, assembleHostPath, resolveOnPath, extractLoginPath, HOST_TOOL_IDS, type HostTool, type HostToolId } from './tools/host.js';
 export {
   ARTIFACT_KIT_CSS, ARTIFACT_KIT_MARKERS, ARTIFACT_KIT_TOKEN_NAMES, ARTIFACT_KIT_THEME_TOKEN_NAMES, ARTIFACT_KIT_SCALE_TOKEN_NAMES,
   ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks, type ArtifactKitTokens, type ArtifactKitComponent,

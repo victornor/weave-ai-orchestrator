@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
 import { makeHarness, type TestHarness } from '../testing/context.js';
+import { detectHostTools } from '../tools/host.js';
 import { createBriefingService } from './index.js';
 
 let h: TestHarness;
@@ -182,5 +186,26 @@ describe('briefing warnings', () => {
     expect(snap).toMatchObject({ needsYou: [], landed: [], underway: [], queued: [], warnings: [] });
     expect(h.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM activity')!.n).toBe(before);
     expect(h.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM events')!.n).toBe(0);
+  });
+});
+
+// Last in the file: it populates the module-level detection snapshot, which the tests above assume
+// is empty. The PATH is a bare scratch directory so no real host tool is involved.
+describe('briefing host-tool warnings (VS-318)', () => {
+  it('surfaces unavailable required/recommended host tools and the daemon PATH', async () => {
+    h = makeHarness();
+    const empty = mkdtempSync(join(tmpdir(), 'ac-briefing-path-'));
+    const original = process.env['PATH'];
+    process.env['PATH'] = empty;
+    try {
+      await detectHostTools();
+      const warnings = briefing().snapshot().warnings;
+      expect(warnings.some((line) => line.includes('gh'))).toBe(true);
+      expect(warnings.some((line) => line.includes('openspec'))).toBe(true);
+      expect(warnings.some((line) => line.includes("daemon's PATH"))).toBe(true);
+    } finally {
+      process.env['PATH'] = original;
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 });

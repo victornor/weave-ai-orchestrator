@@ -209,6 +209,17 @@ describe('daemon config: upgrade', () => {
   });
 });
 
+describe('daemon config: host tool paths (VS-318)', () => {
+  it('defaults to no configured directories, so a deployment needs zero configuration', () => {
+    expect(DaemonConfigSchema.parse({}).hostToolPaths).toEqual([]);
+  });
+
+  it('keeps a populated list in order', () => {
+    const cfg = DaemonConfigSchema.parse({ hostToolPaths: ['/opt/tools/bin', '/snap/bin'] });
+    expect(cfg.hostToolPaths).toEqual(['/opt/tools/bin', '/snap/bin']);
+  });
+});
+
 describe('model selection: the two workspace settings', () => {
   const base = { version: 1 as const, id: 'acme', name: 'Acme', ticketPrefix: 'ACME' };
 

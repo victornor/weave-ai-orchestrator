@@ -45,6 +45,7 @@ vi.mock('../api/hooks', async (importOriginal) => {
     useWorkspaceSummary: () => ({ data: undefined, isError: false, error: null, refetch: vi.fn() }),
     useWorkspaces: () => ({ data: [], isError: false, refetch: vi.fn() }),
     useDaemonModels: () => ({ data: { weaver: null, workers: null, workerOptions: null }, isLoading: false }),
+    useDaemonHostTools: () => ({ data: { paths: [], tools: [] }, isLoading: false }),
   };
 });
 

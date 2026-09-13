@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
 import { homedir, hostname } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@weave-ai/shared';
-import { detectHostToolsCached, getLogger, workspaceLoader } from '@weave-ai/core';
+import { detectHostToolsCached, clearHostToolCache, ensureHostToolPath, getLogger, workspaceLoader, type HostTool } from '@weave-ai/core';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { cancelRunningRuns } from '../daemon.js';
 import { body } from '../http.js';
@@ -115,6 +115,19 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   app.put('/daemon/transcription', (c) => transcriptionPut(c, deps));
   app.get('/daemon/models', (c) => modelsGet(c, deps));
   app.put('/daemon/models', (c) => modelsPut(c, deps));
+  app.get('/daemon/host-tools', async (c) => c.json(await hostToolsView(deps)));
+  app.put('/daemon/host-tools', async (c) => {
+    const input = await body(c, z.object({
+      // Only absolute directories: a relative entry would let a repository's own `node_modules/.bin`
+      // reach the daemon and every worker CLI, which run with their cwd inside clones.
+      paths: z.array(z.string().min(1).refine((p) => isAbsolute(p), 'host tool paths must be absolute')),
+    }));
+    persistHostToolPaths(deps, input.paths);
+    try { await ensureHostToolPath(input.paths); }
+    catch (e) { log.warn({ err: String(e) }, 're-resolving the host tool PATH failed; the configured directories are still persisted'); }
+    clearHostToolCache();
+    return c.json(await hostToolsView(deps));
+  });
 
   app.get('/incidents', (c) => {
     const reporter = c.req.query('reporter');
@@ -245,6 +258,21 @@ function modelsGet(
   deps: AppDeps,
 ): Response {
   return c.json(daemonModelsView(deps.daemon.models));
+}
+
+/** VS-318: the daemon's host tool availability plus the configured extra directories. */
+async function hostToolsView(deps: AppDeps): Promise<{ paths: string[]; tools: HostTool[] }> {
+  const tools = await detectHostToolsCached();
+  return { paths: deps.daemon.hostToolPaths ?? [], tools: Object.values(tools) };
+}
+
+/** Persist `hostToolPaths` to daemon.yaml and swap it into the live config, like the model overlays. */
+function persistHostToolPaths(deps: AppDeps, paths: string[]): void {
+  deps.daemon.hostToolPaths = paths;
+  if (deps.daemonConfigDir) {
+    const current = workspaceLoader.readDaemonConfig(deps.daemonConfigDir);
+    workspaceLoader.writeDaemonConfig(DaemonConfigSchema.parse({ ...current, hostToolPaths: paths }), deps.daemonConfigDir);
+  }
 }
 
 async function modelsPut(

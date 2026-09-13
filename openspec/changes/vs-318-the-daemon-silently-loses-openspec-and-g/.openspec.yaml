@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: The daemon silently loses openspec and gh when started without the user's
+  PATH, and blames a missing install

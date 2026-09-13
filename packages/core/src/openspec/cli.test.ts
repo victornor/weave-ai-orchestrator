@@ -47,6 +47,40 @@ describe('openspec cli wrapper', () => {
     expect((err as OcError).code).toBe('openspec_not_found');
   });
 
+  it('names the daemon PATH and never says "not installed" when a bare binary is missing (VS-318)', async () => {
+    const { clone } = setup([]);
+    const original = process.env['PATH'];
+    process.env['PATH'] = '/nonexistent-a:/nonexistent-b';
+    try {
+      const err = await cli.run(clone, ['status', '--all']).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(OcError);
+      const oc = err as OcError;
+      expect(oc.code).toBe('openspec_not_found');
+      expect(oc.message).toContain('/nonexistent-a:/nonexistent-b');
+      expect(oc.message).toContain("not found on the daemon's PATH");
+      expect(oc.message).not.toContain('not installed');
+    } finally {
+      process.env['PATH'] = original;
+    }
+  });
+
+  it('reports a present-but-failing binary as a failure, not as not-found (VS-318)', async () => {
+    const { clone, bin } = setup([{ match: ['status', '--all'], exit: 3, stdout: '' }]);
+    const err = await cli.statusAll({ cwd: clone, bin: bin.path }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OcError);
+    const oc = err as OcError;
+    expect(oc.code).toBe('internal');
+    expect(oc.message).toContain('exited 3');
+    expect(oc.code).not.toBe('openspec_not_found');
+  });
+
+  it('hostToolNotFoundMessage carries the PATH searched (VS-318)', () => {
+    const msg = cli.hostToolNotFoundMessage('openspec', 'openspec', '/custom/path:/bin');
+    expect(msg).toContain('/custom/path:/bin');
+    expect(msg).toContain("not found on the daemon's PATH");
+    expect(msg).not.toContain('not installed');
+  });
+
   it('returns issues from validate even though it exits 1', async () => {
     const { clone, bin } = setup([
       { match: ['validate'], exit: 1, json: { items: [{ issues: [{ level: 'error', message: 'no spec deltas', path: 'specs/' }, { level: 'warning', message: 'short proposal' }] }] } },

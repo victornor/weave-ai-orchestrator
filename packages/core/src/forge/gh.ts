@@ -93,6 +93,17 @@ function toPullRequest(doc: GhPr): ForgePullRequest {
   };
 }
 
+/**
+ * `gh pr create` prints only the new pull request's URL on stdout — the command has no `--json`
+ * (VS-340). This is the one place that has to read a URL rather than a JSON document, so the parser
+ * is pure and exported for the tests.
+ */
+export function parsePullRequestUrl(text: string): { url: string; number: number } | null {
+  const m = /(https?:\/\/\S+?\/pull\/(\d+))/.exec(text);
+  if (!m?.[1] || !m[2]) return null;
+  return { url: m[1], number: Number(m[2]) };
+}
+
 /** Exported for the mapping tests, which run `gh`'s recorded JSON through it and never call GitHub. */
 export function pullRequestFromGh(doc: GhPr): ForgePullRequest { return toPullRequest(doc); }
 export function pullRequestDetailFromGh(doc: GhPr): ForgePullRequestDetail {
@@ -174,15 +185,26 @@ export class GhForge implements ForgeAdapter {
     return pullRequestDetailFromGh(doc);
   }
 
-  /** Opens a PR from a branch already on the remote (VS-327 backfill). */
+  /** Opens a PR from a branch already on the remote (VS-327 backfill; VS-340 args fix). */
   async createPullRequest(cwd: string, opts: { branch: string; base: string; title: string; body?: string }): Promise<{ url: string; number: number }> {
-    const args = ['pr', 'create', '--base', opts.base, '--head', opts.branch, '--title', opts.title, '--body', opts.body ?? '', '--json', 'url,number'];
+    // `gh pr create` has no `--json`: it prints the pull request's URL, and that is the result.
+    const args = ['pr', 'create', '--base', opts.base, '--head', opts.branch, '--title', opts.title, '--body', opts.body ?? ''];
     const r = await sh('gh', args, { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
     if (!r.ok) throw new OcError('internal', `gh pr create failed: ${(r.stderr || r.stdout).trim().slice(0, 300)}`, { branch: opts.branch, base: opts.base });
-    let doc: { url?: string; number?: number };
-    try { doc = JSON.parse(r.stdout) as { url?: string; number?: number }; } catch { throw new OcError('internal', 'gh pr create returned invalid JSON', { branch: opts.branch }); }
-    if (!doc.url || !doc.number) throw new OcError('internal', 'gh pr create did not report a url and number', { branch: opts.branch });
-    return { url: doc.url, number: doc.number };
+    const pr = parsePullRequestUrl(r.stdout);
+    if (!pr) throw new OcError('internal', 'gh pr create did not print a pull request URL', { branch: opts.branch });
+    return pr;
+  }
+
+  /** The open pull request whose head is `branch`, if there is one (VS-340 backfill retry). */
+  async pullRequestForBranch(cwd: string, branch: string): Promise<{ url: string; number: number } | null> {
+    const r = await sh('gh', ['pr', 'list', '--head', branch, '--state', 'open', '--limit', '1', '--json', 'url,number'], { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
+    if (!r.ok) throw new OcError('internal', `gh pr list failed: ${(r.stderr || r.stdout).trim().slice(0, 300)}`, { cwd, branch });
+    let docs: Array<{ url?: string; number?: number }>;
+    try { docs = JSON.parse(r.stdout) as Array<{ url?: string; number?: number }>; } catch { throw new OcError('internal', 'gh pr list returned invalid JSON', { cwd, branch }); }
+    if (!Array.isArray(docs)) throw new OcError('internal', 'gh pr list did not return a list', { cwd, branch });
+    const first = docs[0];
+    return first?.url && first.number != null ? { url: first.url, number: first.number } : null;
   }
 
   /** One pull request's unified diff, exactly as `git diff` would print it. `null` when it has none. */

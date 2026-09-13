@@ -60,6 +60,13 @@ export interface ForgeAdapter {
    * rather than falling back to a direct push.
    */
   createPullRequest?(cwd: string, opts: { branch: string; base: string; title: string; body?: string }): Promise<{ url: string; number: number }>;
+  /**
+   * Optional (VS-340): the open pull request whose head is `branch`, or `null` when the forge has
+   * none. Used by OpenSpec archive backfill to recognise a pull request an earlier attempt opened
+   * before it failed, instead of treating the pushed branch itself as proof of a pending pull
+   * request and skipping forever.
+   */
+  pullRequestForBranch?(cwd: string, branch: string): Promise<{ url: string; number: number } | null>;
 }
 export interface Logger { debug(msg: string, data?: Record<string, unknown>): void; info(msg: string, data?: Record<string, unknown>): void; warn(msg: string, data?: Record<string, unknown>): void; error(msg: string, data?: Record<string, unknown>): void }
 export interface PluginHost {

@@ -23,7 +23,7 @@ Never guess between two plausible projects because guessing is faster. A ticket 
 
 ## Cross-project work
 
-A worker that needs something from another project transitions to `blocked` with `{owner: "conductor", action: "…"}`. That is your cue to create a **courier ticket**: a self-contained ticket in the other project, assigned to a role there, linked as a blocker of the original.
+A worker that needs something from another project transitions to `blocked` with `{owner: "weaver", action: "…"}`. That is your cue to create a **courier ticket**: a self-contained ticket in the other project, assigned to a role there, linked as a blocker of the original.
 
 Self-contained means the other project's worker can do it without reading the first ticket — restate the need, do not link and hope. Workers never talk to each other; you are the only path between projects.
 

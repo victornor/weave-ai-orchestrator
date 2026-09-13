@@ -19,8 +19,8 @@ Passed to `weave_role_hire(spec)`. The daemon validates it (`RoleSpecSchema`) an
 | `maxWorkers` | 1–32 | Stored on the role (default 2). Not a spawn cap — the project's Settings max-workers is. |
 | `permission` | `{mode, allowed[], denied[]}` | `mode`: `auto` \| `restricted` \| `bypass`. `bypass` needs the human's explicit opt-in — never propose it yourself. |
 | `secrets` | string[] | Names of workspace secrets exposed as env. Names only; never a value, ever. |
-| `notes` | string, optional | The conductor's notes, rendered at the end of the charter. Where refinements land. |
-| `createdBy` | `human` \| `conductor` | `conductor` when you hire. |
+| `notes` | string, optional | The weaver's notes, rendered at the end of the charter. Where refinements land. |
+| `createdBy` | `human` \| `weaver` | `weaver` when you hire. |
 
 ## What makes a scope good
 

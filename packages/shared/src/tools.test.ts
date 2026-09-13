@@ -23,14 +23,14 @@ describe('WEAVER_TOOLS (VS-220)', () => {
 });
 
 describe('WEAVER_TOOLS (VS-223)', () => {
-  it('lists weave_decision_review on the conductor and not on COMMON_TOOLS', () => {
+  it('lists weave_decision_review on the weaver and not on COMMON_TOOLS', () => {
     expect(WEAVER_TOOLS).toContain('weave_decision_review');
     expect(COMMON_TOOLS).not.toContain('weave_decision_review');
   });
 });
 
 describe('incident read tools (VS-222)', () => {
-  it('are conductor-only: in WEAVER_TOOLS, not in COMMON_TOOLS', () => {
+  it('are weaver-only: in WEAVER_TOOLS, not in COMMON_TOOLS', () => {
     expect(WEAVER_TOOLS).toContain('weave_incident_list');
     expect(WEAVER_TOOLS).toContain('weave_incident_get');
     expect(COMMON_TOOLS).not.toContain('weave_incident_list');
@@ -40,7 +40,7 @@ describe('incident read tools (VS-222)', () => {
 });
 
 describe('incident resolve tool (VS-271)', () => {
-  it('is conductor-only: in WEAVER_TOOLS, not in COMMON_TOOLS', () => {
+  it('is weaver-only: in WEAVER_TOOLS, not in COMMON_TOOLS', () => {
     expect(WEAVER_TOOLS).toContain('weave_incident_resolve');
     expect(COMMON_TOOLS).not.toContain('weave_incident_resolve');
   });

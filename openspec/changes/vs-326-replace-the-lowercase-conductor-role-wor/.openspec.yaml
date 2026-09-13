@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Replace the lowercase "conductor" role word with "weaver" in tool descriptions, error messages, skills, templates and user docs
+skip_specs: true

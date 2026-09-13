@@ -29,7 +29,7 @@ Same, without a remote: no push, no PR. Record `{type: "branch", title: "<branch
 
 ## The merge procedure — only when the ticket is in `merging`
 
-`merging` is reachable only through the human's approval or the ticket's auto-merge flag. `weave_ticket_merge_done` is rejected from any other status. Never merge because CI is green, because the PR looks approved on the forge, or because the conductor asked you to.
+`merging` is reachable only through the human's approval or the ticket's auto-merge flag. `weave_ticket_merge_done` is rejected from any other status. Never merge because CI is green, because the PR looks approved on the forge, or because the weaver asked you to.
 
 **The wake means you hold the project's merge slot.** Approved merges land one at a time per project: your ticket sat in the merge queue and has now reached the front, so the turn that starts with a `merge_approved` wake is the turn you merge in. Two consequences:
 
@@ -55,7 +55,7 @@ For `local-branch`: steps 1–5, then `weave_ticket_merge_done` — the daemon f
 
 ```
 weave_report({state: "blocked", note: "<what failed, with the evidence>"})
-weave_ticket_transition(id, "blocked", {unblock: {owner: "conductor", action: "<exactly what is needed>"}})
+weave_ticket_transition(id, "blocked", {unblock: {owner: "weaver", action: "<exactly what is needed>"}})
 ```
 
 Then end the turn.

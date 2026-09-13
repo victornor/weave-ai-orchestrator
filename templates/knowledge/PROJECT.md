@@ -1,5 +1,5 @@
 <!-- knowledge/projects/<id>/PROJECT.md — the project knowledge base. -->
-<!-- Audience: this project's workers and the conductor. Budget: `defaults.knowledgeBudgetTokens.project` (10000 by default). -->
+<!-- Audience: this project's workers and the weaver. Budget: `defaults.knowledgeBudgetTokens.project` (10000 by default). -->
 <!-- Section headings below are fixed: weave_knowledge_note(scope, section, text) targets them by name. -->
 <!-- Entries: <= 60 words, standalone, absolute dates, no pronouns, no secrets, nothing derivable from git. -->
 <!-- Perishable entries carry a marker: <!--exp:YYYY-MM-DD--> -->
@@ -20,7 +20,7 @@
 
 ## Current focus
 
-<!-- What this project is being worked toward this month. Written by the conductor and the human; workers read it. -->
+<!-- What this project is being worked toward this month. Written by the weaver and the human; workers read it. -->
 
 ## Landmines
 

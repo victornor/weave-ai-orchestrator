@@ -43,7 +43,7 @@ The daemon runs `openspec status --change <c> --json` and `openspec validate <c>
 - Implement pending tasks in order. Tick `- [x]` **only when the specified behavior is fully implemented** — not when it is scaffolded, not when it is "basically there".
 - Commit per task or per logical group, with the ticket id in the message.
 - Pause on errors, blockers, or unclear requirements — do not guess. Same obstacle twice → `blocked` with a routable path.
-- **Scope beyond the spec** → `weave_ask` and pause that task. Never absorb it silently, never drop it silently. If it is genuinely separate work, say so on the ticket and let the conductor decide.
+- **Scope beyond the spec** → `weave_ask` and pause that task. Never absorb it silently, never drop it silently. If it is genuinely separate work, say so on the ticket and let the weaver decide.
 - When `state` is `all_done`, deliver per your delivery mode and transition to `in_review`.
 
 ## Revision

@@ -2,7 +2,7 @@
 
 The agent-facing instruction layer. Each skill is a directory with a `SKILL.md` and, where the material is longer than a turn needs, a `references/` directory that the agent loads only when it gets there.
 
-Always-loaded prompts live in `templates/` (`conductor.AGENTS.md.tmpl`, `worker.AGENTS.md.tmpl`, `charter.md.tmpl`, `brief.md.tmpl`). Skills hold everything conditional. The rule that keeps this working: a line in an always-loaded file is paid for by every turn of every agent; a line in a skill is paid for only by the turns that load it. When in doubt it goes in a skill, and the always-loaded file names the trigger.
+Always-loaded prompts live in `templates/` (`weaver.AGENTS.md.tmpl`, `worker.AGENTS.md.tmpl`, `charter.md.tmpl`, `brief.md.tmpl`). Skills hold everything conditional. The rule that keeps this working: a line in an always-loaded file is paid for by every turn of every agent; a line in a skill is paid for only by the turns that load it. When in doubt it goes in a skill, and the always-loaded file names the trigger.
 
 ## What is here
 
@@ -22,7 +22,7 @@ Always-loaded prompts live in `templates/` (`conductor.AGENTS.md.tmpl`, `worker.
 
 ## How the daemon installs them
 
-Skills are installed **into each agent's home** — `conductor/` for the conductor, `workers/<id>/` for a worker — at provisioning time, and regenerated whenever the shipped version changes. The daemon reads `manifest.json`, filters by the agent's `kind`, and writes each selected skill directory to the path its runtime discovers:
+Skills are installed **into each agent's home** — `conductor/` for the weaver, `workers/<id>/` for a worker — at provisioning time, and regenerated whenever the shipped version changes. The daemon reads `manifest.json`, filters by the agent's `kind`, and writes each selected skill directory to the path its runtime discovers:
 
 | Runtime | Install path (relative to the agent home) | How the agent invokes it |
 |---|---|---|

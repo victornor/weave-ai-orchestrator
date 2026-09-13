@@ -29,12 +29,12 @@ function boot() {
   return { deps, harness, services };
 }
 
-async function callTool(app: ReturnType<typeof createApp>, ws: string, token: string, name: string, input: Record<string, unknown>): Promise<{ ok: boolean; data: Record<string, unknown> }> {
+async function callTool(app: ReturnType<typeof createApp>, ws: string, token: string, name: string, input: Record<string, unknown>): Promise<{ ok: boolean; data: Record<string, unknown>; error?: { code: string; message: string } }> {
   const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${ws}/agent/tools/${name}`, {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ input }),
   }));
-  return res.json() as Promise<{ ok: boolean; data: Record<string, unknown> }>;
+  return res.json() as Promise<{ ok: boolean; data: Record<string, unknown>; error?: { code: string; message: string } }>;
 }
 
 const H = { authorization: 'Bearer sess' };
@@ -95,6 +95,21 @@ describe('knowledge context accounting (VS-110)', () => {
 
     const rows = harness.db.all<{ kind: string; scope: string }>('SELECT kind, scope FROM knowledge_usage_events WHERE run_id = ? ORDER BY kind', [runId]);
     expect(rows).toEqual([{ kind: 'document', scope: 'shared' }, { kind: 'hub', scope: 'shared' }]);
+  });
+
+  it('refuses workspace knowledge to a worker as weaver-only (VS-326)', async () => {
+    const { deps, harness, services } = boot();
+    const app = createApp(deps);
+    const ticket = services.tickets.create({ kind: 'human', id: null }, { projectId: harness.projectId, kind: 'task', title: 'Try the workspace KB' });
+    const agentId = harness.addWorker(ticket.id);
+    const token = await signRunToken(runTokenSecret(harness.ctx.db), {
+      workspaceId: harness.workspaceId, runId: 'run_1', agentId, agentKind: 'worker', projectId: harness.projectId, ticketId: ticket.id, roleId: harness.roleId,
+    });
+
+    const payload = await callTool(app, harness.workspaceId, token, 'weave_knowledge_get', { scope: 'workspace' });
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.code).toBe('forbidden');
+    expect(payload.error?.message).toBe('workspace and decisions knowledge are weaver-only');
   });
 });
 

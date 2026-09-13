@@ -29,4 +29,4 @@ Curation makes a file smaller and truer. It never makes it newer.
 
 ## For a workspace file
 
-Same procedure, minus the fact-check against a worktree. The Portfolio section in `WORKSPACE.md` must match `weave_project_list()` exactly — that is the conductor's routing table, and a stale line there sends work to the wrong project. `SHARED.md` gets one extra pass: **delete anything that names a project, a repo, a client or a role.** That file is read by every worker in every project, and it is the one place a leak of the portfolio would be invisible.
+Same procedure, minus the fact-check against a worktree. The Portfolio section in `WORKSPACE.md` must match `weave_project_list()` exactly — that is the weaver's routing table, and a stale line there sends work to the wrong project. `SHARED.md` gets one extra pass: **delete anything that names a project, a repo, a client or a role.** That file is read by every worker in every project, and it is the one place a leak of the portfolio would be invisible.

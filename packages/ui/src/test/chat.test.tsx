@@ -3142,3 +3142,106 @@ describe('ChatRoute inline decision cards (VS-309)', () => {
   });
 });
 
+/**
+ * VS-321: a reader scrolled up into history, mid-selection, must not lose that selection to an
+ * unrelated re-render. `Markdown` used to hand React a fresh `dangerouslySetInnerHTML` object every
+ * render; react-dom diffs that prop by the wrapper object's identity, not its `.__html` value, so an
+ * unchanged message's DOM was torn down and rebuilt on every re-render anywhere in the tree —
+ * destroying whatever text node the browser's selection pointed at.
+ */
+describe('ChatRoute selection stability (VS-321)', () => {
+  const HEIGHT = 1600;
+  const CLIENT = 300;
+  const tops = new WeakMap<HTMLElement, number>();
+
+  beforeEach(() => {
+    Object.defineProperty(HTMLDivElement.prototype, 'scrollHeight', { configurable: true, get: () => HEIGHT });
+    Object.defineProperty(HTMLDivElement.prototype, 'clientHeight', { configurable: true, get: () => CLIENT });
+    Object.defineProperty(HTMLDivElement.prototype, 'scrollTop', {
+      configurable: true,
+      get(this: HTMLElement) { return tops.get(this) ?? 0; },
+      set(this: HTMLElement, v: number) { tops.set(this, v); },
+    });
+  });
+  afterEach(() => {
+    for (const prop of ['scrollHeight', 'clientHeight', 'scrollTop']) Reflect.deleteProperty(HTMLDivElement.prototype, prop);
+  });
+
+  /** Scrolls the list to its opening bottom, then up into history — exactly what captain described. */
+  const scrollUp = (list: HTMLElement): void => {
+    list.scrollTop = HEIGHT - CLIENT;
+    fireEvent.scroll(list);
+    list.scrollTop = 200;
+    fireEvent.scroll(list);
+  };
+
+  /** Selects an element's full text via a real `Range`, and returns the element the selection anchors to. */
+  const selectText = (text: string): HTMLElement => {
+    const el = screen.getByText(text);
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    expect(sel.toString()).toBe(text);
+    return el;
+  };
+
+  it('keeps a selection in an older message when a new message arrives', () => {
+    state.messages = [message({ id: 'm1', body: 'Older message worth copying.' })];
+    const { container, rerender } = render(<ChatRoute />);
+    scrollUp(container.querySelector('.ac-scroll') as HTMLElement);
+    const node = selectText('Older message worth copying.');
+
+    state.messages = [...state.messages, message({ id: 'm2', body: 'A brand new reply.', createdAt: '2026-09-01T09:05:00.000Z' })];
+    act(() => { rerender(<ChatRoute />); });
+
+    expect(screen.getByText('Older message worth copying.')).toBe(node);
+    expect(window.getSelection()?.toString()).toBe('Older message worth copying.');
+    expect(screen.getByText('A brand new reply.')).toBeInTheDocument();
+  });
+
+  it('keeps a selection in an older message through a live trace update', () => {
+    state.messages = [message({ id: 'm1', body: 'Older message worth copying.' })];
+    const { container } = render(<ChatRoute />);
+    scrollUp(container.querySelector('.ac-scroll') as HTMLElement);
+    const node = selectText('Older message worth copying.');
+
+    emit({ type: 'run.started', entityId: 'run_2', payload: { agentId: 'ag_conductor' } });
+    act(() => { stream().connect(); });
+    act(() => { stream().emit(ev({ id: 'e1', seq: 1, runId: 'run_2', type: 'assistant.text', payload: { text: 'Working…' } })); });
+
+    expect(screen.getByText('Older message worth copying.')).toBe(node);
+    expect(window.getSelection()?.toString()).toBe('Older message worth copying.');
+  });
+
+  it('keeps a selection in an older message when a decision card appears', () => {
+    state.messages = [message({ id: 'm1', body: 'Older message worth copying.' })];
+    const { container, rerender } = render(<ChatRoute />);
+    scrollUp(container.querySelector('.ac-scroll') as HTMLElement);
+    const node = selectText('Older message worth copying.');
+
+    state.decisions = [decision({ id: 'd1', title: 'File this as a ticket?' })];
+    act(() => { rerender(<ChatRoute />); });
+
+    expect(screen.getByText('Older message worth copying.')).toBe(node);
+    expect(window.getSelection()?.toString()).toBe('Older message worth copying.');
+    expect(screen.getByText('File this as a ticket?')).toBeInTheDocument();
+  });
+
+  it('keeps a selection through a messages refetch that returns identical content', () => {
+    state.messages = [message({ id: 'm1', body: 'Older message worth copying.' })];
+    const { container, rerender } = render(<ChatRoute />);
+    scrollUp(container.querySelector('.ac-scroll') as HTMLElement);
+    const node = selectText('Older message worth copying.');
+
+    // A refetch that hands back a structurally-equal-but-new array, the shape a query's own
+    // `structuralSharing` does not always dedupe against (a plain object-per-row mock never does).
+    state.messages = [message({ id: 'm1', body: 'Older message worth copying.' })];
+    act(() => { rerender(<ChatRoute />); });
+
+    expect(screen.getByText('Older message worth copying.')).toBe(node);
+    expect(window.getSelection()?.toString()).toBe('Older message worth copying.');
+  });
+});
+

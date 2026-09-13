@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { A, useGo } from './link';
-import { TICKET_STATUSES, ticketUiStatus } from '@weave-ai/shared';
+import { TICKET_STATUSES, projectLabel, ticketUiStatus } from '@weave-ai/shared';
 import { RAIL, TABS, href } from './nav';
 import { WorkspaceNav } from './WorkspaceNav';
 import { MoreSheet } from './MoreSheet';
@@ -84,7 +84,8 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
       if (r.sent) toast.push({ title: `${r.sent} queued ${r.sent === 1 ? 'message' : 'messages'} sent`, status: 'done', ttl: 4000 });
     });
   }, [conn.state, queuedCount, ws, toast]);
-  const scope = scopeIndex >= 0 ? activeProjects[scopeIndex]?.slug ?? null : null;
+  const scopeProject = scopeIndex >= 0 ? activeProjects[scopeIndex] ?? null : null;
+  const scope = scopeProject ? projectLabel(scopeProject) : null;
 
   // Arrival: a toast plus the Needs-you badge is the primary notification path.
   useWorkspaceEvents(

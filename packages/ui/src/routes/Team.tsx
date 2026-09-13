@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { agentUiStatus } from '@weave-ai/shared';
+import { agentUiStatus, projectLabel } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { WorkerCard } from '../components/WorkerCard';
 import { SkeletonRows } from '../components/Skeleton';
@@ -58,7 +58,7 @@ export function TeamRoute(): React.ReactElement {
               const projectRoles = (roles.data ?? []).filter((r) => r.projectId === p.id);
               return (
                 <section key={p.id}>
-                  <div className="ac-label mb-2">{p.slug}</div>
+                  <div className="ac-label mb-2">{projectLabel(p)}</div>
                   {projectRoles.length === 0 ? (
                     <p className="ac-card px-3.5 py-3 text-meta text-text-3">No role hired for this project yet.</p>
                   ) : (
@@ -100,7 +100,7 @@ export function TeamRoute(): React.ReactElement {
                                   <WorkerCard
                                     key={w.id}
                                     agent={w}
-                                    projectSlug={p.slug}
+                                    projectLabel={projectLabel(p)}
                                     ticketIdentifier={w.ticketId}
                                     interactive={w.interactiveSession}
                                     scheduledWake={w.scheduledWake}

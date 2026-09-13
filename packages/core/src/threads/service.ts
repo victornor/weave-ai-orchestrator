@@ -1,5 +1,5 @@
 import { newId, nowIso, threadRow, type Db } from '@weave-ai/db';
-import { OcError, type Attachment, type AttachmentPart, type ChannelThread, type ThreadMessage, type ThreadSearchResult } from '@weave-ai/shared';
+import { OcError, projectLabel, type Attachment, type AttachmentPart, type ChannelThread, type ThreadMessage, type ThreadSearchResult } from '@weave-ai/shared';
 import type { Actor, CoreServices, ThreadsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -231,7 +231,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
           try {
             deps().wake.enqueue(t.agentId, {
               source: 'human_message',
-              reason: `message from ${t.humanLabel ?? 'the human'}${project ? ` about ${project.slug}` : ''}`,
+              reason: `message from ${t.humanLabel ?? 'the human'}${project ? ` about ${projectLabel(project)}` : ''}`,
               payload: {
                 threadId: t.id, messageId: msg.id, ...wakeBody(body),
                 projectId: project?.id ?? null, projectSlug: project?.slug ?? null,

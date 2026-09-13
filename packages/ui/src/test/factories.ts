@@ -48,11 +48,14 @@ export function ticket(over: Partial<Ticket> = {}): Ticket {
 }
 
 export function project(over: Partial<Project> = {}): Project {
+  // The default display name follows the slug (VS-330), so a fixture that only picks a slug reads by
+  // that slug; a test that sets `name` exercises the display-name path.
+  const slug = over.slug ?? 'api';
   return {
     id: 'p1',
     workspaceId: 'ws',
-    slug: 'api',
-    name: 'API',
+    slug,
+    name: over.name ?? slug,
     gitUrl: 'git@example.com:acme/api.git',
     defaultBranch: 'main',
     landingBranch: null,

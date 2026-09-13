@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { DecisionAnswerInputs } from '@weave-ai/shared';
+import { projectLabel, type DecisionAnswerInputs } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { DecisionCard } from '../components/DecisionCard';
 import { PlanPreview } from '../components/PlanPreview';
@@ -135,6 +135,7 @@ export function NeedsYouRoute(): React.ReactElement {
                     decision={d}
                     ticketIdentifier={t?.identifier ?? d.ticketId}
                     projectSlug={projects.data?.find((p) => p.id === (d.projectId ?? t?.projectId))?.slug ?? null}
+                    projectLabel={(() => { const p = projects.data?.find((x) => x.id === (d.projectId ?? t?.projectId)); return p ? projectLabel(p) : null; })()}
                     ws={ws}
                     askedBy={d.askedByAgentId}
                     busy={answer.isPending}

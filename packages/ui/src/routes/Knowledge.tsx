@@ -20,6 +20,8 @@ import {
 } from '../api/hooks';
 import { ago } from '../lib/format';
 import { cx } from '../lib/cx';
+import { projectLabel } from '@weave-ai/shared';
+import { projectLabelFor } from '../lib/projectName';
 import { DocsPanel, DocPanel, KnowledgeDocPanel, refFromPath, type DocRef } from './KnowledgeDocs';
 import { KnowledgeExplorer } from './KnowledgeExplorer';
 import { ChangelogPanel } from './Changelog';
@@ -64,7 +66,7 @@ export function KnowledgeRoute(): React.ReactElement {
               <option value="">all</option>
               {(projects.data ?? []).map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.slug}
+                  {projectLabel(p)}
                 </option>
               ))}
             </select>
@@ -116,6 +118,7 @@ export function KnowledgeRoute(): React.ReactElement {
 }
 
 function SearchResults({ hits, loading }: { hits: ReturnType<typeof useSearch>['data'] extends undefined ? never[] : NonNullable<ReturnType<typeof useSearch>['data']>; loading: boolean }): React.ReactElement {
+  const projects = useProjects();
   if (loading) return <SkeletonRows rows={5} />;
   if (!hits.length) return <EmptyState title="Nothing matches." detail="Try a requirement phrase, a capability name, or a ticket id." />;
   return (
@@ -127,7 +130,7 @@ function SearchResults({ hits, loading }: { hits: ReturnType<typeof useSearch>['
             <div className="text-meta text-text-1">{h.title}</div>
             {h.subtitle ? <div className="ac-mono mt-0.5 text-micro text-text-3">{h.subtitle}</div> : null}
           </div>
-          {h.projectSlug ? <span className="ac-mono text-nano text-text-4">{h.projectSlug}</span> : null}
+          {h.projectSlug || h.projectId ? <span className="text-nano text-text-4">{projectLabelFor(projects.data, { id: h.projectId, slug: h.projectSlug })}</span> : null}
         </div>
       ))}
     </div>
@@ -137,6 +140,7 @@ function SearchResults({ hits, loading }: { hits: ReturnType<typeof useSearch>['
 function KnowledgePanel({ project }: { project?: string }): React.ReactElement {
   const index = useKnowledgeIndex();
   const mutate = useKnowledgeMutation();
+  const projects = useProjects();
   const [open, setOpen] = useState<{ scope: string; project?: string } | null>(null);
   const [openDoc, setOpenDoc] = useState<DocRef | null>(null);
 
@@ -146,7 +150,7 @@ function KnowledgePanel({ project }: { project?: string }): React.ReactElement {
   const files = (index.data?.files ?? []).filter((f) => f.kind !== 'doc' && (!project || !f.projectId || f.projectId === project));
   if (!files.length) return <EmptyState title="No knowledge files yet." detail="They are created with the workspace and each project." />;
   const hubLabel = (f: (typeof files)[number]): string =>
-    f.scope === 'project' ? `${f.projectSlug ?? 'project'} · PROJECT.md` : f.scope === 'shared' ? 'workspace · SHARED.md' : f.scope === 'decisions' ? 'workspace · decisions.md' : 'workspace · WORKSPACE.md';
+    f.scope === 'project' ? `${projectLabelFor(projects.data, { id: f.projectId, slug: f.projectSlug }) ?? 'project'} · PROJECT.md` : f.scope === 'shared' ? 'workspace · SHARED.md' : f.scope === 'decisions' ? 'workspace · decisions.md' : 'workspace · WORKSPACE.md';
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-5">

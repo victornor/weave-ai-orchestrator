@@ -1,3 +1,4 @@
+import { projectLabel } from '@weave-ai/shared';
 import { A } from './link';
 import { GLOBAL_NAV, RAIL, href } from './nav';
 import { PlusGlyph } from './PlusGlyph';
@@ -161,7 +162,7 @@ function ProjectsGroup({ wsId, wsName, state }: { wsId: string; wsName: string; 
               className="flex h-7 items-center gap-2.5 rounded-r4 pl-5 pr-2.5 hover:bg-bg-2"
             >
               {dot ? <span className="size-1.5 rounded-r4" style={{ background: `var(--status-${dot})` }} aria-hidden /> : <span className="size-1.5" aria-hidden />}
-              <span className="ac-mono flex-1 truncate text-meta" style={{ color: projectColorVar(p.id, siblingIds) }} data-project-color>{p.slug}</span>
+              <span className="flex-1 truncate text-meta" style={{ color: projectColorVar(p.id, siblingIds) }} data-project-color>{projectLabel(p)}</span>
             </A>
           );
         })

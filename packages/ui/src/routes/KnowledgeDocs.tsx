@@ -14,6 +14,7 @@ import {
 import type { KnowledgeDocSummary } from '../api/types';
 import { ago } from '../lib/format';
 import { cx } from '../lib/cx';
+import { projectLabelFor } from '../lib/projectName';
 import { A } from '../app/link';
 import { useWs } from '../api/context';
 
@@ -75,7 +76,7 @@ export function DocsPanel({ project, open, onOpen }: { project?: string; open: D
         groups.map(([group, list]) => (
           <section key={group}>
             <div className="mb-1.5 flex items-center gap-2">
-              <span className="ac-mono text-nano uppercase tracking-wide text-text-4">{group}</span>
+              <span className="text-nano uppercase tracking-wide text-text-4">{projectLabelFor(projects.data, { slug: group }) ?? group}</span>
               <span className="text-nano text-text-4">{list.length}</span>
             </div>
             <div className="ac-card divide-y divide-line-1">

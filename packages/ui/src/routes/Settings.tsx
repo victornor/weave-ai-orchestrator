@@ -55,7 +55,7 @@ import {
 import { api, getWorkspaceId, setToken } from '../api/client';
 import { qk } from '../api/keys';
 import type { PresentationBlock, Project, PushCategory } from '@weave-ai/shared';
-import { ProjectConfigSchema, ProjectPoliciesSchema, WorkerModelOptionSchema, WorkerOptionsArraySchema, APPROVAL_OWNERS, ARCHIVE_COMMITS, DELIVERY_MODES, MERGE_METHODS } from '@weave-ai/shared';
+import { ProjectConfigSchema, ProjectPoliciesSchema, WorkerModelOptionSchema, WorkerOptionsArraySchema, APPROVAL_OWNERS, ARCHIVE_COMMITS, DELIVERY_MODES, MERGE_METHODS, projectLabel } from '@weave-ai/shared';
 import type * as T from '../api/types';
 import type { TotpSetup } from '../api/types';
 import { useHookWs, useWs } from '../api/context';
@@ -515,7 +515,7 @@ function RemoveProjectSheet({
     <Sheet
       open
       onClose={onClose}
-      title={`Remove ${project.slug}`}
+      title={`Remove ${projectLabel(project)}`}
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
@@ -538,7 +538,7 @@ function RemoveProjectSheet({
       }
     >
       <p className="text-body text-text-2">
-        {project.slug} will be archived, not deleted. Tickets and knowledge stay in this workspace. The clone is left on disk.
+        {projectLabel(project)} will be archived, not deleted. Tickets and knowledge stay in this workspace. The clone is left on disk.
       </p>
       {reason ? <p className="mt-3 text-micro text-failed">{reason}</p> : null}
     </Sheet>
@@ -570,7 +570,7 @@ function MoveProjectSheet({
     <Sheet
       open
       onClose={onClose}
-      title={`Move ${project.slug}`}
+      title={`Move ${projectLabel(project)}`}
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
@@ -627,7 +627,8 @@ function MoveProjectSheet({
 function ArchivedProjectRow({ p }: { p: Project }): React.ReactElement {
   return (
     <div className="flex flex-wrap items-center gap-3 px-3.5 py-3">
-      <span className="ac-mono text-meta text-text-1">{p.slug}</span>
+      <span className="text-meta text-text-1">{projectLabel(p)}</span>
+      {projectLabel(p) !== p.slug ? <span className="ac-mono text-micro text-text-3">{p.slug}</span> : null}
       <Badge>{p.status}</Badge>
       <span className="ac-mono ac-truncate flex-1 text-micro text-text-3">{p.gitUrl}</span>
     </div>
@@ -680,6 +681,14 @@ function ActiveProjectRow({
     },
   });
 
+  // The display name (VS-330): an empty commit clears it, and every label falls back to the slug.
+  const displayName = useCommittableField({
+    value: p.name ?? '',
+    onCommit: async (raw) => {
+      await patch.mutateAsync({ id: p.id, patch: { name: raw.trim() } });
+    },
+  });
+
   // The number policy's bounds come from the schema the route validates with (VS-303), not a literal.
   const mergeConcurrencySchema = ProjectPoliciesSchema.shape.mergeConcurrency.unwrap().removeDefault();
   const mergeConcurrency = useCommittableField({
@@ -718,9 +727,23 @@ function ActiveProjectRow({
   return (
     <div className="px-3.5 py-3">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="ac-mono text-meta text-text-1">{p.slug}</span>
+        <span className="text-meta text-text-1">{projectLabel(p)}</span>
+        {projectLabel(p) !== p.slug ? <span className="ac-mono text-micro text-text-3">{p.slug}</span> : null}
         <Badge>{p.status}</Badge>
         <span className="ac-mono ac-truncate flex-1 text-micro text-text-3">{p.gitUrl}</span>
+        <label className="flex flex-wrap items-center gap-1.5">
+          <span className="ac-label">name</span>
+          <input
+            aria-label={`name for ${p.slug}`}
+            placeholder={p.slug}
+            value={displayName.draft}
+            onChange={(e) => displayName.onChange(e.target.value)}
+            onBlur={displayName.onBlur}
+            onKeyDown={displayName.onKeyDown}
+            className="h-7 w-32 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+          />
+          <CommitStatus status={displayName.status} error={displayName.error} onSave={displayName.commitNow} />
+        </label>
         <label className="flex flex-wrap items-center gap-1.5">
           <span className="ac-label">workers</span>
           <input

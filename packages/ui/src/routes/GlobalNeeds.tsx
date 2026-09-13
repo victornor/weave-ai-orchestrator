@@ -2,7 +2,7 @@
  * Daemon-wide Needs you (VS-168): open human-owned decisions from every workspace.
  */
 import { useCallback } from 'react';
-import type { Decision, DecisionAnswerInputs } from '@weave-ai/shared';
+import { projectLabel, type Decision, type DecisionAnswerInputs } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { DecisionCard } from '../components/DecisionCard';
 import { PlanPreview } from '../components/PlanPreview';
@@ -131,6 +131,7 @@ function WorkspaceNeeds({
               decision={d}
               ticketIdentifier={t?.identifier ?? d.ticketId}
               projectSlug={projects.data?.find((p) => p.id === (d.projectId ?? t?.projectId))?.slug ?? null}
+              projectLabel={(() => { const p = projects.data?.find((x) => x.id === (d.projectId ?? t?.projectId)); return p ? projectLabel(p) : null; })()}
               ws={ws}
               askedBy={d.askedByAgentId}
               busy={answer.isPending}

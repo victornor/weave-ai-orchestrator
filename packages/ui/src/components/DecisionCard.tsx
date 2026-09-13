@@ -16,6 +16,9 @@ import { cx } from '../lib/cx';
 export interface DecisionCardProps {
   decision: Decision;
   ticketIdentifier?: string | null;
+  /** The project's display label (VS-330) — what the meta line names the project by. */
+  projectLabel?: string | null;
+  /** The project's slug — the identifier a link to the project is built from. */
   projectSlug?: string | null;
   /** The workspace slug — needed to link a merge-approval card to its ticket's conversation (VS-106) and to its pull request's diff (VS-107). */
   ws?: string | null;
@@ -205,7 +208,7 @@ const CONTEXT_PREVIEW_CHARS = 500;
  * primary action sits bottom-left inside a 44 px thumb band. A decision that has
  * been answered renders the same card as an inert record of what was decided.
  */
-export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, askedBy, asker, busy, queued, plan, autoApproving, onHide, ticketFiledByConductor, ticketSummary, compact, onAnswer, className }: DecisionCardProps): React.ReactElement {
+export function DecisionCard({ decision, ticketIdentifier, projectLabel, projectSlug, ws, askedBy, asker, busy, queued, plan, autoApproving, onHide, ticketFiledByConductor, ticketSummary, compact, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
   const [overriding, setOverriding] = useState(false);
   const [confirm, setConfirm] = useState('');
@@ -230,7 +233,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
   const destructive = decision.kind === 'discard_approval';
   // A decision belonging to no project is the workspace's, and says so: an absent label and one that
   // simply could not be resolved must not look the same when four projects are asking at once (VS-92).
-  const meta = [ticketIdentifier, projectSlug ?? 'Workspace', askedBy].filter(Boolean).join(' · ');
+  const meta = [ticketIdentifier, projectLabel ?? projectSlug ?? 'Workspace', askedBy].filter(Boolean).join(' · ');
   // A decision that is no longer open cannot be answered again; it is a record, not a prompt.
   const answered = decision.status === 'answered';
   const inert = decision.status !== 'open';

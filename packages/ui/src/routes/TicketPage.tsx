@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
 import type { Run } from '@weave-ai/shared';
-import { isActiveRun, ticketUiStatus } from '@weave-ai/shared';
+import { isActiveRun, projectLabel, ticketUiStatus } from '@weave-ai/shared';
 import { workerPauseDetail } from '@weave-ai/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Tabs } from '../components/Tabs';
@@ -135,7 +135,7 @@ export function TicketRoute(): React.ReactElement {
                 onOpen={() => go('/w/$ws/merge-queue', { params: { ws }, search: ticket.projectId ? { project: ticket.projectId } : {} })}
               />
             ) : null}
-            {project ? <span className="ac-mono">{project.slug}</span> : null}
+            {project ? <span>{projectLabel(project)}</span> : null}
             {worker ? <span>{worker.name}</span> : null}
             {pausedFor ? <span className="ac-mono ac-truncate max-w-[40vw] text-micro text-text-3" title={pauseDetail?.full ?? pausedFor}>paused · {pausedFor}</span> : null}
           </span>
@@ -211,6 +211,7 @@ function Overview({ ticketId }: { ticketId: string }): React.ReactElement {
           decision={retryDecision}
           ticketIdentifier={d.ticket.identifier}
           projectSlug={d.project?.slug}
+          projectLabel={d.project ? projectLabel(d.project) : null}
           busy={answer.isPending}
           onAnswer={(a) => answer.mutate({ id: retryDecision.id, ...a })}
         />
@@ -229,7 +230,7 @@ function Overview({ ticketId }: { ticketId: string }): React.ReactElement {
         <Facts
           title="Delivery"
           rows={[
-            ['project', d.project?.slug ?? '—'],
+            ['project', d.project ? projectLabel(d.project) : '—'],
             ['worker', d.worker?.name ?? 'unassigned'],
             ['branch', d.worker?.branch ?? '—'],
             ['auto-merge', d.ticket.autoMerge ? 'on' : 'off'],

@@ -27,6 +27,7 @@ import {
   TREE_WIDTH_MIN, type ExplorerHub, type ExplorerNode,
 } from '../lib/knowledgeExplorer';
 import { DocPanel, KnowledgeDocPanel, type DocRef } from './KnowledgeDocs';
+import { projectLabelFor } from '../lib/projectName';
 import { cx } from '../lib/cx';
 import { ago } from '../lib/format';
 import { useGo, useSearchParams } from '../app/link';
@@ -97,7 +98,10 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
 
   const visibleDocs = useMemo(() => (docs.data ?? []).filter((d) => !project || !d.projectId || d.projectId === project), [docs.data, project]);
 
-  const tree = useMemo(() => buildExplorerTree(visibleDocs, hubs), [visibleDocs, hubs]);
+  const tree = useMemo(
+    () => buildExplorerTree(visibleDocs, hubs, (slug) => projectLabelFor(projects.data, { slug })),
+    [visibleDocs, hubs, projects.data],
+  );
 
   // Only `project` and `workspace` roots get an archive entry: `workspace`, `shared` and
   // `decisions` hubs all sit in the same `knowledge/workspace/` directory, so their archive files

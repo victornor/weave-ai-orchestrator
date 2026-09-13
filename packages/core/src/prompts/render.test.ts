@@ -150,6 +150,16 @@ describe('prompt rendering', () => {
     expect(out).not.toMatch(/\{\{|\}\}/);
   });
 
+  it('names the weaver project list by the display label, falling back to the slug (VS-330)', () => {
+    h.db.update('projects', h.projectId, { name: 'Weave AI' });
+    expect(renderConductorInstructions(h.ctx, h.deps)).toContain('- `api` — Weave AI');
+
+    h.db.update('projects', h.projectId, { name: '' });
+    const out = renderConductorInstructions(h.ctx, h.deps);
+    expect(out).toContain('- `api` — api (default branch `main`)');
+    expect(out).not.toContain('- `api` —  ');
+  });
+
   describe('shipped conductor template fills its portfolio sections (VS-243)', () => {
     it.runIf(existsSync(SHIPPED_TEMPLATES))('lists the live projects and roles, not blank sections', () => {
       h.ctx.templatesDir = SHIPPED_TEMPLATES;

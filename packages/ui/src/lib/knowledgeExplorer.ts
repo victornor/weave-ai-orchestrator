@@ -65,8 +65,9 @@ function rootKeyOf(scope: string, projectSlug: string | null): string {
   return scope === 'project' ? `project:${projectSlug ?? ''}` : `scope:${scope}`;
 }
 
-function rootLabelOf(scope: string, projectSlug: string | null): string {
-  return scope === 'project' ? projectSlug ?? 'project' : scope;
+function rootLabelOf(scope: string, projectSlug: string | null, labelOfProject?: (projectSlug: string | null) => string | null): string {
+  if (scope !== 'project') return scope;
+  return labelOfProject?.(projectSlug) ?? projectSlug ?? 'project';
 }
 
 const RANK: Record<ExplorerNode['kind'], number> = { root: 0, hub: 0, folder: 1, doc: 2 };
@@ -81,13 +82,13 @@ function sortChildren(node: ExplorerNode): void {
  * `shared`/`workspace`/`decisions`. Each root holds its hub as a distinguished first child, then
  * the document folder tree derived from `KnowledgeDocSummary.folder`.
  */
-export function buildExplorerTree(docs: readonly KnowledgeDocSummary[], hubs: readonly ExplorerHub[]): ExplorerNode[] {
+export function buildExplorerTree(docs: readonly KnowledgeDocSummary[], hubs: readonly ExplorerHub[], labelOfProject?: (projectSlug: string | null) => string | null): ExplorerNode[] {
   const roots = new Map<string, ExplorerNode>();
   const ensureRoot = (scope: string, projectSlug: string | null): ExplorerNode => {
     const id = rootKeyOf(scope, projectSlug);
     let root = roots.get(id);
     if (!root) {
-      root = { id, kind: 'root', label: rootLabelOf(scope, projectSlug), children: [] };
+      root = { id, kind: 'root', label: rootLabelOf(scope, projectSlug, labelOfProject), children: [] };
       roots.set(id, root);
     }
     return root;

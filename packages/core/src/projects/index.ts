@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
-import { OcError, PROJECT_ADD_STEPS, ProjectConfigSchema, landingBranchOf, type Project, type ProjectAddStepId, type ProjectConfig, type ProjectPolicies, type ProjectSyncState } from '@weave-ai/shared';
+import { OcError, PROJECT_ADD_STEPS, ProjectConfigSchema, landingBranchOf, projectLabel, type Project, type ProjectAddStepId, type ProjectConfig, type ProjectPolicies, type ProjectSyncState } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CommitDetail, CoreServices, HistoryPage, HistoryQuery, ProjectsService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -233,7 +233,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
 
       step = 'ticket';
       report.begin('ticket');
-      describeTicket(actor, id, cfg.id, report);
+      describeTicket(actor, id, cfg.id, projectLabel({ name: cfg.name ?? '', slug: cfg.id }), report);
       report.end('ticket');
     } catch (e) {
       ctx.db.update('projects', id, { status: 'error', errorText: String(e).slice(0, 500), updatedAt: nowIso() });
@@ -252,10 +252,10 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
   }
 
   /** The scout ticket that seeds the project KB, and the wake that tells the conductor to staff it. */
-  function describeTicket(actor: Actor, id: string, slug: string, report: StepReporter): void {
+  function describeTicket(actor: Actor, id: string, slug: string, label: string, report: StepReporter): void {
     try {
       deps().tickets.create(actor, {
-        projectId: id, kind: 'scout', title: `Describe project ${slug}`,
+        projectId: id, kind: 'scout', title: `Describe project ${label}`,
         description: `Investigate the \`${slug}\` repository and write the project knowledge base: overview, stack and commands (run, test, lint, build), conventions the repo docs do not state, current focus, landmines. For each major subsystem, integration or runbook worth more than a few lines, write a linked knowledge document (weave_knowledge_doc_put) and link it from PROJECT.md's Documents section with [[slug]].\n\n## Acceptance criteria\n- \`knowledge/projects/${slug}/PROJECT.md\` filled in through \`weave_knowledge_note\`\n- a \`report\` document on this ticket summarising what you found`,
         priority: 'medium', originKind: 'project_describe', originFingerprint: `project_describe:${slug}`,
       });
@@ -263,7 +263,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       try {
         const conductor = deps().workers.conductor();
         deps().wake.enqueue(conductor.id, {
-          source: 'system', reason: `project ${slug} was added; its scout ticket is unassigned — hire a role for it or assign one`,
+          source: 'system', reason: `project ${label} was added; its scout ticket is unassigned — hire a role for it or assign one`,
           payload: { kind: 'project_added', projectId: id, projectSlug: slug },
           idempotencyKey: `project_added:${id}`, requestedBy: { kind: 'system', id: null },
         });
@@ -319,16 +319,23 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
         }
       }
       const existing = ctx.config.projects.find((p) => p.id === project.slug);
+      // A name that is empty once trimmed clears the display name (VS-330), the same empty-string
+      // sentinel `landingBranch` uses; readers fall back to the slug. The row column is NOT NULL, so
+      // "no name" is stored as the empty string.
+      const clearingName = typeof patch.name === 'string' && patch.name.trim() === '';
+      const trimmedName = typeof patch.name === 'string' ? patch.name.trim() : undefined;
       const patchForMerge: Partial<ProjectConfig> = { ...patch };
       if (patch.landingBranch === '') patchForMerge.landingBranch = undefined;
+      if (trimmedName !== undefined) patchForMerge.name = clearingName ? undefined : trimmedName;
       const merged = ProjectConfigSchema.parse({ ...(existing ?? { id: project.slug, url: project.gitUrl }), ...patchForMerge, id: project.slug });
+      const nextName = clearingName ? '' : (merged.name ?? project.name);
       ctx.db.update('projects', project.id, {
-        name: merged.name ?? project.name, defaultBranch: merged.defaultBranch, landingBranch: merged.landingBranch ?? null, maxWorkers: merged.maxWorkers,
+        name: nextName, defaultBranch: merged.defaultBranch, landingBranch: merged.landingBranch ?? null, maxWorkers: merged.maxWorkers,
         setupCommand: merged.setupCommand ?? null, warmPathsJson: merged.warmPaths, worktreeProvider: merged.worktrees ?? project.worktreeProvider,
         openspecEnabled: merged.openspec.enabled,
         policiesJson: toLegacyPolicies(merged.policies), updatedAt: nowIso(),
       });
-      await upsertConfigBlock(merged);
+      await upsertConfigBlock(nextName === '' ? { ...merged, name: undefined } : merged);
       recordActivity(ctx.db, ctx.workspaceId, actor, 'project.update', 'project', project.id, { patch: Object.keys(patch) });
       ctx.events.emit('project.updated', 'project', project.id, { slug: project.slug });
       return get(project.id);

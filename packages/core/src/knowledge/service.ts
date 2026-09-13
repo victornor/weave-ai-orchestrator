@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, append
 import { dirname, join } from 'node:path';
 import { knowledgeRow, newId, nowIso, type Db } from '@weave-ai/db';
 import {
-  estimateTokens, OcError,
+  estimateTokens, OcError, projectLabel,
   type Decision, type KnowledgeRevisionReason, type KnowledgeScope,
 } from '@weave-ai/shared';
 import type { Actor, CoreServices, KnowledgeBootstrapPart, KnowledgeDocDetail, KnowledgeDocSummary, KnowledgeService } from '../api.js';
@@ -40,7 +40,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     if (scope === 'project') {
       const p = projectOf(projectId);
       const rel = relPathFor(scope, p.slug);
-      return { rel, abs: join(ctx.paths.knowledge, rel), projectRowId: p.id, projectName: p.name };
+      return { rel, abs: join(ctx.paths.knowledge, rel), projectRowId: p.id, projectName: projectLabel(p) };
     }
     const rel = relPathFor(scope);
     return { rel, abs: join(ctx.paths.knowledge, rel), projectRowId: null, projectName: null };
@@ -547,7 +547,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         }
         for (const p of db.all<ProjectRow>('SELECT id, slug, name FROM projects WHERE workspace_id = ? ORDER BY slug', [ws])) {
           const body = service.get('project', p.id).body;
-          const chunk = [`## Project: ${p.name} (${p.slug})`, sectionText(body, 'Overview'), sectionText(body, 'Current focus')].filter(Boolean).join('\n\n');
+          const chunk = [`## Project: ${projectLabel(p)} (${p.slug})`, sectionText(body, 'Overview'), sectionText(body, 'Current focus')].filter(Boolean).join('\n\n');
           parts.push(chunk);
           record('project', p.id, chunk);
         }

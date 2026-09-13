@@ -276,7 +276,7 @@ describe('WorkerCard', () => {
     render(
       <WorkerCard
         agent={agent()}
-        projectSlug="web"
+        projectLabel="web"
         ticketIdentifier="ACME-42"
         lastLine="running vitest — 38/41 passed"
         worktree={{ status: 'active', dirty: true, ahead: 3, behind: 0 }}

@@ -159,7 +159,8 @@ describe('threads', () => {
     expect(wake.calls[0]).toEqual(
       expect.objectContaining({
         input: expect.objectContaining({
-          reason: expect.stringContaining(h.projectSlug),
+          // The reason names the project by its display label (VS-330); the payload keeps the slug.
+          reason: expect.stringContaining('API'),
           payload: expect.objectContaining({ messageId: msg.id, projectId: h.projectId, projectSlug: h.projectSlug }),
         }),
       }),

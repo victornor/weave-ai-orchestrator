@@ -441,6 +441,47 @@ describe('Settings — a project landing branch (VS-122)', () => {
   });
 });
 
+describe('Settings — a project display name (VS-330)', () => {
+  beforeEach(() => {
+    state.projects = [readyProject()];
+  });
+
+  it('renames a project by committing only its name', async () => {
+    render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+
+    const field = screen.getByLabelText('name for api');
+    expect(field).toHaveValue('API');
+
+    fireEvent.change(field, { target: { value: 'Weave AI' } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { name: 'Weave AI' } }));
+  });
+
+  it('clearing the field commits an empty name so the label falls back to the slug', async () => {
+    render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+
+    const field = screen.getByLabelText('name for api');
+    fireEvent.change(field, { target: { value: '   ' } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { name: '' } }));
+  });
+
+  it('shows the display name when set, and the slug alone when cleared', () => {
+    render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+    expect(screen.getByText('API')).toBeInTheDocument();
+  });
+
+  it('a project with no name reads by its slug', () => {
+    state.projects = [{ id: 'p1', slug: 'api', name: '', status: 'ready', gitUrl: 'g', maxWorkers: 2, defaultBranch: 'main', landingBranch: null, policies: {} }];
+    render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+    expect(screen.getByText('api')).toBeInTheDocument();
+  });
+});
+
 describe('Settings — a project delivery policies and setup command (VS-303)', () => {
   const project = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
     id: 'p1', slug: 'api', status: 'ready', gitUrl: 'g', maxWorkers: 2, defaultBranch: 'main', landingBranch: 'edge', setupCommand: 'pnpm install', policies: { requireCi: true }, ...over,
@@ -862,7 +903,7 @@ describe('Settings — remove a project (VS-235)', () => {
     state.projects = [readyProject()];
     openProjects();
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
-    const dialog = screen.getByRole('dialog', { name: 'Remove api' });
+    const dialog = screen.getByRole('dialog', { name: 'Remove API' });
     expect(dialog).toHaveTextContent('archived, not deleted');
     expect(dialog).toHaveTextContent('Tickets and knowledge stay in this workspace');
     expect(dialog).toHaveTextContent('The clone is left on disk');

@@ -16,6 +16,8 @@ import { V2Scheduled } from './scheduled/V2Scheduled';
 
 // VS-345: Needs you is a real screen, not a placeholder; its module owns the page component.
 export { V2NeedsPage } from './NeedsYouPage';
+// VS-351: Roles is a real screen; its module owns the page component.
+export { V2RolesPage } from './RolesPage';
 
 export function V2LivePage(): React.ReactElement {
   return <V2Page title="Live" />;
@@ -47,9 +49,6 @@ export function V2ChatPage(): React.ReactElement {
 }
 export function V2WorkPage(): React.ReactElement {
   return <V2WorkScreen />;
-}
-export function V2RolesPage(): React.ReactElement {
-  return <V2Page title="Roles" />;
 }
 export function V2KnowledgePage(): React.ReactElement {
   return (

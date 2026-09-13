@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: "Weave V2 UI: Roles, live worker feeds in place, and the Hire a role modal
+  that sends a /hire-role request to the weaver"

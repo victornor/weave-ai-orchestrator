@@ -1,4 +1,4 @@
-import type { Agent, Decision, Project, Run, Ticket } from '@weave-ai/shared';
+import type { Agent, Decision, Project, Role, Run, Ticket } from '@weave-ai/shared';
 import type { WorkProduct } from '../api/types';
 
 export function ticket(over: Partial<Ticket> = {}): Ticket {
@@ -141,6 +141,34 @@ export function decision(over: Partial<Decision> = {}): Decision {
     weaverReviewedByAgentId: null,
     answerAuthorKind: null,
     relayedFromMessageId: null,
+    ...over,
+  };
+}
+
+export function role(over: Partial<Role> = {}): Role {
+  return {
+    id: 'r1',
+    workspaceId: 'ws',
+    projectId: 'p1',
+    slug: 'backend',
+    name: 'Backend Engineer',
+    title: null,
+    icon: null,
+    charterSummary: 'Owns the API.',
+    scopeText: '',
+    responsibilities: [],
+    capabilities: [],
+    rules: [],
+    permission: {},
+    sessionPolicy: 'per_ticket',
+    maxWorkers: 4,
+    secrets: [],
+    status: 'active',
+    pauseReason: null,
+    specRevision: 1,
+    createdBy: 'human',
+    createdAt: '2026-09-01T09:00:00.000Z',
+    updatedAt: '2026-09-01T09:00:00.000Z',
     ...over,
   };
 }

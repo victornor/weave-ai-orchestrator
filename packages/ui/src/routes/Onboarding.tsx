@@ -34,7 +34,7 @@ type StepState = 'pending' | 'running' | 'done' | 'failed';
  * One line of the create step. `jobId` is set for the steps the daemon performs as a job — today
  * only adding a project — and is what the view re-attaches to after a reload.
  */
-interface StepView {
+export interface StepView {
   label: string;
   state: StepState;
   detail?: string;
@@ -50,9 +50,9 @@ interface StepView {
  * for each. Without it a reload during a four-minute clone lands back on an empty first-run form.
  */
 const RESUME_KEY = 'ac.onboarding.resume';
-interface Resume { workspaceId: string; name: string; steps: StepView[] }
+export interface Resume { workspaceId: string; name: string; steps: StepView[] }
 
-function readResume(): Resume | null {
+export function readResume(): Resume | null {
   try {
     const raw = window.localStorage.getItem(RESUME_KEY);
     if (!raw) return null;
@@ -62,7 +62,7 @@ function readResume(): Resume | null {
     return null;
   }
 }
-function writeResume(resume: Resume | null): void {
+export function writeResume(resume: Resume | null): void {
   try {
     if (resume) window.localStorage.setItem(RESUME_KEY, JSON.stringify(resume));
     else window.localStorage.removeItem(RESUME_KEY);
@@ -463,7 +463,7 @@ interface StartedAdd { project?: { id?: string } | null; jobId?: string | null }
  * without one — creating the workspace, configuring the conductor — shows its state and how long it
  * took, which is all a single request has to say.
  */
-function StepRow({ step, now, workspaceId, onFinish, onRetry }: {
+export function StepRow({ step, now, workspaceId, onFinish, onRetry }: {
   step: StepView;
   now: number;
   workspaceId: string | null;

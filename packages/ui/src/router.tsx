@@ -124,6 +124,15 @@ const v2RootRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/v2',
   component: lazyRouteComponent(() => import('./v2/V2Root'), 'V2Root'),
+  // Every signed-in V2 page needs a session; `/v2/login` is exempt so the guard cannot loop. Kept
+  // as a dynamic import so V1's entry bundle still carries none of the V2 module (VS-343/VS-353).
+  beforeLoad: async ({ location }) => {
+    if (location.pathname === '/v2/login') return;
+    const { v2Refused } = await import('./v2/auth');
+    if (await v2Refused()) {
+      throw redirect({ to: '/v2/login', search: { next: location.href } as never });
+    }
+  },
 });
 
 const v2IndexRoute = createRoute({
@@ -131,23 +140,45 @@ const v2IndexRoute = createRoute({
   path: '/',
   beforeLoad: () => {
     const ws = getWorkspaceId();
-    throw redirect({ to: (ws ? `/v2/w/${ws}/needs` : '/onboarding') as never });
+    throw redirect({ to: (ws ? `/v2/w/${ws}/needs` : '/v2/onboarding') as never });
   },
   component: () => null,
+});
+
+// The sign-in screen is chromeless: it sits beside the shell, not inside it (VS-353).
+const v2LoginRoute = createRoute({
+  getParentRoute: () => v2RootRoute,
+  path: '/login',
+  validateSearch: (s: Record<string, unknown>) => s,
+  component: lazyRouteComponent(() => import('./v2/V2Login'), 'V2Login'),
+});
+
+// The rail and the phone tab bar wrap every signed-in destination. A pathless layout route adds no
+// URL segment, so no V2 address changes.
+const v2ShellRoute = createRoute({
+  getParentRoute: () => v2RootRoute,
+  id: 'v2-shell',
+  component: lazyRouteComponent(() => import('./v2/V2Root'), 'V2ShellLayout'),
 });
 
 type V2PageExports = typeof import('./v2/pages');
 
 const v2GlobalRoute = <K extends keyof V2PageExports>(path: string, page: K) =>
   createRoute({
-    getParentRoute: () => v2RootRoute,
+    getParentRoute: () => v2ShellRoute,
     path,
     validateSearch: (s: Record<string, unknown>) => s,
     component: lazyRouteComponent(() => import('./v2/pages'), page),
   });
 
+const v2OnboardingRoute = createRoute({
+  getParentRoute: () => v2ShellRoute,
+  path: '/onboarding',
+  component: lazyRouteComponent(() => import('./v2/V2Onboarding'), 'V2OnboardingPage'),
+});
+
 const v2WsRoute = createRoute({
-  getParentRoute: () => v2RootRoute,
+  getParentRoute: () => v2ShellRoute,
   path: '/w/$ws',
   component: lazyRouteComponent(() => import('./v2/V2Root'), 'V2Workspace'),
 });
@@ -292,31 +323,35 @@ const routeTree = rootRoute.addChildren([
   globalSettingsRoute,
   v2RootRoute.addChildren([
     v2IndexRoute,
-    v2NeedsRoute,
-    v2LiveRoute,
-    v2IncidentsRoute,
-    v2MapRoute,
-    v2RunsRoute,
-    v2RunRoute,
-    v2ScheduledRoute,
-    v2SettingsRoute,
-    v2ChatsRoute,
-    v2WsRoute.addChildren([
-      v2WsIndexRoute,
-      v2ChatRoute,
-      v2WsNeedsRoute,
-      v2WorkRoute,
-      v2RolesRoute,
-      v2KnowledgeRoute,
-      v2GraphRoute,
-      v2ExplorerRoute,
-      v2UsageRoute,
-      v2ChangelogRoute,
-      v2ProjectRoute,
-      v2TicketRoute,
-      v2TicketArtifactRoute,
-      v2ArtifactRoute,
-      v2WorkerRoute,
+    v2LoginRoute,
+    v2ShellRoute.addChildren([
+      v2OnboardingRoute,
+      v2NeedsRoute,
+      v2LiveRoute,
+      v2IncidentsRoute,
+      v2MapRoute,
+      v2RunsRoute,
+      v2RunRoute,
+      v2ScheduledRoute,
+      v2SettingsRoute,
+      v2ChatsRoute,
+      v2WsRoute.addChildren([
+        v2WsIndexRoute,
+        v2ChatRoute,
+        v2WsNeedsRoute,
+        v2WorkRoute,
+        v2RolesRoute,
+        v2KnowledgeRoute,
+        v2GraphRoute,
+        v2ExplorerRoute,
+        v2UsageRoute,
+        v2ChangelogRoute,
+        v2ProjectRoute,
+        v2TicketRoute,
+        v2TicketArtifactRoute,
+        v2ArtifactRoute,
+        v2WorkerRoute,
+      ]),
     ]),
   ]),
   wsRoute.addChildren([

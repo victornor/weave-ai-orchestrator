@@ -98,7 +98,8 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-const openActivity = (): void => { fireEvent.click(screen.getByRole('tab', { name: 'Activity' })); };
+// VS-357: the activity feed and composer live on the default Overview tab, which is already open.
+const openActivity = (): void => { fireEvent.click(screen.getByRole('tab', { name: 'Overview' })); };
 
 describe('TicketRoute comments', () => {
   it('keeps the line breaks of a comment the human wrote', () => {
@@ -146,12 +147,52 @@ describe('TicketRoute deep-links to a tab (VS-106)', () => {
     state.comments = [comment({ id: 'c1', body: 'hello' })];
     const { container } = render(<TicketRoute />);
     expect(container.querySelector('article .ac-prose p')).not.toBeNull();
+    expect(screen.getByRole('tab', { name: 'Overview', selected: true })).toBeTruthy();
   });
 
   it('falls back to overview for an unknown tab', () => {
     state.search = { tab: 'nope' };
     render(<TicketRoute />);
     expect(screen.getByRole('tab', { name: 'Overview', selected: true })).toBeTruthy();
+  });
+});
+
+// VS-357: Activity, Work, Usage and Knowledge stopped being tabs; the Overview tab carries all of
+// them, and an old `?tab=` value aliases it and names the section to scroll to.
+describe('TicketRoute merged Overview (VS-357)', () => {
+  it('shows only Overview and Plan when the ticket has no artifact', () => {
+    render(<TicketRoute />);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Plan']);
+  });
+
+  it('adds an Artifacts tab when the ticket has one', () => {
+    state.workProducts = [workProduct()];
+    render(<TicketRoute />);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Plan', 'Artifacts']);
+  });
+
+  it('renders the details/activity split, then Work, Usage and Knowledge in order', () => {
+    const { container } = render(<TicketRoute />);
+    const ids = [...container.querySelectorAll('[id^="ticket-section-"]')].map((el) => el.id);
+    expect(ids).toEqual([
+      'ticket-section-overview',
+      'ticket-section-activity',
+      'ticket-section-work',
+      'ticket-section-usage',
+      'ticket-section-knowledge',
+    ]);
+  });
+
+  it.each(['activity', 'work', 'usage', 'knowledge'])('maps ?tab=%s to the Overview tab', (value) => {
+    state.search = { tab: value };
+    render(<TicketRoute />);
+    expect(screen.getByRole('tab', { name: 'Overview', selected: true })).toBeTruthy();
+  });
+
+  it('opens on Plan when ?tab=plan still names it', () => {
+    state.search = { tab: 'plan' };
+    render(<TicketRoute />);
+    expect(screen.getByRole('tab', { name: 'Plan', selected: true })).toBeTruthy();
   });
 });
 
@@ -280,14 +321,13 @@ describe("TicketRoute's Activity tab answers the merge approval (VS-106)", () =>
   });
 });
 
-describe('TicketRoute knowledge tab (VS-110)', () => {
+describe('TicketRoute knowledge section (VS-110)', () => {
   it('shows the hub/document/total token split and the documents read, labelled as knowledge context', () => {
     state.knowledgeUsage = {
       hubTokens: 40, documentTokens: 10, totalTokens: 50,
       documents: [{ scope: 'project', projectId: 'proj1', slug: 'payments-webhooks', tokens: 10 }],
     };
     render(<TicketRoute />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Knowledge' }));
 
     expect(screen.getByText(/Knowledge context/)).toBeInTheDocument();
     expect(screen.getByText('payments-webhooks')).toBeInTheDocument();
@@ -296,7 +336,6 @@ describe('TicketRoute knowledge tab (VS-110)', () => {
   it('says so when no documents were read', () => {
     state.knowledgeUsage = { hubTokens: 40, documentTokens: 0, totalTokens: 40, documents: [] };
     render(<TicketRoute />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Knowledge' }));
 
     expect(screen.getByText('No documents read')).toBeInTheDocument();
   });

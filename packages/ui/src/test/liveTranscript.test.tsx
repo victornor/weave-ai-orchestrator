@@ -80,16 +80,13 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-/** The Activity tab is not the ticket page's opening tab. */
-function openActivity(): void {
-  fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
-}
+// VS-357: the activity feed is on the ticket page's default Overview tab, so the ticket tests
+// below render it directly rather than clicking a now-removed Activity tab.
 
-describe('ticket Activity tab', () => {
+describe('ticket Activity section', () => {
   it('opens a running turn and streams its events as they arrive', () => {
     state.runs = [makeRun({ status: 'running', turnEpoch: 2 })];
     render(<TicketRoute />);
-    openActivity();
 
     expect(screen.getByText('turn 2')).toBeInTheDocument();
     expect(stream().url).toBe('/api/w/ws1/runs/run_1/events/stream');
@@ -113,7 +110,6 @@ describe('ticket Activity tab', () => {
   it('collapses the turn to its summary row when the run finishes, and closes the stream', () => {
     state.runs = [makeRun({ status: 'running', turnEpoch: 2 })];
     const { rerender } = render(<TicketRoute />);
-    openActivity();
     stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the failing test.' } }));
     expect(live()).toHaveLength(1);
 
@@ -131,7 +127,6 @@ describe('ticket Activity tab', () => {
     state.runs = [makeRun({ status: 'succeeded', turnEpoch: 1, finishedAt: '2026-09-01T09:04:00.000Z' })];
     state.persisted = [ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'What the last turn did.' } })];
     render(<TicketRoute />);
-    openActivity();
 
     // Nothing is asked for while it is collapsed — a ticket with thirty turns fetches none of them.
     expect(screen.queryByText('What the last turn did.')).not.toBeInTheDocument();

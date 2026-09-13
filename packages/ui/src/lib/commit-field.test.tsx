@@ -67,6 +67,34 @@ describe('useCommittableField', () => {
     expect(onCommit).not.toHaveBeenCalled();
   });
 
+  it('plain Enter in multiline mode neither commits nor prevents the line break', () => {
+    const onCommit = vi.fn(async () => {});
+    const preventDefault = vi.fn();
+    const { result } = renderHook(() => useCommittableField({ value: 'a', onCommit, multiline: true }));
+    act(() => result.current.onChange('one\ntwo'));
+    act(() => result.current.onKeyDown({ key: 'Enter', preventDefault } as unknown as React.KeyboardEvent));
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('Cmd/Ctrl+Enter commits a multiline field', async () => {
+    const onCommit = vi.fn(async () => {});
+    const { result } = renderHook(() => useCommittableField({ value: 'a', onCommit, multiline: true }));
+    act(() => result.current.onChange('one\ntwo'));
+    act(() => result.current.onKeyDown({ key: 'Enter', metaKey: true, preventDefault: vi.fn() } as unknown as React.KeyboardEvent));
+    expect(onCommit).toHaveBeenCalledWith('one\ntwo');
+    await waitFor(() => expect(result.current.status).toBe('saved'));
+  });
+
+  it('blur commits a multiline field', async () => {
+    const onCommit = vi.fn(async () => {});
+    const { result } = renderHook(() => useCommittableField({ value: 'a', onCommit, multiline: true }));
+    act(() => result.current.onChange('one\ntwo'));
+    act(() => result.current.onBlur());
+    expect(onCommit).toHaveBeenCalledWith('one\ntwo');
+    await waitFor(() => expect(result.current.status).toBe('saved'));
+  });
+
   it('a rejected commit moves to error with the rejection message and keeps the draft', async () => {
     const onCommit = vi.fn(async () => { throw new Error('branch not found'); });
     const { result } = renderHook(() => useCommittableField({ value: 'a', onCommit }));

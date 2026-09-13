@@ -541,7 +541,7 @@ describe("Settings — an existing worker option's description is editable in pl
     const box = screen.getByLabelText('tier description');
     expect(box).toHaveValue('Hard tickets.');
     fireEvent.change(box, { target: { value: 'Deep, ambiguous, production-facing work.' } });
-    fireEvent.keyDown(box, { key: 'Enter' });
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true });
     await waitFor(() => expect(state.saved.at(-1)!.workerOptions).toEqual([
       { id: 'tier', description: 'Deep, ambiguous, production-facing work.', runtime: 'claude', model: 'claude-fable-5-1', effort: 'high' },
     ]));
@@ -555,11 +555,11 @@ describe("Settings — an existing worker option's description is editable in pl
     fireEvent.change(box, { target: { value: 'x'.repeat(max + 1) } });
     expect(screen.getByText(`${max + 1}/${max} characters`)).toBeInTheDocument();
     expect(screen.getByText(`At most ${max} characters — now ${max + 1}.`)).toBeInTheDocument();
-    fireEvent.keyDown(box, { key: 'Enter' });
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true });
     expect(state.saved).toHaveLength(0);
 
     fireEvent.change(box, { target: { value: 'x'.repeat(max) } });
-    fireEvent.keyDown(box, { key: 'Enter' });
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true });
     await waitFor(() => expect(state.saved.at(-1)!.workerOptions).toEqual([
       { id: 'tier', description: 'x'.repeat(max), runtime: 'claude', model: null },
     ]));
@@ -604,9 +604,69 @@ describe("Settings — an existing worker option's description is editable in pl
     const box = screen.getByLabelText('deep description');
     expect(box).toHaveValue('Cause unknown.');
     fireEvent.change(box, { target: { value: 'Cause unknown, or production-facing.' } });
-    fireEvent.keyDown(box, { key: 'Enter' });
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true });
     await waitFor(() => expect(state.daemonSaved.at(-1)).toEqual({
       workerOptions: [{ id: 'deep', description: 'Cause unknown, or production-facing.', runtime: 'claude', model: null }],
     }));
+  });
+});
+
+describe('Settings — the when-to-use description is a text area (VS-322)', () => {
+  it('is a text area where plain Enter leaves the line break to the browser, and Cmd/Ctrl+Enter saves', async () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: null }] };
+    openModels();
+    const box = screen.getByLabelText('tier description');
+    expect(box.tagName).toBe('TEXTAREA');
+    fireEvent.change(box, { target: { value: 'First line.\nSecond line.' } });
+    // A true return means the event was not cancelled, which is what lets the browser insert the newline.
+    expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(true);
+    expect(state.saved).toHaveLength(0);
+
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'tier', description: 'First line.\nSecond line.', runtime: 'claude', model: null },
+    ]));
+  });
+
+  it('blur saves a multi-line description', async () => {
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: null }] };
+    openModels();
+    const box = screen.getByLabelText('tier description');
+    fireEvent.change(box, { target: { value: 'One.\nTwo.' } });
+    fireEvent.blur(box);
+    await waitFor(() => expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'tier', description: 'One.\nTwo.', runtime: 'claude', model: null },
+    ]));
+  });
+
+  it('a multi-line description survives save and a fresh reload', async () => {
+    const multi = 'First line.\nSecond line.';
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: 'Hard tickets.', runtime: 'claude', model: null }] };
+    const view = render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Models' }));
+    fireEvent.change(screen.getByLabelText('tier description'), { target: { value: multi } });
+    fireEvent.keyDown(screen.getByLabelText('tier description'), { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'tier', description: multi, runtime: 'claude', model: null },
+    ]));
+    view.unmount();
+
+    // A fresh mount reads what the server now holds, line break intact.
+    state.models = { ...state.models, workerOptions: [{ id: 'tier', description: multi, runtime: 'claude', model: null }] };
+    render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Models' }));
+    expect(screen.getByLabelText('tier description')).toHaveValue(multi);
+  });
+
+  it('the add form is a text area that stores a multi-line description intact', () => {
+    openModels();
+    const box = screen.getByLabelText('New worker option description');
+    expect(box.tagName).toBe('TEXTAREA');
+    fireEvent.change(screen.getByLabelText('New worker option id'), { target: { value: 'verbose' } });
+    fireEvent.change(box, { target: { value: 'Scout work.\nAlso low-complexity edits.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add worker option' }));
+    expect(state.saved.at(-1)!.workerOptions).toEqual([
+      { id: 'verbose', description: 'Scout work.\nAlso low-complexity edits.', runtime: 'claude', model: null },
+    ]);
   });
 });

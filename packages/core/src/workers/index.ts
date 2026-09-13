@@ -1,8 +1,8 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
 import {
-  HANDOVER_PAUSE_CODE, OcError, heldByHuman, landingBranchOf, projectLabel, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type TicketStatus,
+  HANDOVER_PAUSE_CODE, OcError, TERMINAL_TICKET_STATUSES, heldByHuman, landingBranchOf, projectLabel, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type TicketStatus,
 } from '@weave-ai/shared';
 import type { WorktreeProvider } from '@weave-ai/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
@@ -13,7 +13,7 @@ import { renderHome } from './home.js';
 import { renderBrief } from '../prompts/index.js';
 import { createSessions } from '../sessions/index.js';
 import { modelSettingFor, modelsFor } from '../models/resolve.js';
-import { landedWorkTest } from '../worktrees/landed.js';
+import { landedWorkTest, worktreeChanges } from '../worktrees/landed.js';
 import { git, worktreeState } from '../util/git.js';
 import { buildHandoverCommand } from './resume-command.js';
 import { sessionActivitySignal } from './activity-signal.js';
@@ -22,6 +22,32 @@ import { handoverCommentBody, reconcileHandover, type HandoverSnapshot } from '.
 export { renderHome, ensureHomeCurrent, skillsFor } from './home.js';
 
 const LIVE = "('provisioning','active','running','paused','error')";
+
+/**
+ * VS-333: a terminal ticket's stale pull-request record is refreshed from the forge before a
+ * retirement is refused, but `retireFinished` runs on every supervisor tick (15 s), so a genuinely
+ * open PR would cost about 240 `gh pr view` calls an hour, forever. One refresh per worker per
+ * window is plenty.
+ */
+const PR_REFRESH_WINDOW_MS = 60 * 60_000;
+
+/** How many archived paths a rescue comment or activity payload names before summarising the rest. */
+const ARCHIVE_LIST_CAP = 50;
+
+function cappedFileList(files: string[]): { files: string[]; more: number } {
+  return { files: files.slice(0, ARCHIVE_LIST_CAP), more: Math.max(0, files.length - ARCHIVE_LIST_CAP) };
+}
+
+function archivedComment(archivePath: string, workerId: string, files: string[]): string {
+  const { files: shown, more } = cappedFileList(files);
+  return [
+    `The worker was retired and its untracked leftovers were kept at \`${join(archivePath, workerId, 'untracked')}\`:`,
+    ...shown.map((f) => `- \`${f}\``),
+    ...(more ? [`and ${more} more.`] : []),
+    'The archive is pruned after the configured retention window, so recover anything you need before then.',
+  ].join('\n');
+}
+
 
 /**
  * Same bound as threads' `HUMAN_MESSAGE_WAKE_BODY_CHARS` and tickets' `TICKET_COMMENT_WAKE_BODY_CHARS`
@@ -46,6 +72,8 @@ export function openspecChangeName(ticket: Ticket): string { return `${ticket.id
 export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServices): WorkersService {
   const log = ctx.log('daemon');
   const sessions = createSessions(ctx);
+  /** Worker id → epoch ms of the last forge PR refresh (VS-333); lost on daemon restart, which just re-reads once. */
+  const prRefreshedAt = new Map<string, number>();
 
   const get = (id: string): Agent => {
     const a = ctx.db.get<Agent>('SELECT * FROM agents WHERE id = ? AND workspace_id = ?', [id, ctx.workspaceId]);
@@ -440,31 +468,103 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const ticket = agent.ticketId ? ticketOf(agent.ticketId) : null;
       const wt = ctx.db.get<{ id: string; path: string; branch: string; status: string }>("SELECT id, path, branch, status FROM worktrees WHERE agent_id = ? AND status != 'removed' ORDER BY created_at DESC LIMIT 1", [workerId]);
 
+      // VS-333: a kept worker stays `done`, and the reason is recorded so the Roles page can show it.
+      const refuse = (reason: string, worktreeId?: string): { retired: false; reason: string } => {
+        if (agent.status === 'done') ctx.db.update('agents', workerId, { errorText: reason, updatedAt: nowIso() });
+        if (worktreeId) ctx.db.update('worktrees', worktreeId, { status: 'dirty', lastVerifiedAt: nowIso() });
+        return { retired: false, reason };
+      };
+      let archivedUntracked: string[] = [];
+
       if (project && wt) {
-        const merged = agent.ticketId
-          ? ctx.db.get<{ id: string }>("SELECT id FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' AND lower(COALESCE(state,'')) = 'merged' LIMIT 1", [agent.ticketId])
-          : undefined;
+        // Merged-PR evidence from the stored record, refreshed from the forge for a terminal ticket
+        // before deciding (VS-333) — a squash-merged PR whose record is stale `open` then passes the
+        // patch-id path. Throttled: see PR_REFRESH_WINDOW_MS.
+        let merged = false;
+        if (agent.ticketId) {
+          const wp = ctx.db.get<{ id: string; url: string; state: string | null }>(
+            "SELECT id, url, state FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' AND url IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+            [agent.ticketId],
+          );
+          merged = (wp?.state ?? '').toLowerCase() === 'merged';
+          if (wp && !merged && ticket && TERMINAL_TICKET_STATUSES.includes(ticket.status)) {
+            const last = prRefreshedAt.get(workerId) ?? 0;
+            if (Date.now() - last >= PR_REFRESH_WINDOW_MS) {
+              prRefreshedAt.set(workerId, Date.now());
+              const forge = ctx.registries.forges.get('github');
+              if (forge) {
+                const pr = await forge.prState(project.clonePath, wp.url).catch((e: unknown) => {
+                  log.warn({ workerId, url: wp.url, err: String(e) }, 'PR state refresh before retirement failed');
+                  return null;
+                });
+                if (pr?.state === 'merged') {
+                  merged = true;
+                  ctx.db.run('UPDATE ticket_work_products SET state = ?, updated_at = ? WHERE id = ?', [pr.state, nowIso(), wp.id]);
+                }
+              }
+            }
+          }
+        }
+
         const policies = (project.policies ?? {}) as { deliveryMode?: string };
         const verdict = await landedWorkTest({
           repoPath: project.clonePath, worktreePath: wt.path, branch: wt.branch, landingBranch: landingBranchOf(project, ticket),
-          mergedPr: !!merged, localBranch: (policies.deliveryMode ?? ctx.config.defaults.deliveryMode) === 'local-branch',
+          mergedPr: merged, localBranch: (policies.deliveryMode ?? ctx.config.defaults.deliveryMode) === 'local-branch',
         });
         if (!verdict.landed) {
           ctx.db.update('worktrees', wt.id, { status: 'dirty', lastVerifiedAt: nowIso(), landedEvidenceJson: verdict.evidence });
           log.info({ workerId, reason: verdict.reason }, 'worker not retired: work has not landed');
-          return { retired: false, reason: verdict.reason };
+          return refuse(verdict.reason);
         }
+
+        // The verdict proved no tracked edits a moment ago; re-check before the forced removal so a
+        // file saved in between is never discarded unarchived.
+        const untracked = verdict.untrackedFiles ?? [];
+        if (untracked.length) {
+          const recheck = await worktreeChanges(wt.path);
+          if (!recheck.ok || recheck.tracked.length) {
+            const reason = recheck.ok ? `${recheck.tracked.length} uncommitted change(s) in the worktree` : 'cannot read worktree status';
+            return refuse(reason, wt.id);
+          }
+        }
+
+        // Copy untracked leftovers into the archive before the worktree is removed (VS-333). If any
+        // copy fails, refuse rather than force-remove a file that was not kept.
+        const archived: string[] = [];
+        if (untracked.length) {
+          for (const rel of untracked) {
+            const dest = join(ctx.paths.archive, workerId, 'untracked', rel);
+            try {
+              mkdirSync(dirname(dest), { recursive: true });
+              cpSync(join(wt.path, rel), dest, { recursive: true, force: true });
+              archived.push(rel);
+            } catch (e) {
+              log.warn({ workerId, file: rel, err: String(e) }, 'archiving an untracked file failed');
+            }
+          }
+          if (archived.length !== untracked.length) {
+            return refuse(`${untracked.length - archived.length} untracked file(s) could not be archived`, wt.id);
+          }
+        }
+
         try {
           const provider = providerFor(project);
-          await provider.remove({ repoPath: project.clonePath, path: wt.path, branch: wt.branch, deleteBranch: true, force: false, configPath: ctx.paths.wtConfig });
+          await provider.remove({ repoPath: project.clonePath, path: wt.path, branch: wt.branch, deleteBranch: true, force: untracked.length > 0, configPath: ctx.paths.wtConfig });
         } catch (e) {
           ctx.db.update('worktrees', wt.id, { status: 'dirty', lastVerifiedAt: nowIso() });
-          return { retired: false, reason: `worktree removal failed: ${String(e)}` };
+          return refuse(`worktree removal failed: ${String(e)}`);
         }
         ctx.db.update('worktrees', wt.id, { status: 'removed', removedAt: nowIso(), lastVerifiedAt: nowIso(), landedEvidenceJson: verdict.evidence });
+        archivedUntracked = archived;
+
+        if (archived.length && agent.ticketId) {
+          try { deps().tickets.comment({ kind: 'system', id: null }, agent.ticketId, archivedComment(ctx.paths.archive, workerId, archived), 'status', 'trusted'); }
+          catch (e) { log.warn({ workerId, err: String(e) }, 'posting the archived-files comment failed'); }
+        }
       }
 
-      // Archive the home (brief, notes, final report); run logs stay under .weave/runs.
+      // Archive the home (brief, notes, final report); run logs stay under .weave/runs. When untracked
+      // files were archived first the directory already exists, so merge into it.
       const archive = join(ctx.paths.archive, workerId);
       try {
         if (existsSync(agent.homePath)) {
@@ -478,7 +578,9 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       deps().wake.cancelForAgent(workerId, 'worker retired');
       ctx.db.update('agents', workerId, { status: 'retired', retiredAt: nowIso(), homePath: archive, updatedAt: nowIso() });
       if (agent.ticketId) ctx.db.run('UPDATE tickets SET worker_id = NULL WHERE id = ? AND worker_id = ?', [agent.ticketId, workerId]);
-      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.retire', 'agent', workerId, {}, agent.ticketId);
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.retire', 'agent', workerId,
+        archivedUntracked.length ? { archivedUntracked: cappedFileList(archivedUntracked).files, archivedUntrackedTotal: archivedUntracked.length } : {},
+        agent.ticketId);
       ctx.events.emit('worker.retired', 'agent', workerId, { ticketId: agent.ticketId, name: agent.name });
       log.info({ workerId }, 'worker retired');
       return { retired: true };

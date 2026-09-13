@@ -78,14 +78,27 @@ describe('git worktree provider', () => {
 });
 
 describe('landed-work test', () => {
-  it('never counts uncommitted changes as landed', async () => {
+  it('does not count a modified tracked file as landed', async () => {
     const repo = await initRepo();
     const target = join(tmpDir(), 'work');
     await new GitWorktreeProvider().create({ repoPath: repo, branch: 'ac/tst-4', base: 'main', targetPath: target });
-    writeFileSync(join(target, 'wip.txt'), 'in progress', 'utf8');
+    writeFileSync(join(target, 'README.md'), '# changed by hand\n', 'utf8');
     const v = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'ac/tst-4', landingBranch: 'main', mergedPr: true });
     expect(v.landed).toBe(false);
     expect(v.reason).toMatch(/uncommitted/);
+  });
+
+  it('lands with untracked leftovers once the committed work has landed (VS-333)', async () => {
+    const repo = await initRepo();
+    const target = join(tmpDir(), 'work');
+    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'ac/tst-4b', base: 'main', targetPath: target });
+    mkdirSync(join(target, '.review-screenshots'), { recursive: true });
+    writeFileSync(join(target, '.review-screenshots', 'a.png'), 'png', 'utf8');
+    writeFileSync(join(target, 'notes.md'), 'scratch', 'utf8');
+    const v = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'ac/tst-4b', landingBranch: 'main', localBranch: true });
+    expect(v.landed).toBe(true);
+    expect(v.untrackedFiles?.sort()).toEqual(['.review-screenshots/a.png', 'notes.md']);
+    expect(v.reason).toMatch(/untracked/);
   });
 
   it('lands when every commit is reachable from a remote-tracking branch', async () => {

@@ -209,15 +209,117 @@ describe('workers', () => {
     expect(h.db.all('SELECT * FROM worktrees')).toHaveLength(0);
   });
 
-  it('keeps an unlanded worker and marks its worktree dirty', async () => {
+  it('keeps a worker with a modified tracked file and marks its worktree dirty', async () => {
     const ticket = seedTicket();
     const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
-    writeFileSync(join(worker.worktreePath!, 'wip.txt'), 'not committed', 'utf8');
+    writeFileSync(join(worker.worktreePath!, 'README.md'), '# changed by hand\n', 'utf8');
     const result = await workers.retireIfLanded(SYSTEM, worker.id);
     expect(result.retired).toBe(false);
     expect(result.reason).toMatch(/uncommitted/);
     expect(h.db.get<{ status: string }>('SELECT status FROM worktrees WHERE agent_id = ?', [worker.id])!.status).toBe('dirty');
     expect(h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [worker.id])!.status).toBe('active');
+  });
+
+  it('keeps a terminal worker whose commit has not landed, recording the reason (VS-333)', async () => {
+    h.db.update('projects', h.projectId, { policiesJson: { deliveryMode: 'local-branch' } });
+    const ticket = seedTicket({ status: 'done' });
+    const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+    writeFileSync(join(worker.worktreePath!, 'unmerged.txt'), 'x', 'utf8');
+    await git(['add', '.'], worker.worktreePath!);
+    await git(['commit', '-m', 'feat: unmerged'], worker.worktreePath!);
+    h.db.update('agents', worker.id, { status: 'done' });
+
+    const result = await workers.retireIfLanded(SYSTEM, worker.id);
+    expect(result.retired).toBe(false);
+    expect(result.reason).toMatch(/not contained/);
+    expect(h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [worker.id])!.errorText).toMatch(/not contained/);
+  });
+
+  it('retires a landed worker with untracked leftovers, archiving them and leaving a trail (VS-333)', async () => {
+    h.db.update('projects', h.projectId, { policiesJson: { deliveryMode: 'local-branch' } });
+    const ticket = seedTicket({ status: 'done' });
+    const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+    const wtPath = worker.worktreePath!;
+    writeFileSync(join(wtPath, 'committed.txt'), 'ok', 'utf8');
+    await git(['add', '.'], wtPath);
+    await git(['commit', '-m', 'feat: landed'], wtPath);
+    await git(['merge', '--ff-only', worker.branch!], clonePath);
+    mkdirSync(join(wtPath, '.review-screenshots'), { recursive: true });
+    writeFileSync(join(wtPath, '.review-screenshots', 'a.png'), 'png', 'utf8');
+    writeFileSync(join(wtPath, 'notes.md'), 'scratch', 'utf8');
+
+    const result = await workers.retireIfLanded(SYSTEM, worker.id);
+    expect(result.retired).toBe(true);
+    expect(existsSync(wtPath)).toBe(false);
+    expect(existsSync(join(h.ctx.paths.archive, worker.id, 'untracked', '.review-screenshots', 'a.png'))).toBe(true);
+    expect(existsSync(join(h.ctx.paths.archive, worker.id, 'untracked', 'notes.md'))).toBe(true);
+    expect(existsSync(join(h.ctx.paths.archive, worker.id, 'brief.md'))).toBe(true);
+
+    const comment = vi.mocked(h.services.tickets!.comment).mock.calls.at(-1);
+    expect(comment?.[2]).toContain('.review-screenshots/a.png');
+    expect(comment?.[2]).toContain('notes.md');
+    const activity = h.db.get<{ details: Record<string, unknown> }>("SELECT details_json FROM activity WHERE action = 'worker.retire' AND entity_id = ?", [worker.id])!;
+    expect(JSON.stringify(activity.details.archivedUntracked)).toContain('notes.md');
+  });
+
+  it('caps the archived-file trail at 50 paths and reports the remainder (VS-333)', async () => {
+    h.db.update('projects', h.projectId, { policiesJson: { deliveryMode: 'local-branch' } });
+    const ticket = seedTicket({ status: 'done' });
+    const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+    const wtPath = worker.worktreePath!;
+    writeFileSync(join(wtPath, 'ok.txt'), 'ok', 'utf8');
+    await git(['add', '.'], wtPath);
+    await git(['commit', '-m', 'feat: landed'], wtPath);
+    await git(['merge', '--ff-only', worker.branch!], clonePath);
+    mkdirSync(join(wtPath, 'leftovers'), { recursive: true });
+    for (let i = 0; i < 51; i++) writeFileSync(join(wtPath, 'leftovers', `f${String(i).padStart(2, '0')}.txt`), 'x', 'utf8');
+
+    const result = await workers.retireIfLanded(SYSTEM, worker.id);
+    expect(result.retired).toBe(true);
+    const comment = vi.mocked(h.services.tickets!.comment).mock.calls.at(-1);
+    expect(comment?.[2]).toContain('and 1 more.');
+  });
+
+  it('retires a squash-merged worker whose stored PR record is stale open, after a forge refresh (VS-333)', async () => {
+    const ticket = seedTicket({ status: 'done' });
+    const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+    const wtPath = worker.worktreePath!;
+    writeFileSync(join(wtPath, 'squashed.txt'), 'content\n', 'utf8');
+    await git(['add', '.'], wtPath);
+    await git(['commit', '-m', 'feat: squashed'], wtPath);
+    const sha = (await git(['rev-parse', 'HEAD'], wtPath)).stdout.trim();
+    await git(['cherry-pick', '--no-commit', sha], clonePath);
+    await git(['commit', '-m', 'feat: squashed (#1)'], clonePath);
+    h.db.insert('ticket_work_products', {
+      id: newId(), ticketId: ticket.id, type: 'pull_request', provider: 'github', url: 'https://github.com/acme/api/pull/1',
+      title: 'PR 1', state: 'open', isPrimary: 1, createdAt: nowIso(), updatedAt: nowIso(),
+    });
+    const prState = vi.fn(async () => ({ state: 'merged' as const, mergeCommit: sha, ciState: 'success' as const }));
+    h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState } as never);
+
+    const result = await workers.retireIfLanded(SYSTEM, worker.id);
+    expect(result.retired).toBe(true);
+    expect(prState).toHaveBeenCalledTimes(1);
+    expect(h.db.get<{ state: string }>('SELECT state FROM ticket_work_products WHERE ticket_id = ?', [ticket.id])!.state).toBe('merged');
+  });
+
+  it('throttles the forge refresh across retirement attempts (VS-333)', async () => {
+    h.db.update('projects', h.projectId, { policiesJson: { deliveryMode: 'local-branch' } });
+    const ticket = seedTicket({ status: 'done' });
+    const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+    writeFileSync(join(worker.worktreePath!, 'open.txt'), 'x', 'utf8');
+    await git(['add', '.'], worker.worktreePath!);
+    await git(['commit', '-m', 'feat: open'], worker.worktreePath!);
+    h.db.insert('ticket_work_products', {
+      id: newId(), ticketId: ticket.id, type: 'pull_request', provider: 'github', url: 'https://github.com/acme/api/pull/2',
+      title: 'PR 2', state: 'open', isPrimary: 1, createdAt: nowIso(), updatedAt: nowIso(),
+    });
+    const prState = vi.fn(async () => ({ state: 'open' as const }));
+    h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState } as never);
+
+    expect((await workers.retireIfLanded(SYSTEM, worker.id)).retired).toBe(false);
+    expect((await workers.retireIfLanded(SYSTEM, worker.id)).retired).toBe(false);
+    expect(prState).toHaveBeenCalledTimes(1);
   });
 
   it('retires a worker whose work landed on the default branch: worktree removed, home archived', async () => {

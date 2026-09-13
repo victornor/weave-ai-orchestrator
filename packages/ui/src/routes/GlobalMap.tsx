@@ -92,7 +92,7 @@ export function GlobalMapRoute(): React.ReactElement {
       return;
     }
     if (node.kind === 'role') {
-      go('/w/$ws/team', { params: { ws } });
+      go('/w/$ws/roles', { params: { ws } });
       return;
     }
     if (node.kind === 'weaver') {

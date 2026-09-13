@@ -12,7 +12,7 @@ import { LiveRoute } from './routes/Live';
 import { MergeQueueRoute } from './routes/MergeQueue';
 import { TicketRoute } from './routes/TicketPage';
 import { WeaverArtifactRoute } from './routes/WeaverArtifactPage';
-import { TeamRoute } from './routes/Team';
+import { RolesRoute } from './routes/Roles';
 import { WorkerRoute } from './routes/WorkerPage';
 import { RunsRoute } from './routes/Runs';
 import { RunRoute } from './routes/RunPage';
@@ -160,7 +160,16 @@ const liveRoute = child('/live', LiveRoute);
 const mergeQueueRoute = child('/merge-queue', MergeQueueRoute, searchPassthrough);
 const ticketRoute = child('/tickets/$ticketId', TicketRoute, searchPassthrough);
 const weaverArtifactRoute = child('/artifacts/$key', WeaverArtifactRoute);
-const teamRoute = child('/team', TeamRoute, searchPassthrough);
+const rolesRoute = child('/roles', RolesRoute, searchPassthrough);
+// The page was named Team before VS-333; old links must keep resolving.
+const teamRedirectRoute = createRoute({
+  getParentRoute: () => wsRoute,
+  path: '/team',
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/w/$ws/roles', params: { ws: (params as { ws: string }).ws } } as never);
+  },
+  component: () => null,
+});
 const workerRoute = child('/workers/$workerId', WorkerRoute);
 const runsRoute = child('/runs', RunsRoute, searchPassthrough);
 const runRoute = child('/runs/$runId', RunRoute);
@@ -203,7 +212,8 @@ const routeTree = rootRoute.addChildren([
     mergeQueueRoute,
     ticketRoute,
     weaverArtifactRoute,
-    teamRoute,
+    rolesRoute,
+    teamRedirectRoute,
     workerRoute,
     runsRoute,
     runRoute,

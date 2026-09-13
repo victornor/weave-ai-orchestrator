@@ -141,7 +141,7 @@ export function buildMapModel(workspaces: readonly MapWorkspaceInput[]): MapMode
         title: r.name,
         workspaceId: w.id,
         workspaceName: w.name,
-        href: `/w/${encodeURIComponent(w.id)}/team`,
+        href: `/w/${encodeURIComponent(w.id)}/roles`,
         projectId: r.projectId,
         projectSlug: project?.slug,
         updatedAt: r.updatedAt,

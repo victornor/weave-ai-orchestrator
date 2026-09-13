@@ -456,6 +456,21 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('SHARED.md + PROJECT.md digest');
   });
 
+  it('names the decision in the weaver\'s wake line (VS-361)', async () => {
+    const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
+    const wake = { id: 'w-d', workspaceId: h.workspaceId, agentId: conductor.id, source: 'system', reason: 'decision plan_approval awaits your review', payload: { decisionId: 'd-42', ticketId }, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [wake], {});
+    expect(prompt).toContain('decision plan_approval awaits your review (decision d-42)');
+  });
+
+  it('leaves a wake without a decision id unchanged in the weaver prompt (VS-361)', async () => {
+    const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
+    const wake = { id: 'w-n', workspaceId: h.workspaceId, agentId: conductor.id, source: 'system', reason: 'digest', payload: {}, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [wake], {});
+    expect(prompt).toContain('- system: digest');
+    expect(prompt).not.toContain('(decision ');
+  });
+
   it('pastes the bootstrap digest for a stale worker session whose home was not re-rendered this turn (VS-244)', async () => {
     const recorded: unknown[][] = [];
     h.services.knowledgeUsage = {

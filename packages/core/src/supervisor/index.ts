@@ -521,8 +521,13 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       }
       // Tickets the conductor filed itself are not news; anything a human or the system created is.
       if (e.type === 'ticket.created') return String(p.createdByKind ?? (p.ticket as { createdByKind?: string } | undefined)?.createdByKind ?? 'human') !== 'agent';
-      // Decisions the conductor itself asked the human are not news to it either.
-      if (e.type === 'decision.created') return String(p.owner ?? (p.decision as { owner?: string } | undefined)?.owner ?? '') !== 'human' || p.askedInRunId == null;
+      // VS-361: a decision is not news to the weaver only when the weaver itself asked it. The old
+      // test — keep when `owner !== 'human' || askedInRunId == null` — dropped every human-owned
+      // decision raised inside a run, which is every worker's plan, merge and action approval.
+      if (e.type === 'decision.created') {
+        const askedBy = p.askedByAgentId ?? (p.decision as { askedByAgentId?: string | null } | undefined)?.askedByAgentId ?? null;
+        return askedBy !== conductor.id;
+      }
       return true;
     });
     if (!relevant.length) return;

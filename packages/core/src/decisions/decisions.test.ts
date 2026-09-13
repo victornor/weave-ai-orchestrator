@@ -756,6 +756,57 @@ describe('decisions', () => {
       }
     });
 
+    it('wakes the weaver at creation for a worker-raised plan, merge or action approval, naming the decision (VS-361)', () => {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      for (const kind of ['plan_approval', 'merge_approval', 'action_approval'] as const) {
+        const d = decisions.create(AGENT, { ticketId: t.id, kind, title: kind, askedByAgentId: workerId, correlationKey: `${kind}:${t.id}` });
+        const call = wake.calls.find((c) => c.agentId === h.conductorId && (c.input.payload as { decisionId?: string })?.decisionId === d.id);
+        expect(call).toBeDefined();
+        expect(call!.input.source).toBe('system');
+        expect(call!.input.reason).toBe(`decision ${kind} awaits your review`);
+        expect(call!.input.payload).toMatchObject({ decisionId: d.id, ticketId: t.id });
+        expect(call!.input.idempotencyKey).toBe(`decision-review:${d.id}`);
+      }
+    });
+
+    it('does not review-wake a review-carrying decision the weaver raised itself (VS-361)', () => {
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan', askedByAgentId: h.conductorId });
+      expect(wake.calls.some((c) => c.input.reason === 'decision plan_approval awaits your review' && (c.input.payload as { decisionId?: string })?.decisionId === d.id)).toBe(false);
+    });
+
+    it('leaves kinds with no weaver review on their existing wake path (VS-361)', () => {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      for (const kind of ['question', 'hire_approval', 'retry_approval'] as const) {
+        const d = decisions.create(AGENT, { ticketId: t.id, kind, title: kind, askedByAgentId: workerId, correlationKey: `${kind}:${newId()}` });
+        expect(wake.calls.some((c) => String(c.input.reason).includes('awaits your review') && (c.input.payload as { decisionId?: string })?.decisionId === d.id)).toBe(false);
+      }
+    });
+
+    it('coalesces two review cards created within a second into one turn (VS-361)', async () => {
+      const { createWakeService } = await import('../wake/index.js');
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      const realWake = createWakeService(h.ctx, h.deps);
+      realWake.cancelForAgent(h.conductorId, 'test: clear queued wakes before the burst');
+      h.services.wake = realWake as never;
+      const a = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'A', askedByAgentId: workerId, correlationKey: `plan_approval:${t.id}` });
+      const b = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'B', askedByAgentId: workerId, correlationKey: `merge_approval:${t.id}` });
+      const rows = h.db.all<{ id: string; status: string }>(
+        "SELECT id, status FROM wakeups WHERE agent_id = ? AND idempotency_key LIKE 'decision-review:%' ORDER BY created_at",
+        [h.conductorId],
+      );
+      expect(rows.filter((r) => r.status === 'queued')).toHaveLength(1);
+      expect(rows.filter((r) => r.status === 'coalesced')).toHaveLength(1);
+      const queuedId = rows.find((r) => r.status === 'queued')!.id;
+      const queued = h.db.get<{ payload: { decisionId?: string; bundle?: Array<{ payload?: { decisionId?: string } }> } }>('SELECT * FROM wakeups WHERE id = ?', [queuedId])!;
+      const ids = [queued.payload.decisionId, ...(queued.payload.bundle ?? []).map((x) => x.payload?.decisionId)];
+      expect(ids).toContain(a.id);
+      expect(ids).toContain(b.id);
+    });
+
     it('lets the conductor mark looked and concerns on plan, merge and action, open or answered', async () => {
       const t = ticket();
       const openPlan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });

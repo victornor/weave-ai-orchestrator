@@ -288,8 +288,15 @@ export async function buildTurnPrompt(
   parts.push(`# Turn ${epoch} for ${agent.name} (${agent.kind}) — ${now}`);
 
   const flat = flattenWakes(wakes);
+  // VS-361: a decision-review wake carries its decision id, and the weaver reviews a card by id, so
+  // name it in the line. Worker wakes (a `decision_answered` carries one too) render as before.
+  const wakeLine = (w: BundledWake): string => {
+    const base = `- ${w.source}: ${w.reason || '(no reason given)'}`;
+    const decisionId = agent.kind === 'weaver' && typeof w.payload.decisionId === 'string' ? w.payload.decisionId : null;
+    return decisionId ? `${base} (decision ${decisionId})` : base;
+  };
   parts.push('\n## Why you were woken');
-  parts.push(bounded(flat, 12, (w) => `- ${w.source}: ${w.reason || '(no reason given)'}`, 'call `weave_inbox` for the rest'));
+  parts.push(bounded(flat, 12, wakeLine, 'call `weave_inbox` for the rest'));
 
   let workerTicket: S.Ticket | null = null;
   if (agent.kind === 'worker' && agent.ticketId) {

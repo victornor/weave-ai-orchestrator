@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-13
+goal: A new plan, merge or action approval wakes the weaver at once for review,
+  instead of waiting up to two minutes for the digest; and the digest stops
+  dropping workers' approval cards

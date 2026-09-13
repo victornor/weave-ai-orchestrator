@@ -1189,6 +1189,18 @@ describe('conductor digest run summaries (VS-245)', () => {
     expect(events.some((e) => e.summaryOmitted === 'digest_cap')).toBe(true);
     expect(events.length).toBeLessThanOrEqual(30);
   });
+
+  it('keeps a worker-raised human-owned approval and a system-raised one, and drops a decision the weaver asked (VS-361)', async () => {
+    const workerId = h.addWorker(null);
+    h.ctx.events.emit('decision.created', 'decision', 'd-worker', { kind: 'merge_approval', owner: 'human', askedByAgentId: workerId, askedInRunId: 'run-1' });
+    h.ctx.events.emit('decision.created', 'decision', 'd-system', { kind: 'plan_approval', owner: 'human', askedByAgentId: null, askedInRunId: null });
+    h.ctx.events.emit('decision.created', 'decision', 'd-weaver', { kind: 'question', owner: 'human', askedByAgentId: h.conductorId, askedInRunId: 'run-weaver' });
+    await supervisor.tick();
+    const ids = digestEvents().map((e) => e.entityId);
+    expect(ids).toContain('d-worker');
+    expect(ids).toContain('d-system');
+    expect(ids).not.toContain('d-weaver');
+  });
 });
 
 /**

@@ -15,13 +15,13 @@ describe('decisions', () => {
   let decisions: DecisionsService;
   let wake: ReturnType<typeof fakeWake>;
   let knowledge: { appendDecision: ReturnType<typeof vi.fn> };
-  let roles: { activate: ReturnType<typeof vi.fn> };
+  let roles: { activate: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     h = makeHarness();
     wake = fakeWake();
     knowledge = { appendDecision: vi.fn() };
-    roles = { activate: vi.fn(async () => ({ id: 'role' })) };
+    roles = { activate: vi.fn(async () => ({ id: 'role' })), update: vi.fn(async () => ({ role: { id: 'role' }, changedKeys: [], charterRewritten: false, reBriefed: 0 })) };
     h.services.wake = wake as never;
     h.services.knowledge = knowledge as never;
     h.services.roles = roles as never;
@@ -305,6 +305,29 @@ describe('decisions', () => {
       options: [{ key: 'approve', label: 'Approve' }, { key: 'reject', label: 'Reject' }],
     });
     await expect(decisions.answer(HUMAN, d2.id, { key: 'runtime:codex' })).rejects.toMatchObject({ code: 'validation' });
+  });
+
+  // VS-335: a permission change reuses the hire_approval kind but must apply the carried patch, never
+  // activate the already-live role or start the project's describe scout.
+  it('a role-permission approval applies the stored patch instead of activating the role', async () => {
+    const patch = { permission: { mode: 'restricted', allowed: [], denied: [] } };
+    const d = decisions.create(HUMAN, {
+      kind: 'hire_approval', title: 'Change permission for Backend Engineer?', correlationKey: `role-permission:${h.roleId}`,
+      target: { roleId: h.roleId, permissionChange: true, patch, reason: 'tighten it', applyToRunning: true },
+      options: [{ key: 'approve', label: 'Approve' }, { key: 'reject', label: 'Reject' }],
+    });
+    await decisions.answer(HUMAN, d.id, { key: 'approve' });
+    expect(roles.update).toHaveBeenCalledWith(HUMAN, h.roleId, patch, 'tighten it', { applyToRunning: true });
+    expect(roles.activate).not.toHaveBeenCalled();
+
+    const reject = decisions.create(HUMAN, {
+      kind: 'hire_approval', title: 'Change permission again?', correlationKey: `role-permission:${h.roleId}-again`,
+      target: { roleId: h.roleId, permissionChange: true, patch, reason: 'tighten it' },
+      options: [{ key: 'approve', label: 'Approve' }, { key: 'reject', label: 'Reject' }],
+    });
+    roles.update.mockClear();
+    await decisions.answer(HUMAN, reject.id, { key: 'reject' });
+    expect(roles.update).not.toHaveBeenCalled();
   });
 
   it('discard approval marks the ticket and notifies the conductor', async () => {

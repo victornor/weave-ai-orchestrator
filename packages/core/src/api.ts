@@ -209,11 +209,33 @@ export interface CommitDetail {
   sha: string; parents: string[]; author: string; email: string; authoredAt: string; committedAt: string;
   message: string; files: CommitFile[]; truncatedFiles: number; forgeUrl: string | null;
 }
+/** What one role spec update wrote (VS-335). */
+export interface RoleUpdateResult {
+  role: S.Role;
+  /** The fields whose value actually changed, in patch order. */
+  changedKeys: string[];
+  /** True when `CHARTER.md` was the spec template's rendering and was refreshed from the new spec. */
+  charterRewritten: boolean;
+  /** Live workers of the role whose brief was re-rendered because `applyToRunning` was set. */
+  reBriefed: number;
+}
+/** A spec update that may have been held for approval (VS-335): a `permission` change is not applied until the hire policy's decision is approved. */
+export interface RoleUpdateRequestResult extends RoleUpdateResult {
+  decisionId: string | null;
+  /** False when the patch is waiting on the approval decision; the role is unchanged until then. */
+  applied: boolean;
+}
 export interface RolesService {
   list(projectId?: string): S.Role[]; get(id: string): S.Role;
   hire(actor: Actor, spec: S.RoleSpec, opts?: { autoActivate?: boolean }): Promise<{ role: S.Role; decisionId: string | null }>;
   activate(actor: Actor, id: string): Promise<S.Role>;
-  update(actor: Actor, id: string, patch: Partial<S.RoleSpec>, reason: string, opts?: { applyToRunning?: boolean }): Promise<S.Role>;
+  update(actor: Actor, id: string, patch: Partial<S.RoleSpec>, reason: string, opts?: { applyToRunning?: boolean }): Promise<RoleUpdateResult>;
+  /**
+   * The tool/route-facing write (VS-335): refuses `id`/`project` as immutable and `secrets`/`maxWorkers`
+   * as owned by their own tools, and holds a patch that changes `permission` for the approval the hire
+   * policy asks for instead of applying it directly.
+   */
+  requestUpdate(actor: Actor, id: string, patch: Partial<S.RoleSpec>, reason: string, opts?: { applyToRunning?: boolean }): Promise<RoleUpdateRequestResult>;
   updateCharter(actor: Actor, id: string, charter: string, reason: string, opts?: { applyToRunning?: boolean }): Promise<S.Role>;
   /** Replace the role's secret names (VS-92). Refused in full if any name is not registered, so a role can never list a secret its workers would silently not get. */
   setSecrets(actor: Actor, id: string, names: string[], reason: string): Promise<S.Role>;

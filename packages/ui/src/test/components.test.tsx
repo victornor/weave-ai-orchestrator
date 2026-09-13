@@ -600,6 +600,18 @@ describe('DecisionCard', () => {
       for (const call of onAnswer.mock.calls) expect(validKeys('hire_approval')).toContain(call[0]?.key);
     });
 
+    // VS-335: a permission change on an existing role reuses the hire_approval kind but must not read
+    // as hiring the role again.
+    it('hire_approval for a role permission change: Approve, not Hire', () => {
+      const onAnswer = vi.fn();
+      render(<DecisionCard decision={decision({ kind: 'hire_approval', target: { roleId: 'role1', permissionChange: true } })} onAnswer={onAnswer} />);
+      expect(screen.queryByRole('button', { name: 'Hire' })).not.toBeInTheDocument();
+      expect(screen.getByText('Role approval')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+      expect(onAnswer).toHaveBeenCalledTimes(1);
+      expect(onAnswer.mock.calls[0]?.[0]?.key).toBe(NAMED_CARD_OPTION_KEYS.hire_approval.approve);
+    });
+
     it('discard_approval: Discard', () => {
       const onAnswer = vi.fn();
       render(<DecisionCard decision={decision({ kind: 'discard_approval' })} ticketIdentifier="ACME-42" onAnswer={onAnswer} />);

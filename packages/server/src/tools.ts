@@ -703,6 +703,16 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx, i) => svc(ctx).roles.hire(ctx.actor, i),
   },
   {
+    name: 'weave_role_update', scope: 'weaver', input: z.object({
+      id: z.string().min(1),
+      patch: RoleSpecSchema.partial().strict(),
+      reason: z.string().min(1),
+      applyToRunning: z.boolean().optional(),
+    }),
+    description: 'Edit a role\'s spec fields — the short description (`charterSummary`), `scope`, `responsibilities`, `capabilities`, `exclusions`, `rules`, `sessionPolicy`, `permission`, `notes`, `name`, `title` and `icon`. `id` and `project` are immutable; `secrets` and `maxWorkers` are changed with weave_role_set_secrets and weave_role_set_max_workers. Use weave_role_update_charter for the charter prose. A change to `permission` is security-sensitive and follows the hire policy: it is raised as an approval and applies only once approved (with hireApproval none it applies directly). `applyToRunning` re-briefs live workers from the new spec immediately. The result says whether a spec-rendered charter was rewritten — if it says the charter was left alone, it was written by hand and must be updated with weave_role_update_charter.',
+    handler: (ctx, i) => svc(ctx).roles.requestUpdate(ctx.actor, i.id, i.patch, i.reason, { applyToRunning: i.applyToRunning }),
+  },
+  {
     name: 'weave_role_update_charter', scope: 'weaver', input: z.object({ id: z.string().min(1), charter: z.string().min(1), reason: z.string().min(1), applyToRunning: z.boolean().optional() }),
     description: 'Replace a role charter, creating a new role revision. applyToRunning re-briefs live workers on their next turn.',
     handler: (ctx, i) => svc(ctx).roles.updateCharter(ctx.actor, i.id, i.charter, i.reason, { applyToRunning: i.applyToRunning }),
@@ -716,7 +726,7 @@ export const TOOLS: ToolDef[] = [
     name: 'weave_role_set_max_workers', scope: 'weaver',
     input: z.object({ id: z.string().min(1), maxWorkers: z.number().int().min(1).max(32), reason: z.string().min(1) }),
     description: 'Change how many workers a role may run at once, as a new role revision. Raising it takes effect on the next spawn sweep; lowering it never cancels a live worker, it only stops new spawns. The project limit still applies, so the effective concurrency is the smaller of the two.',
-    handler: async (ctx, i) => ({ role: await svc(ctx).roles.update(ctx.actor, i.id, { maxWorkers: i.maxWorkers }, i.reason), concurrency: svc(ctx).roles.concurrency(i.id) }),
+    handler: async (ctx, i) => ({ role: (await svc(ctx).roles.update(ctx.actor, i.id, { maxWorkers: i.maxWorkers }, i.reason)).role, concurrency: svc(ctx).roles.concurrency(i.id) }),
   },
   {
     name: 'weave_role_pause', scope: 'weaver', input: z.object({ id: z.string().min(1), reason: z.string().min(1) }),

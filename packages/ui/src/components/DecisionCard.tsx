@@ -239,11 +239,16 @@ export function DecisionCard({ decision, ticketIdentifier, projectLabel, project
   const inert = decision.status !== 'open';
   const optionList = !NAMED_VARIANTS.includes(decision.kind) && decision.options.length > 0;
   const auto = !inert && autoApproving === true && (decision.kind === 'plan_approval' || decision.kind === 'merge_approval');
+  // VS-335: a permission change on an existing role reuses the hire_approval kind; the target says so,
+  // so the card reads as approving a role change rather than hiring the role anew.
+  const rolePermissionChange = decision.kind === 'hire_approval' && (decision.target as Record<string, unknown> | null)?.permissionChange === true;
   const head = inert
     ? { label: answered ? 'Answered' : statusLabel(decision.status), status: (answered ? 'done' : 'blocked') as UiStatus }
     : decision.kind === 'question' && asker === 'weaver'
       ? { label: 'Weaver asks', status: 'needs-you' as UiStatus }
-      : (HEAD[decision.kind] ?? HEAD['approval']!);
+      : rolePermissionChange
+        ? { label: 'Role approval', status: 'needs-you' as UiStatus }
+        : (HEAD[decision.kind] ?? HEAD['approval']!);
 
   // Every required input filled is what unlocks the send; the card names the first one still missing
   // rather than leaving a disabled button with no explanation.
@@ -585,7 +590,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectLabel, project
           ) : decision.kind === 'hire_approval' ? (
             <>
               <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0} onClick={() => answer(NAMED_CARD_OPTION_KEYS.hire_approval.approve)}>
-                Hire
+                {rolePermissionChange ? 'Approve' : 'Hire'}
               </Button>
               <Button variant="secondary" size="thumb" compact={compact} className="w-24" disabled={busy} onClick={() => answer(NAMED_CARD_OPTION_KEYS.hire_approval.reject)}>
                 Reject

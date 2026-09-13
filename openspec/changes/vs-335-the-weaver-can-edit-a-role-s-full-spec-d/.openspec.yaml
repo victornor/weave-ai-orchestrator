@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: The weaver can edit a role's full spec (description, scope,
+  responsibilities and the rest), not only its charter

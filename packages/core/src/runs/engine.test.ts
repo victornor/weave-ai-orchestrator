@@ -2000,6 +2000,33 @@ describe('run engine', () => {
       expect(spy).not.toHaveBeenCalled();
     });
   });
+
+  describe('republishing a revised plan at turn end (VS-364)', () => {
+    beforeEach(() => { h.services.tickets = createTicketsService(h.ctx, h.deps); });
+
+    it('asks the tickets service to republish after a worker turn on a ticket', async () => {
+      const ticketId = seedTicket(h, { status: 'proposed', kind: 'change' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      const spy = vi.spyOn(h.services.tickets!, 'republishRevisedPlan').mockResolvedValue({ republished: false, reason: 'unchanged' });
+      runtime.queue.push({ structured: { state: 'idle', summary: 'nothing changed', tickets: [], knowledge: { recorded: false, reason: 'no-op' } } });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_comment', reason: 'go' });
+
+      await runOnce(workerId);
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith({ kind: 'system', id: null }, ticketId);
+    });
+
+    it('does not republish for a turn whose agent holds no ticket', async () => {
+      const spy = vi.spyOn(h.services.tickets!, 'republishRevisedPlan').mockResolvedValue({ republished: false, reason: 'not proposed' });
+      runtime.queue.push({ structured: { state: 'idle', summary: 'hello', tickets: [], knowledge: { recorded: false, reason: 'no-op' } } });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'hi' });
+
+      await runOnce(h.conductorId);
+
+      expect(spy).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('dispatcher', () => {

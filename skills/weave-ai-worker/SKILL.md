@@ -34,6 +34,8 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 
 For `change` tickets also load `weave-ai-openspec` — it holds the propose/apply mapping and what never to do.
 
+While a `change` ticket is `proposed`, you can be woken to answer weaver concerns or steering. Revise the planning artifacts; you do not transition the ticket. The daemon republishes the changed plan at the end of your turn, superseding the held approval with a fresh one. Never move the ticket back to `proposing` by hand — requesting `proposed` applies only when the ticket is already in `proposing` (the `revise` path).
+
 ## A task's ending matches what it produced
 
 - **You produced a diff that should land** → deliver per `references/delivery.md` → `in_review`, exactly as always.

@@ -87,6 +87,13 @@ export interface TicketsService {
   livenessViolations(): S.Ticket[];
   /** A `proposed` change ticket or a non-`auto_merge` `in_review` ticket with no open approval gets a fresh one, raised as the daemon. Returns what it repaired. */
   repairApprovals(): Promise<Array<{ id: string; identifier: string; kind: 'plan_approval' | 'merge_approval' | 'action_approval' }>>;
+  /**
+   * VS-364: called at the end of a worker's turn. When the ticket is still `proposed`, re-renders the
+   * plan from the worker's worktree and, if it differs from the stored `plan` document and validates,
+   * publishes the new revision and raises a fresh approval exactly as the `proposing → proposed`
+   * transition does. Never throws; the returned `republished`/`reason` says what it did.
+   */
+  republishRevisedPlan(actor: Actor, ticketId: string): Promise<{ republished: boolean; reason: string }>;
   /** Move `in_review` tickets with auto_merge on to `merging` once their delivery is ready (local-branch: immediately; pr: CI green or no CI). Returns how many advanced. */
   autoMergeSweep(): Promise<number>;
   nextIdentifier(): string;

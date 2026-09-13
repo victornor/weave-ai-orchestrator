@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DELIVERY_MODES, MERGE_METHODS, APPROVAL_OWNERS, ARCHIVE_COMMITS, SESSION_POLICIES, PERMISSION_MODES, WORKTREE_PROVIDERS } from './enums.js';
+import type { ModelSource } from './enums.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'kebab-case slug');
 const envRef = z.string().regex(/^\$\{[A-Z0-9_]+\}$/, 'must be an ${ENV_VAR} reference, never a literal secret');
@@ -226,13 +227,15 @@ export const WorkspaceModelsSchema = withKeyAlias(z.object({
 export type WorkspaceModels = z.infer<typeof WorkspaceModelsSchema>;
 
 /**
- * `PUT /models` body: `workerOptions` omitted means keep the existing catalog; an explicit array
- * (including `[]`) replaces it. Conductor and workers are still required, matching the two-setting PUT.
+ * `PUT /models` body (VS-356): each control is independent. `undefined`/omitted leaves the stored
+ * value; `null` clears it back to inherit; a value overrides it. `workerOptions` may be an array to
+ * replace the catalog, `null` (or `[]`) to clear it to inherit the daemon catalog, or omitted to
+ * keep it. An old body carrying both `weaver` and `workers` still writes both.
  */
 export const WorkspaceModelsPutSchema = withKeyAlias(z.object({
-  weaver: ModelSettingSchema,
-  workers: ModelSettingSchema,
-  workerOptions: WorkerOptionsArraySchema.optional(),
+  weaver: ModelSettingSchema.nullish(),
+  workers: ModelSettingSchema.nullish(),
+  workerOptions: WorkerOptionsArraySchema.nullish(),
 }), 'conductor', 'weaver');
 export type WorkspaceModelsPut = z.infer<typeof WorkspaceModelsPutSchema>;
 
@@ -256,6 +259,20 @@ export const DEFAULT_WORKSPACE_MODELS: EffectiveModels = {
   workers: DEFAULT_MODEL_SETTING,
   workerOptions: [],
 };
+
+/** Where each effective control comes from (VS-356): `'workspace'` stored, `'daemon'` overlay, else `'default'`. */
+export interface WorkspaceModelsSource {
+  weaver: ModelSource;
+  workers: ModelSource;
+  workerOptions: ModelSource;
+}
+
+/**
+ * The workspace models wire shape (VS-356): the effective values plus, additively, where each
+ * control came from, so a client can tell an inherited value from a pinned one that happens to be
+ * equal. `EffectiveModels` itself stays source-free — it is what a turn resolves on.
+ */
+export type WorkspaceModelsView = EffectiveModels & { source: WorkspaceModelsSource };
 
 export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
   proposalApproval: legacyApprovalOwner.default('human'),

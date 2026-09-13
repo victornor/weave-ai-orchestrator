@@ -526,7 +526,12 @@ describe('real core services over HTTP', () => {
     const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
 
     const before = await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json();
-    expect(before).toEqual({ weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
+    expect(before).toEqual({
+      weaver: { runtime: 'claude', model: null },
+      workers: { runtime: 'claude', model: null },
+      workerOptions: [],
+      source: { weaver: 'default', workers: 'default', workerOptions: 'default' },
+    });
 
     const next = {
       weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
@@ -534,8 +539,9 @@ describe('real core services over HTTP', () => {
     };
     const put = await app.fetch(new Request(`${base}/models`, { method: 'PUT', headers: H, body: JSON.stringify(next) }));
     expect(put.status).toBe(200);
-    expect(await put.json()).toEqual({ ...next, workerOptions: [] });
-    expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json()).toEqual({ ...next, workerOptions: [] });
+    const expected = { ...next, workerOptions: [], source: { weaver: 'workspace', workers: 'workspace', workerOptions: 'default' } };
+    expect(await put.json()).toEqual(expected);
+    expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json()).toEqual(expected);
   });
 
   it('accepts a legacy conductor-keyed body and responds with weaver (VS-263)', async () => {
@@ -610,6 +616,71 @@ describe('real core services over HTTP', () => {
     expect(res.status).toBe(400);
     expect(await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json())
       .toMatchObject({ weaver: { runtime: 'claude' } });
+  });
+
+  it('changes only the control a PUT names and reports each source (VS-356)', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+
+    const put = await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H,
+      body: JSON.stringify({ weaver: { runtime: 'claude', model: 'weaver-model' } }),
+    }));
+    expect(put.status).toBe(200);
+    expect(await put.json()).toMatchObject({
+      weaver: { runtime: 'claude', model: 'weaver-model' },
+      source: { weaver: 'workspace', workers: 'default', workerOptions: 'default' },
+    });
+
+    // A daemon overlay filled later governs the control nobody overrode.
+    harness.ctx.daemon.models = { workers: { runtime: 'codex', model: 'daemon-workers' } };
+    const afterOverlay = await (await app.fetch(new Request(`${base}/models`, { headers: H }))).json();
+    expect(afterOverlay.workers).toEqual({ runtime: 'codex', model: 'daemon-workers' });
+    expect(afterOverlay.source.workers).toBe('daemon');
+
+    // `null` clears the override so it inherits again.
+    const cleared = await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H, body: JSON.stringify({ weaver: null }),
+    }));
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({ source: { weaver: 'default' } });
+  });
+
+  it('keeps a stored control when a PUT omits it (VS-356)', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+    await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H, body: JSON.stringify({ workers: { runtime: 'codex', model: 'gpt-5' } }),
+    }));
+    const after = await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H, body: JSON.stringify({ weaver: { runtime: 'claude', model: 'weaver' } }),
+    }));
+    expect(await after.json()).toMatchObject({
+      workers: { runtime: 'codex', model: 'gpt-5' },
+      source: { weaver: 'workspace', workers: 'workspace' },
+    });
+  });
+
+  it('clears the worker-options catalog with null to inherit the daemon catalog (VS-356)', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+    const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
+    const daemonOpt = { id: 'daemon', description: 'Daemon.', runtime: 'claude', model: 'opus' };
+    harness.ctx.daemon.models = { workerOptions: [daemonOpt] };
+
+    expect((await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H, body: JSON.stringify({ workerOptions: [cheap] }),
+    }))).status).toBe(200);
+    const cleared = await app.fetch(new Request(`${base}/models`, {
+      method: 'PUT', headers: H, body: JSON.stringify({ workerOptions: null }),
+    }));
+    expect(cleared.status).toBe(200);
+    const body = await cleared.json();
+    expect(body.workerOptions).toEqual([daemonOpt]);
+    expect(body.source.workerOptions).toBe('daemon');
   });
 
   it('routes no way to set a runtime or a model anywhere else', async () => {

@@ -48,6 +48,10 @@ export type ApprovalOwner = (typeof APPROVAL_OWNERS)[number];
 export const ARCHIVE_COMMITS = ['push', 'pr', 'local'] as const;
 export type ArchiveCommit = (typeof ARCHIVE_COMMITS)[number];
 
+/** Where a workspace's effective model control comes from: its own value, a daemon overlay, or the schema default (VS-356). */
+export const MODEL_SOURCES = ['workspace', 'daemon', 'default'] as const;
+export type ModelSource = (typeof MODEL_SOURCES)[number];
+
 export const DECISION_KINDS = ['approval', 'question', 'concern', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval', 'retry_approval', 'action_approval'] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 

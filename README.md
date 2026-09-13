@@ -355,7 +355,7 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | `weave specs list \| show <capability> \| changes [name] \| search <q> \| explore [project]` | the spec index |
 | `weave worktree list \| verify <id> \| discard <id> [--force]` | worktrees and landed-work verdicts |
 | `weave weaver show \| reset-session` | the weave agent |
-| `weave models` · `weave models set conductor\|workers --runtime <id> --model <id\|default> [--effort <e>]` · `weave models options add\|set\|remove` | the workspace's two model settings and the worker-options catalog |
+| `weave models` · `weave models set conductor\|weaver\|workers --runtime <id> --model <id\|default> [--effort <e>]` · `weave models inherit conductor\|weaver\|workers\|options` · `weave models options add\|set\|remove` | the workspace's two model settings and the worker-options catalog; each control writes on its own, inherit clears one |
 | `weave presentation status \| set <path> <value> \| reconcile \| open` | where agents are shown |
 | `weave presenter [--surface tmux\|hyprland\|herdr\|headless] [--once]` | run this on the machine you look at |
 

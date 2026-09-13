@@ -10,6 +10,17 @@ const state = vi.hoisted(() => ({
   modelWrites: [] as unknown[],
   daemonWrites: [] as unknown[],
   plugins: [] as Array<{ id: string; version: string | null; source: string; loaded: boolean; error: string | null }>,
+  workspaceModels: {
+    weaver: { runtime: 'claude', model: 'opus', effort: 'max' },
+    workers: { runtime: 'claude', model: 'sonnet', effort: 'high' },
+    workerOptions: [] as unknown[],
+    source: { weaver: 'workspace', workers: 'workspace', workerOptions: 'default' },
+  } as Record<string, unknown>,
+  daemonModels: {
+    weaver: { runtime: 'claude', model: 'opus', effort: 'high' },
+    workers: null,
+    workerOptions: null as unknown[] | null,
+  } as Record<string, unknown>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -40,13 +51,9 @@ vi.mock('../api/hooks', () => ({
   useIncidents: () => ({ data: { items: [] } }),
   useRuntimes: () => ({ data: [{ id: 'claude', displayName: 'Claude Code', detection: { status: 'available' }, capabilities: {} }] }),
   useRuntimeModels: () => ({ data: [] }),
-  useDaemonModels: () => ({ data: { weaver: { runtime: 'claude', model: 'opus', effort: 'high' }, workers: null, workerOptions: null } }),
+  useDaemonModels: () => ({ data: state.daemonModels }),
   useSetDaemonModels: () => ({ mutate: (v: unknown) => state.daemonWrites.push(v) }),
-  useModels: () => ({ isLoading: false, data: {
-    weaver: { runtime: 'claude', model: 'opus', effort: 'max' },
-    workers: { runtime: 'claude', model: 'sonnet', effort: 'high' },
-    workerOptions: [],
-  } }),
+  useModels: () => ({ isLoading: false, data: state.workspaceModels }),
   useSetModels: () => ({ mutate: (v: unknown) => state.modelWrites.push(v) }),
   useWorkspaceSummary: () => ({ data: { workspace: { id: 'acme', name: 'Acme', ticketPrefix: 'ACME' }, config: {}, plugins: state.plugins } }),
   usePatchConfig: () => ({ mutate: () => undefined, mutateAsync: async () => undefined }),
@@ -73,6 +80,17 @@ beforeEach(() => {
   state.modelWrites = [];
   state.daemonWrites = [];
   state.plugins = [];
+  state.workspaceModels = {
+    weaver: { runtime: 'claude', model: 'opus', effort: 'max' },
+    workers: { runtime: 'claude', model: 'sonnet', effort: 'high' },
+    workerOptions: [],
+    source: { weaver: 'workspace', workers: 'workspace', workerOptions: 'default' },
+  };
+  state.daemonModels = {
+    weaver: { runtime: 'claude', model: 'opus', effort: 'high' },
+    workers: null,
+    workerOptions: null,
+  };
 });
 
 describe('the V2 Settings scope and section rows', () => {
@@ -114,7 +132,7 @@ describe('every listed section renders a real body', () => {
     updates: 'updates-body', security: 'security-body', 'host-tools': 'host-tools-body',
     dictation: 'dictation-body', device: 'device-note-body',
     general: 'Ticket prefix', weaver: 'Reviews every approval before you see it',
-    models: 'Overridden here: 2 agents, 0 worker options.', projects: 'projects-body', knowledge: 'Curation',
+    models: 'Overridden here: 2 agents, 0 worker-options catalogs.', projects: 'projects-body', knowledge: 'Curation',
     approvals: 'YOLO mode', channels: 'channels-body', presentation: 'presentation-body',
     plugins: 'No plugins are configured for this workspace, or the daemon.',
   };
@@ -178,17 +196,81 @@ describe('the workspace model overrides', () => {
   it('marks an override, names its diff and counts it', () => {
     state.search = { scope: 'acme', section: 'models' };
     render(<V2Settings />);
-    expect(screen.getByText('Overridden here: 2 agents, 0 worker options.')).toBeInTheDocument();
+    expect(screen.getByText('Overridden here: 2 agents, 0 worker-options catalogs.')).toBeInTheDocument();
     expect(screen.getByText('Overrides thinking high → max.')).toBeInTheDocument();
     expect(screen.getAllByText('overridden').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('resets a control to the daemon value', () => {
+  it('takes the tag from the source, not from a value that happens to be equal', () => {
+    // Effective weaver equals the daemon's value, but the API says the workspace stores it.
+    state.workspaceModels = {
+      weaver: { runtime: 'claude', model: 'opus', effort: 'high' },
+      workers: { runtime: 'claude', model: 'sonnet' },
+      workerOptions: [],
+      source: { weaver: 'workspace', workers: 'workspace', workerOptions: 'default' },
+    };
     state.search = { scope: 'acme', section: 'models' };
     render(<V2Settings />);
-    const reset = screen.getAllByText('Reset to daemon')[0]!;
-    fireEvent.click(reset);
-    const write = state.modelWrites.at(-1) as { weaver: { effort?: string }; workers: { runtime: string } };
-    expect([write.weaver.effort, write.workers.runtime]).toContain('high');
+    expect(screen.getByText('Overridden here: 2 agents, 0 worker-options catalogs.')).toBeInTheDocument();
+    expect(screen.getAllByText('overridden')).toHaveLength(2);
+  });
+
+  it('resets a control by clearing only it', () => {
+    state.search = { scope: 'acme', section: 'models' };
+    render(<V2Settings />);
+    fireEvent.click(screen.getAllByText('Reset to daemon')[0]!);
+    expect(state.modelWrites.at(-1)).toEqual({ weaver: null });
+  });
+
+  it('shows an inherited catalog and overrides it as a whole', () => {
+    const daemonOpt = { id: 'deep', description: 'Hard tickets.', runtime: 'opencode', model: 'glm-4.6' };
+    state.daemonModels = { weaver: null, workers: null, workerOptions: [daemonOpt] };
+    state.search = { scope: 'acme', section: 'models' };
+    render(<V2Settings />);
+    expect(screen.getByText('deep')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Override'));
+    expect(state.modelWrites.at(-1)).toEqual({ workerOptions: [daemonOpt] });
+  });
+
+  it('resets an overridden catalog by clearing it', () => {
+    const ownOpt = { id: 'deep', description: 'Hard tickets.', runtime: 'opencode', model: 'glm-4.6' };
+    state.workspaceModels = {
+      weaver: { runtime: 'claude', model: 'opus' },
+      workers: { runtime: 'claude', model: 'sonnet' },
+      workerOptions: [ownOpt],
+      source: { weaver: 'daemon', workers: 'daemon', workerOptions: 'workspace' },
+    };
+    state.search = { scope: 'acme', section: 'models' };
+    render(<V2Settings />);
+    fireEvent.click(screen.getByText('Reset to daemon'));
+    expect(state.modelWrites.at(-1)).toEqual({ workerOptions: null });
+  });
+
+  it('starts a catalog when the daemon has none, writing only on the first option (VS-356 review)', () => {
+    // The default daemon has no worker options, so Override must enter local editing rather than
+    // write an empty catalog that would just clear again.
+    state.search = { scope: 'acme', section: 'models' };
+    render(<V2Settings />);
+    expect(screen.getByText('The daemon has no worker options.')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Override'));
+    expect(state.modelWrites).toHaveLength(0);
+    const addOption = screen.getByRole('button', { name: /Add option/ });
+    fireEvent.click(addOption);
+    fireEvent.change(screen.getByLabelText('New option id'), { target: { value: 'quick' } });
+    fireEvent.change(screen.getByLabelText('New option description'), { target: { value: 'Fastest.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(state.modelWrites.at(-1)).toEqual({
+      workerOptions: [{ id: 'quick', description: 'Fastest.', runtime: 'claude', model: null }],
+    });
+  });
+
+  it('cancel returns an empty catalog to inherited (VS-356 review)', () => {
+    state.search = { scope: 'acme', section: 'models' };
+    render(<V2Settings />);
+    fireEvent.click(screen.getByText('Override'));
+    expect(screen.getByRole('button', { name: /Add option/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Cancel'));
+    expect(screen.queryByRole('button', { name: /Add option/ })).not.toBeInTheDocument();
+    expect(state.modelWrites).toHaveLength(0);
   });
 });

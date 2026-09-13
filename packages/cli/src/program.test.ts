@@ -57,7 +57,7 @@ describe('command tree', () => {
     ['presentation', ['set', 'open', 'reconcile', 'status']],
     ['weaver', ['show', 'reset-session']],
     // Model selection, whole and entire (VS-77).
-    ['models', ['show', 'set', 'options']],
+    ['models', ['show', 'set', 'inherit', 'options']],
     ['workspace', ['list', 'use', 'register', 'unregister', 'set-default', 'pause', 'resume', 'export', 'import']],
     ['runs', ['list', 'show', 'tail', 'cancel']],
     ['knowledge', ['show', 'edit', 'note', 'lint', 'curate', 'revert']],
@@ -372,7 +372,7 @@ describe('running commands against a stubbed daemon', () => {
     expect(seen).toContain('GET /api/w/acme/models');
   });
 
-  it('sends the whole block with one setting changed, so the other is not dropped', async () => {
+  it('sends only the changed control, so the other agent is not pinned (VS-356)', async () => {
     const models = { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } };
     let put: unknown = null;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -380,13 +380,55 @@ describe('running commands against a stubbed daemon', () => {
       return new Response(JSON.stringify(models), { status: 200 });
     }) as typeof fetch;
     await buildProgram().parseAsync([...base, 'models', 'set', 'workers', '--runtime', 'codex', '--model', 'gpt-5']);
-    expect(put).toEqual({
-      weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
-      workers: { runtime: 'codex', model: 'gpt-5' },
-    });
+    expect(put).toEqual({ workers: { runtime: 'codex', model: 'gpt-5' } });
   });
 
-  it('adds a worker option by GET-then-PUT of the whole block (VS-162)', async () => {
+  it('clears one control back to inherit with models inherit (VS-356)', async () => {
+    const models = { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'codex', model: null } };
+    let put: unknown = null;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') { put = JSON.parse(String(init?.body)); return new Response(JSON.stringify(put), { status: 200 }); }
+      return new Response(JSON.stringify(models), { status: 200 });
+    }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'models', 'inherit', 'workers']);
+    expect(put).toEqual({ workers: null });
+  });
+
+  it('accepts weaver as the weaver control name, with conductor as an alias (VS-356)', async () => {
+    const models = { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'codex', model: null } };
+    const puts: unknown[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') { const body = JSON.parse(String(init?.body)); puts.push(body); return new Response(JSON.stringify(body), { status: 200 }); }
+      return new Response(JSON.stringify(models), { status: 200 });
+    }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'models', 'inherit', 'weaver']);
+    await buildProgram().parseAsync([...base, 'models', 'inherit', 'conductor']);
+    expect(puts).toEqual([{ weaver: null }, { weaver: null }]);
+  });
+
+  it('models set accepts weaver as the weaver control name (VS-356)', async () => {
+    const models = { weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } };
+    let put: unknown = null;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') { put = JSON.parse(String(init?.body)); return new Response(JSON.stringify(put), { status: 200 }); }
+      return new Response(JSON.stringify(models), { status: 200 });
+    }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'models', 'set', 'weaver', '--model', 'claude-opus-5']);
+    expect(put).toEqual({ weaver: { runtime: 'claude', model: 'claude-opus-5' } });
+  });
+
+  it('clears the option catalog back to inherit (VS-356)', async () => {
+    const models = { weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] as unknown[] };
+    let put: unknown = null;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') { put = JSON.parse(String(init?.body)); return new Response(JSON.stringify(put), { status: 200 }); }
+      return new Response(JSON.stringify(models), { status: 200 });
+    }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'models', 'inherit', 'options']);
+    expect(put).toEqual({ workerOptions: null });
+  });
+
+  it('adds a worker option by GET-then-PUT of only the catalog (VS-162, VS-356)', async () => {
     const models = { weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] as unknown[] };
     let put: unknown = null;
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -395,8 +437,6 @@ describe('running commands against a stubbed daemon', () => {
     }) as typeof fetch;
     await buildProgram().parseAsync([...base, 'models', 'options', 'add', '--id', 'cheap', '--description', 'Scouts.', '--runtime', 'opencode', '--model', 'glm-4.6']);
     expect(put).toEqual({
-      weaver: { runtime: 'claude', model: null },
-      workers: { runtime: 'claude', model: null },
       workerOptions: [{ id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' }],
     });
   });
@@ -422,8 +462,24 @@ describe('running commands against a stubbed daemon', () => {
       return new Response(JSON.stringify(models), { status: 200 });
     }) as typeof fetch;
     await buildProgram().parseAsync([...base, 'models', 'set', 'conductor', '--model', 'claude-opus-5']);
-    expect(put).toEqual({ weaver: { runtime: 'claude', model: 'claude-opus-5' }, workers: { runtime: 'claude', model: null } });
+    expect(put).toEqual({ weaver: { runtime: 'claude', model: 'claude-opus-5' } });
     expect(process.exitCode).not.toBe(1);
+  });
+
+  it('models show prints each control source (VS-356)', async () => {
+    stubFetch({
+      '/api/w/acme/models': {
+        weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
+        workers: { runtime: 'codex', model: null },
+        workerOptions: [],
+        source: { weaver: 'workspace', workers: 'daemon', workerOptions: 'default' },
+      },
+    });
+    configureOutput({ json: false, color: false });
+    await buildProgram().parseAsync([...base.filter((a) => a !== '--json'), 'models', 'show']);
+    const text = written.join('');
+    expect(text).toMatch(/conductor[^\n]*workspace/);
+    expect(text).toMatch(/workers[^\n]*daemon/);
   });
 
   it('daemon models set sends the overlay (VS-185)', async () => {

@@ -1,4 +1,5 @@
 import type * as E from './enums.js';
+import type { TestTally } from './test-summary.js';
 
 export interface Workspace { id: string; slug: string; name: string; ticketPrefix: string; status: E.WorkspaceStatus; rootPath: string; createdAt: string; updatedAt: string }
 export interface Project { id: string; workspaceId: string; slug: string; name: string; gitUrl: string; defaultBranch: string; landingBranch: string | null; clonePath: string; maxWorkers: number; setupCommand: string | null; worktreeProvider: E.WorktreeProviderId; openspecEnabled: boolean; openspecVersion: string | null; policies: Record<string, unknown>; status: E.ProjectStatus; syncState: E.ProjectSyncState; lastFetchedAt: string | null; errorText: string | null }
@@ -100,6 +101,19 @@ export interface WorkspaceSecret { name: string; envVarName: string; scope: E.Se
 export interface Wakeup { id: string; workspaceId: string; agentId: string; source: E.WakeSource; reason: string; payload: Record<string, unknown>; idempotencyKey: string | null; status: E.WakeStatus; coalescedIntoId: string | null; skipReason: string | null; runId: string | null; requestedByKind: string | null; requestedById: string | null; notBefore: string | null; createdAt: string; claimedAt: string | null; finishedAt: string | null }
 export interface Run { id: string; workspaceId: string; agentId: string; ticketId: string | null; sessionId: string | null; wakeupIds: string[]; runtimeId: string; model: string | null; status: E.RunStatus; turnEpoch: number; cwd: string; startedAt: string | null; finishedAt: string | null; exitCode: number | null; signal: string | null; pid: number | null; pgid: number | null; errorCode: string | null; errorFamily: E.RunErrorFamily | null; retryOfRunId: string | null; usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number; contextTokens?: number; basis: string } | null; costCents: number | null; result: Record<string, unknown> | null; liveness: E.RunLiveness | null; logPath: string | null; summary: string | null; createdAt: string }
 export interface RunEvent { id: string; runId: string; seq: number; ts: string; type: E.RunEventType; stream: string; level: string; payload: Record<string, unknown> }
+/**
+ * What a live worker is doing now, and the tally of its most recent test command (VS-328). Derived
+ * in the daemon from run events and carried on the workers read and the workspace stream; never
+ * stored, so a daemon that has just started simply has no entry to report.
+ */
+export interface WorkerActivitySummary {
+  agentId: string;
+  ticketId: string | null;
+  /** The current activity line, or null when the worker has no run in progress. */
+  activity: { verb: string; label: string; target: string | null; since: string } | null;
+  /** The last parsed test tally, or null when none has been read. Kept across turns until replaced. */
+  tests: TestTally | null;
+}
 /**
  * What a run did, counted off its stored events (VS-74). Cheap enough to ask for a page of history
  * at once, and enough to say what a turn was without loading its transcript. `files` counts distinct

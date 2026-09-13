@@ -34,6 +34,8 @@ describe('codex exec --json parser', () => {
     expect(state.finalText).toBe('{"state":"done","summary":"said pong"}');
     expect(state.usage).toEqual({ inputTokens: 1200, outputTokens: 48, cachedInputTokens: 900 });
     expect(events.find((e) => e.type === 'command.executed')!.payload).toMatchObject({ command: 'echo pong', exitCode: 0, output: 'pong\n' });
+    // A command with no test summary carries no tally (VS-328).
+    expect(events.find((e) => e.type === 'command.executed')!.payload['tests']).toBeUndefined();
     expect(events.find((e) => e.type === 'file.changed')!.payload).toMatchObject({ path: '/home/agent/work/notes.md' });
     // item.started is kept as runtime.raw, never dropped
     expect(events.filter((e) => e.type === 'runtime.raw').map((e) => e.payload['originalType'])).toContain('item.started');
@@ -49,5 +51,17 @@ describe('codex exec --json parser', () => {
 
   it('reports session.resumed when resuming', () => {
     expect(run('synthetic-turn-tool-message', true).types[0]).toBe('session.resumed');
+  });
+});
+
+describe('codex command events (VS-328)', () => {
+  it('carries the parsed test tally on command.executed before truncating', () => {
+    const p = createCodexParser();
+    const evs = p.handle(JSON.stringify({
+      type: 'item.completed',
+      item: { item_type: 'command_execution', id: 'i1', command: 'pnpm test', exit_code: 0, status: 'completed', aggregated_output: ' Test Files  2 passed (2)\n      Tests  28 passed (28)\n   Duration  1.20s' },
+    }));
+    const cmd = evs.find((e) => e.type === 'command.executed')!;
+    expect(cmd.payload['tests']).toEqual({ passed: 28, total: 28 });
   });
 });

@@ -73,7 +73,7 @@ function bodyText(value: unknown, depth = 0): string | null {
 }
 
 /** The one thing the tool acted on — a path beats a command beats a pattern beats a url. */
-function toolTarget(name: string, input: Payload | null): string | null {
+export function toolTarget(name: string, input: Payload | null): string | null {
   if (!input) return null;
   const path = str(input, 'file_path', 'filePath', 'path', 'notebook_path', 'notebookPath', 'target');
   if (path) return shortenPath(path);

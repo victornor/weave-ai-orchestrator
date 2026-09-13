@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
 import { truncate } from '@weave-ai/runtime-sdk';
+import { parseTestSummary } from '@weave-ai/shared';
 
 export interface OpenCodeParseState {
   sessionId: string | null;
@@ -122,7 +123,9 @@ export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: fal
       out.push({ ts, type: 'tool.result', payload: { id, name, status, isError, content: truncate(output) } });
       if (SHELL_TOOLS.has(name)) {
         const meta = obj(st?.['metadata']);
-        out.push({ ts, type: 'command.executed', payload: { id, command: str(obj(st?.['input'])?.['command']), exitCode: num(meta?.['exit']), output: truncate(output), isError } });
+        // VS-328: read the test tally from the whole output, before it is size-bounded.
+        const tests = parseTestSummary(output);
+        out.push({ ts, type: 'command.executed', payload: { id, command: str(obj(st?.['input'])?.['command']), exitCode: num(meta?.['exit']), output: truncate(output), isError, ...(tests ? { tests } : {}) } });
       }
       if (EDIT_TOOLS.has(name)) {
         const path = str(obj(st?.['input'])?.['filePath'] ?? obj(st?.['input'])?.['file_path'] ?? obj(st?.['input'])?.['path']);

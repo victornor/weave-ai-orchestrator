@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
 import { truncate } from '@weave-ai/runtime-sdk';
+import { parseTestSummary } from '@weave-ai/shared';
 
 export interface ClaudeParseState {
   sessionId: string | null;
@@ -147,9 +148,13 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
       out.push({ ts, type: 'tool.result', payload: { id, name, isError, content: truncate(text) } });
       if (name && SHELL_TOOLS.has(name)) {
         const meta = obj(msg['tool_use_result']);
+        const stdout = str(meta?.['stdout']) ?? text;
+        const stderr = str(meta?.['stderr']) ?? '';
+        // VS-328: read the test tally from the whole output, before it is size-bounded.
+        const tests = parseTestSummary(stdout) ?? parseTestSummary(stderr);
         out.push({
           ts, type: 'command.executed',
-          payload: { toolUseId: id, tool: name, stdout: truncate(str(meta?.['stdout']) ?? text), stderr: truncate(str(meta?.['stderr']) ?? ''), isError },
+          payload: { toolUseId: id, tool: name, stdout: truncate(stdout), stderr: truncate(stderr), isError, ...(tests ? { tests } : {}) },
         });
       }
     }

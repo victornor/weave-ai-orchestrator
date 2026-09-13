@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
 import { truncate } from '@weave-ai/runtime-sdk';
+import { parseTestSummary } from '@weave-ai/shared';
 
 export interface CodexParseState {
   threadId: string | null;
@@ -88,9 +89,12 @@ export function createCodexParser(opts: { resumed: boolean } = { resumed: false 
         return [{ ts, type: 'assistant.thinking', payload: { id, text: truncate(str(it['text']) ?? '', 2000) } }];
       case 'command_execution': {
         const exitCode = num(it['exit_code']);
+        const raw = str(it['aggregated_output']) ?? '';
+        // VS-328: read the test tally from the whole output, before it is size-bounded.
+        const tests = parseTestSummary(raw);
         return [{
           ts, type: 'command.executed',
-          payload: { id, command: str(it['command']), exitCode, status: str(it['status']), output: truncate(str(it['aggregated_output']) ?? '') },
+          payload: { id, command: str(it['command']), exitCode, status: str(it['status']), output: truncate(raw), ...(tests ? { tests } : {}) },
         }];
       }
       case 'file_change': {

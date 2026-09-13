@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
 import { truncate } from '@weave-ai/runtime-sdk';
+import { parseTestSummary } from '@weave-ai/shared';
 
 export interface CursorParseState {
   sessionId: string | null;
@@ -91,7 +92,9 @@ export function createCursorParser(opts: { resumed: boolean } = { resumed: false
       const content = str(success?.['content']) ?? JSON.stringify(res ?? {});
       const out: RuntimeEvent[] = [{ ts, type: 'tool.result', payload: { id, name, isError, content: truncate(content) } }];
       if (SHELL_KEYS.has(key) || name === 'shell' || name === 'bash') {
-        out.push({ ts, type: 'command.executed', payload: { id, tool: name, output: truncate(content), isError } });
+        // VS-328: read the test tally from the whole output, before it is size-bounded.
+        const tests = parseTestSummary(content);
+        out.push({ ts, type: 'command.executed', payload: { id, tool: name, output: truncate(content), isError, ...(tests ? { tests } : {}) } });
       }
       if (WRITE_KEYS.has(key) || name === 'write' || name === 'edit') {
         const path = str(args['path']) ?? str(success?.['path']);

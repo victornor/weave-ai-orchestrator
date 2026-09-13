@@ -1,8 +1,11 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import type { WorkspaceEvent } from '@weave-ai/shared';
+import { EPHEMERAL_EVENT_TYPES, type WorkspaceEvent } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { HEARTBEAT_MS, Pump, heartbeat } from '../sse.js';
+
+/** A live-only frame (VS-328): forwarded to clients but never replayed, and it must not move the cursor. */
+const isEphemeral = (type: string): boolean => (EPHEMERAL_EVENT_TYPES as readonly string[]).includes(type);
 
 /**
  * `GET /api/w/:ws/events?after=<seq>` — durable outbox replay then live tail.
@@ -23,6 +26,11 @@ export function eventRoutes(): Hono<AppEnv> {
       stream.onAbort(() => pump.close());
       let cursor = after;
       const send = async (ev: WorkspaceEvent): Promise<void> => {
+        if (isEphemeral(ev.type)) {
+          // No `id`: an ephemeral frame carries no position, so a client's replay cursor stays put.
+          await stream.writeSSE({ event: ev.type, data: JSON.stringify(ev) });
+          return;
+        }
         cursor = ev.seq;
         await stream.writeSSE({ id: String(ev.seq), event: ev.type, data: JSON.stringify(ev) });
       };
@@ -34,7 +42,7 @@ export function eventRoutes(): Hono<AppEnv> {
         }
         while (!pump.done) {
           await pump.wait(HEARTBEAT_MS);
-          const pending = pump.drain().filter((ev) => ev.seq > cursor).sort((a, b) => a.seq - b.seq);
+          const pending = pump.drain().filter((ev) => isEphemeral(ev.type) || ev.seq > cursor).sort((a, b) => a.seq - b.seq);
           if (pending.length) { for (const ev of pending) await send(ev); }
           else if (!pump.done) await heartbeat(stream);
         }

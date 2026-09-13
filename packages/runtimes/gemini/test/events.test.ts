@@ -46,3 +46,17 @@ describe('gemini stream-json parser', () => {
     expect(run('synthetic-turn-tool-report', true).types[0]).toBe('session.resumed');
   });
 });
+
+describe('gemini command events (VS-328)', () => {
+  it('carries the parsed test tally on command.executed before truncating', () => {
+    const p = createGeminiParser();
+    p.handle(JSON.stringify({ type: 'tool_use', tool_id: 't1', tool_name: 'run_shell_command', parameters: { command: 'pnpm test' } }));
+    const evs = p.handle(JSON.stringify({ type: 'tool_result', tool_id: 't1', status: 'success', output: ' Test Files  2 passed (2)\n      Tests  28 passed (28)\n   Duration  1.20s' }));
+    const cmd = evs.find((e) => e.type === 'command.executed')!;
+    expect(cmd.payload['tests']).toEqual({ passed: 28, total: 28 });
+
+    p.handle(JSON.stringify({ type: 'tool_use', tool_id: 't2', tool_name: 'run_shell_command', parameters: { command: 'echo pong' } }));
+    const plain = p.handle(JSON.stringify({ type: 'tool_result', tool_id: 't2', status: 'success', output: 'pong' })).find((e) => e.type === 'command.executed')!;
+    expect(plain.payload['tests']).toBeUndefined();
+  });
+});

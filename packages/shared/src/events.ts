@@ -12,4 +12,11 @@ export const EVENT_TYPES = [
   'weaver_artifact.published',
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
+/**
+ * Frames the workspace stream forwards to connected clients without writing an outbox row (VS-328).
+ * They are live-only: a client that misses one converges from the read behind it. Kept out of
+ * `EVENT_TYPES` so nothing treats them as a durable domain event.
+ */
+export const EPHEMERAL_EVENT_TYPES = ['worker.activity'] as const;
+export type EphemeralEventType = (typeof EPHEMERAL_EVENT_TYPES)[number];
 export interface WorkspaceEvent<T = unknown> { seq: number; workspaceId: string; type: EventType; entityType: string; entityId: string; payload: T; createdAt: string }

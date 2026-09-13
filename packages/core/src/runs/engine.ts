@@ -215,7 +215,10 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       ctx.db.run('UPDATE runs SET last_event_at = ? WHERE id = ?', [ts, runId]);
     } catch (e) { log.warn({ err: String(e) }, 'failed to persist run event'); }
     try { appendFileSync(eventsPath, JSON.stringify({ seq, ts, type, stream, payload: clean }) + '\n', 'utf8'); } catch { /* disk full etc; the DB row is authoritative */ }
-    emitRunEvent(ctx, runId, { id: String(seq), runId, seq, ts, type, stream, level, payload: clean });
+    const ev: RunEvent = { id: String(seq), runId, seq, ts, type, stream, level, payload: clean };
+    emitRunEvent(ctx, runId, ev);
+    // VS-328: fold the event into the live per-worker activity summary the board consumes.
+    try { deps().activity.observe(agent.id, agent.ticketId ?? null, ev); } catch (e) { log.warn({ err: String(e) }, 'activity observe failed'); }
   };
 
   const phase = async <T>(name: RunPhase, fn: () => Promise<T>): Promise<T> => {
@@ -582,6 +585,8 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   f.record('run.finalized', { status, liveness, costCents, model }, 'system');
   ctx.events.emit('run.finished', 'run', runId, { agentId: f.agent.id, ticketId: f.agent.ticketId, status, liveness, costCents, summary });
   runState(ctx).active.delete(runId);
+  // VS-328: the run is over — drop the activity line (keep the last test tally) and push the result.
+  try { deps().activity.finish(f.agent.id); } catch { /* activity service unavailable */ }
   try { deps().routines.onRunFinalized(f.wakes); } catch { /* routines service unavailable */ }
 
   // An authentication failure is not this turn's problem but the runtime's: one credential is shared

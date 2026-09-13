@@ -723,12 +723,21 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         return null;
       });
       if (!pr) continue;
-      if (pr.state !== row.state) {
+      const stateChanged = pr.state !== row.state;
+      // VS-328: the check tally changes while the PR stays open (CI running), so it is compared and
+      // written independently of the state change — otherwise it would freeze at the last state move.
+      const stored = (ctx.db.get<{ delivery: Record<string, unknown> | null }>('SELECT delivery_json FROM tickets WHERE id = ?', [row.ticketId])?.delivery ?? {});
+      const ciState = pr.ciState ?? null;
+      const checks = pr.checks ?? null;
+      const ciChanged = JSON.stringify(stored['ciState'] ?? null) !== JSON.stringify(ciState)
+        || JSON.stringify(stored['prChecks'] ?? null) !== JSON.stringify(checks);
+      if (stateChanged || ciChanged) {
         const now = nowIso();
-        ctx.db.run('UPDATE ticket_work_products SET state = ?, updated_at = ? WHERE id = ?', [pr.state, now, row.wpId]);
-        const delivery = (ctx.db.get<{ delivery: Record<string, unknown> | null }>('SELECT delivery_json FROM tickets WHERE id = ?', [row.ticketId])?.delivery ?? {});
-        ctx.db.update('tickets', row.ticketId, { deliveryJson: { ...delivery, prUrl: row.url, prState: pr.state }, updatedAt: now });
-        ctx.events.emit('ticket.work_product', 'ticket', row.ticketId, { ticketId: row.ticketId, id: row.wpId, type: 'pull_request', url: row.url, state: pr.state });
+        if (stateChanged) ctx.db.run('UPDATE ticket_work_products SET state = ?, updated_at = ? WHERE id = ?', [pr.state, now, row.wpId]);
+        ctx.db.update('tickets', row.ticketId, { deliveryJson: { ...stored, prUrl: row.url, prState: pr.state, ciState, prChecks: checks }, updatedAt: now });
+        if (stateChanged) ctx.events.emit('ticket.work_product', 'ticket', row.ticketId, { ticketId: row.ticketId, id: row.wpId, type: 'pull_request', url: row.url, state: pr.state });
+        // What the board reads its delivery from is the tickets query, so a checks-only change still needs this.
+        if (ciChanged) ctx.events.emit('ticket.updated', 'ticket', row.ticketId, { ticketId: row.ticketId });
       }
       if (pr.state !== 'merged') continue;
 

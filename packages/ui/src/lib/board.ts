@@ -59,8 +59,8 @@ export function liveWorkingAgents(workers: readonly Agent[]): Agent[] {
  * Ticket id → the live worker on it. A ticket's `workerId` stays set after the worker
  * retires, so liveness can only come from the workers themselves.
  */
-export function liveWorkersByTicket(workers: readonly Agent[]): Map<string, Agent> {
-  const byTicket = new Map<string, Agent>();
+export function liveWorkersByTicket<T extends Agent>(workers: readonly T[]): Map<string, T> {
+  const byTicket = new Map<string, T>();
   for (const w of workers) {
     if (!w.ticketId || !isLiveWorker(w)) continue;
     const seen = byTicket.get(w.ticketId);

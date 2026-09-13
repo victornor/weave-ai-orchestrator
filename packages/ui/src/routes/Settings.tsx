@@ -1256,6 +1256,7 @@ function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave 
   const descMax = WorkerModelOptionSchema.shape.description.maxLength;
   const description = useCommittableField({
     value: option.description,
+    multiline: true,
     onCommit: async (raw) => {
       if (removing.current) return;
       const next = raw.trim();
@@ -1282,9 +1283,9 @@ function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave 
         </Button>
       </div>
       <Field label="When to use" error={description.status === 'error' ? undefined : descOverflow} hint={descMax != null ? `${descLength}/${descMax} characters` : undefined}>
-        <div className="flex items-center gap-2">
-          <input
-            className={inputCx}
+        <div className="flex items-start gap-2">
+          <textarea
+            className={cx(inputCx, 'h-24 py-2')}
             aria-label={`${option.id} description`}
             value={description.draft}
             disabled={disabled}
@@ -1470,7 +1471,7 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
         <input className={cx(inputCx, 'ac-mono')} aria-label="New worker option id" value={id} onChange={(e) => setId(e.target.value)} />
       </Field>
       <Field label="When to use" error={descriptionIssue}>
-        <input className={inputCx} aria-label="New worker option description" value={description} onChange={(e) => setDescription(e.target.value)} />
+        <textarea className={cx(inputCx, 'h-24 py-2')} aria-label="New worker option description" value={description} onChange={(e) => setDescription(e.target.value)} />
       </Field>
       <Field label="Runtime">
         <select className={cx(inputCx, 'ac-mono')} aria-label="New worker option runtime" value={runtime} onChange={(e) => { setRuntime(e.target.value); setEffort(undefined); }}>

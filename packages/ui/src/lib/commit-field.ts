@@ -28,9 +28,12 @@ const SAVED_HOLD_MS = 2000;
  * parsing/validation and issues the mutation, rejecting with an `Error` whose message is shown as the
  * field's error. `draft` only resyncs from a changed `value` while the field is clean — a save in
  * flight, or an unresolved error, is never clobbered by a query refetch landing mid-edit.
+ *
+ * `multiline` is opt-in (VS-322): a text area needs plain Enter to insert a line break, so in that
+ * mode only Cmd/Ctrl+Enter commits on the keyboard; every other field keeps save-on-Enter.
  */
-export function useCommittableField(opts: { value: string; onCommit: (raw: string) => Promise<void> }): CommittableField {
-  const { value, onCommit } = opts;
+export function useCommittableField(opts: { value: string; onCommit: (raw: string) => Promise<void>; multiline?: boolean }): CommittableField {
+  const { value, onCommit, multiline = false } = opts;
   const [draft, setDraft] = useState(value);
   const [status, setStatus] = useState<CommitStatusValue>('idle');
   const [error, setError] = useState<string>();
@@ -96,10 +99,11 @@ export function useCommittableField(opts: { value: string; onCommit: (raw: strin
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key !== 'Enter') return;
+      if (multiline && !e.metaKey && !e.ctrlKey) return;
       e.preventDefault();
       commitNow();
     },
-    [commitNow],
+    [commitNow, multiline],
   );
 
   return { draft, status, error, onChange, onBlur, onKeyDown, commitNow };

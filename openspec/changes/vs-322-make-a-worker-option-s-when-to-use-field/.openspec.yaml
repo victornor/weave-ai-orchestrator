@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Make a worker option's When to use field a multi-line text area, in both
+  the option row and the add form
+skip_specs: true

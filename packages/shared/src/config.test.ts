@@ -145,6 +145,14 @@ describe('daemon config: models overlays (VS-185)', () => {
   });
 });
 
+describe('worker option description accepts a newline (VS-322)', () => {
+  it('parses a multi-line description unchanged and still enforces the 200 cap', () => {
+    const description = 'First line.\nSecond line.';
+    expect(WorkerModelOptionSchema.parse({ id: 'tier', description }).description).toBe(description);
+    expect(WorkerModelOptionSchema.safeParse({ id: 'tier', description: 'x'.repeat(201) }).success).toBe(false);
+  });
+});
+
 describe('worker option runtime unset (VS-236)', () => {
   it('parses an omitted runtime as null, not claude', () => {
     expect(WorkerModelOptionSchema.parse({ id: 'quick', description: 'x' })).toEqual({

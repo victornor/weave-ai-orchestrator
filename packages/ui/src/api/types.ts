@@ -303,6 +303,9 @@ export interface DocumentRevision {
   reason: string | null;
 }
 
+/** A worker's own pending scheduled wakeup (VS-317): when it asked to be woken, and why. */
+export interface WorkerScheduledWake { at: string | null; reason: string }
+
 export interface WorkerDetail {
   agent: Agent;
   ticket: Ticket | null;
@@ -311,6 +314,8 @@ export interface WorkerDetail {
   lastRun: Run | null;
   usage: UsageTotals | null;
   worktree: { status: string; dirty: boolean; ahead: number; behind: number; path: string | null } | null;
+  /** The worker's pending self-wake, if it has one (VS-317). */
+  scheduledWake: WorkerScheduledWake | null;
   lastStatusLine?: string | null;
   /**
    * Whether a message sent right now would reach a running turn (VS-99), and why not when it

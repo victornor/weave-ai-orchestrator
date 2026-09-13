@@ -133,4 +133,54 @@ describe('wake queue', () => {
     expect(w.status).toBe('queued');
     expect(nowIso()).toBeTruthy();
   });
+
+  it('schedules a self-wake twenty minutes out, carrying the reason and a notBefore', () => {
+    const workerId = h.addWorker(null);
+    const before = Date.now();
+    const w = wake.scheduleSelfWake(workerId, { reason: 'check the sweep', delayMs: 20 * 60_000 });
+    expect(w.source).toBe('self_scheduled');
+    expect(w.status).toBe('queued');
+    expect(w.reason).toBe('check the sweep');
+    const at = Date.parse(w.notBefore!);
+    expect(at).toBeGreaterThanOrEqual(before + 20 * 60_000 - 2_000);
+    expect(at).toBeLessThanOrEqual(Date.now() + 20 * 60_000 + 2_000);
+    expect(wake.pendingSelfWake(workerId)?.id).toBe(w.id);
+  });
+
+  it('replaces the pending self-wake rather than stacking a second (VS-317)', () => {
+    const workerId = h.addWorker(null);
+    const first = wake.scheduleSelfWake(workerId, { reason: 'first', delayMs: 20 * 60_000 });
+    const second = wake.scheduleSelfWake(workerId, { reason: 'second', delayMs: 30 * 60_000 });
+    expect(second.id).not.toBe(first.id);
+    const queued = wake.listForAgent(workerId, ['queued']).filter((w) => w.source === 'self_scheduled');
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.id).toBe(second.id);
+    expect(queued[0]!.reason).toBe('second');
+    const cancelled = wake.listForAgent(workerId, ['cancelled']).filter((w) => w.id === first.id);
+    expect(cancelled).toHaveLength(1);
+    expect(wake.pendingSelfWake(workerId)?.id).toBe(second.id);
+  });
+
+  it('rejects a self-wake shorter than the minimum or longer than the maximum', () => {
+    const workerId = h.addWorker(null);
+    expect(() => wake.scheduleSelfWake(workerId, { reason: 'too soon', delayMs: 1_000 })).toThrow(/at least/);
+    expect(() => wake.scheduleSelfWake(workerId, { reason: 'too far', delayMs: 25 * 60 * 60_000 })).toThrow(/at most/);
+    expect(wake.listForAgent(workerId, ['queued'])).toHaveLength(0);
+  });
+
+  it('reports no pending self-wake once the scheduled one is claimed', () => {
+    const workerId = h.addWorker(null);
+    const w = wake.scheduleSelfWake(workerId, { reason: 'later', delayMs: 5 * 60_000 });
+    expect(wake.pendingSelfWake(workerId)?.id).toBe(w.id);
+    h.db.update('wakeups', w.id, { status: 'claimed' });
+    expect(wake.pendingSelfWake(workerId)).toBeNull();
+  });
+
+  it('always schedules for the named agent, never another', () => {
+    const a = h.addWorker(null);
+    const b = h.addWorker(null);
+    const w = wake.scheduleSelfWake(a, { reason: 'mine', delayMs: 5 * 60_000 });
+    expect(w.agentId).toBe(a);
+    expect(wake.pendingSelfWake(b)).toBeNull();
+  });
 });

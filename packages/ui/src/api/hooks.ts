@@ -69,6 +69,7 @@ function workerDetail(v: unknown): T.WorkerDetail {
     lastRun: (r['lastRun'] as Run | null | undefined) ?? null,
     usage: usage ? totals(usage['total'] ?? usage) : null,
     worktree: (r['worktree'] as T.WorkerDetail['worktree'] | undefined) ?? (agent.worktreePath ? { status: 'unknown', dirty: false, ahead: 0, behind: 0, path: agent.worktreePath } : null),
+    scheduledWake: (r['scheduledWake'] as T.WorkerScheduledWake | undefined) ?? null,
     input: (r['input'] as T.WorkerDetail['input'] | undefined) ?? { midTurn: false },
     sessionResumable: Boolean(r['sessionResumable']),
   };
@@ -596,8 +597,9 @@ export function useRollbackCharter(): UseMutationResult<unknown, Error, { id: st
 
 /* --------------------------------------------------------------- workers */
 
-/** `GET /workers` marks which ticket is an interactive session (VS-101) — joined server-side, not part of `Agent` itself. */
-export type WorkerListItem = Agent & { interactiveSession: boolean };
+/** `GET /workers` marks which ticket is an interactive session (VS-101) and carries the worker's own
+ *  pending scheduled wakeup (VS-317) — both joined server-side, neither part of `Agent` itself. */
+export type WorkerListItem = Agent & { interactiveSession: boolean; scheduledWake: T.WorkerScheduledWake | null };
 
 export function useWorkers(params: { status?: string; project?: string; role?: string; includeRetired?: boolean } = {}, wsOverride?: string): UseQueryResult<WorkerListItem[]> {
   const ws = useHookWs(wsOverride);

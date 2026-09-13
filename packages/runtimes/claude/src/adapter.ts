@@ -88,6 +88,13 @@ export const adapter: RuntimeAdapter = {
   detect(): Promise<RuntimeDetection> { return detectBinary('claude', ['--version']); },
   async listModels(): Promise<RuntimeModel[]> { return MODELS.map((m) => ({ ...m })); },
   configSchema(): JsonSchema { return structuredClone(CONFIG_SCHEMA); },
+  /**
+   * Claude Code's own scheduling tools (VS-317). Their timer lives inside the turn's process and
+   * dies with it, so a worker relying on one is never woken; the run engine denies these on worker
+   * turns only. Names read from the installed 2.1.270 binary's strings, not guessed. The weaver
+   * keeps its own — its scheduling is the routines service, but nothing here touches its turn.
+   */
+  workerDeniedTools: ['ScheduleWakeup', 'CronCreate', 'CronList', 'CronDelete'],
   skillsDir(): string { return '.claude/skills'; },
   /** CLAUDE.md is a one-line pointer so AGENTS.md stays the single source of truth (§8.3). */
   instructionFiles(): string[] { return ['CLAUDE.md', 'AGENTS.md']; },

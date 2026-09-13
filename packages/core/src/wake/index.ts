@@ -1,7 +1,7 @@
 import { newId, nowIso } from '@weave-ai/db';
-import { OcError, type Wakeup, type WakeStatus } from '@weave-ai/shared';
+import { OcError, SELF_WAKE_MAX_DELAY_MS, SELF_WAKE_MIN_DELAY_MS, type Wakeup, type WakeStatus } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
-import type { CoreServices, EnqueueInput, WakeService } from '../api.js';
+import type { CoreServices, EnqueueInput, ScheduleSelfWakeInput, WakeService } from '../api.js';
 import { recordActivity } from '../events.js';
 
 interface AgentLite { id: string; kind: string; status: string; roleId: string | null }
@@ -104,6 +104,40 @@ export function createWakeService(ctx: WorkspaceContext, _deps: () => CoreServic
       ctx.events.emit('wake.queued', 'wakeup', w.id, { agentId, source: input.source, reason: input.reason });
       log.debug({ agentId, source: input.source, wakeId: w.id }, 'wake queued');
       return w;
+    },
+
+    scheduleSelfWake(agentId: string, input: ScheduleSelfWakeInput): Wakeup {
+      const agent = ctx.db.get<AgentLite>('SELECT id, kind, status, role_id FROM agents WHERE id = ? AND workspace_id = ?', [agentId, ctx.workspaceId]);
+      if (!agent) throw new OcError('not_found', `agent ${agentId} not found`);
+      if (!Number.isFinite(input.delayMs)) throw new OcError('validation', 'a scheduled wakeup needs a finite delay', { delayMs: input.delayMs });
+      if (input.delayMs < SELF_WAKE_MIN_DELAY_MS) {
+        throw new OcError('validation', `a scheduled wakeup must be at least ${SELF_WAKE_MIN_DELAY_MS} ms away`, { minMs: SELF_WAKE_MIN_DELAY_MS, actualMs: input.delayMs });
+      }
+      if (input.delayMs > SELF_WAKE_MAX_DELAY_MS) {
+        throw new OcError('validation', `a scheduled wakeup must be at most ${SELF_WAKE_MAX_DELAY_MS} ms away`, { maxMs: SELF_WAKE_MAX_DELAY_MS, actualMs: input.delayMs });
+      }
+      const now = nowIso();
+      const notBefore = new Date(Date.now() + input.delayMs).toISOString();
+      const requestedBy = input.requestedBy ?? { kind: 'agent', id: agentId };
+      // One pending self-wake per worker (VS-317): cancel the outstanding one first, clearing its
+      // idempotency key so the stable key below can be reused on the replacement row.
+      const replaced = ctx.db.run(
+        "UPDATE wakeups SET status = 'cancelled', idempotency_key = NULL, skip_reason = 'replaced by a newer self-wake', finished_at = ? WHERE agent_id = ? AND source = 'self_scheduled' AND status = 'queued'",
+        [now, agentId],
+      ).changes;
+      const w = insert(agentId, { source: 'self_scheduled', reason: input.reason, payload: { delayMs: input.delayMs, scheduledAt: now }, idempotencyKey: `self-wake:${agentId}`, notBefore, requestedBy }, 'queued');
+      recordActivity(ctx.db, ctx.workspaceId, requestedBy, 'wake.enqueue', 'wakeup', w.id, { agentId, source: 'self_scheduled', reason: input.reason, delayMs: input.delayMs });
+      ctx.events.emit('wake.queued', 'wakeup', w.id, { agentId, source: 'self_scheduled', reason: input.reason });
+      log.debug({ agentId, wakeId: w.id, notBefore, replaced }, 'self-wake scheduled');
+      return w;
+    },
+
+    pendingSelfWake(agentId: string): Wakeup | null {
+      const w = ctx.db.get<Wakeup>(
+        "SELECT * FROM wakeups WHERE agent_id = ? AND source = 'self_scheduled' AND status = 'queued' ORDER BY not_before DESC LIMIT 1",
+        [agentId],
+      );
+      return w ? { ...w, payload: (w.payload ?? {}) as Record<string, unknown> } : null;
     },
 
     listForAgent(agentId: string, status?: WakeStatus[]): Wakeup[] {

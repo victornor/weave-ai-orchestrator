@@ -137,6 +137,13 @@ export interface RuntimeAdapter {
    * must never return the token or any part of it.
    */
   readCredential?(input: CredentialProbeInput): CredentialFacts;
+  /**
+   * Tools this runtime's own CLI exposes for scheduling a future turn inside its process (VS-317).
+   * They cannot outlive the turn, so a worker that used one is never actually woken; the run engine
+   * denies them on worker turns only. Omitted by an adapter whose CLI has no such tool, or whose
+   * CLI offers no clean way to deny one.
+   */
+  workerDeniedTools?: string[];
   /** Directory names for skills per CLI, relative to the home. */
   skillsDir(): string;
   /** Instruction discovery file name at the home root (AGENTS.md, CLAUDE.md, GEMINI.md). */

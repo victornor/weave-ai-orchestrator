@@ -281,5 +281,13 @@ export function workerView(svc: CoreServices, worker: Agent | null, ticket: Tick
     ticket: ticket ? { id: ticket.id, identifier: ticket.identifier, title: ticket.title, status: ticket.status } : null,
     turnCount: worker.turnCount,
     lastRunAt: worker.lastRunAt,
+    // VS-317: the worker's own scheduled wakeup, so a scheduled wait is not read as a stall.
+    scheduledWake: scheduledWake(svc, worker.id),
   };
+}
+
+/** The worker's pending self-wake as `{ at, reason }`, or null — the shape every worker view shares. */
+export function scheduledWake(svc: CoreServices, agentId: string): { at: string | null; reason: string } | null {
+  const w = safe(() => svc.wake.pendingSelfWake(agentId));
+  return w ? { at: w.notBefore, reason: w.reason } : null;
 }

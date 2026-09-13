@@ -103,7 +103,7 @@ export type DecisionInputType = (typeof DECISION_INPUT_TYPES)[number];
 export const SECRET_SCOPES = ['workspace', 'project', 'role'] as const;
 export type SecretScope = (typeof SECRET_SCOPES)[number];
 
-export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'ticket_blocked', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved', 'live_interrupt'] as const;
+export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'ticket_blocked', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved', 'live_interrupt', 'self_scheduled'] as const;
 export type WakeSource = (typeof WAKE_SOURCES)[number];
 
 /** Recurring scheduled-task row (VS-220). Human-facing name is "Scheduled tasks"; identifiers stay `routine`. */

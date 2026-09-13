@@ -26,6 +26,10 @@ describe('claude adapter', () => {
     expect(adapter.capabilities).toMatchObject({ resumableSessions: true, forkSessions: true, structuredOutput: true, mcp: true, costReporting: true, usageReporting: 'per_turn' });
   });
 
+  it('declares its own in-process scheduling tools to deny on worker turns (VS-317)', () => {
+    expect(adapter.workerDeniedTools).toEqual(['ScheduleWakeup', 'CronCreate', 'CronList', 'CronDelete']);
+  });
+
   it('exposes a config schema covering the per-role options', () => {
     const props = (adapter.configSchema() as { properties: Record<string, unknown> }).properties;
     expect(Object.keys(props)).toEqual(expect.arrayContaining(['model', 'effort', 'permissionMode', 'maxTurns', 'maxBudgetUsd', 'extraArgs']));

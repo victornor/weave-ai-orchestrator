@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
-import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, type Agent, type KnowledgeScope, type Run, type Ticket } from '@weave-ai/shared';
+import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, SELF_WAKE_STALL_GRACE_MS, type Agent, type KnowledgeScope, type Run, type Ticket } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
@@ -420,6 +420,10 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   function stalledWorkers(): StalledAgentRow[] {
     const timeoutMs = (ctx.config.defaults.stalledWorkerTimeoutSec ?? 300) * 1000;
     const cutoff = new Date(Date.now() - timeoutMs).toISOString();
+    // VS-317: a queued `self_scheduled` wake is an action path only while it is due or not yet past
+    // its time by more than the grace margin. Past that the dispatcher would have claimed it, so the
+    // worker has no route back and must be reported. Other queued wakes always count.
+    const selfWakeCutoff = new Date(Date.now() - SELF_WAKE_STALL_GRACE_MS).toISOString();
     const terminal = TERMINAL_TICKET_STATUSES.map(() => '?').join(',');
     return ctx.db.all<StalledAgentRow>(
       `SELECT a.id AS id, a.ticket_id AS ticket_id, a.last_run_at AS last_run_at, t.identifier AS identifier
@@ -429,9 +433,13 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
           AND t.interactive_session = 0
           AND a.last_run_at IS NOT NULL AND a.last_run_at < ?
           AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.agent_id = a.id AND r.status IN ('queued','running'))
-          AND NOT EXISTS (SELECT 1 FROM wakeups w WHERE w.agent_id = a.id AND w.status IN ('queued','claimed'))
+          AND NOT EXISTS (
+            SELECT 1 FROM wakeups w WHERE w.agent_id = a.id
+              AND (w.status = 'claimed'
+                   OR (w.status = 'queued' AND NOT (w.source = 'self_scheduled' AND w.not_before IS NOT NULL AND w.not_before <= ?)))
+          )
           AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.ticket_id = a.ticket_id AND d.status = 'open')`,
-      [ctx.workspaceId, ...TERMINAL_TICKET_STATUSES, cutoff],
+      [ctx.workspaceId, ...TERMINAL_TICKET_STATUSES, cutoff, selfWakeCutoff],
     );
   }
 

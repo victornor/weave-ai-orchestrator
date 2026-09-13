@@ -5,6 +5,17 @@ import { StatusGlyph, StatusBadge, Badge } from './StatusGlyph';
 import { Button } from './Button';
 import { cents, initials, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
+import type { WorkerScheduledWake } from '../api/types';
+
+/** How soon a scheduled wake is due, worded for the card — "in 20m", "in 2h05m", "due now". */
+function wakeLabel(at: string | null): string {
+  if (!at) return 'scheduled';
+  const ms = new Date(at).getTime() - Date.now();
+  if (ms <= 0) return 'due now';
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `in ${minutes}m`;
+  return `in ${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}m`;
+}
 
 export interface WorkerCardProps {
   agent: Agent;
@@ -17,6 +28,8 @@ export interface WorkerCardProps {
   stalled?: boolean;
   /** The ticket this worker is on is an interactive session (VS-101): a human is conversing with it directly. */
   interactive?: boolean;
+  /** The worker's pending self-wake (VS-317), shown so a scheduled wait is not read as idle. */
+  scheduledWake?: WorkerScheduledWake | null;
   onOpen?: () => void;
   /** Offered on a paused worker; resuming continues the same ticket, worktree and session. */
   onResume?: () => void;
@@ -34,6 +47,7 @@ export function WorkerCard({
   needsYou,
   stalled,
   interactive,
+  scheduledWake,
   onOpen,
   onResume,
   resuming,
@@ -82,6 +96,13 @@ export function WorkerCard({
         ) : null}
       </div>
     </button>
+      {scheduledWake ? (
+        <div className="flex items-center gap-2 border-t border-line-1 px-3 py-2">
+          <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3" title={`wakes ${wakeLabel(scheduledWake.at)}: ${scheduledWake.reason}`}>
+            wakes {wakeLabel(scheduledWake.at)} · {scheduledWake.reason}
+          </span>
+        </div>
+      ) : null}
       {pausedFor ? (
         <div className="flex items-center gap-2 border-t border-line-1 px-3 py-2">
           <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3" title={pauseDetail?.full ?? pausedFor}>
@@ -100,9 +121,10 @@ export function WorkerCard({
   );
 }
 
-export function WorkerRow({ agent, projectSlug, ticketIdentifier, lastLine, needsYou, stalled, interactive, onOpen }: WorkerCardProps): React.ReactElement {
+export function WorkerRow({ agent, projectSlug, ticketIdentifier, lastLine, needsYou, stalled, interactive, scheduledWake, onOpen }: WorkerCardProps): React.ReactElement {
   const ui = agentUiStatus(agent.status, { needsYou, stalled });
   const pausedFor = workerPauseDetail(agent)?.summary ?? null;
+  const scheduled = scheduledWake ? `wakes ${wakeLabel(scheduledWake.at)} · ${scheduledWake.reason}` : null;
   return (
     <button
       type="button"
@@ -112,7 +134,7 @@ export function WorkerRow({ agent, projectSlug, ticketIdentifier, lastLine, need
       <StatusGlyph status={ui} size="sm" pulse={ui === 'working'} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-ui text-text-1">{agent.name}</span>
-        <span className="ac-mono block truncate text-micro text-text-3">{pausedFor ?? lastLine ?? [projectSlug, ticketIdentifier].filter(Boolean).join(' · ')}</span>
+        <span className="ac-mono block truncate text-micro text-text-3">{pausedFor ?? scheduled ?? lastLine ?? [projectSlug, ticketIdentifier].filter(Boolean).join(' · ')}</span>
       </span>
       {interactive ? <Badge tone="accent">interactive</Badge> : null}
     </button>

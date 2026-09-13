@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Selecting text in the weaver chat gets cleared whenever a new message or
+  trace update arrives

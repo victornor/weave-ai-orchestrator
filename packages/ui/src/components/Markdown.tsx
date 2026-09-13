@@ -9,6 +9,11 @@ function clipboardAvailable(): boolean {
 /** `breaks` is for composer text — see `markdownToHtml`. */
 export function Markdown({ source, className, breaks }: { source: string; className?: string; breaks?: boolean }): React.ReactElement {
   const html = useMemo(() => markdownToHtml(source ?? '', { breaks }), [source, breaks]);
+  // React diffs `dangerouslySetInnerHTML` by the wrapper object's identity, not by `.__html`'s
+  // value, so a fresh `{ __html: html }` literal on every render resets `innerHTML` — tearing down
+  // and rebuilding every child node, including whatever a reader had selected — even when `html`
+  // itself is unchanged. Memoising the wrapper keeps its reference stable across such a render (VS-321).
+  const dangerousHtml = useMemo(() => ({ __html: html }), [html]);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // One delegated handler for every `[data-copy]` element `markdownToHtml` emits — a fenced
@@ -37,5 +42,5 @@ export function Markdown({ source, className, breaks }: { source: string; classN
     );
   }, []);
 
-  return <div className={cx('ac-prose', className)} onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div className={cx('ac-prose', className)} onClick={onClick} dangerouslySetInnerHTML={dangerousHtml} />;
 }

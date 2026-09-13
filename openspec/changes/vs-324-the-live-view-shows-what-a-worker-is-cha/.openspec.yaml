@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: "The Live view shows what a worker is changing: file edits as real diffs,
+  written files as content, and two viewers per row by default"

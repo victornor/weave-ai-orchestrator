@@ -1,9 +1,13 @@
-/** VS-164: live-page cell spans in sessionStorage (`lib/liveCellSize.ts`). VS-206: fine tracks. */
+/**
+ * VS-164: live-page cell spans in sessionStorage (`lib/liveCellSize.ts`). VS-206: fine tracks.
+ * VS-324: the never-resized default becomes breakpoint-aware (half the grid at `sm`/`xl`, full
+ * width at phone) instead of a flat `GRANULARITY×GRANULARITY` constant.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clampSize,
   columnCount,
-  DEFAULT_SIZE,
+  defaultSize,
   isDefaultSize,
   readLiveCellSizes,
   ROWS_MAX,
@@ -74,15 +78,21 @@ describe('snapSize', () => {
 });
 
 describe('the equal slot', () => {
-  it('is GRANULARITY×GRANULARITY, matching the current default', () => {
-    expect(DEFAULT_SIZE).toEqual({ cols: 4, rows: 4 });
-    expect(isDefaultSize(DEFAULT_SIZE)).toBe(true);
+  it('is half the grid width at sm and xl, and the full grid width at phone (VS-324)', () => {
+    expect(defaultSize(false, columnCount(false, false))).toEqual({ cols: 4, rows: 4 }); // phone: 4 of 4
+    expect(defaultSize(true, columnCount(true, false))).toEqual({ cols: 4, rows: 4 }); // sm: 4 of 8
+    expect(defaultSize(true, columnCount(true, true))).toEqual({ cols: 6, rows: 4 }); // xl: 6 of 12
   });
 
-  it('sizeOf returns the equal slot for a worker with no stored size, under any colsMax', () => {
-    expect(sizeOf({}, 'nobody', columnCount(false, false))).toEqual(DEFAULT_SIZE);
-    expect(sizeOf({}, 'nobody', columnCount(true, false))).toEqual(DEFAULT_SIZE);
-    expect(sizeOf({}, 'nobody', columnCount(true, true))).toEqual(DEFAULT_SIZE);
+  it('sizeOf returns the equal slot for a worker with no stored size, under any breakpoint', () => {
+    expect(sizeOf({}, 'nobody', false, columnCount(false, false))).toEqual({ cols: 4, rows: 4 });
+    expect(sizeOf({}, 'nobody', true, columnCount(true, false))).toEqual({ cols: 4, rows: 4 });
+    expect(sizeOf({}, 'nobody', true, columnCount(true, true))).toEqual({ cols: 6, rows: 4 });
+  });
+
+  it('isDefaultSize is breakpoint-aware: six cols is default at xl but an explicit resize at sm', () => {
+    expect(isDefaultSize({ cols: 6, rows: 4 }, true, columnCount(true, true))).toBe(true);
+    expect(isDefaultSize({ cols: 6, rows: 4 }, true, columnCount(true, false))).toBe(false);
   });
 });
 
@@ -92,18 +102,38 @@ describe('session map', () => {
   });
 
   it('reads back a size that was chosen, dropping workers no longer live and default slots', () => {
+    const colsMax = columnCount(true, false); // sm: default is {cols: 4, rows: 4}
     const kept = writeLiveCellSizes(
       WS,
       {
         a1: { cols: 6, rows: 3 },
-        a2: { ...DEFAULT_SIZE },
+        a2: { cols: 4, rows: 4 },
         gone: { cols: 9, rows: 5 },
       },
       ['a1', 'a2'],
+      true,
+      colsMax,
     );
     expect(kept).toEqual({ a1: { cols: 6, rows: 3 } });
     expect(sessionStorage.getItem(KEY)).toBe(JSON.stringify({ a1: { cols: 6, rows: 3 } }));
     expect(readLiveCellSizes(WS)).toEqual({ a1: { cols: 6, rows: 3 } });
+  });
+
+  it('drops the xl default (6 of 12), not the old flat default (4 of 12)', () => {
+    const colsMax = columnCount(true, true);
+    const kept = writeLiveCellSizes(WS, { a1: { cols: 6, rows: 4 }, a2: { cols: 4, rows: 4 } }, ['a1', 'a2'], true, colsMax);
+    // a1 is the new xl default and is dropped; a2 (the old flat default) is now a genuine resize and kept.
+    expect(kept).toEqual({ a2: { cols: 4, rows: 4 } });
+  });
+
+  it('keeps a size saved before this change exactly as it was (VS-324: no migration needed)', () => {
+    // Any size other than the breakpoint's own default already survived the old writeLiveCellSizes
+    // (which stripped only the flat 4x4 default at every breakpoint) and keeps surviving the new,
+    // breakpoint-aware one on the same terms.
+    const colsMax = columnCount(true, true);
+    const preExisting = { a1: { cols: 5, rows: 4 } };
+    expect(writeLiveCellSizes(WS, preExisting, ['a1'], true, colsMax)).toEqual(preExisting);
+    expect(sizeOf(preExisting, 'a1', true, colsMax)).toEqual({ cols: 5, rows: 4 });
   });
 
   it.each(['abc', '0', '[]', '{"a1":{"cols":"x","rows":1}}', '{"a1":null}'])(
@@ -121,14 +151,15 @@ describe('session map', () => {
 
   it('honours the choice for the session when the store cannot be written', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied'); });
-    expect(() => writeLiveCellSizes(WS, { a1: { cols: 2, rows: 1 } }, ['a1'])).not.toThrow();
+    expect(() => writeLiveCellSizes(WS, { a1: { cols: 2, rows: 1 } }, ['a1'], true, columnCount(true, false))).not.toThrow();
   });
 });
 
 describe('sameSize / isDefaultSize', () => {
   it('treats missing expanded as false', () => {
     expect(sameSize({ cols: 1, rows: 1 }, { cols: 1, rows: 1, expanded: false })).toBe(true);
-    expect(isDefaultSize({ ...DEFAULT_SIZE })).toBe(true);
-    expect(isDefaultSize({ cols: DEFAULT_SIZE.cols + 1, rows: DEFAULT_SIZE.rows })).toBe(false);
+    const colsMax = columnCount(true, false);
+    expect(isDefaultSize({ cols: 4, rows: 4 }, true, colsMax)).toBe(true);
+    expect(isDefaultSize({ cols: 5, rows: 4 }, true, colsMax)).toBe(false);
   });
 });

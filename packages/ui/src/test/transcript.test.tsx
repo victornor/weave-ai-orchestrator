@@ -13,7 +13,7 @@ function ev(over: Partial<RunEvent> & Pick<RunEvent, 'type'>): RunEvent {
     id: over.id ?? Math.random().toString(36).slice(2),
     runId: 'run1',
     seq: over.seq ?? 0,
-    ts: '2026-09-01T09:00:00.000Z',
+    ts: over.ts ?? '2026-09-01T09:00:00.000Z',
     stream: 'stdout',
     level: 'info',
     payload: over.payload ?? {},
@@ -174,6 +174,107 @@ describe('runEventsToTranscript', () => {
     expect(blocks[0]).toMatchObject({ thinking: true, text: FENCED_REPORT });
     expect(blocks[1]).toMatchObject({ type: 'text', text: 'Done.' });
   });
+
+  // Payload shapes below are copied field-for-field from `packages/runtimes/claude/src/events.ts`
+  // (`tool.call`'s `input: b['input']`, the raw Claude tool_use block) and
+  // `packages/runtimes/opencode/src/events.ts` (`tool.call`'s `input: st?.['input']`) — not
+  // invented. Neither runtime's `tool.result`/`file.changed` carries this data (VS-324 design.md),
+  // so it must come from `tool.call`.
+  describe('edit payload extraction (VS-324)', () => {
+    it('extracts a Claude Edit call as a single-edit payload', () => {
+      const [block] = runEventsToTranscript([
+        ev({ id: 'e1', type: 'tool.call', payload: { id: 'toolu_1', name: 'Edit', input: { file_path: 'src/a.ts', old_string: 'const x = 1;', new_string: 'const x = 2;', replace_all: false } } }),
+      ]);
+      expect(block).toMatchObject({
+        type: 'tool', tool: 'Edit', target: 'src/a.ts',
+        editPayload: { kind: 'edit', edits: [{ oldText: 'const x = 1;', newText: 'const x = 2;' }] },
+      });
+    });
+
+    it('extracts a Claude MultiEdit call as one edit per array entry, in order', () => {
+      const [block] = runEventsToTranscript([
+        ev({
+          id: 'e1', type: 'tool.call',
+          payload: {
+            id: 'toolu_2', name: 'MultiEdit',
+            input: {
+              file_path: 'src/b.ts',
+              edits: [
+                { old_string: 'one', new_string: 'ONE' },
+                { old_string: 'two', new_string: 'TWO' },
+              ],
+            },
+          },
+        }),
+      ]);
+      expect(block).toMatchObject({
+        type: 'tool', tool: 'MultiEdit', target: 'src/b.ts',
+        editPayload: { kind: 'edit', edits: [{ oldText: 'one', newText: 'ONE' }, { oldText: 'two', newText: 'TWO' }] },
+      });
+    });
+
+    it('extracts a Claude Write call as its written content', () => {
+      const [block] = runEventsToTranscript([
+        ev({ id: 'e1', type: 'tool.call', payload: { id: 'toolu_3', name: 'Write', input: { file_path: 'src/c.ts', content: 'export const c = 3;\n' } } }),
+      ]);
+      expect(block).toMatchObject({
+        type: 'tool', tool: 'Write', target: 'src/c.ts',
+        editPayload: { kind: 'write', content: 'export const c = 3;\n' },
+      });
+    });
+
+    it('extracts an opencode edit call, including its filePath as the target', () => {
+      const [block] = runEventsToTranscript([
+        ev({ id: 'e1', type: 'tool.call', payload: { id: 'call_1', name: 'edit', input: { filePath: 'src/d.ts', oldString: 'old', newString: 'new' } } }),
+      ]);
+      expect(block).toMatchObject({
+        type: 'tool', tool: 'edit', target: 'src/d.ts',
+        editPayload: { kind: 'edit', edits: [{ oldText: 'old', newText: 'new' }] },
+      });
+    });
+
+    it('extracts an opencode write call', () => {
+      const [block] = runEventsToTranscript([
+        ev({ id: 'e1', type: 'tool.call', payload: { id: 'call_2', name: 'write', input: { filePath: 'src/e.ts', content: 'export const e = 5;' } } }),
+      ]);
+      expect(block).toMatchObject({
+        type: 'tool', tool: 'write', target: 'src/e.ts',
+        editPayload: { kind: 'write', content: 'export const e = 5;' },
+      });
+    });
+
+    it('leaves an unrecognised tool with no edit payload, falling back to the compact row', () => {
+      const [block] = runEventsToTranscript([
+        ev({ id: 'e1', type: 'tool.call', payload: { id: 'c1', name: 'Read', input: { file_path: 'src/f.ts' } } }),
+      ]);
+      expect(block).toMatchObject({ type: 'tool', tool: 'Read', target: 'src/f.ts' });
+      expect((block as { editPayload?: unknown }).editPayload).toBeNull();
+    });
+
+    it('leaves a recognised edit tool with no edit payload when its fields are missing', () => {
+      const [block] = runEventsToTranscript([
+        ev({ id: 'e1', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/g.ts' } } }),
+      ]);
+      expect((block as { editPayload?: unknown }).editPayload).toBeNull();
+    });
+  });
+
+  describe('thinking block duration (VS-324)', () => {
+    it('derives a duration from the gap to the next event', () => {
+      const blocks = runEventsToTranscript([
+        ev({ id: 'th', type: 'assistant.thinking', payload: { text: 'Weighing the options.' }, ts: '2026-09-01T09:00:00.000Z' }),
+        ev({ id: 't', type: 'assistant.text', payload: { text: 'Done.' }, ts: '2026-09-01T09:00:01.100Z' }),
+      ]);
+      expect(blocks[0]).toMatchObject({ thinking: true, thinkingDurationMs: 1100 });
+    });
+
+    it('has no duration when it is the last event', () => {
+      const blocks = runEventsToTranscript([
+        ev({ id: 'th', type: 'assistant.thinking', payload: { text: 'Weighing the options.' } }),
+      ]);
+      expect(blocks[0]).toMatchObject({ thinking: true, thinkingDurationMs: null });
+    });
+  });
 });
 
 function toolBlock(id: string, name: string): TranscriptBlock {
@@ -263,11 +364,35 @@ describe('Transcript', () => {
     expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(['First', 'Second']);
   });
 
-  it('keeps a thinking block dimmed and italic while still rendering its markdown', () => {
+  // VS-324: a thinking block now collapses to one line by default; expanding it renders the same
+  // markdown VS-319 already produced when thinking always rendered expanded.
+  it('collapses a thinking block by default and expands to its dimmed, italic markdown', () => {
     render(<Transcript events={[ev({ id: 'a', type: 'assistant.thinking', payload: { text: 'Checking `foo.ts` next.' } })]} />);
+    expect(screen.queryByText('foo.ts')).not.toBeInTheDocument();
+    expect(screen.getByText('Thought')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Thought'));
     const code = screen.getByText('foo.ts');
     expect(code.tagName).toBe('CODE');
     expect(code.closest('.italic')).not.toBeNull();
+  });
+
+  it('shows a thinking block\'s duration on the collapsed line when it is derivable', () => {
+    render(
+      <Transcript
+        events={[
+          ev({ id: 'a', type: 'assistant.thinking', payload: { text: 'Weighing options.' }, ts: '2026-09-01T09:00:00.000Z' }),
+          ev({ id: 'b', type: 'assistant.text', payload: { text: 'Done.' }, ts: '2026-09-01T09:00:01.100Z' }),
+        ]}
+      />,
+    );
+    expect(screen.getByText('Thought · 1.1s')).toBeInTheDocument();
+  });
+
+  it('shows a thinking block collapsed with no duration figure when none is derivable', () => {
+    render(<Transcript events={[ev({ id: 'a', type: 'assistant.thinking', payload: { text: 'Weighing options.' } })]} />);
+    expect(screen.getByText('Thought')).toBeInTheDocument();
+    expect(screen.queryByText(/Thought ·/)).not.toBeInTheDocument();
   });
 
   it('renders a block with an unclosed bold marker without crashing, and settles once it closes', () => {
@@ -379,6 +504,202 @@ describe('Transcript', () => {
     expect(screen.getByText('Read')).toBeInTheDocument();
     expect(screen.queryByText(/Read ×/)).not.toBeInTheDocument();
     expect(screen.getByText('solo.ts')).toBeInTheDocument();
+  });
+
+  describe('edit and written-file rendering (VS-324)', () => {
+    // VS-324 review: captain's ask was to see the diff itself, matching the opencode screenshots
+    // where diffs are already on screen — so an edit/write row renders expanded with no click.
+    it('renders a Claude Edit call as a diff with old/new line numbers and add/remove text, with no click', () => {
+      render(
+        <Transcript
+          events={[
+            ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/a.ts', old_string: 'const x = 1;', new_string: 'const x = 2;' } } }),
+          ]}
+        />,
+      );
+      // Both the split and unified layouts are mounted at once (CSS container query chooses which
+      // shows), so a line's text appears in the DOM twice.
+      expect(screen.getAllByText('const x = 1;').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('const x = 2;').length).toBeGreaterThan(0);
+    });
+
+    it('renders an opencode edit call the same way, with no click', () => {
+      render(
+        <Transcript
+          events={[
+            ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'edit', input: { filePath: 'src/b.ts', oldString: 'old text', newString: 'new text' } } }),
+          ]}
+        />,
+      );
+      expect(screen.getAllByText('old text').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('new text').length).toBeGreaterThan(0);
+    });
+
+    it('renders one hunk per edit for a MultiEdit call, in order, with no click', () => {
+      render(
+        <Transcript
+          events={[
+            ev({
+              id: 'a', type: 'tool.call',
+              payload: {
+                id: 'c1', name: 'MultiEdit',
+                input: { file_path: 'src/c.ts', edits: [{ old_string: 'one', new_string: 'ONE' }, { old_string: 'two', new_string: 'TWO' }] },
+              },
+            }),
+          ]}
+        />,
+      );
+      expect(screen.getAllByText('one').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('ONE').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('two').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('TWO').length).toBeGreaterThan(0);
+    });
+
+    it('renders a Write call as numbered written content, with no click', () => {
+      render(
+        <Transcript
+          events={[
+            ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Write', input: { file_path: 'src/d.ts', content: 'line one\nline two' } } }),
+          ]}
+        />,
+      );
+      expect(screen.getByText('line one')).toBeInTheDocument();
+      expect(screen.getByText('line two')).toBeInTheDocument();
+    });
+
+    it('still collapses an edit row when its header is activated, despite opening expanded', () => {
+      render(
+        <Transcript
+          events={[
+            ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/a.ts', old_string: 'const x = 1;', new_string: 'const x = 2;' } } }),
+          ]}
+        />,
+      );
+      expect(screen.getAllByText('const x = 1;').length).toBeGreaterThan(0);
+      fireEvent.click(screen.getByText('src/a.ts'));
+      expect(screen.queryByText('const x = 1;')).not.toBeInTheDocument();
+    });
+
+    it('collapses a long written file behind a "Show more" control, windowed at 40 lines', () => {
+      const content = Array.from({ length: 60 }, (_, i) => `line ${i}`).join('\n');
+      render(
+        <Transcript
+          events={[ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Write', input: { file_path: 'src/big.ts', content } } })]}
+        />,
+      );
+      expect(screen.getByText('line 0')).toBeInTheDocument();
+      expect(screen.getByText('line 39')).toBeInTheDocument();
+      expect(screen.queryByText('line 40')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Show 20 more lines' }));
+      expect(screen.getByText('line 40')).toBeInTheDocument();
+      expect(screen.getByText('line 59')).toBeInTheDocument();
+    });
+
+    it('collapses a long edit hunk behind its own "Show more" control, windowed at 40 lines', () => {
+      // Entirely disjoint old/new text: the LCS finds nothing in common, so the hunk is 120 lines
+      // (60 removed + 60 added), not 60 — the window caps the first 40 of those, all removes.
+      const oldText = Array.from({ length: 60 }, (_, i) => `old ${i}`).join('\n');
+      const newText = Array.from({ length: 60 }, (_, i) => `new ${i}`).join('\n');
+      render(
+        <Transcript
+          events={[ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/big-edit.ts', old_string: oldText, new_string: newText } } })]}
+        />,
+      );
+      expect(screen.getAllByText('old 0').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('old 39').length).toBeGreaterThan(0);
+      expect(screen.queryByText('old 40')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Show 80 more lines' }));
+      expect(screen.getAllByText('old 40').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('old 59').length).toBeGreaterThan(0);
+    });
+
+    it('does not fold consecutive edits into a counted group — each shows its own diff', () => {
+      render(
+        <Transcript
+          events={[
+            ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/one.ts', old_string: 'one old', new_string: 'one new' } } }),
+            ev({ id: 'b', type: 'tool.call', payload: { id: 'c2', name: 'Edit', input: { file_path: 'src/two.ts', old_string: 'two old', new_string: 'two new' } } }),
+          ]}
+        />,
+      );
+      expect(screen.queryByText(/Edit ×/)).not.toBeInTheDocument();
+      expect(screen.getAllByText('one old').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('one new').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('two old').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('two new').length).toBeGreaterThan(0);
+    });
+
+    it('does not recompute an unchanged edit block\'s hunks when later events append', async () => {
+      const render1 = await import('@weave-ai/render');
+      const spy = vi.spyOn(render1, 'diffHunksForEdits');
+      spy.mockClear();
+      const editEvent = ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/a.ts', old_string: 'const x = 1;', new_string: 'const x = 2;' } } });
+      const { rerender } = render(<Transcript events={[editEvent]} />);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      rerender(<Transcript events={[editEvent, ev({ id: 'b', type: 'assistant.text', payload: { text: 'more' } })]} />);
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+    });
+
+    it('falls back to the compact row for a tool this capability does not recognise', () => {
+      render(
+        <Transcript
+          events={[ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Read', input: { file_path: 'src/e.ts' } } })]}
+        />,
+      );
+      expect(screen.getByText('src/e.ts')).toBeInTheDocument();
+      // Nothing expands: no button wraps the row (no diff, no editPayload).
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('falls back to the compact row for a recognised edit tool missing its fields', () => {
+      render(
+        <Transcript
+          events={[ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/f.ts' } } })]}
+        />,
+      );
+      expect(screen.getByText('src/f.ts')).toBeInTheDocument();
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('never interprets edit or written-file text as HTML', () => {
+      const payload = 'See <img src=x onerror="window.__pwned = true">';
+      render(
+        <Transcript
+          events={[
+            ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/g.ts', old_string: 'old', new_string: payload } } }),
+            ev({ id: 'b', type: 'tool.call', payload: { id: 'c2', name: 'Write', input: { file_path: 'src/h.ts', content: payload } } }),
+          ]}
+        />,
+      );
+      expect(document.querySelector('img')).toBeNull();
+      expect((window as unknown as { __pwned?: boolean }).__pwned).toBeUndefined();
+      expect(screen.getAllByText(/<img src=x onerror=/).length).toBeGreaterThan(0);
+    });
+
+    // jsdom does not evaluate CSS container queries, so which of these two DOM trees is actually
+    // visible cannot be asserted here — that is a visual check, noted as unverified this turn
+    // (VS-324 tasks.md 6.4). What this test pins is the mechanism itself: both layouts are mounted,
+    // gated by opposing `@min-[32rem]:` container-query classes rather than a JS-measured width, so
+    // a real browser's layout — not a script — decides which one shows.
+    it('renders both the split and unified diff layouts, gated by opposing container-query classes', () => {
+      render(
+        <Transcript
+          events={[
+            ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/i.ts', old_string: 'old', new_string: 'new' } } }),
+          ]}
+        />,
+      );
+      const splitWrapper = document.querySelector('.hidden.\\@min-\\[32rem\\]\\:block');
+      const unifiedWrapper = document.querySelector('.\\@min-\\[32rem\\]\\:hidden');
+      expect(splitWrapper).not.toBeNull();
+      expect(unifiedWrapper).not.toBeNull();
+      expect(splitWrapper?.querySelector('.grid-cols-2')).not.toBeNull();
+      expect(unifiedWrapper?.querySelector('.grid-cols-2')).toBeNull();
+    });
   });
 });
 

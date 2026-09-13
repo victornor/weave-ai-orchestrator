@@ -257,7 +257,7 @@ export function ChatComposer({
           onChange={(e) => onChange(e.target.value)}
           onPaste={onPaste}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isTouch) { e.preventDefault(); send(); } }}
-          className="max-h-[12rem] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-body text-text-1 outline-none placeholder:text-text-4"
+          className="max-h-[12rem] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-body text-text-1 outline-none placeholder:text-text-4 focus-visible:[box-shadow:none]"
         />
         <input
           ref={fileInput}

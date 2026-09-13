@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: V2 Chat traces collapse grouped tool calls and their output by default in
+  scrollable containers, and Refresh appears only when the live stream drops
+skip_specs: true

@@ -484,6 +484,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                           {m.direction === 'outbound' && trace ? (
                             <ChatTurnTrace
                               trace={trace}
+                              ws={ws}
                               contextWindowTokens={resolveModel(conductorModels.data, trace.model)?.contextWindowTokens}
                               compactionAt={compactionAt}
                             />
@@ -499,9 +500,9 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                         <span className="size-1.5 flex-none rounded-pill bg-working" aria-hidden />
                         <span className="ac-mono text-nano text-text-3">{live ? 'working' : 'starting…'}</span>
                       </div>
-                      {live ? (
+                      {live && (runStreamStatus.state === 'unreachable' || runStreamStatus.state === 'offline') ? (
                         <p className="text-nano text-text-3">
-                          {runStreamStatus.state === 'unreachable' || runStreamStatus.state === 'offline' ? 'The live stream dropped. ' : ''}
+                          The live stream dropped.{' '}
                           <button type="button" onClick={retryNow} className="text-text-3 underline">Refresh</button>
                         </p>
                       ) : null}

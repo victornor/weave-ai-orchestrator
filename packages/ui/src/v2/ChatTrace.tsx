@@ -3,17 +3,23 @@
  *
  * The run-events view model (`runEventsToTranscript` + `groupConsecutiveTools`, VS-319) rendered in
  * V2's Mono language: narration between tool calls is italic in a dimmer ink, a tool row names the
- * tool and its argument, and a tool's result lines are indented two spaces under the call that
- * produced them. Text blocks keep markdown. This is Chat's inline trace; VS-345's `WorkerFeed` is the
- * bounded feed for cards and Live.
+ * tool and its argument, and a tool's result lines sit behind the call that produced them. Text
+ * blocks keep markdown. This is Chat's inline trace; VS-345's `WorkerFeed` is the bounded feed for
+ * cards and Live.
+ *
+ * Density follows V1 (VS-370): a run of same-name calls collapses to one `tool ×N` line that opens
+ * to its calls, each call keeps its result behind its own disclosure, and any result or command
+ * output longer than a few lines scrolls inside a capped box instead of pushing the conversation.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RunEvent, RunTrace } from '@weave-ai/shared';
 import { contextStrip } from '@weave-ai/render';
 import { groupConsecutiveTools, runEventsToTranscript } from '../lib/transcript';
 import type { ToolBlock, TranscriptBlock, TranscriptRow } from '../lib/transcript';
 import { Markdown } from '../components/Markdown';
+import { EditPayloadBody } from '../components/Transcript';
 import { useRunEvents } from '../api/hooks';
+import { readExpandedTraces, toggleExpandedTrace } from '../lib/traceExpansion';
 import { duration as fmtDuration, tokens as fmtTokens } from '../lib/format';
 import { cx } from '../lib/cx';
 
@@ -27,33 +33,61 @@ export function ChatTrace({ events, className }: { events: readonly RunEvent[]; 
   );
 }
 
-/** The tool's argument, or the tail of its result body when there is no separate argument. */
+/** The tool's argument, or the tail of its result body when there is no separate argument. A call
+ *  whose result is text, or an edit whose payload carries a diff, keeps that body behind a
+ *  disclosure; a call with nothing to show is one line, never a button that opens onto nothing. */
 function ToolRow({ block, marker = '▸' }: { block: ToolBlock; marker?: string }): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const expandable = Boolean(block.diff) || Boolean(block.editPayload);
   const tone = block.denied ? 'text-needs-you' : block.error ? 'text-failed' : 'text-text-2';
+  const head = (
+    <div className="flex items-center gap-2" data-trace-tool>
+      <span className="ac-mono flex-none text-nano text-text-4">{expandable ? (open ? '▾' : '▸') : marker}</span>
+      <span className={cx('ac-mono flex-none text-nano', tone)}>{block.tool}</span>
+      {block.target ? <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{block.target}</span> : <span className="flex-1" />}
+      {block.adds != null || block.dels != null ? (
+        <span className="ac-mono flex-none text-nano">
+          {block.adds != null ? <span className="text-done">+{block.adds}</span> : null}
+          {block.dels != null ? <span className="text-failed"> −{block.dels}</span> : null}
+        </span>
+      ) : block.durationMs != null ? (
+        <span className="ac-mono flex-none text-nano text-text-4">{fmtDuration(block.durationMs)}</span>
+      ) : null}
+    </div>
+  );
   return (
     <div className="flex flex-col gap-0.5">
-      <div className="flex items-center gap-2" data-trace-tool>
-        <span className="ac-mono flex-none text-nano text-text-4">{marker}</span>
-        <span className={cx('ac-mono flex-none text-nano', tone)}>{block.tool}</span>
-        {block.target ? <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{block.target}</span> : <span className="flex-1" />}
-        {block.adds != null || block.dels != null ? (
-          <span className="ac-mono flex-none text-nano">
-            {block.adds != null ? <span className="text-done">+{block.adds}</span> : null}
-            {block.dels != null ? <span className="text-failed"> −{block.dels}</span> : null}
-          </span>
-        ) : block.durationMs != null ? (
-          <span className="ac-mono flex-none text-nano text-text-4">{fmtDuration(block.durationMs)}</span>
-        ) : null}
-      </div>
-      {block.diff ? <ResultLines text={block.diff} /> : null}
+      {expandable ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={`${block.tool}${block.target ? `, ${block.target}` : ''}`}
+          onClick={() => setOpen((v) => !v)}
+          className="text-left"
+        >
+          {head}
+        </button>
+      ) : (
+        head
+      )}
+      {open && block.editPayload ? (
+        // The edit/write body comes straight from V1's `EditPayloadBody` (VS-324): the same
+        // `diffHunksForEdits` derivation, `DiffHunks` and 40-line window, not a second renderer.
+        <div className="ac-scroll max-h-40 overflow-auto" data-trace-edit>
+          <EditPayloadBody id={block.id} path={block.target} payload={block.editPayload} />
+        </div>
+      ) : open && block.diff ? (
+        <ResultLines text={block.diff} />
+      ) : null}
     </div>
   );
 }
 
-/** A tool's result body, one line per line, indented two spaces under its call. */
+/** A tool's result body, one line per line, indented two spaces under its call and bounded so a long
+ *  result scrolls rather than dragging the conversation down with it. */
 function ResultLines({ text }: { text: string }): React.ReactElement {
   return (
-    <div className="flex flex-col" data-trace-result style={{ paddingLeft: '2ch' }}>
+    <div className="ac-scroll flex max-h-40 flex-col overflow-auto" data-trace-result style={{ paddingLeft: '2ch' }}>
       {text.split('\n').map((line, i) => (
         <span
           key={i}
@@ -69,18 +103,31 @@ function ResultLines({ text }: { text: string }): React.ReactElement {
   );
 }
 
+/** A run of same-name calls, collapsed to one counted line. Opening it lists the calls; each call's
+ *  own result stays behind that call's disclosure. State is local and keyed by the group's first
+ *  call, so an opened group stays open as live events arrive and a closed one stays closed. */
 function ToolGroup({ row }: { row: Extract<TranscriptRow, { type: 'tools' }> }): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const n = row.calls.length;
   return (
     <div className="flex flex-col gap-1 border-l border-line-2 pl-2.5" data-trace-tool-group>
-      <div className="flex items-center gap-2">
-        <span className="ac-mono flex-none text-nano text-text-4">▾</span>
-        <span className="ac-mono text-nano text-text-2">{row.tool} ×{row.calls.length}</span>
-      </div>
-      <div className="flex flex-col gap-1">
-        {row.calls.map((c) => (
-          <ToolRow key={c.id} block={c} marker="·" />
-        ))}
-      </div>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={`${row.tool}, ${n} calls`}
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 text-left"
+      >
+        <span className="ac-mono flex-none text-nano text-text-4">{open ? '▾' : '▸'}</span>
+        <span className="ac-mono text-nano text-text-2">{row.tool} ×{n}</span>
+      </button>
+      {open ? (
+        <div className="flex flex-col gap-1">
+          {row.calls.map((c) => (
+            <ToolRow key={c.id} block={c} marker="·" />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -145,24 +192,36 @@ function summaryParts(trace: RunTrace, contextWindowTokens: number | null | unde
 /**
  * A finished turn under the message it produced: the collapsed summary line, opening to the turn's
  * trace. The events are read only once the line is opened, so a history of turns is a history of
- * lines (VS-74).
+ * lines (VS-74), and which turns are open is remembered per workspace for the browsing session the
+ * way V1's `TurnTrace` remembers it (`lib/traceExpansion.ts`).
  */
 export function ChatTurnTrace({
   trace,
+  ws,
   contextWindowTokens,
   compactionAt,
 }: {
   trace: RunTrace;
+  /** The workspace the remembered expansion set is scoped to. */
+  ws: string;
   contextWindowTokens?: number | null;
   compactionAt?: number | null;
 }): React.ReactElement {
-  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState<string[]>(() => readExpandedTraces(ws));
+  useEffect(() => setExpanded(readExpandedTraces(ws)), [ws]);
+  const open = expanded.includes(trace.runId);
   const events = useRunEvents(open ? trace.runId : '', 0, undefined, { newest: true });
   const failed = trace.errors > 0 || trace.status === 'failed';
   const parts = summaryParts(trace, contextWindowTokens, compactionAt);
   return (
     <div className="flex flex-col gap-1" data-chat-summary>
-      <button type="button" aria-expanded={open} aria-label="What the weaver did" onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 self-start text-left">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label="What the weaver did"
+        onClick={() => setExpanded(toggleExpandedTrace(ws, trace.runId))}
+        className="flex items-center gap-2 self-start text-left"
+      >
         <span className="ac-mono text-nano text-text-4">{open ? '▾' : '▸'}</span>
         <span className={cx('ac-mono text-nano', failed ? 'text-failed' : 'text-text-4')}>weaver did</span>
         <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-4">{parts.join(' · ')}</span>

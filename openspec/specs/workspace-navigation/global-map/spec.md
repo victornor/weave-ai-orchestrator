@@ -43,7 +43,8 @@ The per-project knowledge graph SHALL keep working unchanged.
 The graph SHALL include, for each hosted workspace that has loaded:
 
 - one **workspace** node, named with the workspace's name;
-- one **project** node per project in that workspace, named with the project's slug;
+- one **project** node per project in that workspace, named with the project's display label (its
+  name, falling back to its slug);
 - one **conductor** node for that workspace's conductor, when the conductor exists;
 - one **role** node per hired role that is not `retired`, named with the role's name, including
   roles whose status is `pending_activation` or `paused`;

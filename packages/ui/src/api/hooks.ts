@@ -632,11 +632,14 @@ export function useWorkers(params: { status?: string; project?: string; role?: s
   return useQuery({ queryKey: [...qk.workers(ws), params], queryFn: () => api.ws<WorkerListItem[]>(ws, `/workers${qs(params)}`), enabled: Boolean(ws) });
 }
 
-export function useWorkersMany(ids: readonly string[]): UseQueryResult<WorkerListItem[]>[] {
+export function useWorkersMany(
+  ids: readonly string[],
+  params: { status?: string; project?: string; role?: string; includeRetired?: boolean } = {},
+): UseQueryResult<WorkerListItem[]>[] {
   return useQueries({
     queries: ids.map((id) => ({
-      queryKey: [...qk.workers(id), {}],
-      queryFn: () => api.ws<WorkerListItem[]>(id, '/workers'),
+      queryKey: [...qk.workers(id), params],
+      queryFn: () => api.ws<WorkerListItem[]>(id, `/workers${qs(params)}`),
     })),
   });
 }
@@ -1219,6 +1222,28 @@ export function useRunsMany(
     queries: ids.map((id) => ({
       queryKey: [...qk.runs(id), params],
       queryFn: () => api.ws<Run[] | { runs: Run[] }>(id, `/runs${qs(params)}`).then((r) => listOf(r, 'runs')),
+    })),
+  });
+}
+
+/**
+ * One page of runs per workspace, keeping the server's own `total` (VS-350). The Runs screen fans
+ * these out and merges by recency, so it can offer a real load-more rather than guessing from a
+ * full page. The key stays under `qk.runs(id)` so a runs invalidation still refreshes it.
+ */
+export function useRunPagesMany(
+  ids: readonly string[],
+  params: { agent?: string; ticket?: string; status?: string; limit?: number; offset?: number } = {},
+): UseQueryResult<{ runs: Run[]; total: number }>[] {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: [...qk.runs(id), 'page', params],
+      queryFn: () =>
+        api.ws<Run[] | { items?: Run[]; runs?: Run[]; total?: number }>(id, `/runs${qs(params)}`).then((r) => {
+          const runs = listOf<Run>(r, 'runs');
+          const total = !Array.isArray(r) && typeof r?.total === 'number' ? r.total : runs.length;
+          return { runs, total };
+        }),
     })),
   });
 }

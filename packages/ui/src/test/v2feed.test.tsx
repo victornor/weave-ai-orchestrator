@@ -72,4 +72,10 @@ describe('the shared worker feed', () => {
     expect(feed!.querySelector('div[style*="132px"]')).not.toBeNull();
     expect(screen.getByText('Deploying the fix now.')).toBeInTheDocument();
   });
+
+  it('takes a body height override for the Live height ladder', () => {
+    render(<WorkerFeed agentId="a1" ws="ws1" bodyHeight={240} />);
+    const feed = document.querySelector('[data-worker-feed]');
+    expect(feed!.querySelector('div[style*="240px"]')).not.toBeNull();
+  });
 });

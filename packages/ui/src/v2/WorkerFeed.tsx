@@ -62,13 +62,17 @@ export interface WorkerFeedProps {
   ws?: string;
   /** Bounds the height for embedding in a card or a narrow pane. */
   compact?: boolean;
+  /** Overrides the trace body's height in pixels (VS-350: Live's 420/300/240/200 ladder). */
+  bodyHeight?: number;
+  /** Hides the built-in status bar when the embedding card provides its own (VS-350). */
+  showChrome?: boolean;
   /** Names the region for assistive tech. */
   label?: string;
   className?: string;
 }
 
 /** The feed: a run's status, its trace and its usage. */
-export function WorkerFeed({ agentId, runId, ws, compact = false, label = 'Worker live feed', className }: WorkerFeedProps): React.ReactElement {
+export function WorkerFeed({ agentId, runId, ws, compact = false, bodyHeight, showChrome = true, label = 'Worker live feed', className }: WorkerFeedProps): React.ReactElement {
   const resolved = useWorkerRun(agentId, ws);
   // The worker's *current* run wins when it can be resolved; a specific `runId` (a decision's asking
   // run) is only the fallback, so a revision run that starts after the ask is what Watch follows.
@@ -85,19 +89,21 @@ export function WorkerFeed({ agentId, runId, ws, compact = false, label = 'Worke
       data-worker-feed
       data-feed-live={streaming ? 'true' : 'false'}
     >
-      <div className="flex items-center gap-2 border-b border-line-1 bg-bg-2 px-2.5 py-1.5">
-        <span className={cx('size-1.5 flex-none rounded-pill', streaming ? 'bg-working' : 'bg-idle')} aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-text-2">{head ? statusText(head.status) : streaming ? 'Running' : 'No run yet'}</span>
-        {usage ? (
-          <span className="ac-mono flex-none text-nano text-text-3">
-            {tokens(usage.inputTokens + usage.outputTokens)} tok
-          </span>
-        ) : null}
-        <button type="button" onClick={retryNow} className="ac-mono flex-none text-nano text-text-3 hover:text-text-1">
-          Refresh
-        </button>
-      </div>
-      <div className="min-h-0" style={{ maxHeight: compact ? 132 : 420 }}>
+      {showChrome ? (
+        <div className="flex items-center gap-2 border-b border-line-1 bg-bg-2 px-2.5 py-1.5">
+          <span className={cx('size-1.5 flex-none rounded-pill', streaming ? 'bg-working' : 'bg-idle')} aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-text-2">{head ? statusText(head.status) : streaming ? 'Running' : 'No run yet'}</span>
+          {usage ? (
+            <span className="ac-mono flex-none text-nano text-text-3">
+              {tokens(usage.inputTokens + usage.outputTokens)} tok
+            </span>
+          ) : null}
+          <button type="button" onClick={retryNow} className="ac-mono flex-none text-nano text-text-3 hover:text-text-1">
+            Refresh
+          </button>
+        </div>
+      ) : null}
+      <div className="min-h-0" style={{ maxHeight: bodyHeight ?? (compact ? 132 : 420) }}>
         {id === null ? (
           <p className="px-2.5 py-3 text-micro text-text-3">Waiting for the next turn.</p>
         ) : events.length === 0 ? (

@@ -2,13 +2,13 @@
  * The instance Map as a graph: workspaces, projects, roles, in-flight tickets and knowledge
  * nodes, with ownership edges. Pure — the route fans out HTTP and this assembles what to draw.
  */
-import { projectLabel, type Project, type Role, type Ticket } from '@weave-ai/shared';
+import { projectLabel, type AgentStatus, type Project, type Role, type Ticket } from '@weave-ai/shared';
 
 export const IN_FLIGHT_TICKET_STATUSES = [
   'proposing', 'proposed', 'approved', 'in_progress', 'in_review', 'merging', 'blocked',
 ] as const;
 
-export type MapNodeKind = 'workspace' | 'project' | 'weaver' | 'role' | 'ticket' | 'knowledge';
+export type MapNodeKind = 'workspace' | 'project' | 'weaver' | 'role' | 'ticket' | 'knowledge' | 'worker';
 
 export interface MapNode {
   id: string;
@@ -24,6 +24,8 @@ export interface MapNode {
   updatedAt: string | null;
   /** Only set on a `ticket` node — drives its status colour. */
   ticketStatus?: Ticket['status'];
+  /** Only set on a `worker` node — its agent status, for the map's hue and Attention filter. */
+  workerStatus?: AgentStatus;
   /** Only set on `workspace`/`project` nodes: true when an in-flight ticket sits under it. */
   hasLiveActivity?: boolean;
 }

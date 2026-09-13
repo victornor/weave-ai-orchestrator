@@ -20,23 +20,13 @@ export { V2NeedsPage } from './NeedsYouPage';
 export { V2RolesPage } from './RolesPage';
 // VS-349: Chat is a real screen; its module owns the page component and the split layout.
 export { V2ChatPage } from './ChatPage';
+// VS-350: Live, Runs, run detail, Map and Incidents are real screens.
+export { V2LivePage } from './LivePage';
+export { V2RunsPage } from './RunsPage';
+export { V2RunPage } from './RunPage';
+export { V2MapPage } from './MapPage';
+export { V2IncidentsPage } from './IncidentsPage';
 
-export function V2LivePage(): React.ReactElement {
-  return <V2Page title="Live" />;
-}
-export function V2IncidentsPage(): React.ReactElement {
-  return <V2Page title="Incidents" />;
-}
-export function V2MapPage(): React.ReactElement {
-  return <V2Page title="Map" />;
-}
-export function V2RunsPage(): React.ReactElement {
-  return <V2Page title="Runs" />;
-}
-export function V2RunPage(): React.ReactElement {
-  const params = useParams({ strict: false }) as { runId?: string };
-  return <V2Page title="Run" subtitle={params.runId} />;
-}
 export function V2ScheduledPage(): React.ReactElement {
   return <V2Scheduled />;
 }
@@ -87,7 +77,5 @@ export function V2ArtifactPage(): React.ReactElement {
   return <V2WorkspaceArtifactReader />;
 }
 export { V2TicketArtifactReader };
-export function V2WorkerPage(): React.ReactElement {
-  const params = useParams({ strict: false }) as { workerId?: string };
-  return <V2Page title="Worker" subtitle={params.workerId} />;
-}
+// VS-350: the worker page is a real screen.
+export { V2WorkerPage } from './WorkerPage';

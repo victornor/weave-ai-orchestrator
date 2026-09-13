@@ -1,7 +1,9 @@
 # worker-supervision/document-briefing Specification
 
 ## Purpose
-TBD - created by archiving change vs-109-the-project-hub-file-becomes-a-short-ind. Update Purpose after archive.
+Points a worker at the knowledge it needs before it starts: its brief names the linked document
+relevant to the area it is about to touch, and its charter states which knowledge-write tool to use
+for a new durable fact, so knowledge is read and written through the document layer, not only the hub.
 
 ## Requirements
 

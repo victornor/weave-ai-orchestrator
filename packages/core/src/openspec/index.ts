@@ -19,6 +19,7 @@ import { git } from '../util/git.js';
 import { landLock } from '../util/land-lock.js';
 import { scratchBranchFrom } from '../tickets/archive-before-merge.js';
 import * as cli from './cli.js';
+import { fillArchivedCapabilityPurposes } from './purpose.js';
 import { findUndeclaredCapabilityRetirements } from './retirement.js';
 
 const SYSTEM: Actor = { kind: 'system', id: null };
@@ -174,6 +175,10 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
             return { archivedAs: null, skipped: 'the openspec binary was not found on the daemon\'s PATH' };
           }
           const archivedAs = result.archivedAs ?? archivedDirFor(project.clonePath, changeName);
+          // VS-362: fill any capability this archive created that openspec left with the placeholder
+          // Purpose, before the commit; a proposal with no usable "Why" throws and the backfill is
+          // recorded as failed rather than committing a placeholder.
+          fillArchivedCapabilityPurposes(project.clonePath, changeName);
           await commitArchive(project.clonePath, changeName, log, false);
           recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archived', 'ticket', ticket.id, { changeName, archivedAs, specsUpdated: result.specsUpdated, warnings: result.warnings }, ticket.id);
           ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivedAs: archivedAs });
@@ -219,6 +224,10 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
             if (!isMissingBinary(e)) throw e;
             return { archivedAs: null, skipped: 'the openspec binary was not found on the daemon\'s PATH' };
           }
+          // VS-362: fill a newly created capability's placeholder Purpose from the archived
+          // proposal's "Why" before this branch is committed and pushed. A change with no usable
+          // "Why" throws, and the sweep records it as a backfill failure rather than shipping it.
+          fillArchivedCapabilityPurposes(scratch.path, changeName);
           const add = await git(['add', '-A', 'openspec'], scratch.path, 30_000);
           if (!add.ok) throw new OcError('internal', `git add of the backfill archive failed: ${add.stderr.trim().slice(0, 300)}`, { changeName });
           const commit = await git(['commit', '-m', `chore(openspec): archive ${changeName}`], scratch.path, 30_000);

@@ -1,7 +1,10 @@
 # agent-prompts/weaver-relay-instructions Specification
 
 ## Purpose
-TBD - created by archiving change vs-310-let-the-weaver-record-captain-s-prose-an. Update Purpose after archive.
+Defines what the shipped weaver instructions must say about answering a human's question in prose:
+the human's words are the answer, recorded with `weave_decision_answer` against the message they came
+from, while plan, merge and action approvals still need the human's own tap and are never recorded
+from a message.
 
 ## Requirements
 

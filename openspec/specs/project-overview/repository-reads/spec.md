@@ -1,7 +1,9 @@
 # project-overview/repository-reads Specification
 
 ## Purpose
-TBD - created by archiving change vs-96-the-project-overview-s-history-section-s. Update Purpose after archive.
+Defines the read-only contract behind the overview's repository views: the daemon reads a project's
+clone without writing or fetching it, serves history for the default branch and the project's
+working branches newest-first in pages, and serves one commit's detail on request.
 
 ## Requirements
 

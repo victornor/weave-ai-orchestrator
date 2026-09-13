@@ -1,7 +1,9 @@
 # model-selection/turn-resolution Specification
 
 ## Purpose
-TBD - created by archiving change vs-77-model-selection-is-exactly-two-per-works. Update Purpose after archive.
+Defines how a turn resolves the runtime and model it runs on from the workspace's two model settings,
+so one setting decides the pair with no five-level fallback; a runtime change starts a new session,
+and every run records what it actually ran on.
 
 ## Requirements
 

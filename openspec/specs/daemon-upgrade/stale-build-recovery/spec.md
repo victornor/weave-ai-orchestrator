@@ -1,7 +1,8 @@
 # daemon-upgrade/stale-build-recovery Specification
 
 ## Purpose
-TBD - created by archiving change vs-210-a-tab-open-across-an-upgrade-breaks-and. Update Purpose after archive.
+Defines how a tab left open across a daemon upgrade recovers when a dynamic import fails against the
+new release's asset map, instead of being stranded on the version-skew error.
 
 ## Requirements
 

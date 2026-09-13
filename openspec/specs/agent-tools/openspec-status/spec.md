@@ -1,7 +1,9 @@
 # agent-tools/openspec-status Specification
 
 ## Purpose
-TBD - created by archiving change vs-318-the-daemon-silently-loses-openspec-and-g. Update Purpose after archive.
+Defines what `weave_openspec_status` reports when the openspec binary cannot be executed: an error
+naming the real host-tool condition rather than a status claiming planning is incomplete, while a
+ticket with no OpenSpec change still returns the zeroed status.
 
 ## Requirements
 

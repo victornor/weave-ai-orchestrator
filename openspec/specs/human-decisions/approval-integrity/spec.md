@@ -1,7 +1,9 @@
 # human-decisions/approval-integrity Specification
 
 ## Purpose
-TBD - created by archiving change vs-104-writing-a-plan-document-no-longer-silent. Update Purpose after archive.
+Keeps an approval honest: the daemon reserves the `plan` document key so a worker's plan write can
+never silently supersede the plan approval it was awaiting, and an approval cannot sit open on a
+card whose decision no longer accepts its action or whose ticket has reached a terminal status.
 
 ## Requirements
 

@@ -1,7 +1,9 @@
 # workspace-navigation/phone-keyboard-viewport Specification
 
 ## Purpose
-TBD - created by archiving change vs-79-mobile-chat-keeps-the-composer-above-the. Update Purpose after archive.
+Defines the mobile viewport contract: the app fills the region the browser is actually showing
+rather than a page taller than the screen, so the keyboard no longer pushes the composer below
+itself, and a following list stays at its newest content when that region changes.
 
 ## Requirements
 

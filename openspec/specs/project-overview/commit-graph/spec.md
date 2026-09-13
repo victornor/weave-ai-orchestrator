@@ -1,7 +1,9 @@
 # project-overview/commit-graph Specification
 
 ## Purpose
-TBD - created by archiving change vs-96-the-project-overview-s-history-section-s. Update Purpose after archive.
+Fills the project overview's History section with the project's commit graph, drawn from the clone
+and its worker worktrees: each row names its commit and, where known, its ticket, selecting a commit
+or branch shows what it is, and the graph keeps up without a reload on phone and desktop alike.
 
 ## Requirements
 

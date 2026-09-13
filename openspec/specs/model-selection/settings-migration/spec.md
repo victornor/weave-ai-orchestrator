@@ -1,7 +1,10 @@
 # model-selection/settings-migration Specification
 
 ## Purpose
-TBD - created by archiving change vs-77-model-selection-is-exactly-two-per-works. Update Purpose after archive.
+Defines how a workspace that predates the two-setting model choice arrives at it without a human:
+the daemon derives the settings from what was in force, records how it decided, asks rather than
+guesses when a workspace's roles disagreed, and clears a workspace value a filled daemon overlay was
+masking.
 
 ## Requirements
 

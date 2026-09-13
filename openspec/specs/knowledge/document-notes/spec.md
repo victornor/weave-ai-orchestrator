@@ -1,7 +1,9 @@
 # knowledge/document-notes Specification
 
 ## Purpose
-TBD - created by archiving change vs-109-the-project-hub-file-becomes-a-short-ind. Update Purpose after archive.
+Lets a knowledge note be appended to an existing linked document instead of the hub, so a durable
+fact lands on the subject it belongs to, and requires the document to already exist and to lie
+inside the same project and scope the writer may read.
 
 ## Requirements
 

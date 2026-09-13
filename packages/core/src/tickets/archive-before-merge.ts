@@ -11,6 +11,7 @@ import { OcError } from '@weave-ai/shared';
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 import { git } from '../util/git.js';
 import * as cli from '../openspec/cli.js';
+import { fillArchivedCapabilityPurposes } from '../openspec/purpose.js';
 
 export interface ScratchLand {
   /** The scratch worktree's path — a checkout of the ticket's branch, outside the primary clone. */
@@ -108,6 +109,11 @@ export interface ArchiveOnBranchResult { archivedAs: string | null; specsUpdated
  */
 export async function archiveOnBranch(worktreePath: string, changeName: string): Promise<ArchiveOnBranchResult> {
   const result = await cli.archive({ cwd: worktreePath, root: worktreePath }, changeName);
+  // VS-362: a capability this archive just created can carry openspec's placeholder Purpose. Fill it
+  // from the archived proposal's "Why" before the commit; a missing "Why" throws
+  // `openspec_archive_blocked`, which the caller already treats as an archive failure that blocks
+  // the merge (rather than letting a placeholder reach the landing branch).
+  fillArchivedCapabilityPurposes(worktreePath, changeName);
   const add = await git(['add', '-A', 'openspec'], worktreePath, 30_000);
   if (!add.ok) throw new OcError('internal', `git add of the archive failed: ${add.stderr.trim().slice(0, 300)}`, { changeName });
   const commit = await git(['commit', '-m', `chore(openspec): archive ${changeName}`], worktreePath, 30_000);

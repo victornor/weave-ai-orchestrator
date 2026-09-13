@@ -1,7 +1,9 @@
 # conductor-chat/decision-layout Specification
 
 ## Purpose
-TBD - created by archiving change vs-289-let-the-weaver-chat-put-open-decisions-i. Update Purpose after archive.
+Gives the chat's open-decision area a device-local layout choice between the pinned bottom strip and
+a split view with a decisions rail beside the conversation, so a wide screen can spend its height on
+the conversation while a phone keeps the existing pinned, resizable area.
 
 ## Requirements
 

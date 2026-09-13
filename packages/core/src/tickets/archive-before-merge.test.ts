@@ -177,6 +177,59 @@ describe('archive-before-merge mechanics', () => {
         await scratch.dispose();
       }
     });
+
+    // A change introducing a capability carries no main spec yet, so archive creates one; with no
+    // `## Purpose` in the delta, openspec writes its placeholder (VS-362).
+    async function seedNewCapabilityChange(repo: string, changeName: string, why: string | null): Promise<void> {
+      const changeDir = join(repo, 'openspec', 'changes', changeName);
+      mkdirSync(join(changeDir, 'specs', 'gadgets'), { recursive: true });
+      writeFileSync(join(changeDir, '.openspec.yaml'), 'schema: spec-driven\n');
+      const whySection = why === null ? '' : `## Why\n\n${why}\n\n`;
+      writeFileSync(join(changeDir, 'proposal.md'), `${whySection}## What Changes\n- Add a gadget.\n\n## Capabilities\n\n### New Capabilities\n- \`gadgets\`: adds a gadget\n`);
+      writeFileSync(
+        join(changeDir, 'specs', 'gadgets', 'spec.md'),
+        '## ADDED Requirements\n\n### Requirement: A gadget exists\nThe system SHALL have a gadget.\n\n#### Scenario: One gadget\n- **WHEN** asked\n- **THEN** a gadget is returned\n',
+      );
+      writeFileSync(join(changeDir, 'tasks.md'), '## 1. Gadget\n\n- [x] 1.1 Add it\n');
+      await git(['add', '.'], repo);
+      await git(['commit', '-m', 'chore: seed new-capability change'], repo);
+    }
+
+    it('fills a capability the archive created from the proposal Why', async () => {
+      const why = 'Gadgets exist so callers can rely on a gadget being present and shaped the way this capability guarantees.';
+      await seedNewCapabilityChange(origin, 'add-gadget', why);
+      await git(['pull', 'origin', 'main'], clone);
+      await pushBranchFromClone(BRANCH);
+      await git(['fetch', 'origin'], clone);
+
+      const scratch = await scratchLandWorktree(clone, BRANCH);
+      try {
+        await archiveOnBranch(scratch.path, 'add-gadget');
+        const spec = (await git(['show', 'HEAD:openspec/specs/gadgets/spec.md'], scratch.path)).stdout;
+        expect(spec).toContain(why);
+        expect(spec).not.toContain('Update Purpose after archive');
+      } finally {
+        await scratch.dispose();
+      }
+    });
+
+    it('rejects an archive that would leave a placeholder and commits nothing', async () => {
+      await seedNewCapabilityChange(origin, 'add-gadget-no-why', null);
+      await git(['pull', 'origin', 'main'], clone);
+      await pushBranchFromClone(BRANCH);
+      await git(['fetch', 'origin'], clone);
+
+      const scratch = await scratchLandWorktree(clone, BRANCH);
+      try {
+        const before = await head(scratch.path);
+        await expect(archiveOnBranch(scratch.path, 'add-gadget-no-why'))
+          .rejects.toMatchObject({ code: 'openspec_archive_blocked' });
+        // Nothing was committed: the branch tip is exactly where it started.
+        expect(await head(scratch.path)).toBe(before);
+      } finally {
+        await scratch.dispose();
+      }
+    });
   });
 
   describe('attemptArchiveThenMerge', () => {

@@ -11,6 +11,8 @@ import { KnowledgeExplorerPage } from './knowledge/KnowledgeExplorerPage';
 import { V2WorkScreen } from './work/Work';
 import { V2TicketScreen } from './ticket/Ticket';
 import { V2TicketArtifactReader, V2WorkspaceArtifactReader } from './artifact/Artifact';
+import { V2Settings } from './settings/V2Settings';
+import { V2Scheduled } from './scheduled/V2Scheduled';
 
 // VS-345: Needs you is a real screen, not a placeholder; its module owns the page component.
 export { V2NeedsPage } from './NeedsYouPage';
@@ -32,10 +34,10 @@ export function V2RunPage(): React.ReactElement {
   return <V2Page title="Run" subtitle={params.runId} />;
 }
 export function V2ScheduledPage(): React.ReactElement {
-  return <V2Page title="Scheduled" />;
+  return <V2Scheduled />;
 }
 export function V2SettingsPage(): React.ReactElement {
-  return <V2Page title="Settings" />;
+  return <V2Settings />;
 }
 export function V2ChatsPage(): React.ReactElement {
   return <V2Page title="Chats" />;

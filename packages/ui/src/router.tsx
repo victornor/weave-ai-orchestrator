@@ -142,6 +142,7 @@ const v2GlobalRoute = <K extends keyof V2PageExports>(path: string, page: K) =>
   createRoute({
     getParentRoute: () => v2RootRoute,
     path,
+    validateSearch: (s: Record<string, unknown>) => s,
     component: lazyRouteComponent(() => import('./v2/pages'), page),
   });
 

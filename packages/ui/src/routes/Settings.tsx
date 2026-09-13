@@ -395,7 +395,7 @@ function WorkspaceSection(): React.ReactElement {
  * YOLO mode: the daemon grants plan and merge approvals itself (PLAN §15). Off by default, and
  * deliberate to turn on, so the copy says plainly what stops happening and what does not.
  */
-function YoloSection({ config }: { config: Record<string, unknown> }): React.ReactElement {
+export function YoloSection({ config }: { config: Record<string, unknown> }): React.ReactElement {
   const patch = usePatchConfig();
   const toast = useToast();
   const on = workspaceYolo(config);
@@ -483,7 +483,7 @@ function BudgetField({ label, hint, value, min, step, onCommit }: {
   );
 }
 
-function KnowledgeBudgetsSection({ config }: { config: Record<string, unknown> }): React.ReactElement {
+export function KnowledgeBudgetsSection({ config }: { config: Record<string, unknown> }): React.ReactElement {
   const patch = usePatchConfig();
   const defaults = (config['defaults'] ?? {}) as Record<string, unknown>;
   const budgets = (defaults['knowledgeBudgetTokens'] ?? {}) as Record<string, number | undefined>;
@@ -956,7 +956,7 @@ function ProjectRow({
   return <ActiveProjectRow p={p} workspaceOn={workspaceOn} workspaceDefaults={workspaceDefaults} liveCount={liveCount} destinations={destinations} />;
 }
 
-function ProjectsSection(): React.ReactElement {
+export function ProjectsSection(): React.ReactElement {
   const projects = useProjects();
   const add = useAddProject();
   const workers = useWorkers();
@@ -1704,7 +1704,7 @@ function OverlaySetting({ label, setting, fallback, runtimes, onFill, onClear }:
  * user's login shell does not cover. Zero configuration is the norm; this only helps the exception.
  * Saving persists `hostToolPaths` to daemon.yaml and re-resolves live, no restart.
  */
-function HostToolsSection(): React.ReactElement {
+export function HostToolsSection(): React.ReactElement {
   const hostTools = useDaemonHostTools();
   const save = useSetDaemonHostTools();
   const [draft, setDraft] = useState<string | null>(null);
@@ -1776,7 +1776,7 @@ function allowlistRuleLabel(telegram: { allowedUserIds?: number[]; allowAll?: bo
   return { text: 'Off — no user is allowed', tone: 'added' };
 }
 
-function ChannelsSection(): React.ReactElement {
+export function ChannelsSection(): React.ReactElement {
   const summary = useWorkspaceSummary();
   const patch = usePatchConfig();
   const tokenStatus = useTelegramTokenStatus();
@@ -1936,7 +1936,7 @@ function PendingTelegramUsers({ users, approving, onApprove }: { users: T.Telegr
   );
 }
 
-function PresentationSection(): React.ReactElement {
+export function PresentationSection(): React.ReactElement {
   const presentation = usePresentation();
   const surfaces = usePresentationSurfaces();
   const put = usePutPresentation();
@@ -2003,7 +2003,7 @@ function PresentationBlockRow({ label, block, fallback }: { label: string; block
   );
 }
 
-function SecuritySection(): React.ReactElement {
+export function SecuritySection(): React.ReactElement {
   const me = useMe();
   const sessions = useAuthSessions();
   const qc = useQueryClient();
@@ -2188,7 +2188,7 @@ const NOTIFS = [
   { key: 'everything', label: 'Everything else', detail: 'Status changes, run starts, curation', def: false, wired: false },
 ] as const;
 
-function DictationSection(): React.ReactElement {
+export function DictationSection(): React.ReactElement {
   const tx = useTranscription();
   const put = useSetTranscription();
   const backend = tx.data?.backend ?? 'chrome';
@@ -2242,7 +2242,7 @@ function DictationSection(): React.ReactElement {
   );
 }
 
-function DeviceSection(): React.ReactElement {
+export function DeviceSection({ themeControl = 'full' }: { themeControl?: 'full' | 'note' } = {}): React.ReactElement {
   // Push subscriptions are registered per workspace — the daemon's push routes live under
   // `/api/w/:ws`, and the subscription id is remembered per workspace in localStorage — so the
   // controls address the workspace this browser remembers, which is where an existing subscription
@@ -2310,19 +2310,25 @@ function DeviceSection(): React.ReactElement {
 
       <section>
         <div className="ac-label mb-2">Theme</div>
-        <div className="flex gap-1.5">
-          {(['dark', 'light', 'system'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTheme(t)}
-              className={cx('rounded-r6 border px-3 py-1.5 text-meta', theme === t ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-3')}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-        <p className="mt-1.5 text-micro text-text-3">Dark is the designed theme; light is authored from the same tokens.</p>
+        {themeControl === 'note' ? (
+          <p className="text-micro text-text-3">Theme follows the switch in the V2 rail footer.</p>
+        ) : (
+          <>
+            <div className="flex gap-1.5">
+              {(['dark', 'light', 'system'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTheme(t)}
+                  className={cx('rounded-r6 border px-3 py-1.5 text-meta', theme === t ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-3')}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-micro text-text-3">Dark is the designed theme; light is authored from the same tokens.</p>
+          </>
+        )}
       </section>
 
       <section>
@@ -2437,7 +2443,7 @@ function DeviceSection(): React.ReactElement {
  * restarts the daemon this app is talking to. See PLAN §20.
  */
 
-function UpdatesSection(): React.ReactElement {
+export function UpdatesSection(): React.ReactElement {
   const update = useDaemonUpdate();
   const status = useDaemonUpgrade();
   const refresh = useRefreshDaemonUpdate();

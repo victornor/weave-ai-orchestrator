@@ -3,7 +3,6 @@
  * address and the header ship here so navigation and highlighting are complete (proposal: "a route
  * and a header for every V2 destination").
  */
-import { useParams } from '@tanstack/react-router';
 import { V2Page } from './V2Page';
 import { KnowledgeHome } from './knowledge/KnowledgeHome';
 import { KnowledgeGraphPage } from './knowledge/KnowledgeGraphPage';
@@ -26,15 +25,20 @@ export { V2RunsPage } from './RunsPage';
 export { V2RunPage } from './RunPage';
 export { V2MapPage } from './MapPage';
 export { V2IncidentsPage } from './IncidentsPage';
+// VS-352: Global Chats is a real screen; its module owns the page component.
+export { V2ChatsScreen as V2ChatsPage } from './chats/ChatsPage';
+// VS-352: Usage is a real screen.
+export { V2UsageScreen as V2UsagePage } from './usage/UsagePage';
+// VS-352: Changelog is a real screen.
+export { V2ChangelogScreen as V2ChangelogPage } from './changelog/ChangelogPage';
+// VS-352: the project overview is a real screen.
+export { V2ProjectScreen as V2ProjectPage } from './project/ProjectPage';
 
 export function V2ScheduledPage(): React.ReactElement {
   return <V2Scheduled />;
 }
 export function V2SettingsPage(): React.ReactElement {
   return <V2Settings />;
-}
-export function V2ChatsPage(): React.ReactElement {
-  return <V2Page title="Chats" />;
 }
 export function V2WorkPage(): React.ReactElement {
   return <V2WorkScreen />;
@@ -59,16 +63,6 @@ export function V2ExplorerPage(): React.ReactElement {
       <KnowledgeExplorerPage />
     </V2Page>
   );
-}
-export function V2UsagePage(): React.ReactElement {
-  return <V2Page title="Usage" />;
-}
-export function V2ChangelogPage(): React.ReactElement {
-  return <V2Page title="Changelog" />;
-}
-export function V2ProjectPage(): React.ReactElement {
-  const params = useParams({ strict: false }) as { project?: string };
-  return <V2Page title="Project" subtitle={params.project} />;
 }
 export function V2TicketPage(): React.ReactElement {
   return <V2TicketScreen />;

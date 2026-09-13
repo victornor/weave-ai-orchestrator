@@ -65,6 +65,11 @@ Run detail and Global Chats — and the workspace pages — Chat, Needs you, Wor
 knowledge graph, the knowledge explorer, Usage, Changelog, the project overview, the ticket page,
 the artifact reader and the worker page. The merge queue SHALL NOT have a V2 route.
 
+The header SHALL accept an optional screen-supplied action area, so a screen MAY put its own controls
+into the same 38px header the frame renders. Supplying actions SHALL NOT change the breadcrumb, the
+destination label or the counts: those SHALL still derive from the frame's one source, and a screen
+SHALL NOT render a second header above or beside it.
+
 #### Scenario: Each destination resolves
 
 - **WHEN** a user opens any V2 destination's address
@@ -81,6 +86,17 @@ the artifact reader and the worker page. The merge queue SHALL NOT have a V2 rou
 - **WHEN** the V2 route table is inspected
 - **THEN** it contains no route for the merge queue, and no V2 rail row or phone list entry links to
   one
+
+#### Scenario: A screen puts its controls in the header
+
+- **WHEN** a screen supplies header actions, such as Usage's window and grain picker
+- **THEN** those controls render in the frame's 38px header, beside the label and counts, and the
+  label, breadcrumb and counts are unchanged
+
+#### Scenario: A screen without actions
+
+- **WHEN** a screen supplies no header actions
+- **THEN** the header renders exactly as before, with the label, breadcrumb and counts
 
 ### Requirement: The V2 root resolves a workspace the way V1 does
 

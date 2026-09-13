@@ -205,7 +205,7 @@ function JumpView({
   );
 }
 
-export function V2ChatPage(): React.ReactElement {
+export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): React.ReactElement {
   const ws = useWs();
   const go = useGo();
   const conn = useConnection();
@@ -274,7 +274,9 @@ export function V2ChatPage(): React.ReactElement {
     ),
   );
 
-  const { events: runEvents, status: runStreamStatus, retryNow } = useRunEventStream(live?.id ?? null, { live: live?.running ?? false });
+  // `focused` gates the run stream (VS-199, as V1's `ChatPage focused` does): in Global Chats each
+  // pane renders this screen, but only the focused pane may hold a live stream to its weaver's run.
+  const { events: runEvents, status: runStreamStatus, retryNow } = useRunEventStream(live?.id ?? null, { live: focused && (live?.running ?? false) });
   const liveEvents = useMemo(() => runEvents.filter((e) => !isHumanReplyToolEvent(e)), [runEvents]);
   const working = sending || (live?.running ?? false);
 

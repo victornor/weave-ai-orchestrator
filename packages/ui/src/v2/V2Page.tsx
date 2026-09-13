@@ -59,10 +59,13 @@ function Pill({ tone, label }: { tone: 'working' | 'needs-you' | 'blocked'; labe
 export interface V2PageProps {
   title: string;
   subtitle?: string;
+  /** A screen's own controls for the 38px header (e.g. Usage's window and grain picker). They sit
+   *  beside the label and the one-source counts; supplying them does not change either. */
+  actions?: ReactNode;
   children?: ReactNode;
 }
 
-export function V2Page({ title, subtitle, children }: V2PageProps): React.ReactElement {
+export function V2Page({ title, subtitle, actions, children }: V2PageProps): React.ReactElement {
   const scope = useV2Scope();
   const root = useV2WorkspaceName(scope);
   const counts = useV2Counts(scope);
@@ -77,6 +80,7 @@ export function V2Page({ title, subtitle, children }: V2PageProps): React.ReactE
         <h1 className="text-ui font-medium tracking-[-0.005em] text-text-1">{title}</h1>
         {subtitle ? <span className="truncate text-meta text-text-3">{subtitle}</span> : null}
         <div className="ml-auto flex flex-none items-center gap-2">
+          {actions}
           {counts.live > 0 ? <Pill tone="working" label={`${counts.live} running`} /> : null}
           {counts.needs > 0 ? <Pill tone="needs-you" label={`${counts.needs} need you`} /> : null}
         </div>

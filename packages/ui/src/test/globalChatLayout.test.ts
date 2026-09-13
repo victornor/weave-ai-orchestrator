@@ -165,8 +165,14 @@ describe('localStorage persistence', () => {
     expect(readGlobalChatLayout()).toEqual(saved);
   });
 
-  it('prunes ids the daemon no longer lists when writing', () => {
-    const saved = layout({ order: ['a', 'gone'], widths: { a: 2, gone: 5 }, collapsed: { gone: true } });
+  it('reads and writes a caller-supplied key independently of V1\'s', () => {
+    const saved = layout({ order: ['a'], widths: { a: 2 } });
+    writeGlobalChatLayout(saved, ['a'], 'weave.v2.chats.layout');
+    expect(readGlobalChatLayout('weave.v2.chats.layout')).toEqual(saved);
+    expect(readGlobalChatLayout()).toEqual(emptyLayout());
+  });
+
+  it('prunes ids the daemon no longer lists when writing', () => {    const saved = layout({ order: ['a', 'gone'], widths: { a: 2, gone: 5 }, collapsed: { gone: true } });
     writeGlobalChatLayout(saved, ['a']);
     expect(readGlobalChatLayout()).toEqual({ order: ['a'], widths: { a: 2 }, collapsed: {} });
   });

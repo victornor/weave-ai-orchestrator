@@ -18,6 +18,8 @@ const state = vi.hoisted(() => ({
   search: [] as Array<{ messageId: string; authorKind: string; authorId: string | null; createdAt: string; snippet: string }>,
   context: [] as ThreadMessage[],
   events: [] as unknown[],
+  runStreams: [] as Array<{ id: string | null; live: boolean }>,
+  lastRun: null as { id: string; status: string } | null,
   answer: vi.fn(),
   post: vi.fn(),
   go: vi.fn(),
@@ -42,7 +44,10 @@ vi.mock('../api/context', () => ({
   useWorkspaceEvents: () => undefined,
 }));
 vi.mock('../api/runStream', () => ({
-  useRunEventStream: () => ({ events: [], status: { state: 'connected' }, retryNow: vi.fn() }),
+  useRunEventStream: (id: string | null, opts?: { live?: boolean }) => {
+    state.runStreams.push({ id, live: opts?.live ?? false });
+    return { events: [], status: { state: 'connected' }, retryNow: vi.fn() };
+  },
 }));
 vi.mock('../v2/chatSplit', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../v2/chatSplit')>();
@@ -68,7 +73,7 @@ vi.mock('../api/hooks', () => ({
   useWorkers: () => ({ data: [{ id: 'w1', status: 'running' }, { id: 'w2', status: 'idle' }] }),
   useProjects: () => ({ data: [{ id: 'p1', workspaceId: 'ws1', slug: 'web', name: 'web' }] }),
   useTickets: () => ({ data: state.tickets }),
-  useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: 'claude' }, lastRun: null } }),
+  useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: 'claude' }, lastRun: state.lastRun } }),
   useRuntimes: () => ({ data: [{ id: 'claude', capabilities: { contextCompactionAt: 0.8 } }] }),
   useRuntimeModels: () => ({ data: [{ id: 'sonnet', contextWindowTokens: 1_000_000 }] }),
   useUsageAccounts: () => ({
@@ -186,6 +191,8 @@ beforeEach(() => {
   state.search = [];
   state.context = [];
   state.events = [];
+  state.runStreams = [];
+  state.lastRun = null;
   state.answer.mockReset();
   state.post.mockReset().mockResolvedValue(undefined);
   state.go.mockReset();
@@ -203,6 +210,17 @@ describe('chat split geometry', () => {
 });
 
 describe('the V2 Chat screen', () => {
+  it('gates the run stream to the focused pane (VS-199)', () => {
+    state.lastRun = { id: 'r9', status: 'running' };
+    const first = render(<V2ChatPage focused={false} />);
+    expect(state.runStreams.at(-1)).toEqual({ id: 'r9', live: false });
+    first.unmount();
+
+    state.runStreams = [];
+    render(<V2ChatPage />);
+    expect(state.runStreams.at(-1)).toEqual({ id: 'r9', live: true });
+  });
+
   it('keeps the decisions pane on desktop when nothing is waiting, and drops it below the threshold', async () => {
     state.decisions = [];
     const utils = render(<V2ChatPage />);

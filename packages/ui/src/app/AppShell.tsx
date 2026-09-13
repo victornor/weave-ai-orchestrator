@@ -228,6 +228,7 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
           needsCount={needsCount}
           projectsByWs={projectsByWs}
           onNewWorkspace={() => go('/onboarding')}
+          activePlugins={summary.data?.plugins}
         />
 
         <button type="button" onClick={() => setPaletteOpen(true)} className="flex items-center gap-2 border-t border-line-1 px-2.5 py-2.5 text-left">

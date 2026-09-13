@@ -12,6 +12,7 @@ import {
 import type { Registries, WorkspaceContext } from '../context.js';
 import { workspacePaths } from '../context.js';
 import { EventBus } from '../events.js';
+import { createPluginRegistry } from '../plugins/index.js';
 import { PROJECT_SECTIONS } from '../knowledge/files.js';
 import { getLogger } from '../logger.js';
 import { registerBuiltinWorktreeProviders, writeWtConfig } from '../worktrees/index.js';
@@ -332,6 +333,7 @@ class Loader implements WorkspaceLoader {
       db,
       events: new EventBus(db, ws.id),
       registries: opts.registries,
+      plugins: createPluginRegistry(),
       log: (domain) => getLogger(domain, { workspace: config.id }),
       loopbackUrl: opts.loopbackUrl,
       skillsDir: opts.skillsDir,

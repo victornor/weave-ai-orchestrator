@@ -9,7 +9,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { OcError, type ToolResult, MCP_SERVER_NAME } from '@weave-ai/shared';
 import { getLogger } from '@weave-ai/core';
 import type { AppDeps, AppEnv } from './types.js';
-import { jsonSchemaFor, runTool, toolsFor, type ToolCtx } from './tools.js';
+import { runTool, toolListFor, type ToolCtx } from './tools.js';
 
 const log = getLogger('http', { component: 'mcp' });
 
@@ -38,12 +38,12 @@ export function capListResult(result: ToolResult<unknown>, cap: number): ToolRes
   return { ok: true, data: { ...data, items: [], truncated: true } };
 }
 
-/** Build the MCP server exposing exactly the tools this run's agent may call. */
+/** Build the MCP server exposing exactly the tools this run's agent may call — core tools plus this workspace's own plugin tools (VS-334). */
 export function createMcpServer(ctx: ToolCtx, version: string): Server {
-  const defs = toolsFor(ctx.claims.agentKind);
+  const defs = toolListFor(ctx.claims.agentKind, ctx.ws);
   const server = new Server({ name: MCP_SERVER_NAME, version }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: defs.map((d) => ({ name: d.name, description: d.description, inputSchema: jsonSchemaFor(d) })),
+    tools: defs.map((d) => ({ name: d.name, description: d.description, inputSchema: d.inputSchema })),
   }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const result = await runTool(req.params.name, ctx, req.params.arguments ?? {});

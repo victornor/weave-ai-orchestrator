@@ -19,6 +19,7 @@ import { RunRoute } from './routes/RunPage';
 import { UsageRoute } from './routes/Usage';
 import { KnowledgeRoute } from './routes/Knowledge';
 import { ProjectOverviewRoute } from './routes/project/ProjectOverview';
+import { PluginPageRoute } from './routes/PluginPage';
 import { DaemonSettingsRoute, WorkspaceSettingsRoute } from './routes/Settings';
 import { redirectForSettingsRoute } from './lib/settings';
 import { GlobalNeedsRoute } from './routes/GlobalNeeds';
@@ -177,6 +178,8 @@ const usageRoute = child('/usage', UsageRoute, searchPassthrough);
 const knowledgeRoute = child('/knowledge', KnowledgeRoute, searchPassthrough);
 // A project is addressed by its slug; its id resolves to the same page, as `GET /projects/:id` does.
 const projectRoute = child('/p/$project', ProjectOverviewRoute, searchPassthrough);
+// VS-334: one static route with a dynamic `$pluginId` segment — not a route added per plugin.
+const pluginPageRoute = child('/plugins/$pluginId', PluginPageRoute);
 // This workspace's settings only (VS-230). A URL naming the daemon side — `?area=daemon` or one of
 // its sections — moves to `/settings`, carrying the section and the rest of the search.
 const settingsRoute = createRoute({
@@ -220,6 +223,7 @@ const routeTree = rootRoute.addChildren([
     usageRoute,
     knowledgeRoute,
     projectRoute,
+    pluginPageRoute,
     settingsRoute,
   ]),
 ]);

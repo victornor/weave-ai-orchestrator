@@ -88,6 +88,7 @@ function summary(v: unknown): T.WorkspaceSummary {
     },
     config: cfg,
     counts: r['counts'] as T.WorkspaceSummary['counts'],
+    plugins: r['plugins'] as T.WorkspaceSummary['plugins'],
   };
 }
 

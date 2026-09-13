@@ -69,6 +69,26 @@ export interface ForgeAdapter {
   pullRequestForBranch?(cwd: string, branch: string): Promise<{ url: string; number: number } | null>;
 }
 export interface Logger { debug(msg: string, data?: Record<string, unknown>): void; info(msg: string, data?: Record<string, unknown>): void; warn(msg: string, data?: Record<string, unknown>): void; error(msg: string, data?: Record<string, unknown>): void }
+/** A plugin's own namespaced, durable document store (VS-334). One value per key, JSON-shaped. */
+export interface PluginStore {
+  get(key: string): Promise<unknown | null>;
+  put(key: string, value: unknown): Promise<void>;
+  delete(key: string): Promise<void>;
+  list(prefix?: string): Promise<Array<{ key: string; value: unknown }>>;
+}
+export type PluginHttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+/** What a plugin's HTTP route handler receives — a minimal, stable request shape, not a raw framework `Context` (VS-334). */
+export interface PluginRequestCtx {
+  method: PluginHttpMethod;
+  path: string;
+  params: Record<string, string>;
+  query: URLSearchParams;
+  headers: Headers;
+  json(): Promise<unknown>;
+  text(): Promise<string>;
+  workspaceId: string;
+}
+export type PluginRouteHandler = (req: PluginRequestCtx) => Promise<Response> | Response;
 export interface PluginHost {
   registerRuntime(adapter: RuntimeAdapter): void;
   registerChannel(adapter: ChannelAdapter): void;
@@ -77,8 +97,65 @@ export interface PluginHost {
   registerForge(adapter: ForgeAdapter): void;
   registerHook(sub: { events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }): void;
   registerAgentTool(tool: AgentToolDefinition): void;
+  /**
+   * Mounts `handler` at `/api/w/:ws/plugins/<pluginId><path>`, behind the same session auth as every
+   * other workspace route (VS-334). `path` is relative to the plugin's own prefix — it can never
+   * escape it, and the operator-only plugin-data purge route deliberately lives outside this prefix
+   * entirely so a plugin's own page (reached only through the postMessage bridge scoped to this same
+   * prefix) can never trigger it.
+   */
+  registerHttpRoute(method: PluginHttpMethod, path: string, handler: PluginRouteHandler): void;
+  /** This plugin's own namespaced document store (VS-334) — isolated per plugin, never a core table. */
+  store: PluginStore;
+  /** Puts a `plugin.event` on this workspace's existing event stream, tagged with this plugin's id (VS-334). */
+  emit(kind: string, entityId: string, payload: unknown): void;
+  /** The Artifact Kit CSS, for a plugin's page to inline into a `<style>` block (VS-334) — a method, not a static import, so `@weave-ai/plugin-sdk` never has to depend on `@weave-ai/core` to expose it. */
+  kitCss(): string;
   config<T = Record<string, unknown>>(): T;
   logger: Logger;
 }
 export interface WeaveAIPlugin { id: string; version: string; apiVersion: 1; register(host: PluginHost): void | Promise<void> }
 export function definePlugin(p: WeaveAIPlugin): WeaveAIPlugin { return p; }
+
+/**
+ * Vanilla JS (no imports, no bundler) a plugin's own page route inlines in a `<script>` tag before
+ * its own script (VS-334). Defines `window.weavePluginClient()`, returning `{ request, onEvent }`:
+ * `request(method, path, body?)` posts to the parent frame and resolves on the matching reply;
+ * `onEvent(kind, handler)` subscribes to this plugin's own live events, forwarded by the host page's
+ * postMessage bridge. The page itself can make no other network call — its CSP's `connect-src`
+ * is `'none'`; this is the only channel to the daemon.
+ */
+export const WEAVE_PLUGIN_CLIENT_JS = `
+window.weavePluginClient = function weavePluginClient() {
+  var pending = Object.create(null);
+  var eventHandlers = Object.create(null);
+  var nextId = 1;
+  window.addEventListener('message', function (event) {
+    var msg = event.data;
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'response' && pending[msg.id]) {
+      var p = pending[msg.id];
+      delete pending[msg.id];
+      if (msg.ok) p.resolve({ status: msg.status, data: msg.data });
+      else p.reject(msg.error);
+    } else if (msg.type === 'event') {
+      var handlers = eventHandlers[msg.kind];
+      if (handlers) for (var i = 0; i < handlers.length; i++) handlers[i](msg.payload);
+    }
+  });
+  return {
+    request: function (method, path, body) {
+      return new Promise(function (resolve, reject) {
+        var id = String(nextId++);
+        pending[id] = { resolve: resolve, reject: reject };
+        window.parent.postMessage({ type: 'request', id: id, method: method, path: path, body: body }, '*');
+      });
+    },
+    onEvent: function (kind, handler) {
+      if (!eventHandlers[kind]) eventHandlers[kind] = [];
+      eventHandlers[kind].push(handler);
+      window.parent.postMessage({ type: 'subscribe', kind: kind }, '*');
+    },
+  };
+};
+`;

@@ -946,9 +946,17 @@ export const TOOLS: ToolDef[] = [
 
 const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
 
-/** Tool names an agent of this kind may call (PLAN §9.2 + WORKER_ONLY_TOOLS). */
-export function toolNamesFor(kind: 'weaver' | 'worker'): string[] {
-  return kind === 'weaver' ? [...COMMON_TOOLS, ...WEAVER_TOOLS] : [...COMMON_TOOLS, ...WORKER_ONLY_TOOLS];
+/**
+ * Tool names an agent of this kind may call (PLAN §9.2 + WORKER_ONLY_TOOLS), plus — when `ws` is
+ * given — the names of this workspace's own plugin tools whose `scope` allows this kind (VS-334).
+ * A plugin tool registered while loading a *different* workspace is never in this list: it lives in
+ * that workspace's own `ctx.plugins.tools`, not here.
+ */
+export function toolNamesFor(kind: 'weaver' | 'worker', ws?: WorkspaceRuntime): string[] {
+  const core = kind === 'weaver' ? [...COMMON_TOOLS, ...WEAVER_TOOLS] : [...COMMON_TOOLS, ...WORKER_ONLY_TOOLS];
+  if (!ws) return core;
+  const pluginNames = ws.ctx.plugins.tools.filter((t) => t.scope === 'all' || t.scope === kind).map((t) => t.name);
+  return [...core, ...pluginNames];
 }
 export function toolsFor(kind: 'weaver' | 'worker'): ToolDef[] {
   const allowed = new Set(toolNamesFor(kind));
@@ -957,16 +965,38 @@ export function toolsFor(kind: 'weaver' | 'worker'): ToolDef[] {
 export function jsonSchemaFor(def: ToolDef): Record<string, unknown> {
   return zodToJsonSchema(def.input, { $refStrategy: 'none', target: 'jsonSchema7' }) as Record<string, unknown>;
 }
+export interface ToolListEntry { name: string; description: string; inputSchema: Record<string, unknown> }
+/** The full tool list an MCP `tools/list` (or the CLI's `GET /tools`) should show: core tools plus this workspace's own plugin tools, scope-filtered (VS-334). */
+export function toolListFor(kind: 'weaver' | 'worker', ws: WorkspaceRuntime): ToolListEntry[] {
+  const core = toolsFor(kind).map((d) => ({ name: d.name, description: d.description, inputSchema: jsonSchemaFor(d) }));
+  const plugin = ws.ctx.plugins.tools
+    .filter((t) => t.scope === 'all' || t.scope === kind)
+    .map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
+  return [...core, ...plugin];
+}
 
 /** Dispatch one tool call. Never throws: every failure comes back as `{ ok: false, error }`. */
 export async function runTool(name: string, ctx: ToolCtx, rawInput: unknown): Promise<ToolResult<unknown>> {
   try {
     const def = BY_NAME.get(name);
-    if (!def) throw new OcError('not_found', `unknown tool ${name}`);
-    if (!toolNamesFor(ctx.claims.agentKind).includes(name)) throw new OcError('forbidden', `tool ${name} is not available to a ${ctx.claims.agentKind}`);
-    const parsed = def.input.safeParse(rawInput ?? {});
-    if (!parsed.success) throw toOcError(parsed.error);
-    const result = await def.handler(ctx, parsed.data);
+    if (def) {
+      if (!toolNamesFor(ctx.claims.agentKind).includes(name)) throw new OcError('forbidden', `tool ${name} is not available to a ${ctx.claims.agentKind}`);
+      const parsed = def.input.safeParse(rawInput ?? {});
+      if (!parsed.success) throw toOcError(parsed.error);
+      const result = await def.handler(ctx, parsed.data);
+      return isWithMcpContent(result) ? ok(result.data, mcpContentOf(result)) : ok(result);
+    }
+    // VS-334: a core-tool miss falls through to this workspace's own plugin tools — never another
+    // workspace's, since each keeps its own `ctx.plugins.tools`.
+    const pluginTool = ctx.ws.ctx.plugins.tools.find((t) => t.name === name);
+    if (!pluginTool) throw new OcError('not_found', `unknown tool ${name}`);
+    if (pluginTool.scope !== 'all' && pluginTool.scope !== ctx.claims.agentKind) {
+      throw new OcError('forbidden', `tool ${name} is not available to a ${ctx.claims.agentKind}`);
+    }
+    const result = await pluginTool.handler(typeof rawInput === 'object' && rawInput !== null ? (rawInput as Record<string, unknown>) : {}, {
+      workspaceId: ctx.claims.workspaceId, agentId: ctx.claims.agentId, agentKind: ctx.claims.agentKind,
+      projectId: ctx.claims.projectId, ticketId: ctx.claims.ticketId, runId: ctx.claims.runId,
+    });
     return isWithMcpContent(result) ? ok(result.data, mcpContentOf(result)) : ok(result);
   } catch (e) {
     return fail(toOcError(e));

@@ -10,6 +10,8 @@ export const EVENT_TYPES = [
   'routine.created', 'routine.updated', 'routine.removed', 'routine.fired',
   'thread.message', 'knowledge.updated', 'knowledge.curated', 'spec.indexed', 'usage.recorded', 'knowledge_usage.recorded', 'auth.login', 'auth.logout', 'auth.revoked', 'presentation.updated',
   'weaver_artifact.published',
+  /** VS-334: a plugin's own event, `entityType` is `plugin:<pluginId>`; payload is `{ pluginId, kind, payload }`. */
+  'plugin.event',
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 /**

@@ -27,6 +27,12 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
 
+  examples/plugins/notes:
+    dependencies:
+      '@weave-ai/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+
   packages/channel-sdk:
     dependencies:
       '@weave-ai/shared':

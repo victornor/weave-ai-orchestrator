@@ -4,7 +4,7 @@ import { GLOBAL_NAV, RAIL, href } from './nav';
 import { PlusGlyph } from './PlusGlyph';
 import { WeaveMark } from '../components/WeaveMark';
 import { Skeleton } from '../components/Skeleton';
-import type { WorkspaceListItem } from '../api/types';
+import type { WorkspaceListItem, WorkspacePlugin } from '../api/types';
 import type { WorkspaceProjectsState } from '../api/hooks';
 import { cx } from '../lib/cx';
 import { projectColorVar } from '../lib/projectColor';
@@ -29,6 +29,14 @@ export interface WorkspaceNavProps {
    */
   projectsByWs: Record<string, WorkspaceProjectsState>;
   onNewWorkspace: () => void;
+  /**
+   * The *active* workspace's own loaded plugins (VS-334) — data-driven, not a `RAIL`/`TABS`/
+   * `MORE_ITEMS` entry, so a plugin's nav link needs no build step and never desyncs from what's
+   * actually loaded. Absent (or all without a page) renders nothing extra; a collapsed or
+   * non-active workspace group never fetched another workspace's summary, so this never applies
+   * to it.
+   */
+  activePlugins?: WorkspacePlugin[];
 }
 
 /**
@@ -53,8 +61,9 @@ function Chevron({ open }: { open: boolean }): React.ReactElement {
  * with plain data instead of the wholesale `api/hooks` mock the shell's own test needs.
  */
 export function WorkspaceNav({
-  workspaces, activeWs, activePath, expanded, onToggle, needsCount, projectsByWs, onNewWorkspace,
+  workspaces, activeWs, activePath, expanded, onToggle, needsCount, projectsByWs, onNewWorkspace, activePlugins,
 }: WorkspaceNavProps): React.ReactElement {
+  const pluginPages = (activePlugins ?? []).filter((p) => p.loaded && p.hasPage);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* The rail's brand block (VS-291). The mark stands alone: at 28px tall it is ~126px across,
@@ -111,6 +120,24 @@ export function WorkspaceNav({
                         {item.key === 'needs' && count > 0 ? <span className="ac-mono text-nano text-needs-you">{count}</span> : null}
                         {/* The number keys reach the active workspace only, so only it is hinted. */}
                         {active ? <span className="ac-mono text-nano text-text-4">{item.kbd}</span> : null}
+                      </A>
+                    );
+                  })}
+                </nav>
+              ) : null}
+              {open && active && pluginPages.length > 0 ? (
+                <nav className="flex flex-col gap-px" aria-label="Plugins">
+                  {pluginPages.map((p) => {
+                    const to = `/w/${w.id}/plugins/${p.id}`;
+                    const current = active && activePath.startsWith(to);
+                    return (
+                      <A
+                        key={p.id}
+                        to={to}
+                        aria-current={current ? 'page' : undefined}
+                        className={cx('flex h-7 items-center gap-2.5 rounded-r4 pl-9 pr-2.5', current ? 'bg-bg-3 text-text-1' : 'text-text-3 hover:bg-bg-2')}
+                      >
+                        <span className="flex-1 text-meta">{p.id}</span>
                       </A>
                     );
                   })}

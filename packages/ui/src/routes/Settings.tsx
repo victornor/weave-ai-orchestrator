@@ -148,9 +148,39 @@ export function WorkspaceSettingsRoute(): React.ReactElement {
           {section === 'models' ? <ModelsSection /> : null}
           {section === 'channels' ? <ChannelsSection /> : null}
           {section === 'presentation' ? <PresentationSection /> : null}
+          {section === 'plugins' ? <PluginsSection plugins={summary.data?.plugins} loading={summary.isLoading} /> : null}
         </div>
       </PageBody>
     </Page>
+  );
+}
+
+/**
+ * Read-only, following `HostToolsSection`'s list-of-rows pattern (VS-334): what this workspace
+ * loads, not what it could load — installing or removing a plugin is still "edit config, restart."
+ */
+function PluginsSection({ plugins, loading }: { plugins: T.WorkspacePlugin[] | undefined; loading: boolean }): React.ReactElement {
+  if (loading) return <SkeletonRows rows={3} />;
+  if (!plugins || plugins.length === 0) {
+    return <p className="text-micro text-text-3">No plugins are configured for this workspace, or the daemon.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-micro leading-relaxed text-text-3">
+        Plugins add agent tools, storage, routes and pages (PLAN §17). Installing or removing one is
+        still editing <span className="ac-mono">workspace.yaml</span> or <span className="ac-mono">daemon.yaml</span> and restarting.
+      </p>
+      <div className="flex flex-col divide-y divide-line-1 rounded-r6 border border-line-2">
+        {plugins.map((p) => (
+          <div key={p.id} className="flex items-center gap-3 px-3 py-2.5">
+            <span className="ac-mono w-28 truncate text-body text-text-1">{p.id}</span>
+            <Badge tone={p.loaded ? 'added' : 'removed'}>{p.loaded ? (p.version ?? 'loaded') : 'failed'}</Badge>
+            <Badge tone="modified">{p.source}</Badge>
+            <span className="truncate text-micro text-text-3">{p.loaded ? (p.error ?? '') : p.error}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

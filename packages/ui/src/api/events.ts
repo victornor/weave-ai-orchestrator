@@ -203,6 +203,9 @@ const TRACKED: EventType[] = [
   'auth.revoked',
   'presentation.updated',
   'weaver_artifact.published',
+  // VS-334: a plugin's own event, forwarded to a plugin page only by the postMessage bridge
+  // (lib/pluginBridge.ts) — never invalidates a query itself, since no core cache key is keyed on it.
+  'plugin.event',
 ];
 
 /**

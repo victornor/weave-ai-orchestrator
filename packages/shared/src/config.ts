@@ -318,6 +318,10 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
   path: ['handoverQuietMinutes'],
 }), 'conductorDigestIntervalSec', 'weaverDigestIntervalSec');
 
+/** One `plugins:` list entry, shared by `daemon.yaml` and `workspace.yaml` (VS-334). */
+export const PluginEntrySchema = z.union([z.string(), z.object({ name: z.string(), config: z.record(z.string(), z.unknown()).optional() })]);
+export type PluginEntry = z.infer<typeof PluginEntrySchema>;
+
 export const WorkspaceConfigSchema = withKeyAlias(z.object({
   version: z.literal(1),
   id: slug,
@@ -336,7 +340,7 @@ export const WorkspaceConfigSchema = withKeyAlias(z.object({
   channels: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
   webhooks: z.array(z.object({ url: z.string().url(), events: z.array(z.string()).default(['*']), secret: envRef.optional() })).default([]),
   pricingOverrides: z.record(z.string(), z.object({ inputPerMTok: z.number(), outputPerMTok: z.number(), cachedInputPerMTok: z.number().optional() })).default({}),
-  plugins: z.array(z.union([z.string(), z.object({ name: z.string(), config: z.record(z.string(), z.unknown()).optional() })])).default([]),
+  plugins: z.array(PluginEntrySchema).default([]),
 }), 'conductor', 'weaver');
 export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
 
@@ -463,6 +467,12 @@ export const DaemonConfigSchema = z.object({
   hostToolPaths: z.array(z.string()).default([]),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   otlpEndpoint: z.string().optional(),
+  /**
+   * Loaded for every workspace this daemon serves, in addition to that workspace's own
+   * `workspace.yaml` `plugins:` list (VS-334) — how a plugin like captain's Services page reaches
+   * every workspace without editing each one's config.
+   */
+  plugins: z.array(PluginEntrySchema).default([]),
 });
 export type DaemonConfig = z.infer<typeof DaemonConfigSchema>;
 

@@ -9,6 +9,7 @@ import { openDb, newId, nowIso, type Db } from '@weave-ai/db';
 import { DaemonConfigSchema, WorkspaceConfigSchema, type WorkspaceConfig, type WorkspaceEvent } from '@weave-ai/shared';
 import { EventBus } from '../events.js';
 import { createRegistries, workspacePaths, type WorkspaceContext } from '../context.js';
+import { createPluginRegistry } from '../plugins/index.js';
 import { getLogger } from '../logger.js';
 import type { CoreServices } from '../api.js';
 import { createChangelogService } from '../changelog/index.js';
@@ -89,7 +90,7 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
   bus.on((ev) => events.push(ev));
 
   const ctx: WorkspaceContext = {
-    workspaceId, config, daemon, paths, db, events: bus, registries: createRegistries(),
+    workspaceId, config, daemon, paths, db, events: bus, registries: createRegistries(), plugins: createPluginRegistry(),
     log: (domain) => getLogger(domain, { workspaceId }),
     loopbackUrl: 'http://127.0.0.1:7433',
     skillsDir: join(root, 'skills'),

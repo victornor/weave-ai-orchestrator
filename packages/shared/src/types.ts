@@ -230,9 +230,10 @@ export interface UpgradeAnnouncement {
   /** When the daemon making the announcement was serving again. */
   backUpAt: string;
   /**
-   * `drained`: runs waited out before the switch. `interrupted`: of those, how many were still
-   * executing when the bounded wait expired and were ended and resumed like any interrupted run
-   * (VS-115). `resumed`: wakes queued in this workspace now.
+   * `drained`: runs waited out before the switch. `interrupted`: how many turns the restart actually
+   * recorded as interrupted (VS-339 reads this from the records, not from a pre-restart snapshot).
+   * `resumed`: how many of those turns' own wakes are queued to start again, not every queued wake
+   * in the workspace (VS-339).
    */
   runs: { drained: number; interrupted: number; resumed: number };
   /** Work that landed between the previous release being built and the new one being built. */
@@ -258,6 +259,28 @@ export interface UpgradeAnnouncement {
   migrationOutcome: E.UpgradeMigrationOutcome | null;
   health: { ok: boolean; checks: UpgradeHealthCheck[] };
   failure: { reason: E.UpgradeFailureReason | null; message: string | null } | null;
+}
+
+/**
+ * What a non-upgrade daemon restart tells one workspace (VS-339, `daemon-restart/restart-announcement`):
+ * the payload of the weaver's `system` wake. The chat line the human gets is rendered from the same
+ * record, so the two cannot disagree.
+ */
+export interface RestartNotice {
+  kind: 'daemon.restarted';
+  /** When this boot began serving again. */
+  bootAt: string;
+  /** When the previous process booted, from the durable lifecycle record; null on the first boot. */
+  previousBootAt: string | null;
+  /** When the previous process recorded a deliberate shutdown; null when it crashed or never shut down. */
+  downAt: string | null;
+  shutdownReason: string | null;
+  /** True when the previous process recorded a deliberate shutdown at or after its own boot. */
+  clean: boolean;
+  /** Start attempts that failed since the previous boot, with the last one's reason. */
+  failedStarts: { count: number; lastAt: string | null; lastReason: string | null };
+  /** The turns the restart cut off and is resuming: the worker, its ticket and its run. */
+  interrupted: Array<{ runId: string; agentId: string; agentName: string; agentKind: string; ticketId: string | null; ticketIdentifier: string | null }>;
 }
 /** One sub-step of a job: fixed for the job's kind, timed independently (VS-37, workspace-setup/setup-jobs). */
 export interface JobStep { id: string; label: string; state: E.JobStepState; startedAt: string | null; endedAt: string | null }

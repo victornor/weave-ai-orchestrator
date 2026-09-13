@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: A daemon restart tells no weaver it happened, and parks the turns it cut
+  off as worker failures for a human to retry

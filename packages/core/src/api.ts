@@ -373,7 +373,19 @@ export interface RunsService {
  * (today's behavior). With a `timeoutMs`, races the drain against it and returns whether it actually
  * drained in time — `false` means the timeout won and runs may still be in flight.
  */
-export interface Dispatcher { tick(): Promise<void>; start(): void; stop(timeoutMs?: number): Promise<boolean>; running(): number }
+export interface Dispatcher {
+  tick(): Promise<void>;
+  start(): void;
+  stop(timeoutMs?: number): Promise<boolean>;
+  running(): number;
+  /**
+   * VS-339: record, synchronously, that the daemon is shutting down or draining, before any await and
+   * before any child process can be signalled. `finalize()` reads the mark so a turn cut off by the
+   * shutdown is classified `interrupted` regardless of its exit code or runtime-reported error.
+   * `start()` clears it again, so an `undrain` does not leave the workspace marked shut down.
+   */
+  beginShutdown(reason: string): void;
+}
 /** `running()` is the daemon's own health check: is the tick timer installed (VS-76)? */
 export interface Supervisor { tick(): Promise<void>; start(): void; stop(): void; running(): boolean }
 

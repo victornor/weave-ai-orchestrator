@@ -48,6 +48,19 @@ describe('POST /api/daemon/drain', () => {
     expect(cancel.mock.calls[0]![2]).toBe('interrupt');
   });
 
+  it('marks the drain before stopping and cancelling, so a cut-off turn resumes (VS-339)', async () => {
+    const { h, fetch } = app();
+    const order: string[] = [];
+    h.impls.dispatcher!.beginShutdown = vi.fn((reason: string) => { order.push(`begin:${reason}`); });
+    h.impls.dispatcher!.stop = vi.fn(async () => { order.push('stop'); return false; });
+    h.impls.runs!.list = () => ({ items: [{ id: 'run_1' }], total: 1 });
+    h.impls.runs!.cancel = vi.fn(async () => { order.push('cancel'); });
+
+    await fetch('/api/daemon/drain', post({ timeoutSec: 0 }));
+
+    expect(order).toEqual(['begin:drain', 'stop', 'cancel']);
+  });
+
   it('does not cancel anything when the dispatcher is not given a chance to time out', async () => {
     const { h, fetch } = app();
     h.impls.dispatcher!.stop = vi.fn(async () => true);

@@ -22,6 +22,12 @@ export interface RunRuntimeState {
   active: Map<string, ActiveRun>;
   emitter: EventEmitter;
   stopping: boolean;
+  /**
+   * VS-339: set synchronously when the daemon begins shutting down or draining, before any child
+   * process can be signalled, and cleared by `dispatcher.start()`. `finalize()` reads it to tell a
+   * turn cut off by the shutdown from a genuine failure, whatever the child's exit code says.
+   */
+  shuttingDown: { reason: string; at: string } | null;
 }
 
 const states = new WeakMap<WorkspaceContext, RunRuntimeState>();
@@ -32,7 +38,7 @@ export function runState(ctx: WorkspaceContext): RunRuntimeState {
   if (!s) {
     const emitter = new EventEmitter();
     emitter.setMaxListeners(500);
-    s = { active: new Map(), emitter, stopping: false };
+    s = { active: new Map(), emitter, stopping: false, shuttingDown: null };
     states.set(ctx, s);
   }
   return s;

@@ -37,8 +37,10 @@ interface Workspace {
   supervisorRunning: boolean;
   /** Land a ticket at `at`: the delivery record the announcement reads. */
   land(identifier: string, title: string, at: string): void;
-  /** A wake sitting in the queue, which is what "resumes now" counts. */
+  /** A wake sitting in the queue that no interrupted run owns. */
   queueWake(): void;
+  /** A run the previous shutdown recorded `interrupted_by_shutdown`, with a wake left queued (VS-339). */
+  interruptRun(at: string, opts?: { resume?: boolean }): void;
 }
 
 interface Fixture {
@@ -79,6 +81,18 @@ function fixture(): Fixture {
       queueWake() {
         wsDb.run('INSERT INTO wakeups (id, workspace_id, agent_id, source, reason, status, created_at) VALUES (?,?,?,?,?,?,?)',
           [newId(), id, `${id}-conductor`, 'ticket_assigned', 'work', 'queued', nowIso()]);
+      },
+      interruptRun(at, opts = {}) {
+        const runId = newId();
+        const wakeId = newId();
+        if (opts.resume !== false) {
+          wsDb.run('INSERT INTO wakeups (id, workspace_id, agent_id, source, reason, status, created_at) VALUES (?,?,?,?,?,?,?)',
+            [wakeId, id, `${id}-conductor`, 'retry', 'previous turn was interrupted', 'queued', at]);
+        }
+        wsDb.run(
+          `INSERT INTO runs (id, workspace_id, agent_id, wakeup_ids_json, runtime_id, status, turn_epoch, cwd, error_code, error_family, finished_at, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [runId, id, `${id}-conductor`, JSON.stringify([wakeId]), 'claude', 'interrupted', 1, '/tmp/home', 'interrupted_by_shutdown', 'tooling', at, at]);
       },
     };
 
@@ -218,6 +232,9 @@ describe('announcing a completed upgrade', () => {
     ws.land('TST-1', 'Landed inside the window', afterBuild(FROM, 3));
     ws.land('TST-2', 'Landed after the release was built', afterBuild(TO, 1));
     ws.land('TST-0', 'Landed before the previous release', afterBuild(FROM, -3));
+    // VS-339: one turn the restart cut off (its wake queued to resume), plus an unrelated queued wake
+    // that must not be counted as resumed.
+    ws.interruptRun(afterBuild(TO, 0.05));
     ws.queueWake();
     const upgrade = fx.seed();
 
@@ -236,7 +253,7 @@ describe('announcing a completed upgrade', () => {
       from: { path: FROM }, to: { path: TO, sha: 'b'.repeat(40), version: '1.1.0' },
       running: { path: TO, version: '1.1.0' },
       startedAt: upgrade.startedAt, finishedAt: upgrade.finishedAt,
-      runs: { drained: 2, resumed: 1 },
+      runs: { drained: 2, interrupted: 1, resumed: 1 },
       health: { ok: true },
       failure: null,
     });
@@ -481,6 +498,32 @@ describe('the drained count', () => {
     await svc.settled();
 
     expect(fx.db.get<Upgrade>('SELECT * FROM upgrades')!.drainedRuns).toBe(3);
+  });
+});
+
+// ---------- the run counts, from the records (VS-339) ----------
+
+describe('the interrupted and resumed counts', () => {
+  it('does not count a turn that finished before the upgrade began', async () => {
+    const ws = fx.addWorkspace('ws1');
+    ws.interruptRun(afterBuild(TO, -0.6));
+    fx.seed();
+
+    await fx.service().announce();
+
+    expect(ws.woken[0]!.payload.runs).toMatchObject({ interrupted: 0, resumed: 0 });
+  });
+
+  it('counts only the interrupted turns whose own wakes are queued', async () => {
+    const ws = fx.addWorkspace('ws1');
+    ws.interruptRun(afterBuild(TO, 0.05));
+    ws.interruptRun(afterBuild(TO, 0.06), { resume: false });
+    ws.queueWake();
+    fx.seed();
+
+    await fx.service().announce();
+
+    expect(ws.woken[0]!.payload.runs).toMatchObject({ interrupted: 2, resumed: 1 });
   });
 });
 

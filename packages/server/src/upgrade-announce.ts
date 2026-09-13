@@ -37,8 +37,13 @@ export interface AnnouncementFacts {
    * itself (VS-239). Empty whenever either commit is missing or the release's history cannot be read.
    */
   commitTicketRefs(from: string | null, to: string | null): string[];
-  /** Wakes queued in this workspace and waiting for the dispatcher that just started. */
-  queuedWakes(): number;
+  /**
+   * The turns the restart recorded as interrupted in the given window, and how many of those turns'
+   * own wakes are now queued to start again (VS-339). This is read from the records finalize and boot
+   * recovery wrote, not from a snapshot taken before the restart, so the two counts agree with what
+   * actually happened.
+   */
+  interrupted(window: { since: string | null; until: string }): { interrupted: number; resumed: number };
   /** The migration files a release directory carries, in order; empty when it cannot be read. */
   migrationsIn(release: string | null): string[];
   /**
@@ -142,6 +147,10 @@ export function buildAnnouncement(row: Upgrade, facts: AnnouncementFacts): Upgra
   const commitRefs = window.since ? facts.commitTicketRefs(from.sha, to.sha) : [];
   const undeliveredIds = commitRefs.filter((id) => !landedIds.has(id));
   const ticketsOmitted = Math.max(0, landed.length - ANNOUNCED_TICKETS);
+  // VS-339: the restart window is the upgrade's own span, not the release window — the interrupted
+  // turns finish after the target release was built, at the restart. Read from the records, so the
+  // counts can never disagree with what finalize and boot recovery did.
+  const interrupted = facts.interrupted({ since: row.startedAt ?? row.requestedAt, until: facts.now });
   return {
     kind: 'daemon.upgraded',
     upgradeId: row.id,
@@ -152,7 +161,7 @@ export function buildAnnouncement(row: Upgrade, facts: AnnouncementFacts): Upgra
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
     backUpAt: facts.now,
-    runs: { drained: row.drainedRuns ?? 0, interrupted: row.interruptedRuns ?? 0, resumed: facts.queuedWakes() },
+    runs: { drained: row.drainedRuns ?? 0, interrupted: interrupted.interrupted, resumed: interrupted.resumed },
     tickets: landed.slice(0, ANNOUNCED_TICKETS),
     ticketsOmitted,
     undelivered: { count: undeliveredIds.length, identifiers: undeliveredIds.slice(0, ANNOUNCED_UNDELIVERED) },

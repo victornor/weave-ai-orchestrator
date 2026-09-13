@@ -270,7 +270,7 @@ export function GlobalChatsRoute(): React.ReactElement {
                             onClick={() => collapse(id)}
                             className="flex-none px-1.5 text-meta text-text-3 outline-none hover:text-text-1 focus-visible:bg-bg-2 disabled:opacity-30"
                           >
-                            ⟨
+                            ⟩
                           </button>
                           <button
                             type="button"

@@ -260,6 +260,91 @@ describe('tickets', () => {
       expect(restored.blockedFromStatus).toBeNull();
     });
 
+    // VS-338: a resolving wake starting a worker's turn must return a `{owner, action}` block to the
+    // work it was doing — nothing used to move it, so the board stayed wrong while the worker ran.
+    describe('resumeIfBlocked (VS-338)', () => {
+      /** Block a ticket that held `from`, the way the worker's own stuck report does. */
+      const blockFrom = async (kind: TicketKind, from: TicketStatus) => {
+        const t = make({ kind, title: `${kind} ${from}` });
+        h.db.update('tickets', t.id, { status: from });
+        return tickets.transition(SYSTEM, t.id, { to: 'blocked', unblock: { owner: 'human', action: 'answer me' } });
+      };
+
+      it('restores the exact prior status and records why', async () => {
+        const blocked = await blockFrom('change', 'approved');
+        expect(blocked.status).toBe('blocked');
+        expect(blocked.blockedFromStatus).toBe('approved');
+
+        const restored = await tickets.resumeIfBlocked(SYSTEM, blocked.id, 'worker resumed after the block was answered');
+        expect(restored.status).toBe('approved');
+        expect(restored.blockedFromStatus).toBeNull();
+        expect(restored.unblock).toBeNull();
+        expect(tickets.comments(blocked.id).some((c) => c.body.includes('worker resumed after the block was answered'))).toBe(true);
+      });
+
+      it('restores a task ticket to the status it was working in', async () => {
+        const blocked = await blockFrom('task', 'in_progress');
+        const restored = await tickets.resumeIfBlocked(SYSTEM, blocked.id, 'resumed');
+        expect(restored.status).toBe('in_progress');
+      });
+
+      it('leaves a ticket still waiting on an unfinished blocker blocked', async () => {
+        const blocker = make({ title: 'still open' });
+        const t = make({ kind: 'task' });
+        h.db.update('tickets', t.id, { status: 'in_progress' });
+        await tickets.transition(SYSTEM, t.id, { to: 'blocked', blockedBy: [blocker.id] });
+        const restored = await tickets.resumeIfBlocked(SYSTEM, t.id, 'resumed');
+        expect(restored.status).toBe('blocked');
+        expect(tickets.get(t.id).status).toBe('blocked');
+      });
+
+      it('restores a ticket whose blocker has finished', async () => {
+        const blocker = make({ title: 'done blocker' });
+        const t = make({ kind: 'task' });
+        h.db.update('tickets', blocker.id, { status: 'done' });
+        tickets.setBlockers(HUMAN, t.id, [blocker.id]);
+        h.db.update('tickets', t.id, { status: 'blocked', blockedFromStatus: 'in_progress' });
+        const restored = await tickets.resumeIfBlocked(SYSTEM, t.id, 'resumed');
+        expect(restored.status).toBe('in_progress');
+      });
+
+      it('is a no-op for a ticket that is not blocked', async () => {
+        const t = make({ kind: 'task' });
+        h.db.update('tickets', t.id, { status: 'in_progress' });
+        const same = await tickets.resumeIfBlocked(SYSTEM, t.id, 'resumed');
+        expect(same.status).toBe('in_progress');
+      });
+
+      it('restores quietly: no hand-off wake, and no merge card churn', async () => {
+        // `approved` must not queue the hand-off wake that first entering it sends.
+        const approved = await blockFrom('change', 'approved');
+        wake.calls.length = 0;
+        await tickets.resumeIfBlocked(SYSTEM, approved.id, 'resumed');
+        expect(wake.calls.some((c) => c.input.source === 'ticket_assigned')).toBe(false);
+
+        // `in_review` must not supersede or re-raise the open merge card the human may be about to tap.
+        const t = make({ kind: 'change', title: 'in review' });
+        tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'https://example.com/pr/1' });
+        const cardId = newId();
+        h.db.insert('decisions', {
+          id: cardId, workspaceId: h.workspaceId, ticketId: t.id, kind: 'merge_approval', owner: 'human',
+          title: 'Approve the merge', context: '', optionsJson: [], allowFreeText: 1, status: 'open',
+          weaverReviewStatus: 'looked', createdAt: nowIso(),
+        });
+        h.db.update('tickets', t.id, { status: 'in_review' });
+        await tickets.transition(SYSTEM, t.id, { to: 'blocked', unblock: { owner: 'human', action: 'decide' } });
+        decisions.create.mockClear();
+        decisions.supersedeForTarget.mockClear();
+        const restored = await tickets.resumeIfBlocked(SYSTEM, t.id, 'resumed');
+        expect(restored.status).toBe('in_review');
+        expect(decisions.create).not.toHaveBeenCalled();
+        expect(decisions.supersedeForTarget).not.toHaveBeenCalled();
+        expect(h.db.get<{ status: string; weaverReviewStatus: string | null }>(
+          'SELECT status, weaver_review_status AS weaverReviewStatus FROM decisions WHERE id = ?', [cardId],
+        )).toMatchObject({ status: 'open', weaverReviewStatus: 'looked' });
+      });
+    });
+
     // VS-127: a blocked ticket used to be visible only at the conductor's next digest — this is what
     // makes a conductor-owned unblock action wake it the same turn instead.
     it('wakes the conductor immediately when blocked on an unblock action it owns', async () => {

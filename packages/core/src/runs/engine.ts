@@ -14,7 +14,7 @@ import { truncate } from '@weave-ai/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { createSessions, type SessionsService } from '../sessions/index.js';
-import { buildTurnPrompt, type TurnPromptOptions } from '../prompts/index.js';
+import { buildTurnPrompt, flattenWakes, type TurnPromptOptions } from '../prompts/index.js';
 import { ensureHomeCurrent } from '../workers/home.js';
 import { recordUsage } from '../usage/index.js';
 import { git } from '../util/git.js';
@@ -124,6 +124,37 @@ function classifyLiveness(status: Run['status'], report: RunReport | null, ticke
  * counts toward the stuck-worker gate, whatever it reported.
  */
 const TICKET_STATUSES_NOT_EXPECTING_ACTION = new Set(['proposed', 'in_review', 'blocked']);
+
+/**
+ * VS-338: the wakes that deliberately put a worker back on its ticket, so a `{owner, action}` block
+ * they carried is resolved. A generic `system` digest, a `self_scheduled` self-check, a `routine`
+ * fire or a system-booked `retry` must NOT reopen a blocked ticket — the board would churn and, for
+ * a `weaver`-owned block, the weaver would be woken on every tick. A resume and a relaunch count: a
+ * person or the system explicitly asked for the worker to continue.
+ */
+const RESOLVING_WAKE_SOURCES: ReadonlySet<string> = new Set(['decision_answered', 'conductor_request', 'human_message', 'live_interrupt']);
+
+function wakeResolvesBlock(
+  w: { source: string; requestedByKind: string; payload: Record<string, unknown> },
+  ticketId: string,
+): boolean {
+  if (RESOLVING_WAKE_SOURCES.has(w.source)) {
+    // A decision answered elsewhere must not reopen this ticket; one with no ticket is the worker's own.
+    if (w.source === 'decision_answered') {
+      const onTicket = w.payload['ticketId'];
+      if (onTicket != null && onTicket !== ticketId) return false;
+    }
+    return true;
+  }
+  if (w.source === 'ticket_comment' || w.source === 'retry') return w.requestedByKind === 'human';
+  if (w.source === 'system') return w.payload['resumed'] === true || typeof w.payload['relaunchNote'] === 'string';
+  return false;
+}
+
+/** Whether any wake this run claimed (a coalesced bundle included) resolves a block on `ticketId`. */
+function runResolvesBlock(wakes: Wakeup[], ticketId: string): boolean {
+  return flattenWakes(wakes).some((w) => wakeResolvesBlock(w, ticketId));
+}
 
 /** Tables carrying the authoring run's id for a durable, ticket-facing artifact a turn can produce. */
 const EVIDENCE_TABLES = ['ticket_comments', 'ticket_document_revisions', 'ticket_work_products', 'knowledge_revisions'] as const;
@@ -287,6 +318,20 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
         cancelled: null, record,
       });
     }
+  }
+
+  // VS-338: a resolving wake starting this turn means the `{owner, action}` block on the ticket was
+  // answered — return it to the work it was doing before the turn does anything, so the status
+  // event, activity and board record it. Placed after the curation gate so a ticket that gate blocks
+  // stays blocked, and keyed to the wake so a timer or self-check does not churn a still-blocked
+  // ticket.
+  if (ticket?.status === 'blocked' && runResolvesBlock(wakes, ticket.id)) {
+    const restored = await deps().tickets.resumeIfBlocked(
+      { kind: 'system', id: null }, ticket.id, `${agent.name} resumed after the block was answered`,
+    );
+    // finalize reads this object for the turn's liveness; keep it from claiming the ticket is still
+    // blocked when the restore just moved it.
+    Object.assign(ticket, restored);
   }
 
   ctx.db.update('runs', runId, { status: 'running', startedAt: nowIso(), runtimeId: setting.runtime, model: setting.model ?? null });

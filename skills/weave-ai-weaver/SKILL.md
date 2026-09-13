@@ -81,6 +81,10 @@ The digest is evidence, not a to-do list. Act on what changed:
 3. Does it need another project? Create the courier ticket there, link it as a blocker, tell the worker. Workers never coordinate with each other.
 4. Is it genuinely the human's? Escalate — one decision, in full.
 
+Answering a block (`weave_decision_answer`) or steering the worker (`weave_worker_message`) wakes that
+worker; the ticket's status is restored to what it held before the block when the worker's turn
+starts, so you never transition the ticket yourself and a still-stuck worker re-blocks it.
+
 **Inspecting a run.** `weave_run_inspect(ref)` takes a ticket identifier, a worker id or a run id and
 returns the run's phase and elapsed time, the worker's status and pause reason, and a compact
 transcript of its recent events; `weave_run_list(ref)` returns its recent runs with their outcomes and

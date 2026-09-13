@@ -30,7 +30,7 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 | `todo` (`scout`) | Investigate; write the report document. Load `weave-ai-scout`. | `done` |
 | `todo` (`question`) | Answer as a ticket comment with evidence, then `weave_report` with `state: done` — that report closes a question ticket for you. | `done` |
 | `todo` (`operational`) | Write an `action` document (commands, host/service, expected outcome) and wait for human `action_approval` — YOLO does not grant it. After approval, execute, write a `report` of what actually happened, update the knowledge base. A later `approve` of an `action` revision that already has a `report` is not a second authorisation to run. Repo docs are a follow-up `change`. Never finish with unlanded commits. | `done` |
-| `blocked` | Only if the blocker cleared. Otherwise idle. | the status the work resumes in |
+| `blocked` | A resolving wake (an answer, a message, a human comment, a resume) that starts your turn makes the daemon return the ticket to the status it was blocked from — do not transition it back yourself. Re-block with a routable path only if you are still stuck; otherwise continue. | the status the work resumes in |
 
 For `change` tickets also load `weave-ai-openspec` — it holds the propose/apply mapping and what never to do.
 

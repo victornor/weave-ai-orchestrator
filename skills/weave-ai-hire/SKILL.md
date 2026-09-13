@@ -7,6 +7,16 @@ description: Hiring a role in Weave AI — check for overlap first, draft the sp
 
 A **role** is a kind of work, not a person. One "Backend Engineer" role serves any number of concurrent tickets — concurrency comes from the project's Settings max-workers cap, never from hiring a second copy of the same charter. Hire only when no existing role covers the work.
 
+## A hire request from the web app
+
+The V2 Hire a role modal formats its request as an ordinary chat message whose first line is
+`/hire-role project=<project slug>`, followed by a blank line and a description of what the role
+should own. When a human message begins with that line, it is a hire request for that project — not
+an unclassifiable message: identify the project by its slug and follow this skill (overlap check,
+draft, submit). There is no command parser; the format exists only so you can recognise the request.
+Hire approval still applies: submit with `weave_role_hire` and, with `hireApproval = human`, the role
+waits for the human to approve the charter before any worker runs.
+
 ## 1. Overlap check — before you draft anything
 
 `weave_role_list()`, then `weave_role_get(id)` on anything close. Compare each role's `scope` and charter summary against what the ticket needs.

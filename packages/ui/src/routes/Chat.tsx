@@ -55,6 +55,7 @@ import { MIN_PX, STEP_PX, clampHeight, maxHeight, readDecisionHeight, writeDecis
 import type { HeightBounds } from '../lib/decisionHeight';
 import { isAtBottom, useStickToBottom } from '../lib/stickToBottom';
 import { readChatScroll, writeChatScroll } from '../lib/chatScroll';
+import { defaultThread } from '../lib/threads';
 import { enqueue, useQueueCount } from '../lib/queue';
 import { decisionCarriesSecret } from '../lib/decisionSecrets';
 import { staleAnswerCopy } from '../lib/decisionStaleness';
@@ -207,7 +208,7 @@ export function ChatPage({
 
   useEffect(() => {
     if (fetchId) return;
-    const first = threads.data?.[0];
+    const first = defaultThread(threads.data ?? []);
     if (first) setThreadId(first.id);
     else if (threads.isSuccess && !createThread.isPending && !createThread.data) createThread.mutate({}, { onSuccess: (t) => setThreadId(t.id) });
   }, [threads.data, threads.isSuccess, fetchId, createThread]);

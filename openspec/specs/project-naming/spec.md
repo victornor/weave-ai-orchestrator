@@ -35,7 +35,7 @@ shared rule, so no surface can disagree with another about what a project is cal
 The web app SHALL show a project's display label — never its raw slug in place of the label — on
 every surface a person reads a project's name from. That includes, at least: the sidebar's project
 rows and the phone More menu's project list; the board's project filter and its ticket cards; the
-ticket page's project meta and facts; the worker page's project meta; the Team page's per-project
+ticket page's project meta and facts; the worker page's project meta; the Roles page's per-project
 headings and worker cards; the Merge queue's project header and selector; the Knowledge area's
 project filter, section headings and graph labels; the Usage page's per-project bars and legend; the
 Map's project nodes and detail panel; the Settings project rows; the chat's project tags and project
@@ -55,7 +55,7 @@ A name change SHALL be reflected on every one of these surfaces without a page r
 
 #### Scenario: The remaining surfaces
 
-- **WHEN** the worker page, Team, Merge queue, Knowledge, Usage, the Map or a decision label names a
+- **WHEN** the worker page, Roles, Merge queue, Knowledge, Usage, the Map or a decision label names a
   project that has a display name
 - **THEN** each shows the display label rather than the slug
 

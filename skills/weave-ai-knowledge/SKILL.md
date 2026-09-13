@@ -42,7 +42,7 @@ A rejection is information, not an obstacle. The daemon rejects near-duplicates,
 
 ## Curation
 
-A curation turn is triggered when a file crosses 80% of its budget, 14 days after the last one, on `weave knowledge curate`, or after an over-budget rejection. Workspace files are curated by the conductor; a project KB is curated by a curation worker on a "Curate project knowledge" ticket with no worktree of its own.
+A curation turn is triggered when a file crosses 80% of its budget, 14 days after the last one, on `weave knowledge curate`, or after an over-budget rejection. Workspace files are curated by the weaver; a project KB is curated by a curation worker on a "Curate project knowledge" ticket with no worktree of its own.
 
 **You may merge, move, tighten, archive and remove. You may never add a fact.** Full procedure: `references/curation.md`.
 

@@ -17,7 +17,7 @@ this system exists to avoid.
 | Found through | always loaded at boot | `weave_knowledge_docs` (catalogue), links, `weave_knowledge_search` |
 
 Shared documents (`knowledge/workspace/shared/<slug>.md`) are readable by every agent and written
-by the conductor only. Workspace documents are the conductor's private notes.
+by the weaver only. Workspace documents are the weaver's private notes.
 
 ## When to write a document
 

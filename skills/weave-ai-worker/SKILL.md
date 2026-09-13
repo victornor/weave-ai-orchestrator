@@ -12,7 +12,7 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 **Interactive session.** If your ticket is an interactive session, conversation is the posture for every turn, not only the first. Answer, investigate, read and explain. Do not write code, transition the ticket toward delivery, or create a plan or merge approval unless the human asked for changes in this conversation. If you think a change is warranted and they have not asked, say so in the conversation and wait. A conversation that ends with a good answer is complete success — the ticket is a container, not a mandate. The status table below applies only after they asked you to make a change.
 
 1. **`weave_inbox()`** — always first. It tells you why you were woken and bundles everything that happened since your last turn.
-2. **First turn or after a relaunch:** `weave_worktree_status()`. Compare `path` and `branch` against your brief. A mismatch is not something you work around — `weave_report({state:"blocked"})` and transition to `blocked` with `{owner:"conductor", action:"worker launched in the wrong worktree"}`. Then read `work/AGENTS.md` once, including its Documents section — read the linked document for the file or subsystem you are about to touch (`weave_knowledge_doc_get`) before starting. On a relaunch also read the ticket's comments and documents before touching code: continue from where the work is, not from where you remember it.
+2. **First turn or after a relaunch:** `weave_worktree_status()`. Compare `path` and `branch` against your brief. A mismatch is not something you work around — `weave_report({state:"blocked"})` and transition to `blocked` with `{owner:"weaver", action:"worker launched in the wrong worktree"}`. Then read `work/AGENTS.md` once, including its Documents section — read the linked document for the file or subsystem you are about to touch (`weave_knowledge_doc_get`) before starting. On a relaunch also read the ticket's comments and documents before touching code: continue from where the work is, not from where you remember it.
 3. **Do the phase your ticket status asks for** (table below).
 4. **Report the phase change** with `weave_report`. Not progress. Phase changes.
 5. **Leave durable progress on the ticket** — comment, document, or work product — before the turn ends.
@@ -59,7 +59,7 @@ State what you will do — the concrete commands, against which host or service,
 
 ## Communication rules
 
-- **`weave_report({state, key?, note})`** — states: `working`, `needs_decision`, `blocked`, `paused`, `done`, `failed`. Every report wakes the conductor, so report sparingly: material phase changes only, never receipt acknowledgements, never step-by-step FYI.
+- **`weave_report({state, key?, note})`** — states: `working`, `needs_decision`, `blocked`, `paused`, `done`, `failed`. Every report wakes the weaver, so report sparingly: material phase changes only, never receipt acknowledgements, never step-by-step FYI.
   - `paused` = a known external wait you expect to clear itself (CI running, a nightly job). Leave it alone; it will wake you.
   - `blocked` = you are stuck and need help. Always with a routable path.
   - A `needs_decision` or `blocked` you opened with a `key` stays open until you report the same `key` resolved. A later `done` does not close it.
@@ -71,7 +71,7 @@ State what you will do — the concrete commands, against which host or service,
 
 ## When to ask
 
-`weave_ask(ticketId, {title, context, kind, options:[{key,label,detail}], recommendation, allowFreeText, correlationKey})`, then **end the turn**. Whichever `kind` you name — `question`, `concern` or `gate_finding` — the ask is owned by the conductor, never the human, and wakes it immediately. The answer arrives as your next wake, on this ticket.
+`weave_ask(ticketId, {title, context, kind, options:[{key,label,detail}], recommendation, allowFreeText, correlationKey})`, then **end the turn**. Whichever `kind` you name — `question`, `concern` or `gate_finding` — the ask is owned by the weaver, never the human, and wakes it immediately. The answer arrives as your next wake, on this ticket.
 
 Ask when: the request is materially ambiguous and the choice changes what you build; the work would expand the agreed contract; the action is destructive or irreversible; you need a credential; resolving a merge conflict would change behavior the spec described; **or you are stuck** — the ticket's stated fix turns out to be insufficient, you need a second opinion before continuing. For that last case, use `kind: "concern"` and say what you tried and what would unblock you — you do not need to invent options for a decision you are not making.
 
@@ -89,7 +89,7 @@ Delivery and the exact merge sequence: `references/delivery.md`.
 
 **Do not launch `claude`, `codex`, `gemini`, `opencode` or any other coding CLI from inside a ticket** — not to try something out, not for a read-only probe, not to confirm a fact "against the real thing".
 
-The daemon holds one credential per runtime per host, shared with the owner's own CLI. OAuth rotates the refresh token on **every** refresh, so a single invocation from your worktree can rotate the token out from under every agent in the workspace, including the conductor, and force the owner to log in again. That has happened: 2026-09-07, every agent down at once.
+The daemon holds one credential per runtime per host, shared with the owner's own CLI. OAuth rotates the refresh token on **every** refresh, so a single invocation from your worktree can rotate the token out from under every agent in the workspace, including the weaver, and force the owner to log in again. That has happened: 2026-09-07, every agent down at once.
 
 The same goes for the workspace's runtime directories under `.weave/runtimes/` — read them through the `weave_*` tools, never by pointing a CLI at them.
 
@@ -107,7 +107,7 @@ Your last message is one fenced ```json block:
 {"state":"working","summary":"…","tickets":[{"id":"ACME-42","status":"in_progress","note":"…"}],"nextAction":{"owner":"self","what":"…"},"knowledge":{"recorded":false,"reason":"…"},"uncommittedWork":false}
 ```
 
-`state`: `working | needs_decision | blocked | paused | done | failed | idle`. `nextAction.owner`: `self | conductor | human | none`. `knowledge` is required: `{recorded:true, where}` when the ticket produced durable knowledge, `{recorded:false, reason}` when it did not — "nothing durable" is always a complete answer, and a report that omits the field or gives an incomplete shape is treated as no report at all. One example per state: `references/report-examples.md`.
+`state`: `working | needs_decision | blocked | paused | done | failed | idle`. `nextAction.owner`: `self | weaver | human | none`. `knowledge` is required: `{recorded:true, where}` when the ticket produced durable knowledge, `{recorded:false, reason}` when it did not — "nothing durable" is always a complete answer, and a report that omits the field or gives an incomplete shape is treated as no report at all. One example per state: `references/report-examples.md`.
 
 ## Common mistakes
 
@@ -117,7 +117,7 @@ Your last message is one fenced ```json block:
 | Assuming a write landed because the call did not throw | An error response is a silent failure | Read `ok`; treat anything else as a failure to report |
 | Retrying a failing write all turn | Burns the whole turn on one call | Two attempts, then stop and report it |
 | Asking a question in a comment or in plain text | Nobody is reading; the turn ends with nothing routed | `weave_ask` — options and a recommendation for a real decision, or `kind: "concern"` with no options when you are stuck |
-| `weave_report("working")` to acknowledge a wake | Wakes the conductor for nothing | Report only material phase changes |
+| `weave_report("working")` to acknowledge a wake | Wakes the weaver for nothing | Report only material phase changes |
 | `blocked` with a prose reason | No owner, no action, no route out | `blockedBy` ids, or `{owner, action}` |
 | `in_review` with no work product | There is nothing to review | Record the PR or branch first |
 | Re-deriving the transition graph from memory after a rejected transition | A rejected `invalid_disposition` transition already lists `details.allowed` — the statuses actually reachable from the current one, for that ticket kind | Read `details.allowed` on the error and retry with one of those |
@@ -126,9 +126,9 @@ Your last message is one fenced ```json block:
 | Merging because CI is green | Green is not consent | Merge only when the ticket is in `merging` |
 | Running `openspec archive` | The daemon owns archiving, after verification | Stop at `weave_ticket_merge_done` |
 | Finishing a task at `done` with unlanded commits | The daemon refuses it (`worktree_not_landed`); unlanded work must not strand in a worktree | Deliver the diff through `in_review`, or cancel if the work is not wanted |
-| Fixing something unrelated you noticed | Silent scope expansion nobody approved | Note it in a comment; the conductor decides |
+| Fixing something unrelated you noticed | Silent scope expansion nobody approved | Note it in a comment; the weaver decides |
 | Looking for more work when the inbox is empty | You do not generate your own work | Report `idle` and end |
-| Running the real coding CLI to check something | One refresh rotates the token and signs every agent out, the conductor included | A fake CLI and a scratch config dir; say so in the PR if it truly needs the real one |
+| Running the real coding CLI to check something | One refresh rotates the token and signs every agent out, the weaver included | A fake CLI and a scratch config dir; say so in the PR if it truly needs the real one |
 | Pasting a credential into a comment or commit | Permanent leak in the record | `weave_ask` for it; never write it down |
 | Continuing after a worktree mismatch | You may be writing into the wrong checkout | Stop, report `blocked` |
 

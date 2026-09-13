@@ -346,7 +346,7 @@ upgrade:
 ```
 
 Both bounds default short because expiry no longer means giving up: once dispatch is held, waiting
-longer only holds every workspace's dispatch — including the conductor's own — for longer with no
+longer only holds every workspace's dispatch — including the weaver's own — for longer with no
 benefit, since a turn that is not done in 30s is not meaningfully closer to done at 900s either. Both
 remain overridable per invocation (`--drain-timeout`) or in `daemon.yaml`.
 
@@ -431,7 +431,7 @@ The first turn that fails to authenticate **gates that runtime**:
 3. Every agent on the runtime is paused with the reason `runtime_login_expired`.
 4. **Exactly one** decision is raised for the human — not one per worker — correlated on
    `runtime-login:<runtimeId>`, so later failures join it.
-5. The human is told over the channel path directly. That is deliberate: the conductor is usually on
+5. The human is told over the channel path directly. That is deliberate: the weaver is usually on
    the same runtime and cannot take a turn, and an outage must not be able to hide behind an agent
    the outage itself has stopped.
 
@@ -588,7 +588,7 @@ weave runs tail <id>
 The supervisor runs every 15 s and escalates on its own: silence past
 `defaults.silenceTimeoutSec` (600) with no worktree writes → interrupt, then kill the process group,
 then relaunch the same worker into the same home and worktree with a progress note; a second failure
-gets a fresh session; a third marks the worker `error` and the ticket `blocked` with the conductor
+gets a fresh session; a third marks the worker `error` and the ticket `blocked` with the weaver
 woken. Manual overrides: `weave worker relaunch <id> --note "..."`, `weave worker cancel <id>`,
 `weave runs cancel <id> --mode kill`.
 

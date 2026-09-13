@@ -1,8 +1,8 @@
 # Weave AI
 
 Weave AI turns a directory into a **workspace**: a virtual business made of one or more git
-projects, staffed by AI agents with well-defined roles and coordinated by one **conductor** agent
-that you talk to. You say "add dark mode to the dashboard"; the conductor turns that into a ticket,
+projects, staffed by AI agents with well-defined roles and coordinated by one **weaver** agent
+that you talk to. You say "add dark mode to the dashboard"; the weaver turns that into a ticket,
 hires a role for the project if none fits, and a disposable **worker** picks it up in its own git
 worktree, proposes a plan, waits for your approval, implements it, opens a PR, and merges it once
 you approve. You never manage the mechanics — state transitions, worktrees, locks, git operations,
@@ -115,7 +115,7 @@ weave runtime login claude        # only if the inherited credentials are not en
 #    and creates a scout ticket that describes the repo.
 weave project add git@github.com:acme/api.git --runtime claude
 
-# 6. Talk to the conductor.
+# 6. Talk to the weaver.
 weave say "what is in this workspace?"
 weave chat                        # interactive
 ```
@@ -199,7 +199,7 @@ weave login https://myhost.tailnet-name.ts.net:7433 --pin --device macbook
 # then a TOTP code if you enabled TOTP.
 
 weave doctor                              # local tools here, plus "daemon host:" rows for the server
-weave chat                                # talk to the conductor
+weave chat                                # talk to the weaver
 weave top                                 # live agents
 weave presenter --surface tmux            # workers as tmux windows on the laptop (hyprland on Linux)
 ```
@@ -212,8 +212,8 @@ go away for good and enable "Add to Dock" as an app, trust the certificate once:
 ```bash
 # on the laptop, after the first `weave login --pin`
 openssl s_client -connect myhost.tailnet-name.ts.net:7433 -servername myhost.tailnet-name.ts.net </dev/null 2>/dev/null \
-  | openssl x509 -out ~/Downloads/conductor.crt
-sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Downloads/conductor.crt
+  | openssl x509 -out ~/Downloads/weaver.crt
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Downloads/weaver.crt
 ```
 
 `weave login` stores a named context in `~/.config/weave/contexts.yaml` (URL, token, default
@@ -243,12 +243,12 @@ conductor:
 |---|---|---|
 | **Workspace** | A directory + SQLite DB representing one virtual business. One daemon hosts many. | `<dir>/workspace.yaml`, `<dir>/.weave/db.sqlite` |
 | **Project** | A git repo cloned into the workspace. Has a default runtime, branch, policies, OpenSpec root. | `<ws>/projects/<id>/` (reference clone, never a cwd) |
-| **Conductor** | The one workspace-scoped agent you talk to. Creates tickets, hires roles, assigns, supervises, reports. Read-only on projects. | `<ws>/conductor/` |
+| **Weaver** | The one workspace-scoped agent you talk to. Creates tickets, hires roles, assigns, supervises, reports. Read-only on projects. | `<ws>/conductor/` |
 | **Role** | A hired template scoped to one project: charter, runtime, model, concurrency limit. Roles do not run. | `<ws>/roles/<id>/role.yaml`, `CHARTER.md` |
 | **Worker** | A disposable agent spawned from a role for exactly **one ticket**, with its own home, brief, worktree and session for the ticket's life. Retired once the work lands. | `<ws>/workers/<id>/`, worktree at `work/` |
 | **Ticket** | The unit of work: `change`, `task`, `scout` or `question`. Identifier `ACME-42`. | DB, mirrored to `<ws>/tickets/` |
-| **Decision** | Anything held for a human (or the conductor): plan approval, hire approval, merge approval, a worker's question, a discard confirmation. | DB, `weave decision`, UI, Telegram buttons |
-| **Knowledge base** | Curated, budgeted markdown: the workspace KB (conductor-only), `SHARED.md` (every agent), one `PROJECT.md` per project (that project's workers only). | `<ws>/knowledge/` |
+| **Decision** | Anything held for a human (or the weaver): plan approval, hire approval, merge approval, a worker's question, a discard confirmation. | DB, `weave decision`, UI, Telegram buttons |
+| **Knowledge base** | Curated, budgeted markdown: the workspace KB (weaver-only), `SHARED.md` (every agent), one `PROJECT.md` per project (that project's workers only). | `<ws>/knowledge/` |
 | **Specs** | OpenSpec capabilities and changes per project, indexed and browsable. Specs change only through tickets. | the project repo's `openspec/`, indexed into the DB |
 | **Run / wakeup** | One executed agent turn; a durable request to run one. Agents are wake-driven, never polling. | DB, `<ws>/.weave/runs/<runId>/` |
 | **Surface** | Where an agent is *shown*: headless, tmux, herdr, Hyprland. Never changes how a run executes. | `presentation:` in `workspace.yaml`, reconciled by `weave presenter` |
@@ -263,13 +263,13 @@ Three rules worth internalising:
 2. **Evidence is not authorization.** A scout report never authorizes a code change; approval gates
    are explicit state.
 3. **A worker never merges without human approval** unless the ticket has `autoMerge` on (off by
-   default; the conductor never turns it on by itself).
+   default; the weaver never turns it on by itself).
 
 ---
 
 ## Command cheat-sheet
 
-Run `conductor <group> --help` for the full set. Global flags: `-w/--workspace`, `--json`, `--no-color`,
+Run `weave <group> --help` for the full set. Global flags: `-w/--workspace`, `--json`, `--no-color`,
 `--context`, `--url`, `--token` (env: `AC_WORKSPACE`, `AC_API_URL`, `AC_TOKEN`).
 
 ### Daemon and access
@@ -314,9 +314,9 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 
 | Command | Does |
 |---|---|
-| `weave say "<text>" [--timeout 180] [--no-wait]` | one-shot message to the conductor; prints the reply |
+| `weave say "<text>" [--timeout 180] [--no-wait]` | one-shot message to the weaver; prints the reply |
 | `weave chat [ticketId]` | interactive thread; with a ticket it binds to that ticket's worker |
-| `weave attach <workerId\|conductor>` | live transcript + steering for one agent |
+| `weave attach <workerId\|weaver>` | live transcript + steering for one agent |
 | `weave top` | one-screen fleet view |
 | `weave briefing` | the four-section briefing, rendered from the snapshot (no LLM tokens) |
 | `weave decision list [-s open] [--owner human]` | everything waiting on you |
@@ -481,7 +481,7 @@ plugins: []                   # npm package names, or ./paths relative to the wo
 
 ### `<workspace>/roles/<id>/role.yaml`
 
-Written by the daemon when the conductor hires a role; you normally edit it through the UI. Key
+Written by the daemon when the weaver hires a role; you normally edit it through the UI. Key
 fields: `id`, `name`, `project`, `charterSummary`, `scope`, `responsibilities[]`, `capabilities[]`,
 `exclusions[]`, `rules[]`, `sessionPolicy` (`per_ticket` by default), `maxWorkers`,
 `permission.{mode,allowed,denied}`. A role names no runtime or model: every worker runs on the

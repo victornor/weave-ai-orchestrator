@@ -1,6 +1,6 @@
 /**
  * The `weave_*` agent tools (PLAN §9.2). One registry, two front doors: the MCP server (`mcp.ts`)
- * and `POST /api/w/:ws/agent/tools/:tool` for the `conductor` CLI. Every tool returns a `ToolResult`;
+ * and `POST /api/w/:ws/agent/tools/:tool` for the `weave` CLI. Every tool returns a `ToolResult`;
  * nothing throws to the client.
  */
 import { execFile } from 'node:child_process';
@@ -61,7 +61,7 @@ function leanTicket(t: Ticket): Record<string, unknown> {
 
 // ---------- scope enforcement (PLAN §9.1) ----------
 
-/** Reads: the conductor sees everything; a worker only its own project. */
+/** Reads: the weaver sees everything; a worker only its own project. */
 function readTicket(ctx: ToolCtx, id: string): Ticket {
   const t = svc(ctx).tickets.get(id);
   if (isConductor(ctx)) return t;
@@ -88,7 +88,7 @@ function writeTicket(ctx: ToolCtx, id: string): Ticket {
 
 function knowledgeScope(ctx: ToolCtx, scope: string, projectId?: string | null): string | null {
   if (isConductor(ctx)) return projectId ?? null;
-  if (scope === 'workspace' || scope === 'decisions') throw new OcError('forbidden', 'workspace and decisions knowledge are conductor-only');
+  if (scope === 'workspace' || scope === 'decisions') throw new OcError('forbidden', 'workspace and decisions knowledge are weaver-only');
   if (scope === 'project') {
     if (projectId && projectId !== ctx.claims.projectId) throw new OcError('forbidden', 'workers may only read their own project knowledge');
     return ctx.claims.projectId;
@@ -109,7 +109,7 @@ function recordKnowledgeRead(ctx: ToolCtx, scope: KnowledgeScope, projectId: str
 
 function projectScope(ctx: ToolCtx, projectId?: string | null): string {
   if (isConductor(ctx)) {
-    if (!projectId) throw new OcError('validation', 'projectId is required for the conductor');
+    if (!projectId) throw new OcError('validation', 'projectId is required for the weaver');
     return projectId;
   }
   if (projectId && projectId !== ctx.claims.projectId) throw new OcError('forbidden', 'outside your project');
@@ -131,7 +131,7 @@ function bundledWakes(ctx: ToolCtx): Wakeup[] {
 /**
  * A `human_message` wake's attachments (VS-133), resolved to real content: an image's bytes are
  * pushed onto `images` (base64, for the MCP `image` content block the caller assembles) and a text
- * document's decoded content is inlined directly in the returned entry — the conductor gets the
+ * document's decoded content is inlined directly in the returned entry — the weaver gets the
  * content, not a filename it would have to fetch separately. A deleted/unreadable attachment is
  * dropped rather than failing the whole `weave_inbox` call.
  */
@@ -248,12 +248,12 @@ function validateArtifactHtml(html: string): void {
 export const TOOLS: ToolDef[] = [
   {
     name: 'weave_inbox', scope: 'all', input: z.object({}),
-    description: 'Everything that woke you for this turn, bundled: human messages, ticket events, answered decisions and steering from the conductor. Call this first; it is cheap and it is the only place new instructions arrive mid-life.',
+    description: 'Everything that woke you for this turn, bundled: human messages, ticket events, answered decisions and steering from the weaver. Call this first; it is cheap and it is the only place new instructions arrive mid-life.',
     handler: (ctx) => {
       const wakes = bundledWakes(ctx);
       const bucket = { messages: [] as unknown[], tickets: [] as unknown[], decisions: [] as unknown[], steering: [] as unknown[], routines: [] as unknown[], other: [] as unknown[] };
       // Image bytes for any attachment on a bundled human_message wake, collected across every
-      // entry so one weave_inbox call surfaces every image the conductor was woken with, not just the
+      // entry so one weave_inbox call surfaces every image the weaver was woken with, not just the
       // first (openspec design.md — Decision 5).
       const images: McpImageBlock[] = [];
       for (const w of wakes) {
@@ -359,14 +359,14 @@ export const TOOLS: ToolDef[] = [
       id: ticketId, type: z.enum(WORK_PRODUCT_TYPES), url: z.string().optional(), title: z.string().optional(), state: z.string().optional(),
       provider: z.string().optional(), externalId: z.string().optional(), isPrimary: z.boolean().optional(),
     }),
-    description: 'Record what you produced (pull request, branch, commit, artifact, preview URL) so the human and the conductor can find it.',
+    description: 'Record what you produced (pull request, branch, commit, artifact, preview URL) so the human and the weaver can find it.',
     handler: (ctx, i) => svc(ctx).tickets.addWorkProduct(ctx.actor, writeTicket(ctx, i.id).id, i),
   },
   {
     name: 'weave_ask', scope: 'all', input: AskSchema,
     description:
-      'Ask for a decision. A worker\'s ask is always owned by the conductor — whichever of question, concern or gate_finding you name, it wakes the conductor immediately, never the human. '
-      + 'The conductor\'s own use of this tool still reaches the human. Use kind=concern when you are stuck and need help or feedback rather than making a decision: '
+      'Ask for a decision. A worker\'s ask is always owned by the weaver — whichever of question, concern or gate_finding you name, it wakes the weaver immediately, never the human. '
+      + 'The weaver\'s own use of this tool still reaches the human. Use kind=concern when you are stuck and need help or feedback rather than making a decision: '
       + 'say what you tried and what would unblock you — no options required. Use kind=question for a genuine open question, and kind=gate_finding for a finding toward the accepted design. '
       + 'When you do have real options, give them and a recommendation with a one-line why. plan_approval, merge_approval, hire_approval, discard_approval and retry_approval cannot be raised this way — those are always system-raised. '
       + 'Use `inputs` when the answer is a value rather than a choice: text, multiline, multiselect (with `choices`), or secret. '
@@ -516,7 +516,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_knowledge_get', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), projectId: z.string().optional() }),
-    description: 'Read a knowledge base: shared (SHARED.md), project (your project KB), workspace/decisions (conductor only). Includes size against budget.',
+    description: 'Read a knowledge base: shared (SHARED.md), project (your project KB), workspace/decisions (weaver only). Includes size against budget.',
     handler: (ctx, i) => {
       const projectId = knowledgeScope(ctx, i.scope, i.projectId);
       const result = svc(ctx).knowledge.get(i.scope, projectId);
@@ -531,7 +531,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_knowledge_docs', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES).optional(), projectId: z.string().optional() }),
-    description: 'The catalogue of linked knowledge documents you can read: slug, title, one-line summary, link and backlink counts. Workers see their project documents plus shared ones; the conductor sees everything. Read this before writing a document so you link to what exists instead of duplicating it.',
+    description: 'The catalogue of linked knowledge documents you can read: slug, title, one-line summary, link and backlink counts. Workers see their project documents plus shared ones; the weaver sees everything. Read this before writing a document so you link to what exists instead of duplicating it.',
     handler: (ctx, i) => {
       if (isConductor(ctx)) return svc(ctx).knowledge.listDocs({ ...(i.scope ? { scope: i.scope } : {}), ...(i.projectId !== undefined ? { projectId: i.projectId } : {}) });
       return svc(ctx).knowledge.listDocs({ projectId: ctx.claims.projectId, ...(i.scope ? { scope: i.scope } : {}) }).filter((d) => d.scope === 'shared' || d.projectId === ctx.claims.projectId);
@@ -549,7 +549,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_knowledge_doc_put', scope: 'all', input: z.object({ slug: z.string().min(2), body: z.string().min(1), scope: z.enum(KNOWLEDGE_SCOPES).default('project'), projectId: z.string().optional(), folder: z.string().min(2).optional() }),
-    description: 'Create or replace a linked knowledge document (kebab-case slug, `# Title` first line, within the workspace\'s configured document budget — 10000 tokens by default). Pass `folder` (one or more kebab-case segments, e.g. "research/competitors") to file a *new* document there instead of flat; it is ignored on an existing slug — the document is found and updated wherever it already lives. Link related documents with [[slug]]; the result lists unresolved links and whether the document is an orphan — link it from PROJECT.md or another document so it can be found. Workers write project documents; shared/workspace documents are the conductor\'s.',
+    description: 'Create or replace a linked knowledge document (kebab-case slug, `# Title` first line, within the workspace\'s configured document budget — 10000 tokens by default). Pass `folder` (one or more kebab-case segments, e.g. "research/competitors") to file a *new* document there instead of flat; it is ignored on an existing slug — the document is found and updated wherever it already lives. Link related documents with [[slug]]; the result lists unresolved links and whether the document is an orphan — link it from PROJECT.md or another document so it can be found. Workers write project documents; shared/workspace documents are the weaver\'s.',
     handler: (ctx, i) => {
       if (!isConductor(ctx) && i.scope !== 'project') throw new OcError('forbidden', 'workers write project documents only');
       return svc(ctx).knowledge.putDoc(ctx.actor, i.scope, i.slug, i.body, knowledgeScope(ctx, i.scope, i.projectId), undefined, i.folder);
@@ -654,7 +654,7 @@ export const TOOLS: ToolDef[] = [
     },
   },
 
-  // ---------- conductor ----------
+  // ---------- weaver ----------
   {
     name: 'weave_ticket_create', scope: 'all', input: z.object({
       projectId: z.string().nullish(), kind: z.enum(TICKET_KINDS), title: z.string().min(1), description: z.string().default(''),
@@ -835,7 +835,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_routine_list', scope: 'weaver', input: z.object({}),
-    description: 'Scheduled tasks (recurring conductor alarms). Human-facing name is Scheduled tasks; identifiers stay routine.',
+    description: 'Scheduled tasks (recurring weaver alarms). Human-facing name is Scheduled tasks; identifiers stay routine.',
     handler: (ctx) => ({ items: svc(ctx).routines.list() }),
   },
   {

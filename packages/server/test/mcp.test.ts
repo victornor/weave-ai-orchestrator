@@ -102,7 +102,7 @@ describe('MCP endpoint', () => {
     await client.close();
   });
 
-  it('refuses a conductor-only tool for a worker', async () => {
+  it('refuses a weaver-only tool for a worker', async () => {
     const { client } = await connect();
     const res = await client.callTool({ name: 'weave_role_hire', arguments: {} });
     const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);

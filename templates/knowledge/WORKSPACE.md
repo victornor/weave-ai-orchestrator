@@ -1,6 +1,6 @@
-<!-- knowledge/workspace/WORKSPACE.md — the conductor's knowledge base. -->
-<!-- Audience: the conductor only. Workers get 403 on this file. Budget: `defaults.knowledgeBudgetTokens.workspace` (10000 by default). -->
-<!-- Seeded by the human at the bootstrap interview; extended by the conductor via weave_knowledge_note. -->
+<!-- knowledge/workspace/WORKSPACE.md — the weaver's knowledge base. -->
+<!-- Audience: the weaver only. Workers get 403 on this file. Budget: `defaults.knowledgeBudgetTokens.workspace` (10000 by default). -->
+<!-- Seeded by the human at the bootstrap interview; extended by the weaver via weave_knowledge_note. -->
 <!-- Section headings below are fixed: weave_knowledge_note("workspace", section, text) targets them by name. -->
 
 # {{workspace.name}}
@@ -15,7 +15,7 @@
 
 ## Portfolio
 
-<!-- One line per project: id — purpose — default role. This is the conductor's routing table; keep it current. -->
+<!-- One line per project: id — purpose — default role. This is the weaver's routing table; keep it current. -->
 
 ## Policies
 

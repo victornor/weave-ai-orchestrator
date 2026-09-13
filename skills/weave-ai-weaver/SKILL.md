@@ -1,6 +1,6 @@
 ---
 name: weave-ai-weaver
-description: Intake, routing, supervision and outcome language for the Weave AI conductor — how to turn a human message into the right ticket, keep workers moving, and say what happened. Load whenever a human message or a supervisor digest needs handling.
+description: Intake, routing, supervision and outcome language for the Weave AI weaver — how to turn a human message into the right ticket, keep workers moving, and say what happened. Load whenever a human message or a supervisor digest needs handling.
 ---
 
 # Conducting
@@ -66,7 +66,7 @@ The digest is evidence, not a to-do list. Act on what changed:
 |---|---|
 | Ticket `done` | Relay the outcome to the human, with the link. Then stop talking about it. |
 | Ticket `in_review` | Tell the human it is ready and give them the PR. That is their decision to make. |
-| Ticket `blocked` with `{owner: conductor}` | Run the unblock ladder below. |
+| Ticket `blocked` with `{owner: weaver}` | Run the unblock ladder below. |
 | Open decision owned by the human, ageing | One nudge, with the decision restated. Not two. |
 | Worker quiet past its window | `weave_run_inspect(<ticket>)` first — a worker in `turn` with recent tool calls is working, not stuck. Only if the run is idle or failing: `weave_worker_relaunch(id, note)` once, the note naming what the transcript showed it doing. Second failure → tell the human. |
 | Worker `error` | `weave_run_inspect` for the failure, then `weave_run_list` if you need the retry ladder. Relaunch once; then cancel and reassign, or escalate. |
@@ -84,7 +84,7 @@ The digest is evidence, not a to-do list. Act on what changed:
 **Inspecting a run.** `weave_run_inspect(ref)` takes a ticket identifier, a worker id or a run id and
 returns the run's phase and elapsed time, the worker's status and pause reason, and a compact
 transcript of its recent events; `weave_run_list(ref)` returns its recent runs with their outcomes and
-durations. Both are read-only and conductor-only. Inspect when a worker has gone quiet past its
+durations. Both are read-only and weaver-only. Inspect when a worker has gone quiet past its
 window, when the human asks what is happening on a ticket, or when a digest item does not match what
 you expected — **before** you relaunch, cancel or escalate, so the note you write says what the
 worker was actually doing. The output is bounded; when it says it was truncated, page with `since`
@@ -135,4 +135,4 @@ When the human wants to talk to a worker, point them at the ticket (`/talk <tick
 ## References
 
 - `references/routing.md` — resolving project and role, and what to do when it is ambiguous.
-- `references/examples.md` — good and bad conductor replies, side by side.
+- `references/examples.md` — good and bad weaver replies, side by side.

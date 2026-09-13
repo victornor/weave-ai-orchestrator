@@ -2,7 +2,7 @@
 
 One fenced ```json block, as the last thing in your message. Nothing after it.
 
-Schema: `state` (required), `summary` (required, ≤ 4000 chars), `tickets[]` (`{id, status?, note?}`), `nextAction` (`{owner: self|conductor|human|none, what}`), `knowledge` (required — `{recorded:true, where}` or `{recorded:false, reason}`), `uncommittedWork`.
+Schema: `state` (required), `summary` (required, ≤ 4000 chars), `tickets[]` (`{id, status?, note?}`), `nextAction` (`{owner: self|weaver|human|none, what}`), `knowledge` (required — `{recorded:true, where}` or `{recorded:false, reason}`), `uncommittedWork`.
 
 `knowledge` answers one question every turn: did this ticket produce durable knowledge, and where — or why not. "Nothing durable" is always a complete, legitimate answer; a report missing `knowledge`, or giving `recorded:true` with no `where`, or `recorded:false` with no `reason`, fails to parse and is treated as no report at all, the same as one missing `state`.
 
@@ -18,7 +18,7 @@ Schema: `state` (required), `summary` (required, ≤ 4000 chars), `tickets[]` (`
 
 **blocked** — you are stuck and someone else must move.
 ```json
-{"state":"blocked","summary":"The design tokens live in the shared-ui repo, which I cannot see. Nothing further is possible here until they are published or vendored.","tickets":[{"id":"ACME-42","status":"blocked","note":"needs a courier ticket in shared-ui"}],"nextAction":{"owner":"conductor","what":"Create a ticket in shared-ui to publish the dark palette tokens"},"knowledge":{"recorded":false,"reason":"blocked before any durable finding"},"uncommittedWork":true}
+{"state":"blocked","summary":"The design tokens live in the shared-ui repo, which I cannot see. Nothing further is possible here until they are published or vendored.","tickets":[{"id":"ACME-42","status":"blocked","note":"needs a courier ticket in shared-ui"}],"nextAction":{"owner":"weaver","what":"Create a ticket in shared-ui to publish the dark palette tokens"},"knowledge":{"recorded":false,"reason":"blocked before any durable finding"},"uncommittedWork":true}
 ```
 
 **paused** — a known external wait that clears itself.
@@ -33,7 +33,7 @@ Schema: `state` (required), `summary` (required, ≤ 4000 chars), `tickets[]` (`
 
 **failed** — the work could not be completed and is not going to be by retrying.
 ```json
-{"state":"failed","summary":"The integration suite cannot run in this worktree: it needs a Postgres instance the setup command does not provision, and three attempts to stand one up failed on missing permissions. The unit tests pass.","tickets":[{"id":"ACME-42","status":"blocked","note":"integration tests unrunnable here"}],"nextAction":{"owner":"conductor","what":"Decide whether to ship on unit coverage or fix the worktree setup command"},"knowledge":{"recorded":false,"reason":"the failure is on the ticket; nothing durable beyond it"},"uncommittedWork":false}
+{"state":"failed","summary":"The integration suite cannot run in this worktree: it needs a Postgres instance the setup command does not provision, and three attempts to stand one up failed on missing permissions. The unit tests pass.","tickets":[{"id":"ACME-42","status":"blocked","note":"integration tests unrunnable here"}],"nextAction":{"owner":"weaver","what":"Decide whether to ship on unit coverage or fix the worktree setup command"},"knowledge":{"recorded":false,"reason":"the failure is on the ticket; nothing durable beyond it"},"uncommittedWork":false}
 ```
 
 **idle** — the inbox held nothing actionable. Cheap and correct; do not invent work to avoid it.

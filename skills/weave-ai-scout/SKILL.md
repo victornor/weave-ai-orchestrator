@@ -12,11 +12,11 @@ Flow: `todo → in_progress → done`. There is no propose phase, no approval, n
 ## Rules
 
 - **Never push, never open a PR, never merge.** Nothing leaves the worktree.
-- **Never change the project's code as the deliverable.** If the fix is one line and obvious, say so in the recommendation — writing it is a different ticket, and the conductor decides.
+- **Never change the project's code as the deliverable.** If the fix is one line and obvious, say so in the recommendation — writing it is a different ticket, and the weaver decides.
 - Read widely: the repo, the specs (`weave_spec_search`, `weave_spec_get`), the project KB, the git history, the tests, the failing output. Run things. Reproduce.
 - Cite everything. A claim without evidence is a guess, and a guess in a report gets acted on as if it were a finding.
 - Time-box yourself against the ticket's acceptance criteria. When you have enough to answer the question, write the report; do not keep digging for completeness.
-- Same obstacle twice, or the investigation needs access you do not have → `blocked` with `{owner: "conductor", action: "…"}`.
+- Same obstacle twice, or the investigation needs access you do not have → `blocked` with `{owner: "weaver", action: "…"}`.
 - A question you cannot resolve without a product decision → `weave_ask`, then end the turn.
 
 ## The report
@@ -49,10 +49,10 @@ It must stand alone. The reader has your ticket and nothing else — not your se
 
 ## Evidence is not authorization
 
-Your recommendation is a recommendation. It does not create a ticket, it does not authorize a change, and it does not become a plan. The conductor reads the report and decides. Write it so that decision is easy: state the cost and the risk of doing nothing as clearly as the cost of your recommendation.
+Your recommendation is a recommendation. It does not create a ticket, it does not authorize a change, and it does not become a plan. The weaver reads the report and decides. Write it so that decision is easy: state the cost and the risk of doing nothing as clearly as the cost of your recommendation.
 
 A verdict is always `done`. Do not end a completed investigation as `blocked` because the answer was "this cannot be fixed here" — that is a finding, and findings are the deliverable.
 
 ## `question` tickets
 
-Same discipline, smaller shape: the answer goes in a ticket comment with its evidence, then `done`. No document, no worktree ceremony. If answering properly needs an investigation, say so and let the conductor raise a `scout`.
+Same discipline, smaller shape: the answer goes in a ticket comment with its evidence, then `done`. No document, no worktree ceremony. If answering properly needs an investigation, say so and let the weaver raise a `scout`.

@@ -15,7 +15,7 @@ its web UI, `git`, `gh` and `openspec`. Everything stateful lives in one volume 
 docker build -t weave-ai .
 
 docker volume create ac-data
-docker run -d --name conductor \
+docker run -d --name weave \
   -p 7433:7433 \
   -v ac-data:/data \
   weave-ai
@@ -25,8 +25,8 @@ The daemon listens on `0.0.0.0:7433` inside the container. It refuses to start o
 address without an operator password unless `auth.loopbackTrusted` is set, so set one first:
 
 ```bash
-docker exec -it conductor node packages/cli/dist/bin.js --url http://127.0.0.1:7433 daemon set-password
-docker exec -it conductor node packages/cli/dist/bin.js --url http://127.0.0.1:7433 \
+docker exec -it weave node packages/cli/dist/bin.js --url http://127.0.0.1:7433 daemon set-password
+docker exec -it weave node packages/cli/dist/bin.js --url http://127.0.0.1:7433 \
   -w '' init /data/workspaces/acme --prefix ACME --name Acme
 ```
 
@@ -38,8 +38,8 @@ Credentials never go in the image. The daemon host needs them at run time:
 
 | Need | How to provide it |
 |---|---|
-| Coding CLI auth (claude, codex, opencode, gemini, cursor) | `docker exec -it conductor node packages/cli/dist/bin.js runtime login <id>`, or mount the host's config dir |
-| `gh` auth (required for `deliveryMode: pr`) | `-e GH_TOKEN=...`, or `docker exec -it conductor gh auth login` |
+| Coding CLI auth (claude, codex, opencode, gemini, cursor) | `docker exec -it weave node packages/cli/dist/bin.js runtime login <id>`, or mount the host's config dir |
+| `gh` auth (required for `deliveryMode: pr`) | `-e GH_TOKEN=...`, or `docker exec -it weave gh auth login` |
 | git over SSH | mount a key: `-v ~/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro` |
 | Channel tokens and other `${ENV}` refs in `workspace.yaml` | `-e TELEGRAM_BOT_TOKEN=...` |
 | Webhook secrets (`webhooks[].secret`) | the same way — they are `${ENV}` references, never literals |
@@ -75,10 +75,10 @@ Rebuild the image and recreate the container — `/data` survives, and the daemo
 databases on start. Back up by snapshotting the volume while the container is stopped:
 
 ```bash
-docker stop conductor
+docker stop weave
 docker run --rm -v ac-data:/data -v "$PWD":/backup debian:12-slim \
   tar czf /backup/ac-data.tgz -C / data
-docker start conductor
+docker start weave
 ```
 
 ## Notes

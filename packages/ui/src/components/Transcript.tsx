@@ -3,6 +3,7 @@ import type { RunEvent } from '@weave-ai/shared';
 import { groupConsecutiveTools, reportUiStatus, runEventsToTranscript } from '../lib/transcript';
 import type { ToolBlock, TranscriptBlock } from '../lib/transcript';
 import { StatusGlyph } from './StatusGlyph';
+import { Markdown } from './Markdown';
 import { duration, tokens as fmtTokens } from '../lib/format';
 import { cx } from '../lib/cx';
 
@@ -94,7 +95,13 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
   const [open, setOpen] = useState(false);
 
   if (block.type === 'text') {
-    return <p className={cx('whitespace-pre-wrap text-body leading-relaxed', block.thinking ? 'text-text-3 italic' : 'text-text-body')}>{block.text}</p>;
+    return (
+      <Markdown
+        source={block.text}
+        breaks
+        className={cx('text-body leading-relaxed', block.thinking ? 'text-text-3 italic' : 'text-text-body')}
+      />
+    );
   }
 
   if (block.type === 'report') {

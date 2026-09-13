@@ -15,6 +15,7 @@ import { Markdown } from '../components/Markdown';
 import { HandoverCommand } from '../components/HandoverCommand';
 import { useToast } from '../components/Toast';
 import { useHandoverCommand, useEndHandover, useRunEvents, useStartHandover, useWorker, useWorkerAction, useWorkerBrief, useWorkerMessage } from '../api/hooks';
+import { mergeRunEvents } from '../api/runStream';
 import { useWorkspaceEvents, useWs } from '../api/context';
 import { useGo } from '../app/link';
 import { cents, tokens } from '../lib/format';
@@ -95,7 +96,8 @@ export function WorkerRoute(): React.ReactElement {
 
   const { agent, ticket, project, usage, worktree, input } = detail.data;
   const pausedFor = workerPauseReason(agent);
-  const events = [...(persisted.data ?? []), ...live];
+  // `persisted` and `live` do not agree on `id` for the same row (VS-319), so merge by `seq`.
+  const events = mergeRunEvents(persisted.data ?? [], live);
   // Before typing: whether a message would reach the running turn right now, and why not when it
   // wouldn't (VS-99). After sending: which of the two actually happened, until the next send.
   const steerLabel = lastOutcome ?? (input.midTurn

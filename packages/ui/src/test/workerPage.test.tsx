@@ -1,14 +1,16 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentPauseDetail, AgentStatus } from '@weave-ai/shared';
+import type { AgentPauseDetail, AgentStatus, RunEvent, WorkspaceEvent } from '@weave-ai/shared';
 import type { HandoverCommandResult, WorkerMessageOutcome } from '../api/types';
 import { agent, ticket } from './factories';
 
+const bus = vi.hoisted(() => ({ handlers: new Set<(e: WorkspaceEvent) => void>() }));
 const state = vi.hoisted(() => ({
   input: { midTurn: false, reason: 'no turn is currently running for this agent' } as { midTurn: boolean; interrupts?: boolean; reason?: string },
   messageOutcome: { delivery: 'queued', runId: 'run_1', wakeId: 'wk_1' } as WorkerMessageOutcome,
   sent: [] as Array<{ id: string; ticketId: string; body: string; live?: boolean }>,
   runEventsRequests: [] as string[],
+  runEventsData: [] as RunEvent[],
   actionMutate: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   // VS-249
   agentStatus: 'active' as AgentStatus,
@@ -20,11 +22,22 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({ useParams: () => ({ workerId: 'a1' }) }));
-vi.mock('../api/context', () => ({
-  useWs: () => 'ws1',
-  useHookWs: (o?: string) => o ?? 'ws1',
-  useWorkspaceEvents: () => undefined,
-}));
+vi.mock('../api/context', async () => {
+  const { useEffect, useRef } = await import('react');
+  return {
+    useWs: () => 'ws1',
+    useHookWs: (o?: string) => o ?? 'ws1',
+    useWorkspaceEvents: (fn: (e: WorkspaceEvent) => void) => {
+      const ref = useRef(fn);
+      ref.current = fn;
+      useEffect(() => {
+        const h = (e: WorkspaceEvent): void => ref.current(e);
+        bus.handlers.add(h);
+        return () => { bus.handlers.delete(h); };
+      }, []);
+    },
+  };
+});
 vi.mock('../app/link', () => ({ useGo: () => vi.fn() }));
 
 vi.mock('../api/hooks', () => ({
@@ -42,7 +55,7 @@ vi.mock('../api/hooks', () => ({
   }),
   useWorkerBrief: () => ({ data: { brief: '# Brief' } }),
   useWorkerAction: () => ({ mutate: state.actionMutate }),
-  useRunEvents: (id: string) => { state.runEventsRequests.push(id); return { data: [] }; },
+  useRunEvents: (id: string) => { state.runEventsRequests.push(id); return { data: state.runEventsData }; },
   useWorkerMessage: () => ({
     mutateAsync: async (v: { id: string; ticketId: string; body: string; live?: boolean }) => {
       state.sent.push(v);
@@ -63,6 +76,7 @@ const { WorkerRoute } = await import('../routes/WorkerPage');
 beforeEach(() => {
   state.sent = [];
   state.runEventsRequests = [];
+  state.runEventsData = [];
   state.actionMutate = vi.fn();
   state.agentStatus = 'active';
   state.agentPauseDetail = null;
@@ -70,9 +84,24 @@ beforeEach(() => {
   state.handoverCalls = [];
   state.startMutate = vi.fn();
   state.endMutateAsync = vi.fn(async () => undefined);
+  bus.handlers.clear();
   sessionStorage.clear();
+  window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+function runEvent(over: Partial<RunEvent> & Pick<RunEvent, 'id' | 'seq'>): RunEvent {
+  return {
+    runId: 'run_1', ts: '2026-09-01T09:00:00.000Z', stream: 'stdout', level: 'info',
+    type: 'assistant.thinking', payload: { text: 'Checking the failing test.' }, ...over,
+  };
+}
+
+const emitRunEvent = (event: RunEvent): void => {
+  act(() => {
+    for (const h of bus.handlers) h({ type: 'run.event', seq: 1, workspaceId: 'ws1', entityType: 'run', entityId: event.runId, payload: { runId: event.runId, event }, createdAt: '' } as WorkspaceEvent);
+  });
+};
 
 function composerInput(): HTMLElement {
   return screen.getByRole('textbox', { name: /steer this worker/i });
@@ -209,5 +238,17 @@ describe('WorkerPage session handover (VS-249)', () => {
     });
 
     expect(state.endMutateAsync).toHaveBeenCalledWith({ id: 'a1', note: 'attached Frida to the device' });
+  });
+});
+
+describe('WorkerPage transcript merge (VS-319)', () => {
+  it('does not duplicate a row the persisted query re-fetches after the live stream already delivered it', () => {
+    // The real shape: a persisted row's id is the database's own autoincrement id, a live
+    // `run.event` frame's id is a synthetic per-run counter — they never agree, `seq` does.
+    state.runEventsData = [runEvent({ id: '4821', seq: 1 })];
+    render(<WorkerRoute />);
+    emitRunEvent(runEvent({ id: '1', seq: 1 }));
+
+    expect(screen.getAllByText('Checking the failing test.')).toHaveLength(1);
   });
 });

@@ -7,7 +7,7 @@ const persisted = vi.hoisted(() => ({ data: [] as RunEvent[] }));
 vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../api/hooks', () => ({ useRunEvents: (id: string) => (id ? persisted : { data: [] }) }));
 
-const { useRunEventStream } = await import('../api/runStream');
+const { useRunEventStream, mergeRunEvents } = await import('../api/runStream');
 
 function ev(over: Partial<RunEvent> & Pick<RunEvent, 'id' | 'seq'>): RunEvent {
   return {
@@ -58,6 +58,26 @@ afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
 const last = () => FakeEventSource.open[FakeEventSource.open.length - 1]!;
 
+describe('mergeRunEvents', () => {
+  it('keeps two events with different seq', () => {
+    const out = mergeRunEvents([ev({ id: 'e1', seq: 1 })], [ev({ id: 'e2', seq: 2 })]);
+    expect(out.map((e) => e.seq)).toEqual([1, 2]);
+  });
+
+  it('collapses a row present in both inputs with the same seq but a different id', () => {
+    // The real shape (VS-319): a persisted row's id is the database's own autoincrement id, a
+    // live emission's id is `String(seq)` — the two never agree, `seq` does.
+    const out = mergeRunEvents([ev({ id: '4821', seq: 1 })], [ev({ id: '1', seq: 1 })]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.seq).toBe(1);
+  });
+
+  it('orders the result by seq regardless of input order', () => {
+    const out = mergeRunEvents([ev({ id: 'e3', seq: 3 }), ev({ id: 'e1', seq: 1 })], [ev({ id: 'e2', seq: 2 })]);
+    expect(out.map((e) => e.seq)).toEqual([1, 2, 3]);
+  });
+});
+
 describe('useRunEventStream', () => {
   it('opens the run stream and appends frames as they arrive', () => {
     const { result } = renderHook(() => useRunEventStream('run1'));
@@ -97,6 +117,25 @@ describe('useRunEventStream', () => {
     act(() => { last().emit(ev({ id: 'e2', seq: 2 })); });
     act(() => { last().emit(ev({ id: 'e3', seq: 3 })); });
     expect(result.current.events.map((e) => e.id)).toEqual(['e1', 'e2', 'e3']);
+  });
+
+  it('does not duplicate a row the persisted query re-fetches after the live tail already delivered it', () => {
+    // Matches the real shape (VS-319): the engine emits a live event's id as `String(seq)`
+    // (`packages/core/src/runs/engine.ts`), never the row's real database id, so a persisted
+    // refetch of the same row — triggered mid-turn by the workspace stream invalidating
+    // `runEvents` on every `run.event` — returns it under a different id even though `seq`
+    // agrees. A merge keyed on `id` lets both through.
+    const { result, rerender } = renderHook(() => useRunEventStream('run1'));
+
+    act(() => { last().emit(ev({ id: '1', seq: 1 })); });
+    expect(result.current.events.map((e) => e.id)).toEqual(['1']);
+
+    // The persisted query refetches and returns the same row (same seq) under its real row id.
+    persisted.data = [ev({ id: '4821', seq: 1 })];
+    rerender();
+
+    expect(result.current.events).toHaveLength(1);
+    expect(result.current.events.map((e) => e.seq)).toEqual([1]);
   });
 
   it('reconnects after an error, resuming from the highest seq without duplicating the overlap', () => {

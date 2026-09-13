@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Working traces render their text as markdown, like finished messages, and
+  stop showing the same paragraph twice

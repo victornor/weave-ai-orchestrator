@@ -247,6 +247,65 @@ describe('Transcript', () => {
     expect(screen.getByText('asked you a question · waiting 2m')).toBeInTheDocument();
   });
 
+  // VS-319: a live text block used to render as literal `<p className="whitespace-pre-wrap">`,
+  // so markdown characters showed up raw. It now renders through the same `Markdown` component a
+  // finished message uses.
+  it('renders a live text block through markdown, matching a finished message', () => {
+    render(
+      <Transcript
+        events={[
+          ev({ id: 'a', type: 'assistant.text', payload: { text: '**Inbox:**\n\n1. First\n2. Second\n\nRun `pnpm test` now.' } }),
+        ]}
+      />,
+    );
+    expect(screen.getByText('Inbox:').tagName).toBe('STRONG');
+    expect(screen.getByText('pnpm test').tagName).toBe('CODE');
+    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(['First', 'Second']);
+  });
+
+  it('keeps a thinking block dimmed and italic while still rendering its markdown', () => {
+    render(<Transcript events={[ev({ id: 'a', type: 'assistant.thinking', payload: { text: 'Checking `foo.ts` next.' } })]} />);
+    const code = screen.getByText('foo.ts');
+    expect(code.tagName).toBe('CODE');
+    expect(code.closest('.italic')).not.toBeNull();
+  });
+
+  it('renders a block with an unclosed bold marker without crashing, and settles once it closes', () => {
+    const { rerender } = render(<Transcript events={[ev({ id: 'a', type: 'assistant.text', payload: { text: 'Adding **bold' } })]} />);
+    expect(screen.getByText(/Adding \*\*bold/)).toBeInTheDocument();
+
+    rerender(<Transcript events={[ev({ id: 'a', type: 'assistant.text', payload: { text: 'Adding **bold** now.' } })]} />);
+    expect(screen.getByText('bold').tagName).toBe('STRONG');
+  });
+
+  it('renders an unfinished list item without crashing, and settles once the list continues', () => {
+    const { rerender } = render(<Transcript events={[ev({ id: 'a', type: 'assistant.text', payload: { text: '1. Ste' } })]} />);
+    expect(screen.getByText('Ste')).toBeInTheDocument();
+
+    rerender(<Transcript events={[ev({ id: 'a', type: 'assistant.text', payload: { text: '1. Step one\n2. Step two' } })]} />);
+    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Step one', 'Step two']);
+  });
+
+  it('renders an unclosed fenced code block without crashing, and settles once it closes', () => {
+    const { rerender } = render(<Transcript events={[ev({ id: 'a', type: 'assistant.text', payload: { text: '```\nstill going' } })]} />);
+    expect(screen.getByText('still going')).toBeInTheDocument();
+
+    rerender(<Transcript events={[ev({ id: 'a', type: 'assistant.text', payload: { text: '```\nstill going\n```\ndone.' } })]} />);
+    expect(screen.getByText('done.')).toBeInTheDocument();
+    expect(screen.getByText('still going').tagName).toBe('CODE');
+  });
+
+  it('renders untrusted trace text as inert, never as executed markup', () => {
+    render(
+      <Transcript
+        events={[ev({ id: 'a', type: 'assistant.text', payload: { text: 'See <img src=x onerror="window.__pwned = true">' } })]}
+      />,
+    );
+    expect(document.querySelector('img')).toBeNull();
+    expect((window as unknown as { __pwned?: boolean }).__pwned).toBeUndefined();
+    expect(screen.getByText(/<img src=x onerror=/)).toBeInTheDocument();
+  });
+
   const REPORT = {
     state: 'working' as const,
     summary: 'Opened the PR for VS-147.',

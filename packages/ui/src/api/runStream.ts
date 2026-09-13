@@ -3,8 +3,9 @@
  * `GET /api/w/:ws/runs/:id/events/stream`.
  *
  * The endpoint replays before it tails, so a surface that mounts mid-turn gets the whole turn
- * without a separate catch-up path, and a reconnect resumes from the highest `seq` seen. Frames
- * are de-duplicated by event id, because the replay overlaps whatever the query already returned.
+ * without a separate catch-up path, and a reconnect resumes from the highest `seq` seen. The
+ * persisted rows and the live tail are merged by `seq`, because the replay overlaps whatever the
+ * query already returned (see `mergeRunEvents`).
  *
  * A finished run has no tail to follow: `live: false` keeps the persisted query and opens no
  * stream, so the same hook serves a turn being watched and a turn being read back, and a turn that
@@ -24,6 +25,27 @@ export interface RunEventStream {
   events: RunEvent[];
   status: ConnectionStatus;
   retryNow: () => void;
+}
+
+/**
+ * Merge a run's persisted events with its live tail, de-duplicating by `seq` rather than `id`.
+ *
+ * The two sources do not agree on `id`: a persisted row's `id` is `run_events`' real database
+ * primary key (`GET /runs/:id/events`), while a live emission carries `id: String(seq)` — a
+ * per-run counter, never the row's real id (`packages/core/src/runs/engine.ts`'s `record()`).
+ * `seq` is the one field both sides actually agree on, and the table's own `UNIQUE (run_id, seq)`
+ * constraint guarantees it is unique per run (VS-319) — both inputs here are always one run's
+ * events, so `seq` alone, with no `runId` pairing, is enough.
+ */
+export function mergeRunEvents(persisted: readonly RunEvent[], live: readonly RunEvent[]): RunEvent[] {
+  const out: RunEvent[] = [];
+  const seen = new Set<number>();
+  for (const e of [...persisted, ...live]) {
+    if (seen.has(e.seq)) continue;
+    seen.add(e.seq);
+    out.push(e);
+  }
+  return out.sort((a, b) => a.seq - b.seq);
 }
 
 export function useRunEventStream(runId: string | null, { live = true, ws: wsOverride }: { live?: boolean; ws?: string } = {}): RunEventStream {
@@ -61,16 +83,7 @@ export function useRunEventStream(runId: string | null, { live = true, ws: wsOve
     },
   });
 
-  const events = useMemo(() => {
-    const out: RunEvent[] = [];
-    const seen = new Set<string>();
-    for (const e of [...(persisted.data ?? []), ...tail]) {
-      if (seen.has(e.id)) continue;
-      seen.add(e.id);
-      out.push(e);
-    }
-    return out.sort((a, b) => a.seq - b.seq);
-  }, [persisted.data, tail]);
+  const events = useMemo(() => mergeRunEvents(persisted.data ?? [], tail), [persisted.data, tail]);
 
   return { events, status, retryNow };
 }

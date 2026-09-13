@@ -27,7 +27,10 @@ export function roleRoutes(): Hono<AppEnv> {
     // Strict: an unknown key would otherwise be stripped and the update would report success while
     // changing nothing — the `runtimeId` vs `runtime` mix-up the web app used to ship (VS-32).
     const { patch, reason } = await body(c, z.object({ patch: RoleSpecSchema.partial().strict(), reason: z.string().min(1) }));
-    return c.json(await c.get('ws').services.roles.update(c.get('actor'), c.req.param('id'), patch, reason));
+    // The session-authenticated route is the human's own path (and the CLI's `role set-max-workers`):
+    // it writes directly, including `maxWorkers` and `secrets`. The permission gate (VS-335) is on the
+    // weaver's `weave_role_update` tool, where an agent could change a security field unilaterally.
+    return c.json((await c.get('ws').services.roles.update(c.get('actor'), c.req.param('id'), patch, reason)).role);
   });
 
   app.put('/:id/charter', async (c) => {

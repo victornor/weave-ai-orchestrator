@@ -8,7 +8,7 @@ export const COMMON_TOOLS = [
   'weave_knowledge_replace', 'weave_knowledge_docs', 'weave_knowledge_doc_get', 'weave_knowledge_doc_put', 'weave_knowledge_search', 'weave_openspec_status', 'weave_spec_list', 'weave_spec_get', 'weave_spec_search', 'weave_spec_change_get', 'weave_ticket_merge_done', 'weave_worktree_status', 'weave_artifact_kit', 'weave_ticket_artifact_put',
 ] as const;
 export const WEAVER_TOOLS = [
-  'weave_ticket_create', 'weave_ticket_assign', 'weave_ticket_set_priority', 'weave_role_list', 'weave_role_get', 'weave_role_hire', 'weave_role_update_charter', 'weave_role_set_secrets',
+  'weave_ticket_create', 'weave_ticket_assign', 'weave_ticket_set_priority', 'weave_role_list', 'weave_role_get', 'weave_role_hire', 'weave_role_update', 'weave_role_update_charter', 'weave_role_set_secrets',
   'weave_role_set_max_workers', 'weave_role_pause', 'weave_role_resume', 'weave_role_retire', 'weave_worker_list', 'weave_worker_get', 'weave_worker_message', 'weave_worker_relaunch', 'weave_worker_cancel',
   'weave_decision_answer', 'weave_decision_review', 'weave_human_send', 'weave_thread_message_get', 'weave_briefing', 'weave_project_list', 'weave_project_add', 'weave_usage',
   'weave_run_inspect', 'weave_run_list', 'weave_worker_models',

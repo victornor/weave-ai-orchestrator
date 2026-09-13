@@ -1,5 +1,5 @@
 import { decisionRow, newId, nowIso, type Db } from '@weave-ai/db';
-import { OcError, TERMINAL_TICKET_STATUSES, WEAVER_REVIEW_KINDS, WEAVER_REVIEW_NOTE_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type TicketStatus } from '@weave-ai/shared';
+import { OcError, TERMINAL_TICKET_STATUSES, WEAVER_REVIEW_KINDS, WEAVER_REVIEW_NOTE_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type RoleSpec, type TicketStatus } from '@weave-ai/shared';
 import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -263,12 +263,19 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
   }
 
   async function applyHireApproval(actor: Actor, d: Decision, key: string): Promise<void> {
-    const roleId = (d.target as { roleId?: string } | null)?.roleId;
+    const target = (d.target ?? {}) as { roleId?: string; permissionChange?: boolean; patch?: Partial<RoleSpec>; reason?: string; applyToRunning?: boolean };
+    const roleId = target.roleId;
     if (!roleId) {
       log.warn({ decisionId: d.id }, 'hire_approval without target.roleId; nothing to activate');
       return;
     }
     if (key === 'reject' || key === 'decline') return;
+    // VS-335: a permission change raises the same kind as a hire but must not activate the (already
+    // live) role or start the project's describe scout; it applies the patch the card carried.
+    if (target.permissionChange) {
+      await deps().roles.update(actor, roleId, target.patch ?? {}, target.reason ?? 'permission change approved', { applyToRunning: target.applyToRunning === true });
+      return;
+    }
     await deps().roles.activate(actor, roleId);
     // The new role's first job: the project's unassigned "describe" scout ticket, if any, starts now
     // rather than waiting for the conductor's next turn.

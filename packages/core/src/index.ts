@@ -6,6 +6,7 @@ export { createCore } from './create.js';
 export { createJobsService, JOB_LOG_LINES, JOB_LOG_FLUSH_MS } from './jobs/index.js';
 export { createRoutinesService } from './routines/index.js';
 export { createWakeService } from './wake/index.js';
+export { createRolesService, readRoleSpec } from './roles/index.js';
 export { nextAfter, parseSchedule } from './routines/schedule.js';
 export { createChangelogService } from './changelog/index.js';
 export { createKnowledgeUsageService } from './knowledge/index.js';

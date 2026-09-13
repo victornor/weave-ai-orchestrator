@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-13
+goal: A weaver can raise one decision card holding several questions, each with
+  its own choices and a recommended default, instead of listing questions in
+  chat

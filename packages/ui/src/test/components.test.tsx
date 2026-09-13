@@ -509,6 +509,92 @@ describe('DecisionCard', () => {
     expect(screen.getByText('neither — put it behind a flag')).toBeInTheDocument();
   });
 
+  // ---------- VS-342: several closed-set questions on one card ----------
+
+  const choiceCard = (over: Partial<Parameters<typeof decision>[0]> = {}): ReturnType<typeof decision> =>
+    decision({
+      kind: 'question',
+      allowFreeText: false,
+      options: [],
+      inputs: [
+        {
+          key: 'served', label: 'How is V2 served', type: 'single_choice', required: true, description: 'Where the new UI is hosted.',
+          choices: [{ key: 'same', label: 'Same app', recommended: true }, { key: 'sep', label: 'Separate build' }],
+        },
+        {
+          key: 'drop', label: 'Drop V1 screens', type: 'single_choice', required: true,
+          choices: [{ key: 'none', label: 'None', recommended: true }, { key: 'settings', label: 'Settings' }],
+        },
+      ],
+      ...over,
+    });
+
+  it('renders several single-choice questions, pre-selects the recommended choices, and sends them in one answer', () => {
+    const onAnswer = vi.fn();
+    render(<DecisionCard decision={choiceCard()} onAnswer={onAnswer} />);
+    expect(screen.getByText(/How is V2 served/)).toBeInTheDocument();
+    expect(screen.getByText('Drop V1 screens')).toBeInTheDocument();
+    expect(screen.getByText('Where the new UI is hosted.')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Same app/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /None/ })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith({ inputs: { served: 'same', drop: 'none' } });
+  });
+
+  it('marks the recommendation RECOMMENDED whatever is selected, with selection shown only by the checked state', () => {
+    render(<DecisionCard decision={decision({
+      kind: 'question', allowFreeText: false, options: [],
+      inputs: [{
+        key: 'served', label: 'How is V2 served', type: 'single_choice',
+        choices: [{ key: 'same', label: 'Same app', recommended: true }, { key: 'sep', label: 'Separate build' }],
+      }],
+    })} onAnswer={() => undefined} />);
+    const recommended = screen.getByRole('radio', { name: /Same app/ });
+    const other = screen.getByRole('radio', { name: /Separate build/ });
+    expect(recommended).toBeChecked();
+    expect(screen.getAllByText('RECOMMENDED')).toHaveLength(1);
+
+    fireEvent.click(other);
+    expect(other).toBeChecked();
+    expect(recommended).not.toBeChecked();
+    // The recommended choice keeps its tag even when it is not the one selected.
+    expect(screen.getByText('RECOMMENDED')).toBeInTheDocument();
+    expect(screen.queryByText('PICKED')).not.toBeInTheDocument();
+  });
+
+  it('takes the human\'s own words for a single-choice question that allows them', () => {
+    const onAnswer = vi.fn();
+    render(<DecisionCard decision={decision({
+      kind: 'question', allowFreeText: false, options: [],
+      inputs: [{
+        key: 'served', label: 'How is V2 served', type: 'single_choice', allowOther: true,
+        choices: [{ key: 'same', label: 'Same app', recommended: true }, { key: 'sep', label: 'Separate build' }],
+      }],
+    })} onAnswer={onAnswer} />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Write your own…' }));
+    fireEvent.change(screen.getByLabelText('How is V2 served — your own answer'), { target: { value: 'a standalone gateway' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith({ inputs: { served: 'a standalone gateway' } });
+  });
+
+  it('shows each question and the answer it was given on an answered card', () => {
+    render(<DecisionCard
+      decision={choiceCard({ status: 'answered', answeredAt: '2026-09-13T19:00:00.000Z', answerInputs: { served: 'sep', drop: 'none' } })}
+      onAnswer={() => undefined}
+    />);
+    expect(screen.getByText(/Separate build/)).toBeInTheDocument();
+    expect(screen.getByText(/None/)).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+  });
+
+  it('pre-fills an input carrying a default', () => {
+    render(<DecisionCard decision={decision({
+      kind: 'question', allowFreeText: false, options: [],
+      inputs: [{ key: 'url', label: 'Base URL', type: 'text', default: 'https://example.test' }],
+    })} onAnswer={() => undefined} />);
+    expect(screen.getByDisplayValue('https://example.test')).toBeInTheDocument();
+  });
+
   it('says a relayed answer is the human\'s words recorded by the weaver (VS-310)', () => {
     render(
       <DecisionCard

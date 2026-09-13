@@ -255,6 +255,21 @@ describe('decisionToCard', () => {
       expect(card.allowFreeText).toBe(true);
     });
 
+    it('sends a card of single-choice questions to the web app too, keeping its options out (VS-342)', () => {
+      const card = decisionToCard(decision({
+        kind: 'question',
+        options: [{ key: 'skip', label: 'Skip' }],
+        inputs: [
+          { key: 'served', label: 'How is V2 served', type: 'single_choice', choices: [{ key: 'same', label: 'Same app', recommended: true }, { key: 'sep', label: 'Separate build' }] },
+          { key: 'drop', label: 'Drop V1 screens', type: 'single_choice', choices: [{ key: 'none', label: 'None' }, { key: 'settings', label: 'Settings' }] },
+        ],
+      }), { projectName: 'web', now });
+      expect(card.answerElsewhere).toBe(true);
+      expect(card.options).toEqual([]);
+      expect(card.allowFreeText).toBe(false);
+      expect(card.body.at(-1)).toMatchObject({ value: 'Answer this in the web app: it asks for 2 values.' });
+    });
+
     it('offers an answered card with inputs as a record rather than sending it elsewhere', () => {
       const card = decisionToCard(decision({
         kind: 'question', status: 'answered', answeredAt: '2026-09-04T11:58:00.000Z',

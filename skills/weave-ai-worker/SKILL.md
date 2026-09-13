@@ -71,7 +71,7 @@ State what you will do — the concrete commands, against which host or service,
 
 ## When to ask
 
-`weave_ask(ticketId, {title, context, kind, options:[{key,label,detail}], recommendation, allowFreeText, correlationKey})`, then **end the turn**. Whichever `kind` you name — `question`, `concern` or `gate_finding` — the ask is owned by the weaver, never the human, and wakes it immediately. The answer arrives as your next wake, on this ticket.
+`weave_ask(ticketId, {title, context, kind, options:[{key,label,detail}], inputs:[…], recommendation, allowFreeText, correlationKey})`, then **end the turn**. Whichever `kind` you name — `question`, `concern` or `gate_finding` — the ask is owned by the weaver, never the human, and wakes it immediately. The answer arrives as your next wake, on this ticket. `inputs` carries text, multiline, `single_choice` (with `choices`, one optionally `recommended`), multiselect (with `choices`) and secret; put several closed-set questions on **one** card as several `single_choice` inputs, each with its recommendation, rather than listing them in the ask's prose.
 
 Ask when: the request is materially ambiguous and the choice changes what you build; the work would expand the agreed contract; the action is destructive or irreversible; you need a credential; resolving a merge conflict would change behavior the spec described; **or you are stuck** — the ticket's stated fix turns out to be insufficient, you need a second opinion before continuing. For that last case, use `kind: "concern"` and say what you tried and what would unblock you — you do not need to invent options for a decision you are not making.
 

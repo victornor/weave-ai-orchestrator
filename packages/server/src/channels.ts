@@ -418,13 +418,20 @@ export class ChannelManager {
 }
 
 export function decisionCard(decision: Decision): CanonicalMessage {
-  const body = [decision.context, decision.recommendation ? `Recommendation: ${decision.recommendation}` : null]
-    .filter(Boolean).join('\n\n');
+  const asksFor = decision.inputs?.length ?? 0;
+  const body = [
+    decision.context,
+    decision.recommendation ? `Recommendation: ${decision.recommendation}` : null,
+    // A channel has no controls for inputs and must never take a secret in a message, so a card
+    // carrying them is shown as a question to answer in the web app rather than offered answerable
+    // (VS-342; human-decisions/answer-inputs, "A surface that cannot collect a value safely says so").
+    asksFor ? `Answer this in the web app: it asks for ${asksFor} value${asksFor === 1 ? '' : 's'}.` : null,
+  ].filter(Boolean).join('\n\n');
   const part: CanonicalPart = {
     type: 'card',
     title: decision.title,
     body,
-    actions: decision.options.map((o) => ({ key: o.key, label: o.label, style: o.recommended ? 'primary' : 'default' })),
+    actions: asksFor ? [] : decision.options.map((o) => ({ key: o.key, label: o.label, style: o.recommended ? 'primary' : 'default' })),
     ref: { kind: 'decision', id: decision.id },
   };
   return { parts: [part], text: `${decision.title}\n${body}` };

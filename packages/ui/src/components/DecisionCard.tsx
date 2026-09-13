@@ -117,9 +117,11 @@ function statusLabel(status: Decision['status']): string {
 const isEmpty = (v: string | string[] | undefined): boolean => v === undefined || (typeof v === 'string' ? v.trim() === '' : v.length === 0);
 
 /**
- * One control per input (VS-92), in the order the asker gave them. A `secret` is a password field:
- * its value is never rendered back, is submitted straight to the daemon, and is registered under
- * the asker's `secretName` rather than becoming the answer.
+ * One control per input (VS-92), in the order the asker gave them. `single_choice` is one-of its
+ * choices, the recommended one shown pre-selected, with an optional free-form alternative written
+ * into the same value (VS-342). A `secret` is a password field: its value is never rendered back, is
+ * submitted straight to the daemon, and is registered under the asker's `secretName` rather than
+ * becoming the answer.
  */
 function InputControl({ input, value, disabled, onChange }: {
   input: DecisionInput; value: string | string[] | undefined; disabled?: boolean; onChange: (v: string | string[]) => void;
@@ -127,18 +129,70 @@ function InputControl({ input, value, disabled, onChange }: {
   const id = `dc-input-${input.key}`;
   const field = 'w-full rounded-r6 border border-line-2 bg-bg-input px-3 text-meta text-text-1 outline-none placeholder:text-text-4 focus:border-accent-edge';
   const chosen = Array.isArray(value) ? value : [];
+  const chosenOne = typeof value === 'string' ? value : '';
+  const choiceKeys = (input.choices ?? []).map((c) => c.key);
+  // A single-choice value that is not one of the choices is the human's own words: the "other"
+  // alternative. Local state only covers the moment it is picked before anything is typed.
+  const [otherActive, setOtherActive] = useState(false);
+  const other = input.type === 'single_choice' && input.allowOther === true;
+  const otherSelected = other && (otherActive || (chosenOne !== '' && !choiceKeys.includes(chosenOne)));
+  const labelFor = input.type === 'single_choice' || input.type === 'multiselect' ? undefined : id;
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={input.type === 'multiselect' ? undefined : id} className="text-micro font-medium text-text-2">
+      <label htmlFor={labelFor} className="text-micro font-medium text-text-2">
         {input.label}
         {input.required ? <span className="ml-1 text-needs-you" aria-hidden>*</span> : null}
       </label>
+      {input.description ? <p className="-mt-0.5 text-nano leading-snug text-text-3">{input.description}</p> : null}
       {input.type === 'multiline' ? (
         <textarea
           id={id} rows={3} disabled={disabled} value={typeof value === 'string' ? value : ''}
           placeholder={input.placeholder} aria-required={input.required}
           onChange={(e) => onChange(e.target.value)} className={cx(field, 'resize-y py-2')}
         />
+      ) : input.type === 'single_choice' ? (
+        <div role="radiogroup" aria-label={input.label} className="flex flex-col gap-1.5">
+          {(input.choices ?? []).map((c) => {
+            const on = !otherSelected && chosenOne === c.key;
+            return (
+              <button
+                key={c.key} type="button" role="radio" aria-checked={on} disabled={disabled}
+                onClick={() => { setOtherActive(false); onChange(c.key); }}
+                className={cx(
+                  'rounded-r6 border p-2.5 text-left transition-colors duration-(--dur-fast) ease-ac',
+                  on ? 'border-accent bg-accent-tint' : c.recommended ? 'border-accent-edge' : 'border-line-2 hover:bg-bg-2',
+                )}
+              >
+                <span className="mb-0.5 flex items-center gap-2">
+                  <span className="text-meta font-medium text-text-strong">{c.label}</span>
+                  {c.recommended ? (
+                    <span className="ac-mono rounded-r4 border border-accent-edge px-1.5 py-0.5 text-nano tracking-micro text-accent-link">RECOMMENDED</span>
+                  ) : null}
+                </span>
+                {c.description ? <span className="block text-micro leading-snug text-text-3">{c.description}</span> : null}
+              </button>
+            );
+          })}
+          {other ? (
+            <button
+              type="button" role="radio" aria-checked={otherSelected} disabled={disabled}
+              onClick={() => { setOtherActive(true); onChange(''); }}
+              className={cx(
+                'rounded-r6 border border-dashed p-2.5 text-left text-meta transition-colors duration-(--dur-fast) ease-ac',
+                otherSelected ? 'border-accent bg-accent-tint text-text-strong' : 'border-line-2 text-text-4 hover:text-text-2',
+              )}
+            >
+              Write your own…
+            </button>
+          ) : null}
+          {otherSelected ? (
+            <input
+              type="text" disabled={disabled} value={chosenOne} placeholder={input.placeholder}
+              aria-label={`${input.label} — your own answer`}
+              onChange={(e) => onChange(e.target.value)} className={cx(field, 'h-9')}
+            />
+          ) : null}
+        </div>
       ) : input.type === 'multiselect' ? (
         <div role="group" aria-label={input.label} className="flex flex-wrap gap-1.5">
           {(input.choices ?? []).map((c) => {
@@ -175,6 +229,28 @@ function InputControl({ input, value, disabled, onChange }: {
   );
 }
 
+/**
+ * A card's starting values (VS-342): an input's `default`, and a single-choice input's recommended
+ * choice, pre-fill the controls so a question with a recommendation can be sent without the human
+ * first touching it. A secret has nothing safe to pre-fill and is skipped.
+ */
+function initialInputValues(inputs: DecisionInput[]): DecisionAnswerInputs {
+  const out: DecisionAnswerInputs = {};
+  for (const i of inputs) {
+    if (i.type === 'secret') continue;
+    if (i.type === 'single_choice') {
+      const recommended = (i.choices ?? []).find((c) => c.recommended === true)?.key;
+      const v = typeof i.default === 'string' ? i.default : recommended;
+      if (v) out[i.key] = v;
+    } else if (i.type === 'multiselect') {
+      if (Array.isArray(i.default) && i.default.length) out[i.key] = [...i.default];
+    } else if (typeof i.default === 'string' && i.default !== '') {
+      out[i.key] = i.default;
+    }
+  }
+  return out;
+}
+
 /** What an answered card shows in place of its controls: a secret is the name it was stored under. */
 function answeredInputs(decision: Decision): Array<{ label: string; value: string }> {
   const given = decision.answerInputs ?? {};
@@ -182,6 +258,10 @@ function answeredInputs(decision: Decision): Array<{ label: string; value: strin
     .filter((i) => given[i.key] !== undefined)
     .map((i) => {
       const v = given[i.key]!;
+      if (i.type === 'single_choice') {
+        // The chosen choice's label, or the human's own words when they chose the free-form answer.
+        return { label: i.label, value: i.choices?.find((c) => c.key === v)?.label ?? String(v) };
+      }
       if (i.type === 'multiselect') {
         const labels = (Array.isArray(v) ? v : [v]).map((k) => i.choices?.find((c) => c.key === k)?.label ?? k);
         return { label: i.label, value: labels.join(', ') };
@@ -214,7 +294,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectLabel, project
   const [confirm, setConfirm] = useState('');
   const [freeText, setFreeText] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  const [values, setValues] = useState<DecisionAnswerInputs>({});
+  const [values, setValues] = useState<DecisionAnswerInputs>(() => initialInputValues(decision.inputs ?? []));
   // A long context (a failure's full runtime message, say) stays bounded until asked for in full
   // (VS-201) — never clipped by CSS, which can cut mid-word with no way to tell from outside.
   const [contextExpanded, setContextExpanded] = useState(false);

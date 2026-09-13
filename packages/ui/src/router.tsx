@@ -1,4 +1,4 @@
-import { createRootRoute, createRoute, createRouter, Outlet, redirect } from '@tanstack/react-router';
+import { createRootRoute, createRoute, createRouter, lazyRouteComponent, Outlet, redirect } from '@tanstack/react-router';
 import { RouteError } from './components/RouteError';
 import { AppShell } from './app/AppShell';
 import { WorkspaceProvider } from './api/context';
@@ -115,6 +115,82 @@ const globalSettingsRoute = createRoute({
   component: DaemonSettingsShell,
 });
 
+// ---- V2 (VS-343) ----
+// A parallel frontend at `/v2`, served by the same SPA and no daemon change. The shell and every
+// page load through `lazyRouteComponent`, so V1's entry chunk does not carry V2's module or CSS.
+// Addresses mirror V1 under the prefix: workspace pages are `/v2/w/$ws/<section>`, global pages are
+// `/v2/<section>`.
+const v2RootRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/v2',
+  component: lazyRouteComponent(() => import('./v2/V2Root'), 'V2Root'),
+});
+
+const v2IndexRoute = createRoute({
+  getParentRoute: () => v2RootRoute,
+  path: '/',
+  beforeLoad: () => {
+    const ws = getWorkspaceId();
+    throw redirect({ to: (ws ? `/v2/w/${ws}/needs` : '/onboarding') as never });
+  },
+  component: () => null,
+});
+
+type V2PageExports = typeof import('./v2/pages');
+
+const v2GlobalRoute = <K extends keyof V2PageExports>(path: string, page: K) =>
+  createRoute({
+    getParentRoute: () => v2RootRoute,
+    path,
+    component: lazyRouteComponent(() => import('./v2/pages'), page),
+  });
+
+const v2WsRoute = createRoute({
+  getParentRoute: () => v2RootRoute,
+  path: '/w/$ws',
+  component: lazyRouteComponent(() => import('./v2/V2Root'), 'V2Workspace'),
+});
+
+const v2WsIndexRoute = createRoute({
+  getParentRoute: () => v2WsRoute,
+  path: '/',
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: `/v2/w/${(params as { ws: string }).ws}/needs` as never });
+  },
+  component: () => null,
+});
+
+const v2WsRouteFor = <K extends keyof V2PageExports>(path: string, page: K) =>
+  createRoute({
+    getParentRoute: () => v2WsRoute,
+    path,
+    component: lazyRouteComponent(() => import('./v2/pages'), page),
+  });
+
+const v2NeedsRoute = v2GlobalRoute('/needs', 'V2NeedsPage');
+const v2LiveRoute = v2GlobalRoute('/live', 'V2LivePage');
+const v2IncidentsRoute = v2GlobalRoute('/incidents', 'V2IncidentsPage');
+const v2MapRoute = v2GlobalRoute('/map', 'V2MapPage');
+const v2RunsRoute = v2GlobalRoute('/runs', 'V2RunsPage');
+const v2RunRoute = v2GlobalRoute('/runs/$runId', 'V2RunPage');
+const v2ScheduledRoute = v2GlobalRoute('/scheduled', 'V2ScheduledPage');
+const v2SettingsRoute = v2GlobalRoute('/settings', 'V2SettingsPage');
+const v2ChatsRoute = v2GlobalRoute('/chats', 'V2ChatsPage');
+
+const v2ChatRoute = v2WsRouteFor('chat', 'V2ChatPage');
+const v2WsNeedsRoute = v2WsRouteFor('needs', 'V2NeedsPage');
+const v2WorkRoute = v2WsRouteFor('work', 'V2WorkPage');
+const v2RolesRoute = v2WsRouteFor('roles', 'V2RolesPage');
+const v2KnowledgeRoute = v2WsRouteFor('knowledge', 'V2KnowledgePage');
+const v2GraphRoute = v2WsRouteFor('knowledge/graph', 'V2GraphPage');
+const v2ExplorerRoute = v2WsRouteFor('knowledge/explorer', 'V2ExplorerPage');
+const v2UsageRoute = v2WsRouteFor('usage', 'V2UsagePage');
+const v2ChangelogRoute = v2WsRouteFor('changelog', 'V2ChangelogPage');
+const v2ProjectRoute = v2WsRouteFor('p/$project', 'V2ProjectPage');
+const v2TicketRoute = v2WsRouteFor('tickets/$ticketId', 'V2TicketPage');
+const v2ArtifactRoute = v2WsRouteFor('artifacts/$key', 'V2ArtifactPage');
+const v2WorkerRoute = v2WsRouteFor('workers/$workerId', 'V2WorkerPage');
+
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
@@ -206,6 +282,34 @@ const routeTree = rootRoute.addChildren([
   globalMapRoute,
   globalScheduledRoute,
   globalSettingsRoute,
+  v2RootRoute.addChildren([
+    v2IndexRoute,
+    v2NeedsRoute,
+    v2LiveRoute,
+    v2IncidentsRoute,
+    v2MapRoute,
+    v2RunsRoute,
+    v2RunRoute,
+    v2ScheduledRoute,
+    v2SettingsRoute,
+    v2ChatsRoute,
+    v2WsRoute.addChildren([
+      v2WsIndexRoute,
+      v2ChatRoute,
+      v2WsNeedsRoute,
+      v2WorkRoute,
+      v2RolesRoute,
+      v2KnowledgeRoute,
+      v2GraphRoute,
+      v2ExplorerRoute,
+      v2UsageRoute,
+      v2ChangelogRoute,
+      v2ProjectRoute,
+      v2TicketRoute,
+      v2ArtifactRoute,
+      v2WorkerRoute,
+    ]),
+  ]),
   wsRoute.addChildren([
     wsIndexRoute,
     needsRoute,

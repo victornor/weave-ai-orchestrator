@@ -153,6 +153,13 @@ describe('what the More menu lists', () => {
     expect(screen.queryByLabelText('Daemon update available')).toBeNull();
     expect(screen.queryByLabelText('Daemon upgrade in progress')).toBeNull();
   });
+
+  it('offers the V2 preview without joining the pinned section list (VS-343)', () => {
+    open();
+    expect(within(sheet()).getByRole('link', { name: /Open V2 preview/ })).toHaveAttribute('href', '/v2');
+    const pin = within(sheet()).getByRole('navigation', { name: 'More sections' });
+    expect(within(pin).queryByText(/V2/)).toBeNull();
+  });
 });
 
 describe('dismissing the More menu', () => {

@@ -1,0 +1,150 @@
+## Purpose
+
+V2 is a parallel frontend for the same daemon, reachable at `/v2` while V1 stays at `/`: a
+lazy-loaded subtree inside the existing web app, with an addressable page and a header for every V2
+destination, an obvious way to move between the two versions, and no effect on V1.
+
+## ADDED Requirements
+
+### Requirement: V2 is served at `/v2` on the same daemon
+
+The web app SHALL render the V2 shell for every path under `/v2`, inside the existing UI app and on
+the same daemon as V1. Serving V2 SHALL NOT require a new daemon route, HTTP API route, config flag
+or migration; the daemon's existing static handler already serves the web app for a path that is not
+a built asset, and `/v2` SHALL resolve through that same handler. The V2 bundle's scripts and
+stylesheets SHALL load from the same built asset directory V1 uses.
+
+#### Scenario: Opening V2 from a signed-in browser
+
+- **WHEN** a signed-in user opens `/v2`
+- **THEN** the app renders the V2 shell without any daemon change having been made
+
+#### Scenario: A deep link into a V2 page
+
+- **WHEN** a user opens `/v2/w/<workspace>/work` directly, without visiting `/` first
+- **THEN** the app renders the V2 shell on that workspace's Work page
+
+#### Scenario: V2 assets are served
+
+- **WHEN** the V2 shell loads
+- **THEN** its scripts, stylesheet and images are served from the same asset path V1's build emits,
+  with no second static handler
+
+### Requirement: V2 loads lazily and leaves V1's address alone
+
+Opening `/` SHALL render V1 exactly as it did before this change. V2's code and styles SHALL load on
+the first navigation to a `/v2` path rather than as part of V1's initial bundle. Moving between the
+two versions SHALL NOT require a document reload and SHALL NOT alter the other version's route
+table, assets or stored keys.
+
+#### Scenario: `/` is still V1
+
+- **WHEN** a user opens `/`
+- **THEN** the app redirects and renders exactly as V1 did before, with no V2 chrome
+
+#### Scenario: V2 is not in V1's initial payload
+
+- **WHEN** the app is loaded at `/` and no `/v2` path has been visited
+- **THEN** the V2 shell's own module and stylesheet have not been fetched
+
+#### Scenario: A V2 visit does not disturb V1
+
+- **WHEN** a user navigates from a V2 page back to a V1 page
+- **THEN** the V1 page renders without a reload, with V1's own theme and chrome
+
+### Requirement: Every V2 destination has a route and a header
+
+The V2 app SHALL provide an addressable route for every destination it navigates to, each rendering
+a page with a header that names the destination and its scope. The page body MAY be a placeholder
+until the screen ticket that owns it fills the content, but the route, the destination's rail entry
+and the header SHALL exist.
+
+The destinations SHALL include the global pages — Needs you, Live, Incidents, Map, Runs, Settings,
+Run detail and Global Chats — and the workspace pages — Chat, Needs you, Work, Roles, Knowledge, the
+knowledge graph, the knowledge explorer, Usage, Changelog, the project overview, the ticket page,
+the artifact reader and the worker page. The merge queue SHALL NOT have a V2 route.
+
+#### Scenario: Each destination resolves
+
+- **WHEN** a user opens any V2 destination's address
+- **THEN** the V2 shell renders that destination's page with its header
+
+#### Scenario: A kept V1 screen has a V2 address
+
+- **WHEN** a user opens the V2 Global Chats, project overview, Usage, Changelog, knowledge graph,
+  knowledge explorer or worker page address
+- **THEN** the V2 shell renders a page for it with its header
+
+#### Scenario: The merge queue has no V2 route
+
+- **WHEN** the V2 route table is inspected
+- **THEN** it contains no route for the merge queue, and no V2 rail row or phone list entry links to
+  one
+
+### Requirement: The V2 root resolves a workspace the way V1 does
+
+Opening `/v2` SHALL resolve to a workspace-scoped page the way V1's `/` does: the workspace this
+device last used when one is remembered, with the app landing on that workspace's Needs you; when
+none is remembered or the visitor is not signed in, the same onboarding or sign-in decision V1
+makes. A remembered workspace the daemon no longer reports SHALL be forgotten rather than produce an
+error.
+
+#### Scenario: A returning device
+
+- **WHEN** a device that last used workspace Acme opens `/v2`
+- **THEN** the app shows Acme's V2 Needs you page and the V2 rail highlights that row
+
+#### Scenario: No workspace remembered
+
+- **WHEN** a device with nothing remembered opens `/v2`
+- **THEN** the app makes the same onboarding-or-sign-in decision V1's `/` makes
+
+#### Scenario: A forgotten workspace
+
+- **WHEN** the remembered workspace is no longer reported by the daemon and `/v2` is opened
+- **THEN** the app forgets it and resolves to the first available workspace or onboarding, without
+  an error
+
+### Requirement: One click moves between V1 and V2
+
+The V2 app SHALL offer one control that opens V1 at `/`, and the V1 app SHALL offer one control that
+opens V2 at `/v2`. Each SHALL require a single activation and SHALL NOT require typing a URL. The V1
+control SHALL be additive: it SHALL NOT change any existing V1 screen's layout, wording, behaviour
+or address beyond adding that control.
+
+#### Scenario: V2 back to V1
+
+- **WHEN** a user activates the V2 control that opens V1
+- **THEN** the app renders V1
+
+#### Scenario: V1 forward to V2
+
+- **WHEN** a user activates the V1 control that opens V2
+- **THEN** the app renders the V2 shell
+
+#### Scenario: The V1 control is additive
+
+- **WHEN** V1 is rendered
+- **THEN** every screen V1 showed before is present, and the only addition is the control that
+  opens V2
+
+### Requirement: V1 is visually isolated from V2
+
+V2's design tokens and component styles SHALL be scoped to the V2 root so that no V1 element
+inherits them. A V1 element SHALL resolve the same token values it resolved before this change
+whether or not a V2 page has been visited in the same session.
+
+#### Scenario: V1 tokens outside the V2 root
+
+- **WHEN** a V1 screen is rendered after a V2 page has been visited
+- **THEN** its surfaces, text, accent and status colours are V1's own values
+
+#### Scenario: V2 tokens inside the V2 root
+
+- **WHEN** a V2 screen is rendered
+- **THEN** tokens resolve to the Mono values of the active V2 theme
+
+#### Scenario: V1's tests still pass
+
+- **WHEN** the existing UI test suite is run
+- **THEN** every V1 test passes unchanged

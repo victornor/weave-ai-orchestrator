@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:#141518;font-family:'Inter',ui-sans-serif,system-ui,sans-serif;font-feature-settings:'tnum' 1,'cv05' 1;-webkit-font-smoothing:antialiased}
+a{color:var(--accent-link);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}a:hover{color:var(--accent-hover);text-decoration-color:currentColor}
+[data-theme='dark']{color-scheme:dark;--bg-0:#050506;--bg-1:#0b0b0d;--bg-2:#101012;--bg-3:#17171a;--bg-input:#08080a;--line-1:#17171a;--line-2:#222226;--line-3:#313137;--text-1:#e9eaec;--text-2:#9ca1aa;--text-3:#868c95;--text-4:#7c828b;--text-strong:#f2f3f5;--text-soft:#c6cad1;--text-body:#d8dbe0;--text-nav:#7c828b;--accent:#5e6ad2;--accent-link:#7c87f0;--accent-hover:#9aa3f5;--accent-on:#fff;--accent-tint:rgb(94 106 210/.12);--accent-tint-strong:rgb(94 106 210/.18);--accent-edge:rgb(94 106 210/.35);--focus-ring:rgb(94 106 210/.16);--st-idle:#8a8f98;--st-working:#e9a23b;--st-stalled:#c98a2e;--st-blocked:#ff6b4a;--st-needs-you:#7c87f0;--st-merging:#a472f5;--st-done:#3fb950;--st-failed:#e5484d;--st-held:#e0649a;--project-1:#2dd4bf;--project-2:#38bdf8;--project-3:#e879f9;--overlay:rgb(0 0 0/.62);--elev-sheet:0 16px 48px rgb(0 0 0/.6);--held-tint:rgb(224 100 154/.10);--held-edge:rgb(224 100 154/.34);--ok-tint:rgb(63 185 80/.10)}
+[data-theme='light']{color-scheme:light;--bg-0:#f7f8f9;--bg-1:#fff;--bg-2:#f2f3f5;--bg-3:#eaecef;--bg-input:#fff;--line-1:#e6e8eb;--line-2:#d3d6db;--line-3:#c7cad0;--text-1:#16181c;--text-2:#565a61;--text-3:#676c74;--text-4:#676c74;--text-strong:#0c0d10;--text-soft:#3d4148;--text-body:#24272c;--text-nav:#676c74;--accent:#4a55c4;--accent-link:#4a55c4;--accent-hover:#3b45a8;--accent-on:#fff;--accent-tint:rgb(74 85 196/.09);--accent-tint-strong:rgb(74 85 196/.14);--accent-edge:rgb(74 85 196/.35);--focus-ring:rgb(74 85 196/.18);--st-idle:#6b7078;--st-working:#b8791f;--st-stalled:#96631a;--st-blocked:#d2401e;--st-needs-you:#4a55c4;--st-merging:#7a45d0;--st-done:#1f8a34;--st-failed:#c22b31;--st-held:#bc3a70;--project-1:#0f766e;--project-2:#0369a1;--project-3:#a21caf;--overlay:rgb(16 24 32/.28);--elev-sheet:0 16px 48px rgb(16 24 32/.18);--held-tint:rgb(188 58 112/.07);--held-edge:rgb(188 58 112/.3);--ok-tint:rgb(31 138 52/.08)}
+.wv-scroll{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.wv-scroll::-webkit-scrollbar{width:8px;height:8px}
+.wv-scroll::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:999px;border:2px solid transparent;background-clip:content-box}
+.mono{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-size:11.5px;font-weight:500;letter-spacing:0;color:var(--text-3)}
+[data-theme='light'] .wv-mark{filter:invert(1)}
+.wv-mark{display:block;opacity:.92}
+@keyframes wv-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes wv-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:#141518;color:#e9eaec;padding:0 0 64px">
+
+<div style="position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:12px 20px;background:rgba(20,21,24,.92);backdrop-filter:blur(12px);border-bottom:1px solid #26282d">
+  <div style="display:flex;align-items:baseline;gap:9px">
+    <span style="font-size:14px;font-weight:600;letter-spacing:-.01em;color:#f2f3f5">Weave</span>
+    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#6b7078">second pass</span>
+  </div>
+  <div style="display:flex;gap:2px;padding:2px;background:#1c1e22;border:1px solid #2a2d33;border-radius:4px">
+    <button onClick="{{ setPhone }}" style="{{ phoneBtn }}">Phone</button>
+    <button onClick="{{ setDesktop }}" style="{{ desktopBtn }}">Desktop</button>
+  </div>
+  <div style="display:flex;gap:2px;padding:2px;background:#1c1e22;border:1px solid #2a2d33;border-radius:4px">
+    <button onClick="{{ setDark }}" style="{{ darkBtn }}">Dark</button>
+    <button onClick="{{ setLight }}" style="{{ lightBtn }}">Light</button>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-left:auto">
+    <sc-for list="{{ jumpList }}" as="j" hint-placeholder-count="6">
+      <button onClick="{{ j.go }}" style="{{ j.style }}">{{ j.label }}</button>
+    </sc-for>
+  </div>
+</div>
+
+<div style="display:flex;justify-content:center;padding:36px 20px 0">
+  <div data-theme="{{ theme }}" style="{{ frameStyle }}">
+
+    <!-- ================= PHONE ================= -->
+    <sc-if value="{{ isPhone }}" hint-placeholder-val="{{ true }}">
+      <div style="position:relative;display:flex;flex-direction:column;height:844px;background:var(--bg-0);color:var(--text-1);overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 18px 2px;font-size:12px;font-weight:600;color:var(--text-1);flex:none">
+          <span class="mono" style="font-size:12px">9:41</span>
+          <div style="display:flex;gap:5px;align-items:center">
+            <div style="width:16px;height:9px;border:1px solid var(--text-3);border-radius:2px;position:relative"><div style="position:absolute;inset:1.5px;right:5px;background:var(--text-1);border-radius:1px"></div></div>
+          </div>
+        </div>
+        <div class="wv-scroll" style="flex:1;min-height:0;display:flex;flex-direction:column">
+          <sc-if value="{{ showPhoneHeader }}" hint-placeholder-val="{{ true }}">
+            <div style="position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--bg-0);border-bottom:1px solid var(--line-1)">
+              <sc-if value="{{ canBack }}" hint-placeholder-val="{{ true }}">
+                <button onClick="{{ goBack }}" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;margin-left:-6px;background:none;border:0;color:var(--text-2);cursor:pointer;font-size:16px">‹</button>
+              </sc-if>
+              <div style="min-width:0;flex:1">
+                <div style="font-size:16px;font-weight:600;letter-spacing:-.01em;color:var(--text-strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ screenTitle }}</div>
+                <div style="font-size:11px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ screenSub }}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid var(--line-2);border-radius:999px">
+                <div style="width:6px;height:6px;border-radius:999px;background:var(--st-done)"></div>
+                <span class="mono" style="font-size:10px;color:var(--text-2)">{{ scopePill }}</span>
+              </div>
+            </div>
+          </sc-if>
+          <dc-import name="Screens" screen="{{ screen }}" live-scope="{{ liveScopeVal }}" on-live-scope="{{ onLiveScope }}" worker-count="{{ workerCount }}" open-count="{{ openCount }}" scope="{{ scope }}" on-scope="{{ onScope }}" is-phone="{{ true }}" on-go="{{ onGo }}" hint-size="100%,600px"></dc-import>
+        </div>
+        <sc-if value="{{ showBar }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:none;display:flex;align-items:stretch;height:56px;padding-top:8px;background:var(--bg-1);border-top:1px solid var(--line-1)">
+          <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="5">
+            <button onClick="{{ t.go }}" style="{{ t.style }}">
+              <div style="{{ t.glyph }}"></div>
+              <span style="font-size:10px;font-weight:500;letter-spacing:.01em">{{ t.label }}</span>
+              <sc-if value="{{ t.count }}" hint-placeholder-val="{{ false }}">
+                <span style="{{ t.badge }}">{{ t.count }}</span>
+              </sc-if>
+            </button>
+          </sc-for>
+        </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- ================= DESKTOP ================= -->
+    <sc-if value="{{ isDesktop }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;height:820px;background:var(--bg-0);color:var(--text-1);overflow:hidden">
+        <sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+        <div class="wv-scroll" style="flex:none;width:194px;display:flex;flex-direction:column;background:var(--bg-1);border-right:1px solid var(--line-1)">
+          <div style="display:flex;align-items:center;gap:8px;padding:11px 12px 8px">
+            <img class="wv-mark" src="assets/weave-mark.png" alt="Weave" style="width:58px;height:13px;object-fit:contain">
+            <span style="font-size:13px;font-weight:600;letter-spacing:-.01em;color:var(--text-strong)">WeaveAI</span>
+            <button onClick="{{ toggleRail }}" style="flex:none;margin-left:auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;margin-right:-4px;background:none;border:0;border-radius:3px;color:var(--text-3);cursor:pointer" aria-label="Collapse the sidebar"><span style="display:block;width:11px;height:11px;border:1.5px solid currentColor;border-radius:2px;border-left-width:4px"></span></button>
+          </div>
+          <div style="padding:4px 8px 2px"><div class="lbl" style="padding:0 6px 5px;color:var(--text-3)">Everywhere</div>
+            <sc-for list="{{ globalNav }}" as="g" hint-placeholder-count="5">
+              <button onClick="{{ g.go }}" style="{{ g.style }}"><div style="{{ g.dot }}"></div><span style="flex:1;text-align:left">{{ g.label }}</span><span class="mono" style="{{ g.countStyle }}">{{ g.count }}</span></button>
+            </sc-for>
+          </div>
+          <div style="height:1px;margin:6px 10px;background:var(--line-1)"></div>
+          <div style="padding:0 10px">
+            <button onClick="{{ toggleWs }}" style="display:flex;align-items:center;gap:7px;width:100%;padding:5px 6px 4px;background:none;border:0;cursor:pointer">
+              <span style="{{ wsCaret }}"></span>
+              <span style="font-size:12.5px;font-weight:600;color:var(--text-strong)">Acme</span>
+              <span class="mono" style="margin-left:auto;font-size:10px;color:var(--st-needs-you)">3</span>
+            </button>
+            <sc-if value="{{ wsOpen }}" hint-placeholder-val="{{ true }}">
+            <sc-for list="{{ wsNav }}" as="w" hint-placeholder-count="5">
+              <button onClick="{{ w.go }}" style="{{ w.style }}"><div style="{{ w.dot }}"></div><span style="flex:1;text-align:left">{{ w.label }}</span></button>
+            </sc-for>
+            <div style="height:7px"></div>
+            <sc-for list="{{ projects }}" as="p" hint-placeholder-count="3">
+              <button onClick="{{ p.go }}" style="{{ p.style }}"><span style="{{ p.nameStyle }}">{{ p.name }}</span></button>
+            </sc-for>
+            <button onClick="{{ noop }}" style="display:flex;align-items:center;gap:9px;width:100%;padding:6px 8px 6px 20px;background:none;border:0;border-radius:4px;color:var(--text-3);font-size:12.5px;cursor:pointer"><span style="margin-left:-12px;color:var(--text-4)">+</span>New project</button>
+            </sc-if>
+            <div style="height:1px;margin:8px 6px;background:var(--line-1)"></div>
+            <button onClick="{{ noop }}" style="display:flex;align-items:center;gap:9px;width:100%;padding:6px 8px 6px 20px;background:none;border:0;border-radius:4px;color:var(--text-3);font-size:12.5px;cursor:pointer"><span style="margin-left:-12px;color:var(--text-4)">+</span>New workspace</button>
+          </div>
+          <div style="margin-top:auto;padding:10px">
+            <div style="padding:9px 10px;background:var(--accent-tint);border:1px solid var(--accent-edge);border-radius:4px">
+              <div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;font-weight:600;color:var(--text-1)">Update available</span></div>
+              <div class="mono" style="margin-top:3px;font-size:10px;color:var(--text-3)">main · 9f2c1ab</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+              <span class="mono" style="min-width:0;flex:1;font-size:10px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">victor@acme</span>
+              <div style="flex:none;display:flex;gap:1px;padding:2px;background:var(--bg-2);border:1px solid var(--line-1);border-radius:4px">
+                <button onClick="{{ setDark }}" style="{{ railDarkBtn }}" aria-label="Dark theme"><span style="display:block;width:10px;height:10px;border-radius:999px;background:currentColor;box-shadow:inset 3px -3px 0 0 var(--bg-2)"></span></button>
+                <button onClick="{{ setLight }}" style="{{ railLightBtn }}" aria-label="Light theme"><span style="display:block;width:10px;height:10px;border-radius:999px;background:currentColor"></span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+        <sc-if value="{{ railShut }}" hint-placeholder-val="{{ false }}">
+        <div class="wv-scroll" style="flex:none;width:48px;display:flex;flex-direction:column;align-items:center;background:var(--bg-1);border-right:1px solid var(--line-1)">
+          <button onClick="{{ toggleRail }}" style="flex:none;display:flex;align-items:center;justify-content:center;width:30px;height:30px;margin:9px 0 6px;background:none;border:0;border-radius:4px;cursor:pointer" aria-label="Expand the sidebar">
+            <img class="wv-mark" src="assets/weave-mark.png" alt="Weave" style="width:36px;height:8px;object-fit:contain">
+          </button>
+          <div style="width:22px;height:1px;background:var(--line-1);margin-bottom:6px"></div>
+          <sc-for list="{{ railGroups }}" as="grp" hint-placeholder-count="2">
+            <div style="display:flex;flex-direction:column;align-items:center">
+              <sc-if value="{{ grp.initial }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;align-items:center;width:100%;margin:4px 0 5px">
+                  <div style="width:22px;height:1px;background:var(--line-2);margin-bottom:5px"></div>
+                  <span class="mono" style="font-size:9.5px;font-weight:500;letter-spacing:.06em;color:var(--text-3)">{{ grp.initial }}</span>
+                </div>
+              </sc-if>
+              <sc-for list="{{ grp.items }}" as="r" hint-placeholder-count="6">
+                <button onClick="{{ r.go }}" style="{{ r.style }}" title="{{ r.label }}">
+                  <div style="{{ r.dot }}"></div>
+                  <sc-if value="{{ r.badge }}" hint-placeholder-val="{{ false }}">
+                    <span style="position:absolute;top:3px;right:3px;width:5px;height:5px;border-radius:999px;background:var(--st-needs-you)"></span>
+                  </sc-if>
+                </button>
+              </sc-for>
+            </div>
+          </sc-for>
+          <div style="margin-top:auto;padding:10px 0">
+            <button onClick="{{ toggleTheme }}" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;background:none;border:0;border-radius:4px;color:var(--text-3);cursor:pointer" aria-label="Switch theme"><span style="{{ themeGlyph }}"></span></button>
+          </div>
+        </div>
+        </sc-if>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+          <sc-if value="{{ showTopBar }}" hint-placeholder-val="{{ true }}">
+          <div style="flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;height:38px;border-bottom:1px solid var(--line-1);background:var(--bg-0)">
+            <span style="font-size:13px;color:var(--text-3)">{{ crumbRoot }}</span><span style="font-size:13px;color:var(--text-4)">›</span><span style="font-size:13px;font-weight:500;letter-spacing:-.005em;color:var(--text-1)">{{ screenTitle }}</span>
+            <span style="font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ screenSub }}</span>
+            <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+              <div style="flex:none;display:flex;align-items:center;gap:6px;padding:4px 9px;background:var(--bg-2);border:1px solid var(--line-1);border-radius:4px"><div style="flex:none;width:6px;height:6px;border-radius:999px;background:var(--st-working)"></div><span class="mono" style="white-space:nowrap;font-size:11px;color:var(--text-2)">{{ runningPill }}</span></div>
+              <div style="flex:none;display:flex;align-items:center;gap:6px;padding:4px 9px;background:var(--bg-2);border:1px solid var(--line-1);border-radius:4px"><div style="flex:none;width:6px;height:6px;border-radius:999px;background:var(--st-needs-you)"></div><span class="mono" style="white-space:nowrap;font-size:11px;color:var(--text-2)">{{ needPill }}</span></div>
+            </div>
+          </div>
+          </sc-if>
+          <div class="{{ paneClass }}" style="{{ paneStyle }}">
+            <dc-import name="Screens" screen="{{ screen }}" live-scope="{{ liveScopeVal }}" on-live-scope="{{ onLiveScope }}" worker-count="{{ workerCount }}" open-count="{{ openCount }}" scope="{{ scope }}" on-scope="{{ onScope }}" is-phone="{{ false }}" on-go="{{ onGo }}" full-h="{{ fullH }}" style="{{ mountStyle }}" hint-size="100%,600px"></dc-import>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+</div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1360,&quot;height&quot;:1000}}">
+// Mono: greyscale chrome, with a hue kept only where work is live — a wholly
+// colourless set left the header counts and the rail badge unreadable as state.
+// Dark and light carry separate hexes; a hue that reads on #0b0b0d fails on white.
+const THEME_HUES = {
+  dark: { accent: '#3d4148', link: '#c6cad1', needs: '#7c87f0', working: '#e9a23b', blocked: '#ff6b4a', done: '#7c828b', merging: '#8a8f98' },
+  light: { accent: '#3d4148', link: '#3d4148', needs: '#4a55c4', working: '#8a5e14', blocked: '#c93a17', done: '#565a61', merging: '#4e535b' }
+};
+
+const themeVars = (theme) => {
+  const p = THEME_HUES[theme === 'light' ? 'light' : 'dark'];
+  const rgb = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
+  };
+  return {
+    '--accent': p.accent, '--accent-link': p.link, '--accent-hover': p.link,
+    '--accent-tint': `rgb(${rgb(p.accent)}/${theme === 'light' ? '.09' : '.13'})`,
+    '--accent-tint-strong': `rgb(${rgb(p.accent)}/.18)`,
+    '--accent-edge': `rgb(${rgb(p.accent)}/.34)`,
+    '--focus-ring': `rgb(${rgb(p.accent)}/.18)`,
+    '--st-needs-you': p.needs, '--st-working': p.working, '--st-blocked': p.blocked,
+    '--st-done': p.done, '--st-merging': p.merging
+  };
+};
+
+const TAB_GLYPH = {
+  chat: 'width:16px;height:14px;border:1.5px solid currentColor;border-radius:3px;border-bottom-left-radius:1px',
+  needs: 'width:14px;height:14px;border-radius:999px;border:1.5px solid currentColor;box-shadow:inset 0 0 0 2.5px currentColor',
+  board: 'width:16px;height:14px;border-left:3px solid currentColor;border-right:3px solid currentColor;border-top:1.5px solid currentColor;border-bottom:1.5px solid currentColor;border-radius:2px',
+  live: 'width:15px;height:15px;border-radius:999px;border:1.5px solid currentColor;box-shadow:inset 0 0 0 1.5px transparent, 0 0 0 0 currentColor',
+  more: 'width:16px;height:4px;border-radius:999px;background:currentColor;box-shadow:0 -6px 0 currentColor, 0 6px 0 currentColor;margin:5px 0'
+};
+
+class Component extends DCLogic {
+  state = { screen: 'chat', theme: 'dark', device: 'phone', stack: [], scope: 'acme', wsOpen: true, railOpen: true };
+
+  go = (screen, scope) => () => this.setState(s => ({ screen, scope: scope || s.scope, stack: [...s.stack, s.screen] }));
+  back = () => this.setState(s => ({ screen: s.stack[s.stack.length - 1] || 'chat', stack: s.stack.slice(0, -1) }));
+
+  railThemeBtn(active) {
+    return `flex:none;display:flex;align-items:center;justify-content:center;width:22px;height:18px;border:0;border-radius:3px;background:${active ? 'var(--bg-0)' : 'transparent'};color:${active ? 'var(--text-1)' : 'var(--text-3)'};cursor:pointer`;
+  }
+
+  chipBtn(active) {
+    return `padding:4px 10px;border-radius:3px;border:0;background:${active ? '#e9eaec' : 'transparent'};color:${active ? '#141518' : '#9ca1aa'};font:500 11.5px/1 Inter,sans-serif;cursor:pointer`;
+  }
+
+  renderVals() {
+    const { screen, theme, device } = this.state;
+    // Open decisions: 3 in Acme, 1 in Fernwood. Every count on screen derives from these.
+    // Worker roster: 2 working, 1 merging, 1 stalled — all 4 running. Every
+    // count that mentions workers derives from this, not from a literal.
+    const WORKERS = [{ status: 'working' }, { status: 'merging' }, { status: 'stalled' }, { status: 'working' }, { status: 'blocked' }, { status: 'working' }];
+    const runningPill = `${WORKERS.length} running`;
+    const OPEN_ACME = 3, OPEN_ALL = 4;
+    // Incidents: 1 open, 3 resolved — the same roster the screen lists.
+    const INC_OPEN = 1, INC_RESOLVED = 3;
+    // The crumb root is a fact about the screen, not about the Needs-you filter:
+    // these screens live inside a workspace; live/incidents/map/scheduled are global.
+    const WS_SCOPED = ['chat', 'needs', 'board', 'roles', 'knowledge', 'ticket', 'artifact', 'onboarding'];
+    const crumbRoot = WS_SCOPED.includes(screen)
+      ? (screen === 'needs' && this.state.scope !== 'acme' ? 'Everywhere' : 'Acme')
+      : 'Everywhere';
+
+    const openInScope = crumbRoot === 'Acme' ? OPEN_ACME : OPEN_ALL;
+    // Live filters in-screen; the header states the roster and what is shown.
+    const shownWorkers = { acme: 4, fernwood: 2 }[this.state.liveScope] ?? WORKERS.length;
+    const isPhone = device === 'phone';
+    const meta = {
+      chat: ['Chat', 'Acme · all projects'],
+      needs: ['Needs you', `${openInScope} open · 1 held by the weaver`],
+      board: ['Work', 'Acme · 14 tickets'],
+      ticket: ['ACME-42', 'Dark mode for the dashboard'],
+      artifact: ['How theming resolves', 'Artifact · published by Backend Engineer #7'],
+      live: ['Live', `${WORKERS.length} running · showing ${shownWorkers}`],
+      knowledge: ['Knowledge', 'Acme · 3 projects · 41 documents'],
+      map: ['Map', `3 workspaces · 6 projects · ${WORKERS.length} workers`],
+      incidents: ['Incidents', `${INC_OPEN} open · ${INC_RESOLVED} resolved`],
+      runs: ['Runs', '200 in view · every agent, every workspace'],
+      run: ['Run', 'Weaver · acme · 09:31'],
+      scheduled: ['Scheduled', '5 recurring · next in 42m'],
+      roles: ['Roles', 'Acme · 8 roles · 8 workers'],
+      settings: ['Settings', 'This daemon and every workspace'],
+      onboarding: ['Set up your workspace', 'Step 3 of 5'],
+      login: ['Sign in', 'weave-ai · acme.weave.host'],
+      system: ['Design notes', 'Tokens, status set, navigation, departures'],
+      more: ['More', 'Everywhere, Acme, and this mockup']
+    };
+    const [screenTitle, screenSub] = meta[screen] || ['', ''];
+
+    const tabDefs = [
+      ['chat', 'Chat', 'chat', 0],
+      ['needs', 'Needs you', 'needs', OPEN_ALL],
+      ['board', 'Work', 'board', 0],
+      ['live', 'Live', 'live', 0],
+      ['more', 'More', 'more', 0]
+    ];
+    const tabs = tabDefs.map(([id, label, g, count]) => {
+      // The bar is the global view: one tap shows every workspace at once.
+      const scoped = ['needs', 'live'].includes(id);
+      const tabScope = scoped ? 'all' : (id === 'board' ? 'acme' : undefined);
+      const active = (screen === id || (id === 'chat' && screen === 'chat')) && (!scoped || this.state.scope === 'all');
+      const col = active ? 'var(--accent-link)' : 'var(--text-nav)';
+      return {
+        id, label, count: count || false,
+        go: this.go(id, tabScope),
+        style: `position:relative;flex:1;min-width:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:none;border:0;color:${col};cursor:pointer;padding:0 2px`,
+        glyph: TAB_GLYPH[g] + ';color:inherit;flex:none',
+        badge: 'position:absolute;top:-2px;right:50%;transform:translateX(18px);min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:var(--st-needs-you);color:#fff;font:600 9.5px/15px Inter,sans-serif;text-align:center'
+      };
+    });
+
+    const navBtn = (active) => `display:flex;align-items:center;gap:9px;width:100%;padding:6px 8px 6px 20px;margin-bottom:1px;background:${active ? 'var(--bg-2)' : 'transparent'};border:0;border-radius:4px;color:${active ? 'var(--text-1)' : 'var(--text-2)'};font:${active ? '500' : '450'} 13px/1.3 Inter,sans-serif;cursor:pointer`;
+
+    const MARK = (k, c) => ({
+      needs: `width:13px;height:13px;border-radius:999px;border:1.5px solid ${c}`,
+      live: `width:13px;height:13px;border-radius:2px;border:1.5px solid ${c};background:radial-gradient(circle at 50% 50%, ${c} 0 2px, transparent 2.5px)`,
+      incidents: `width:13px;height:12px;background:${c};clip-path:polygon(50% 0,100% 100%,0 100%)`,
+      map: `width:13px;height:13px;border-radius:2px;border:1.5px solid ${c};background:linear-gradient(to right, transparent 45%, ${c} 45%, ${c} 55%, transparent 55%)`,
+      scheduled: `width:13px;height:13px;border-radius:999px;border:1.5px solid ${c};border-top-color:transparent`,
+      runs: `width:13px;height:11px;border-radius:2px;border:1.5px solid ${c};background:linear-gradient(to bottom, transparent 3px, ${c} 3px, ${c} 4.5px, transparent 4.5px, transparent 7px, ${c} 7px, ${c} 8.5px, transparent 8.5px)`,
+      chat: `width:13px;height:11px;border-radius:3px 3px 3px 1px;border:1.5px solid ${c}`,
+      board: `width:13px;height:12px;border-radius:2px;border:1.5px solid ${c};background:linear-gradient(to bottom, ${c} 0 1.5px, transparent 1.5px)`,
+      knowledge: `width:11px;height:13px;border-radius:1px 3px 3px 1px;border:1.5px solid ${c};border-left-width:3px`,
+      settings: `width:13px;height:13px;border-radius:999px;border:1.5px solid ${c};background:radial-gradient(circle at 50% 50%, ${c} 0 1.5px, transparent 2px)`,
+      roles: `width:13px;height:13px;border-radius:2px;border:1.5px solid ${c};background:linear-gradient(to bottom, transparent 45%, ${c} 45%, ${c} 55%, transparent 55%), linear-gradient(to right, transparent 45%, ${c} 45%, ${c} 55%, transparent 55%)`
+    }[k]);
+    const globalNav = [
+      ['needs', 'Needs you', String(OPEN_ALL), 'var(--st-needs-you)'],
+      ['live', 'Live', String(WORKERS.length), 'var(--st-working)'],
+      ['incidents', 'Incidents', String(INC_OPEN), 'var(--st-blocked)'],
+      ['map', 'Map', '', 'var(--text-4)'],
+      ['runs', 'Runs', '', 'var(--text-4)'],
+      ['scheduled', 'Scheduled', '', 'var(--text-4)'],
+      ['settings', 'Settings', '', 'var(--text-4)']
+    ].map(([id, label, count, c]) => ({
+      label, count, go: this.go(id, 'all'), style: navBtn(screen === id && this.state.scope === 'all'),
+      dot: MARK(id, screen === id && this.state.scope === 'all' ? 'var(--text-1)' : 'var(--text-3)') + ';flex:none;margin:0 1px',
+      countStyle: `font-size:11px;color:${count ? c : 'transparent'}`
+    }));
+
+    const wsNav = [
+      ['chat', 'Chat', '1'], ['needs', 'Needs you', '2'], ['board', 'Work', '3'],
+      ['roles', 'Roles', '4'], ['knowledge', 'Knowledge', '5']
+    ].map(([id, label, key]) => {
+      const on = screen === id && this.state.scope === 'acme';
+      const c = on ? 'var(--text-1)' : 'var(--text-3)';
+      const m = {
+        roles: `width:13px;height:11px;border-radius:2px;border:1.5px solid ${c};background:linear-gradient(to bottom, transparent 3.5px, ${c} 3.5px 5px, transparent 5px 7.5px, ${c} 7.5px 9px, transparent 9px)`,
+        chat: `width:13px;height:11px;border-radius:2px;border:1.5px solid ${c};border-bottom-left-radius:1px`,
+        needs: `width:12px;height:12px;border-radius:999px;border:1.5px solid ${c}`,
+        board: `width:13px;height:11px;border-left:2.5px solid ${c};border-right:2.5px solid ${c};border-top:1.5px solid ${c};border-bottom:1.5px solid ${c};border-radius:2px`,
+        live: `width:12px;height:12px;border-radius:2px;border:1.5px solid ${c};background:radial-gradient(circle at 50% 50%, ${c} 0 2px, transparent 2.5px)`,
+        knowledge: `width:11px;height:13px;border:1.5px solid ${c};border-radius:2px;border-left-width:3px`,
+        settings: `width:12px;height:12px;border-radius:999px;border:1.5px solid ${c};border-right-color:transparent;border-bottom-color:transparent`
+      }[id];
+      return { label, key, go: this.go(id, 'acme'), style: navBtn(on), dot: m + ';flex:none;margin:0 1px', keyStyle: 'font-size:10px;color:var(--text-4)' };
+    });
+
+    const projects = [
+      ['web', 'var(--project-1)', '6'], ['api', 'var(--project-2)', '5'], ['infra', 'var(--project-3)', '3']
+    ].map(([name, c, n]) => ({
+      name, n, go: this.go('board'), style: navBtn(false),
+      nameStyle: `flex:1;text-align:left;color:${c}`
+    }));
+
+    const jumps = [
+      ['chat', 'Chat'], ['needs', 'Needs you'], ['ticket', 'Ticket'], ['artifact', 'Artifact'],
+      ['board', 'Work'], ['live', 'Live'], ['roles', 'Roles'], ['knowledge', 'Knowledge'], ['map', 'Map'],
+      ['incidents', 'Incidents'], ['scheduled', 'Scheduled'], ['settings', 'Settings'],
+      ['onboarding', 'Onboarding'], ['login', 'Login'], ['system', 'Design notes']
+    ];
+    const jumpList = jumps.map(([id, label]) => ({
+      label, go: this.go(id),
+      style: `padding:4px 9px;border-radius:4px;border:1px solid ${screen === id ? '#5e6ad2' : '#2a2d33'};background:${screen === id ? 'rgba(94,106,210,.18)' : '#1c1e22'};color:${screen === id ? '#c6cad1' : '#8a8f98'};font:450 11px/1 Inter,sans-serif;cursor:pointer`
+    }));
+
+    return {
+      theme, isPhone, isDesktop: !isPhone, screenTitle, screenSub, screen,
+      // Chat owns its own scrolling (stream and dock scroll separately), so its
+      // pane must be a bounded, non-scrolling box rather than the usual wv-scroll.
+      // grid-template-rows:minmax(0,1fr) forces the child mount host to the pane's
+      // height even though the runtime owns that element and ignores style props.
+      paneStyle: screen === 'chat'
+        ? 'flex:1;min-height:0;display:grid;grid-template-rows:minmax(0,1fr);grid-template-columns:minmax(0,1fr);overflow:hidden'
+        : 'flex:1;min-height:0;overflow-y:auto',
+      paneClass: screen === 'chat' ? '' : 'wv-scroll',
+      fullH: screen === 'chat',
+      // Chat carries its own status bar (workers, session, layout), so the generic
+      // breadcrumb header would be a second top bar stealing 46px of stream height.
+      showTopBar: screen !== 'chat',
+      mountStyle: screen === 'chat'
+        ? { flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }
+        : { display: 'block' },
+      crumbRoot,
+      railOpen: this.state.railOpen,
+      railShut: !this.state.railOpen,
+      toggleRail: () => this.setState(s => ({ railOpen: !s.railOpen })),
+      toggleTheme: () => this.setState(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      themeGlyph: theme === 'dark'
+        ? 'display:block;width:12px;height:12px;border-radius:999px;background:currentColor;box-shadow:inset 4px -4px 0 0 var(--bg-1)'
+        : 'display:block;width:12px;height:12px;border-radius:999px;background:currentColor',
+      // Collapsed rail: same destinations, marks only, grouped as when expanded —
+      // the rule plus the workspace initial keeps the tie to Acme visible.
+      railGroups: [
+        { initial: '', items: [['needs', 'Needs you', true], ['live', 'Live', false], ['incidents', 'Incidents', false], ['map', 'Map', false], ['runs', 'Runs', false], ['scheduled', 'Scheduled', false], ['settings', 'Settings', false]] },
+        { initial: 'A', items: [['chat', 'Chat', false], ['needs', 'Needs you', false], ['board', 'Work', false], ['roles', 'Roles', false], ['knowledge', 'Knowledge', false]] }
+      ].map(grp => ({
+        initial: grp.initial,
+        items: grp.items.map(([id, label, badge]) => ({
+          label, badge, go: this.go(id, grp.initial ? 'acme' : 'all'),
+          style: `position:relative;flex:none;display:flex;align-items:center;justify-content:center;width:30px;height:30px;margin-bottom:2px;background:${screen === id && (grp.initial ? this.state.scope === 'acme' : this.state.scope === 'all') ? 'var(--bg-3)' : 'transparent'};border:0;border-radius:4px;cursor:pointer`,
+          dot: MARK(id, screen === id && (grp.initial ? this.state.scope === 'acme' : this.state.scope === 'all') ? 'var(--text-1)' : 'var(--text-3)') + ';flex:none'
+        }))
+      })),
+      scopePill: crumbRoot === 'Acme' ? 'acme' : 'everywhere',
+      needPill: `${openInScope} need you`,
+      runningPill,
+      workerCount: WORKERS.length,
+      openCount: openInScope,
+      scope: this.state.scope,
+      onScope: (v) => this.setState({ scope: v }),
+      onGo: (id) => this.setState(st => ({ screen: id, stack: [...st.stack, st.screen] })),
+      liveScopeVal: this.state.liveScope || 'all',
+      onLiveScope: (v) => this.setState({ liveScope: v }),
+      tabs, globalNav, wsNav, projects, jumpList,
+      showPhoneHeader: !['login', 'artifact'].includes(screen),
+      showBar: screen !== 'login',
+      canBack: ['ticket', 'artifact', 'system', 'settings', 'onboarding', 'login', 'run', 'runs', 'roles', 'knowledge', 'incidents', 'map', 'scheduled'].includes(screen),
+      goBack: this.back,
+      noop: () => {},
+      // Theme hues live on the frame so the rail, header chips and cards all repaint.
+      frameStyle: Object.assign({
+        width: isPhone ? 390 : 1280,
+        maxWidth: '100%',
+        borderRadius: isPhone ? 18 : 5,
+        overflow: 'hidden',
+        border: '1px solid var(--line-2)',
+        boxShadow: '0 24px 70px rgba(0,0,0,.55)'
+      }, themeVars(theme)),
+      // Workspace sections collapse; the caret replaces the initial tile.
+      toggleWs: () => this.setState(s => ({ wsOpen: !s.wsOpen })),
+      wsOpen: this.state.wsOpen !== false,
+      wsCaret: `flex:none;width:0;height:0;border-left:4.5px solid var(--text-3);border-top:3.5px solid transparent;border-bottom:3.5px solid transparent;margin:0 3px;transform:rotate(${this.state.wsOpen !== false ? 90 : 0}deg)`,
+      setPhone: () => this.setState({ device: 'phone' }),
+      setDesktop: () => this.setState({ device: 'desktop' }),
+      setDark: () => this.setState({ theme: 'dark' }),
+      setLight: () => this.setState({ theme: 'light' }),
+      phoneBtn: this.chipBtn(isPhone), desktopBtn: this.chipBtn(!isPhone),
+      darkBtn: this.chipBtn(theme === 'dark'), lightBtn: this.chipBtn(theme === 'light'),
+      // In-app theme switch, footer of the rail — the harness pair above is scaffolding.
+      railDarkBtn: this.railThemeBtn(theme === 'dark'),
+      railLightBtn: this.railThemeBtn(theme === 'light')
+    };
+  }
+}
+
+</script>
+</body>
+</html>

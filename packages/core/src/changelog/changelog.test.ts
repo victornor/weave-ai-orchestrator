@@ -92,6 +92,14 @@ describe('changelog', () => {
       expect(entry!.actor).toMatchObject({ kind: 'human', id: 'victor' });
     });
 
+    it('names a project by its display label, falling back to the slug (VS-330)', () => {
+      act({ action: 'role.hire', createdAt: '2026-09-05T06:00:00.000Z', entityType: 'role', entityId: h.roleId, projectId: h.projectId, detailsJson: { project: 'api' } });
+      expect(changelog.list().entries[0]!.summary).toBe('Hired Backend Engineer for API');
+
+      h.db.update('projects', h.projectId, { name: '' });
+      expect(changelog.list().entries[0]!.summary).toBe('Hired Backend Engineer for api');
+    });
+
     it('scopes a project to its own entries', () => {
       const mine = ticket();
       const theirs = ticket({ projectId: otherProject });

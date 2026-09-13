@@ -7,6 +7,7 @@ import { A } from '../../app/link';
 import { useKnowledgeDoc, useKnowledgeDocs, useKnowledgeHealth } from '../../api/hooks';
 import { BudgetMeter } from '../../components/BudgetMeter';
 import { SkeletonRows } from '../../components/Skeleton';
+import { projectLabel } from '@weave-ai/shared';
 import { ago } from '../../lib/format';
 import { knowledgeSections } from '../../lib/projectOverview';
 import type { ProjectSectionProps } from './sections';
@@ -24,7 +25,7 @@ export function KnowledgeSection({ project, ws }: ProjectSectionProps): React.Re
     <div className="flex flex-col gap-3.5">
       {hub.data ? (
         <BudgetMeter
-          label={`${project.slug} · project KB`}
+          label={`${projectLabel(project)} · project KB`}
           used={hub.data.tokenEstimate}
           budget={hub.data.budgetTokens}
           lastCuratedAt={hub.data.lastCuratedAt}

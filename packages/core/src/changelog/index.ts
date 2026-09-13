@@ -9,7 +9,7 @@
  */
 import type { Db } from '@weave-ai/db';
 import {
-  CHANGELOG_KINDS, CHANGELOG_MEASURE_KIND, CHANGELOG_SOURCES, OcError,
+  CHANGELOG_KINDS, CHANGELOG_MEASURE_KIND, CHANGELOG_SOURCES, OcError, projectLabel,
   type ChangelogDay, type ChangelogHeatmap, type ChangelogKind, type ChangelogPage,
 } from '@weave-ai/shared';
 import { changelogEntry, dayKey, type ActivityRow } from '@weave-ai/render';
@@ -39,6 +39,7 @@ interface Row extends Omit<ActivityRow, 'details'> {
   ticketTitle: string | null;
   roleName: string | null;
   projectSlug: string | null;
+  projectName: string | null;
 }
 
 /**
@@ -48,7 +49,7 @@ interface Row extends Omit<ActivityRow, 'details'> {
 const SELECT = `
   SELECT a.id, a.action, a.actor_kind, a.actor_id, a.entity_type, a.entity_id, a.ticket_id, a.project_id,
          a.details_json AS details, a.created_at,
-         t.identifier AS identifier, t.title AS ticket_title, r.name AS role_name, p.slug AS project_slug
+         t.identifier AS identifier, t.title AS ticket_title, r.name AS role_name, p.slug AS project_slug, p.name AS project_name
     FROM activity a
     LEFT JOIN tickets t ON t.id = a.ticket_id
     LEFT JOIN roles r ON r.id = a.entity_id AND a.entity_type = 'role'
@@ -70,15 +71,21 @@ function decodeCursor(cursor: string): { at: string; id: string } {
   return { at, id };
 }
 
-const toEntry = (row: Row) => changelogEntry(
-  { ...row, details: decode(row.details) },
-  {
-    ticketIdentifier: row.identifier,
-    ticketTitle: row.ticketTitle,
-    entityName: row.roleName ?? row.projectSlug,
-    actorLabel: row.actorKind === 'agent' ? 'an agent' : null,
-  },
-);
+const toEntry = (row: Row) => {
+  // Name the project by its display label, never a blank for a cleared name (VS-330), and carry it
+  // into the details so the `hired` line reads `for <label>` rather than the slug.
+  const project = row.projectSlug ? projectLabel({ name: row.projectName ?? '', slug: row.projectSlug }) : null;
+  const details = decode(row.details);
+  return changelogEntry(
+    { ...row, details: project ? { ...details, project } : details },
+    {
+      ticketIdentifier: row.identifier,
+      ticketTitle: row.ticketTitle,
+      entityName: row.roleName ?? project,
+      actorLabel: row.actorKind === 'agent' ? 'an agent' : null,
+    },
+  );
+};
 
 /** `YYYY-MM-DD` is what the day bucketing produces and what a range is expressed in. */
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;

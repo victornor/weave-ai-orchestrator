@@ -7,6 +7,7 @@
  * the page changing.
  */
 import { useParams } from '@tanstack/react-router';
+import { projectLabel } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../../components/Page';
 import { Badge } from '../../components/StatusGlyph';
 import { Button } from '../../components/Button';
@@ -63,7 +64,7 @@ export function ProjectOverviewRoute(): React.ReactElement {
   return (
     <Page>
       <PageHeader
-        title={project.name}
+        title={projectLabel(project)}
         meta={<span className="ac-mono">{project.slug}</span>}
         actions={
           <div className="flex flex-wrap items-center gap-1.5">

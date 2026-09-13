@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Decision, DecisionAnswerInputs, Project, RunTrace, ThreadMessage, Ticket } from '@weave-ai/shared';
-import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent } from '@weave-ai/shared';
+import { ticketUiStatus, agentUiStatus, isActiveRun, isHumanReplyToolEvent, projectLabel } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Button } from '../components/Button';
 import { Composer } from '../components/Composer';
@@ -271,7 +271,10 @@ export function ChatPage({
   }, [messages.data]);
   const projectId = pickedProject === undefined ? lastUsedProject : pickedProject;
   const projectName = useCallback(
-    (id: string) => projects.data?.find((p) => p.id === id)?.name ?? id,
+    (id: string) => {
+      const p = projects.data?.find((x) => x.id === id);
+      return p ? projectLabel(p) : id;
+    },
     [projects.data],
   );
 
@@ -630,6 +633,10 @@ export function ChatPage({
   /** The project a card belongs to, named or — for a workspace-wide question — left for the card to label. */
   const projectSlugOf = (d: { projectId: string | null; ticketId: string | null }): string | null =>
     projects.data?.find((p) => p.id === (d.projectId ?? tickets.data?.find((t) => t.id === d.ticketId)?.projectId))?.slug ?? null;
+  const projectLabelOf = (d: { projectId: string | null; ticketId: string | null }): string | null => {
+    const p = projects.data?.find((x) => x.id === (d.projectId ?? tickets.data?.find((t) => t.id === d.ticketId)?.projectId));
+    return p ? projectLabel(p) : null;
+  };
 
   const ticketOf = (d: { ticketId: string | null }): Ticket | undefined =>
     tickets.data?.find((t) => t.id === d.ticketId);
@@ -712,6 +719,7 @@ export function ChatPage({
     askedByConductor,
     ticketOf,
     projectSlugOf,
+    projectLabelOf,
     onAnswer: (id, a) => answerDecision(id, a),
     onHide: (d) => hide(d),
   };
@@ -1094,7 +1102,7 @@ function ProjectPicker({
       <ProjectTag label="Auto" active={value === null} onClick={() => onChange(null)} />
       {orphan ? <ProjectTag label={value} active colorVar={projectColorVar(value, siblingIds)} onClick={() => onChange(null)} /> : null}
       {choosable.map((p) => (
-        <ProjectTag key={p.id} label={p.name} active={p.id === value} colorVar={projectColorVar(p.id, siblingIds)} onClick={() => onChange(p.id === value ? null : p.id)} />
+        <ProjectTag key={p.id} label={projectLabel(p)} active={p.id === value} colorVar={projectColorVar(p.id, siblingIds)} onClick={() => onChange(p.id === value ? null : p.id)} />
       ))}
     </div>
   );
@@ -1163,6 +1171,7 @@ interface ChatCardContext {
   askedByConductor: (d: Decision) => boolean;
   ticketOf: (d: { ticketId: string | null }) => Ticket | undefined;
   projectSlugOf: (d: { projectId: string | null; ticketId: string | null }) => string | null;
+  projectLabelOf: (d: { projectId: string | null; ticketId: string | null }) => string | null;
   onAnswer: (id: string, a: { key?: string; text?: string; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string; remember?: boolean }) => void;
   onHide: (d: Decision) => void;
 }
@@ -1187,6 +1196,7 @@ function ChatDecisionCard({ d, ctx, register }: { d: Decision; ctx: ChatCardCont
       {...(ctx.askedByConductor(d) ? { asker: 'weaver' as const } : {})}
       ticketIdentifier={ctx.ticketOf(d)?.identifier ?? d.ticketId}
       projectSlug={ctx.projectSlugOf(d)}
+      projectLabel={ctx.projectLabelOf(d)}
       ws={ctx.ws}
       busy={ctx.busy}
       plan={<PlanPreview decision={d} />}

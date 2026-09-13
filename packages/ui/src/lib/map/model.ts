@@ -2,7 +2,7 @@
  * The instance Map as a graph: workspaces, projects, roles, in-flight tickets and knowledge
  * nodes, with ownership edges. Pure — the route fans out HTTP and this assembles what to draw.
  */
-import type { Project, Role, Ticket } from '@weave-ai/shared';
+import { projectLabel, type Project, type Role, type Ticket } from '@weave-ai/shared';
 
 export const IN_FLIGHT_TICKET_STATUSES = [
   'proposing', 'proposed', 'approved', 'in_progress', 'in_review', 'merging', 'blocked',
@@ -118,7 +118,7 @@ export function buildMapModel(workspaces: readonly MapWorkspaceInput[]): MapMode
       push({
         id: pid,
         kind: 'project',
-        title: p.slug,
+        title: projectLabel(p),
         workspaceId: w.id,
         workspaceName: w.name,
         href: `/w/${encodeURIComponent(w.id)}/p/${encodeURIComponent(p.slug)}`,
@@ -194,7 +194,7 @@ export function buildMapModel(workspaces: readonly MapWorkspaceInput[]): MapMode
       push({
         id: kid,
         kind: 'knowledge',
-        title: `${project.slug} knowledge`,
+        title: `${projectLabel(project)} knowledge`,
         workspaceId: w.id,
         workspaceName: w.name,
         href: `/w/${encodeURIComponent(w.id)}/knowledge`,

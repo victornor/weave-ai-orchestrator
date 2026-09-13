@@ -141,6 +141,12 @@ describe('the address', () => {
     expect(screen.getByRole('heading', { name: 'API', level: 1 })).toBeTruthy();
   });
 
+  it('titles a project with no display name by its slug (VS-330)', () => {
+    state.projects = [projectOf({ id: 'p1', slug: 'api', name: '' }), web];
+    render(<ProjectOverviewRoute />);
+    expect(screen.getByRole('heading', { name: 'api', level: 1 })).toBeTruthy();
+  });
+
   it('says a project it does not have was not found, without an error state', () => {
     state.param = 'ops';
     render(<ProjectOverviewRoute />);

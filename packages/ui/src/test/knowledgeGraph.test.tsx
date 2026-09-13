@@ -57,6 +57,7 @@ const state = vi.hoisted(() => ({ graph: null as KnowledgeGraph | null, reduced:
 
 vi.mock('../api/hooks', () => ({
   useKnowledgeGraph: () => ({ data: state.graph, isLoading: false, isError: false, refetch: vi.fn() }),
+  useProjects: () => ({ data: [] }),
 }));
 
 const { KnowledgeGraphView } = await import('../routes/KnowledgeGraph');

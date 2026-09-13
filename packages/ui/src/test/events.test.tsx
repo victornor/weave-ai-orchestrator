@@ -217,6 +217,11 @@ describe("a project's sync state (VS-131)", () => {
     expect(invalidated(event('ticket.updated', { entityId: 'tk_1', entityType: 'ticket' })))
       .not.toContain(JSON.stringify(qk.projectSync('ws1', 'tk_1')));
   });
+
+  it('refreshes the project list on a rename, so an open label updates without a reload (VS-330)', () => {
+    expect(invalidated(event('project.updated', { entityId: 'p1', entityType: 'project' })))
+      .toContain(JSON.stringify(qk.projects('ws1')));
+  });
 });
 
 describe('knowledge context events (VS-110)', () => {

@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { landingBranchOf, yoloEnabled } from '@weave-ai/shared';
+import { landingBranchOf, projectLabel, yoloEnabled } from '@weave-ai/shared';
 import { formatAge } from '@weave-ai/render';
 import type * as S from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
@@ -115,7 +115,7 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
       exclusions: (r as unknown as { exclusions?: string[] })?.exclusions ?? [], notes: (r as unknown as { notes?: string })?.notes ?? '',
     },
     project: {
-      id: p?.slug ?? '', name: p?.name ?? '', ...projectHeaders(ctx, p), landingBranch: p ? landingBranchOf(p, t) : 'main',
+      id: p?.slug ?? '', name: p ? projectLabel(p) : '', ...projectHeaders(ctx, p), landingBranch: p ? landingBranchOf(p, t) : 'main',
       rules: r?.rules ?? [], openspec: p?.openspecEnabled ?? false,
       yolo: yoloEnabled(policies, ctx.config.defaults.yolo),
     },
@@ -183,12 +183,13 @@ export function renderConductorInstructions(ctx: WorkspaceContext, deps: () => C
   const roles = ctx.db.all<S.Role>('SELECT * FROM roles WHERE workspace_id = ? AND status != ?', [ctx.workspaceId, 'retired']);
   const workers = ctx.db.all<S.Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'worker' AND status NOT IN ('retired','done')", [ctx.workspaceId]);
   const projectLines = projects.length
-    ? projects.map((p) => `- \`${p.slug}\` — ${p.name}${p.defaultBranch ? ` (default branch \`${p.defaultBranch}\`)` : ''}`).join('\n')
+    ? projects.map((p) => `- \`${p.slug}\` — ${projectLabel(p)}${p.defaultBranch ? ` (default branch \`${p.defaultBranch}\`)` : ''}`).join('\n')
     : '- (none yet)';
   const roleLines = roles.length
     ? roles.map((r) => {
         const live = workers.filter((w) => w.roleId === r.id).length;
-        return `- **${r.name}** [${r.status}] in \`${projects.find((p) => p.id === r.projectId)?.slug ?? '?'}\` — ${r.charterSummary} (${live}/${r.maxWorkers} workers live)`;
+        const proj = projects.find((p) => p.id === r.projectId);
+        return `- **${r.name}** [${r.status}] in ${proj ? projectLabel(proj) : '?'} — ${r.charterSummary} (${live}/${r.maxWorkers} workers live)`;
       }).join('\n')
     : '- (none hired yet)';
   return renderTemplate(tmpl, {

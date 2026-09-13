@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearch } from '@tanstack/react-router';
 import type { Ticket, TicketStatus, WorkerActivitySummary } from '@weave-ai/shared';
-import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, ticketUiStatus } from '@weave-ai/shared';
+import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, projectLabel, ticketUiStatus } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented } from '../components/Tabs';
 import { OutcomeChip, TicketCard, TicketRow } from '../components/TicketCard';
@@ -158,7 +158,7 @@ export function BoardRoute(): React.ReactElement {
 
   const filters = (
     <div className="flex flex-wrap items-center gap-1.5">
-      <Select label="project" value={project} onChange={setProject} options={(projects.data ?? []).map((p) => ({ value: p.id, label: p.slug }))} />
+      <Select label="project" value={project} onChange={setProject} options={(projects.data ?? []).map((p) => ({ value: p.id, label: projectLabel(p) }))} />
       <Select label="role" value={role} onChange={setRole} options={(roles.data ?? []).map((r) => ({ value: r.id, label: r.name }))} />
       <Select label="kind" value={kind} onChange={setKind} options={TICKET_KINDS.map((k) => ({ value: k, label: k }))} />
       <Select label="priority" value={priority} onChange={setPriority} options={TICKET_PRIORITIES.map((p) => ({ value: p, label: p }))} />

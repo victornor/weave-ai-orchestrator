@@ -7,7 +7,7 @@ import { Badge } from '../components/StatusGlyph';
 import { updateEntryLabel } from '../lib/upgrade';
 import type { UpdateEntry } from '../lib/upgrade';
 import type { WorkspaceListItem } from '../api/types';
-import type { Project } from '@weave-ai/shared';
+import { projectLabel, type Project } from '@weave-ai/shared';
 import { cx } from '../lib/cx';
 
 export interface MoreSheetProps {
@@ -120,7 +120,7 @@ export function MoreSheet({
                   onClick={onClose}
                   className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-bg-2"
                 >
-                  <span className="ac-mono min-w-0 flex-1 truncate text-meta text-text-1">{p.slug}</span>
+                  <span className="min-w-0 flex-1 truncate text-meta text-text-1">{projectLabel(p)}</span>
                   <span className="ac-mono text-nano text-text-4">{p.defaultBranch}</span>
                 </A>
               ))}

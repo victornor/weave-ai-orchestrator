@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { UiStatus } from '@weave-ai/shared';
+import { projectLabel, type UiStatus } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented } from '../components/Tabs';
 import { SkeletonRows } from '../components/Skeleton';
@@ -63,14 +63,14 @@ export function MergeQueueRoute(): React.ReactElement {
     <Page>
       <PageHeader
         title="Merge queue"
-        meta={project ? <span className="ac-mono">{project.slug}</span> : undefined}
+        meta={project ? <span>{projectLabel(project)}</span> : undefined}
         actions={
           list.length > 1 ? (
             <Segmented
               ariaLabel="Project"
               mono
               className="max-w-[60vw] md:max-w-none"
-              options={list.map((p) => ({ value: p.id, label: p.slug }))}
+              options={list.map((p) => ({ value: p.id, label: projectLabel(p) }))}
               value={projectId ?? ''}
               onChange={choose}
             />

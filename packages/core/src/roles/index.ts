@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { newId, nowIso } from '@weave-ai/db';
-import { OcError, RoleSpecSchema, NAMED_CARD_OPTION_KEYS, toLegacyRoleSpec, type Role, type RoleSpec, type Project } from '@weave-ai/shared';
+import { OcError, RoleSpecSchema, NAMED_CARD_OPTION_KEYS, toLegacyRoleSpec, projectLabel, type Role, type RoleSpec, type Project } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, RoleConcurrency, RolesService } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -122,7 +122,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
           // Approve or decline, and nothing about a runtime (VS-77): a role does not carry one, and
           // every worker it spawns runs on the workspace's workers setting.
           const decision = deps().decisions.create(actor, {
-            kind: 'hire_approval', owner: 'human', title: `Hire ${spec.name} for ${project.slug}?`,
+            kind: 'hire_approval', owner: 'human', title: `Hire ${spec.name} for ${projectLabel(project)}?`,
             context: `${spec.charterSummary}\n\nScope: ${spec.scope}\n\nUp to ${spec.maxWorkers} concurrent workers, on the workspace's workers model setting.`,
             options: [
               { key: NAMED_CARD_OPTION_KEYS.hire_approval.approve, label: 'Approve and activate', recommended: true },

@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 
 import { join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
 import {
-  HANDOVER_PAUSE_CODE, OcError, heldByHuman, landingBranchOf, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type TicketStatus,
+  HANDOVER_PAUSE_CODE, OcError, heldByHuman, landingBranchOf, projectLabel, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type TicketStatus,
 } from '@weave-ai/shared';
 import type { WorktreeProvider } from '@weave-ai/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
@@ -233,7 +233,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const role = ctx.db.get<Role>("SELECT * FROM roles WHERE project_id = ? AND status = 'active' ORDER BY created_at LIMIT 1", [projectId]);
       if (!role) throw new OcError('wrong_status', `project ${project.slug} has no active role to curate its knowledge`);
       const ticket = deps().tickets.create(actor, {
-        projectId, kind: 'task', title: `Curate project knowledge (${project.slug})`,
+        projectId, kind: 'task', title: `Curate project knowledge (${projectLabel(project)})`,
         description: 'Curate this project\'s knowledge base: merge duplicates, fold learnings that became conventions, archive stale entries, keep every section within budget. Never invent facts. Submit with `weave_knowledge_replace`.',
         priority: 'low', assigneeRoleId: role.id, originKind: 'curation', originFingerprint: `curation:${projectId}`,
       });

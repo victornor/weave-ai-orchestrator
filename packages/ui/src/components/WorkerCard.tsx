@@ -19,7 +19,8 @@ function wakeLabel(at: string | null): string {
 
 export interface WorkerCardProps {
   agent: Agent;
-  projectSlug?: string | null;
+  /** The project's display label (VS-330), resolved by the caller. */
+  projectLabel?: string | null;
   ticketIdentifier?: string | null;
   lastLine?: string | null;
   worktree?: { status: string; dirty: boolean; ahead: number; behind: number } | null;
@@ -39,7 +40,7 @@ export interface WorkerCardProps {
 
 export function WorkerCard({
   agent,
-  projectSlug,
+  projectLabel,
   ticketIdentifier,
   lastLine,
   worktree,
@@ -69,7 +70,7 @@ export function WorkerCard({
         <span className="min-w-0 flex-1">
           <span className="block truncate text-ui font-medium text-text-1">{agent.name}</span>
           <span className="ac-mono mt-0.5 block truncate text-micro text-text-3">
-            {[projectSlug, ticketIdentifier].filter(Boolean).join(' · ') || '—'}
+            {[projectLabel, ticketIdentifier].filter(Boolean).join(' · ') || '—'}
           </span>
         </span>
         {interactive ? <Badge tone="accent">interactive</Badge> : null}
@@ -121,7 +122,7 @@ export function WorkerCard({
   );
 }
 
-export function WorkerRow({ agent, projectSlug, ticketIdentifier, lastLine, needsYou, stalled, interactive, scheduledWake, onOpen }: WorkerCardProps): React.ReactElement {
+export function WorkerRow({ agent, projectLabel, ticketIdentifier, lastLine, needsYou, stalled, interactive, scheduledWake, onOpen }: WorkerCardProps): React.ReactElement {
   const ui = agentUiStatus(agent.status, { needsYou, stalled });
   const pausedFor = workerPauseDetail(agent)?.summary ?? null;
   const scheduled = scheduledWake ? `wakes ${wakeLabel(scheduledWake.at)} · ${scheduledWake.reason}` : null;
@@ -134,7 +135,7 @@ export function WorkerRow({ agent, projectSlug, ticketIdentifier, lastLine, need
       <StatusGlyph status={ui} size="sm" pulse={ui === 'working'} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-ui text-text-1">{agent.name}</span>
-        <span className="ac-mono block truncate text-micro text-text-3">{pausedFor ?? scheduled ?? lastLine ?? [projectSlug, ticketIdentifier].filter(Boolean).join(' · ')}</span>
+        <span className="ac-mono block truncate text-micro text-text-3">{pausedFor ?? scheduled ?? lastLine ?? [projectLabel, ticketIdentifier].filter(Boolean).join(' · ')}</span>
       </span>
       {interactive ? <Badge tone="accent">interactive</Badge> : null}
     </button>

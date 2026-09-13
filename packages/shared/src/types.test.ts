@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { incompleteDelivery, landingBranchOf, type Ticket } from './types.js';
+import { incompleteDelivery, landingBranchOf, projectLabel, type Ticket } from './types.js';
 
 const done = (delivery: Ticket['delivery']): Pick<Ticket, 'status' | 'delivery'> => ({ status: 'done', delivery });
 
@@ -50,5 +50,21 @@ describe('landingBranchOf', () => {
 
   it("the ticket's own declaration overrides even when the project declares no landing branch", () => {
     expect(landingBranchOf({ defaultBranch: 'main', landingBranch: null }, { landingBranch: 'hotfix' })).toBe('hotfix');
+  });
+});
+
+describe('projectLabel', () => {
+  it('uses the name when it has one', () => {
+    expect(projectLabel({ name: 'Weave AI', slug: 'agent-conductor' })).toBe('Weave AI');
+  });
+
+  it('trims the name', () => {
+    expect(projectLabel({ name: '  Weave AI  ', slug: 'agent-conductor' })).toBe('Weave AI');
+  });
+
+  it('falls back to the slug for an empty or whitespace-only name', () => {
+    expect(projectLabel({ name: '', slug: 'agent-conductor' })).toBe('agent-conductor');
+    expect(projectLabel({ name: '   ', slug: 'agent-conductor' })).toBe('agent-conductor');
+    expect(projectLabel({ name: undefined as unknown as string, slug: 'agent-conductor' })).toBe('agent-conductor');
   });
 });

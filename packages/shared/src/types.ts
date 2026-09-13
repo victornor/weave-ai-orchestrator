@@ -13,6 +13,15 @@ export function landingBranchOf(project: Pick<Project, 'defaultBranch' | 'landin
   return ticket?.landingBranch ?? project.landingBranch ?? project.defaultBranch;
 }
 /**
+ * What a project is called to a person (VS-330): its display name when it has one, else its slug.
+ * The one rule every human-readable project label goes through, so a cleared or whitespace name
+ * falls back to the slug everywhere instead of rendering blank. The slug stays the identifier
+ * wherever one is typed, copied or linked.
+ */
+export function projectLabel(project: Pick<Project, 'name' | 'slug'>): string {
+  return project.name?.trim() || project.slug;
+}
+/**
  * Whether a finished ticket claims a merge but lacks the record merge-done writes (VS-250). A
  * `done` ticket whose delivery has `prState: 'merged'` or `merged: true` without a non-empty
  * `mergeCommit` is incomplete: the old `merging → done` bypass left rows like VS-227 reading as an

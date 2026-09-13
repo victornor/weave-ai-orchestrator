@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { UsageGrain, UsageWindow } from '@weave-ai/shared';
+import { projectLabel, type UsageGrain, type UsageWindow } from '@weave-ai/shared';
 import { accountLimits, mixedBillingNote, showCost } from '@weave-ai/render';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { WindowGrainPicker } from '../components/WindowGrainPicker';
@@ -53,7 +53,7 @@ export function UsageRoute(): React.ReactElement {
   const withCost = showCost(series.data?.billingMix);
   const plans = accountLimits(accounts.data ?? [], new Date());
 
-  const projectKeys = (projects.data ?? []).map((p) => ({ key: p.id, label: p.slug }));
+  const projectKeys = (projects.data ?? []).map((p) => ({ key: p.id, label: projectLabel(p) }));
   const buckets = (series.data?.series ?? []).map((pt) => ({
     label: dayLabel(pt.bucket, grain),
     parts: projectKeys.length

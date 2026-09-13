@@ -171,6 +171,28 @@ describe('projects', () => {
     expect(saved.at(-1)!.projects[0]!.landingBranch).toBeUndefined();
   });
 
+  it('sets, trims and clears a project display name (VS-330)', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, cfg(src));
+    expect(project.name).toBe('web');
+
+    const renamed = await projects.update(HUMAN, project.id, { name: '  Weave AI  ' });
+    expect(renamed.name).toBe('Weave AI');
+    expect(saved.at(-1)!.projects[0]!.name).toBe('Weave AI');
+
+    // A patch that does not mention the name keeps it.
+    const other = await projects.update(HUMAN, project.id, { maxWorkers: 5 });
+    expect(other.name).toBe('Weave AI');
+
+    // An empty (or whitespace-only) name is the clear sentinel; the config block omits it.
+    const cleared = await projects.update(HUMAN, project.id, { name: '' });
+    expect(cleared.name).toBe('');
+    expect(saved.at(-1)!.projects[0]!.name).toBeUndefined();
+
+    const whitespace = await projects.update(HUMAN, project.id, { name: '   ' });
+    expect(whitespace.name).toBe('');
+  });
+
   it('rejects a landing branch absent from the remote, at the point of setting (VS-122)', async () => {
     const src = await sourceRepo();
     const project = await projects.add(HUMAN, cfg(src));

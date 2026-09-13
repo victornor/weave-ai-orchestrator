@@ -21,8 +21,9 @@ import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Button } from '../components/Button';
-import { useKnowledgeGraph } from '../api/hooks';
+import { useKnowledgeGraph, useProjects } from '../api/hooks';
 import { cx } from '../lib/cx';
+import { projectLabelFor } from '../lib/projectName';
 import { buildModel, type GraphModel, type GraphNode } from '../lib/graph/model';
 import { highlighted, matchingIds, nodeDimmed, visible } from '../lib/graph/filters';
 import { centeringForce, clusterForce } from '../lib/graph/cluster';
@@ -110,6 +111,9 @@ function useThemeColours(el: Element | null): { colours: React.RefObject<ThemeCo
 
 export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOpen: (path: string) => void }): React.ReactElement {
   const graph = useKnowledgeGraph(project);
+  const graphProjects = useProjects();
+  // A group is a project slug or a scope word; name it by the project's label where it is one.
+  const groupLabel = (g: string): string => projectLabelFor(graphProjects.data, { slug: g }) ?? g;
   const reduced = useMediaQuery('(prefers-reduced-motion: reduce)');
   const phone = useMediaQuery('(max-width: 640px)');
   const animated = !reduced;
@@ -410,7 +414,7 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
               className={cx('flex items-center gap-1.5 text-micro', off ? 'text-text-4 line-through' : 'text-text-2')}
             >
               <span className="size-2 rounded-full" style={{ background: colourOf(g), opacity: off ? 0.3 : 1 }} />
-              {g}
+              {groupLabel(g)}
             </button>
           );
         })}
@@ -458,6 +462,7 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
           node={sel}
           pinned={pins.has(sel.id)}
           colour={colourOf(sel.group)}
+          projects={graphProjects.data}
           onOpen={onOpen}
           onFocus={(id) => { setSelected(id); focusNode(id); }}
           onTogglePin={() => togglePin(sel.id)}
@@ -471,12 +476,14 @@ export function KnowledgeGraphView({ project, onOpen }: { project?: string; onOp
 export default KnowledgeGraphView;
 
 export function GraphDetailPanel({
-  model, node, pinned, colour, onOpen, onFocus, onTogglePin, onClose,
+  model, node, pinned, colour, projects, onOpen, onFocus, onTogglePin, onClose,
 }: {
   model: GraphModel;
   node: GraphNode;
   pinned: boolean;
   colour: string;
+  /** The workspace's projects, so a project node is named by its display label (VS-330). */
+  projects?: Parameters<typeof projectLabelFor>[0];
   onOpen: (path: string) => void;
   onFocus: (id: string) => void;
   onTogglePin: () => void;
@@ -495,7 +502,7 @@ export function GraphDetailPanel({
         <span className="size-2 shrink-0 rounded-full" style={{ background: colour }} />
         <span className="text-meta font-medium text-text-1">{node.title}</span>
         <span className="ac-mono text-nano text-text-4">
-          {node.projectSlug ?? node.scope} · {node.tokens} tok · {node.degree} links{node.kind === 'hub' ? ' · hub' : ''}
+          {node.projectSlug ? (projectLabelFor(projects, { slug: node.projectSlug }) ?? node.projectSlug) : node.scope} · {node.tokens} tok · {node.degree} links{node.kind === 'hub' ? ' · hub' : ''}
         </span>
         <div className="flex-1" />
         <Button size="sm" aria-pressed={pinned} onClick={onTogglePin}>{pinned ? 'Unpin' : 'Pin'}</Button>

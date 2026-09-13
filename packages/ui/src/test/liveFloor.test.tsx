@@ -9,6 +9,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Run, RunEvent, Ticket, WorkerModelOption } from '@weave-ai/shared';
 import { agent, run as makeRun, ticket } from './factories';
+import { LIVE_RUN_GRACE_MS } from '../lib/liveOrder';
 
 const state = vi.hoisted(() => ({
   workers: undefined as Agent[] | undefined,
@@ -127,6 +128,11 @@ function layout(el: HTMLElement, width = 200, height = 150): void {
 
 function cellOf(name: string): HTMLElement {
   return screen.getByText(name).closest('article') as HTMLElement;
+}
+
+/** The worker name in each rendered cell, in document order. */
+function cellNames(): string[] {
+  return screen.getAllByRole('article').map((el) => el.querySelector('header .text-ui')?.textContent ?? '');
 }
 
 function evt(seq: number, text: string, runId = 'run_1'): RunEvent {
@@ -560,4 +566,141 @@ describe('Live page keeps the last turn (VS-332)', () => {
     ]);
   });
 });
+
+describe('Live page running-first order (VS-337)', () => {
+  function runningAndWaiting(): void {
+    state.workers = [
+      agent({ id: 'a1', name: 'Runner', ticketId: 'tk_1', status: 'running', createdAt: '2026-09-01T00:00:00.000Z' }),
+      agent({ id: 'a2', name: 'Waiting', ticketId: 'tk_2', status: 'active', createdAt: '2026-09-02T00:00:00.000Z' }),
+    ];
+    state.tickets = [ticket({ id: 'tk_1', identifier: 'ACME-1' }), ticket({ id: 'tk_2', identifier: 'ACME-2' })];
+    state.running = [makeRun({ id: 'run_1', agentId: 'a1', status: 'running' })];
+    state.recent = [makeRun({ id: 'run_1', agentId: 'a1', status: 'running' })];
+  }
+
+  it('renders running cells before waiting cells, newest first within each group', () => {
+    state.workers = [
+      agent({ id: 'r-old', name: 'Running Old', ticketId: 'tk_1', status: 'running', createdAt: '2026-09-01T00:00:00.000Z' }),
+      agent({ id: 'w-new', name: 'Waiting New', ticketId: 'tk_2', status: 'active', createdAt: '2026-09-04T00:00:00.000Z' }),
+      agent({ id: 'r-new', name: 'Running New', ticketId: 'tk_3', status: 'running', createdAt: '2026-09-03T00:00:00.000Z' }),
+      agent({ id: 'w-old', name: 'Waiting Old', ticketId: 'tk_4', status: 'active', createdAt: '2026-09-02T00:00:00.000Z' }),
+    ];
+    state.tickets = [
+      ticket({ id: 'tk_1', identifier: 'ACME-1' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-2' }),
+      ticket({ id: 'tk_3', identifier: 'ACME-3' }),
+      ticket({ id: 'tk_4', identifier: 'ACME-4' }),
+    ];
+    state.running = [
+      makeRun({ id: 'run_old', agentId: 'r-old', status: 'running' }),
+      makeRun({ id: 'run_new', agentId: 'r-new', status: 'running' }),
+    ];
+    render(<LiveRoute />);
+
+    // The waiting worker is newest overall, yet every running cell is above it.
+    expect(cellNames()).toEqual(['Running New', 'Running Old', 'Waiting New', 'Waiting Old']);
+  });
+
+  it('keeps a finished cell in place for the grace window, then moves it down', () => {
+    vi.useFakeTimers();
+    try {
+      runningAndWaiting();
+      const { rerender } = render(<LiveRoute />);
+      expect(cellNames()).toEqual(['Runner', 'Waiting']);
+
+      state.running = [];
+      state.recent = [makeRun({ id: 'run_1', agentId: 'a1', status: 'succeeded', finishedAt: '2026-09-01T09:05:00.000Z' })];
+      rerender(<LiveRoute />);
+      expect(cellNames()).toEqual(['Runner', 'Waiting']);
+
+      act(() => vi.advanceTimersByTime(LIVE_RUN_GRACE_MS - 1));
+      expect(cellNames()).toEqual(['Runner', 'Waiting']);
+
+      act(() => vi.advanceTimersByTime(1));
+      expect(cellNames()).toEqual(['Waiting', 'Runner']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a cell in place when a new run starts inside the grace window', () => {
+    vi.useFakeTimers();
+    try {
+      runningAndWaiting();
+      const { rerender } = render(<LiveRoute />);
+
+      state.running = [];
+      state.recent = [makeRun({ id: 'run_1', agentId: 'a1', status: 'succeeded' })];
+      rerender(<LiveRoute />);
+      act(() => vi.advanceTimersByTime(LIVE_RUN_GRACE_MS / 2));
+
+      state.running = [makeRun({ id: 'run_2', agentId: 'a1', status: 'running' })];
+      state.recent = [makeRun({ id: 'run_2', agentId: 'a1', status: 'running' })];
+      rerender(<LiveRoute />);
+
+      act(() => vi.advanceTimersByTime(LIVE_RUN_GRACE_MS));
+      expect(cellNames()).toEqual(['Runner', 'Waiting']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves the run-tail slots on the canonical order, unaffected by the reorder', () => {
+    state.workers = [
+      agent({ id: 'a1', name: 'Running Old', ticketId: 'tk_1', status: 'running', createdAt: '2026-09-01T00:00:00.000Z' }),
+      agent({ id: 'a2', name: 'Running New', ticketId: 'tk_2', status: 'running', createdAt: '2026-09-02T00:00:00.000Z' }),
+      agent({ id: 'a3', name: 'Waiting New', ticketId: 'tk_3', status: 'active', createdAt: '2026-09-03T00:00:00.000Z' }),
+    ];
+    state.tickets = [
+      ticket({ id: 'tk_1', identifier: 'ACME-1' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-2' }),
+      ticket({ id: 'tk_3', identifier: 'ACME-3' }),
+    ];
+    state.running = [
+      makeRun({ id: 'run_1', agentId: 'a1', status: 'running' }),
+      makeRun({ id: 'run_2', agentId: 'a2', status: 'running' }),
+    ];
+    render(<LiveRoute />);
+
+    // a3 is newest overall, so the two slots go to the active a2 and a1 — not to a3.
+    expect(live().map((s) => s.url)).toEqual([
+      '/api/w/ws1/runs/run_2/events/stream',
+      '/api/w/ws1/runs/run_1/events/stream',
+    ]);
+    expect(cellNames()).toEqual(['Running New', 'Running Old', 'Waiting New']);
+  });
+
+  it('does not drop or reopen a running cell’s stream when the order changes', () => {
+    state.workers = [agent({ id: 'a1', name: 'Runner', ticketId: 'tk_1', status: 'running', createdAt: '2026-09-01T00:00:00.000Z' })];
+    state.tickets = [ticket({ id: 'tk_1', identifier: 'ACME-1' })];
+    state.running = [makeRun({ id: 'run_1', agentId: 'a1', status: 'running' })];
+    const { rerender } = render(<LiveRoute />);
+    const stream = live()[0]!;
+
+    // A newer waiting worker arrives; running-first keeps the runner on top rather than below it.
+    runningAndWaiting();
+    rerender(<LiveRoute />);
+
+    expect(cellNames()).toEqual(['Runner', 'Waiting']);
+    expect(live()).toEqual([stream]);
+    expect(stream.closed).toBe(false);
+  });
+
+  it('keeps a moved cell’s saved size', () => {
+    stubSm();
+    sessionStorage.setItem('conductor.live.cellSizes.ws1', JSON.stringify({ a1: { cols: 6, rows: 3 } }));
+    state.workers = [
+      agent({ id: 'a1', name: 'Waiting Sized', ticketId: 'tk_1', status: 'active', createdAt: '2026-09-02T00:00:00.000Z' }),
+      agent({ id: 'a2', name: 'Running', ticketId: 'tk_2', status: 'running', createdAt: '2026-09-01T00:00:00.000Z' }),
+    ];
+    state.tickets = [ticket({ id: 'tk_1', identifier: 'ACME-1' }), ticket({ id: 'tk_2', identifier: 'ACME-2' })];
+    state.running = [makeRun({ id: 'run_1', agentId: 'a2', status: 'running' })];
+    render(<LiveRoute />);
+
+    // a1 is newest in the canonical order, so it starts on top and the reorder moves it below a2.
+    expect(cellNames()).toEqual(['Running', 'Waiting Sized']);
+    expect(colSpan(cellOf('Waiting Sized'))).toBe(6);
+  });
+});
+
 

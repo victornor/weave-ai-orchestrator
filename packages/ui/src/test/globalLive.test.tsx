@@ -3,6 +3,7 @@ import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Run, RunEvent, Ticket, WorkerModelOption } from '@weave-ai/shared';
 import { agent, run as makeRun, ticket } from './factories';
+import { LIVE_RUN_GRACE_MS } from '../lib/liveOrder';
 
 const state = vi.hoisted(() => ({
   workspaces: [] as Array<{ id: string; name: string }>,
@@ -77,6 +78,11 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 const opt = (id: string): WorkerModelOption => ({ id, description: `${id} tier`, runtime: 'claude', model: null });
+
+/** The worker name in each rendered cell, in document order. */
+function cellNames(): string[] {
+  return screen.getAllByRole('article').map((el) => el.querySelector('header .text-ui')?.textContent ?? '');
+}
 
 describe('GlobalLiveRoute', () => {
   it('shows cells from two workspaces and names them', () => {
@@ -195,5 +201,58 @@ describe('GlobalLiveRoute', () => {
 
     live()[0]!.emit(evt(1, 'New turn.', 'run_2'));
     expect(screen.getByText('New turn.')).toBeInTheDocument();
+  });
+
+  it('orders running cells before waiting ones across the page, not per workspace (VS-337)', () => {
+    state.workers = {
+      alpha: [
+        agent({ id: 'w1', name: 'Alpha Waiting', status: 'active', ticketId: 't1', createdAt: '2026-09-04T00:00:00.000Z' }),
+        agent({ id: 'w2', name: 'Alpha Running', status: 'running', ticketId: 't2', createdAt: '2026-09-03T00:00:00.000Z' }),
+      ],
+      beta: [
+        agent({ id: 'w3', name: 'Beta Waiting', status: 'active', ticketId: 't3', createdAt: '2026-09-03T00:00:00.000Z' }),
+        agent({ id: 'w4', name: 'Beta Running', status: 'running', ticketId: 't4', createdAt: '2026-09-02T00:00:00.000Z' }),
+      ],
+    };
+    state.tickets = {
+      alpha: [ticket({ id: 't1', identifier: 'ALP-1' }), ticket({ id: 't2', identifier: 'ALP-2' })],
+      beta: [ticket({ id: 't3', identifier: 'BET-1' }), ticket({ id: 't4', identifier: 'BET-2' })],
+    };
+    state.running = {
+      alpha: [makeRun({ id: 'run_2', agentId: 'w2', status: 'running' })],
+      beta: [makeRun({ id: 'run_4', agentId: 'w4', status: 'running' })],
+    };
+    render(<GlobalLiveRoute />);
+
+    // A per-workspace restart would read Alpha Running, Alpha Waiting, Beta Running, Beta Waiting.
+    expect(cellNames()).toEqual(['Alpha Running', 'Beta Running', 'Alpha Waiting', 'Beta Waiting']);
+  });
+
+  it('keeps a just-finished cell in the running group until the grace window elapses (VS-337)', () => {
+    vi.useFakeTimers();
+    try {
+      state.workers = {
+        alpha: [
+          agent({ id: 'a1', name: 'Finish Soon', status: 'running', ticketId: 't1', createdAt: '2026-09-01T00:00:00.000Z' }),
+          agent({ id: 'a2', name: 'Waiting', status: 'active', ticketId: 't2', createdAt: '2026-09-02T00:00:00.000Z' }),
+        ],
+        beta: [],
+      };
+      state.tickets = { alpha: [ticket({ id: 't1', identifier: 'ALP-1' }), ticket({ id: 't2', identifier: 'ALP-2' })] };
+      state.running = { alpha: [makeRun({ id: 'run_1', agentId: 'a1', status: 'running' })] };
+      state.recent = { alpha: [makeRun({ id: 'run_1', agentId: 'a1', status: 'running' })] };
+      const { rerender } = render(<GlobalLiveRoute />);
+      expect(cellNames()).toEqual(['Finish Soon', 'Waiting']);
+
+      state.running = { alpha: [] };
+      state.recent = { alpha: [makeRun({ id: 'run_1', agentId: 'a1', status: 'succeeded' })] };
+      rerender(<GlobalLiveRoute />);
+      expect(cellNames()).toEqual(['Finish Soon', 'Waiting']);
+
+      act(() => vi.advanceTimersByTime(LIVE_RUN_GRACE_MS));
+      expect(cellNames()).toEqual(['Waiting', 'Finish Soon']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Live pages put workers that are running a turn first, and workers waiting
+  for their next turn after them

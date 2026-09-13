@@ -22,6 +22,7 @@ import { useRunEventStream } from '../api/runStream';
 import { useHookWs, useWs } from '../api/context';
 import { A } from '../app/link';
 import { liveWorkingAgents } from '../lib/board';
+import { orderByRunning, useRunningWorkerIds } from '../lib/liveOrder';
 import { liveRunTailSlots } from '../lib/liveStreams';
 import {
   type CellSize,
@@ -90,7 +91,21 @@ export function LiveRoute(): React.ReactElement {
     return map;
   }, [recent.data]);
 
+  // VS-337: running cells first, with a grace window so a turn handoff does not move the cell.
+  const activeIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const w of live) {
+      const r = runByAgent.get(w.id);
+      if (r && isActiveRun(r.status)) ids.add(w.id);
+    }
+    return ids;
+  }, [live, runByAgent]);
+  const runningIds = useRunningWorkerIds(activeIds);
+  const orderedLive = useMemo(() => orderByRunning(live, (w) => w, runningIds), [live, runningIds]);
+
   const liveIds = useMemo(() => live.map((w) => w.id), [live]);
+  // VS-337: the tail slots read the canonical `liveWorkingAgents` order, before the running-first
+  // reorder, so which cells hold a stream does not depend on where a cell sits.
   const tailSlots = useMemo(() => {
     const streaming = live
       .filter((w) => {
@@ -123,7 +138,7 @@ export function LiveRoute(): React.ReactElement {
           <EmptyState title="Nobody is working." detail="Live workers on a ticket show up here. Paused and idle ones stay on Roles and the board." />
         ) : (
           <div className="grid grid-flow-dense gap-3 sm:grid-cols-8 xl:grid-cols-12">
-            {live.map((w) => (
+            {orderedLive.map((w) => (
               <LiveCell
                 key={w.id}
                 agent={w}

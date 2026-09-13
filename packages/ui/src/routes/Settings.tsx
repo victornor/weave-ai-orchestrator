@@ -911,6 +911,18 @@ function ActiveProjectRow({
             toValue={(raw) => raw === 'on'}
             onSelect={setPolicy}
           />
+          <label className="flex items-center justify-between gap-2">
+            <span className="ac-label">commit knowledge to repo</span>
+            <select
+              aria-label={`commit knowledge to repo for ${p.slug}`}
+              className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+              value={p.knowledgeRepoEnabled ? 'on' : 'off'}
+              onChange={(e) => patch.mutate({ id: p.id, patch: { knowledgeRepo: { enabled: e.target.value === 'on' } } })}
+            >
+              <option value="off">off</option>
+              <option value="on">on</option>
+            </select>
+          </label>
           <Field label="Merge concurrency" hint="How many of this project's tickets may be in the active merge step at once.">
             <div className="flex items-center gap-2">
               <input
@@ -967,6 +979,7 @@ export function ProjectsSection(): React.ReactElement {
   const [maxWorkersText, setMaxWorkersText] = useState('2');
   const [setupCommand, setSetupCommand] = useState('');
   const [autoMergeDefault, setAutoMergeDefault] = useState(false);
+  const [knowledgeRepoEnabled, setKnowledgeRepoEnabled] = useState(false);
   const config = useWorkspaceSummary().data?.config ?? {};
   const workspaceOn = workspaceYolo(config);
   const workspaceDefaults = workspacePolicyDefaults(config);
@@ -1013,12 +1026,21 @@ export function ProjectsSection(): React.ReactElement {
         <Field label="Setup command" hint="Run once per worktree before the first turn.">
           <input className={cx(inputCx, 'ac-mono')} placeholder="pnpm install" value={setupCommand} onChange={(e) => setSetupCommand(e.target.value)} />
         </Field>
+        <label className="mt-1 flex items-center gap-2 text-micro text-text-2">
+          <input
+            type="checkbox"
+            aria-label="Commit knowledge to repo"
+            checked={knowledgeRepoEnabled}
+            onChange={(e) => setKnowledgeRepoEnabled(e.target.checked)}
+          />
+          Commit this project&apos;s knowledge to its own repo, at <code className="ac-mono">.weave/knowledge/</code>.
+        </label>
         <Button
           variant="primary"
           disabled={!url || !maxWorkersValid || add.isPending}
           onClick={() =>
             add.mutate(
-              { url, maxWorkers, ...(setupCommand ? { setupCommand } : {}), policies: { autoMergeDefault } },
+              { url, maxWorkers, ...(setupCommand ? { setupCommand } : {}), policies: { autoMergeDefault }, knowledgeRepo: { enabled: knowledgeRepoEnabled } },
               {
                 onSuccess: () => {
                   toast.push({ title: 'Cloning…', detail: url, status: 'working' });

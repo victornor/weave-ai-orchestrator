@@ -69,7 +69,7 @@ describe('mergeDone lands an open PR itself (VS-327)', () => {
       get: () => ({
         id: h.projectId, workspaceId: h.workspaceId, slug: 'api', name: 'API', gitUrl: 'git@example.com:acme/api.git',
         defaultBranch: 'main', landingBranch: null, clonePath: clone, maxWorkers: 4, setupCommand: null,
-        worktreeProvider: 'git', openspecEnabled: true, openspecVersion: null, policies: { deliveryMode: 'pr' },
+        worktreeProvider: 'git', openspecEnabled: true, openspecVersion: null, knowledgeRepoEnabled: false, policies: { deliveryMode: 'pr' },
         status: 'ready', syncState: 'in_sync', lastFetchedAt: null, errorText: null,
       } satisfies Project),
     } as never;

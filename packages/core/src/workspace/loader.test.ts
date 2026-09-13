@@ -155,7 +155,7 @@ describe('workspace loader', () => {
     const ctx = await load();
     await ctx.saveConfig({
       ...ctx.config,
-      projects: [{ id: 'api', url: 'git@github.com:acme/api.git', defaultBranch: 'main', maxWorkers: 4, warmPaths: [], setupCommand: 'pnpm install', openspec: { enabled: true }, policies: {} }],
+      projects: [{ id: 'api', url: 'git@github.com:acme/api.git', defaultBranch: 'main', maxWorkers: 4, warmPaths: [], setupCommand: 'pnpm install', openspec: { enabled: true }, knowledgeRepo: { enabled: false }, policies: {} }],
     });
     const toml = readFileSync(workspacePaths(root).wtConfig, 'utf8');
     expect(toml).toContain('[projects."github.com/acme/api"]');

@@ -33,6 +33,10 @@ function mkTicket(over: Record<string, unknown> = {}): { id: string } {
 
 beforeEach(() => {
   h = makeHarness();
+  // These writes use placeholder actors with no backing `runs` row, so `write()`'s provenance lookup
+  // always resolves no ticket; a real project lookup (opted out by default) short-circuits VS-358's
+  // out-of-ticket pull-request path instead of throwing on the harness's unset `projects` service.
+  h.services.projects = { get: () => ({ knowledgeRepoEnabled: false, slug: h.projectSlug }) } as never;
   knowledge = createKnowledgeService(h.ctx, h.deps);
   h.services.knowledge = knowledge;
   usage = createKnowledgeUsageService(h.ctx, h.deps);

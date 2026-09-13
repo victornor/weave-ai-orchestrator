@@ -153,7 +153,8 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       maxWorkers: project.maxWorkers,
       ...(project.setupCommand ? { setupCommand: project.setupCommand } : {}),
       ...(project.landingBranch ? { landingBranch: project.landingBranch } : {}),
-      worktrees: project.worktreeProvider, openspec: { enabled: Boolean(project.openspecEnabled) }, policies: project.policies,
+      worktrees: project.worktreeProvider, openspec: { enabled: Boolean(project.openspecEnabled) },
+      knowledgeRepo: { enabled: Boolean(project.knowledgeRepoEnabled) }, policies: project.policies,
     });
     return { ...base, url: githubSshRemote(base.url) };
   }
@@ -172,7 +173,8 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       id, workspaceId: ctx.workspaceId, slug: cfg.id, name: cfg.name ?? cfg.id, gitUrl: cfg.url, defaultBranch: cfg.defaultBranch,
       landingBranch: cfg.landingBranch ?? null,
       clonePath: join(ctx.paths.projects, cfg.id), maxWorkers: cfg.maxWorkers, setupCommand: cfg.setupCommand ?? null, warmPathsJson: cfg.warmPaths,
-      worktreeProvider: cfg.worktrees ?? ctx.config.defaults.worktrees, openspecEnabled: cfg.openspec.enabled, policiesJson: toLegacyPolicies(cfg.policies),
+      worktreeProvider: cfg.worktrees ?? ctx.config.defaults.worktrees, openspecEnabled: cfg.openspec.enabled,
+      knowledgeRepoEnabled: cfg.knowledgeRepo.enabled, policiesJson: toLegacyPolicies(cfg.policies),
       status: 'cloning', createdAt: now, updatedAt: now,
     });
     const job = deps().jobs.start('project_add', { type: 'project', id }, actor);
@@ -333,6 +335,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
         name: nextName, defaultBranch: merged.defaultBranch, landingBranch: merged.landingBranch ?? null, maxWorkers: merged.maxWorkers,
         setupCommand: merged.setupCommand ?? null, warmPathsJson: merged.warmPaths, worktreeProvider: merged.worktrees ?? project.worktreeProvider,
         openspecEnabled: merged.openspec.enabled,
+        knowledgeRepoEnabled: merged.knowledgeRepo.enabled,
         policiesJson: toLegacyPolicies(merged.policies), updatedAt: nowIso(),
       });
       await upsertConfigBlock(nextName === '' ? { ...merged, name: undefined } : merged);

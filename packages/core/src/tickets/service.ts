@@ -15,6 +15,7 @@ import { attemptArchiveThenMerge } from './archive-before-merge.js';
 import { createMergeQueue } from './merge-queue.js';
 import { landLock } from '../util/land-lock.js';
 import { git } from '../util/git.js';
+import { reconcileProjectKnowledgeFromRepo } from '../knowledge/repoSync.js';
 import { effectiveModels } from '../models/resolve.js';
 import { existsSync } from 'node:fs';
 import { flattenWakes } from '../prompts/index.js';
@@ -1250,6 +1251,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           // separate ones either side of the merge, or a ticket landing on the same project
           // concurrently could archive against a base this ticket's own merge has since moved past.
           landInfo = await serialize(project.id, async () => {
+            // VS-358: read inside the lock, immediately before landing — not before `serialize(...)`
+            // is even called, or a ticket that queued behind another landing for this project would
+            // scope its reconciliation diff to more than its own landing actually changed.
+            const beforeSha = (await git(['rev-parse', 'HEAD'], p.clonePath, 15_000)).stdout.trim() || null;
             let mergeCommit: string | undefined;
             if (mode === 'pr') {
               const pr = db.get<{ url: string | null }>("SELECT url FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' ORDER BY created_at DESC LIMIT 1", [t.id]);
@@ -1317,7 +1322,18 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
             // 1. Use the forge's merge commit for this PR (caller SHA is a cross-check; omitting it is fine).
             // 2. When the forge is unreachable, do not forward the worker's SHA: ancestry of any
             //    commit already on the landing branch would close a ticket that never merged.
-            return landDelivery(ctx.config, p, t, branch, mergeCommit ? { mergeCommit } : undefined);
+            const result = await landDelivery(ctx.config, p, t, branch, mergeCommit ? { mergeCommit } : undefined);
+            if (p.knowledgeRepoEnabled && beforeSha) {
+              try {
+                const afterSha = (await git(['rev-parse', 'HEAD'], p.clonePath, 15_000)).stdout.trim();
+                if (afterSha && afterSha !== beforeSha) await reconcileProjectKnowledgeFromRepo(ctx, deps, p, beforeSha, afterSha, t.id);
+              } catch (e) {
+                // A reconciliation failure never blocks the landing that already succeeded — the
+                // workspace copy simply stays as it was until the next opportunity to reconcile it.
+                log.warn({ err: e, projectId: p.id, ticketId: t.id }, 'knowledge repo sync after merge failed');
+              }
+            }
+            return result;
           });
           recordActivity(db, ws, actor, 'ticket.delivery_landed', 'ticket', t.id, { ...landInfo }, t.id);
         } else log.warn({ ticketId: t.id }, 'mergeDone: no project clone available; skipping delivery landing');

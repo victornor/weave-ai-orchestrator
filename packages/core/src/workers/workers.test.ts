@@ -744,6 +744,14 @@ describe('workers', () => {
     expect(existsSync(join(curator.homePath, 'AGENTS.md'))).toBe(true);
   });
 
+  it('spawns a curator with a real worktree and branch for an opted-in project (VS-358)', async () => {
+    h.db.run('UPDATE projects SET knowledge_repo_enabled = 1 WHERE id = ?', [h.projectId]);
+    const curator = await workers.spawnCurator(SYSTEM, h.projectId);
+    expect(curator.worktreePath).not.toBeNull();
+    expect(curator.branch).not.toBeNull();
+    expect(curator.spawnReason).toBe('knowledge curation');
+  });
+
   it('ensureConductor is idempotent and renders the weaver home', async () => {
     const a = await workers.ensureConductor();
     const b = await workers.ensureConductor();

@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId } from '@weave-ai/db';
@@ -27,6 +28,10 @@ describe('knowledge', () => {
     };
     h.services.wake = wake as never;
     h.services.workers = workers as never;
+    // Every note/putDoc/replace call here uses a placeholder actor with no backing `runs` row, so
+    // `write()`'s provenance lookup always resolves no ticket — reads the real opt-in flag off the
+    // row so a test that flips it (VS-358) is still honoured, short-circuiting before any git work.
+    h.services.projects = { get: () => ({ knowledgeRepoEnabled: Boolean(h.db.get<{ v: number }>('SELECT knowledge_repo_enabled AS v FROM projects WHERE id = ?', [h.projectId])!.v), slug: h.projectSlug }) } as never;
     knowledge = createKnowledgeService(h.ctx, h.deps);
     h.services.knowledge = knowledge;
   });
@@ -113,6 +118,23 @@ describe('knowledge', () => {
   it('rejects entries over 60 words', () => {
     const long = Array.from({ length: 61 }, (_, i) => `word${i}`).join(' ');
     expect(() => knowledge.note(WORKER, 'project', 'Learnings', long, h.projectId)).toThrowError(expect.objectContaining({ code: 'entry_too_long' }));
+  });
+
+  it('rejects secret-shaped notes and records nothing (VS-358)', () => {
+    const before = knowledge.get('project', h.projectId).revision;
+    expect(() => knowledge.note(WORKER, 'project', 'Landmines', 'The deploy key is ghp-abcdefghijklmnopqrstuvwx, never commit it.', h.projectId))
+      .toThrowError(expect.objectContaining({ code: 'validation' }));
+    expect(() => knowledge.note(WORKER, 'project', 'Landmines', 'DB creds: https://user:pass@host/db, rotate them.', h.projectId))
+      .toThrowError(expect.objectContaining({ code: 'validation' }));
+    expect(() => knowledge.note(WORKER, 'project', 'Landmines', '-----BEGIN RSA PRIVATE KEY----- do not paste this here.', h.projectId))
+      .toThrowError(expect.objectContaining({ code: 'validation' }));
+    expect(knowledge.get('project', h.projectId).revision).toBe(before);
+    // An ordinary note is unaffected.
+    expect(knowledge.note(WORKER, 'project', 'Landmines', 'Rotate the deploy key every quarter.', h.projectId).revision).toBeGreaterThan(before);
+    // The check applies to every project, opted in to a knowledge repo or not.
+    h.db.run('UPDATE projects SET knowledge_repo_enabled = 1 WHERE id = ?', [h.projectId]);
+    expect(() => knowledge.note(WORKER, 'project', 'Landmines', 'Deploy key: ghp-abcdefghijklmnopqrstuvwx', h.projectId))
+      .toThrowError(expect.objectContaining({ code: 'validation' }));
   });
 
   it('rejects near-duplicate entries', () => {
@@ -683,5 +705,63 @@ describe('knowledge', () => {
     const [entry] = knowledge.listArchive('project', h.projectId);
     expect(() => knowledge.getArchive('shared', null, entry!.path)).toThrow(/no archive file/);
     expect(() => knowledge.getArchive('project', h.projectId, `${entry!.path}/../../../etc/passwd`)).toThrow(/no archive file/);
+  });
+
+  describe('worktree mirror (VS-358)', () => {
+    const tmps: string[] = [];
+    afterEach(() => { while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
+    const worktree = (): string => { const d = mkdtempSync(join(tmpdir(), 'ac-mirror-')); tmps.push(d); return d; };
+    const mirrorPath = (dir: string, ...rest: string[]): string => join(dir, '.weave', 'knowledge', ...rest);
+
+    it('mirrors a hub note into the worktree, and omitting mirror mirrors nothing', () => {
+      const dir = worktree();
+      knowledge.note(WORKER, 'project', 'Landmines', 'The retry loop never backs off.', h.projectId, undefined, { worktreePath: dir, projectSlug: 'api' });
+      expect(existsSync(mirrorPath(dir, 'PROJECT.md'))).toBe(true);
+      expect(readFileSync(mirrorPath(dir, 'PROJECT.md'), 'utf8')).toContain('The retry loop never backs off.');
+
+      const dir2 = worktree();
+      knowledge.note(WORKER, 'project', 'Landmines', 'A second, unmirrored note.', h.projectId);
+      expect(existsSync(mirrorPath(dir2, 'PROJECT.md'))).toBe(false);
+    });
+
+    it("a mirrored note never carries another ticket's unmerged note on the same hub", () => {
+      const dirA = worktree();
+      const dirB = worktree();
+      knowledge.note(WORKER, 'project', 'Landmines', "Ticket A's own note.", h.projectId, undefined, { worktreePath: dirA, projectSlug: 'api' });
+      knowledge.note(WORKER, 'project', 'Landmines', "Ticket B's own note.", h.projectId, undefined, { worktreePath: dirB, projectSlug: 'api' });
+
+      const mirroredA = readFileSync(mirrorPath(dirA, 'PROJECT.md'), 'utf8');
+      const mirroredB = readFileSync(mirrorPath(dirB, 'PROJECT.md'), 'utf8');
+      expect(mirroredA).toContain("Ticket A's own note.");
+      expect(mirroredA).not.toContain("Ticket B's own note.");
+      expect(mirroredB).toContain("Ticket B's own note.");
+      expect(mirroredB).not.toContain("Ticket A's own note.");
+      // The workspace's own copy has both — the mirror restriction is worktree-local only.
+      const workspaceBody = knowledge.get('project', h.projectId).body;
+      expect(workspaceBody).toContain("Ticket A's own note.");
+      expect(workspaceBody).toContain("Ticket B's own note.");
+    });
+
+    it('mirrors a document put and a curation replace verbatim', () => {
+      const dir = worktree();
+      knowledge.putDoc(WORKER, 'project', 'run-engine', '# Run engine\n\nOne turn end to end.\n', h.projectId, undefined, undefined, { worktreePath: dir, projectSlug: 'api' });
+      expect(readFileSync(mirrorPath(dir, 'docs/run-engine.md'), 'utf8')).toBe('# Run engine\n\nOne turn end to end.\n');
+
+      const dir2 = worktree();
+      const rewritten = knowledge.get('project', h.projectId).body.replace('Node 26', 'Node 27');
+      knowledge.replace(WORKER, 'project', rewritten, 'curation', h.projectId, undefined, { worktreePath: dir2, projectSlug: 'api' });
+      expect(readFileSync(mirrorPath(dir2, 'PROJECT.md'), 'utf8')).toBe(rewritten.endsWith('\n') ? rewritten : `${rewritten}\n`);
+    });
+
+    it('a read mid-ticket sees the workspace copy regardless of the mirror', () => {
+      const dir = worktree();
+      const before = knowledge.get('project', h.projectId).body;
+      knowledge.note(WORKER, 'project', 'Landmines', 'Mirrored while the workspace read stays the same shape.', h.projectId, undefined, { worktreePath: dir, projectSlug: 'api' });
+      const after = knowledge.get('project', h.projectId).body;
+      expect(after).not.toBe(before);
+      expect(after).toContain('Mirrored while the workspace read stays the same shape.');
+      // Reading again is identical regardless of the mirror having been written.
+      expect(knowledge.get('project', h.projectId).body).toBe(after);
+    });
   });
 });

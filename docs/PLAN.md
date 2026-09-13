@@ -256,6 +256,11 @@ A workspace is a directory. `weave init <dir> --prefix ACME` scaffolds it.
     work/                     # the ticket worktree (worktree provider places it here)
     notes.md                  # worker scratch, not injected anywhere, archived with the worker
   projects/<projectId>/       # primary git clone (reference only; the daemon fast-forwards it, nobody works here)
+    .weave/knowledge/         # VS-358, opt-in per project (knowledgeRepo.enabled, §13): a mirror of this
+                               #   project's knowledge/projects/<projectId>/** above, committed into the
+                               #   project's own repo instead of the daemon's. Not the same directory as the
+                               #   workspace's own .weave/ above — one is the daemon's runtime state on the
+                               #   host, this one lives inside a project's repo and is versioned with its code.
   archive/workers/<workerId>/ # retired workers' brief, notes, final report (logs stay under .weave/runs)
   tickets/                    # optional rendered markdown mirror of tickets (generated, read-only)
 ```
@@ -299,6 +304,7 @@ projects:
     setupCommand: pnpm install   # run once per new worktree (worktrunk post-create hook)
     worktrees: worktrunk      # worktrunk | git  (worktree provider, §11.5)
     openspec: { enabled: true }
+    knowledgeRepo: { enabled: false }  # VS-358: commit this project's knowledge into .weave/knowledge/ in its own repo
     policies: { proposalApproval: conductor }
 conductor:                    # its runtime and model are `models.conductor`, above
   channels: [web, cli, telegram]

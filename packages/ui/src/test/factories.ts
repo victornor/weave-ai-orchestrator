@@ -65,6 +65,7 @@ export function project(over: Partial<Project> = {}): Project {
     worktreeProvider: 'git',
     openspecEnabled: true,
     openspecVersion: null,
+    knowledgeRepoEnabled: false,
     policies: {},
     status: 'ready',
     syncState: 'in_sync',

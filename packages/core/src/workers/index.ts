@@ -265,7 +265,10 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         description: 'Curate this project\'s knowledge base: merge duplicates, fold learnings that became conventions, archive stale entries, keep every section within budget. Never invent facts. Submit with `weave_knowledge_replace`.',
         priority: 'low', assigneeRoleId: role.id, originKind: 'curation', originFingerprint: `curation:${projectId}`,
       });
-      return spawn(actor, ticket.id, { noWorktree: true, spawnReason: 'knowledge curation' });
+      // VS-358: an opted-in project's curation delivers through the project's normal review, which
+      // needs a worktree and branch to commit onto; an opted-out project keeps today's read-only,
+      // worktree-less spawn.
+      return spawn(actor, ticket.id, { noWorktree: !project.knowledgeRepoEnabled, spawnReason: 'knowledge curation' });
     },
 
     /**

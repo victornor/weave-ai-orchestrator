@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { DEFAULT_KNOWLEDGE_BUDGETS, estimateTokens, OcError, type KnowledgeBudgets, type KnowledgeScope } from '@weave-ai/shared';
 
 /**
@@ -38,6 +40,9 @@ export const DECISION_SECTIONS = ['Decisions'] as const;
 
 export const EXPIRY_RE = /<!--\s*exp:(\d{4}-\d{2}-\d{2})\s*-->/;
 
+/** A provider-key-shaped token, a PEM private key block, or a credentialed URL (VS-358: shared by `note()` and `putDoc`). */
+export const SECRET_SHAPED_RE = /(?:sk|ghp|xox[bp])-[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\s/]+:[^\s@/]+@/i;
+
 export function sha256(s: string): string {
   return createHash('sha256').update(s, 'utf8').digest('hex');
 }
@@ -55,6 +60,33 @@ export function relPathFor(scope: KnowledgeScope, projectSlug?: string | null): 
       if (!projectSlug) throw new OcError('validation', 'the project knowledge scope needs a project');
       return `projects/${projectSlug}/PROJECT.md`;
   }
+}
+
+/**
+ * VS-358: the single enforcement point for the repo-write boundary. Maps a knowledge-store-relative
+ * path (as `relPathFor`/`docPathFor` produce it) to its path under a project repo's `.weave/knowledge/`
+ * — but only when `rel` actually belongs to that project's own `project` scope. Anything else
+ * (a workspace-scope file, the shared file, the decisions log, or another project's path) throws
+ * rather than producing a path, so a caller can never be tricked into writing outside its own project's
+ * `knowledge/projects/<projectSlug>/**` into a repo.
+ */
+export function repoKnowledgePath(rel: string, projectSlug: string): string {
+  const prefix = `projects/${projectSlug}/`;
+  if (!rel.startsWith(prefix)) {
+    throw new OcError('internal', `knowledge path ${rel} is not under ${prefix}; refusing to write it into a repo`, { rel, projectSlug });
+  }
+  return rel.slice(prefix.length);
+}
+
+/**
+ * VS-358: a worktree's own current copy of a mirrored knowledge file, under `.weave/knowledge/`. A
+ * worker's mirror write is computed against this — never against the shared workspace body, which may
+ * already carry another ticket's or the weaver's unmerged edit — so `seed` (the workspace's own seed
+ * body, or `''` for a document) only applies the first time a project's knowledge reaches this worktree.
+ */
+export function readMirrorFile(worktreePath: string, repoRelPath: string, seed: string): string {
+  const abs = join(worktreePath, '.weave', 'knowledge', repoRelPath);
+  return existsSync(abs) ? readFileSync(abs, 'utf8') : seed;
 }
 
 export interface Section { name: string; lines: string[] }
@@ -160,6 +192,38 @@ export function entriesOf(body: string): Entry[] {
     }
   }
   return out;
+}
+
+/**
+ * VS-358: a three-way merge of a hub/entry-shaped file at bullet granularity, for merge-time
+ * reconciliation (`knowledge-repo/merge-sync`). `base` is the file's content before this landing,
+ * `landed` is its content after, `workspace` is the daemon's current copy — which may already hold
+ * entries `landed` never saw (another ticket's still-unmerged note, a pending weaver PR). The result
+ * is `workspace` plus whatever `landed` genuinely added relative to `base`, minus whatever `landed`
+ * genuinely removed relative to `base` — an entry present only in `workspace` is always kept.
+ */
+export function mergeEntries(base: string, landed: string, workspace: string): string {
+  const baseEntries = entriesOf(base);
+  const landedEntries = entriesOf(landed);
+  const baseNorms = new Set(baseEntries.map((e) => e.normalized));
+  const landedNorms = new Set(landedEntries.map((e) => e.normalized));
+  const workspaceNorms = new Set(entriesOf(workspace).map((e) => e.normalized));
+  const removedNorms = new Set(baseEntries.filter((e) => !landedNorms.has(e.normalized)).map((e) => e.normalized));
+
+  const doc = parseDoc(workspace);
+  for (const s of doc.sections) {
+    s.lines = s.lines.filter((line) => {
+      if (!/^\s*[-*]\s+/.test(line)) return true;
+      const text = line.replace(/^\s*[-*]\s+/, '').replace(/^\d{4}-\d{2}-\d{2}\s*[·:-]\s*/, '');
+      return !removedNorms.has(normalize(text));
+    });
+  }
+  let next = renderDoc(doc);
+  for (const e of landedEntries) {
+    if (baseNorms.has(e.normalized) || workspaceNorms.has(e.normalized)) continue;
+    next = appendEntry(next, e.section, e.line.trimEnd());
+  }
+  return next;
 }
 
 export function normalize(text: string): string {

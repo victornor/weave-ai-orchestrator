@@ -19,7 +19,7 @@ import {
 import {
   flattenWakes, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX, ARTIFACT_KIT_CSS, ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks,
   resolveOutboundAttachments, type OutboundAttachmentInput,
-  type Actor, type CoreServices, type IncidentsService,
+  type Actor, type CoreServices, type IncidentsService, type KnowledgeMirror,
 } from '@weave-ai/core';
 import type { RunTokenClaims } from './runtoken.js';
 import type { WorkspaceRuntime } from './types.js';
@@ -94,6 +94,22 @@ function knowledgeScope(ctx: ToolCtx, scope: string, projectId?: string | null):
     return ctx.claims.projectId;
   }
   return null;
+}
+
+/**
+ * VS-358: the worktree to also mirror a project knowledge write into, or `undefined` when none
+ * applies — a weaver caller, a non-project scope, a worker with no worktree (including today's
+ * worktree-less curation spawn for an opted-out project), or a project that has not opted in.
+ * `resolvedScope`/`resolvedProjectId` are `knowledgeScope`'s own result, so a worker's project is
+ * already guaranteed to be its own by the time this is called.
+ */
+function mirrorTargetFor(ctx: ToolCtx, resolvedScope: string, resolvedProjectId: string | null): KnowledgeMirror | undefined {
+  if (ctx.claims.agentKind !== 'worker' || resolvedScope !== 'project' || !resolvedProjectId) return undefined;
+  const agent = svc(ctx).workers.get(ctx.claims.agentId);
+  if (!agent.worktreePath) return undefined;
+  const project = safe(() => svc(ctx).projects.get(resolvedProjectId));
+  if (!project?.knowledgeRepoEnabled) return undefined;
+  return { worktreePath: agent.worktreePath, projectSlug: project.slug };
 }
 
 /**
@@ -544,7 +560,10 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'weave_knowledge_note', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), section: z.string().min(1), text: z.string().min(1), projectId: z.string().optional(), doc: z.string().min(2).optional() }),
     description: 'Append one concise dated entry to a knowledge section. Max 60 words; near-duplicates and over-budget writes are rejected and schedule a curation run instead. Pass `doc` to append into that linked document\'s section instead of the hub — the document must already exist (weave_knowledge_doc_put creates one).',
-    handler: (ctx, i) => svc(ctx).knowledge.note(ctx.actor, i.scope, i.section, i.text, knowledgeScope(ctx, i.scope, i.projectId), i.doc),
+    handler: (ctx, i) => {
+      const projectId = knowledgeScope(ctx, i.scope, i.projectId);
+      return svc(ctx).knowledge.note(ctx.actor, i.scope, i.section, i.text, projectId, i.doc, mirrorTargetFor(ctx, i.scope, projectId));
+    },
   },
   {
     name: 'weave_knowledge_docs', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES).optional(), projectId: z.string().optional() }),
@@ -569,7 +588,8 @@ export const TOOLS: ToolDef[] = [
     description: 'Create or replace a linked knowledge document (kebab-case slug, `# Title` first line, within the workspace\'s configured document budget — 10000 tokens by default). Pass `folder` (one or more kebab-case segments, e.g. "research/competitors") to file a *new* document there instead of flat; it is ignored on an existing slug — the document is found and updated wherever it already lives. Link related documents with [[slug]]; the result lists unresolved links and whether the document is an orphan — link it from PROJECT.md or another document so it can be found. Workers write project documents; shared/workspace documents are the weaver\'s.',
     handler: (ctx, i) => {
       if (!isConductor(ctx) && i.scope !== 'project') throw new OcError('forbidden', 'workers write project documents only');
-      return svc(ctx).knowledge.putDoc(ctx.actor, i.scope, i.slug, i.body, knowledgeScope(ctx, i.scope, i.projectId), undefined, i.folder);
+      const projectId = knowledgeScope(ctx, i.scope, i.projectId);
+      return svc(ctx).knowledge.putDoc(ctx.actor, i.scope, i.slug, i.body, projectId, undefined, i.folder, mirrorTargetFor(ctx, i.scope, projectId));
     },
   },
   {
@@ -583,7 +603,10 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'weave_knowledge_replace', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), body: z.string(), projectId: z.string().optional() }),
     description: 'Rewrite a whole knowledge file. Only valid inside a curation run; otherwise use weave_knowledge_note.',
-    handler: (ctx, i) => svc(ctx).knowledge.replace(ctx.actor, i.scope, i.body, 'curation', knowledgeScope(ctx, i.scope, i.projectId)),
+    handler: (ctx, i) => {
+      const projectId = knowledgeScope(ctx, i.scope, i.projectId);
+      return svc(ctx).knowledge.replace(ctx.actor, i.scope, i.body, 'curation', projectId, undefined, mirrorTargetFor(ctx, i.scope, projectId));
+    },
   },
   {
     name: 'weave_openspec_status', scope: 'all', input: z.object({ ticketId: ticketId }),

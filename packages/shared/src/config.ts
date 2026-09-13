@@ -90,6 +90,8 @@ export const ProjectConfigSchema = z.object({
   warmPaths: z.array(z.string()).default([]),
   worktrees: z.enum(WORKTREE_PROVIDERS).optional(),
   openspec: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
+  /** VS-358: opt-in per project to also committing its knowledge into `.weave/knowledge/` in its own repo. Off unless a human turns it on. */
+  knowledgeRepo: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   policies: ProjectPoliciesSchema.default({}),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;

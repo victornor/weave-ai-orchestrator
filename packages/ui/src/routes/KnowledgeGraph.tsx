@@ -103,7 +103,10 @@ function useThemeColours(el: Element | null): { colours: React.RefObject<ThemeCo
       colours.current = readThemeColours(el);
       setTick((t) => t + 1);
     });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    // V2 puts `data-theme` on its `.v2-root` element, not `<html>` (VS-343); V1 has no such ancestor,
+    // so the nearest root (falling back to the document element) lets both versions repaint on their
+    // own switch.
+    observer.observe(el.closest('.v2-root') ?? document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => observer.disconnect();
   }, [el]);
   return { colours, tick };

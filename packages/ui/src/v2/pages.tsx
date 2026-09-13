@@ -5,6 +5,9 @@
  */
 import { useParams } from '@tanstack/react-router';
 import { V2Page } from './V2Page';
+import { KnowledgeHome } from './knowledge/KnowledgeHome';
+import { KnowledgeGraphPage } from './knowledge/KnowledgeGraphPage';
+import { KnowledgeExplorerPage } from './knowledge/KnowledgeExplorerPage';
 
 export function V2NeedsPage(): React.ReactElement {
   return <V2Page title="Needs you" />;
@@ -44,13 +47,25 @@ export function V2RolesPage(): React.ReactElement {
   return <V2Page title="Roles" />;
 }
 export function V2KnowledgePage(): React.ReactElement {
-  return <V2Page title="Knowledge" />;
+  return (
+    <V2Page title="Knowledge">
+      <KnowledgeHome />
+    </V2Page>
+  );
 }
 export function V2GraphPage(): React.ReactElement {
-  return <V2Page title="Knowledge graph" />;
+  return (
+    <V2Page title="Knowledge graph">
+      <KnowledgeGraphPage />
+    </V2Page>
+  );
 }
 export function V2ExplorerPage(): React.ReactElement {
-  return <V2Page title="Knowledge explorer" />;
+  return (
+    <V2Page title="Knowledge explorer">
+      <KnowledgeExplorerPage />
+    </V2Page>
+  );
 }
 export function V2UsagePage(): React.ReactElement {
   return <V2Page title="Usage" />;

@@ -7,7 +7,7 @@
  * Read-only throughout: nothing here edits, comments, approves or merges. That stays the decision
  * card's, and the pull request's description/checks panel above this, exactly as VS-97 left them.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DiffHunk, DiffLine } from '@weave-ai/render';
 import { highlightLine, languageForPath, useHighlighter } from '../../lib/highlight';
 import { usePullRequestDiffContext, usePullRequestDiffFile, usePullRequestDiffFiles } from '../../api/hooks';
@@ -113,6 +113,10 @@ function FileBody({
   const skip = manifest.binary || manifest.tooLarge;
   const diffFile = usePullRequestDiffFile(projectId, number, skip ? null : path);
   const hljs = useHighlighter();
+  const lang = languageForPath(path);
+  // Stable across re-renders, so a line whose text is unchanged keeps its `{ __html }` object (and
+  // its DOM) instead of having React rewrite it on every render and clear a selection (VS-323).
+  const highlight = useCallback<Highlighter>((text) => highlightLine(hljs, text, lang), [hljs, lang]);
 
   if (manifest.binary) return <p className="px-2.5 py-2 text-meta text-text-3">This file is binary.</p>;
   if (manifest.tooLarge) return <p className="px-2.5 py-2 text-meta text-text-3">This file's change is too large to render.</p>;
@@ -121,8 +125,6 @@ function FileBody({
   if (!data || !data.available) return <p className="px-2.5 py-2 text-meta text-text-3">{data?.reason ? UNAVAILABLE[data.reason] : UNAVAILABLE.unreachable}</p>;
   if (!data.file) return <p className="px-2.5 py-2 text-meta text-text-3">No content for this file.</p>;
 
-  const lang = languageForPath(path);
-  const highlight: Highlighter = (text) => highlightLine(hljs, text, lang);
   const hunks = data.file.hunks;
   return (
     <div className="ac-diff-code ac-mono overflow-x-auto border-t border-line-1 text-nano">
@@ -143,9 +145,15 @@ function HunkHeader({ hunk }: { hunk: DiffHunk }): React.ReactElement {
 
 const LINE_BG: Record<DiffLine['kind'], string> = { add: 'bg-done/10', remove: 'bg-failed/10', context: '' };
 
-/** Highlighted markup is trusted here: `highlightLine` escapes the source text itself (`lib/highlight.ts`). */
+/**
+ * Highlighted markup is trusted here: `highlightLine` escapes the source text itself (`lib/highlight.ts`).
+ * The wrapped `{ __html }` is memoised on the text (and the stable `highlight`, which closes over the
+ * language), because React 19 compares `dangerouslySetInnerHTML` by reference: a fresh object on every
+ * render rewrites the line's DOM even when the text is identical, clearing any selection inside it.
+ */
 function Code({ text, highlight }: { text: string; highlight: Highlighter }): React.ReactElement {
-  return <span dangerouslySetInnerHTML={{ __html: highlight(text) }} />;
+  const html = useMemo(() => ({ __html: highlight(text) }), [text, highlight]);
+  return <span dangerouslySetInnerHTML={html} />;
 }
 
 function UnifiedHunk({ hunk, highlight }: { hunk: DiffHunk; highlight: Highlighter }): React.ReactElement {

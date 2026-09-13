@@ -45,16 +45,19 @@ describe('archive-before-merge mechanics', () => {
   }
 
   describe('scratchLandWorktree', () => {
-    it('checks out the branch into a new directory without disturbing the clone', async () => {
+    it('detaches at origin/<branch> in a new directory without disturbing the clone', async () => {
       await pushBranchFromClone(BRANCH);
       const cloneHeadBefore = await head(clone, 'main');
+      const remoteHead = (await git(['rev-parse', `refs/remotes/origin/${BRANCH}`], clone)).stdout.trim();
 
       const scratch = await scratchLandWorktree(clone, BRANCH);
       try {
         expect(existsSync(scratch.path)).toBe(true);
         expect(scratch.path).not.toBe(clone);
+        // Detached at origin/<branch> — no local branch of the ticket's name is created (VS-363).
         const branchInScratch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], scratch.path)).stdout.trim();
-        expect(branchInScratch).toBe(BRANCH);
+        expect(branchInScratch).toBe('HEAD');
+        expect(await head(scratch.path)).toBe(remoteHead);
         // The primary clone's own checkout is untouched.
         const cloneBranchAfter = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], clone)).stdout.trim();
         expect(cloneBranchAfter).toBe('main');
@@ -156,7 +159,7 @@ describe('archive-before-merge mechanics', () => {
       await git(['commit', '-m', 'chore: seed openspec change'], repo);
     }
 
-    it('archives the change and commits it onto the checked-out branch, not the landing branch', async () => {
+    it('archives the change and commits it onto the worktree HEAD, not the landing branch', async () => {
       await seedOpenSpecChange(origin, 'add-blue-widget');
       await git(['pull', 'origin', 'main'], clone);
       await pushBranchFromClone(BRANCH);
@@ -366,6 +369,63 @@ describe('archive-before-merge mechanics', () => {
       });
       expect(outcome).toEqual({ kind: 'checks_failed' });
       expect(forge.mergePr).not.toHaveBeenCalled();
+    });
+
+    it('lands while the worker worktree holds the branch, leaving it untouched (VS-363)', async () => {
+      const changeName = 'add-thing';
+      const changeDir = join(origin, 'openspec', 'changes', changeName);
+      mkdirSync(join(origin, 'openspec', 'specs', 'widgets'), { recursive: true });
+      writeFileSync(join(origin, 'openspec', 'specs', 'widgets', 'spec.md'), '# widgets Specification\n\n## Purpose\nWidgets exist for archive-commit tests, at least fifty characters long.\n\n## Requirements\n\n### Requirement: A widget exists\nThe system SHALL have a widget.\n\n#### Scenario: One widget\n- **WHEN** asked\n- **THEN** a widget is returned\n');
+      mkdirSync(changeDir, { recursive: true });
+      writeFileSync(join(changeDir, '.openspec.yaml'), 'schema: spec-driven\n');
+      writeFileSync(join(changeDir, 'proposal.md'), '## Why\nTest.\n\n## What Changes\n- Add a scenario.\n\n## Capabilities\n\n### Modified Capabilities\n- `widgets`: adds a scenario\n');
+      mkdirSync(join(changeDir, 'specs', 'widgets'), { recursive: true });
+      writeFileSync(join(changeDir, 'specs', 'widgets', 'spec.md'), '## MODIFIED Requirements\n\n### Requirement: A widget exists\nThe system SHALL have a widget, and it SHALL be blue.\n\n#### Scenario: One widget\n- **WHEN** asked\n- **THEN** a widget is returned\n\n#### Scenario: The widget is blue\n- **WHEN** the widget is inspected\n- **THEN** it is blue\n');
+      writeFileSync(join(changeDir, 'tasks.md'), '## 1. Widget\n\n- [x] 1.1 Make it blue\n');
+      await git(['add', '.'], origin);
+      await git(['commit', '-m', 'chore: seed openspec change'], origin);
+      await git(['pull', 'origin', 'main'], clone);
+      await pushBranchFromClone(BRANCH);
+
+      // Stand in for the requesting worker's worktree: a second worktree of the same repository
+      // that has the ticket's branch checked out. Before VS-363, scratchLandWorktree's
+      // `git checkout -B` refused here with "already used by worktree".
+      const workerDir = join(dir, 'worker-worktree');
+      const addWorker = await git(['worktree', 'add', workerDir, BRANCH], clone, 60_000);
+      expect(addWorker.ok).toBe(true);
+      expect((await git(['rev-parse', '--abbrev-ref', 'HEAD'], workerDir)).stdout.trim()).toBe(BRANCH);
+      const workerHeadBefore = await head(workerDir);
+      const branchesBefore = (await git(['branch', '--format=%(refname:short)'], clone)).stdout.trim().split('\n').sort();
+
+      const scratch = await scratchLandWorktree(clone, BRANCH);
+      try {
+        // Detached at origin/<branch> — no local branch is created or checked out.
+        expect((await git(['rev-parse', '--abbrev-ref', 'HEAD'], scratch.path)).stdout.trim()).toBe('HEAD');
+        expect(await head(scratch.path)).toBe((await git(['rev-parse', `refs/remotes/origin/${BRANCH}`], clone)).stdout.trim());
+      } finally {
+        await scratch.dispose();
+      }
+      expect(existsSync(scratch.path)).toBe(false);
+
+      const forge = fakeForge();
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', changeName, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
+      });
+      expect(outcome).toMatchObject({ kind: 'merged', mergeCommit: 'deadbeef' });
+
+      // The archive commit landed on the remote branch, and the merge proceeded.
+      await git(['fetch', 'origin'], clone);
+      const spec = (await git(['show', `refs/remotes/origin/${BRANCH}:openspec/specs/widgets/spec.md`], clone)).stdout;
+      expect(spec).toMatch(/blue/);
+
+      // The worker's worktree is untouched: same branch, same HEAD, clean working tree.
+      expect((await git(['rev-parse', '--abbrev-ref', 'HEAD'], workerDir)).stdout.trim()).toBe(BRANCH);
+      expect(await head(workerDir)).toBe(workerHeadBefore);
+      expect((await git(['status', '--porcelain'], workerDir)).stdout.trim()).toBe('');
+
+      // No local branch was created or reset, and dispose left no stray scratch branch.
+      const branchesAfter = (await git(['branch', '--format=%(refname:short)'], clone)).stdout.trim().split('\n').sort();
+      expect(branchesAfter).toEqual(branchesBefore);
     });
   });
 });

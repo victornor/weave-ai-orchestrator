@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Global Chats panes can be resized by dragging, collapsed to a side sliver,
+  and reordered

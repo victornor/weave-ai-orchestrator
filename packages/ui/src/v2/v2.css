@@ -220,3 +220,33 @@
   border: 2px solid transparent;
   background-clip: content-box;
 }
+
+/* Chat message references (VS-349, HANDOFF §5): a ticket identifier inside running prose is a
+   bordered mono tag, distinct from a plain code span for a literal like `main`. The markdown renderer
+   keeps the `#ticket:` anchor, so the recipe is applied by href rather than by splitting the body. */
+.v2-root .ac-prose a[href^='#ticket:'] {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg-2);
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-1);
+  text-decoration: none;
+  vertical-align: 1px;
+}
+.v2-root .ac-prose a[href^='#ticket:']:hover {
+  border-color: var(--line-3);
+  background: var(--bg-3);
+}
+
+/* A link to a page reads as underlined prose text — Mono has no link hue (HANDOFF §2). */
+.v2-root .ac-prose a:not([href^='#ticket:']) {
+  color: var(--accent-link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}

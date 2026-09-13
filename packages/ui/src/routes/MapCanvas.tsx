@@ -46,18 +46,19 @@ const KIND_LABEL: Record<MapNodeKind, string> = {
   role: 'Role',
   ticket: 'Ticket',
   knowledge: 'Knowledge',
+  worker: 'Worker',
 };
 
 const KINDS: MapNodeKind[] = ['workspace', 'project', 'weaver', 'role', 'ticket', 'knowledge'];
 
 /** Core dot radius per kind, graph units — small, per the brief, not the old chip sizes. */
 const CORE_RADIUS: Record<MapNodeKind, number> = {
-  workspace: 10, project: 7, weaver: 7, role: 5, ticket: 3.5, knowledge: 3.5,
+  workspace: 10, project: 7, weaver: 7, role: 5, ticket: 3.5, knowledge: 3.5, worker: 5,
 };
 
 /** Label priority: lower wins when two labels would overlap (design.md §3). */
 const LABEL_PRIORITY: Record<MapNodeKind, number> = {
-  workspace: 0, project: 1, weaver: 1, role: 2, ticket: 3, knowledge: 3,
+  workspace: 0, project: 1, weaver: 1, role: 2, ticket: 3, knowledge: 3, worker: 2,
 };
 
 function useMediaQuery(query: string): boolean {

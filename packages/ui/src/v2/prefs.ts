@@ -19,3 +19,29 @@ export function writeRailCollapsed(collapsed: boolean): void {
     /* private mode */
   }
 }
+
+/** The Live floor's cards per row (VS-350). */
+const LIVE_COLUMNS_KEY = 'weave.v2.live.columns';
+export const LIVE_COLUMNS_DEFAULT = 2;
+export const LIVE_COLUMNS_MIN = 1;
+export const LIVE_COLUMNS_MAX = 4;
+
+/** Cards per row, clamped to the control's range; an absent or junk value falls back to the default. */
+export function readLiveColumns(): number {
+  try {
+    const raw = Number(localStorage.getItem(LIVE_COLUMNS_KEY));
+    if (!Number.isFinite(raw) || raw < LIVE_COLUMNS_MIN) return LIVE_COLUMNS_DEFAULT;
+    return Math.min(LIVE_COLUMNS_MAX, Math.round(raw));
+  } catch {
+    return LIVE_COLUMNS_DEFAULT;
+  }
+}
+
+export function writeLiveColumns(columns: number): void {
+  try {
+    const clamped = Math.min(LIVE_COLUMNS_MAX, Math.max(LIVE_COLUMNS_MIN, Math.round(columns)));
+    localStorage.setItem(LIVE_COLUMNS_KEY, String(clamped));
+  } catch {
+    /* private mode */
+  }
+}

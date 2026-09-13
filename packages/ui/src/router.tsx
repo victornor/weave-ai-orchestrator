@@ -169,7 +169,13 @@ const v2WsRouteFor = <K extends keyof V2PageExports>(path: string, page: K) =>
   });
 
 const v2NeedsRoute = v2GlobalRoute('/needs', 'V2NeedsPage');
-const v2LiveRoute = v2GlobalRoute('/live', 'V2LivePage');
+// VS-350: Live reads a `worker` search param, so it validates search by passthrough like V1's pages.
+const v2LiveRoute = createRoute({
+  getParentRoute: () => v2RootRoute,
+  path: '/live',
+  validateSearch: (s: Record<string, unknown>) => s,
+  component: lazyRouteComponent(() => import('./v2/pages'), 'V2LivePage'),
+});
 const v2IncidentsRoute = v2GlobalRoute('/incidents', 'V2IncidentsPage');
 const v2MapRoute = v2GlobalRoute('/map', 'V2MapPage');
 const v2RunsRoute = v2GlobalRoute('/runs', 'V2RunsPage');

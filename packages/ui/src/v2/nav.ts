@@ -135,6 +135,9 @@ export function activeNavKey(pathname: string): string | null {
 /** A destination's address, filling `$ws` from the current scope. */
 export function v2Href(dest: V2Dest, scope: V2Scope, fallbackWs = ''): string {
   const ws = scope.kind === 'workspace' ? scope.ws : fallbackWs;
+  // With no workspace to name, a workspace-scoped destination cannot build `/v2/w//…`; onboarding is
+  // where a workspace is created, so that is where it points (VS-353).
+  if (!ws && dest.scopeKind === 'workspace') return '/v2/onboarding';
   return `/v2${dest.path.replace('$ws', encodeURIComponent(ws))}`;
 }
 

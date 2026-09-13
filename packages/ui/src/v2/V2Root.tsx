@@ -1,20 +1,39 @@
 /**
- * The V2 root: the scoped `.v2-root` element that carries the Mono tokens and the active theme,
- * and the workspace layout that gives a `/v2/w/<ws>` subtree the same `WorkspaceProvider` V1 uses.
+ * The V2 root and its shell layout. `V2Root` owns the scoped `.v2-root` element that carries the
+ * Mono tokens and the active theme; the shell (rail, phone tab bar) is a separate pathless layout
+ * inside it, so `/v2/login` renders the tokens and theme with no chrome (VS-353).
  */
+import { createContext, useContext } from 'react';
 import { Outlet, useParams } from '@tanstack/react-router';
 import { WorkspaceProvider } from '../api/context';
-import { useV2Theme } from './theme';
+import { useV2Theme, type V2ThemeState } from './theme';
 import { V2Shell } from './V2Shell';
 import './v2.css';
 
+const V2ThemeContext = createContext<V2ThemeState | null>(null);
+
+/** The V2 theme, provided by `V2Root` so the token root and the shell switch share one choice. */
+export function useV2ThemeState(): V2ThemeState {
+  const ctx = useContext(V2ThemeContext);
+  if (!ctx) throw new Error('useV2ThemeState must be used inside V2Root');
+  return ctx;
+}
+
 export function V2Root(): React.ReactElement {
-  const { theme, setTheme } = useV2Theme();
+  const theme = useV2Theme();
   return (
-    <div className="v2-root flex h-[100dvh] min-h-0 flex-col overflow-hidden" data-theme={theme}>
-      <V2Shell theme={theme} onTheme={setTheme} />
-    </div>
+    <V2ThemeContext.Provider value={theme}>
+      <div className="v2-root flex h-[100dvh] min-h-0 flex-col overflow-hidden" data-theme={theme.theme}>
+        <Outlet />
+      </div>
+    </V2ThemeContext.Provider>
   );
+}
+
+/** The chrome for every signed-in V2 page. `/v2/login` is a sibling, so it renders without it. */
+export function V2ShellLayout(): React.ReactElement {
+  const { theme, setTheme } = useV2ThemeState();
+  return <V2Shell theme={theme} onTheme={setTheme} />;
 }
 
 export function V2Workspace(): React.ReactElement {

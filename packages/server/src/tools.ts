@@ -191,20 +191,26 @@ const TransitionSchema = z.object({
   blockedBy: z.array(z.string()).optional(),
 });
 /**
- * A value the card collects alongside the options (VS-92). `multiselect` needs its `choices`;
- * `secret` needs a `secretName` and never records the value the human types — see the tool
- * description, which says so where an agent will actually read it.
+ * A value the card collects alongside the options (VS-92). `single_choice` and `multiselect` need
+ * their `choices`; a `single_choice` may mark one choice recommended and allow the human's own words
+ * with `allowOther` (VS-342). `secret` needs a `secretName` and never records the value the human
+ * types — see the tool description, which says so where an agent will actually read it.
  */
 const AskInputSchema = z.object({
   key: z.string().min(1).describe('unique within this decision; how the value comes back to you'),
-  label: z.string().min(1).describe('what the human reads above the field'),
+  label: z.string().min(1).describe('what the human reads above the field — one question when the input is a single_choice'),
   type: z.enum(DECISION_INPUT_TYPES),
   required: z.boolean().optional().describe('the human cannot send the card until this is filled'),
   placeholder: z.string().optional(),
-  choices: z.array(z.object({ key: z.string().min(1), label: z.string().min(1), description: z.string().optional() })).optional()
-    .describe('multiselect only, and required for it'),
+  description: z.string().optional().describe('a short context line shown under the label on every surface'),
+  choices: z.array(z.object({ key: z.string().min(1), label: z.string().min(1), description: z.string().optional(), recommended: z.boolean().optional() })).optional()
+    .describe('single_choice and multiselect only, and required for both; a single_choice needs at least two, and a recommended choice shows pre-selected'),
   secretName: z.string().optional()
     .describe('secret only, and required for it: UPPER_SNAKE_CASE. The value is stored under this name and you receive only the name.'),
+  default: z.union([z.string(), z.array(z.string())]).optional()
+    .describe('a value the card pre-fills: a string for text/multiline, a choice key for single_choice, a list of keys for multiselect. It is a pre-fill only, never an answer'),
+  allowOther: z.boolean().optional()
+    .describe('single_choice only: also offer the human their own words alongside the choices'),
 });
 const AskSchema = z.object({
   ticketId: z.string().optional(),
@@ -379,7 +385,8 @@ export const TOOLS: ToolDef[] = [
       + 'The weaver\'s own use of this tool still reaches the human. Use kind=concern when you are stuck and need help or feedback rather than making a decision: '
       + 'say what you tried and what would unblock you — no options required. Use kind=question for a genuine open question, and kind=gate_finding for a finding toward the accepted design. '
       + 'When you do have real options, give them and a recommendation with a one-line why. plan_approval, merge_approval, hire_approval, discard_approval and retry_approval cannot be raised this way — those are always system-raised. '
-      + 'Use `inputs` when the answer is a value rather than a choice: text, multiline, multiselect (with `choices`), or secret. '
+      + 'Use `inputs` for one or more questions answered together: text, multiline, single_choice (with `choices`, one choice optionally `recommended`, and `allowOther` for the human\'s own words), multiselect (with `choices`), or secret. '
+      + 'A card may carry several single_choice inputs, so several closed-set questions asked at once are one card, each with its recommendation — never a list of questions in a prose message. '
       + 'A `secret` input is how you ask for a credential — never ask for one in prose. Its value is registered under the input\'s `secretName` and you receive only that name in `answerInputs`; '
       + 'the value never appears in the answer, the chat, a ticket, a log or a transcript. Attach it to a role with weave_role_set_secrets to give that role\'s workers the environment variable. '
       + 'End your turn after asking — the answer arrives as your next wake, with `answerInputs` keyed by your input keys.',

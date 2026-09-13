@@ -96,7 +96,7 @@ export const NAMED_CARD_OPTION_KEYS = {
 export type NamedCardKind = keyof typeof NAMED_CARD_OPTION_KEYS;
 
 /** What a decision can ask for beyond an option (VS-92). `secret` never records its value — only the name it was stored under. */
-export const DECISION_INPUT_TYPES = ['text', 'multiline', 'multiselect', 'secret'] as const;
+export const DECISION_INPUT_TYPES = ['text', 'multiline', 'single_choice', 'multiselect', 'secret'] as const;
 export type DecisionInputType = (typeof DECISION_INPUT_TYPES)[number];
 
 /** How widely a registered secret applies. The `secrets` table has carried this since 0001_init. */

@@ -142,6 +142,38 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
   }
 
   /**
+   * The shape a choice-carrying input has to have or the card could not render it or the answer
+   * could not validate: at least the type's minimum of choices, unique non-empty keys, at most one
+   * recommendation, and a default the input actually offers (VS-342). A recommendation the human
+   * never sees pre-selected, or a default the answer then refuses, is caught here where the asker
+   * can still fix the card.
+   */
+  function validateChoiceInput(key: string, input: DecisionInput): void {
+    const choices = input.choices ?? [];
+    const min = input.type === 'single_choice' ? 2 : 1;
+    if (choices.length < min) {
+      throw new OcError('validation', input.type === 'single_choice'
+        ? `single_choice input "${key}" needs at least two choices`
+        : `multiselect input "${key}" needs at least one choice`);
+    }
+    const keys = new Set<string>();
+    for (const c of choices) {
+      if (!(c.key ?? '').trim()) throw new OcError('validation', `every choice of input "${key}" needs a key`);
+      if (keys.has(c.key)) throw new OcError('validation', `input "${key}" repeats the choice "${c.key}"`);
+      keys.add(c.key);
+    }
+    if (choices.filter((c) => c.recommended === true).length > 1) {
+      throw new OcError('validation', `input "${key}" recommends more than one choice`);
+    }
+    if (input.default !== undefined) {
+      const defaults = Array.isArray(input.default) ? input.default : [input.default];
+      for (const d of defaults) {
+        if (!keys.has(d)) throw new OcError('validation', `input "${key}" defaults to a choice it does not offer: "${d}"`);
+      }
+    }
+  }
+
+  /**
    * Refuse a card that could not be answered, before the row exists. Everything here is a shape the
    * card has to render or the answer has to validate against; a decision that reaches the human
    * with a multi-select and no choices is a dead end with no way back for either of them.
@@ -154,15 +186,12 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       if (seen.has(key)) throw new OcError('validation', `two decision inputs share the key "${key}"`);
       seen.add(key);
       if (!(i.label ?? '').trim()) throw new OcError('validation', `input "${key}" needs a label`);
-      if (i.type === 'multiselect') {
-        const choices = i.choices ?? [];
-        if (!choices.length) throw new OcError('validation', `multiselect input "${key}" needs at least one choice`);
-        const keys = new Set<string>();
-        for (const c of choices) {
-          if (!(c.key ?? '').trim()) throw new OcError('validation', `every choice of input "${key}" needs a key`);
-          if (keys.has(c.key)) throw new OcError('validation', `input "${key}" repeats the choice "${c.key}"`);
-          keys.add(c.key);
-        }
+      if (i.type === 'single_choice' || i.type === 'multiselect') {
+        validateChoiceInput(key, i);
+      } else if (i.default !== undefined) {
+        // A secret has nothing safe to pre-fill, and a text default has to be one string.
+        if (i.type === 'secret') throw new OcError('validation', `secret input "${key}" cannot carry a default`);
+        if (typeof i.default !== 'string') throw new OcError('validation', `input "${key}" default must be a string`);
       }
       // The value never becomes the answer, so the name it is stored under is the only thing that
       // can carry it onward — and it has to be usable as an environment variable name.
@@ -380,7 +409,15 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
         if (input.required) throw new OcError('validation', `input "${input.key}" (${input.label}) is required`);
         continue; // An optional input left empty is absent, never present and empty.
       }
-      if (input.type === 'multiselect') {
+      if (input.type === 'single_choice') {
+        // VS-342: the chosen key, or — only when the input allows it — the human's own words.
+        if (Array.isArray(raw)) throw new OcError('validation', `input "${input.key}" takes a single value`);
+        const offered = (input.choices ?? []).map((c) => c.key);
+        if (!offered.includes(raw) && !input.allowOther) {
+          throw new OcError('validation', `"${raw}" is not a choice of input "${input.key}"`, { choices: offered });
+        }
+        out[input.key] = raw;
+      } else if (input.type === 'multiselect') {
         const chosen = Array.isArray(raw) ? raw : [raw];
         const offered = (input.choices ?? []).map((c) => c.key);
         for (const c of chosen) {

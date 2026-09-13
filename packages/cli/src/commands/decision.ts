@@ -40,6 +40,16 @@ export function resolveOverrideHold(card: Pick<CardModel, 'held' | 'awaitsReview
   return { overrideHold: true, overrideReason: reason };
 }
 
+/**
+ * VS-342: a decision carrying inputs cannot be answered from the CLI — it has no controls for them
+ * and no way to pass them — so point at the web card rather than send an answer the daemon refuses
+ * for the values it is missing.
+ */
+export function refuseInputAnswer(id: string, decision: Pick<Decision, 'inputs'>): void {
+  const asksFor = (decision.inputs ?? []).length;
+  if (asksFor) throw new ApiError('validation', `${id} asks for ${asksFor} value${asksFor === 1 ? '' : 's'}; answer it on its card in the web app`, 400, { decisionId: id });
+}
+
 export function register(program: Command): void {
   const decision = program.command('decision').description('decisions waiting for an answer');
 
@@ -88,7 +98,9 @@ export function register(program: Command): void {
     .action(async (id: string, answer: string | undefined, opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const { client } = await session(command);
       const raw = await client.wget<unknown>(`/decisions/${encodeURIComponent(id)}`);
-      const card = decisionToCard(unwrap<Decision>(raw, 'decision'), {});
+      const found = unwrap<Decision>(raw, 'decision');
+      refuseInputAnswer(id, found);
+      const card = decisionToCard(found, {});
 
       let key: string | undefined;
       let text: string | undefined = typeof opts['text'] === 'string' ? opts['text'] : undefined;

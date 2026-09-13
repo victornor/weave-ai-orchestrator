@@ -631,6 +631,59 @@ describe('decisions', () => {
     });
   });
 
+  // ---------- VS-342: single-choice inputs and several questions on one card ----------
+
+  describe('a single-choice input', () => {
+    const CHOICE = {
+      key: 'served', label: 'How is V2 served', type: 'single_choice' as const,
+      choices: [
+        { key: 'same', label: 'Same app', recommended: true },
+        { key: 'separate', label: 'Separate build' },
+      ],
+    };
+
+    it('refuses a single-choice that could not be rendered or answered', () => {
+      const bad = (inputs: unknown[], match: RegExp): void =>
+        expect(() => decisions.create(AGENT, { kind: 'question', title: 'x', inputs: inputs as never, correlationKey: newId() })).toThrow(match);
+      bad([{ key: 'q', label: 'Q', type: 'single_choice', choices: [{ key: 'a', label: 'A' }] }], /needs at least two choices/);
+      bad([{ key: 'q', label: 'Q', type: 'single_choice', choices: [{ key: 'a', label: 'A' }, { key: 'a', label: 'Again' }] }], /repeats the choice "a"/);
+      bad([{ key: 'q', label: 'Q', type: 'single_choice', choices: [{ key: 'a', label: 'A', recommended: true }, { key: 'b', label: 'B', recommended: true }] }], /recommends more than one choice/);
+      bad([{ key: 'q', label: 'Q', type: 'single_choice', default: 'nope', choices: [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }] }], /defaults to a choice it does not offer/);
+      bad([{ key: 's', label: 'S', type: 'secret', secretName: 'TOKEN', default: 'x' }], /cannot carry a default/);
+      expect(decisions.list()).toHaveLength(0);
+    });
+
+    it('records the chosen key, and the human\'s own words when the input allows them', async () => {
+      const d = decisions.create(AGENT, { kind: 'question', title: 'How should V2 be served?', inputs: [CHOICE] });
+      expect((await decisions.answer(HUMAN, d.id, { inputs: { served: 'separate' } })).answerInputs).toEqual({ served: 'separate' });
+
+      const other = decisions.create(AGENT, { kind: 'question', title: 'How?', correlationKey: newId(), inputs: [{ ...CHOICE, allowOther: true }] });
+      expect((await decisions.answer(HUMAN, other.id, { inputs: { served: 'a standalone gateway' } })).answerInputs).toEqual({ served: 'a standalone gateway' });
+    });
+
+    it('refuses a single-choice value that is not one of its choices and not allowed free text', async () => {
+      const d = decisions.create(AGENT, { kind: 'question', title: 'How?', inputs: [CHOICE] });
+      await expect(decisions.answer(HUMAN, d.id, { inputs: { served: 'something else' } })).rejects.toThrow(/"something else" is not a choice/);
+      await expect(decisions.answer(HUMAN, d.id, { inputs: { served: ['same'] } })).rejects.toThrow(/takes a single value/);
+      expect(decisions.get(d.id).status).toBe('open');
+      expect(decisions.get(d.id).answerInputs).toBeNull();
+    });
+
+    it('round-trips several questions on one card in a single send', async () => {
+      const inputs = [
+        { key: 'served', label: 'Serve V2', type: 'single_choice' as const, required: true, choices: [{ key: 'same', label: 'Same app', recommended: true }, { key: 'separate', label: 'Separate' }] },
+        { key: 'drop', label: 'Drop V1 screens', type: 'single_choice' as const, required: true, choices: [{ key: 'none', label: 'None', recommended: true }, { key: 'settings', label: 'Settings' }] },
+        { key: 'work', label: 'Work column maps to', type: 'single_choice' as const, choices: [{ key: 'running', label: 'Running' }, { key: 'active', label: 'Active' }] },
+      ];
+      const d = decisions.create(AGENT, { kind: 'question', title: 'Four V2 calls', inputs, askedByAgentId: h.conductorId });
+      const answered = await decisions.answer(HUMAN, d.id, { inputs: { served: 'separate', drop: 'none' } });
+      expect(answered.answerInputs).toEqual({ served: 'separate', drop: 'none' });
+      // The optional third question is absent rather than empty, as for every other input.
+      expect(Object.keys(answered.answerInputs!)).not.toContain('work');
+      expect(wake.calls.at(-1)!.input.payload).toMatchObject({ decisionId: d.id, answerInputs: { served: 'separate', drop: 'none' } });
+    });
+  });
+
   // ---------- VS-92: a secret input's value ----------
 
   describe('a secret input', () => {

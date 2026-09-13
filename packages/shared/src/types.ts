@@ -65,12 +65,14 @@ export function heldByHuman(agent: { status?: string; pauseDetail?: AgentPauseDe
 export interface Agent { id: string; workspaceId: string; kind: E.AgentKind; projectId: string | null; roleId: string | null; roleRevision: number | null; ticketId: string | null; name: string; runtimeId: string; status: E.AgentStatus; pauseReason: string | null; pauseDetail: AgentPauseDetail | null; errorText: string | null; homePath: string; worktreePath: string | null; branch: string | null; turnEpoch: number; turnCount: number; spawnedBy: string; spawnReason: string | null; briefRevision: number; lastRunAt: string | null; retiredAt: string | null; createdAt: string; updatedAt: string }
 export interface Ticket { id: string; workspaceId: string; projectId: string | null; number: number; identifier: string; kind: E.TicketKind; title: string; description: string; /** One-line why (VS-146); shown on plan-approval cards. Null until set. */ summary: string | null; status: E.TicketStatus; priority: E.TicketPriority; autoMerge: boolean; assigneeRoleId: string | null; workerId: string | null; assigneeHuman: boolean; /** A human is conversing with this ticket's worker directly (VS-101): the session's whole persistent record. */ interactiveSession: boolean; /** Overrides the project's landing branch for this ticket alone (VS-119); set only at creation. */ landingBranch: string | null; /** Workspace catalog option this ticket's worker runs on (VS-162); null means `models.workers`. */ workerModelId: string | null; parentId: string | null; createdByKind: string; createdById: string | null; createdRunId: string | null; originKind: string | null; originFingerprint: string | null; checkoutRunId: string | null; executionRunId: string | null; openspecChangeName: string | null; openspecState: Record<string, unknown> | null; delivery: Record<string, unknown> | null; unblock: { owner: string; action: string } | null; blockedFromStatus: E.TicketStatus | null; monitorNextCheckAt: string | null; blockedTransitionAt: string | null; mergeQueuedAt: string | null; mergeStartedAt: string | null; startedAt: string | null; completedAt: string | null; cancelledAt: string | null; createdAt: string; updatedAt: string }
 export interface TicketComment { id: string; ticketId: string; authorKind: E.AuthorKind; authorId: string | null; runId: string | null; body: string; kind: E.CommentKind; sourceTrust: E.SourceTrust; createdAt: string }
-/** One of a `multiselect` input's choices. Keys are unique within that input. */
-export interface DecisionInputChoice { key: string; label: string; description?: string }
+/** One of a `single_choice` or `multiselect` input's choices. Keys are unique within that input. */
+export interface DecisionInputChoice { key: string; label: string; description?: string; recommended?: boolean }
 /**
  * A value a decision asks the human for, alongside (or instead of) choosing an option (VS-92).
- * `multiselect` carries its `choices`; `secret` carries the `secretName` its value is registered
- * under — the value of a secret input is never the answer, only the name is (see `answerInputs`).
+ * `single_choice` and `multiselect` carry their `choices`; a `single_choice` offers exactly one,
+ * pre-selects the `recommended` one, and may allow the human's own words with `allowOther`.
+ * `secret` carries the `secretName` its value is registered under — the value of a secret input is
+ * never the answer, only the name is (see `answerInputs`).
  */
 export interface DecisionInput {
   key: string;
@@ -78,10 +80,19 @@ export interface DecisionInput {
   type: E.DecisionInputType;
   required?: boolean;
   placeholder?: string;
-  /** `multiselect` only, and required for it. */
+  /** A short context line shown under the label on every surface (VS-342). */
+  description?: string;
+  /** `single_choice` and `multiselect` only, and required for both. */
   choices?: DecisionInputChoice[];
   /** `secret` only, and required for it: the workspace secret name, which becomes the env var name. */
   secretName?: string;
+  /**
+   * A value the card pre-fills (VS-342): a string for `text`/`multiline`, a key for `single_choice`,
+   * a list of keys for `multiselect`. A pre-fill only — the daemon never answers from it.
+   */
+  default?: string | string[];
+  /** `single_choice` only: offer the human's own words alongside the choices (VS-342). */
+  allowOther?: boolean;
 }
 /** What a card collected, keyed by input key: a string, or the chosen keys of a multi-select. A secret's string is its name. */
 export type DecisionAnswerInputs = Record<string, string | string[]>;

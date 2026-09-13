@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ChannelAdapter, ChannelContext, InboundMessage, OutboundMessage, RejectedContact, SendResult } from '@weave-ai/channel-sdk';
 import { newId, nowIso } from '@weave-ai/db';
-import { ChannelManager } from '../src/channels.js';
+import { ChannelManager, decisionCard } from '../src/channels.js';
 import { makeHarness, decision, type Harness } from './fakes.js';
 
 let harness: Harness | null = null;
@@ -436,5 +436,25 @@ describe('pending Telegram identities (VS-135)', () => {
     h.bus.emit('workspace.updated', 'workspace', h.runtime.id, { config: next });
     await new Promise((r) => setTimeout(r, 10));
     expect(adapter.starts).toBe(2);
+  });
+});
+
+// VS-342: a card carrying inputs cannot be answered on a channel, and must say so rather than
+// offering option buttons whose answer the daemon then refuses.
+describe('decisionCard with inputs', () => {
+  it('offers no answerable actions and points at the web app', () => {
+    const msg = decisionCard(decision({
+      inputs: [{ key: 'served', label: 'How is V2 served', type: 'single_choice', choices: [{ key: 'same', label: 'Same app' }, { key: 'sep', label: 'Separate' }] }],
+    }));
+    const part = msg.parts[0] as { actions: unknown[]; body: string };
+    expect(part.actions).toEqual([]);
+    expect(part.body).toContain('Answer this in the web app: it asks for 1 value.');
+  });
+
+  it('leaves a card without inputs answerable exactly as before', () => {
+    const msg = decisionCard(decision());
+    const part = msg.parts[0] as { actions: Array<{ key: string }>; body: string };
+    expect(part.actions.map((a) => a.key)).toEqual(['vars', 'tw']);
+    expect(part.body).not.toContain('Answer this in the web app');
   });
 });

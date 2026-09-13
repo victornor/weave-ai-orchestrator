@@ -117,6 +117,19 @@ describe('weave_run_inspect — resolving a reference', () => {
     }
   });
 
+  it("reports the worker's pending self-wake, and none once it is gone (VS-317)", async () => {
+    harness = makeHarness();
+    seed(harness, workingRun());
+    harness.impls.wake!.pendingSelfWake = () => ({ id: 'wk_self', workspaceId: 'ws1', agentId: 'ag_1', source: 'self_scheduled', reason: 'check the sweep', payload: {}, idempotencyKey: null, status: 'queued', coalescedIntoId: null, skipReason: null, runId: null, requestedByKind: 'agent', requestedById: 'ag_1', notBefore: '2026-09-05T12:20:00.000Z', createdAt: '2026-09-05T12:00:00.000Z', claimedAt: null, finishedAt: null });
+
+    const withWake = await call(harness, 'weave_run_inspect', { ref: 'ACME-42' });
+    expect((withWake.data as Record<string, never>)['worker']).toMatchObject({ scheduledWake: { at: '2026-09-05T12:20:00.000Z', reason: 'check the sweep' } });
+
+    harness.impls.wake!.pendingSelfWake = () => null;
+    const consumed = await call(harness, 'weave_run_inspect', { ref: 'ACME-42' });
+    expect((consumed.data as Record<string, never>)['worker']).toMatchObject({ scheduledWake: null });
+  });
+
   it('fails as not_found for a reference that matches nothing', async () => {
     harness = makeHarness();
     seed(harness, workingRun());

@@ -359,6 +359,11 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     // one comment — a ceiling under the role's own permission, never a widening of it: a role that
     // already denies one of these tools still denies it.
     const isFirstInteractiveTurn = Boolean(ticket?.interactiveSession) && agent.turnCount === 0;
+    // VS-317: a worker's turn denies the runtime's own scheduling tools, whose timer dies with the
+    // turn, so it must use `weave_schedule_wakeup` instead. Declared by the adapter; the role's own
+    // denials and the weaver's turn are untouched.
+    const workerDenied = agent.kind === 'worker' ? (runtime.workerDeniedTools ?? []) : [];
+    const deniedTools = workerDenied.length ? [...new Set([...(permission.denied ?? []), ...workerDenied])] : permission.denied;
     const deniedSet = new Set(permission.denied ?? []);
     const allowedTools = isFirstInteractiveTurn
       ? (permission.allowed?.length ? permission.allowed.filter((t) => FIRST_TURN_ALLOWLIST.includes(t)) : FIRST_TURN_ALLOWLIST)
@@ -398,7 +403,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
         // VS-171: Claude auto-mode can classify away weave_*; skip-permissions is only on for bypass.
         mode: agent.kind === 'weaver' ? 'bypass' : (permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto'),
         allowedTools,
-        deniedTools: permission.denied,
+        deniedTools,
       },
       model: setting.model ?? null,
       effort: setting.effort ?? null,

@@ -261,6 +261,17 @@ describe('WorkerCard', () => {
     expect(screen.queryByText('interactive')).not.toBeInTheDocument();
   });
 
+  // VS-317: a worker waiting on its own scheduled wake says when and why — it is not idle.
+  it('shows the pending self-wake and nothing when there is none', () => {
+    const at = new Date(Date.now() + 20 * 60_000).toISOString();
+    const { unmount } = render(<WorkerCard agent={agent()} scheduledWake={{ at, reason: 'check the sweep' }} />);
+    expect(screen.getByText(/wakes in 20m · check the sweep/)).toBeInTheDocument();
+    unmount();
+
+    render(<WorkerCard agent={agent()} />);
+    expect(screen.queryByText(/wakes /)).not.toBeInTheDocument();
+  });
+
   it('shows the last line and the worktree state', () => {
     render(
       <WorkerCard

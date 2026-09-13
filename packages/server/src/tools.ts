@@ -9,6 +9,7 @@ import { z, type ZodTypeAny } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
+  SELF_WAKE_MAX_DELAY_MS, SELF_WAKE_MIN_DELAY_MS,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
   ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS, ATTACHMENT_MAX_PER_MESSAGE,
@@ -25,7 +26,7 @@ import type { WorkspaceRuntime } from './types.js';
 import { toOcError } from './http.js';
 import {
   DEFAULT_RUN_LIST, MAX_EVENTS, MAX_RUN_LIST, derivePhase, readWindow, renderWindow, resolveRunRef,
-  runView, totalEventsOf, workerView,
+  runView, scheduledWake, totalEventsOf, workerView,
 } from './inspect.js';
 
 const exec = promisify(execFile);
@@ -406,6 +407,33 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'weave_schedule_wakeup', scope: 'worker', input: z.object({
+      reason: z.string().min(1).max(200).describe('why you want to be woken; it comes back as this wakeup\'s reason'),
+      delayMinutes: z.number().positive().optional().describe('minutes from now to be woken (one of this or `at`)'),
+      at: z.string().min(1).optional().describe('ISO-8601 instant to be woken at (one of this or `delayMinutes`)'),
+    }),
+    description:
+      'Schedule your own next turn: give a delay or an absolute time and a reason, and the daemon wakes you then. '
+      + 'This is the only scheduling that survives the end of a turn — a runtime\'s own scheduling tools do not. '
+      + 'Use it to check on a long background job later. The wakeup is always for you, never another agent; a second call replaces your previous scheduled wake. '
+      + `The delay must be between ${SELF_WAKE_MIN_DELAY_MS / 60_000} and ${SELF_WAKE_MAX_DELAY_MS / 60_000} minutes.`,
+    handler: (ctx, i) => {
+      if ((i.delayMinutes === undefined) === (i.at === undefined)) {
+        throw new OcError('validation', 'give exactly one of delayMinutes or at');
+      }
+      let delayMs: number;
+      if (i.delayMinutes !== undefined) {
+        delayMs = i.delayMinutes * 60_000;
+      } else {
+        const at = Date.parse(i.at!);
+        if (!Number.isFinite(at)) throw new OcError('validation', `at is not a valid ISO-8601 instant: ${i.at!}`, { at: i.at! });
+        delayMs = at - Date.now();
+      }
+      const w = svc(ctx).wake.scheduleSelfWake(ctx.claims.agentId, { reason: i.reason, delayMs, requestedBy: ctx.actor });
+      return { wakeId: w.id, at: w.notBefore, reason: w.reason };
+    },
+  },
+  {
     name: 'weave_incident', scope: 'all', input: z.object({
       title: z.string().min(1).max(200),
       whatFailed: z.string().min(1).max(2000),
@@ -697,13 +725,13 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_worker_list', scope: 'weaver', input: z.object({ projectId: z.string().optional(), roleId: z.string().optional(), includeRetired: z.boolean().optional() }),
-    description: 'Live workers with status, ticket and role.',
-    handler: (ctx, i) => svc(ctx).workers.list(i),
+    description: 'Live workers with status, ticket and role. A worker waiting on its own `scheduledWake` (VS-317) is not idle: it has asked to be woken at that time for that reason.',
+    handler: (ctx, i) => svc(ctx).workers.list(i).map((w) => ({ ...w, scheduledWake: scheduledWake(svc(ctx), w.id) })),
   },
   {
     name: 'weave_worker_get', scope: 'weaver', input: z.object({ id: z.string().min(1) }),
-    description: 'One worker: agent record plus its brief.',
-    handler: (ctx, i) => ({ worker: svc(ctx).workers.get(i.id), brief: svc(ctx).workers.brief(i.id) }),
+    description: 'One worker: agent record plus its brief. `scheduledWake` is the worker\'s own pending self-wake, if it has one (VS-317).',
+    handler: (ctx, i) => ({ worker: svc(ctx).workers.get(i.id), brief: svc(ctx).workers.brief(i.id), scheduledWake: scheduledWake(svc(ctx), i.id) }),
   },
   {
     name: 'weave_worker_message', scope: 'weaver', input: z.object({ workerId: z.string().min(1), message: z.string().min(1), live: z.boolean().optional() }),

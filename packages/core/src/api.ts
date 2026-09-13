@@ -298,8 +298,18 @@ export interface WorkersService {
 
 // ---------- wake / runs ----------
 export interface EnqueueInput { source: S.WakeSource; reason: string; payload?: Record<string, unknown>; idempotencyKey?: string; notBefore?: string; requestedBy?: Actor }
+/** VS-317: a worker asking to be woken later, through `weave_schedule_wakeup`. */
+export interface ScheduleSelfWakeInput { reason: string; delayMs: number; requestedBy?: Actor }
 export interface WakeService {
   enqueue(agentId: string, input: EnqueueInput): S.Wakeup;
+  /**
+   * Record a worker's own scheduled wakeup for its next turn (VS-317): bounded delay, one pending
+   * self-wake per worker (a new one replaces the old), a stable idempotency key. Always the given
+   * agent, never another.
+   */
+  scheduleSelfWake(agentId: string, input: ScheduleSelfWakeInput): S.Wakeup;
+  /** A worker's outstanding queued self-wake, if it has one — for the status views and the supervisor. */
+  pendingSelfWake(agentId: string): S.Wakeup | null;
   listForAgent(agentId: string, status?: S.WakeStatus[]): S.Wakeup[];
   cancelForAgent(agentId: string, reason: string): number;
 }

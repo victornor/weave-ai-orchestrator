@@ -7,6 +7,8 @@ export class FakeRuntime implements RuntimeAdapter {
   streamingInput = false;
   /** VS-249: flip to `false` to simulate a runtime that cannot resume a session at all. */
   resumableSessions = true;
+  /** VS-317: set to simulate an adapter that declares scheduling tools to deny on worker turns. */
+  workerDeniedTools?: string[];
   get capabilities() {
     return { resumableSessions: this.resumableSessions, forkSessions: false, streamingInput: this.streamingInput, systemPromptInjection: 'system_prompt' as const, structuredOutput: true, mcp: true, usageReporting: 'per_turn' as const, costReporting: false, permissionModes: ['auto'] };
   }

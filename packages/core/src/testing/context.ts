@@ -150,11 +150,14 @@ export function fakeSpecs(): { index: (projectId: string) => Promise<{ capabilit
 }
 
 /** Minimal wake service double: records every enqueue. */
-export function fakeWake(): { enqueue: (agentId: string, input: Record<string, unknown>) => Record<string, unknown>; calls: Array<{ agentId: string; input: Record<string, unknown> }>; listForAgent: () => never[]; cancelForAgent: () => number } {
+export function fakeWake(): { enqueue: (agentId: string, input: Record<string, unknown>) => Record<string, unknown>; scheduleSelfWake: (agentId: string, input: Record<string, unknown>) => Record<string, unknown>; pendingSelfWake: () => null; calls: Array<{ agentId: string; input: Record<string, unknown> }>; listForAgent: () => never[]; cancelForAgent: () => number } {
   const calls: Array<{ agentId: string; input: Record<string, unknown> }> = [];
+  const record = (agentId: string, input: Record<string, unknown>): Record<string, unknown> => { calls.push({ agentId, input }); return { id: newId(), agentId, ...input }; };
   return {
     calls,
-    enqueue: (agentId, input) => { calls.push({ agentId, input }); return { id: newId(), agentId, ...input }; },
+    enqueue: record,
+    scheduleSelfWake: record,
+    pendingSelfWake: () => null,
     listForAgent: () => [],
     cancelForAgent: () => 0,
   };

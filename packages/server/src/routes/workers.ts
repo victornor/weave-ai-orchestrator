@@ -4,6 +4,7 @@ import { describeLiveInput } from '@weave-ai/core';
 import { TICKET_KINDS } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
+import { scheduledWake } from '../inspect.js';
 
 const ListQuery = z.object({ status: csv.optional(), project: z.string().optional(), role: z.string().optional(), includeRetired: z.string().optional() });
 
@@ -20,7 +21,12 @@ export function workerRoutes(): Hono<AppEnv> {
     const interactive = ticketIds.length
       ? new Set(ws.ctx.db.all<{ id: string }>(`SELECT id FROM tickets WHERE interactive_session = 1 AND id IN (${ticketIds.map(() => '?').join(',')})`, ticketIds).map((r) => r.id))
       : new Set<string>();
-    return c.json(workers.map((w) => ({ ...w, interactiveSession: w.ticketId ? interactive.has(w.ticketId) : false })));
+    return c.json(workers.map((w) => ({
+      ...w,
+      interactiveSession: w.ticketId ? interactive.has(w.ticketId) : false,
+      // VS-317: a worker waiting on its own scheduled wake is not idle.
+      scheduledWake: scheduledWake(ws.services, w.id),
+    })));
   });
 
   app.get('/:id', (c) => {
@@ -39,6 +45,8 @@ export function workerRoutes(): Hono<AppEnv> {
       // Whether the worker's *next* turn would resume its existing session rather than start a
       // fresh one — orthogonal to `input.midTurn`, which is about a turn executing right now.
       sessionResumable: safe(() => s.workers.sessionResumable(worker.id)) ?? false,
+      // VS-317: the worker's own pending self-wake, so its status view does not read as idle.
+      scheduledWake: scheduledWake(s, worker.id),
     });
   });
 

@@ -970,6 +970,39 @@ describe('stalled worker detection (VS-202)', () => {
     expect(stalledEventsFor(agentId)).toHaveLength(0);
   });
 
+  it('does not flag a worker waiting on its own scheduled self-wake (VS-317)', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    h.db.insert('wakeups', {
+      id: newId(), workspaceId: h.workspaceId, agentId, source: 'self_scheduled', reason: 'check the sweep', payloadJson: {},
+      status: 'queued', notBefore: new Date(Date.now() + 20 * 60_000).toISOString(), createdAt: nowIso(),
+    });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(0);
+  });
+
+  it('does not flag a worker a moment past its self-wake, before the grace margin (VS-317)', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    h.db.insert('wakeups', {
+      id: newId(), workspaceId: h.workspaceId, agentId, source: 'self_scheduled', reason: 'check the sweep', payloadJson: {},
+      status: 'queued', notBefore: new Date(Date.now() - 10_000).toISOString(), createdAt: nowIso(),
+    });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(0);
+  });
+
+  it('flags a worker idle well past its own self-wake (VS-317)', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    h.db.insert('wakeups', {
+      id: newId(), workspaceId: h.workspaceId, agentId, source: 'self_scheduled', reason: 'check the sweep', payloadJson: {},
+      status: 'queued', notBefore: new Date(Date.now() - 5 * 60_000).toISOString(), createdAt: nowIso(),
+    });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(1);
+  });
+
   it('does not flag a worker whose ticket is an interactive session (VS-213)', async () => {
     const ticketId = seedTicket(h, { status: 'in_progress', interactiveSession: true });
     const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });

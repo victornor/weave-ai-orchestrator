@@ -103,6 +103,7 @@ export function TeamRoute(): React.ReactElement {
                                     projectSlug={p.slug}
                                     ticketIdentifier={w.ticketId}
                                     interactive={w.interactiveSession}
+                                    scheduledWake={w.scheduledWake}
                                     onOpen={() => go('/w/$ws/workers/$workerId', { params: { ws, workerId: w.id } })}
                                     onResume={() => workerAction.mutate({ id: w.id, action: 'resume' })}
                                     resuming={workerAction.isPending}

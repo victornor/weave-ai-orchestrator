@@ -468,6 +468,27 @@ describe('run engine', () => {
     });
   });
 
+  describe('the runtime\'s own scheduler tools are denied on worker turns (VS-317)', () => {
+    it('adds the adapter-declared tools to a worker turn, preserving the role\'s own denials', async () => {
+      runtime.workerDeniedTools = ['ScheduleWakeup', 'CronCreate', 'CronList', 'CronDelete'];
+      h.db.update('roles', h.roleId, { permissionJson: { denied: ['WebFetch'] } });
+      const ticketId = seedTicket(h);
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      runtime.queue.push({ structured: { state: 'working', summary: 'started', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+      expect(runtime.inputs[0]!.permission.deniedTools).toEqual(expect.arrayContaining(['WebFetch', 'ScheduleWakeup', 'CronCreate', 'CronList', 'CronDelete']));
+    });
+
+    it('leaves the weaver\'s turn alone', async () => {
+      runtime.workerDeniedTools = ['ScheduleWakeup', 'CronCreate', 'CronList', 'CronDelete'];
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'hello' });
+      runtime.queue.push({ structured: { state: 'idle', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce();
+      expect(runtime.inputs[0]!.permission.deniedTools ?? []).not.toContain('ScheduleWakeup');
+    });
+  });
+
   it('carries the runtime’s live-input handle onto the active run, and clears it at finalize (VS-99)', async () => {
     runtime.streamingInput = true;
     runtime.delayMs = 30;
@@ -1766,6 +1787,30 @@ describe('dispatcher', () => {
     await dispatcher.tick();
     await dispatcher.drain();
     expect(h.db.all('SELECT * FROM runs')).toHaveLength(0);
+  });
+
+  it('starts a worker turn for its own scheduled wake only once the time passes (VS-317)', async () => {
+    const ticketId = seedTicket(h);
+    const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+    const scheduled = h.services.wake!.scheduleSelfWake(workerId, { reason: 'check the sweep', delayMs: 20 * 60_000 });
+
+    // The worker's turn has ended and twenty minutes have not passed.
+    await dispatcher.tick();
+    await dispatcher.drain();
+    expect(h.db.all('SELECT * FROM runs')).toHaveLength(0);
+
+    // Time passes: the scheduled wake is now due.
+    h.db.update('wakeups', scheduled.id, { notBefore: new Date(Date.now() - 1_000).toISOString() });
+    await dispatcher.tick();
+    await dispatcher.drain();
+    const runs = h.db.all<{ id: string; wakeupIds: string[] }>('SELECT * FROM runs');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.wakeupIds).toContain(scheduled.id);
+    // The wake was claimed by this run and its reason travelled with it.
+    const claimed = h.db.get<{ status: string; reason: string; runId: string | null }>('SELECT status, reason, run_id FROM wakeups WHERE id = ?', [scheduled.id])!;
+    expect(claimed.status).not.toBe('queued');
+    expect(claimed.runId).toBe(runs[0]!.id);
+    expect(claimed.reason).toBe('check the sweep');
   });
 
 });

@@ -54,7 +54,7 @@ State what you will do — the concrete commands, against which host or service,
   - `in_progress` — you are working now, or you will resume on your next wake.
   - `in_review` — there is a real work product and a real reviewer path. Assigning yourself and commenting "please review" is not a review path.
   - `blocked` — there are blockers, an open decision, or `{owner, action}` naming exactly who does what next.
-- **Only claim a monitor, watcher or follow-up exists after you scheduled one.** Describing one in a comment does not create it.
+- **Only claim a monitor, watcher or follow-up exists after you scheduled one.** Describing one in a comment does not create it. To check on something later — a long background job, a quota window — call `weave_schedule_wakeup({reason, delayMinutes})` (or an absolute `at`); it queues a wake for your own next turn. The runtime's own scheduling tools (`ScheduleWakeup`, cron) run inside the turn's process and die with it, so they never fire; never rely on them.
 - **Transition honestly.** The daemon runs the gates; a rejected transition is information, not an obstacle to route around.
 
 ## Communication rules

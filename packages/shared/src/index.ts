@@ -5,6 +5,7 @@ export * from './ui-status.js';
 export * from './config.js';
 export * from './report.js';
 export * from './tools.js';
+export * from './self-wake.js';
 export * from './usage.js';
 export * from './pricing.js';
 export * from './events.js';

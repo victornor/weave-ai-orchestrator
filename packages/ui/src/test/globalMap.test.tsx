@@ -49,7 +49,7 @@ function role(over: Partial<Role> = {}): Role {
 }
 
 function worker(over: Partial<WorkerListItem> = {}): WorkerListItem {
-  return { ...agent(over), interactiveSession: false, ...over };
+  return { ...agent(over), interactiveSession: false, scheduledWake: null, ...over };
 }
 
 function ready(over: Partial<typeof state> = {}): void {

@@ -249,6 +249,15 @@ export const UPGRADE_FAILURE_REASONS = ['build_failed', 'backup_failed', 'switch
 export type UpgradeFailureReason = (typeof UPGRADE_FAILURE_REASONS)[number];
 
 /**
+ * VS-316: whether this upgrade migrated the host's service-management unit from the pre-rename name to
+ * the current one. `null` (not a member of this list — the column itself is nullable) means migration
+ * was not applicable. Independent of the upgrade's own terminal state: a `fallback` can sit on an
+ * otherwise `completed` upgrade.
+ */
+export const UPGRADE_MIGRATION_OUTCOMES = ['migrated', 'fallback', 'prepare_failed'] as const;
+export type UpgradeMigrationOutcome = (typeof UPGRADE_MIGRATION_OUTCOMES)[number];
+
+/**
  * A job is one long-running workspace-setup operation, observable while it runs: an ordered list of
  * sub-steps with their own timings plus a bounded tail of the output its commands produced. Adding a
  * project is the only kind so far — minutes of cloning, adopting OpenSpec and seeding knowledge that

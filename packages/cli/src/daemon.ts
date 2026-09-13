@@ -96,7 +96,12 @@ export async function stopDaemon(timeoutMs = SHUTDOWN_KILL_GRACE_MS): Promise<{ 
     if (!isRunning(pid)) break;
     await new Promise((r) => setTimeout(r, 150));
   }
-  if (isRunning(pid)) process.kill(pid!, 'SIGKILL');
+  if (isRunning(pid)) {
+    process.kill(pid!, 'SIGKILL');
+    // VS-316: SIGKILL is not synchronous — give the kernel a moment to reap it before trusting it worked.
+    for (let i = 0; i < 10 && isRunning(pid); i++) await new Promise((r) => setTimeout(r, 50));
+    if (isRunning(pid)) throw new Error(`pid ${pid} is still running after SIGKILL`);
+  }
   rmSync(pidFile(), { force: true });
   return { stopped: true, pid };
 }

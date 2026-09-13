@@ -157,6 +157,7 @@ export function buildAnnouncement(row: Upgrade, facts: AnnouncementFacts): Upgra
     ticketsOmitted,
     undelivered: { count: undeliveredIds.length, identifiers: undeliveredIds.slice(0, ANNOUNCED_UNDELIVERED) },
     migrations: upgradeMigrations(row, facts.migrationsIn, facts.migrationsApplied),
+    migrationOutcome: row.migrationOutcome,
     health: { ok: facts.checks.every((c) => c.ok), checks: facts.checks },
     failure: outcome === 'completed' ? null : { reason: row.reason, message: row.message },
   };
@@ -200,6 +201,17 @@ const omittedClause = (a: UpgradeAnnouncement): string => {
 };
 
 /**
+ * VS-316: names a service-unit rename that didn't happen — `migrated` and `null` (not applicable) need
+ * no separate mention, since the ordinary completed-upgrade line already covers a fully successful
+ * upgrade, and this is the only place a `fallback`/`prepare_failed` migration reaches a human.
+ */
+const migrationClause = (a: UpgradeAnnouncement): string => {
+  if (a.migrationOutcome === 'fallback') return ' The service-unit rename to the current name did not take; still running under the old one.';
+  if (a.migrationOutcome === 'prepare_failed') return ' Could not even prepare the service-unit rename this time; still running under the old name.';
+  return '';
+};
+
+/**
  * One line, posted on the primary chat thread. It says what is running and when it came back, and it
  * never claims the system is back up when a check says otherwise — that claim is the whole point of it.
  */
@@ -210,7 +222,7 @@ export function announcementText(a: UpgradeAnnouncement): string {
     const base = a.health.ok
       ? `${head}, back up at ${at}.`
       : `${head} and restarted at ${at}, but not fully back up: ${failingChecks(a)} failed.`;
-    return `${base}${omittedClause(a)}${undeliveredClause(a)}`;
+    return `${base}${omittedClause(a)}${undeliveredClause(a)}${migrationClause(a)}`;
   }
   if (a.outcome === 'recorded_completed') {
     const head = `The upgrade to ${releaseLabel(a.to)} is recorded completed, but this daemon is running ${releaseLabel(a.running)}`;

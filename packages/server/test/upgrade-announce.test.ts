@@ -494,6 +494,7 @@ describe('the announcement line', () => {
     running: { path: TO, sha: 'b'.repeat(40), version: '1.1.0' },
     startedAt: null, finishedAt: null, backUpAt: '2026-02-02T10:30:00.000Z',
     runs: { drained: 0, interrupted: 0, resumed: 0 }, tickets: [], ticketsOmitted: 0, undelivered: { count: 0, identifiers: [] }, migrations: [],
+    migrationOutcome: null,
     health: { ok: true, checks: [] }, failure: null,
   };
 
@@ -544,6 +545,15 @@ describe('the announcement line', () => {
     expect(announcementText({ ...base, ticketsOmitted: 1 }))
       .toMatch(/ 1 more landed ticket not listed\.$/);
     expect(announcementText(base)).not.toMatch(/not listed/);
+  });
+
+  it('names a service-unit rename that fell back or never prepared, and says nothing when it migrated or was not applicable (VS-316)', () => {
+    expect(announcementText({ ...base, migrationOutcome: 'fallback' }))
+      .toMatch(/rename to the current name did not take; still running under the old one\.$/);
+    expect(announcementText({ ...base, migrationOutcome: 'prepare_failed' }))
+      .toMatch(/Could not even prepare the service-unit rename this time; still running under the old name\.$/);
+    expect(announcementText({ ...base, migrationOutcome: 'migrated' })).not.toMatch(/rename/);
+    expect(announcementText({ ...base, migrationOutcome: null })).not.toMatch(/rename/);
   });
 
   it('never reads a completed record as a successful upgrade when another release is serving', () => {

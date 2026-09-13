@@ -174,7 +174,7 @@ export interface Incident {
  * wait never expired; `announcedAt` is the once-only marker of VS-76's announcement, set by the daemon
  * that reports the finished upgrade to the workspace.
  */
-export interface Upgrade { id: string; state: E.UpgradeState; source: string; ref: string; runTest: number; targetSha: string | null; fromRelease: string | null; toRelease: string | null; toSha: string | null; requestedBy: string; requestedAt: string; startedAt: string | null; finishedAt: string | null; reason: E.UpgradeFailureReason | null; message: string | null; log: string[]; backups: string[]; cameBackVersion: string | null; drainedRuns: number | null; interruptedRuns: number | null; announcedAt: string | null }
+export interface Upgrade { id: string; state: E.UpgradeState; source: string; ref: string; runTest: number; targetSha: string | null; fromRelease: string | null; toRelease: string | null; toSha: string | null; requestedBy: string; requestedAt: string; startedAt: string | null; finishedAt: string | null; reason: E.UpgradeFailureReason | null; message: string | null; log: string[]; backups: string[]; cameBackVersion: string | null; drainedRuns: number | null; interruptedRuns: number | null; announcedAt: string | null; migrationOutcome: E.UpgradeMigrationOutcome | null }
 
 /** One health check the upgrade announcement makes before it claims the daemon is back up (VS-76). */
 export interface UpgradeHealthCheck { name: 'database' | 'supervisor' | 'runtimes'; ok: boolean; detail: string }
@@ -225,6 +225,12 @@ export interface UpgradeAnnouncement {
   undelivered: { count: number; identifiers: string[] };
   /** Migration files applied when this process opened the daemon and workspace databases. */
   migrations: string[];
+  /**
+   * VS-316: whether this upgrade also migrated the host's service-management unit from the pre-rename
+   * name to the current one. Not to be confused with `migrations` above (database schema files) — this
+   * is about the systemd unit or launchd agent that runs the daemon itself. `null` when not applicable.
+   */
+  migrationOutcome: E.UpgradeMigrationOutcome | null;
   health: { ok: boolean; checks: UpgradeHealthCheck[] };
   failure: { reason: E.UpgradeFailureReason | null; message: string | null } | null;
 }

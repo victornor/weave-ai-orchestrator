@@ -12,7 +12,6 @@
  */
 import { execFileSync, spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { newId, nowIso, type Db } from '@weave-ai/db';
@@ -23,7 +22,8 @@ import {
 import { getLogger, recordActivity } from '@weave-ai/core';
 import {
   buildRelease, cliBinIn, commitSubjectsInRange, currentLink, inOwnScope, migrationsIn, planRestart,
-  pruneReleases, readLink, releaseSha, resolveWorkspaceStateDir, switchRelease, SERVICE_NAME,
+  pruneReleases, readLink, releaseSha, resolveInstalledLaunchdAgent, resolveInstalledUnit,
+  resolveWorkspaceStateDir, switchRelease,
 } from '@weave-ai/release';
 import type { WorkspaceRuntime } from './types.js';
 import type { UpdateChecker } from './release-info.js';
@@ -85,6 +85,12 @@ export interface UpgradeDeps {
   prune?: (keep: number) => string[];
   spawnRunner?: (o: { upgradeId: string; release: string }) => void;
   now?: () => number;
+  /**
+   * VS-316, Decision 6: arms the still-serving-process watchdog right after `spawnRunner` succeeds.
+   * Defaults to a real, `unref`'d `setTimeout` for `RESTART_VERIFY_MS`; tests replace it to invoke
+   * `check` synchronously instead of waiting 10 real minutes.
+   */
+  armRestartWatchdog?: (o: { upgradeId: string; check: () => void }) => void;
 }
 
 const uniqueWorkspaces = (workspaces: Map<string, WorkspaceRuntime>): WorkspaceRuntime[] => [...new Set(workspaces.values())];
@@ -97,6 +103,7 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
   const switchTo = deps.switchTo ?? ((path: string) => switchRelease(path));
   const prune = deps.prune ?? ((keep: number) => pruneReleases(keep));
   const spawnRunner = deps.spawnRunner ?? ((o) => launchRunner(o.release, o.upgradeId, deps.configDir));
+  const armRestartWatchdog = deps.armRestartWatchdog ?? ((o) => { const t = setTimeout(o.check, RESTART_VERIFY_MS); t.unref?.(); });
 
   let pipeline: Promise<void> = Promise.resolve();
 
@@ -131,6 +138,35 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
   function holdDispatch(): Promise<unknown> {
     const stops = uniqueWorkspaces(deps.workspaces).map((w) => w.services.dispatcher.stop().catch(() => undefined));
     return Promise.all(stops);
+  }
+
+  /**
+   * VS-316, Decision 6. `advance()`'s success path holds dispatch on the assumption that the restart
+   * will replace this process, so a new one dispatches on its own boot — an assumption this exact
+   * ticket's defects broke, leaving dispatch held here forever while the restart silently never
+   * happened (1h40m of it, across three workspaces, in the incident this fixes). If this process is
+   * still executing this callback once `RESTART_VERIFY_MS` has passed, it was never replaced: fail the
+   * upgrade and resume dispatch itself, rather than wait on a replacement that is not coming.
+   *
+   * Guarded exactly like `recordVerdict` (`packages/cli/src/upgrade-runner.ts`) so a verdict that
+   * lands from the runner (or a rollback) at nearly the same instant and this watchdog can never both
+   * apply — only the guarded write's own success decides whether to resume dispatch here.
+   */
+  function armStillServingWatchdog(id: string): void {
+    armRestartWatchdog({
+      upgradeId: id,
+      check: () => {
+        const message = `this process is still serving ${deps.releaseRoot} ${Math.round(RESTART_VERIFY_MS / 1000)}s after the restart was requested; it was apparently never replaced`;
+        const result = db.run(
+          "UPDATE upgrades SET state = 'failed', finished_at = ?, reason = 'restart_unverified', message = ? WHERE id = ? AND state = 'restarting'",
+          [nowIso(), message, id],
+        );
+        if (result.changes === 1) {
+          log.warn({ upgradeId: id }, 'restart never replaced this process; resuming dispatch here');
+          resumeDispatch();
+        }
+      },
+    });
   }
 
   /** The `undrain` rule: resume everywhere except a workspace that was paused in its own right. */
@@ -245,6 +281,9 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
     set(id, { state: 'restarting', toRelease: built.path, toSha: releaseSha(built.path) ?? built.sha });
     try {
       spawnRunner({ upgradeId: id, release: built.path });
+      // VS-316: dispatch stays held here on the assumption that this process is about to be replaced.
+      // If it never is, this is the backstop that notices and resumes it — see armStillServingWatchdog.
+      armStillServingWatchdog(id);
     } catch (e) {
       // The runner never started, so nothing will restart or roll back: undo the swing ourselves.
       if (wasCurrent) { try { switchTo(wasCurrent); } catch { /* leave it to the human */ } }
@@ -520,19 +559,6 @@ function onPath(bin: string): boolean {
   try { execFileSync(bin, ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
 }
 
-/** VS-260: the installed unit may still be the pre-rename `agent-conductor.service` until a human reinstalls it. */
-function serviceUnitPath(): string {
-  const dir = join(process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config'), 'systemd', 'user');
-  const current = join(dir, SERVICE_NAME);
-  if (existsSync(current)) return current;
-  const legacy = join(dir, 'agent-conductor.service');
-  return existsSync(legacy) ? legacy : current;
-}
-
-function launchdPlistPath(): string {
-  return join(homedir(), 'Library', 'LaunchAgents', 'com.weave-ai.daemon.plist');
-}
-
 /**
  * Start the restart runner: the **new** release's CLI, so a release that changed the runner ships its
  * own. Detached and in its own session; under systemd it also needs its own transient scope, because
@@ -541,8 +567,8 @@ function launchdPlistPath(): string {
 export function launchRunner(release: string, upgradeId: string, configDir: string): void {
   const plan = planRestart({
     platform: process.platform,
-    unitInstalled: existsSync(serviceUnitPath()),
-    launchdInstalled: existsSync(launchdPlistPath()),
+    unit: resolveInstalledUnit(),
+    launchdAgent: resolveInstalledLaunchdAgent(),
     systemdRunAvailable: onPath('systemd-run'),
     uid: process.getuid?.(),
   });

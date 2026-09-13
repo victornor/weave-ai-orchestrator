@@ -258,12 +258,70 @@ export function cliBinIn(release: string): string { return join(release, 'packag
 export const SERVICE_NAME = 'weave-ai.service';
 export const LAUNCHD_LABEL = 'com.weave-ai.daemon';
 
+export interface InstalledUnit {
+  /** The unit's real name on the host, e.g. `weave-ai.service` or the pre-rename `agent-conductor.service`. */
+  name: string;
+  path: string;
+  /** True when this is the pre-rename name, not `SERVICE_NAME`. */
+  legacy: boolean;
+}
+
+/** VS-316: the pre-rename systemd unit name, before the `weave-ai.service` name `SERVICE_NAME` holds. */
+const LEGACY_SERVICE_NAME = 'agent-conductor.service';
+/** VS-316: the pre-rename launchd label, inferred by the same naming convention `resolveInstallPath` already applies to paths — no shipped macOS install has confirmed this literal, so it is best-effort (see design.md, Decision 1). */
+const LEGACY_LAUNCHD_LABEL = 'com.agent-conductor.daemon';
+
+function systemdUserUnitDir(): string {
+  return join(process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config'), 'systemd', 'user');
+}
+
+/**
+ * What is actually installed on this host, by name — the pre-rename name if it exists, else the
+ * current `SERVICE_NAME`, else nothing. Never assumes the current name is what a real host has
+ * (VS-316): the two used to be checked independently, one with a legacy fallback and one without,
+ * which is exactly how the restart runner ended up targeting a unit that did not exist.
+ *
+ * Legacy wins when **both** exist (PR #265 review): an interrupted migration can leave the new unit's
+ * file on disk without it ever having become the one actually running — preferring it just because the
+ * file exists would make the next upgrade `systemctl restart` a unit nothing replaced, recreating the
+ * exact two-daemons shape this ticket removes. Migration is safe to re-attempt from the legacy side
+ * (prepare overwrites the stale file); it is not safe to assume the new side already won.
+ */
+export function resolveInstalledUnit(): InstalledUnit | null {
+  const dir = systemdUserUnitDir();
+  const legacy = join(dir, LEGACY_SERVICE_NAME);
+  if (existsSync(legacy)) return { name: LEGACY_SERVICE_NAME, path: legacy, legacy: true };
+  const current = join(dir, SERVICE_NAME);
+  return existsSync(current) ? { name: SERVICE_NAME, path: current, legacy: false } : null;
+}
+
+export interface InstalledLaunchdAgent {
+  label: string;
+  path: string;
+  legacy: boolean;
+}
+
+function launchdAgentPath(label: string): string {
+  return join(homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
+}
+
+/**
+ * The launchd counterpart of `resolveInstalledUnit()`. Best-effort on the legacy label; see its note
+ * above. Also prefers the legacy label when both exist, for the same reason.
+ */
+export function resolveInstalledLaunchdAgent(): InstalledLaunchdAgent | null {
+  const legacy = launchdAgentPath(LEGACY_LAUNCHD_LABEL);
+  if (existsSync(legacy)) return { label: LEGACY_LAUNCHD_LABEL, path: legacy, legacy: true };
+  const current = launchdAgentPath(LAUNCHD_LABEL);
+  return existsSync(current) ? { label: LAUNCHD_LABEL, path: current, legacy: false } : null;
+}
+
 export interface RestartEnvironment {
   platform: NodeJS.Platform;
-  /** A systemd user unit exists for the daemon. */
-  unitInstalled: boolean;
-  /** A launchd agent plist exists for the daemon. */
-  launchdInstalled: boolean;
+  /** The systemd user unit actually installed, by name — `null` when none is. */
+  unit: InstalledUnit | null;
+  /** The launchd agent actually installed, by label — `null` when none is. */
+  launchdAgent: InstalledLaunchdAgent | null;
   /** `systemd-run` is on PATH, so a helper can be moved into its own transient scope. */
   systemdRunAvailable: boolean;
   /** The uid launchd addresses the agent by; only read on darwin. */
@@ -290,16 +348,16 @@ export interface RestartPlan {
  * environment it is handed and spawns nothing.
  */
 export function planRestart(env: RestartEnvironment): RestartPlan {
-  if (env.platform === 'linux' && env.unitInstalled) {
+  if (env.platform === 'linux' && env.unit) {
     return {
-      restart: { cmd: 'systemctl', args: ['--user', 'restart', SERVICE_NAME] },
+      restart: { cmd: 'systemctl', args: ['--user', 'restart', env.unit.name] },
       launch: env.systemdRunAvailable ? 'systemd-run' : 'detached',
       runnerSurvives: env.systemdRunAvailable,
-      how: `systemctl --user restart ${SERVICE_NAME}`,
+      how: `systemctl --user restart ${env.unit.name}`,
     };
   }
-  if (env.platform === 'darwin' && env.launchdInstalled) {
-    const target = `gui/${env.uid ?? 0}/${LAUNCHD_LABEL}`;
+  if (env.platform === 'darwin' && env.launchdAgent) {
+    const target = `gui/${env.uid ?? 0}/${env.launchdAgent.label}`;
     return {
       restart: { cmd: 'launchctl', args: ['kickstart', '-k', target] },
       launch: 'detached',

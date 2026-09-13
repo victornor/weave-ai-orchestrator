@@ -4,6 +4,7 @@ import type { RunEvent } from '@weave-ai/shared';
 import { groupConsecutiveTools, reportUiStatus, runEventsToTranscript } from '../lib/transcript';
 import type { TranscriptBlock } from '../lib/transcript';
 import { Transcript } from '../components/Transcript';
+import { UnifiedHunk } from '../components/DiffHunks';
 import { Markdown } from '../components/Markdown';
 import { markdownToHtml } from '../lib/markdown';
 import { qrMatrix } from '../lib/qr';
@@ -681,10 +682,10 @@ describe('Transcript', () => {
     });
 
     // jsdom does not evaluate CSS container queries, so which of these two DOM trees is actually
-    // visible cannot be asserted here — that is a visual check, noted as unverified this turn
-    // (VS-324 tasks.md 6.4). What this test pins is the mechanism itself: both layouts are mounted,
-    // gated by opposing `@min-[32rem]:` container-query classes rather than a JS-measured width, so
-    // a real browser's layout — not a script — decides which one shows.
+    // visible cannot be asserted here — that is a visual check. What this test pins is the mechanism
+    // itself: both layouts are mounted, gated by opposing `@min-[48rem]:` container-query classes at
+    // the width chosen for two readable code columns (VS-344) rather than a JS-measured width, so a
+    // real browser's layout — not a script — decides which one shows.
     it('renders both the split and unified diff layouts, gated by opposing container-query classes', () => {
       render(
         <Transcript
@@ -693,12 +694,80 @@ describe('Transcript', () => {
           ]}
         />,
       );
-      const splitWrapper = document.querySelector('.hidden.\\@min-\\[32rem\\]\\:block');
-      const unifiedWrapper = document.querySelector('.\\@min-\\[32rem\\]\\:hidden');
+      const splitWrapper = document.querySelector('.hidden.\\@min-\\[48rem\\]\\:block');
+      const unifiedWrapper = document.querySelector('.\\@min-\\[48rem\\]\\:hidden');
       expect(splitWrapper).not.toBeNull();
       expect(unifiedWrapper).not.toBeNull();
       expect(splitWrapper?.querySelector('.grid-cols-2')).not.toBeNull();
       expect(unifiedWrapper?.querySelector('.grid-cols-2')).toBeNull();
+      // The too-early 32rem threshold the ticket reports is gone.
+      expect(document.querySelector('.\\@min-\\[32rem\\]\\:block')).toBeNull();
+    });
+
+    // VS-344: the overlap was a split column whose `whitespace-pre` line painted over the divider.
+    // Each column now shrinks (min-w-0) and its code span wraps, so a long line stays inside it.
+    it('keeps each split column inside itself and wraps its long lines', () => {
+      const { container } = render(
+        <Transcript
+          events={[
+            ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/i.ts', old_string: 'old', new_string: 'new' } } }),
+          ]}
+        />,
+      );
+      const grid = container.querySelector('.grid-cols-2');
+      expect(grid).not.toBeNull();
+      const columns = Array.from(grid!.children) as HTMLElement[];
+      expect(columns).toHaveLength(2);
+      for (const col of columns) {
+        expect(col.className).toContain('min-w-0');
+        expect(col.className).toContain('overflow-hidden');
+      }
+      const codeSpans = grid!.querySelectorAll('div.flex > span:last-child');
+      expect(codeSpans.length).toBeGreaterThan(0);
+      for (const span of codeSpans) {
+        expect(span.className).toContain('min-w-0');
+        expect(span.className).toContain('flex-1');
+        expect(span.className).toContain('whitespace-pre-wrap');
+        expect(span.className).toContain('break-words');
+      }
+    });
+
+    // A line with no break opportunity is the case wrapping has to handle, not the easy one. The
+    // grid stays `grid-cols-2` (Tailwind's `minmax(0, 1fr)` tracks, which cannot be widened by
+    // content) and both columns carry `min-w-0`, which is what lets the wrapping code span win over
+    // the content's intrinsic width in a real browser. jsdom cannot measure the result.
+    it('does not let a very long single-token line widen the split grid', () => {
+      const { container } = render(
+        <Transcript
+          events={[
+            ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/i.ts', old_string: 'a'.repeat(400), new_string: 'b'.repeat(400) } } }),
+          ]}
+        />,
+      );
+      const grid = container.querySelector('.grid-cols-2');
+      expect(grid).not.toBeNull();
+      for (const col of Array.from(grid!.children) as HTMLElement[]) {
+        expect(col.className).toContain('min-w-0');
+      }
+    });
+
+    it('wraps a unified hunk by default and keeps horizontal scrolling when asked not to', () => {
+      const h = {
+        oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, header: '@@ -1 +1 @@',
+        lines: [{ kind: 'context' as const, oldLine: 1, newLine: 1, text: 'keep' }],
+      };
+      const hl = (text: string): string => text;
+      const { container, rerender } = render(<UnifiedHunk hunk={h} highlight={hl} />);
+      const row = container.querySelector('div.flex')!;
+      expect(row.className).toContain('whitespace-pre-wrap');
+      expect(row.className).toContain('break-words');
+      expect(row.querySelector('span:last-child')!.className).toContain('min-w-0');
+
+      rerender(<UnifiedHunk hunk={h} highlight={hl} wrap={false} />);
+      const scrollingRow = container.querySelector('div.flex')!;
+      expect(scrollingRow.className).toContain('whitespace-pre');
+      expect(scrollingRow.className).not.toContain('whitespace-pre-wrap');
+      expect(scrollingRow.querySelector('span:last-child')!.className).not.toContain('flex-1');
     });
   });
 });

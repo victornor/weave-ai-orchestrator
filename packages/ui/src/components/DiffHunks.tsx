@@ -25,14 +25,20 @@ export function Code({ text, highlight }: { text: string; highlight: Highlighter
   return <span dangerouslySetInnerHTML={html} />;
 }
 
-export function UnifiedHunk({ hunk, highlight }: { hunk: DiffHunk; highlight: Highlighter }): React.ReactElement {
+/**
+ * Unified by default, with `wrap` making each row wrap inside the hunk rather than overflow it
+ * (VS-344). A transcript cell wraps so a long line cannot spill out of the cell; the pull-request
+ * diff view passes `wrap={false}` and keeps its own horizontal scroll, because a unified line has
+ * the whole container's width and scrolling it is a legitimate reading choice there.
+ */
+export function UnifiedHunk({ hunk, highlight, wrap = true }: { hunk: DiffHunk; highlight: Highlighter; wrap?: boolean }): React.ReactElement {
   return (
     <div>
       {hunk.lines.map((line, i) => (
-        <div key={i} className={cx('flex whitespace-pre', LINE_BG[line.kind])}>
+        <div key={i} className={cx('flex', wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre', LINE_BG[line.kind])}>
           <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{line.oldLine ?? ''}</span>
           <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{line.newLine ?? ''}</span>
-          <span className="px-1.5">
+          <span className={cx('px-1.5', wrap && 'min-w-0 flex-1')}>
             {line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '}
             <Code text={line.text} highlight={highlight} />
           </span>
@@ -42,28 +48,33 @@ export function UnifiedHunk({ hunk, highlight }: { hunk: DiffHunk; highlight: Hi
   );
 }
 
+/**
+ * Side by side, each column wrapping its own long lines (VS-344). `min-w-0` lets a column shrink
+ * below its content and `overflow-hidden` is the belt to the wrapping braces; the code span takes
+ * the free width so a wrapped continuation hangs under the code, not under the line-number gutter.
+ * Not a paired diff the way GitHub's split view aligns a removed line with its replacement — each
+ * side is simply every line it has, in order. Good enough to read side by side; exact pairing is a
+ * refinement, not a correctness requirement of this view.
+ */
 export function SplitHunk({ hunk, highlight }: { hunk: DiffHunk; highlight: Highlighter }): React.ReactElement {
-  // Not a paired diff the way GitHub's split view aligns a removed line with its replacement — each
-  // side is simply every line it has, in order. Good enough to read side by side; exact pairing is a
-  // refinement, not a correctness requirement of this view.
   const left = hunk.lines.filter((l) => l.kind !== 'add');
   const right = hunk.lines.filter((l) => l.kind !== 'remove');
   const rows = Math.max(left.length, right.length);
   return (
     <div className="grid grid-cols-2 divide-x divide-line-1">
-      <div>
+      <div className="min-w-0 overflow-hidden">
         {Array.from({ length: rows }, (_, i) => left[i]).map((line, i) => (
-          <div key={i} className={cx('flex whitespace-pre', line ? LINE_BG[line.kind] : '')}>
+          <div key={i} className={cx('flex', line ? LINE_BG[line.kind] : '')}>
             <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{line?.oldLine ?? ''}</span>
-            <span className="px-1.5">{line ? <><span>{line.kind === 'remove' ? '-' : ' '}</span><Code text={line.text} highlight={highlight} /></> : null}</span>
+            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words px-1.5">{line ? <><span>{line.kind === 'remove' ? '-' : ' '}</span><Code text={line.text} highlight={highlight} /></> : null}</span>
           </div>
         ))}
       </div>
-      <div>
+      <div className="min-w-0 overflow-hidden">
         {Array.from({ length: rows }, (_, i) => right[i]).map((line, i) => (
-          <div key={i} className={cx('flex whitespace-pre', line ? LINE_BG[line.kind] : '')}>
+          <div key={i} className={cx('flex', line ? LINE_BG[line.kind] : '')}>
             <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{line?.newLine ?? ''}</span>
-            <span className="px-1.5">{line ? <><span>{line.kind === 'add' ? '+' : ' '}</span><Code text={line.text} highlight={highlight} /></> : null}</span>
+            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words px-1.5">{line ? <><span>{line.kind === 'add' ? '+' : ' '}</span><Code text={line.text} highlight={highlight} /></> : null}</span>
           </div>
         ))}
       </div>

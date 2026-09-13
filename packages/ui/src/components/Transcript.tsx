@@ -276,20 +276,30 @@ function EditPayloadBody({ id, path, payload }: { id: string; path: string; payl
  * written file does not flood a cell now that both render expanded by default (VS-324 review). */
 const CONTENT_WINDOW = 40;
 
-/** Side by side when there is room to read two columns, unified when there is not — decided per
- * rendered instance by a CSS container query, since a transcript cell's width varies continuously
- * by drag rather than by viewport breakpoint, and cannot be measured in the test harness (VS-324
- * design.md; see also `workspace-navigation/live-floor`'s own jsdom-geometry landmine). */
+/** Side by side only when two code columns actually read, unified otherwise — decided per rendered
+ * instance by a CSS container query, since a transcript cell's width varies continuously by drag
+ * rather than by viewport breakpoint, and cannot be measured in the test harness (VS-324 design.md;
+ * see also `workspace-navigation/live-floor`'s own jsdom-geometry landmine).
+ *
+ * `48rem` (VS-344): the diff renders at `text-nano` (10px JetBrains Mono, 6px per character), so a
+ * readable ~48-character column is ~288px; with the 2.5rem line-number gutter and padding each side
+ * spends ~52px, and two columns need ~680px. 48rem leaves ~332px of code per column (~55
+ * characters). 32rem gave ~204px (~34 characters) and switched split on in cells too narrow to read
+ * it. A default half-cell at either breakpoint (and a full-width `sm` cell) stays below 48rem and is
+ * unified; only a cell widened towards the `xl` grid's full width crosses into split.
+ *
+ * The `@min-[48rem]` classes are written literally, not composed from the comment above: Tailwind's
+ * scanner reads source text, so a generated class would never be emitted. */
 function EditHunk({ hunk, highlight }: { hunk: DiffHunk; highlight: Highlighter }): React.ReactElement {
   const [shown, setShown] = useState(() => Math.min(hunk.lines.length, CONTENT_WINDOW));
   const windowed = shown >= hunk.lines.length ? hunk : { ...hunk, lines: hunk.lines.slice(0, shown) };
   return (
-    <div className="ac-mono overflow-x-auto text-nano">
+    <div className="ac-mono text-nano">
       <div className="@container">
-        <div className="hidden @min-[32rem]:block">
+        <div className="hidden @min-[48rem]:block">
           <SplitHunk hunk={windowed} highlight={highlight} />
         </div>
-        <div className="@min-[32rem]:hidden">
+        <div className="@min-[48rem]:hidden">
           <UnifiedHunk hunk={windowed} highlight={highlight} />
         </div>
       </div>

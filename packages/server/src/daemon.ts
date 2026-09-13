@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 import { releaseVersion } from '@weave-ai/release';
 import { createAdaptorServer } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
-import { openDb } from '@weave-ai/db';
+import { nowIso, openDb } from '@weave-ai/db';
 import type { Db } from '@weave-ai/db';
 import {
   createRegistries, createCore, createAuthService, createIncidentsService, getLogger, initLogger, workspaceLoader,
@@ -27,6 +27,7 @@ import { OcError, SHUTDOWN_CANCEL_GRACE_MS, SHUTDOWN_DRAIN_GRACE_MS, type Daemon
 import { createApp, type WorkspaceAdmin } from './app.js';
 import { createUpdateChecker, runningReleaseRoot } from './release-info.js';
 import { createUpgradeService } from './upgrade.js';
+import { announceRestart, markBooted, observeBoot, recordShutdown, recordStartFailure } from './restart-notice.js';
 import { ChannelManager } from './channels.js';
 import { WebhookDispatcher } from './webhooks.js';
 import { PushDispatcher } from './pushDispatcher.js';
@@ -100,6 +101,11 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   if (pushKeys) daemonCfg.push.vapidPublicKey = pushKeys.publicKey;
 
   const daemonDb = openDb(join(configDir, 'daemon.sqlite'));
+  const releaseRoot = runningReleaseRoot();
+  // VS-339: read what the durable lifecycle says about the process this one replaced, before writing
+  // anything. `markBooted` happens once the daemon is actually serving, so a failed attempt leaves the
+  // previous boot record in place and is reported by the next successful boot.
+  const bootObservation = observeBoot(daemonDb, { now: nowIso(), release: releaseRoot, pid: process.pid });
   const auth = createAuthService(daemonDb, daemonCfg);
   const registries = createRegistries();
   const hooks: Array<{ events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }> = [];
@@ -116,7 +122,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   let onOperatorConfigured: (() => void) | null = null;
   const updates = createUpdateChecker({ daemon: daemonCfg, version: VERSION });
   const upgrades = createUpgradeService({
-    db: daemonDb, daemon: daemonCfg, configDir, workspaces, updates, version: VERSION, releaseRoot: runningReleaseRoot(),
+    db: daemonDb, daemon: daemonCfg, configDir, workspaces, updates, version: VERSION, releaseRoot,
     runtimes: () => [...registries.runtimes.keys()],
   });
   const incidents = createIncidentsService(daemonDb);
@@ -157,7 +163,15 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   };
 
   if (publicListenerAllowed(daemonCfg, auth, host)) {
-    await startPublic();
+    try {
+      await startPublic();
+    } catch (e) {
+      // VS-339: a start that cannot bind — the 2026-09-13 `EADDRNOTAVAIL` — is recorded so the next
+      // successful boot can report it. The error still fails this boot.
+      try { recordStartFailure(daemonDb, e instanceof Error ? e.message : String(e), nowIso()); }
+      catch (re) { log.warn({ err: re }, 'could not record the failed start'); }
+      throw e;
+    }
   } else {
     // PLAN §4.4: never expose an unauthenticated daemon. Hold the public listener; the loopback
     // listener still serves `POST /api/auth/setup`, and `weave daemon set-password` on this host opens it.
@@ -166,10 +180,17 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     await writePidFile();
   }
 
-  // Now that the daemon is serving again, tell each workspace about an upgrade that has not been
-  // reported yet (VS-76). Not awaited: the announcement is a report about a daemon that is already up,
-  // and a channel that is slow to take it must not hold the boot.
+  // Now that the daemon is serving again, record this boot (which resets the failed-start count) and
+  // tell each workspace what happened. An upgrade has its own announcement (VS-76) and must not get a
+  // second notice; a boot on a different release than the previous boot's is an upgrade restart, so
+  // only a same-release restart gets the restart notice (VS-339). Not awaited: these are reports about
+  // a daemon that is already up, and a slow channel must not hold the boot.
+  markBooted(daemonDb, { now: bootObservation.bootAt, release: releaseRoot, pid: process.pid });
   void upgrades.announce().catch((e: unknown) => log.error({ err: e }, 'upgrade announcement failed'));
+  if (bootObservation.previousBootAt !== null && bootObservation.previousBootRelease === releaseRoot) {
+    void announceRestart({ db: daemonDb, workspaces, observation: bootObservation })
+      .catch((e: unknown) => log.error({ err: e }, 'restart announcement failed'));
+  }
 
   const drainGraceMs = opts.shutdownGraceMs?.drain ?? SHUTDOWN_DRAIN_GRACE_MS;
   const cancelGraceMs = opts.shutdownGraceMs?.cancel ?? SHUTDOWN_CANCEL_GRACE_MS;
@@ -179,6 +200,16 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
 
   async function shutdown(reason: string): Promise<void> {
     log.info({ reason }, 'daemon shutting down');
+    // VS-339: mark every workspace and record the deliberate shutdown before the first await. systemd
+    // signals the whole control group, so a runtime child can exit and its turn finalize before the
+    // async stop below ever reaches the dispatcher; the synchronous mark is what catches it. The
+    // durable record is what lets the next boot tell a deliberate stop from a crash.
+    for (const ws of new Set(workspaces.values())) {
+      try { ws.services.dispatcher.beginShutdown(reason); }
+      catch (e) { log.warn({ err: e, ws: ws.id }, 'could not mark the workspace as shutting down'); }
+    }
+    try { recordShutdown(daemonDb, reason, nowIso()); }
+    catch (e) { log.warn({ err: e }, 'could not record the shutdown'); }
     // VS-262: one workspace at a time, sequentially, would multiply the bounded drain below by the
     // number of registered workspaces — `SHUTDOWN_KILL_GRACE_MS` assumes the per-workspace bound is
     // the *total* bound. Every workspace's own sequence still runs in its documented order; nothing

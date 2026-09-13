@@ -525,6 +525,10 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   const now = nowIso();
   const runId = f.run.id;
   const r = f.result;
+  // VS-339: whether the daemon began shutting down or draining while this turn ran, captured once so
+  // the classification below cannot depend on a later state change. Set synchronously before any
+  // child process can be signalled, so a runtime that exits on that signal is caught here.
+  const shuttingDown = runState(ctx).shuttingDown;
 
   let status: Run['status'] = 'succeeded';
   let errorCode: string | null = null;
@@ -533,14 +537,28 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   else if (r?.timedOut) { status = 'timed_out'; errorCode = 'timeout'; errorFamily = 'tooling'; }
   else if (r?.error) { status = 'failed'; errorCode = r.error.code; errorFamily = r.error.family; }
   else if (r && r.exitCode !== 0 && r.exitCode !== null) { status = 'failed'; errorCode = `exit_${r.exitCode}`; errorFamily = 'unknown'; }
-  if (f.cancelled?.mode === 'interrupt' || (!f.failure && !r?.error && (r?.signal === 'SIGTERM' || r?.signal === 'SIGKILL' || r?.exitCode === 143 || r?.exitCode === 137))) {
-    // Daemon shutdown, an upgrade's drain timeout, a human interrupt (via /runs/:id/cancel), or a
-    // human's live message on a runtime that cannot take mid-turn input (VS-254): not the agent's
-    // failure. Boot recovery re-queues the wake and the session resumes where it stopped.
+  if (shuttingDown && (f.cancelled !== null || status !== 'succeeded')) {
+    // VS-339: a turn still active when the daemon began shutting down or draining was cut off by that
+    // shutdown, whatever its exit code or the error its runtime attached — claude's exit 143 and
+    // opencode's exit 1 both arrive as `unknown` failures, and the runtime-error branch above would
+    // otherwise win. A turn the shutdown cancelled is caught even if its child happened to exit 0; a
+    // turn that genuinely completed before the shutdown keeps its success. It is not the agent's
+    // failure, and its wake is re-queued below so the next daemon resumes the session.
+    status = 'interrupted';
+    errorCode = 'interrupted_by_shutdown';
+    errorFamily = 'tooling';
+  } else if (f.cancelled?.mode === 'interrupt' || (!f.failure && !r?.error && (r?.signal === 'SIGTERM' || r?.signal === 'SIGKILL' || r?.exitCode === 143 || r?.exitCode === 137))) {
+    // A human interrupt (via /runs/:id/cancel) or a human's live message on a runtime that cannot
+    // take mid-turn input (VS-254): not the agent's failure. (A daemon shutdown is handled above by
+    // the explicit mark, not by guessing from the child's exit.)
     status = 'interrupted';
     errorCode = f.cancelled?.cause === 'message' ? 'interrupted_by_message' : 'interrupted';
     errorFamily = 'tooling';
   } else if (f.cancelled) { status = 'cancelled'; errorCode = errorCode ?? 'cancelled'; errorFamily = errorFamily ?? 'tooling'; }
+
+  // VS-339: a shutdown cut is resumed by leaving its wakes queued and its worker active, as boot
+  // recovery does for a run orphaned by a hard kill.
+  const shutdownInterrupted = status === 'interrupted' && errorCode === 'interrupted_by_shutdown';
 
   const usage = r?.usage ?? null;
   const model = r?.model ?? f.run.model ?? null;
@@ -585,7 +603,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
       });
     }
 
-    const agentStatus = status === 'succeeded' ? 'active' : (errorFamily && RETRYABLE.includes(errorFamily)) || status === 'cancelled' ? 'active' : 'error';
+    const agentStatus = status === 'succeeded' || shutdownInterrupted ? 'active' : (errorFamily && RETRYABLE.includes(errorFamily)) || status === 'cancelled' ? 'active' : 'error';
     ctx.db.update('agents', f.agent.id, {
       status: agentStatus,
       turnEpoch: f.run.turnEpoch,
@@ -603,7 +621,9 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
     // so the same recovery path resumes this agent too once the runtime is confirmed healthy again.
     // A wake preserved this way is put back to `queued` rather than left `claimed`, so the dispatcher
     // (which only claims `queued` wakes) can pick it up the moment this agent is active again.
-    const preserveWake = errorFamily === 'auth' && !authFailuresExhausted;
+    // VS-339: a shutdown cut is preserved the same way — its wakes stay queued so the next daemon
+    // resumes the turn with no human card.
+    const preserveWake = (errorFamily === 'auth' && !authFailuresExhausted) || shutdownInterrupted;
     for (const w of f.wakes) {
       if (preserveWake) {
         ctx.db.update('wakeups', w.id, { status: 'queued', runId: null, claimedAt: null });

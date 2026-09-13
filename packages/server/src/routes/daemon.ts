@@ -190,6 +190,10 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
     const { timeoutSec } = await body(c, z.object({ timeoutSec: z.number().int().min(0).max(3600).default(180) }));
     const all = uniqueWorkspaces(deps);
     await Promise.all(all.map(async (w) => {
+      // VS-339: mark the drain before stopping or cancelling, so a turn this drain cuts off is
+      // classified `interrupted_by_shutdown` and queued to resume rather than parked as a failure.
+      // `dispatcher.start()` (reachable through `/daemon/undrain`) clears the mark.
+      w.services.dispatcher.beginShutdown('drain');
       const drained = await w.services.dispatcher.stop(timeoutSec * 1000).catch(() => false);
       if (!drained) await cancelRunningRuns(w).catch(() => undefined);
     }));

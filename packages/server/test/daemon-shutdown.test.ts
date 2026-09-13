@@ -3,6 +3,8 @@
  * that it runs concurrently across workspaces rather than multiplying its bound by workspace count.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -10,8 +12,9 @@ import { FakeRuntime } from '@weave-ai/runtime-sdk';
 import type { TurnHandle, TurnInput, TurnSink } from '@weave-ai/runtime-sdk';
 import type { Run } from '@weave-ai/shared';
 import { workspaceLoader, initLogger } from '@weave-ai/core';
-import { openDb } from '@weave-ai/db';
+import { nowIso, openDb } from '@weave-ai/db';
 import { startDaemon, type DaemonHandle } from '../src/daemon.js';
+import { observeBoot } from '../src/restart-notice.js';
 
 initLogger(process.env.AC_LOG_LEVEL ?? 'silent');
 
@@ -94,8 +97,57 @@ describe('graceful shutdown (VS-262)', () => {
     try {
       const run = db.get<Run>("SELECT * FROM runs WHERE agent_id = (SELECT id FROM agents WHERE kind = 'weaver')");
       expect(run?.status).toBe('interrupted');
+      // VS-339: a shutdown cut is distinguished from a human interrupt, its wake is left queued to
+      // resume, and its worker is left active rather than parked.
+      expect(run?.errorCode).toBe('interrupted_by_shutdown');
+      const wake = db.get<{ status: string; runId: string | null }>(
+        "SELECT status, run_id FROM wakeups WHERE source = 'human_message'");
+      expect(wake?.status).toBe('queued');
+      expect(wake?.runId).toBeNull();
+      expect(db.get<{ status: string }>("SELECT status FROM agents WHERE kind = 'weaver'")?.status).toBe('active');
+      expect(db.all("SELECT id FROM decisions WHERE status = 'open'")).toHaveLength(0);
     } finally {
       db.close();
+    }
+    // The deliberate shutdown is recorded in the daemon database for the next boot (VS-339).
+    const daemonDb = openDb(join(configDir, 'daemon.sqlite'));
+    try {
+      expect(daemonDb.get<{ value: string }>("SELECT value FROM meta WHERE key = 'daemon.lifecycle.shutdown_at'")?.value).toBeTruthy();
+      expect(daemonDb.get<{ value: string }>("SELECT value FROM meta WHERE key = 'daemon.lifecycle.shutdown_reason'")?.value).toBe('test');
+    } finally {
+      daemonDb.close();
+    }
+  }, 15_000);
+
+  it('records a failed start so the next boot can report it (VS-339)', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'ac-cfg-'));
+    const wsDir = mkdtempSync(join(tmpdir(), 'ac-ws-'));
+    dirs = [configDir, wsDir];
+    await workspaceLoader.initWorkspace(wsDir, { id: 'bindfail', name: 'Bind', ticketPrefix: 'BND' });
+    workspaceLoader.writeRegistry({ workspaces: [{ id: 'bindfail', path: wsDir }] }, configDir);
+
+    // Hold a port, then ask the daemon to bind it — the 2026-09-13 EADDRNOTAVAIL shape.
+    const blocker = createServer();
+    await new Promise<void>((r) => blocker.listen(0, '127.0.0.1', r));
+    const port = (blocker.address() as AddressInfo).port;
+    workspaceLoader.writeDaemonConfig({
+      ...workspaceLoader.readDaemonConfig(configDir),
+      http: { listen: `127.0.0.1:${port}`, trustProxy: false, tls: { mode: 'none', domains: [] } },
+    }, configDir);
+
+    try {
+      await expect(startDaemon({ configDir })).rejects.toThrow();
+    } finally {
+      blocker.close();
+    }
+
+    const daemonDb = openDb(join(configDir, 'daemon.sqlite'));
+    try {
+      const observed = observeBoot(daemonDb, { now: nowIso(), release: null, pid: null });
+      expect(observed.failedStarts.count).toBe(1);
+      expect(observed.failedStarts.lastReason).toMatch(/EADDRINUSE|address already in use/i);
+    } finally {
+      daemonDb.close();
     }
   }, 15_000);
 

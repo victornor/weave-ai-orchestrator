@@ -583,6 +583,89 @@ describe('run engine', () => {
     });
   });
 
+  // VS-339: a turn cut off by a daemon shutdown is interrupted whatever the child's exit code says,
+  // and its wake is left queued to resume. The mark is what the daemon sets synchronously before any
+  // child can be signalled; here it is set directly, with the run already executing.
+  describe('cut off by a daemon shutdown (VS-339)', () => {
+    const markShutdown = () => { runState(h.ctx).shuttingDown = { reason: 'SIGTERM', at: nowIso() }; };
+    /** A queued run whose wake is already bound to it, ready for `executeRun` as if dispatched. */
+    function seedRunWithWake(agentId: string): { runId: string; wakeId: string } {
+      const wake = h.services.wake!.enqueue(agentId, { source: 'human_message', reason: 'go' });
+      const runId = newId();
+      h.db.insert('runs', {
+        id: runId, workspaceId: h.workspaceId, agentId, wakeupIdsJson: [wake.id], runtimeId: 'fake',
+        status: 'queued', turnEpoch: 1, cwd: h.ctx.paths.weaver, createdAt: nowIso(),
+      });
+      h.db.update('wakeups', wake.id, { status: 'claimed', runId });
+      return { runId, wakeId: wake.id };
+    }
+
+    it('a SIGTERM exit carrying a runtime error is interrupted_by_shutdown', async () => {
+      const { runId } = seedRunWithWake(h.conductorId);
+      markShutdown();
+      runtime.queue.push({ exitCode: 143, error: { code: 'exit_143', family: 'unknown', message: 'terminated' } });
+      const run = await executeRun(h.ctx, h.deps, runId);
+      expect(run.status).toBe('interrupted');
+      expect(run.errorCode).toBe('interrupted_by_shutdown');
+      expect(run.errorFamily).toBe('tooling');
+    });
+
+    it('an exit 1 during shutdown is interrupted_by_shutdown', async () => {
+      const { runId } = seedRunWithWake(h.conductorId);
+      markShutdown();
+      runtime.queue.push({ exitCode: 1, error: { code: 'exit_1', family: 'unknown', message: 'parent terminated' } });
+      const run = await executeRun(h.ctx, h.deps, runId);
+      expect(run.status).toBe('interrupted');
+      expect(run.errorCode).toBe('interrupted_by_shutdown');
+    });
+
+    it('the same result without the mark stays a genuine failure', async () => {
+      const { runId } = seedRunWithWake(h.conductorId);
+      runtime.queue.push({ exitCode: 143, error: { code: 'exit_143', family: 'unknown', message: 'crashed' } });
+      const run = await executeRun(h.ctx, h.deps, runId);
+      expect(run.status).toBe('failed');
+      expect(run.errorCode).toBe('exit_143');
+    });
+
+    it('leaves the interrupted turn wake queued and the worker active, with no retry card', async () => {
+      const ticketId = seedTicket(h);
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      const { runId, wakeId } = seedRunWithWake(workerId);
+      markShutdown();
+      runtime.queue.push({ exitCode: 1, error: { code: 'exit_1', family: 'unknown', message: 'parent terminated' } });
+      const run = await executeRun(h.ctx, h.deps, runId);
+      expect(run.status).toBe('interrupted');
+      const wake = h.db.get<Wakeup>('SELECT * FROM wakeups WHERE id = ?', [wakeId])!;
+      expect(wake.status).toBe('queued');
+      expect(wake.runId).toBeNull();
+      expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('active');
+      expect(h.db.all("SELECT id FROM decisions WHERE ticket_id = ? AND status = 'open'", [ticketId])).toHaveLength(0);
+    });
+
+    it('a worker interrupted by shutdown dispatches normally again afterwards', async () => {
+      const ticketId = seedTicket(h);
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      const { runId } = seedRunWithWake(workerId);
+      markShutdown();
+      runtime.queue.push({ exitCode: 1, error: { code: 'exit_1', family: 'unknown', message: 'parent terminated' } });
+      await executeRun(h.ctx, h.deps, runId);
+      // A restart starts the dispatcher again; the mark is cleared and the queued wake runs.
+      dispatcher.start();
+      runtime.queue.push({ structured: { state: 'working', summary: 'resumed', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      const resumed = await runOnce(workerId);
+      expect(resumed.status).toBe('succeeded');
+    });
+
+    it('dispatcher.start() clears the shutdown mark a drain set', () => {
+      const d = createDispatcher(h.ctx, h.deps);
+      d.beginShutdown('drain');
+      expect(runState(h.ctx).shuttingDown).not.toBeNull();
+      d.start();
+      expect(runState(h.ctx).shuttingDown).toBeNull();
+      d.stop();
+    });
+  });
+
   // VS-77: a turn's runtime, model and effort come from the workspace's two model settings, and
   // from nothing else. These are the tests that keep the old fallback chain from growing back.
   describe('resolving what a turn runs on', () => {

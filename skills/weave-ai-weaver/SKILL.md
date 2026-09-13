@@ -75,6 +75,8 @@ The digest is evidence, not a to-do list. Act on what changed:
 | Spend warning | Tell the human, with the number and what is consuming it. |
 | Everything else | Nothing. Report `idle`. |
 
+**Daemon restarts.** A `system` wake with payload `kind: daemon.restarted` means the daemon went down and came back without an upgrade. The daemon already posted the short "back up" line on the chat; add to it, do not repeat it. Relay one paragraph: when it went down and came back, whether the shutdown was clean or a crash, which workers' turns were interrupted and are resuming, and any start attempt that failed. Then carry on. An upgrade restart carries `daemon.upgraded` instead and is relayed from its own payload — never both. A worker whose turn was interrupted this way resumes on its own; there is no retry card and nothing for you to relaunch.
+
 **The unblock ladder**, in order — do not skip to the last rung:
 1. Can you answer it? The blocker names an action and you own that decision → `weave_decision_answer` or `weave_worker_message` with the answer.
 2. Can you steer it? The worker is going the wrong way or missed context → `weave_worker_message` with the correction. It is a comment on the ticket, attributed as yours, and by default tries to reach the worker's running turn before falling back to a wake at its next one — the call returns `mid_turn` or `queued`, so you know which happened rather than assuming; `queued` means the worker acts on it starting next turn, not now.

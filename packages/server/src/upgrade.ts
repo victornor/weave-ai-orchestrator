@@ -382,8 +382,25 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
         if (!prefix || !row.toRelease) return [];
         return ticketRefsInSubjects(commitSubjectsInRange(row.toRelease, from, to), prefix);
       },
-      queuedWakes: () => w.ctx.db.get<{ n: number }>(
-        "SELECT COUNT(*) AS n FROM wakeups WHERE workspace_id = ? AND status = 'queued'", [w.ctx.workspaceId])?.n ?? 0,
+      // VS-339: the turns the restart cut off, read from the records finalize left, and how many of
+      // their own wakes are queued to resume. Both are facts of the workspace database, not a
+      // pre-restart snapshot — so they agree with what actually happened.
+      interrupted: (window) => {
+        const runs = w.ctx.db.all<{ id: string; wakeupIds: string[] | null }>(
+          `SELECT id, wakeup_ids_json FROM runs
+            WHERE workspace_id = ? AND error_code = 'interrupted_by_shutdown'
+              AND finished_at IS NOT NULL AND finished_at > ? AND finished_at <= ?`,
+          [w.ctx.workspaceId, window.since ?? '', window.until],
+        );
+        let resumed = 0;
+        for (const run of runs) {
+          for (const id of run.wakeupIds ?? []) {
+            const status = w.ctx.db.get<{ status: string }>('SELECT status FROM wakeups WHERE id = ?', [id])?.status;
+            if (status === 'queued') resumed += 1;
+          }
+        }
+        return { interrupted: runs.length, resumed };
+      },
       migrationsIn: (release) => migrationsIn(release),
       migrationsApplied,
       checks: healthChecks(w),

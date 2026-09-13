@@ -170,8 +170,21 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
     start(): void {
       if (timer) return;
       state.stopping = false;
+      // VS-339: a drain that is undone must not leave the workspace permanently marked shut down,
+      // or every later failure would be treated as a shutdown cut.
+      state.shuttingDown = null;
       timer = setInterval(() => { void dispatcher.tick(); }, 1000);
       timer.unref?.();
+    },
+
+    /**
+     * VS-339: the shutdown mark. Synchronous by contract — the daemon calls it before its first await
+     * in `shutdown()` (and at the top of the HTTP drain), because systemd signals the whole control
+     * group, so a runtime child can exit and its turn finalize before an async stop would land.
+     */
+    beginShutdown(reason: string): void {
+      state.shuttingDown = { reason, at: nowIso() };
+      state.stopping = true;
     },
 
     async stop(timeoutMs?: number): Promise<boolean> {

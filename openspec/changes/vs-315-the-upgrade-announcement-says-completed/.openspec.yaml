@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: The upgrade announcement says "completed" while the old release is
+  serving, and misreports migrations and landed work

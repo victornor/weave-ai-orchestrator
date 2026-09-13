@@ -4,18 +4,22 @@
  * announcement reaches — the primary chat thread and the conductor's wake queue — are recorded by fakes.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, renameSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Db, newId, nowIso } from '@weave-ai/db';
 import { DaemonConfigSchema, type Upgrade, type UpgradeAnnouncement, type UpgradeState } from '@weave-ai/shared';
 import { createUpgradeService, type UpgradeDeps, type UpgradeService } from '../src/upgrade.js';
-import { announcementText, releaseBuiltAt, releaseWindow } from '../src/upgrade-announce.js';
+import { announcementReason, announcementText, releaseBuiltAt, releaseWindow, upgradeMigrations } from '../src/upgrade-announce.js';
 import type { WorkspaceRuntime } from '../src/types.js';
 
 const FROM = '/rel/20260101-120000-aaaaaaaaaa';   // built 2026-01-01 12:00 local
 const TO = '/rel/20260202-120000-bbbbbbbbbb';     // built 2026-02-02 12:00 local
+
+/** Release directories built by a test, removed afterwards. */
+const tmpDirs: string[] = [];
 
 /** An instant `days` after the release directory `path` says it was built. */
 const afterBuild = (path: string, days: number): string =>
@@ -141,7 +145,25 @@ function fixture(): Fixture {
 
 let fx: Fixture;
 beforeEach(() => { fx = fixture(); });
-afterEach(() => { fx.db.close(); for (const w of fx.list) w.db.close(); });
+afterEach(() => {
+  fx.db.close();
+  for (const w of fx.list) w.db.close();
+  while (tmpDirs.length) rmSync(tmpDirs.pop()!, { recursive: true, force: true });
+});
+
+/**
+ * A release directory whose `packages/db/dist/migrations` holds exactly `files`. Named `<stamp>-<sha>`
+ * so `releaseBuiltAt`/`releaseSha` read it like a real release directory.
+ */
+function releaseMigrationsDir(stamp: string, sha: string, files: string[]): string {
+  const base = mkdtempSync(join(tmpdir(), 'ac-relmig-'));
+  tmpDirs.push(base);
+  const dir = join(base, `${stamp}-${sha}`);
+  const migrations = join(dir, 'packages', 'db', 'dist', 'migrations');
+  mkdirSync(migrations, { recursive: true });
+  for (const f of files) writeFileSync(join(migrations, f), '');
+  return dir;
+}
 
 // ---------- the release window, on its own ----------
 
@@ -157,6 +179,34 @@ describe('the release window', () => {
     const row = { fromRelease: '/rel/handmade', toRelease: TO } as Upgrade;
     expect(releaseWindow(row, now)).toEqual({ since: null, until: releaseBuiltAt(TO) });
     expect(releaseWindow({ fromRelease: FROM, toRelease: null } as Upgrade, now).until).toBe(now);
+  });
+});
+
+// ---------- the migration window, on its own (VS-315) ----------
+
+describe('the migration window', () => {
+  const row = { fromRelease: 'from', toRelease: 'to' } as Upgrade;
+  const files: Record<string, string[]> = {
+    from: ['0001_a.sql', '0002_b.sql'],
+    to: ['0001_a.sql', '0002_b.sql', '0030_x.sql'],
+  };
+  const read = (r: string | null): string[] => (r ? files[r] ?? [] : []);
+
+  it('is the target release minus the source, restricted to what the databases record as applied', () => {
+    expect(upgradeMigrations(row, read, ['0001_a.sql', '0002_b.sql', '0030_x.sql'])).toEqual(['0030_x.sql']);
+  });
+
+  it('never names a migration the databases do not record as applied', () => {
+    expect(upgradeMigrations(row, read, ['0001_a.sql', '0002_b.sql'])).toEqual([]);
+  });
+
+  it('falls back to the target when the source release cannot be read, still bounded by the applied set', () => {
+    expect(upgradeMigrations(row, (r) => (r === 'to' ? files['to']! : []), ['0001_a.sql', '0030_x.sql']))
+      .toEqual(['0001_a.sql', '0030_x.sql']);
+  });
+
+  it('names nothing when the target release cannot be read', () => {
+    expect(upgradeMigrations(row, () => [], ['0030_x.sql'])).toEqual([]);
   });
 });
 
@@ -191,9 +241,11 @@ describe('announcing a completed upgrade', () => {
       failure: null,
     });
     expect(wake.payload.tickets.map((t) => t.identifier)).toEqual(['TST-1']);
+    expect(wake.payload.ticketsOmitted).toBe(0);
     expect(wake.payload.health.checks.map((c) => c.name)).toEqual(['database', 'supervisor', 'runtimes']);
-    // Every migration, because these databases were opened empty by this process.
-    expect(wake.payload.migrations).toContain('0012_upgrade_announcement.sql');
+    // The release directories are not on disk, so there is no window to read and no migration is
+    // named. This is the release's migrations, not this boot's in-memory applied list (VS-315).
+    expect(wake.payload.migrations).toEqual([]);
   });
 
   it('names the failing check instead of claiming the system is back up', async () => {
@@ -221,6 +273,92 @@ describe('announcing a completed upgrade', () => {
     expect(a.sent).toHaveLength(0);
     expect(b.sent).toHaveLength(1);
     expect(b.woken).toHaveLength(1);
+  });
+});
+
+// ---------- the outcome follows the running release (VS-315) ----------
+
+describe('the outcome follows the running release, not the record alone', () => {
+  it('never announces completed when the record says completed but another release is serving', async () => {
+    const ws = fx.addWorkspace('ws1');
+    fx.seed({ state: 'completed', toRelease: TO, toSha: 'b'.repeat(40), cameBackVersion: '1.1.0' });
+    await fx.service({ releaseRoot: FROM, version: '1.0.0' }).announce();
+
+    const payload = ws.woken[0]!.payload;
+    expect(payload.outcome).toBe('recorded_completed');
+    expect(payload.running).toMatchObject({ path: FROM, version: '1.0.0' });
+    expect(payload.to.version).toBeNull();
+    expect(ws.sent[0]!.text).toMatch(/^The upgrade to bbbbbbb is recorded completed, but this daemon is running 1\.0\.0, back up at \d\d:\d\d\.$/);
+    expect(ws.woken[0]!.reason).toMatch(/^The upgrade to bbbbbbb is recorded completed, but the daemon is running 1\.0\.0$/);
+  });
+
+  it('accepts a different release path when the commit is the record\'s target', async () => {
+    const ws = fx.addWorkspace('ws1');
+    fx.seed({ state: 'completed', toRelease: '/rel/20260202-130000-bbbbbbbbbb', toSha: 'b'.repeat(10) });
+    await fx.service({ releaseRoot: TO, version: '1.1.0' }).announce();
+    expect(ws.woken[0]!.payload.outcome).toBe('completed');
+  });
+});
+
+// ---------- the migrations named are the release's (VS-315) ----------
+
+describe('the migrations named belong to the release window', () => {
+  const migrationsDir = fileURLToPath(new URL('../../db/src/migrations', import.meta.url));
+
+  it('names the release window even when an earlier process applied the migrations', async () => {
+    const ws = fx.addWorkspace('ws1');
+    const all = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+    const introduced = all.slice(-2);            // the incident's 0030/0031 shape
+    const source = releaseMigrationsDir('20260101-120000', 'a'.repeat(10), all.slice(0, -2));
+    const target = releaseMigrationsDir('20260202-120000', 'b'.repeat(10), all);
+
+    // An earlier process ran them: this instance applied nothing, so its in-memory list is empty while
+    // the durable `meta` rows remain. Only the release window and the durable record are consulted.
+    (fx.db as unknown as { appliedMigrations: string[] }).appliedMigrations = [];
+    (ws.db as unknown as { appliedMigrations: string[] }).appliedMigrations = [];
+
+    fx.seed({ fromRelease: source, toRelease: target, toSha: 'b'.repeat(10) });
+    await fx.service({ releaseRoot: target, version: '1.1.0' }).announce();
+
+    expect(ws.woken[0]!.payload.migrations).toEqual(introduced);
+  });
+});
+
+// ---------- the landed list and its cap (VS-315) ----------
+
+describe('the landed list collapses duplicates, keeps the newest and reports its cap', () => {
+  it('lists each ticket once, at its most recent landing, newest first', async () => {
+    const ws = fx.addWorkspace('ws1');
+    ws.land('TST-1', 'landed then re-landed', afterBuild(FROM, 3));
+    ws.land('TST-2', 'landed once', afterBuild(FROM, 4));
+    ws.land('TST-1', 'landed then re-landed', afterBuild(FROM, 5));
+    fx.seed();
+
+    await fx.service().announce();
+
+    const payload = ws.woken[0]!.payload;
+    expect(payload.tickets.map((t) => t.identifier)).toEqual(['TST-1', 'TST-2']);
+    expect(payload.tickets[0]!.at).toBe(afterBuild(FROM, 5));
+    expect(payload.ticketsOmitted).toBe(0);
+    expect(ws.sent[0]!.text).not.toMatch(/not listed/);
+  });
+
+  it('keeps the newest twenty and states how many it left out', async () => {
+    const ws = fx.addWorkspace('ws1');
+    for (let n = 1; n <= 25; n++) ws.land(`TST-${n}`, `landed ${n}`, afterBuild(FROM, n));
+    // TST-5 lands a second time, newest of all: it must appear once, at day 30.
+    ws.land('TST-5', 'landed 5 again', afterBuild(FROM, 30));
+    fx.seed();
+
+    await fx.service().announce();
+
+    const payload = ws.woken[0]!.payload;
+    expect(payload.tickets).toHaveLength(20);
+    expect(new Set(payload.tickets.map((t) => t.identifier)).size).toBe(20);
+    expect(payload.tickets[0]).toMatchObject({ identifier: 'TST-5', at: afterBuild(FROM, 30) });
+    expect(payload.tickets.map((t) => t.identifier)).not.toContain('TST-6');
+    expect(payload.ticketsOmitted).toBe(5);
+    expect(ws.sent[0]!.text).toMatch(/ 5 more landed tickets not listed\.$/);
   });
 });
 
@@ -355,7 +493,7 @@ describe('the announcement line', () => {
     to: { path: TO, sha: 'b'.repeat(40), version: '1.1.0' },
     running: { path: TO, sha: 'b'.repeat(40), version: '1.1.0' },
     startedAt: null, finishedAt: null, backUpAt: '2026-02-02T10:30:00.000Z',
-    runs: { drained: 0, interrupted: 0, resumed: 0 }, tickets: [], undelivered: { count: 0, identifiers: [] }, migrations: [],
+    runs: { drained: 0, interrupted: 0, resumed: 0 }, tickets: [], ticketsOmitted: 0, undelivered: { count: 0, identifiers: [] }, migrations: [],
     health: { ok: true, checks: [] }, failure: null,
   };
 
@@ -398,6 +536,38 @@ describe('the announcement line', () => {
   it('still names the count when the identifiers could not be read', () => {
     const text = announcementText({ ...base, undelivered: { count: 3, identifiers: [] } });
     expect(text).toMatch(/3 changes are in the release without a delivery record\.$/);
+  });
+
+  it('states how many landed tickets the cap left out, and nothing when it hid none', () => {
+    expect(announcementText({ ...base, ticketsOmitted: 3 }))
+      .toMatch(/^Upgraded to 1\.1\.0, back up at \d\d:\d\d\. 3 more landed tickets not listed\.$/);
+    expect(announcementText({ ...base, ticketsOmitted: 1 }))
+      .toMatch(/ 1 more landed ticket not listed\.$/);
+    expect(announcementText(base)).not.toMatch(/not listed/);
+  });
+
+  it('never reads a completed record as a successful upgrade when another release is serving', () => {
+    const recorded = {
+      ...base,
+      outcome: 'recorded_completed' as const,
+      to: { path: TO, sha: 'b'.repeat(40), version: null },
+      running: { path: FROM, sha: 'a'.repeat(40), version: '1.0.0' },
+    };
+    const text = announcementText(recorded);
+    expect(text).toMatch(/^The upgrade to bbbbbbb is recorded completed, but this daemon is running 1\.0\.0, back up at \d\d:\d\d\.$/);
+    expect(text).not.toMatch(/^Upgraded/);
+    expect(announcementReason(recorded)).toBe('The upgrade to bbbbbbb is recorded completed, but the daemon is running 1.0.0');
+  });
+
+  it('names a failing check instead of claiming a recorded_completed daemon is back up', () => {
+    const text = announcementText({
+      ...base,
+      outcome: 'recorded_completed',
+      running: { path: FROM, sha: 'a'.repeat(40), version: '1.0.0' },
+      health: { ok: false, checks: [{ name: 'supervisor', ok: false, detail: 'not ticking' }] },
+    });
+    expect(text).not.toMatch(/back up at/);
+    expect(text).toMatch(/and not fully back up: supervisor \(not ticking\) failed\./);
   });
 });
 
@@ -446,7 +616,8 @@ describe('reporting a release with undelivered ticket-referencing commits', () =
     ws.land('TST-1', 'a ticket whose merge went through mergeDone as usual', afterBuild(from, 3));
     fx.seed({ fromRelease: from, toRelease: repo.path, toSha: null });
 
-    await fx.service().announce();
+    // The daemon is running the release it announced, so the outcome is completed (VS-315).
+    await fx.service({ releaseRoot: repo.path }).announce();
 
     expect(ws.sent[0]!.text).toMatch(/^Upgraded to 1\.1\.0, back up at \d\d:\d\d\. 1 change is in the release without a delivery record \(TST-227\)\.$/);
     expect(ws.woken[0]!.payload.tickets.map((t) => t.identifier)).toEqual(['TST-1']);
@@ -465,7 +636,7 @@ describe('reporting a release with undelivered ticket-referencing commits', () =
     ws.land('TST-1', 'fully delivered', afterBuild(from, 3));
     fx.seed({ fromRelease: from, toRelease: repo.path, toSha: null });
 
-    await fx.service().announce();
+    await fx.service({ releaseRoot: repo.path }).announce();
 
     expect(ws.sent[0]!.text).toMatch(/^Upgraded to 1\.1\.0, back up at \d\d:\d\d\.$/);
     expect(ws.woken[0]!.payload.undelivered).toEqual({ count: 0, identifiers: [] });

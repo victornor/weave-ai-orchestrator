@@ -39,7 +39,13 @@ export interface AnnouncementFacts {
   commitTicketRefs(from: string | null, to: string | null): string[];
   /** Wakes queued in this workspace and waiting for the dispatcher that just started. */
   queuedWakes(): number;
-  migrations: string[];
+  /** The migration files a release directory carries, in order; empty when it cannot be read. */
+  migrationsIn(release: string | null): string[];
+  /**
+   * The migration files the databases record as applied, from their durable `meta` rows — not this
+   * process's in-memory `appliedMigrations`, which is empty when an earlier boot ran `migrate`.
+   */
+  migrationsApplied: string[];
   checks: UpgradeHealthCheck[];
   now: string;
 }
@@ -68,9 +74,56 @@ export function releaseWindow(row: Upgrade, now: string): { since: string | null
   return { since: releaseBuiltAt(row.fromRelease), until: releaseBuiltAt(row.toRelease) ?? now };
 }
 
-/** A failure whose target is not the release now executing came back on something else: a rollback. */
+/**
+ * One entry per ticket, at its most recent landing and newest first. A release window can hold two
+ * `landed` activity rows for one ticket — a merge and a retried completion (VS-285) — and neither may
+ * be listed twice. Sorting here, not only in the query, keeps the function a fact of its input.
+ */
+export function dedupeLanded(tickets: LandedTicket[]): LandedTicket[] {
+  const byIdentifier = new Map<string, LandedTicket>();
+  for (const t of tickets) {
+    const previous = byIdentifier.get(t.identifier);
+    if (!previous || t.at > previous.at) byIdentifier.set(t.identifier, t);
+  }
+  return [...byIdentifier.values()].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+}
+
+/**
+ * The migrations the release window introduced: files the target release carries and the source does
+ * not, restricted to those the databases record as applied. Both halves are process-independent — the
+ * file delta is read from the release directories and the applied set from durable rows — so a
+ * migration applied by an earlier boot is still named. When the source release cannot be read the
+ * window is open, and the applied set still bounds the list to migrations the target carries.
+ */
+export function upgradeMigrations(
+  row: Upgrade,
+  migrationsIn: (release: string | null) => string[],
+  applied: string[],
+): string[] {
+  const target = migrationsIn(row.toRelease);
+  if (target.length === 0) return [];
+  const source = new Set(migrationsIn(row.fromRelease));
+  const recorded = new Set(applied);
+  return target.filter((f) => recorded.has(f) && !source.has(f));
+}
+
+/**
+ * Whether the announcing daemon is actually executing the upgrade's target: a release-path match, or
+ * a commit match when the paths differ (a release can be re-created at a new path from the same commit).
+ */
+function runningIsTarget(row: Upgrade, running: UpgradeRelease): boolean {
+  if (row.toRelease && running.path && row.toRelease === running.path) return true;
+  return Boolean(row.toSha && running.sha && row.toSha === running.sha);
+}
+
+/**
+ * The outcome as the running release decides it, not the record alone. A row recorded `completed` by
+ * another process is only `completed` when this daemon is on the target; otherwise the announcement
+ * says so with `recorded_completed` and never reads as a successful upgrade. A failure whose target is
+ * not the release now executing came back on something else: a rollback.
+ */
 export function upgradeOutcome(row: Upgrade, running: UpgradeRelease): UpgradeAnnouncement['outcome'] {
-  if (row.state === 'completed') return 'completed';
+  if (row.state === 'completed') return runningIsTarget(row, running) ? 'completed' : 'recorded_completed';
   if (row.toRelease && running.path && row.toRelease !== running.path) return 'rolled_back';
   return 'failed';
 }
@@ -81,12 +134,14 @@ export function buildAnnouncement(row: Upgrade, facts: AnnouncementFacts): Upgra
   const from = { path: row.fromRelease, sha: facts.shaOf(row.fromRelease), version: null };
   // Only a completed upgrade is running its target, so only then does the version belong to it.
   const to = { path: row.toRelease, sha: row.toSha ?? facts.shaOf(row.toRelease), version: outcome === 'completed' ? row.cameBackVersion ?? facts.running.version : null };
-  // The full landed set, not the bounded slice below — an identifier past the display cap must still
-  // count as accounted for, or the undelivered check would wrongly flag it (VS-239).
-  const landed = window.since ? facts.landed(window) : [];
+  // The full landed set, one entry per ticket and newest first, not the bounded slice below — an
+  // identifier past the display cap must still count as accounted for, or the undelivered check would
+  // wrongly flag it (VS-239).
+  const landed = window.since ? dedupeLanded(facts.landed(window)) : [];
   const landedIds = new Set(landed.map((t) => t.identifier));
   const commitRefs = window.since ? facts.commitTicketRefs(from.sha, to.sha) : [];
   const undeliveredIds = commitRefs.filter((id) => !landedIds.has(id));
+  const ticketsOmitted = Math.max(0, landed.length - ANNOUNCED_TICKETS);
   return {
     kind: 'daemon.upgraded',
     upgradeId: row.id,
@@ -99,8 +154,9 @@ export function buildAnnouncement(row: Upgrade, facts: AnnouncementFacts): Upgra
     backUpAt: facts.now,
     runs: { drained: row.drainedRuns ?? 0, interrupted: row.interruptedRuns ?? 0, resumed: facts.queuedWakes() },
     tickets: landed.slice(0, ANNOUNCED_TICKETS),
+    ticketsOmitted,
     undelivered: { count: undeliveredIds.length, identifiers: undeliveredIds.slice(0, ANNOUNCED_UNDELIVERED) },
-    migrations: facts.migrations,
+    migrations: upgradeMigrations(row, facts.migrationsIn, facts.migrationsApplied),
     health: { ok: facts.checks.every((c) => c.ok), checks: facts.checks },
     failure: outcome === 'completed' ? null : { reason: row.reason, message: row.message },
   };
@@ -137,6 +193,12 @@ const undeliveredClause = (a: UpgradeAnnouncement): string => {
   return ` ${a.undelivered.count} ${noun} in the release without a delivery record${named}.`;
 };
 
+/** What the landed cap left out (VS-315); the empty string when it hid nothing. */
+const omittedClause = (a: UpgradeAnnouncement): string => {
+  if (a.ticketsOmitted === 0) return '';
+  return ` ${a.ticketsOmitted} more landed ${a.ticketsOmitted === 1 ? 'ticket' : 'tickets'} not listed.`;
+};
+
 /**
  * One line, posted on the primary chat thread. It says what is running and when it came back, and it
  * never claims the system is back up when a check says otherwise — that claim is the whole point of it.
@@ -148,7 +210,13 @@ export function announcementText(a: UpgradeAnnouncement): string {
     const base = a.health.ok
       ? `${head}, back up at ${at}.`
       : `${head} and restarted at ${at}, but not fully back up: ${failingChecks(a)} failed.`;
-    return `${base}${undeliveredClause(a)}`;
+    return `${base}${omittedClause(a)}${undeliveredClause(a)}`;
+  }
+  if (a.outcome === 'recorded_completed') {
+    const head = `The upgrade to ${releaseLabel(a.to)} is recorded completed, but this daemon is running ${releaseLabel(a.running)}`;
+    return a.health.ok
+      ? `${head}, back up at ${at}.`
+      : `${head} at ${at}, and not fully back up: ${failingChecks(a)} failed.`;
   }
   const head = a.outcome === 'rolled_back'
     ? `The upgrade to ${releaseLabel(a.to)} was rolled back`
@@ -163,6 +231,7 @@ export function announcementText(a: UpgradeAnnouncement): string {
 /** The wake's `reason`: the headline the conductor sees in its inbox before it reads the payload. */
 export function announcementReason(a: UpgradeAnnouncement): string {
   if (a.outcome === 'completed') return `The daemon upgraded to ${releaseLabel(a.to)} and is back up`;
+  if (a.outcome === 'recorded_completed') return `The upgrade to ${releaseLabel(a.to)} is recorded completed, but the daemon is running ${releaseLabel(a.running)}`;
   if (a.outcome === 'rolled_back') return `The daemon upgrade was rolled back; it is running ${releaseLabel(a.running)}`;
   return `The daemon upgrade failed; it is running ${releaseLabel(a.running)}`;
 }

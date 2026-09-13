@@ -1,11 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  LAUNCHD_LABEL, SERVICE_NAME, commitSubjectsInRange, configDir, dataHome, inOwnScope, planRestart, releaseStamp,
-  releaseVersion, stateHome,
+  LAUNCHD_LABEL, SERVICE_NAME, commitSubjectsInRange, configDir, dataHome, inOwnScope, migrationsIn, planRestart,
+  releaseStamp, releaseVersion, stateHome,
 } from './index.js';
 
 const tmps: string[] = [];
@@ -154,5 +154,22 @@ describe('releaseVersion / releaseStamp', () => {
     tmps.push(root);
     expect(releaseVersion(root)).toBe('unknown');
     expect(releaseStamp(root)).toBeNull();
+  });
+});
+
+describe('migrationsIn (VS-315)', () => {
+  it('lists a release\'s migration files, sorted', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ac-relmig-'));
+    tmps.push(root);
+    const dir = join(root, 'packages', 'db', 'dist', 'migrations');
+    mkdirSync(dir, { recursive: true });
+    for (const f of ['0031_b.sql', '0030_a.sql', 'settings.txt']) writeFileSync(join(dir, f), '');
+    expect(migrationsIn(root)).toEqual(['0030_a.sql', '0031_b.sql']);
+  });
+
+  it('is empty for a missing release and for a null one, rather than throwing', () => {
+    const missing = join(mkdtempSync(join(tmpdir(), 'ac-relmig-none-')), 'nope');
+    expect(migrationsIn(missing)).toEqual([]);
+    expect(migrationsIn(null)).toEqual([]);
   });
 });

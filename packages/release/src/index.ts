@@ -183,6 +183,19 @@ export function releaseSha(release: string): string | null {
 }
 
 /**
+ * The migration files a release directory carries, sorted, from the build's own
+ * `packages/db/dist/migrations` (the db package's build copies `src/migrations` there). Empty when the
+ * release is null or its migrations cannot be read — a release directory that was pruned, or a path
+ * that is not a release at all.
+ */
+export function migrationsIn(release: string | null): string[] {
+  if (!release) return [];
+  try {
+    return readdirSync(join(release, 'packages', 'db', 'dist', 'migrations')).filter((f) => f.endsWith('.sql')).sort();
+  } catch { return []; }
+}
+
+/**
  * Commit subjects strictly between `from` and `to` (exclusive/inclusive, like `git log from..to`),
  * read from a release directory's own clone — it keeps its `.git`, so no second checkout is needed.
  * Empty whenever the read cannot be trusted: either sha missing, no readable `.git` (a pruned

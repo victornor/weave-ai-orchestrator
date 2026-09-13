@@ -5,11 +5,11 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@weave-ai/shared';
-import type { WorkspaceModels } from '../api/types';
+import type { WorkspaceModels, WorkspaceModelsPut } from '../api/types';
 
 const state = vi.hoisted(() => ({
   models: {} as WorkspaceModels,
-  saved: [] as WorkspaceModels[],
+  saved: [] as WorkspaceModelsPut[],
   saveError: null as Error | null,
   runtimeModels: [] as Array<{ id: string; label: string; efforts?: string[] }>,
   daemonModels: { weaver: null, workers: null, workerOptions: null } as {
@@ -29,8 +29,8 @@ vi.mock('../api/hooks', () => ({
   useModels: () => ({ data: state.models, isLoading: false }),
   useModelsOptional: () => ({ data: state.models, isLoading: false }),
   useSetModels: () => ({
-    mutate: (v: WorkspaceModels) => state.saved.push(v),
-    mutateAsync: async (v: WorkspaceModels) => {
+    mutate: (v: WorkspaceModelsPut) => state.saved.push(v),
+    mutateAsync: async (v: WorkspaceModelsPut) => {
       state.saved.push(v);
       if (state.saveError) throw state.saveError;
       return v;
@@ -73,7 +73,11 @@ vi.mock('../api/hooks', () => ({
 const { DaemonSettingsRoute, WorkspaceSettingsRoute } = await import('../routes/Settings');
 
 beforeEach(() => {
-  state.models = { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'claude', model: null } };
+  state.models = {
+    weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
+    workers: { runtime: 'claude', model: null },
+    source: { weaver: 'workspace', workers: 'workspace', workerOptions: 'default' },
+  };
   state.saved = [];
   state.saveError = null;
   state.runtimeModels = [{ id: 'claude-fable-5-1', label: 'Fable 5.1' }, { id: 'claude-opus-5', label: 'Opus 5' }];
@@ -103,26 +107,23 @@ describe('Settings — the two model settings', () => {
     expect(within(screen.getByLabelText('Workers model')).getByRole('option', { name: 'default (the runtime chooses)' })).toBeInTheDocument();
   });
 
-  it('sends the whole block when one setting changes, so the other is not dropped', () => {
+  it('sends only the changed control, so the other agent is not pinned (VS-356)', () => {
     openModels();
     fireEvent.change(screen.getByLabelText('Workers runtime'), { target: { value: 'codex' } });
-    expect(state.saved).toEqual([{
-      weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
-      workers: { runtime: 'codex', model: null },
-    }]);
+    expect(state.saved).toEqual([{ workers: { runtime: 'codex', model: null } }]);
   });
 
-  it('changes the weaver without touching the workers', () => {
+  it('changes the weaver without writing the workers setting', () => {
     openModels();
     fireEvent.change(screen.getByLabelText('Weaver model'), { target: { value: 'claude-opus-5' } });
-    expect(state.saved[0]!.weaver.model).toBe('claude-opus-5');
-    expect(state.saved[0]!.workers).toEqual({ runtime: 'claude', model: null });
+    expect(state.saved[0]).toEqual({ weaver: { runtime: 'claude', model: 'claude-opus-5' } });
+    expect(state.saved[0]!.workers).toBeUndefined();
   });
 
   it('clears a model back to the runtime default with null, not an empty string', () => {
     openModels();
     fireEvent.change(screen.getByLabelText('Weaver model'), { target: { value: '' } });
-    expect(state.saved[0]!.weaver.model).toBeNull();
+    expect(state.saved[0]!.weaver!.model).toBeNull();
   });
 
   it('takes a model the runtime does not list', async () => {
@@ -131,7 +132,7 @@ describe('Settings — the two model settings', () => {
     const box = screen.getByLabelText('Workers model id');
     fireEvent.change(box, { target: { value: 'some-unlisted-model' } });
     fireEvent.blur(box);
-    await waitFor(() => expect(state.saved[0]?.workers.model).toBe('some-unlisted-model'));
+    await waitFor(() => expect(state.saved[0]?.workers?.model).toBe('some-unlisted-model'));
   });
 
   it('reveals the free-text box for a stored model the runtime does not list', () => {
@@ -154,7 +155,7 @@ describe('Settings — the two model settings', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('runtime: kebab-case slug');
   });
 
-  it('shows worker options and adding one PUTs the full block (VS-162)', () => {
+  it('shows worker options and adding one PUTs only the catalog (VS-162, VS-356)', () => {
     openModels();
     fireEvent.change(screen.getByLabelText('New worker option id'), { target: { value: 'cheap' } });
     fireEvent.change(screen.getByLabelText('New worker option description'), { target: { value: 'Scouts and low complexity.' } });
@@ -164,8 +165,6 @@ describe('Settings — the two model settings', () => {
     fireEvent.change(screen.getByLabelText('New worker option model id'), { target: { value: 'gpt-5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add worker option' }));
     expect(state.saved.at(-1)).toEqual({
-      weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
-      workers: { runtime: 'claude', model: null },
       workerOptions: [{ id: 'cheap', description: 'Scouts and low complexity.', runtime: 'codex', model: 'gpt-5' }],
     });
   });
@@ -192,7 +191,7 @@ describe('Settings — the two model settings', () => {
     expect(state.saved.at(-1)!.workerOptions).toEqual([{ id: 'cheap', description: 'Scouts.', runtime: 'claude', model: null }]);
   });
 
-  it('removes a worker option and preserves the catalog when the weaver setting changes (VS-162)', () => {
+  it('removes a worker option, and a weaver change writes only the weaver (VS-162, VS-356)', () => {
     const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
     state.models = { ...state.models, workerOptions: [cheap] };
     openModels();
@@ -202,7 +201,7 @@ describe('Settings — the two model settings', () => {
     state.saved = [];
     state.models = { ...state.models, workerOptions: [cheap] };
     fireEvent.change(screen.getByLabelText('Weaver model'), { target: { value: 'claude-opus-5' } });
-    expect(state.saved.at(-1)!.workerOptions).toEqual([cheap]);
+    expect(state.saved.at(-1)).toEqual({ weaver: { runtime: 'claude', model: 'claude-opus-5' } });
   });
 
   it('an unconfigured option row does not select claude and disables the model until a runtime is chosen (VS-236)', () => {
@@ -241,9 +240,9 @@ describe('Settings — the two model settings', () => {
     expect(screen.getByLabelText('Weaver runtime')).not.toBeDisabled();
     expect(screen.getByLabelText('Workers runtime')).not.toBeDisabled();
     fireEvent.change(screen.getByLabelText('Weaver runtime'), { target: { value: 'codex' } });
-    expect(state.saved.at(-1)?.weaver.runtime).toBe('codex');
+    expect(state.saved.at(-1)?.weaver?.runtime).toBe('codex');
     fireEvent.change(screen.getByLabelText('Workers runtime'), { target: { value: 'codex' } });
-    expect(state.saved.at(-1)?.workers.runtime).toBe('codex');
+    expect(state.saved.at(-1)?.workers?.runtime).toBe('codex');
   });
 
   it('opens daemon Models inheriting by default, stating the workspace value inherited (VS-207)', () => {
@@ -312,9 +311,9 @@ describe('Settings — thinking level next to the model (VS-228)', () => {
     expect(within(select).getByRole('option', { name: 'default (unset)' })).toBeInTheDocument();
     expect(within(select).getByRole('option', { name: 'high' })).toBeInTheDocument();
     fireEvent.change(select, { target: { value: 'high' } });
-    expect(state.saved.at(-1)!.weaver.effort).toBe('high');
+    expect(state.saved.at(-1)!.weaver!.effort).toBe('high');
     fireEvent.change(select, { target: { value: '' } });
-    expect(state.saved.at(-1)!.weaver.effort).toBeUndefined();
+    expect(state.saved.at(-1)!.weaver!.effort).toBeUndefined();
   });
 
   it('hides thinking level when the model reports none', () => {
@@ -341,7 +340,6 @@ describe('Settings — thinking level next to the model (VS-228)', () => {
     fireEvent.change(screen.getByLabelText('Weaver model'), { target: { value: 'claude-opus-5' } });
     expect(state.saved.at(-1)!.weaver).toEqual({ runtime: 'claude', model: 'claude-opus-5', effort: undefined });
   });
-
   it('shows a stale stored effort as free text rather than dropping it', () => {
     state.models = { ...state.models, weaver: { runtime: 'claude', model: 'claude-fable-5-1', effort: 'ultra' } };
     state.runtimeModels = [

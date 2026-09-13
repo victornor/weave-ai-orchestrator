@@ -525,10 +525,10 @@ export interface UsageService {
  * migration left owing.
  */
 export interface ModelsService {
-  /** Effective settings: the workspace's own configured value, else a filled daemon overlay, else the schema default (VS-284). */
-  get(): S.EffectiveModels;
-  /** `workerOptions` omitted keeps the existing catalog; an explicit array (including `[]`) replaces it (VS-162). Always writes what was asked (VS-284: nothing can refuse it on the daemon's account). */
-  set(actor: Actor, next: S.WorkspaceModelsPut | S.EffectiveModels): Promise<S.EffectiveModels>;
+  /** Effective settings plus each control's source: the workspace's own value, else a filled daemon overlay, else the schema default (VS-284, VS-356). */
+  get(): S.WorkspaceModelsView;
+  /** Each control is independent (VS-356): omitted keeps the stored value, `null` clears it to inherit, a value overrides. `workerOptions` `null`/`[]` clears the catalog. Always writes what was asked (VS-284: nothing can refuse it on the daemon's account). */
+  set(actor: Actor, next: S.WorkspaceModelsPut | S.EffectiveModels): Promise<S.WorkspaceModelsView>;
   reconcile(): void;
   /** Answer the migration's question: write the workers runtime and close the matter for good. */
   settleWorkersRuntime(actor: Actor, runtime: string): Promise<S.EffectiveModels>;

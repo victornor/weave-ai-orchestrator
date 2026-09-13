@@ -114,8 +114,13 @@ export interface RuntimeModel { id: string; label: string; provider?: string; so
 /** One of the two model settings a workspace holds (VS-77): `GET`/`PUT /models`. */
 export interface ModelSetting { runtime: string; model: string | null; effort?: string }
 export interface WorkerModelOption { id: string; description: string; runtime: string | null; model: string | null; effort?: string }
-/** VS-284: the effective settings — the workspace's own configured value, else a filled daemon overlay, else the schema default. Never locked; always editable. */
-export interface WorkspaceModels { weaver: ModelSetting; workers: ModelSetting; workerOptions?: WorkerModelOption[] }
+/** Where an effective control comes from (VS-356): stored on this workspace, a filled daemon overlay, or the schema default. */
+export type ModelSource = 'workspace' | 'daemon' | 'default';
+export interface WorkspaceModelsSource { weaver: ModelSource; workers: ModelSource; workerOptions: ModelSource }
+/** VS-284, VS-356: the effective settings plus each control's source. Never locked; always editable. */
+export interface WorkspaceModels { weaver: ModelSetting; workers: ModelSetting; workerOptions?: WorkerModelOption[]; source: WorkspaceModelsSource }
+/** `PUT /models` (VS-356): a value overrides, `null` clears back to inherit, omission keeps. */
+export interface WorkspaceModelsPut { weaver?: ModelSetting | null; workers?: ModelSetting | null; workerOptions?: WorkerModelOption[] | null }
 export interface DaemonModels { weaver: ModelSetting | null; workers: ModelSetting | null; workerOptions: WorkerModelOption[] | null }
 
 /** VS-318: one host tool the daemon needs, as `/api/daemon/host-tools` and `/api/health` report it. */

@@ -274,7 +274,12 @@ describe('the models service', () => {
   const open = (): Decision[] => h.deps().decisions.list({ status: ['open'] });
 
   it('reads and replaces both settings', async () => {
-    expect(models.get()).toEqual({ weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
+    expect(models.get()).toEqual({
+      weaver: { runtime: 'claude', model: null },
+      workers: { runtime: 'claude', model: null },
+      workerOptions: [],
+      source: { weaver: 'default', workers: 'default', workerOptions: 'default' },
+    });
     const next = await models.set(HUMAN, { weaver: { runtime: 'claude', model: 'claude-fable-5-1' }, workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' } });
     expect(next.workers).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
     expect(next.workerOptions).toEqual([]);
@@ -288,6 +293,56 @@ describe('the models service', () => {
     expect(kept.workerOptions).toEqual([cheap]);
     const cleared = await models.set(HUMAN, { weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
     expect(cleared.workerOptions).toEqual([]);
+  });
+
+  it('writes only the control it names, leaving the other agent inherited (VS-356)', async () => {
+    await models.set(HUMAN, { weaver: { runtime: 'claude', model: 'weaver-model' } });
+    expect(h.ctx.config.models.workers).toBeUndefined();
+    // The control nobody overrode still follows the daemon overlay later filled.
+    h.ctx.daemon.models = { workers: { runtime: 'codex', model: 'daemon-workers' } };
+    expect(models.get().workers).toEqual({ runtime: 'codex', model: 'daemon-workers' });
+    expect(models.get().source).toEqual({ weaver: 'workspace', workers: 'daemon', workerOptions: 'default' });
+  });
+
+  it('clears one control with null so it follows the daemon overlay, then the default (VS-356)', async () => {
+    await models.set(HUMAN, { weaver: { runtime: 'codex', model: 'w' }, workers: { runtime: 'codex', model: 'x' } });
+    h.ctx.daemon.models = { weaver: { runtime: 'claude', model: 'daemon-weaver' } };
+    const after = await models.set(HUMAN, { weaver: null });
+    expect(after.weaver).toEqual({ runtime: 'claude', model: 'daemon-weaver' });
+    expect(after.source.weaver).toBe('daemon');
+    expect(h.ctx.config.models.weaver).toBeUndefined();
+    // The control that was not named keeps its stored value.
+    expect(after.workers).toEqual({ runtime: 'codex', model: 'x' });
+    h.ctx.daemon.models = {};
+    expect(models.get().weaver).toEqual({ runtime: 'claude', model: null });
+    expect(models.get().source.weaver).toBe('default');
+  });
+
+  it('keeps a stored control when the write omits it (VS-356)', async () => {
+    await models.set(HUMAN, { workers: { runtime: 'codex', model: 'gpt-5' } });
+    const after = await models.set(HUMAN, { weaver: { runtime: 'claude', model: 'weaver' } });
+    expect(after.workers).toEqual({ runtime: 'codex', model: 'gpt-5' });
+    expect(after.source.workers).toBe('workspace');
+  });
+
+  it('clears the worker-options catalog with null so it inherits the daemon catalog (VS-356)', async () => {
+    const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
+    await models.set(HUMAN, { workerOptions: [cheap] });
+    expect(models.get().source.workerOptions).toBe('workspace');
+    const daemonOpt = { id: 'daemon', description: 'Daemon.', runtime: 'claude', model: 'opus' };
+    h.ctx.daemon.models = { workerOptions: [daemonOpt] };
+    const cleared = await models.set(HUMAN, { workerOptions: null });
+    expect(cleared.workerOptions).toEqual([daemonOpt]);
+    expect(cleared.source.workerOptions).toBe('daemon');
+  });
+
+  it('keeps an old two-field body working unchanged (VS-356)', async () => {
+    const cheap = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' };
+    await models.set(HUMAN, { workerOptions: [cheap] });
+    const after = await models.set(HUMAN, { weaver: { runtime: 'claude', model: 'w' }, workers: { runtime: 'claude', model: 'x' } });
+    expect(after.workerOptions).toEqual([cheap]);
+    expect(after.weaver).toEqual({ runtime: 'claude', model: 'w' });
+    expect(after.workers).toEqual({ runtime: 'claude', model: 'x' });
   });
 
   it('refuses a setting with no runtime rather than storing it', async () => {

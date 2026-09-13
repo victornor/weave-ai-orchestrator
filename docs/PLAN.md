@@ -1302,10 +1302,11 @@ weave attach <workerId|weaver>                   live transcript + steering for 
 weave top                                           fleet view
 weave presentation set|open|reconcile|status       surfaces (§14b)
 weave weaver show|reset-session                 the weave agent
-weave models [show]|set conductor|workers --runtime <id> --model <id|default> [--effort <e>]
+weave models [show]|set conductor|weaver|workers --runtime <id> --model <id|default> [--effort <e>]
+weave models inherit conductor|weaver|workers|options
 weave models options add --id <id> --description <text> --runtime <id> [--model <id|default>] [--effort <e>]
 weave models options set <id> … | options remove <id>
-                                                       workspace model selection (ADR 0011); locked controls error
+                                                       workspace model selection (ADR 0011); each control writes on its own, inherit clears one
 weave daemon models [show]|set conductor|workers --runtime <id> --model <id|default> [--effort <e>] [--clear]
 weave daemon models options add|remove …           daemon overlays for every workspace (VS-185, ADR 0013)
 weave workspace list|use|register|unregister|pause|resume   multi-workspace registry

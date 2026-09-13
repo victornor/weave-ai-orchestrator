@@ -802,10 +802,10 @@ export function useModelsMany(ids: readonly string[]): UseQueryResult<T.Workspac
 }
 
 /**
- * `PUT /models` replaces both settings, so the whole block goes back every time — a partial body
- * would drop the setting that was not being changed.
+ * `PUT /models` changes only the controls the body names (VS-356): a value overrides, `null` clears
+ * back to inherit, omission keeps. The response is the sourced view, cached in place of the read.
  */
-export function useSetModels(): UseMutationResult<T.WorkspaceModels, Error, T.WorkspaceModels> {
+export function useSetModels(): UseMutationResult<T.WorkspaceModels, Error, T.WorkspaceModelsPut> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({

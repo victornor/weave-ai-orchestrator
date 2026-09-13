@@ -2,7 +2,7 @@
  * The workspace's two model settings as a service (VS-77, ADR 0011): read them, change one, and
  * settle the question a mixed-runtime migration left open.
  */
-import { DEFAULT_MODEL_SETTING, OcError, WorkspaceModelsSchema, type EffectiveModels, type WorkspaceModels, type WorkspaceModelsPut } from '@weave-ai/shared';
+import { DEFAULT_MODEL_SETTING, OcError, WorkspaceModelsSchema, type EffectiveModels, type WorkspaceModels, type WorkspaceModelsPut, type WorkspaceModelsView } from '@weave-ai/shared';
 import type { Db } from '@weave-ai/db';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, ModelsService } from '../api.js';
@@ -10,8 +10,8 @@ import { recordActivity } from '../events.js';
 import { releaseLoginPausesForAbandonedRuntimes } from '../runs/authgate.js';
 import { migrationSummary, type ModelMigration } from './migrate.js';
 
-export { effectiveModels, modelSettingFor, modelsFor, workerOptionRuntimes } from './resolve.js';
-import { effectiveModels } from './resolve.js';
+export { effectiveModels, modelSettingFor, modelsFor, modelsSource, workerOptionRuntimes } from './resolve.js';
+import { effectiveModels, modelsSource } from './resolve.js';
 export { demaskWorkspaceModels, deriveModelSettings, hasModelSettings, migrationSummary, type DemaskResult, type ModelMigration, type RoleRuntimeRow, type WorkersRule } from './migrate.js';
 
 /** The `meta` row migration 0012 leaves behind: what the roles were running on before it dropped the columns. */
@@ -50,24 +50,33 @@ export function recordPendingMigration(db: Db, workspaceId: string, m: ModelMigr
 export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServices): ModelsService {
   const log = ctx.log('daemon');
 
+  /** The effective values plus each control's source (VS-356). */
+  const view = (): WorkspaceModelsView => ({
+    ...effectiveModels(ctx.daemon, ctx.config),
+    source: modelsSource(ctx.daemon, ctx.config),
+  });
+
   const service: ModelsService = {
-    get(): EffectiveModels {
-      return effectiveModels(ctx.daemon, ctx.config);
+    get(): WorkspaceModelsView {
+      return view();
     },
 
-    async set(actor: Actor, next: WorkspaceModelsPut | EffectiveModels): Promise<EffectiveModels> {
+    async set(actor: Actor, next: WorkspaceModelsPut | EffectiveModels): Promise<WorkspaceModelsView> {
       // VS-284: a workspace's own setting always wins over a daemon overlay now, so a write here
       // is never refused or silently discarded on the daemon's account — it always writes what
       // was asked, exactly as any other workspace config write does.
+      // VS-356: each control is independent. `undefined`/omitted keeps what is stored, `null`
+      // clears it back to inherit, a value overrides. `workerOptions` `null`/`[]` clears the
+      // catalog so the workspace inherits the daemon's.
       const stored = ctx.config.models;
-      const workerOptions = 'workerOptions' in next && next.workerOptions !== undefined
-        ? next.workerOptions
-        : (stored.workerOptions ?? []);
-      const parsed = WorkspaceModelsSchema.safeParse({
-        weaver: next.weaver,
-        workers: next.workers,
-        workerOptions,
-      });
+      const merged: WorkspaceModels = {
+        workerOptions: next.workerOptions === undefined ? (stored.workerOptions ?? []) : (next.workerOptions ?? []),
+      };
+      const weaver = next.weaver === undefined ? stored.weaver : (next.weaver ?? undefined);
+      const workers = next.workers === undefined ? stored.workers : (next.workers ?? undefined);
+      if (weaver !== undefined) merged.weaver = weaver;
+      if (workers !== undefined) merged.workers = workers;
+      const parsed = WorkspaceModelsSchema.safeParse(merged);
       if (!parsed.success) {
         throw new OcError('validation', `invalid model settings: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
       }
@@ -82,7 +91,7 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
       recordActivity(ctx.db, ctx.workspaceId, actor, 'workspace.models_changed', 'workspace', ctx.workspaceId, { before, after: parsed.data });
       ctx.events.emit('workspace.updated', 'workspace', ctx.workspaceId, { models: parsed.data });
       log.info({ before, after: parsed.data }, 'model settings changed');
-      return effectiveModels(ctx.daemon, ctx.config);
+      return view();
     },
 
     reconcile(): void {

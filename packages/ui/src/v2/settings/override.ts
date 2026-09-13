@@ -1,14 +1,10 @@
 /**
- * The workspace-override model (VS-348, HANDOFF §9): compare a workspace's effective setting for an
- * agent or worker option against the daemon's baseline for that control, and name the difference.
- *
- * The comparison is value-based, not a stored inherit flag: the API has no endpoint that clears one
- * workspace field back to inherit (`PUT /models` requires both agents), so "reset to daemon" writes
- * the baseline value and a control reads `inherited` again once it equals the baseline. See the
- * change's design.md, Decision 4.
+ * The workspace-override model (VS-348, VS-356): an agent setting or the worker-options catalog is
+ * `inherited` or `overridden` from the per-control source the API reports, not by comparing values.
+ * `diffSetting`/`diffOption` still name the values that differ, which needs the daemon baseline.
  */
 import { DEFAULT_MODEL_SETTING } from '@weave-ai/shared';
-import type { DaemonModels, ModelSetting, WorkerModelOption } from '../../api/types';
+import type { DaemonModels, ModelSetting, WorkspaceModelsSource, WorkerModelOption } from '../../api/types';
 
 export type AgentKind = 'weaver' | 'workers';
 export type OverrideState = 'inherited' | 'overridden';
@@ -18,18 +14,19 @@ function norm(v: string | null | undefined): string {
   return v ?? '';
 }
 
-/** Structural equality of the three fields that decide which model a turn runs on. */
-export function sameSetting(a: ModelLike, b: ModelLike): boolean {
-  return norm(a.runtime) === norm(b.runtime) && norm(a.model) === norm(b.model) && norm(a.effort) === norm(b.effort);
-}
-
-/** The daemon's value for an agent: its overlay, else the built-in default. */
+/** The daemon's value for an agent: its overlay, else the built-in default. Used for the diff footer. */
 export function baselineAgent(daemon: DaemonModels | undefined, kind: AgentKind): ModelSetting {
   return daemon?.[kind] ?? DEFAULT_MODEL_SETTING;
 }
 
-export function agentOverrideState(effective: ModelSetting, baseline: ModelSetting): OverrideState {
-  return sameSetting(effective, baseline) ? 'inherited' : 'overridden';
+/** An agent control is overridden when the API says the workspace stores its own value for it. */
+export function agentOverrideState(source: WorkspaceModelsSource | undefined, kind: AgentKind): OverrideState {
+  return source?.[kind] === 'workspace' ? 'overridden' : 'inherited';
+}
+
+/** The catalog overrides as a whole: overridden when the workspace stores its own non-empty catalog. */
+export function optionOverrideState(source: WorkspaceModelsSource | undefined): OverrideState {
+  return source?.workerOptions === 'workspace' ? 'overridden' : 'inherited';
 }
 
 /** The fields that differ, as "runtime: a → b" lines; empty when the values are equal. */
@@ -41,14 +38,9 @@ export function diffSetting(effective: ModelLike, baseline: ModelLike): string[]
   return out;
 }
 
-/** The daemon option a workspace option overrides, matched by id; undefined when the daemon has none. */
+/** The daemon option a workspace option is compared against, matched by id; undefined when the daemon has none. */
 export function baselineOption(daemon: DaemonModels | undefined, id: string): WorkerModelOption | undefined {
   return daemon?.workerOptions?.find((o) => o.id === id);
-}
-
-export function optionOverrideState(effective: WorkerModelOption, baseline: WorkerModelOption | undefined): OverrideState {
-  if (!baseline) return 'inherited';
-  return sameSetting(effective, baseline) ? 'inherited' : 'overridden';
 }
 
 export function diffOption(effective: WorkerModelOption, baseline: WorkerModelOption | undefined): string[] {
@@ -60,14 +52,10 @@ export interface OverrideCounts {
   options: number;
 }
 
-/** One source for the banner count, derived from the same comparison the tags and footers use. */
-export function countOverrides(
-  effective: { weaver: ModelSetting; workers: ModelSetting; workerOptions?: WorkerModelOption[] },
-  daemon: DaemonModels | undefined,
-): OverrideCounts {
+/** One source for the banner count: the controls the same source map the tags use marks overridden. */
+export function countOverrides(source: WorkspaceModelsSource | undefined): OverrideCounts {
   let agents = 0;
-  if (agentOverrideState(effective.weaver, baselineAgent(daemon, 'weaver')) === 'overridden') agents += 1;
-  if (agentOverrideState(effective.workers, baselineAgent(daemon, 'workers')) === 'overridden') agents += 1;
-  const options = (effective.workerOptions ?? []).filter((o) => optionOverrideState(o, baselineOption(daemon, o.id)) === 'overridden').length;
-  return { agents, options };
+  if (source?.weaver === 'workspace') agents += 1;
+  if (source?.workers === 'workspace') agents += 1;
+  return { agents, options: source?.workerOptions === 'workspace' ? 1 : 0 };
 }

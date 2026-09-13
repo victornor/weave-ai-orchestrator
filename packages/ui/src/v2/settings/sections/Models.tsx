@@ -12,7 +12,7 @@ import { SkeletonRows } from '../../../components/Skeleton';
 import { cx } from '../../../lib/cx';
 import { isRuntimeAvailable, modelOptionLabel, runtimeStatusLabel } from '../../../lib/runtime';
 import { effortModeFor, effortsForModel, isCustomModel, settingAfterModelChange } from '../model';
-import { baselineAgent, countOverrides, diffOption, diffSetting, agentOverrideState, optionOverrideState } from '../override';
+import { baselineAgent, baselineOption, countOverrides, diffOption, diffSetting, agentOverrideState, optionOverrideState } from '../override';
 
 const inputCx = 'h-8 w-full rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1 outline-none';
 
@@ -150,8 +150,11 @@ export function WorkspaceModelsSection(): React.ReactElement {
   const effective = models.data;
   if (!effective) return <p className="text-micro text-text-3">The workspace's model settings could not be read.</p>;
   const list = runtimes.data ?? [];
-  const counts = countOverrides(effective, daemon.data);
+  const counts = countOverrides(effective.source);
   const total = counts.agents + counts.options;
+  // VS-356: write only the control that changed, and reset by clearing it.
+  const setAgent = (kind: 'weaver' | 'workers', next: T.ModelSetting | null): void =>
+    save.mutate(kind === 'weaver' ? { weaver: next } : { workers: next });
   return (
     <div className="flex flex-col gap-4">
       <div className="v2-recessed flex items-center gap-2 rounded-r4 border border-line-1 px-3 py-2">
@@ -159,13 +162,13 @@ export function WorkspaceModelsSection(): React.ReactElement {
         <p className="text-micro text-text-2">
           {total === 0
             ? 'All models inherit the daemon.'
-            : `Overridden here: ${counts.agents} agent${counts.agents === 1 ? '' : 's'}, ${counts.options} worker option${counts.options === 1 ? '' : 's'}.`}
+            : `Overridden here: ${counts.agents} agent${counts.agents === 1 ? '' : 's'}, ${counts.options} worker-options catalog${counts.options === 1 ? '' : 's'}.`}
         </p>
       </div>
       {(['weaver', 'workers'] as const).map((k) => {
         const setting = effective[k];
         const baseline = baselineAgent(daemon.data, k);
-        const state = agentOverrideState(setting, baseline);
+        const state = agentOverrideState(effective.source, k);
         const diff = diffSetting(setting, baseline);
         return (
           <div key={k} className={cx('v2-card flex flex-col gap-2 p-3.5', state === 'overridden' && 'border-accent-edge')}>
@@ -176,17 +179,17 @@ export function WorkspaceModelsSection(): React.ReactElement {
                 {k === 'weaver' ? 'One per workspace. Reads every approval before you do.' : 'The default a ticket runs on when it names no option.'}
               </span>
               {state === 'overridden' ? (
-                <button type="button" className="v2-link text-micro" onClick={() => save.mutate({ ...effective, [k]: baseline })}>Reset to daemon</button>
+                <button type="button" className="v2-link text-micro" onClick={() => setAgent(k, null)}>Reset to daemon</button>
               ) : null}
             </div>
             <ModelControls label={k} setting={setting} runtimes={list} recessed={state === 'inherited'}
-              onChange={(next) => save.mutate({ ...effective, [k]: next })} />
+              onChange={(next) => setAgent(k, next)} />
             <p className="text-micro text-text-3">{state === 'overridden' ? `Overrides ${diff.join(', ')}.` : 'Inherited from the daemon.'}</p>
           </div>
         );
       })}
       <WorkspaceOptions effective={effective} daemon={daemon.data} runtimes={list}
-        onSave={(next) => save.mutate({ ...effective, workerOptions: next })} />
+        onSave={(next) => save.mutate({ workerOptions: next })} />
     </div>
   );
 }
@@ -306,51 +309,69 @@ function NewOption({ runtimes, existing, onAdd, onCancel }: {
 }
 
 function WorkspaceOptions({ effective, daemon, runtimes, onSave }: {
-  effective: T.WorkspaceModels; daemon: T.DaemonModels | undefined; runtimes: T.RuntimeInfo[]; onSave: (next: T.WorkerModelOption[]) => void;
+  effective: T.WorkspaceModels; daemon: T.DaemonModels | undefined; runtimes: T.RuntimeInfo[]; onSave: (next: T.WorkerModelOption[] | null) => void;
 }): React.ReactElement {
+  const state = optionOverrideState(effective.source);
   const daemonOptions = daemon?.workerOptions ?? [];
   const wsOptions = effective.workerOptions ?? [];
-  const list = daemonOptions.length > 0 ? daemonOptions : wsOptions;
-  const overridden = list.filter((o) => optionOverrideState(wsOptions.find((w) => w.id === o.id) ?? o, daemonOptions.length ? o : undefined) === 'overridden').length;
-  if (list.length === 0) return <p className="text-micro text-text-3">No worker options are configured on the daemon.</p>;
-  const edit = (base: T.WorkerModelOption, next: T.ModelSetting): void => {
-    onSave(list.map((o) => {
-      const existing = wsOptions.find((w) => w.id === o.id) ?? o;
-      return o.id === base.id ? { ...o, runtime: next.runtime, model: next.model, effort: next.effort } : existing;
-    }));
+  // Starting from an empty daemon catalog: Override cannot write the (empty) daemon list — that
+  // would just clear the catalog again. Enter local editing instead, and write only on the first
+  // added option (VS-356 review).
+  const [starting, setStarting] = useState(false);
+  const override = (): void => {
+    if (daemonOptions.length > 0) onSave(daemonOptions);
+    else setStarting(true);
   };
-  const reset = (base: T.WorkerModelOption): void => {
-    onSave(list.map((o) => (o.id === base.id ? o : (wsOptions.find((w) => w.id === o.id) ?? o))));
-  };
+  const header = (
+    <div className="flex items-baseline gap-2">
+      <span className="ac-label text-text-1">Worker options</span>
+      <OverrideTag state={state} />
+      <div className="flex-1" />
+      {state === 'overridden'
+        ? <button type="button" className="v2-link text-micro" onClick={() => onSave(null)}>Reset to daemon</button>
+        : starting
+          ? <button type="button" className="v2-link text-micro" onClick={() => setStarting(false)}>Cancel</button>
+          : <button type="button" className="v2-link text-micro" onClick={override}>Override</button>}
+    </div>
+  );
+  if (state === 'inherited') {
+    if (starting) {
+      return (
+        <div className="flex flex-col gap-2">
+          {header}
+          <p className="text-micro text-text-3">Add the first option. Nothing is written until you do.</p>
+          <WorkerOptionsEditor options={[]} runtimes={runtimes} onSave={onSave} />
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col gap-2">
+        {header}
+        <p className="text-micro text-text-3">The list is the daemon's. Override to run an option on a different model.</p>
+        {daemonOptions.length === 0
+          ? <p className="text-micro text-text-3">The daemon has no worker options.</p>
+          : daemonOptions.map((o) => (
+            <div key={o.id} className="v2-card flex flex-col gap-2 p-3">
+              <div className="flex items-baseline gap-2">
+                <span className="ac-mono text-meta text-text-1">{o.id}</span>
+                <span className="v2-tag text-text-2">{modelTag(o)}</span>
+                <span className="min-w-0 flex-1 truncate text-micro text-text-3">{o.description}</span>
+              </div>
+            </div>
+          ))}
+        <p className="text-micro text-text-3">Inherited from the daemon.</p>
+      </div>
+    );
+  }
+  const diffs = wsOptions
+    .map((o) => { const d = diffOption(o, baselineOption(daemon, o.id)); return d.length > 0 ? `${o.id}: ${d.join(', ')}` : null; })
+    .filter((d): d is string => d != null);
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-baseline gap-2">
-        <span className="ac-label text-text-1">Worker options</span>
-        <div className="flex-1" />
-        <span className="ac-mono text-micro text-text-3">{overridden} of {list.length} overridden</span>
-      </div>
-      <p className="text-micro text-text-3">The list is the daemon's. A workspace can change which model an option runs on — not what the option means, since the weaver picks by description.</p>
-      {list.map((base) => {
-        const current = wsOptions.find((w) => w.id === base.id) ?? base;
-        const state = optionOverrideState(current, daemonOptions.length ? base : undefined);
-        const diff = diffOption(current, daemonOptions.length ? base : undefined);
-        return (
-          <div key={base.id} className={cx('v2-card flex flex-col gap-2 p-3', state === 'overridden' && 'border-accent-edge')}>
-            <div className="flex items-baseline gap-2">
-              <span className="ac-mono text-meta text-text-1">{base.id}</span>
-              <OverrideTag state={state} />
-              <span className="min-w-0 flex-1 text-micro text-text-3">{base.description}</span>
-              {state === 'overridden' ? (
-                <button type="button" className="v2-link text-micro" onClick={() => reset(base)}>Reset to daemon</button>
-              ) : null}
-            </div>
-            <ModelControls label={base.id} setting={{ runtime: current.runtime ?? base.runtime ?? runtimes[0]?.id ?? 'claude', model: current.model, ...(current.effort !== undefined ? { effort: current.effort } : {}) }}
-              runtimes={runtimes} recessed={state === 'inherited'}
-              onChange={(next) => edit(base, next)} />
-            <p className="text-micro text-text-3">{state === 'overridden' ? `Overrides ${diff.join(', ')}.` : 'Inherited from the daemon.'}</p>
-          </div>
-        );
-      })}
+      {header}
+      <p className="text-micro text-text-3">This workspace has its own catalog. The weaver picks one per ticket by reading these descriptions. Workers above is the default when none matches.</p>
+      <WorkerOptionsEditor options={wsOptions} runtimes={runtimes} onSave={onSave} />
+      <p className="text-micro text-text-3">{diffs.length > 0 ? `Overrides ${diffs.join('; ')}.` : 'Set in this workspace.'}</p>
     </div>
   );
 }

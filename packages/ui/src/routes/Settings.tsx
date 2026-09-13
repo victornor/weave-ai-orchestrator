@@ -1071,8 +1071,27 @@ function ModelsSection(): React.ReactElement {
   if (!models.data) return <ErrorState code="MODELS_UNREACHABLE" message="The workspace's model settings could not be read." />;
 
   const current = models.data;
-  const set = (kind: 'weaver' | 'workers', next: T.ModelSetting): void => save.mutate({ ...current, [kind]: next });
-  const commit = (kind: 'weaver' | 'workers', next: T.ModelSetting): Promise<void> => save.mutateAsync({ ...current, [kind]: next }).then(() => undefined);
+  // VS-356: send only the control that changed, so editing one agent never pins the other.
+  const set = (kind: 'weaver' | 'workers', next: T.ModelSetting): void =>
+    save.mutate(kind === 'weaver' ? { weaver: next } : { workers: next });
+  const commit = (kind: 'weaver' | 'workers', next: T.ModelSetting): Promise<void> =>
+    save.mutateAsync(kind === 'weaver' ? { weaver: next } : { workers: next }).then(() => undefined);
+  const sourceLine = (kind: 'weaver' | 'workers'): string => {
+    const source = current.source?.[kind];
+    if (source === 'workspace') return 'Set in this workspace.';
+    if (source === 'daemon') return 'Inherited from the daemon default.';
+    return 'Using the built-in default.';
+  };
+  const scopeControl = (kind: 'weaver' | 'workers'): React.ReactNode => (
+    <div className="flex items-center gap-2">
+      <span className="text-micro text-text-3">{sourceLine(kind)}</span>
+      {current.source?.[kind] === 'workspace' ? (
+        <Button size="sm" onClick={() => save.mutate(kind === 'weaver' ? { weaver: null } : { workers: null })}>
+          Use daemon default
+        </Button>
+      ) : null}
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -1081,6 +1100,7 @@ function ModelsSection(): React.ReactElement {
         hint="The agent you talk to. One per workspace."
         setting={current.weaver}
         runtimes={runtimes.data ?? []}
+        scopeControl={scopeControl('weaver')}
         onChange={(next) => set('weaver', next)}
         onCommit={(next) => commit('weaver', next)}
       />
@@ -1089,13 +1109,14 @@ function ModelsSection(): React.ReactElement {
         hint="Every worker in this workspace whose ticket names no catalog option."
         setting={current.workers}
         runtimes={runtimes.data ?? []}
+        scopeControl={scopeControl('workers')}
         onChange={(next) => set('workers', next)}
         onCommit={(next) => commit('workers', next)}
       />
       <WorkerOptionsEditor
         current={current}
         runtimes={runtimes.data ?? []}
-        onSave={(next) => save.mutateAsync(next).then(() => undefined)}
+        onSave={(next) => save.mutateAsync({ workerOptions: next.workerOptions ?? [] }).then(() => undefined)}
       />
       {save.error ? <ErrorState code="MODELS_NOT_SAVED" message={save.error.message} /> : null}
       <p className="text-micro leading-relaxed text-text-3">
@@ -1280,13 +1301,16 @@ function ModelSettingFields({ label, hint, setting, runtimes, disabled, onChange
   );
 }
 
+/** The catalog editor's view of the workspace: the workers default and the catalog, nothing else. */
+type WorkerOptionsDraft = Pick<T.WorkspaceModels, 'workers' | 'workerOptions'>;
+
 function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave }: {
   option: T.WorkerModelOption;
   options: T.WorkerModelOption[];
-  current: T.WorkspaceModels;
+  current: WorkerOptionsDraft;
   runtimes: T.RuntimeInfo[];
   disabled?: boolean;
-  onSave: (next: T.WorkspaceModels) => Promise<void> | void;
+  onSave: (next: WorkerOptionsDraft) => Promise<void> | void;
 }): React.ReactElement {
   const configured = option.runtime != null;
   const models = useRuntimeModels(option.runtime);
@@ -1449,10 +1473,10 @@ function WorkerOptionRow({ option, options, current, runtimes, disabled, onSave 
 }
 
 function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
-  current: T.WorkspaceModels;
+  current: WorkerOptionsDraft;
   runtimes: T.RuntimeInfo[];
   disabled?: boolean;
-  onSave: (next: T.WorkspaceModels) => Promise<void> | void;
+  onSave: (next: WorkerOptionsDraft) => Promise<void> | void;
 }): React.ReactElement {
   const options = current.workerOptions ?? [];
   const [id, setId] = useState('');
@@ -1761,7 +1785,7 @@ function DaemonWorkerOptions({ options, runtimes, fallback, onSave }: {
   const list = options ?? [];
   return (
     <WorkerOptionsEditor
-      current={{ weaver: fallback, workers: fallback, workerOptions: list }}
+      current={{ workers: fallback, workerOptions: list }}
       runtimes={runtimes}
       onSave={(next) => onSave(next.workerOptions && next.workerOptions.length > 0 ? next.workerOptions : null)}
     />

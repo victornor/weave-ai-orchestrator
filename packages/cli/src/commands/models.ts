@@ -1,12 +1,12 @@
 /**
- * `weave models [show] | models set conductor|workers | models options …` — model selection
- * (VS-77, ADR 0011; VS-162, ADR 0012; VS-284). The CLI's own argument vocabulary
- * (`conductor`/`workers`) is unchanged for now (VS-260's job); the wire field it reads and writes
- * is `weaver` (VS-263) — `wireField()` is the one place that translates between them.
+ * `weave models [show] | models set conductor|weaver|workers | models inherit
+ * conductor|weaver|workers|options | models options …` — model selection (VS-77, ADR 0011; VS-162,
+ * ADR 0012; VS-284; VS-356). The weaver control answers to both its legacy CLI name (`conductor`)
+ * and the product's current name (`weaver`); the wire field it reads and writes is `weaver`
+ * (VS-263) — `wireField()` is the one place that translates.
  *
- * Every command here always writes the workspace's own setting (VS-284: a daemon overlay can no
- * longer refuse or discard it) — `weave daemon models` is the separate command tree for the
- * daemon's own overlays.
+ * Every command here writes only the control it names (VS-356), so editing one agent never pins the
+ * other; `weave daemon models` is the separate command tree for the daemon's own overlays.
  */
 import type { Command } from 'commander';
 import { emit, fields, style, write } from '../output.js';
@@ -18,14 +18,16 @@ interface WorkspaceModels {
   weaver?: ModelSetting;
   workers?: ModelSetting;
   workerOptions?: WorkerModelOption[];
+  source?: { weaver?: string; workers?: string; workerOptions?: string };
 }
 
-const KINDS = ['conductor', 'workers'] as const;
+/** The weaver control's accepted names: the legacy `conductor` and the product's current `weaver`. */
+const KINDS = ['conductor', 'weaver', 'workers'] as const;
 type Kind = (typeof KINDS)[number];
 
-/** The CLI's own argument spelling ('conductor'/'workers') to the wire field it reads/writes. */
+/** The CLI's argument spelling to the wire field it reads/writes; `conductor`/`weaver` both mean `weaver`. */
 function wireField(kind: Kind): 'weaver' | 'workers' {
-  return kind === 'conductor' ? 'weaver' : 'workers';
+  return kind === 'workers' ? 'workers' : 'weaver';
 }
 
 function describe(s: ModelSetting | undefined): string {
@@ -50,22 +52,24 @@ export function register(program: Command): void {
     .action(async (_opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
       const current = await client.wget<WorkspaceModels>('/models');
+      const source = (k: 'weaver' | 'workers' | 'workerOptions'): string => current.source?.[k] ?? '(unknown)';
       emit(current, () => {
         fields([
-          ['conductor', describe(current.weaver)],
-          ['workers', describe(current.workers)],
+          ['conductor', `${describe(current.weaver)} · ${source('weaver')}`],
+          ['workers', `${describe(current.workers)} · ${source('workers')}`],
           ...((current.workerOptions ?? []).map((o) => ['option', describeOption(o)] as [string, string])),
+          ['options', source('workerOptions')],
         ]);
       });
     }));
 
   models
     .command('set')
-    .argument('<setting>', `which setting to change: ${KINDS.join(' or ')}`)
+    .argument('<setting>', 'which setting to change: conductor|weaver or workers')
     .option('--runtime <id>', 'runtime id, as `weave runtime list` reports it')
     .option('--model <id>', 'model id, or "default" to let the runtime choose')
     .option('--effort <effort>', 'reasoning effort the runtime understands, or "default" to clear it')
-    .description('change one of the two model settings')
+    .description('change one of the two model settings, leaving the other as it is')
     .action(async (setting: string, opts: Record<string, string | undefined>, command: Command) => run(async () => {
       if (!KINDS.includes(setting as Kind)) throw new Error(`unknown setting ${setting}: expected ${KINDS.join(' or ')}`);
       const kind = setting as Kind;
@@ -82,8 +86,23 @@ export function register(program: Command): void {
         if (opts['effort'] === 'default') delete next.effort;
         else next.effort = opts['effort'];
       }
-      const result = await client.put<WorkspaceModels>(client.w('/models'), { ...current, [field]: next });
+      // VS-356: send only the changed control, so the other agent is not pinned.
+      const result = await client.put<WorkspaceModels>(client.w('/models'), { [field]: next });
       emit(result, () => write(`${style.ok('updated')} ${kind} = ${describe(result[field])}`));
+    }));
+
+  models
+    .command('inherit')
+    .argument('<setting>', 'which control to clear back to the daemon default: conductor|weaver, workers or options')
+    .description('clear one workspace control so it inherits the daemon default again')
+    .action(async (setting: string, _opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const body = setting === 'options' ? { workerOptions: null }
+        : KINDS.includes(setting as Kind) ? { [wireField(setting as Kind)]: null }
+        : null;
+      if (!body) throw new Error(`unknown setting ${setting}: expected conductor, weaver, workers or options`);
+      const result = await client.put<WorkspaceModels>(client.w('/models'), body);
+      emit(result, () => write(`${style.ok('cleared')} ${setting} now inherits the daemon default`));
     }));
 
   const options = models.command('options').description('named worker-model options a ticket may pick (VS-162)');
@@ -107,7 +126,7 @@ export function register(program: Command): void {
       };
       if (opts['effort']) option.effort = opts['effort'];
       const workerOptions = [...(current.workerOptions ?? []), option];
-      const result = await client.put<WorkspaceModels>(client.w('/models'), { ...current, workerOptions });
+      const result = await client.put<WorkspaceModels>(client.w('/models'), { workerOptions });
       emit(result, () => write(`${style.ok('added')} option ${describeOption(option)}`));
     }));
 
@@ -134,7 +153,7 @@ export function register(program: Command): void {
         else next.effort = opts['effort'];
       }
       list[idx] = next;
-      const result = await client.put<WorkspaceModels>(client.w('/models'), { ...current, workerOptions: list });
+      const result = await client.put<WorkspaceModels>(client.w('/models'), { workerOptions: list });
       emit(result, () => write(`${style.ok('updated')} option ${describeOption(next)}`));
     }));
 
@@ -147,7 +166,7 @@ export function register(program: Command): void {
       const current = await client.wget<WorkspaceModels>('/models');
       const workerOptions = (current.workerOptions ?? []).filter((o) => o.id !== id);
       if (workerOptions.length === (current.workerOptions ?? []).length) throw new Error(`no worker option '${id}'`);
-      const result = await client.put<WorkspaceModels>(client.w('/models'), { ...current, workerOptions });
+      const result = await client.put<WorkspaceModels>(client.w('/models'), { workerOptions });
       emit(result, () => write(`${style.ok('removed')} option ${id}`));
     }));
 }

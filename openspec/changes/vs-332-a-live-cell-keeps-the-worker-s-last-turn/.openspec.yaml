@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: A Live cell keeps the worker's last turn on screen between turns, with
+  'Waiting for the next turn' underneath instead of wiping it

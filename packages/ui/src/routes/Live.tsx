@@ -8,7 +8,7 @@
  * rather than literal Tailwind classes, since the granularity is too fine to enumerate as classes.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { agentUiStatus, isActiveRun, type Agent, type Run, type Ticket, type WorkerModelOption } from '@weave-ai/shared';
+import { agentUiStatus, isActiveRun, type Agent, type Run, type RunEvent, type Ticket, type WorkerModelOption } from '@weave-ai/shared';
 import { Page, PageBody, PageHeader } from '../components/Page';
 import { RunTranscript } from '../components/RunTranscript';
 import { StreamStatusNotice } from '../components/StreamStatus';
@@ -54,6 +54,9 @@ export function LiveRoute(): React.ReactElement {
   const tickets = useTickets({ limit: 300 });
   const running = useRuns({ status: 'running', limit: 200 });
   const queued = useRuns({ status: 'queued', limit: 200 });
+  // VS-332: each worker's most recent run, so a cell between turns keeps showing the last turn.
+  // One bounded query for the floor, not one fetch per cell.
+  const recent = useRuns({ limit: 200 });
   // The tier tag's catalog (VS-217); undefined while loading keeps every cell untagged.
   const models = useModels();
   const minSm = useMediaQuery('(min-width: 40rem)');
@@ -76,6 +79,16 @@ export function LiveRoute(): React.ReactElement {
     }
     return map;
   }, [running.data, queued.data]);
+  // VS-332: the newest run per agent (active or finished), the fallback a cell shows between turns.
+  // Newest-first, but compared by `createdAt` so the ordering is not assumed.
+  const lastRunByAgent = useMemo(() => {
+    const map = new Map<string, Run>();
+    for (const r of recent.data ?? []) {
+      const seen = map.get(r.agentId);
+      if (!seen || r.createdAt > seen.createdAt) map.set(r.agentId, r);
+    }
+    return map;
+  }, [recent.data]);
 
   const liveIds = useMemo(() => live.map((w) => w.id), [live]);
   const tailSlots = useMemo(() => {
@@ -116,6 +129,7 @@ export function LiveRoute(): React.ReactElement {
                 agent={w}
                 ticket={w.ticketId ? ticketsById.get(w.ticketId) : undefined}
                 run={runByAgent.get(w.id) ?? null}
+                lastRun={lastRunByAgent.get(w.id) ?? null}
                 size={sizeOf(sizes, w.id, minSm, colsMax)}
                 colsMax={colsMax}
                 desktop={minSm}
@@ -135,6 +149,7 @@ export function LiveCell({
   agent,
   ticket,
   run,
+  lastRun = null,
   size,
   colsMax,
   desktop,
@@ -147,6 +162,8 @@ export function LiveCell({
   agent: Agent;
   ticket: Ticket | undefined;
   run: Run | null;
+  /** VS-332: the worker's most recent run, shown while it has none in progress. */
+  lastRun?: Run | null;
   size: CellSize;
   colsMax: number;
   desktop: boolean;
@@ -160,7 +177,21 @@ export function LiveCell({
 }): React.ReactElement {
   const ws = useHookWs(wsProp);
   const streaming = Boolean(run && isActiveRun(run.status));
-  const { events, status, retryNow } = useRunEventStream(streaming && run ? run.id : null, { live: streaming && streamLive, ws: wsProp });
+  const current = streaming ? run : lastRun;
+  // A finished run reads its newest events (VS-332), so a long turn shows its ending; an in-progress
+  // run keeps the head-then-stream path unchanged.
+  const { events, status, retryNow } = useRunEventStream(current?.id ?? null, { live: streaming && streamLive, newest: !streaming, ws: wsProp });
+  // VS-332: keep the outgoing turn's transcript while the next run warms up, so the cell never
+  // flashes empty on a handoff. Updated only when the run id or event count really changed.
+  const [kept, setKept] = useState<{ run: Run; events: RunEvent[] } | null>(null);
+  useEffect(() => {
+    if (!current || events.length === 0) return;
+    setKept((prev) => (prev && prev.run.id === current.id && prev.events.length === events.length ? prev : { run: current, events }));
+  }, [current, events]);
+  const keptIsOutgoing = streaming && events.length === 0 && kept !== null && kept.run.id !== current?.id;
+  const shownRun = keptIsOutgoing ? kept.run : current;
+  const shownEvents = keptIsOutgoing ? kept.events : events;
+  const hasTranscript = Boolean(shownRun && (streaming || shownEvents.length > 0));
   const identifier = ticket?.identifier ?? agent.ticketId;
   const title = ticket?.title;
   const ticketLabel = [identifier, title].filter(Boolean).join(' · ') || 'ticket';
@@ -207,19 +238,16 @@ export function LiveCell({
         <StatusBadge status={agentUiStatus(agent.status)} />
       </header>
       <div className="min-h-0 flex-1 p-2.5">
-        {streaming ? (
-          <>
-            <StreamStatusNotice status={status} onRetry={retryNow} className="mb-2" />
-            <RunTranscript
-              events={events}
-              live
-              label={`Transcript of ${agent.name}`}
-              className="ac-live-transcript"
-            />
-          </>
-        ) : (
-          <p className="px-1 py-2 text-micro text-text-3">Waiting for the next turn.</p>
-        )}
+        {streaming ? <StreamStatusNotice status={status} onRetry={retryNow} className="mb-2" /> : null}
+        {hasTranscript ? (
+          <RunTranscript
+            events={shownEvents}
+            live={streaming}
+            label={`Transcript of ${agent.name}`}
+            className="ac-live-transcript"
+          />
+        ) : null}
+        {streaming ? null : <p className="px-1 py-2 text-micro text-text-3">Waiting for the next turn.</p>}
       </div>
       {desktop ? (
         <ResizeHandle

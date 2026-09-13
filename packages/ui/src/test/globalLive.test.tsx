@@ -1,7 +1,7 @@
 /** VS-168: daemon-wide Live page. */
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Run, Ticket, WorkerModelOption } from '@weave-ai/shared';
+import type { Agent, Run, RunEvent, Ticket, WorkerModelOption } from '@weave-ai/shared';
 import { agent, run as makeRun, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
   tickets: {} as Record<string, Ticket[]>,
   running: {} as Record<string, Run[]>,
   queued: {} as Record<string, Run[]>,
+  recent: {} as Record<string, Run[]>,
+  persisted: [] as RunEvent[],
   models: {} as Record<string, WorkerModelOption[] | undefined>,
 }));
 
@@ -26,10 +28,10 @@ vi.mock('../api/hooks', () => ({
   useWorkersMany: (ids: string[]) => ids.map((id) => ({ data: state.workers[id], isError: Boolean(state.errors[id]), refetch: vi.fn() })),
   useTicketsMany: (ids: string[]) => ids.map((id) => ({ data: state.tickets[id] ?? [] })),
   useRunsMany: (ids: string[], params: { status?: string } = {}) => ids.map((id) => ({
-    data: params.status === 'queued' ? (state.queued[id] ?? []) : (state.running[id] ?? []),
+    data: params.status === 'queued' ? (state.queued[id] ?? []) : params.status === 'running' ? (state.running[id] ?? []) : (state.recent[id] ?? []),
   })),
   useModelsMany: (ids: string[]) => ids.map((id) => ({ data: state.models[id] === undefined ? undefined : { workerOptions: state.models[id] } })),
-  useRunEvents: () => ({ data: [], isLoading: false }),
+  useRunEvents: () => ({ data: state.persisted, isLoading: false }),
 }));
 
 const { GlobalLiveRoute } = await import('../routes/GlobalLive');
@@ -45,6 +47,11 @@ class FakeEventSource {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
   }
   close(): void { this.closed = true; }
+  emit(event: RunEvent): void {
+    act(() => {
+      for (const fn of this.listeners.get(event.type) ?? []) fn({ data: JSON.stringify(event) } as MessageEvent<string>);
+    });
+  }
 }
 
 const live = (): FakeEventSource[] => FakeEventSource.open.filter((s) => !s.closed);
@@ -60,6 +67,8 @@ beforeEach(() => {
   state.tickets = {};
   state.running = {};
   state.queued = {};
+  state.recent = {};
+  state.persisted = [];
   state.models = {};
   FakeEventSource.open = [];
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
@@ -160,5 +169,31 @@ describe('GlobalLiveRoute', () => {
       '/api/w/alpha/runs/run_1/events/stream',
       '/api/w/alpha/runs/run_2/events/stream',
     ]);
+  });
+
+  it('keeps a between-turns worker\'s last run and hands off to the next (VS-332)', () => {
+    const evt = (seq: number, text: string, runId: string): RunEvent => ({ id: `e${seq}`, runId, seq, ts: '2026-09-01T09:00:00.000Z', type: 'assistant.text', stream: 'stdout', level: 'info', payload: { text } });
+    const a = agent({ id: 'w1', name: 'Frontend #1', status: 'active', ticketId: 't1' });
+    state.workers = { alpha: [a], beta: [] };
+    state.tickets = { alpha: [ticket({ id: 't1', identifier: 'ALP-1', title: 'One' })] };
+    state.recent = { alpha: [makeRun({ id: 'run_1', agentId: 'w1', status: 'succeeded' })] };
+    state.persisted = [evt(1, 'First turn.', 'run_1')];
+    const { rerender } = render(<GlobalLiveRoute />);
+
+    expect(live()).toEqual([]);
+    expect(screen.getByText('First turn.')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for the next turn.')).toBeInTheDocument();
+
+    state.running = { alpha: [makeRun({ id: 'run_2', agentId: 'w1', status: 'running' })] };
+    state.recent = { alpha: [makeRun({ id: 'run_2', agentId: 'w1', status: 'running' })] };
+    state.persisted = [];
+    rerender(<GlobalLiveRoute />);
+
+    expect(live().map((s) => s.url)).toEqual(['/api/w/alpha/runs/run_2/events/stream']);
+    expect(screen.getByText('First turn.')).toBeInTheDocument();
+    expect(screen.queryByText('Waiting for the next turn.')).not.toBeInTheDocument();
+
+    live()[0]!.emit(evt(1, 'New turn.', 'run_2'));
+    expect(screen.getByText('New turn.')).toBeInTheDocument();
   });
 });

@@ -1149,3 +1149,22 @@ describe('daemon host tools (VS-318)', () => {
     }
   });
 });
+
+describe('a run\'s events (VS-332)', () => {
+  it('serves the newest window for tail and the head page for after/limit', async () => {
+    const { h, fetch } = app();
+    const calls: Array<{ method: string; arg: number | undefined }> = [];
+    h.impls.runs.events = (_id: string, after?: number) => { calls.push({ method: 'events', arg: after }); return [{ seq: 1 }]; };
+    h.impls.runs.tail = (_id: string, limit?: number) => { calls.push({ method: 'tail', arg: limit }); return [{ seq: 900 }, { seq: 901 }]; };
+
+    const tailed = await fetch('/api/w/ws1/runs/run_1/events?tail=500', { headers: authed() });
+    expect(tailed.status).toBe(200);
+    await expect(tailed.json()).resolves.toEqual([{ seq: 900 }, { seq: 901 }]);
+
+    const head = await fetch('/api/w/ws1/runs/run_1/events?after=0&limit=10', { headers: authed() });
+    expect(head.status).toBe(200);
+    await expect(head.json()).resolves.toEqual([{ seq: 1 }]);
+
+    expect(calls).toEqual([{ method: 'tail', arg: 500 }, { method: 'events', arg: 0 }]);
+  });
+});

@@ -28,8 +28,12 @@ export function runRoutes(): Hono<AppEnv> {
   app.get('/:id', (c) => c.json(c.get('ws').services.runs.get(c.req.param('id'))));
 
   app.get('/:id/events', (c) => {
-    const q = query(c, z.object({ after: z.coerce.number().int().optional(), limit: z.coerce.number().int().min(1).max(2000).optional() }));
-    return c.json(c.get('ws').services.runs.events(c.req.param('id'), q.after, q.limit));
+    const q = query(c, z.object({ after: z.coerce.number().int().optional(), limit: z.coerce.number().int().min(1).max(2000).optional(), tail: z.coerce.number().int().min(1).max(2000).optional() }));
+    const runs = c.get('ws').services.runs;
+    // `tail` reads the newest window (VS-332), for a surface showing a finished run whose ending
+    // matters; `after`/`limit` stay the head-page read. Both return oldest-first.
+    if (q.tail) return c.json(runs.tail(c.req.param('id'), q.tail));
+    return c.json(runs.events(c.req.param('id'), q.after, q.limit));
   });
 
   app.get('/:id/events/stream', (c) => {

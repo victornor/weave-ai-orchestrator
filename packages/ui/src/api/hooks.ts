@@ -1184,11 +1184,20 @@ export function useRun(id: string): UseQueryResult<T.RunDetail> {
   return useQuery({ queryKey: qk.run(ws, id), queryFn: () => api.ws<unknown>(ws, `/runs/${id}`).then(runDetail), enabled: Boolean(id) });
 }
 
-export function useRunEvents(id: string, after = 0, wsOverride?: string): UseQueryResult<RunEvent[]> {
+/** Events per page for `useRunEvents`; `newest` reads this many from the end of the run (VS-332). */
+export const RUN_EVENT_PAGE = 500;
+
+/**
+ * A run's events. The default reads the head page (`?after=&limit=`); `newest` reads the last
+ * {@link RUN_EVENT_PAGE} events instead, so a finished run whose ending matters does not render only
+ * its opening (VS-332).
+ */
+export function useRunEvents(id: string, after = 0, wsOverride?: string, opts: { newest?: boolean } = {}): UseQueryResult<RunEvent[]> {
   const ws = useHookWs(wsOverride);
+  const newest = opts.newest ?? false;
   return useQuery({
-    queryKey: [...qk.runEvents(ws, id), after],
-    queryFn: () => api.ws<RunEvent[] | { events: RunEvent[] }>(ws, `/runs/${id}/events${qs({ after, limit: 500 })}`).then((r) => listOf(r, 'events')),
+    queryKey: [...qk.runEvents(ws, id), newest ? 'tail' : 'head', ...(newest ? [] : [after])],
+    queryFn: () => api.ws<RunEvent[] | { events: RunEvent[] }>(ws, `/runs/${id}/events${qs(newest ? { tail: RUN_EVENT_PAGE } : { after, limit: RUN_EVENT_PAGE })}`).then((r) => listOf(r, 'events')),
     enabled: Boolean(id) && Boolean(ws),
   });
 }

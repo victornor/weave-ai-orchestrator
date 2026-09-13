@@ -249,6 +249,11 @@ describe('WorkerPage transcript merge (VS-319)', () => {
     render(<WorkerRoute />);
     emitRunEvent(runEvent({ id: '1', seq: 1 }));
 
+    // VS-324: a thinking block collapses by default — one collapsed row is itself the dedup
+    // signal, and expanding it confirms the text underneath was not duplicated either.
+    const collapsed = screen.getAllByText('Thought');
+    expect(collapsed).toHaveLength(1);
+    fireEvent.click(collapsed[0]!);
     expect(screen.getAllByText('Checking the failing test.')).toHaveLength(1);
   });
 });

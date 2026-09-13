@@ -1,9 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { RunEvent } from '@weave-ai/shared';
+import { diffHunksForEdits, type DiffHunk } from '@weave-ai/render';
 import { groupConsecutiveTools, reportUiStatus, runEventsToTranscript } from '../lib/transcript';
-import type { ToolBlock, TranscriptBlock } from '../lib/transcript';
+import type { EditPayload, ToolBlock, TranscriptBlock } from '../lib/transcript';
 import { StatusGlyph } from './StatusGlyph';
 import { Markdown } from './Markdown';
+import { Code, SplitHunk, UnifiedHunk, type Highlighter } from './DiffHunks';
+import { highlightLine, languageForPath, useHighlighter } from '../lib/highlight';
 import { duration, tokens as fmtTokens } from '../lib/format';
 import { cx } from '../lib/cx';
 
@@ -91,17 +94,43 @@ function ToolGroup({ tool, calls }: { tool: string; calls: ToolBlock[] }): React
   );
 }
 
-export function TranscriptLine({ block }: { block: TranscriptBlock }): React.ReactElement {
+/** A thinking block collapsed to one line naming its duration when derivable (VS-324), expanding to
+ * the same markdown rendering VS-319 already produces. No runtime reports this duration directly —
+ * `runEventsToTranscript` derives it from the gap to the next event — so it is absent, not zero,
+ * when it cannot be derived. */
+function ThinkingLine({ text, durationMs }: { text: string; durationMs: number | null }): React.ReactElement {
   const [open, setOpen] = useState(false);
+  return (
+    <div className="overflow-hidden rounded-r4 border border-line-1">
+      <button
+        type="button"
+        className="w-full text-left"
+        aria-expanded={open}
+        aria-label={durationMs != null ? `Thought, ${duration(durationMs)}` : 'Thought'}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <div className="flex items-center gap-2.5 bg-bg-2 px-2.5 py-1.5">
+          <span className="ac-mono text-nano text-text-3">{open ? '▾' : '▸'}</span>
+          <span className="ac-mono text-micro text-text-3">Thought{durationMs != null ? ` · ${duration(durationMs)}` : ''}</span>
+        </div>
+      </button>
+      {open ? (
+        <div className="border-t border-line-1 p-2.5">
+          <Markdown source={text} breaks className="text-body italic leading-relaxed text-text-3" />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function TranscriptLine({ block }: { block: TranscriptBlock }): React.ReactElement {
+  // An edit-type row starts expanded (VS-324 review): captain's ask was to see the diff itself,
+  // not a second click to reveal it. The header still collapses it like any other row.
+  const [open, setOpen] = useState(() => block.type === 'tool' && Boolean(block.editPayload));
 
   if (block.type === 'text') {
-    return (
-      <Markdown
-        source={block.text}
-        breaks
-        className={cx('text-body leading-relaxed', block.thinking ? 'text-text-3 italic' : 'text-text-body')}
-      />
-    );
+    if (block.thinking) return <ThinkingLine text={block.text} durationMs={block.thinkingDurationMs ?? null} />;
+    return <Markdown source={block.text} breaks className="text-body leading-relaxed text-text-body" />;
   }
 
   if (block.type === 'report') {
@@ -175,7 +204,7 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
     );
   }
 
-  const expandable = Boolean(block.diff);
+  const expandable = Boolean(block.diff) || Boolean(block.editPayload);
   const head = (
     <div className={cx('flex items-center gap-2.5 px-2.5 py-1.5', expandable ? 'bg-bg-2' : 'rounded-r4 border border-line-1 bg-bg-2')}>
       <span className="ac-mono text-nano text-text-3">{block.pending ? '·' : expandable ? (open ? '▾' : '▸') : '▸'}</span>
@@ -199,7 +228,105 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
       <button type="button" className="w-full text-left" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         {head}
       </button>
-      {open ? <DiffBlock diff={block.diff ?? ''} /> : null}
+      {open ? (
+        block.editPayload ? (
+          <EditPayloadBody id={block.id} path={block.target} payload={block.editPayload} />
+        ) : (
+          <DiffBlock diff={block.diff ?? ''} />
+        )
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * An edit-type tool call's expanded body: a diff per edit, or a written file's content — whichever
+ * `payload.kind` says (VS-324). Syntax highlighting is inferred from `path`'s extension, matching
+ * the pull request diff view.
+ *
+ * `id` (the block's own id, stable and never reassigned once a `tool.call` creates it — `editPayload`
+ * is set once and never mutated afterward) is the hunk memo's key, not `payload` itself: every edit
+ * row now renders expanded by default, and `runEventsToTranscript` rebuilds every block — a fresh
+ * object, fresh nested arrays — on every new event. Memoising on the object would rerun the LCS diff
+ * for every visible edit on every live event; the id alone is enough, since the same id can only
+ * ever carry the same edits (VS-324 review).
+ */
+function EditPayloadBody({ id, path, payload }: { id: string; path: string; payload: EditPayload }): React.ReactElement {
+  const hljs = useHighlighter();
+  const lang = languageForPath(path);
+  const highlight = useCallback<Highlighter>((text) => highlightLine(hljs, text, lang), [hljs, lang]);
+  // Hooks run unconditionally regardless of `payload.kind`; the write branch simply never uses
+  // `hunks`. Deliberately keyed on `id` alone, not `payload` — see the doc comment above.
+  const hunks = useMemo(() => (payload.kind === 'edit' ? diffHunksForEdits(payload.edits) : []), [id]);
+
+  if (payload.kind === 'write') {
+    return <WrittenFile content={payload.content} highlight={highlight} />;
+  }
+  return (
+    <div className="flex flex-col divide-y divide-line-1 border-t border-line-1">
+      {hunks.map((hunk, i) => (
+        <EditHunk key={i} hunk={hunk} highlight={highlight} />
+      ))}
+    </div>
+  );
+}
+
+/** How many lines a long edit hunk or a written file shows before the rest is behind "Show more",
+ * mirroring `Transcript`'s own "Show earlier" windowing — low enough that a big edit or a large
+ * written file does not flood a cell now that both render expanded by default (VS-324 review). */
+const CONTENT_WINDOW = 40;
+
+/** Side by side when there is room to read two columns, unified when there is not — decided per
+ * rendered instance by a CSS container query, since a transcript cell's width varies continuously
+ * by drag rather than by viewport breakpoint, and cannot be measured in the test harness (VS-324
+ * design.md; see also `workspace-navigation/live-floor`'s own jsdom-geometry landmine). */
+function EditHunk({ hunk, highlight }: { hunk: DiffHunk; highlight: Highlighter }): React.ReactElement {
+  const [shown, setShown] = useState(() => Math.min(hunk.lines.length, CONTENT_WINDOW));
+  const windowed = shown >= hunk.lines.length ? hunk : { ...hunk, lines: hunk.lines.slice(0, shown) };
+  return (
+    <div className="ac-mono overflow-x-auto text-nano">
+      <div className="@container">
+        <div className="hidden @min-[32rem]:block">
+          <SplitHunk hunk={windowed} highlight={highlight} />
+        </div>
+        <div className="@min-[32rem]:hidden">
+          <UnifiedHunk hunk={windowed} highlight={highlight} />
+        </div>
+      </div>
+      {shown < hunk.lines.length ? (
+        <button
+          type="button"
+          onClick={() => setShown((n) => Math.min(hunk.lines.length, n + CONTENT_WINDOW))}
+          className="ac-mono w-full border-t border-line-1 px-2.5 py-1 text-left text-nano text-text-3 hover:bg-bg-3 hover:text-text-1"
+        >
+          Show {hunk.lines.length - shown} more lines
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function WrittenFile({ content, highlight }: { content: string; highlight: Highlighter }): React.ReactElement {
+  const lines = useMemo(() => content.split('\n'), [content]);
+  const [shown, setShown] = useState(() => Math.min(lines.length, CONTENT_WINDOW));
+  const visible = lines.slice(0, shown);
+  return (
+    <div className="ac-mono border-t border-line-1 text-nano">
+      {visible.map((line, i) => (
+        <div key={i} className="flex whitespace-pre">
+          <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{i + 1}</span>
+          <span className="px-1.5"><Code text={line} highlight={highlight} /></span>
+        </div>
+      ))}
+      {shown < lines.length ? (
+        <button
+          type="button"
+          onClick={() => setShown((n) => Math.min(lines.length, n + CONTENT_WINDOW))}
+          className="ac-mono w-full border-t border-line-1 px-2.5 py-1 text-left text-nano text-text-3 hover:bg-bg-3 hover:text-text-1"
+        >
+          Show {lines.length - shown} more lines
+        </button>
+      ) : null}
     </div>
   );
 }

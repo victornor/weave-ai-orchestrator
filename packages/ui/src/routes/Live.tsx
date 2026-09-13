@@ -26,7 +26,7 @@ import { liveRunTailSlots } from '../lib/liveStreams';
 import {
   type CellSize,
   columnCount,
-  DEFAULT_SIZE,
+  defaultSize,
   GRANULARITY,
   readLiveCellSizes,
   ROWS_MAX,
@@ -88,8 +88,8 @@ export function LiveRoute(): React.ReactElement {
     return liveRunTailSlots(streaming);
   }, [live, runByAgent]);
   const commit = useCallback((id: string, next: CellSize) => {
-    setSizes((prev) => writeLiveCellSizes(ws, { ...prev, [id]: next }, liveIds));
-  }, [ws, liveIds]);
+    setSizes((prev) => writeLiveCellSizes(ws, { ...prev, [id]: next }, liveIds, minSm, colsMax));
+  }, [ws, liveIds, minSm, colsMax]);
 
   const loaded = workers.data !== undefined;
   const n = live.length;
@@ -116,7 +116,7 @@ export function LiveRoute(): React.ReactElement {
                 agent={w}
                 ticket={w.ticketId ? ticketsById.get(w.ticketId) : undefined}
                 run={runByAgent.get(w.id) ?? null}
-                size={sizeOf(sizes, w.id, colsMax)}
+                size={sizeOf(sizes, w.id, minSm, colsMax)}
                 colsMax={colsMax}
                 desktop={minSm}
                 onSize={(next) => commit(w.id, next)}
@@ -199,7 +199,7 @@ export function LiveCell({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => onSize(shown.expanded ? DEFAULT_SIZE : { cols: GRANULARITY, rows: ROWS_MAX, expanded: true })}
+            onClick={() => onSize(shown.expanded ? defaultSize(desktop, colsMax) : { cols: GRANULARITY, rows: ROWS_MAX, expanded: true })}
           >
             {shown.expanded ? 'Restore' : 'Expand'}
           </Button>
@@ -233,7 +233,7 @@ export function LiveCell({
           }}
           onReset={() => {
             setDrag(null);
-            onSize(DEFAULT_SIZE);
+            onSize(defaultSize(desktop, colsMax));
           }}
         />
       ) : null}

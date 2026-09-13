@@ -83,8 +83,8 @@ export function GlobalLiveRoute(): React.ReactElement {
     [cells],
   );
   const commit = useCallback((id: string, next: CellSize) => {
-    setSizes((prev) => writeLiveCellSizes(GLOBAL_SIZE_KEY, { ...prev, [id]: next }, liveIds));
-  }, [liveIds]);
+    setSizes((prev) => writeLiveCellSizes(GLOBAL_SIZE_KEY, { ...prev, [id]: next }, liveIds, minSm, colsMax));
+  }, [liveIds, minSm, colsMax]);
 
   const loaded = Boolean(workspaces.data) && workerQueries.every((q) => q.data !== undefined || q.isError);
   const failed = listed.map((w, i) => (workerQueries[i]?.isError ? w : null)).filter((w): w is NonNullable<typeof w> => w !== null);
@@ -129,7 +129,7 @@ export function GlobalLiveRoute(): React.ReactElement {
                     agent={c.agent}
                     ticket={c.ticket}
                     run={c.run}
-                    size={sizeOf(sizes, c.agent.id, colsMax)}
+                    size={sizeOf(sizes, c.agent.id, minSm, colsMax)}
                     colsMax={colsMax}
                     desktop={minSm}
                     onSize={(next) => commit(c.agent.id, next)}

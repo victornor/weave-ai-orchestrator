@@ -3,10 +3,9 @@
  *
  * Size is integer CSS-grid spans, not pixels — a wrapping grid reflows around spans, and jsdom
  * cannot see geometry. Spans are fine-grained tracks (VS-206): `GRANULARITY` tracks per old
- * "slot", so `DEFAULT_SIZE` is the equal slot the page already uses at every breakpoint. The map
- * is per workspace and per worker; workers are disposable, so this lives in sessionStorage (a
- * durable store would accumulate dead ids). A browser that refuses storage still resizes for the
- * session.
+ * "slot". The map is per workspace and per worker; workers are disposable, so this lives in
+ * sessionStorage (a durable store would accumulate dead ids). A browser that refuses storage still
+ * resizes for the session.
  */
 
 export interface CellSize {
@@ -20,14 +19,24 @@ export const GRANULARITY = 4;
 
 export const ROWS_MAX = GRANULARITY * 2;
 
-export const DEFAULT_SIZE: CellSize = { cols: GRANULARITY, rows: GRANULARITY };
-
 const keyOf = (wsId: string): string => `conductor.live.cellSizes.${wsId}`;
 
 export function columnCount(minSm: boolean, minXl: boolean): number {
   if (minXl) return 3 * GRANULARITY;
   if (minSm) return 2 * GRANULARITY;
   return 1 * GRANULARITY;
+}
+
+/**
+ * The equal slot a never-resized cell occupies (VS-324): half the grid's width on `sm` and `xl`
+ * (`desktop === true` at both — `desktop` is exactly the caller's `minSm`), the full grid's width
+ * on the one-column phone layout (`desktop === false`). `colsMax` is `8` at `sm` and `12` at `xl`,
+ * so this gives `4` and `6` respectively without any per-breakpoint branching here; `4` at phone
+ * (`colsMax` itself) keeps one cell per row. Rows are unaffected — only the default width changes.
+ */
+export function defaultSize(desktop: boolean, colsMax: number): CellSize {
+  const cols = desktop ? Math.max(1, Math.round(colsMax / 2)) : colsMax;
+  return { cols, rows: GRANULARITY };
 }
 
 export function clampSize(size: CellSize, colsMax: number): CellSize {
@@ -42,8 +51,9 @@ export function sameSize(a: CellSize, b: CellSize): boolean {
   return a.cols === b.cols && a.rows === b.rows && Boolean(a.expanded) === Boolean(b.expanded);
 }
 
-export function isDefaultSize(size: CellSize): boolean {
-  return size.cols === GRANULARITY && size.rows === GRANULARITY && !size.expanded;
+export function isDefaultSize(size: CellSize, desktop: boolean, colsMax: number): boolean {
+  const d = defaultSize(desktop, colsMax);
+  return size.cols === d.cols && size.rows === d.rows && !size.expanded;
 }
 
 export function snapSize(
@@ -97,11 +107,13 @@ export function writeLiveCellSizes(
   wsId: string,
   map: Record<string, CellSize>,
   liveIds: readonly string[],
+  desktop: boolean,
+  colsMax: number,
 ): Record<string, CellSize> {
   const keep: Record<string, CellSize> = {};
   for (const id of liveIds) {
     const size = map[id];
-    if (!size || isDefaultSize(size)) continue;
+    if (!size || isDefaultSize(size, desktop, colsMax)) continue;
     keep[id] = size;
   }
   try {
@@ -113,6 +125,6 @@ export function writeLiveCellSizes(
   return keep;
 }
 
-export function sizeOf(map: Record<string, CellSize>, workerId: string, colsMax: number): CellSize {
-  return clampSize(map[workerId] ?? DEFAULT_SIZE, colsMax);
+export function sizeOf(map: Record<string, CellSize>, workerId: string, desktop: boolean, colsMax: number): CellSize {
+  return clampSize(map[workerId] ?? defaultSize(desktop, colsMax), colsMax);
 }

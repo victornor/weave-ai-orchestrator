@@ -7,20 +7,18 @@
  * Read-only throughout: nothing here edits, comments, approves or merges. That stays the decision
  * card's, and the pull request's description/checks panel above this, exactly as VS-97 left them.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { DiffHunk, DiffLine } from '@weave-ai/render';
+import { useCallback, useEffect, useState } from 'react';
+import type { DiffHunk } from '@weave-ai/render';
 import { highlightLine, languageForPath, useHighlighter } from '../../lib/highlight';
 import { usePullRequestDiffContext, usePullRequestDiffFile, usePullRequestDiffFiles } from '../../api/hooks';
 import { Badge } from '../../components/StatusGlyph';
 import { Button } from '../../components/Button';
 import { SkeletonRows } from '../../components/Skeleton';
+import { Code, SplitHunk, UnifiedHunk, type Highlighter } from '../../components/DiffHunks';
 import { useDiffLayout, type DiffLayout } from '../../lib/diffLayout';
 import { cx } from '../../lib/cx';
 import { UNAVAILABLE } from '../../lib/pullRequestUnavailable';
 import type * as T from '../../api/types';
-
-/** One line's text, turned into a highlighted-or-plain HTML string (VS-107 / ADR 0013). */
-type Highlighter = (text: string) => string;
 
 /** A media query as a boolean that follows changes (mirrors HistorySection.tsx's local hook). */
 function useMediaQuery(query: string): boolean {
@@ -141,65 +139,6 @@ function FileBody({
 
 function HunkHeader({ hunk }: { hunk: DiffHunk }): React.ReactElement {
   return <div className="bg-bg-2 px-2.5 py-0.5 text-text-4">{hunk.header}</div>;
-}
-
-const LINE_BG: Record<DiffLine['kind'], string> = { add: 'bg-done/10', remove: 'bg-failed/10', context: '' };
-
-/**
- * Highlighted markup is trusted here: `highlightLine` escapes the source text itself (`lib/highlight.ts`).
- * The wrapped `{ __html }` is memoised on the text (and the stable `highlight`, which closes over the
- * language), because React 19 compares `dangerouslySetInnerHTML` by reference: a fresh object on every
- * render rewrites the line's DOM even when the text is identical, clearing any selection inside it.
- */
-function Code({ text, highlight }: { text: string; highlight: Highlighter }): React.ReactElement {
-  const html = useMemo(() => ({ __html: highlight(text) }), [text, highlight]);
-  return <span dangerouslySetInnerHTML={html} />;
-}
-
-function UnifiedHunk({ hunk, highlight }: { hunk: DiffHunk; highlight: Highlighter }): React.ReactElement {
-  return (
-    <div>
-      {hunk.lines.map((line, i) => (
-        <div key={i} className={cx('flex whitespace-pre', LINE_BG[line.kind])}>
-          <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{line.oldLine ?? ''}</span>
-          <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{line.newLine ?? ''}</span>
-          <span className="px-1.5">
-            {line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '}
-            <Code text={line.text} highlight={highlight} />
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SplitHunk({ hunk, highlight }: { hunk: DiffHunk; highlight: Highlighter }): React.ReactElement {
-  // Not a paired diff the way GitHub's split view aligns a removed line with its replacement — each
-  // side is simply every line it has, in order. Good enough to read side by side; exact pairing is a
-  // refinement, not a correctness requirement of this view.
-  const left = hunk.lines.filter((l) => l.kind !== 'add');
-  const right = hunk.lines.filter((l) => l.kind !== 'remove');
-  const rows = Math.max(left.length, right.length);
-  return (
-    <div className="grid grid-cols-2 divide-x divide-line-1">
-      <div>
-        {Array.from({ length: rows }, (_, i) => left[i]).map((line, i) => (
-          <div key={i} className={cx('flex whitespace-pre', line ? LINE_BG[line.kind] : '')}>
-            <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{line?.oldLine ?? ''}</span>
-            <span className="px-1.5">{line ? <><span>{line.kind === 'remove' ? '-' : ' '}</span><Code text={line.text} highlight={highlight} /></> : null}</span>
-          </div>
-        ))}
-      </div>
-      <div>
-        {Array.from({ length: rows }, (_, i) => right[i]).map((line, i) => (
-          <div key={i} className={cx('flex whitespace-pre', line ? LINE_BG[line.kind] : '')}>
-            <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{line?.newLine ?? ''}</span>
-            <span className="px-1.5">{line ? <><span>{line.kind === 'add' ? '+' : ' '}</span><Code text={line.text} highlight={highlight} /></> : null}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 /** The unchanged region between two hunks — collapsed until the reader asks for it. */

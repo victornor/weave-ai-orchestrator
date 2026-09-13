@@ -18,6 +18,8 @@ import { V2Scheduled } from './scheduled/V2Scheduled';
 export { V2NeedsPage } from './NeedsYouPage';
 // VS-351: Roles is a real screen; its module owns the page component.
 export { V2RolesPage } from './RolesPage';
+// VS-349: Chat is a real screen; its module owns the page component and the split layout.
+export { V2ChatPage } from './ChatPage';
 
 export function V2LivePage(): React.ReactElement {
   return <V2Page title="Live" />;
@@ -43,9 +45,6 @@ export function V2SettingsPage(): React.ReactElement {
 }
 export function V2ChatsPage(): React.ReactElement {
   return <V2Page title="Chats" />;
-}
-export function V2ChatPage(): React.ReactElement {
-  return <V2Page title="Chat" />;
 }
 export function V2WorkPage(): React.ReactElement {
   return <V2WorkScreen />;

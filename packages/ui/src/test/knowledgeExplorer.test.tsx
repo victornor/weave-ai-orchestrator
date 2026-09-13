@@ -132,12 +132,15 @@ describe('KnowledgeExplorer', () => {
 
     fireEvent.click(date);
     expect(screen.getByText('Archived')).toBeInTheDocument();
+    // VS-331: the explorer's archive panel has no Close button.
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
   });
 });
 
 const ARTIFACT: TicketArtifactSummary = {
   id: 'wp_1', ticketId: 'tk_1', ticketIdentifier: 'ACME-42', ticketTitle: 'Add dark mode',
   key: 'overview', title: 'Overview', metadata: { kind: 'diagram' }, url: '/api/w/ws1/tickets/tk_1/artifacts/overview/raw',
+  previewable: true,
   updatedAt: '2026-09-12T00:00:00Z',
 };
 
@@ -192,6 +195,15 @@ describe('KnowledgeExplorer artifacts entry (VS-270)', () => {
     state.artifacts = [];
     render(<KnowledgeExplorer project="p1" />);
     expect(screen.getByText('Nothing to browse yet.')).toBeInTheDocument();
+  });
+
+  it('does not list a link-only artifact work product with no stored document (VS-331)', () => {
+    state.hubFiles = [{ id: 'h1', path: 'projects/api/PROJECT.md', scope: 'project', projectId: 'p1', projectSlug: 'api', kind: 'hub' }];
+    state.artifacts = [{ ...ARTIFACT, previewable: false, title: 'Phone screenshots', url: 'file:///tmp/artifacts/' }];
+    render(<KnowledgeExplorer project="p1" />);
+
+    expect(screen.queryByText('Artifacts')).toBeNull();
+    expect(screen.queryByText('Phone screenshots')).toBeNull();
   });
 });
 
@@ -290,6 +302,24 @@ describe('KnowledgeExplorer two-pane browser (VS-279)', () => {
     fireEvent.click(screen.getByText('← tree'));
     expect(screen.getByText('The run engine')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Retry policy' })).toBeNull();
+  });
+
+  it('renders no Close button in any explorer content pane (VS-331)', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.docs = [DOC_FLAT];
+    state.artifacts = [ARTIFACT];
+    render(<KnowledgeExplorer project="p1" />);
+
+    // Default hub panel (PROJECT.md).
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
+
+    fireEvent.click(screen.getByText('The run engine'));
+    expect(screen.getByRole('heading', { name: 'Retry policy' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
+
+    fireEvent.click(screen.getByText('Overview').closest('button')!);
+    expect(screen.getByTitle('Overview').tagName).toBe('IFRAME');
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
   });
 
   it('reflects the selected document in the URL', () => {

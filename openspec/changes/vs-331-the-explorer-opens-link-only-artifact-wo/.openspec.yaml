@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Fix the Knowledge Explorer and ticket page rendering of link-only artifact
+  work products, and remove the Explorer's Close buttons

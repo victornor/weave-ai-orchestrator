@@ -616,6 +616,19 @@ describe('tickets', () => {
         expect(rows.map((r) => r.key)).toEqual(['second', 'first']);
         expect(rows.find((r) => r.key === 'first')!.metadata['kind']).toBe('diagram');
       });
+
+      it('marks a row previewable only when its artifact document was stored (VS-331)', () => {
+        const t = make();
+        // A link-only row, as VS-68's was recorded before VS-269 publishing existed.
+        tickets.putArtifactWorkProduct(AGENT, t.id, 'link-only', { url: 'file:///tmp/nope' });
+        // A real publish stores the `artifact:<key>` document alongside the work product.
+        tickets.putDocument(AGENT, t.id, 'artifact:overview', '<!doctype html><html></html>', { system: true });
+        tickets.putArtifactWorkProduct(AGENT, t.id, 'overview', { url: '/api/w/ws/tickets/t/artifacts/overview/raw' });
+
+        const rows = tickets.artifacts(h.projectId);
+        expect(rows.find((r) => r.key === 'link-only')!.previewable).toBe(false);
+        expect(rows.find((r) => r.key === 'overview')!.previewable).toBe(true);
+      });
     });
 
     it('lists the documents on a ticket with their current revision', () => {

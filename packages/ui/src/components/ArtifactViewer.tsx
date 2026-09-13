@@ -21,6 +21,18 @@ export interface ArtifactViewerArtifact {
   url: string;
 }
 
+/**
+ * VS-331: the only shape the raw-serve routes produce is a same-origin `/api/w/<ws>/…/raw` path
+ * (optionally with a `?revision=` query). Anything else — an empty string, a `file://` folder a
+ * pre-VS-269 work product recorded — cannot be framed or fetched, so the viewer must say so rather
+ * than mount a blank iframe and dead actions.
+ */
+export function isPreviewableArtifactUrl(url: string, ws: string): boolean {
+  if (!url) return false;
+  const path = url.split('?')[0] ?? '';
+  return path.startsWith(`/api/w/${ws}/`) && path.endsWith('/raw');
+}
+
 export function ArtifactViewer({
   ws, artifact, revisions,
 }: {
@@ -35,7 +47,9 @@ export function ArtifactViewer({
   const [revision, setRevision] = useState<number | undefined>(undefined);
   const [downloading, setDownloading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  const previewable = isPreviewableArtifactUrl(artifact.url, ws);
   const src = `${artifact.url}${qs({ revision })}`;
   // `artifact.url` already carries the `/api/w/:ws` prefix `api.ws` itself adds — strip it back off so
   // a fetch-based read goes through the same helper (auth headers, error handling) without doubling
@@ -45,6 +59,7 @@ export function ArtifactViewer({
 
   async function download(): Promise<void> {
     setDownloading(true);
+    setError(null);
     try {
       const [html, kitCss] = await Promise.all([
         api.ws<string>(ws, `${relativePath}${qs({ revision })}`),
@@ -64,9 +79,31 @@ export function ArtifactViewer({
       a.download = `${artifact.title || artifact.key}.html`;
       a.click();
       URL.revokeObjectURL(url);
+    } catch (e) {
+      // VS-331: a swallowed failure left the button looking like it did something.
+      setError(e instanceof Error ? e.message : 'The download failed.');
     } finally {
       setDownloading(false);
     }
+  }
+
+  // VS-331: a link-only artifact (no stored document) has nothing to frame, fetch or link to. Say so
+  // explicitly and keep every action inert, rather than rendering a blank frame with dead buttons.
+  if (!previewable) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex-1" />
+          <span className="text-micro text-text-4" aria-disabled="true">Open in new tab ↗</span>
+          <Button size="sm" variant="secondary" disabled>Copy link</Button>
+          <Button size="sm" variant="secondary" disabled>Download</Button>
+        </div>
+        <div className="ac-card p-3.5">
+          <p className="text-meta font-medium text-text-2">This artifact has no stored content to preview.</p>
+          {artifact.url ? <p className="ac-mono mt-1 break-all text-micro text-text-4">{artifact.url}</p> : null}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -113,6 +150,8 @@ export function ArtifactViewer({
           {downloading ? 'Downloading…' : 'Download'}
         </Button>
       </div>
+
+      {error ? <p role="alert" className="text-micro text-failed">Download failed: {error}</p> : null}
 
       <iframe
         key={src}

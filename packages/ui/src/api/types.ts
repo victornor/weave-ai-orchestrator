@@ -262,6 +262,9 @@ export interface TicketArtifactSummary {
   title: string | null;
   metadata: Record<string, unknown>;
   url: string | null;
+  /** True when the artifact is backed by a stored `artifact:<key>` document (VS-331) — a link-only
+   * work product is listed with `false` and must not be opened in the viewer. */
+  previewable: boolean;
   updatedAt: string;
 }
 

@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "A plan revised while its approval card is held never reaches the card:
+  republish changed plan artifacts at the end of a worker's turn, and make
+  concerns mean the plan must change"

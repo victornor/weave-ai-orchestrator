@@ -802,7 +802,7 @@ export const TOOLS: ToolDef[] = [
       status: z.enum(['looked', 'concerns']),
       note: z.string().min(1),
     }),
-    description: 'Mark that you have reviewed a plan, merge or action approval. Both marks need a note shown on the card: concerns = what you object to; looked = the one or two sentences you would otherwise write in chat about why the work is clean. Do not mark at turn start or in a batch. A clean mark says the review found nothing to object to — it is not an endorsement and never your approval. Never use this to answer those decisions. On a merge approval the head you are reviewing is recorded, so a later push to the same card wakes you.',
+    description: 'Mark that you have reviewed a plan, merge or action approval. Both marks need a note shown on the card: concerns = what you object to; looked = the one or two sentences you would otherwise write in chat about why the work is clean. A concerns mark holds approval until a new plan revision (for a plan) or a new commit (for a merge) lands, so use it only when the work must change before approval — notes to apply while building go in a looked note. Do not mark at turn start or in a batch. A clean mark says the review found nothing to object to — it is not an endorsement and never your approval. Never use this to answer those decisions. On a merge approval the head you are reviewing is recorded, so a later push to the same card wakes you.',
     handler: async (ctx, i) => {
       // VS-365: record the delivery head this review is made against, so a commit pushed afterwards can
       // wake the weaver without a comment. Only a merge approval has a delivery head worth recording.

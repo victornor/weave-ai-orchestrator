@@ -326,6 +326,41 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     { key: NAMED_CARD_OPTION_KEYS.action_approval.reject, label: 'Reject', description: 'Cancel the ticket.' },
   ];
 
+  const planApprovalOptions = [
+    { key: NAMED_CARD_OPTION_KEYS.plan_approval.approve, label: 'Approve', description: 'The worker implements the plan.', recommended: true },
+    { key: NAMED_CARD_OPTION_KEYS.plan_approval.revise, label: 'Revise', description: 'Send it back with feedback.' },
+    { key: NAMED_CARD_OPTION_KEYS.plan_approval.reject, label: 'Reject', description: 'Cancel the ticket.' },
+  ];
+
+  /** The context line every plan-approval card carries; a caller may append its own suffix. */
+  function planApprovalContext(t: Ticket): string {
+    return `OpenSpec change \`${t.openspecChangeName ?? ''}\` is planning-complete and validates. Review the plan document.`;
+  }
+
+  /**
+   * Raise the plan approval for a planning-complete change ticket. Shared by the `proposing →
+   * proposed` transition, the stranded-approval repair and the turn-end republish, so all three
+   * publish a card with the same owner, options, correlation key, document target and asking agent.
+   * YOLO is not applied here: each caller decides whether to auto-answer, because its ticket and
+   * actor differ.
+   */
+  function raisePlanApproval(actor: Actor, t: Ticket, opts: { context?: string } = {}) {
+    const owner = approvalOwner(t);
+    if (owner === 'none') throw new OcError('validation', `plan approval for ${t.identifier} has no owner`);
+    const doc = db.get<{ id: string; currentRevision: number }>('SELECT id, current_revision FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, 'plan']);
+    return deps().decisions.create(actor, {
+      ticketId: t.id, kind: 'plan_approval', owner,
+      title: `Approve the plan for ${t.identifier}: ${t.title}`,
+      context: opts.context ?? planApprovalContext(t),
+      options: planApprovalOptions,
+      allowFreeText: true,
+      correlationKey: `plan_approval:${t.id}`,
+      target: doc ? { documentId: doc.id, revision: doc.currentRevision } : undefined,
+      askedByAgentId: t.workerId,
+      askedInRunId: actor.runId ?? null,
+    });
+  }
+
   /** Human-owned, never YOLO, never `proposalApproval: none`. */
   function raiseActionApproval(
     actor: Actor,
@@ -580,24 +615,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     // Post-transition side effects (decisions and wakes; both are idempotent-ish and coalesce).
     let autoApproved = false;
     if (to === 'proposed' && t.kind === 'change') {
-      const owner = approvalOwner(next);
-      if (owner === 'none') return transition(actor, t.id, { to: 'approved', note: 'plan auto-approved by policy' });
-      const doc = db.get<{ id: string; currentRevision: number }>('SELECT id, current_revision FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, 'plan']);
-      const planApproval = deps().decisions.create(actor, {
-        ticketId: t.id, kind: 'plan_approval', owner,
-        title: `Approve the plan for ${next.identifier}: ${next.title}`,
-        context: `OpenSpec change \`${next.openspecChangeName ?? ''}\` is planning-complete and validates. Review the plan document.`,
-        options: [
-          { key: NAMED_CARD_OPTION_KEYS.plan_approval.approve, label: 'Approve', description: 'The worker implements the plan.', recommended: true },
-          { key: NAMED_CARD_OPTION_KEYS.plan_approval.revise, label: 'Revise', description: 'Send it back with feedback.' },
-          { key: NAMED_CARD_OPTION_KEYS.plan_approval.reject, label: 'Reject', description: 'Cancel the ticket.' },
-        ],
-        allowFreeText: true,
-        correlationKey: `plan_approval:${t.id}`,
-        target: doc ? { documentId: doc.id, revision: doc.currentRevision } : undefined,
-        askedByAgentId: next.workerId,
-        askedInRunId: actor.runId ?? null,
-      });
+      if (approvalOwner(next) === 'none') return transition(actor, t.id, { to: 'approved', note: 'plan auto-approved by policy' });
+      const planApproval = raisePlanApproval(actor, next);
       // The plan is ready the moment the decision exists — `validateForProposed` has already run —
       // so under YOLO it is answered here rather than waiting for a click. `applyPlanApproval`
       // transitions the ticket to `approved` and wakes the worker, exactly as a human answer does.
@@ -1446,22 +1465,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           repaired.push({ id: t.id, identifier: t.identifier, kind: 'plan_approval' });
           continue;
         }
-        const doc = db.get<{ id: string; currentRevision: number }>('SELECT id, current_revision FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, 'plan']);
-        const planApproval = deps().decisions.create(SYSTEM, {
-          ticketId: t.id, kind: 'plan_approval', owner,
-          title: `Approve the plan for ${t.identifier}: ${t.title}`,
-          context: `OpenSpec change \`${t.openspecChangeName ?? ''}\` is planning-complete and validates. Review the plan document. (Re-raised: the previous approval was lost.)`,
-          options: [
-            { key: NAMED_CARD_OPTION_KEYS.plan_approval.approve, label: 'Approve', description: 'The worker implements the plan.', recommended: true },
-            { key: NAMED_CARD_OPTION_KEYS.plan_approval.revise, label: 'Revise', description: 'Send it back with feedback.' },
-            { key: NAMED_CARD_OPTION_KEYS.plan_approval.reject, label: 'Reject', description: 'Cancel the ticket.' },
-          ],
-          allowFreeText: true,
-          correlationKey: `plan_approval:${t.id}`,
-          target: doc ? { documentId: doc.id, revision: doc.currentRevision } : undefined,
-          askedByAgentId: t.workerId,
-          askedInRunId: null,
-        });
+        const planApproval = raisePlanApproval(SYSTEM, t, { context: `${planApprovalContext(t)} (Re-raised: the previous approval was lost.)` });
         // Same as the original creation at the `proposed` transition: YOLO answers it immediately.
         if (yolo(t)) await autoApprove(t, planApproval.id);
         repaired.push({ id: t.id, identifier: t.identifier, kind: 'plan_approval' });
@@ -1506,6 +1510,58 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       }
 
       return repaired;
+    },
+
+    /**
+     * VS-364: a worker can revise the plan while the ticket stays `proposed` — answering weaver
+     * concerns or steering, neither of which moves the ticket — and until this ran, nothing published
+     * the new artifacts, so the card kept the old revision and a held approval had no revision to lift
+     * on. Called at the end of a worker's turn: re-render the plan from the worker's worktree, and when
+     * it differs from the stored document, publish it and raise a fresh approval exactly as the
+     * `proposing → proposed` transition does — the write supersedes the open card. Invalid artifacts
+     * publish nothing and surface their issues; an unchanged plan is a no-op. Never throws: a
+     * republish failure must not fail the finished run.
+     */
+    async republishRevisedPlan(actor: Actor, ticketId: string) {
+      const t = get(ticketId);
+      if (t.status !== 'proposed' || t.kind !== 'change' || !t.openspecChangeName) {
+        return { republished: false, reason: 'not proposed' } as const;
+      }
+      try {
+        const res = await deps().openspec.validateForProposed(t.id);
+        if (!res.ok) {
+          systemComment(t.id, `the plan was revised but does not validate, so it was not republished:\n${res.issues.map((i) => `- ${i.message}`).join('\n')}`, actor);
+          wake(conductorId(), 'system', `${t.identifier}: a revised plan failed validation and was not republished`, { ticketId: t.id });
+          return { republished: false, reason: 'validation failed' } as const;
+        }
+        const current = db.get<{ body: string }>(
+          `SELECT r.body FROM ticket_documents d JOIN ticket_document_revisions r ON r.document_id = d.id AND r.revision = d.current_revision
+            WHERE d.ticket_id = ? AND d.key = 'plan'`,
+          [t.id],
+        );
+        if (current?.body === res.plan) return { republished: false, reason: 'unchanged' } as const;
+        // `validateForProposed` shells out and takes seconds; the human can approve the still-open card
+        // during that await, moving the ticket to `approved` (or beyond). Re-read the status *inside*
+        // the write transaction, so a republish can never land a new plan revision or a fresh card on a
+        // ticket that has moved on — which would also re-run YOLO's auto-approval a second time.
+        const written = tx(db, () => {
+          const still = db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [t.id])?.status;
+          if (still !== 'proposed') return null;
+          const w = putDocument(actor, t.id, 'plan', res.plan, { system: true });
+          recordActivity(db, ws, actor, 'ticket.plan_republished', 'ticket', t.id, { revision: w.revision }, t.id);
+          return w;
+        });
+        if (!written) return { republished: false, reason: 'no longer proposed' } as const;
+        const fresh = raisePlanApproval(actor, t, {
+          context: `${planApprovalContext(t)} The worker revised the plan while the ticket was still proposed; this is revision ${written.revision}.`,
+        });
+        if (yolo(t)) await autoApprove(t, fresh.id);
+        systemComment(t.id, `a revised plan was published as revision ${written.revision}; the previous approval is superseded and a fresh one is open.`, actor);
+        return { republished: true, reason: 'republished' } as const;
+      } catch (e) {
+        log.warn({ err: e, ticketId: t.id }, 'republishing a revised plan failed');
+        return { republished: false, reason: `failed: ${String(e)}` } as const;
+      }
     },
 
     nextIdentifier() {

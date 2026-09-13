@@ -274,7 +274,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       report: null, durationMs: Date.now() - started, sessionId: null,
       cancelled: null, record,
     });
-    await checkHeldReviewAfterTurn(ctx, deps, agent, ticket);
+    await afterTurnHooks(ctx, deps, agent, ticket);
     return finished;
   }
 
@@ -319,7 +319,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
         report: null, durationMs: Date.now() - started, sessionId: null,
         cancelled: null, record,
       });
-      await checkHeldReviewAfterTurn(ctx, deps, agent, ticket);
+      await afterTurnHooks(ctx, deps, agent, ticket);
       return finished;
     }
   }
@@ -515,18 +515,24 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     cancelled: state.active.get(runId)?.cancelled ?? null,
     record,
   });
-  await checkHeldReviewAfterTurn(ctx, deps, agent, ticket);
+  await afterTurnHooks(ctx, deps, agent, ticket);
   return finished;
 }
 
 /**
- * VS-365: a worker can push a fix to a merge approval the weaver holds under concerns and end its
- * turn without a comment, which used to wake nobody. At the end of a worker's turn, ask the tickets
- * service whether the held card's delivery head has moved since the review — it wakes the weaver once
- * per new head. Only worker turns with a ticket; never lets the check fail the run.
+ * The daemon's end-of-worker-turn side effects, in order and each isolated, so neither can fail the
+ * finished run. First republish a plan revised while the ticket stayed `proposed` (VS-364 — answering
+ * weaver concerns or steering moves no ticket, so no transition published the new artifacts), then
+ * tell the weaver when a held merge card's delivery head has moved since its review (VS-365). Only
+ * worker turns with a ticket.
  */
-async function checkHeldReviewAfterTurn(ctx: WorkspaceContext, deps: () => CoreServices, agent: Agent, ticket: Ticket | null): Promise<void> {
+async function afterTurnHooks(ctx: WorkspaceContext, deps: () => CoreServices, agent: Agent, ticket: Ticket | null): Promise<void> {
   if (agent.kind !== 'worker' || !ticket) return;
+  try {
+    await deps().tickets.republishRevisedPlan({ kind: 'system', id: null }, ticket.id);
+  } catch (e) {
+    ctx.log('run').warn({ err: String(e), ticketId: ticket.id }, 'republish of a revised plan failed');
+  }
   try {
     await deps().tickets.noteHeldReviewHead({ kind: 'system', id: null }, ticket.id);
   } catch (e) {

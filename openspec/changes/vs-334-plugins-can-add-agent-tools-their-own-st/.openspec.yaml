@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: Plugins can add agent tools, their own storage, API routes and a web page,
+  so a separate Services plugin can be built on them

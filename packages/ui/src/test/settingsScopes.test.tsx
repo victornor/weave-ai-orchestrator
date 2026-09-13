@@ -23,6 +23,7 @@ const state = vi.hoisted(() => ({
   update: null as Record<string, unknown> | null,
   savedPaths: [] as string[],
   hostToolSaveError: null as Error | null,
+  summaryPlugins: undefined as Array<{ id: string; version: string | null; source: 'workspace' | 'daemon'; loaded: boolean; error: string | null; hasPage: boolean }> | undefined,
 }));
 
 vi.mock('../api/context', () => ({
@@ -35,7 +36,7 @@ vi.mock('../app/link', () => ({
 }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
-  useWorkspaceSummary: () => ({ data: { workspace: { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME' }, config: {} }, isLoading: false }),
+  useWorkspaceSummary: () => ({ data: { workspace: { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME' }, config: {}, plugins: state.summaryPlugins }, isLoading: false }),
   useWorkspaces: () => ({ data: [{ id: 'ws2', slug: 'other', name: 'Other' }] }),
   usePatchConfig: () => ({ mutate: vi.fn(), isPending: false }),
   useProjects: () => ({ data: [], isLoading: false }),
@@ -102,6 +103,7 @@ beforeEach(() => {
   state.update = null;
   state.savedPaths = [];
   state.hostToolSaveError = null;
+  state.summaryPlugins = undefined;
   localStorage.clear();
 });
 
@@ -219,7 +221,7 @@ describe('redirecting a link that names the other side (VS-230)', () => {
 describe('the workspace settings page', () => {
   it('lists only the workspace sections, and offers no area switcher', () => {
     openWorkspaceSettings();
-    expect(tabNames()).toEqual(['Workspace', 'Projects', 'Models', 'Channels', 'Presentation']);
+    expect(tabNames()).toEqual(['Workspace', 'Projects', 'Models', 'Channels', 'Presentation', 'Plugins']);
     for (const label of SETTINGS_AREAS.map((a) => a.label)) {
       expect(screen.queryByRole('radio', { name: label })).not.toBeInTheDocument();
     }
@@ -258,6 +260,27 @@ describe('the workspace settings page', () => {
       to: '/w/$ws/settings',
       opts: { params: { ws: 'ws1' }, search: { section: 'channels' }, replace: true },
     });
+  });
+
+  it('the Plugins section lists a loaded and a failed plugin (VS-334)', () => {
+    state.search = { section: 'plugins' };
+    state.summaryPlugins = [
+      { id: 'notes', version: '0.1.0', source: 'workspace', loaded: true, error: null, hasPage: true },
+      { id: 'broken', version: null, source: 'daemon', loaded: false, error: 'boom', hasPage: false },
+    ];
+    openWorkspaceSettings();
+    expect(screen.getByText('notes')).toBeInTheDocument();
+    expect(screen.getByText('0.1.0')).toBeInTheDocument();
+    expect(screen.getByText('broken')).toBeInTheDocument();
+    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(screen.getByText('boom')).toBeInTheDocument();
+  });
+
+  it('the Plugins section says so when nothing is configured', () => {
+    state.search = { section: 'plugins' };
+    state.summaryPlugins = undefined;
+    openWorkspaceSettings();
+    expect(screen.getByText(/No plugins are configured/)).toBeInTheDocument();
   });
 });
 

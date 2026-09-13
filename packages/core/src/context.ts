@@ -4,20 +4,29 @@ import { resolveWorkspaceStateDir, type WorkspaceInstallStatus } from '@weave-ai
 import type { RuntimeAdapter } from '@weave-ai/runtime-sdk';
 import type { ChannelAdapter } from '@weave-ai/channel-sdk';
 import type { SurfaceAdapter } from '@weave-ai/surface-sdk';
-import type { WorktreeProvider, ForgeAdapter, AgentToolDefinition, Logger as PluginLogger } from '@weave-ai/plugin-sdk';
+import type { WorktreeProvider, ForgeAdapter, Logger as PluginLogger } from '@weave-ai/plugin-sdk';
 import type { EventBus } from './events.js';
 import type { Logger } from './logger.js';
+import type { PluginRegistry } from './plugins/index.js';
 
-/** Registries are process-wide (plugins register once); a WorkspaceContext binds them to one workspace's db and config. */
+/**
+ * Registries are process-wide (plugins register once); a WorkspaceContext binds them to one
+ * workspace's db and config. This holds only capability-shaped adapters, opt-in *by reference* from
+ * a workspace's own config (`models.workers` names a runtime id, `channels.telegram` names a channel
+ * kind) — safe to share, since an entry nothing references is simply never used.
+ *
+ * Agent tools, HTTP routes, and hooks are NOT here (VS-334): a plugin tool is directly callable the
+ * moment it's registered, with no such opt-in step, so each workspace needs its own — see
+ * `WorkspaceContext.plugins` and `./plugins/index.ts`'s `PluginRegistry`.
+ */
 export interface Registries {
   runtimes: Map<string, RuntimeAdapter>;
   channels: Map<string, ChannelAdapter>;
   surfaces: Map<string, SurfaceAdapter>;
   worktreeProviders: Map<string, WorktreeProvider>;
   forges: Map<string, ForgeAdapter>;
-  agentTools: AgentToolDefinition[];
 }
-export function createRegistries(): Registries { return { runtimes: new Map(), channels: new Map(), surfaces: new Map(), worktreeProviders: new Map(), forges: new Map(), agentTools: [] }; }
+export function createRegistries(): Registries { return { runtimes: new Map(), channels: new Map(), surfaces: new Map(), worktreeProviders: new Map(), forges: new Map() }; }
 
 export interface WorkspacePaths {
   root: string; state: string; db: string; runs: string; weaver: string; roles: string; workers: string; archive: string; projects: string; knowledge: string; runtimesHome: string; wtConfig: string;
@@ -58,6 +67,8 @@ export interface WorkspaceContext {
   db: Db;
   events: EventBus;
   registries: Registries;
+  /** This workspace's own plugin registry — tools, routes, hooks, and load results (VS-334). Never shared with another workspace. */
+  plugins: PluginRegistry;
   log: (domain: Parameters<typeof import('./logger.js').getLogger>[0]) => Logger;
   /** Public base URL agents and clients use (loopback listener for run tokens). */
   loopbackUrl: string;

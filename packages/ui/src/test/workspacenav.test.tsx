@@ -385,3 +385,36 @@ describe('the global section', () => {
     expect(screen.getByText('Alpha').closest('button')).not.toBeNull();
   });
 });
+
+// VS-334: a workspace's own loaded plugins drive a runtime-rendered nav section, entirely apart
+// from RAIL/TABS/MORE_ITEMS — this suite's pinned assertions above are untouched by it.
+describe('plugins nav section (VS-334)', () => {
+  it('renders nothing extra when the active workspace loads no plugin with a page', () => {
+    render(nav({ activePlugins: [] }));
+    expect(screen.queryByLabelText('Plugins')).not.toBeInTheDocument();
+  });
+
+  it('lists only a loaded plugin that registered a page, not a failed one or one with no page', () => {
+    render(nav({
+      activePlugins: [
+        { id: 'notes', version: '0.1.0', source: 'workspace', loaded: true, error: null, hasPage: true },
+        { id: 'broken', version: null, source: 'daemon', loaded: false, error: 'boom', hasPage: false },
+        { id: 'headless', version: '0.1.0', source: 'workspace', loaded: true, error: null, hasPage: false },
+      ],
+    }));
+    const plugins = screen.getByLabelText('Plugins');
+    expect(within(plugins).getByText('notes')).toBeInTheDocument();
+    expect(within(plugins).queryByText('broken')).not.toBeInTheDocument();
+    expect(within(plugins).queryByText('headless')).not.toBeInTheDocument();
+    expect(within(plugins).getByText('notes').closest('a')).toHaveAttribute('href', '/w/alpha/plugins/notes');
+  });
+
+  it('does not add a plugins section to a non-active workspace group', () => {
+    render(nav({
+      expanded: ['beta'],
+      activePlugins: [{ id: 'notes', version: '0.1.0', source: 'workspace', loaded: true, error: null, hasPage: true }],
+    }));
+    // Only one Plugins nav exists at all, and it belongs to the active (alpha) group.
+    expect(screen.getAllByLabelText('Plugins')).toHaveLength(1);
+  });
+});

@@ -4,7 +4,7 @@
  */
 import { tmpdir } from 'node:os';
 import { Db } from '@weave-ai/db';
-import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, createRoutinesService, getLogger, initLogger } from '@weave-ai/core';
+import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, createRoutinesService, createPluginRegistry, getLogger, initLogger } from '@weave-ai/core';
 import type { Actor, CoreServices, HistoryQuery, WorkspaceContext } from '@weave-ai/core';
 import type { AuthService } from '@weave-ai/core';
 import {
@@ -344,7 +344,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     // VS-258: a hand-built double, never routed through workspacePaths()/resolveWorkspaceStateDir() —
     // this literal does not track (and does not need to track) which name a real workspace resolves to.
     paths: { root: '/tmp/ws', state: '/tmp/ws/.agent-conductor', db: ':memory:', runs: '', conductor: '', roles: '', workers: '', archive: '', projects: '', knowledge: '', runtimesHome: '', wtConfig: '', secretsFile: '', secretsKey: '' },
-    db, events: bus, registries: createRegistries(),
+    db, events: bus, registries: createRegistries(), plugins: createPluginRegistry(),
     log: (domain: Parameters<typeof getLogger>[0]) => getLogger(domain),
     loopbackUrl: 'http://127.0.0.1:0', skillsDir: '/tmp/skills', templatesDir: '/tmp/templates',
     isolated: false, daemonConfigDir: '/tmp/daemon-config',

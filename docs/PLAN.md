@@ -1169,7 +1169,9 @@ OpenTelemetry traces per run (span per phase) and per HTTP request; `trace_id` i
 
 ## 17. Extension points
 
-All extension goes through `packages/plugin-sdk`:
+All extension goes through `packages/plugin-sdk`. The full authoring guide, with every `PluginHost`
+method's contract and a worked example, is [`docs/PLUGINS.md`](PLUGINS.md); this section is the
+settled shape (VS-334).
 
 ```ts
 export interface WeaveAIPlugin {
@@ -1181,16 +1183,58 @@ export interface PluginHost {
   registerChannel(adapter: ChannelAdapter): void;
   registerSurface(adapter: SurfaceAdapter): void;
   registerHook(subscription: { events: EventType[] | "*"; handler: (ev: WorkspaceEvent) => Promise<void> }): void;
-  registerAgentTool(tool: AgentToolDefinition): void;   // extra weave_* MCP tools with scope: weaver | worker | all
+  registerAgentTool(tool: AgentToolDefinition): void;   // <pluginId>_<name> MCP tools, scope: weaver | worker | all
+  registerHttpRoute(method: PluginHttpMethod, path: string, handler: PluginRouteHandler): void;
   registerWorktreeProvider(provider: WorktreeProvider): void;   // §11.5
   registerForge(adapter: ForgeAdapter): void;           // PR/merge operations (github via gh is built in)
-  registerStorage?(provider: LogStorageProvider): void;
-  config<T>(schema: ZodType<T>): T;                     // plugin config from workspace.yaml plugins[].config
-  logger: Logger; api: ControlPlaneClient;              // typed client over the REST API with a service token
+  store: PluginStore;                                   // this plugin's own namespaced document store
+  emit(kind: string, entityId: string, payload: unknown): void;  // a `plugin.event` on this workspace's stream
+  kitCss(): string;                                     // the Artifact Kit CSS, for a plugin's page to inline
+  config<T>(): T;                                       // plugin config from workspace.yaml/daemon.yaml plugins[].config
+  logger: Logger;
 }
 ```
 
-- Plugins are npm packages or local directories listed in `workspace.yaml`; loaded in-process at daemon start (trusted code; documented as such). Out-of-process isolation is a non-goal for v1.
+Still aspirational, not yet built: `registerStorage?(provider: LogStorageProvider)` (a pluggable
+*run-log* storage backend — unrelated to `store`, which is per-plugin *data*) and schema-validated
+`config<T>(schema: ZodType<T>)`. Neither is part of VS-334's scope.
+
+- **Trust and packaging.** Plugins are npm packages or local directories, listed under `plugins:` in
+  `workspace.yaml` (that workspace only) or `daemon.yaml` (every workspace the daemon serves,
+  applied in addition to a workspace's own list); loaded in-process at daemon start, trusted code,
+  documented as such. Out-of-process isolation is a non-goal for v1. A plugin failing to load, or a
+  duplicate `pluginId` within one workspace's merged list, is logged and skipped — never fatal to the
+  daemon or to another plugin.
+- **Registries are scoped by what they are.** `registerRuntime`/`registerChannel`/`registerSurface`/
+  `registerForge`/`registerWorktreeProvider` register process-wide capabilities, safe to share because
+  a workspace opts into one *by naming it in its own config* (`models.workers`, `channels.telegram`).
+  `registerAgentTool`, `registerHttpRoute` and `registerHook` are directly reachable the moment
+  they're registered, with no such opt-in step, so each workspace gets its **own** registry — a tool,
+  route or hook a plugin registers while loading workspace A is never reachable from workspace B.
+- **Agent tools.** A tool name must be namespaced `<pluginId>_<name>`; one colliding with a core
+  `weave_*` tool, or with another plugin's tool in the same workspace, is rejected at registration.
+  It runs through the same `ToolResult` envelope as a core tool and reaches the calling agent's
+  workspace/project/ticket/run context.
+- **Storage.** `host.store` is a namespaced JSON document store (`get`/`put`/`delete`/`list(prefix?)`)
+  in the workspace database's `plugin_data` table — durable, isolated per plugin id, never a core
+  table. An operator purges one plugin's data with `weave plugin purge-data <id>`
+  (`DELETE /api/w/:ws/plugin-data/:pluginId`) — deliberately outside a plugin's own route prefix, so
+  its page's bridge (below) can never reach it.
+- **HTTP routes.** `registerHttpRoute` mounts a handler at `/api/w/:ws/plugins/<pluginId>/<path>`,
+  inside the existing workspace route group — the same session auth as every other `/api/w/:ws/*`
+  route, no run-token access.
+- **A page.** A plugin's page is one more route (`GET /page` returning self-contained HTML) rendered
+  by the web app at `/w/:ws/plugins/:pluginId` inside an **opaque-origin** sandboxed iframe (no
+  `allow-same-origin`; its own CSP keeps `connect-src 'none'`). It reaches the daemon only through a
+  host-page **postMessage bridge**, scoped to that plugin's own route prefix — `weavePluginClient()`
+  (`@weave-ai/plugin-sdk`) is the page-side client. A "Plugins" nav entry is data-driven from the
+  workspace summary, not a `RAIL`/`TABS`/`MORE_ITEMS` entry.
+- **Events.** `host.emit(kind, entityId, payload)` puts a `plugin.event` on the workspace's existing
+  outbox/SSE stream, tagged with the plugin's id; the bridge forwards only a subscribed page's own
+  events, off the app's single existing connection.
+- **Management.** Settings' workspace-scoped Plugins section lists each loaded plugin's id, version,
+  source (workspace or daemon), load state and error, from the workspace summary
+  (`GET /api/w/:ws`). Installing or removing one is still "edit config, restart."
 - **Webhooks**: `workspace.yaml` `webhooks: [{url, events, secret}]` → the daemon POSTs events (HMAC-SHA256 signed, at-least-once, from the `events` outbox with a per-webhook cursor).
 - **Inbound HTTP**: `POST /api/tickets` etc. with a human or service token; `POST /api/routines/<publicId>/fire` for external triggers (M6).
 - **SSE**: `GET /api/events?after=<seq>` for any UI or integration.

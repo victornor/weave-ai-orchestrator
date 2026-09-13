@@ -34,6 +34,8 @@ import { agentRoutes } from './routes/agent.js';
 import { channelRoutes } from './routes/channels.js';
 import { routineRoutes } from './routes/routines.js';
 import { artifactRoutes } from './routes/artifacts.js';
+import { pluginRoutes } from './routes/plugins.js';
+import { pluginDataRoutes } from './routes/plugin-data.js';
 
 export type { WorkspaceAdmin };
 
@@ -86,6 +88,8 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   ws.route('/channels', channelRoutes());
   ws.route('/routines', routineRoutes());
   ws.route('/artifacts', artifactRoutes());
+  ws.route('/plugins', pluginRoutes());
+  ws.route('/plugin-data', pluginDataRoutes());
   app.route('/api/w/:ws', ws);
 
   // ---- MCP (loopback listener, run tokens) ----

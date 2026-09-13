@@ -17,13 +17,17 @@ import type { Db } from '@weave-ai/db';
 import {
   createRegistries, createCore, createAuthService, createIncidentsService, getLogger, initLogger, workspaceLoader,
   stageWorkspaceImport, importTickets, ensureHostToolPath, startHostToolProbe,
-  type Registries, type WorkspaceContext,
+  isNamespacedToolName, PLUGIN_ID_RE, PluginDataService, ARTIFACT_KIT_CSS,
+  type Registries, type WorkspaceContext, type PluginRuntime,
 } from '@weave-ai/core';
 import type { AuthService, CoreServices } from '@weave-ai/core';
 import type { ChannelAdapter, SurfaceAdapter } from '@weave-ai/plugin-sdk';
 import type { RuntimeAdapter } from '@weave-ai/runtime-sdk';
 import type { WeaveAIPlugin, PluginHost, AgentToolDefinition, WorktreeProvider, ForgeAdapter } from '@weave-ai/plugin-sdk';
-import { OcError, SHUTDOWN_CANCEL_GRACE_MS, SHUTDOWN_DRAIN_GRACE_MS, type DaemonConfig, type EventType, type WorkspaceEvent } from '@weave-ai/shared';
+import {
+  OcError, SHUTDOWN_CANCEL_GRACE_MS, SHUTDOWN_DRAIN_GRACE_MS, COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS,
+  type DaemonConfig, type EventType, type WorkspaceEvent,
+} from '@weave-ai/shared';
 import { createApp, type WorkspaceAdmin } from './app.js';
 import { createUpdateChecker, runningReleaseRoot } from './release-info.js';
 import { createUpgradeService } from './upgrade.js';
@@ -108,7 +112,6 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const bootObservation = observeBoot(daemonDb, { now: nowIso(), release: releaseRoot, pid: process.pid });
   const auth = createAuthService(daemonDb, daemonCfg);
   const registries = createRegistries();
-  const hooks: Array<{ events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }> = [];
 
   await registerBuiltins(registries);
 
@@ -134,10 +137,10 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   };
   loopback.setDeps({ ...deps, listener: 'loopback' });
 
-  const admin = makeAdmin(configDir, isolated, daemonCfg, registries, workspaces, loopback.url, hooks, pushKeys);
+  const admin = makeAdmin(configDir, isolated, daemonCfg, registries, workspaces, loopback.url, pushKeys);
   const registry = workspaceLoader.readRegistry(configDir);
   for (const entry of registry.workspaces) {
-    try { await loadWorkspaceInto(workspaces, entry.path, { daemon: daemonCfg, registries, loopbackUrl: loopback.url, daemonConfigDir: configDir, isolated, pushKeys, ...dirs() }, hooks); }
+    try { await loadWorkspaceInto(workspaces, entry.path, { daemon: daemonCfg, registries, loopbackUrl: loopback.url, daemonConfigDir: configDir, isolated, pushKeys, ...dirs() }); }
     catch (e) { log.error({ err: e, workspace: entry.id, path: entry.path }, 'workspace failed to load'); }
   }
 
@@ -254,7 +257,6 @@ async function loadWorkspaceInto(
   workspaces: Map<string, WorkspaceRuntime>,
   path: string,
   opts: { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; daemonConfigDir: string; isolated: boolean; pushKeys: PushKeys | null },
-  hooks: Array<{ events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }>,
 ): Promise<WorkspaceRuntime> {
   const ctx: WorkspaceContext = await workspaceLoader.loadWorkspace(path, opts);
   const services: CoreServices = createCore(ctx);
@@ -263,14 +265,19 @@ async function loadWorkspaceInto(
   workspaces.set(ctx.config.id, runtime);
   if (ctx.workspaceId !== ctx.config.id) workspaces.set(ctx.workspaceId, runtime);
 
-  for (const hook of hooks) {
+  // VS-334: a plugin's tools, routes and hooks land in this workspace's own `ctx.plugins`, populated
+  // fresh by `loadPlugins` below — never the shared `registries`, and never a hooks array any other
+  // workspace's load loop could also iterate. Subscribing only after `loadPlugins` returns means a
+  // plugin's own hook fires for its own workspace, unlike the pre-VS-334 ordering bug where it never
+  // did (subscription ran before that workspace's plugins had registered anything).
+  await loadPlugins(ctx, opts.registries);
+  for (const hook of ctx.plugins.hooks) {
     ctx.events.on((ev) => {
       if (hook.events !== '*' && !hook.events.includes(ev.type)) return;
-      void hook.handler(ev).catch((e: unknown) => log.warn({ err: e, type: ev.type }, 'plugin hook failed'));
+      void hook.handler(ev).catch((e: unknown) => log.warn({ err: e, type: ev.type, plugin: hook.pluginId }, 'plugin hook failed'));
     });
   }
 
-  await loadPlugins(ctx, opts.registries, hooks);
   // A job still `running` belongs to a process that is gone; fail it before anything reads it.
   try { services.jobs.reconcile(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'job reconciliation failed'); }
   // Asks which runtime the workers setting should hold when the VS-77 migration could not settle it.
@@ -307,7 +314,7 @@ export async function cancelRunningRuns(ws: WorkspaceRuntime): Promise<void> {
 
 function makeAdmin(
   configDir: string, isolated: boolean, daemon: DaemonConfig, registries: Registries, workspaces: Map<string, WorkspaceRuntime>,
-  loopbackUrl: string, hooks: Array<{ events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }>, pushKeys: PushKeys | null,
+  loopbackUrl: string, pushKeys: PushKeys | null,
 ): WorkspaceAdmin {
   const opts = () => ({ daemon, registries, loopbackUrl, daemonConfigDir: configDir, isolated, pushKeys, ...dirs() });
   const remember = (id: string, path: string): void => {
@@ -317,13 +324,13 @@ function makeAdmin(
   };
   return {
     async register(path) {
-      const ws = await loadWorkspaceInto(workspaces, resolve(path), opts(), hooks);
+      const ws = await loadWorkspaceInto(workspaces, resolve(path), opts());
       remember(ws.id, resolve(path));
       return { id: ws.id, path: resolve(path) };
     },
     async init(input) {
       await workspaceLoader.initWorkspace(resolve(input.path), { id: input.id, name: input.name, ticketPrefix: input.ticketPrefix });
-      const ws = await loadWorkspaceInto(workspaces, resolve(input.path), opts(), hooks);
+      const ws = await loadWorkspaceInto(workspaces, resolve(input.path), opts());
       remember(ws.id, resolve(input.path));
       return { id: ws.id, path: resolve(input.path) };
     },
@@ -335,7 +342,7 @@ function makeAdmin(
       if (already && already.ctx.paths.root !== target) {
         throw new OcError('conflict', `workspace ${staged.workspaceId} is already loaded from ${already.ctx.paths.root}`);
       }
-      const ws = already ?? await loadWorkspaceInto(workspaces, target, opts(), hooks);
+      const ws = already ?? await loadWorkspaceInto(workspaces, target, opts());
       remember(ws.id, target);
       const tickets = importTickets(ws.services, from);
       log.info({ workspace: ws.id, from, target, ...tickets }, 'workspace package imported');
@@ -392,22 +399,38 @@ async function loadAdapter<T>(specifier: string): Promise<T | null> {
   }
 }
 
-async function loadPlugins(
-  ctx: WorkspaceContext, registries: Registries,
-  hooks: Array<{ events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }>,
-): Promise<void> {
-  for (const entry of ctx.config.plugins) {
+async function loadPlugins(ctx: WorkspaceContext, registries: Registries): Promise<void> {
+  // VS-334: daemon-wide plugins first, so they reach every workspace; a workspace's own list is
+  // appended after and may repeat one of them harmlessly (the repeat is rejected below as a
+  // duplicate id, same as two distinct plugins colliding on id).
+  const merged: Array<{ entry: (typeof ctx.config.plugins)[number]; source: PluginRuntime['source'] }> = [
+    ...ctx.daemon.plugins.map((entry) => ({ entry, source: 'daemon' as const })),
+    ...ctx.config.plugins.map((entry) => ({ entry, source: 'workspace' as const })),
+  ];
+  for (const { entry, source } of merged) {
     const name = typeof entry === 'string' ? entry : entry.name;
     const config = typeof entry === 'string' ? {} : entry.config ?? {};
+    let plugin: WeaveAIPlugin | undefined;
     try {
       const mod = (await import(pluginSpecifier(ctx, name))) as Record<string, unknown>;
-      const plugin = (mod.default ?? mod.plugin) as WeaveAIPlugin | undefined;
+      plugin = (mod.default ?? mod.plugin) as WeaveAIPlugin | undefined;
       if (!plugin || typeof plugin.register !== 'function') { log.error({ plugin: name }, 'plugin has no definePlugin default export'); continue; }
-      if (plugin.apiVersion !== 1) { log.error({ plugin: name, apiVersion: plugin.apiVersion }, 'unsupported plugin apiVersion'); continue; }
-      await plugin.register(pluginHost(name, config, registries, hooks));
-      log.info({ plugin: plugin.id, version: plugin.version }, 'plugin registered');
+      const p = plugin;
+      if (p.apiVersion !== 1) { log.error({ plugin: name, apiVersion: p.apiVersion }, 'unsupported plugin apiVersion'); continue; }
+      if (!PLUGIN_ID_RE.test(p.id)) { log.error({ plugin: p.id }, 'plugin id is not a valid slug; skipped'); continue; }
+      if (ctx.plugins.loaded.some((loaded) => loaded.id === p.id)) {
+        log.error({ plugin: p.id }, 'duplicate plugin id for this workspace; skipped');
+        ctx.plugins.loaded.push({ id: p.id, version: p.version ?? null, source, loaded: false, error: `duplicate plugin id: ${p.id} is already loaded for this workspace`, hasPage: false });
+        continue;
+      }
+      const routesBefore = ctx.plugins.routes.length;
+      await p.register(pluginHost(p.id, config, ctx, registries));
+      const hasPage = ctx.plugins.routes.slice(routesBefore).some((r) => r.method === 'GET' && r.path === '/page');
+      ctx.plugins.loaded.push({ id: p.id, version: p.version, source, loaded: true, error: null, hasPage });
+      log.info({ plugin: p.id, version: p.version, source }, 'plugin registered');
     } catch (e) {
       log.error({ err: e, plugin: name }, 'plugin failed to load; continuing');
+      ctx.plugins.loaded.push({ id: plugin?.id ?? name, version: plugin?.version ?? null, source, loaded: false, error: (e as Error).message, hasPage: false });
     }
   }
 }
@@ -428,18 +451,33 @@ export function pluginSpecifier(ctx: Pick<WorkspaceContext, 'paths'>, name: stri
 }
 
 function pluginHost(
-  name: string, config: Record<string, unknown>, registries: Registries,
-  hooks: Array<{ events: EventType[] | '*'; handler(ev: WorkspaceEvent): Promise<void> }>,
+  pluginId: string, config: Record<string, unknown>, ctx: WorkspaceContext, registries: Registries,
 ): PluginHost {
-  const plog = getLogger('plugin', { plugin: name });
+  const plog = getLogger('plugin', { plugin: pluginId });
+  const store = new PluginDataService(ctx.db);
   return {
     registerRuntime: (a: RuntimeAdapter) => { registries.runtimes.set(a.id, a); },
     registerChannel: (a: ChannelAdapter) => { registries.channels.set(a.kind, a); },
     registerSurface: (a: SurfaceAdapter) => { registries.surfaces.set(a.kind, a); },
     registerWorktreeProvider: (p: WorktreeProvider) => { registries.worktreeProviders.set(p.id, p); },
     registerForge: (a: ForgeAdapter) => { registries.forges.set(a.id, a); },
-    registerHook: (sub) => { hooks.push(sub); },
-    registerAgentTool: (t: AgentToolDefinition) => { registries.agentTools.push(t); },
+    registerHook: (sub) => { ctx.plugins.hooks.push({ pluginId, events: sub.events, handler: sub.handler }); },
+    registerAgentTool: (t: AgentToolDefinition) => {
+      if (!isNamespacedToolName(t.name, pluginId)) { plog.error({ tool: t.name }, `plugin tool name must match ${pluginId}_<name>; skipped`); return; }
+      const coreNames: readonly string[] = [...COMMON_TOOLS, ...WEAVER_TOOLS, ...WORKER_ONLY_TOOLS];
+      if (coreNames.includes(t.name)) { plog.error({ tool: t.name }, 'plugin tool name collides with a core tool; skipped'); return; }
+      if (ctx.plugins.tools.some((existing) => existing.name === t.name)) { plog.error({ tool: t.name }, 'plugin tool name collides with another plugin\'s tool in this workspace; skipped'); return; }
+      ctx.plugins.tools.push(t);
+    },
+    registerHttpRoute: (method, path, handler) => { ctx.plugins.routes.push({ pluginId, method, path, handler }); },
+    store: {
+      get: async (key) => store.get(pluginId, key),
+      put: async (key, value) => { store.put(pluginId, key, value); },
+      delete: async (key) => { store.delete(pluginId, key); },
+      list: async (prefix) => store.list(pluginId, prefix),
+    },
+    emit: (kind, entityId, payload) => { ctx.events.emit('plugin.event', `plugin:${pluginId}`, entityId, { pluginId, kind, payload }); },
+    kitCss: () => ARTIFACT_KIT_CSS,
     config: <T>() => config as T,
     logger: {
       debug: (m, d) => plog.debug(d ?? {}, m), info: (m, d) => plog.info(d ?? {}, m),

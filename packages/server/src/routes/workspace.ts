@@ -18,6 +18,9 @@ export function workspaceRoutes(deps: AppDeps): Hono<AppEnv> {
       id: ws.id, name: ws.ctx.config.name, ticketPrefix: ws.ctx.config.ticketPrefix, root: ws.ctx.paths.root, rootPath: ws.ctx.paths.root,
       status: statusOf(ws), config: ws.ctx.config, loopbackUrl: ws.ctx.loopbackUrl,
       channels: [...Object.keys(ws.ctx.config.channels)],
+      // VS-334: this workspace's own loaded plugins — workspace-configured and daemon-wide alike —
+      // for the Settings management list and the web app's "Plugins" nav section / page route.
+      plugins: ws.ctx.plugins.loaded,
     });
   });
 

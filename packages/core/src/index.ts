@@ -33,3 +33,8 @@ export {
   ARTIFACT_KIT_CSS, ARTIFACT_KIT_MARKERS, ARTIFACT_KIT_TOKEN_NAMES, ARTIFACT_KIT_THEME_TOKEN_NAMES, ARTIFACT_KIT_SCALE_TOKEN_NAMES,
   ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks, type ArtifactKitTokens, type ArtifactKitComponent,
 } from './artifacts/kit.js';
+export {
+  createPluginRegistry, isNamespacedToolName, PLUGIN_TOOL_NAME_RE, PLUGIN_ID_RE,
+  type PluginRegistry, type PluginRuntime, type PluginRouteDef, type PluginHookDef,
+} from './plugins/index.js';
+export { PluginDataService } from './plugins/data.js';

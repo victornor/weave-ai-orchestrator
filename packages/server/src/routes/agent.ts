@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { OcError } from '@weave-ai/shared';
 import type { AppDeps, AppEnv } from '../types.js';
 import { body } from '../http.js';
-import { runTool, toolNamesFor, toolsFor, jsonSchemaFor, type ToolCtx } from '../tools.js';
+import { runTool, toolNamesFor, toolListFor, type ToolCtx } from '../tools.js';
 
 /**
  * The MCP tools mirrored over REST for the `conductor` CLI (PLAN §9.5). Loopback listener + run token only;
@@ -24,13 +24,13 @@ export function agentRoutes(deps: AppDeps): Hono<AppEnv> {
 
   app.get('/tools', (c) => {
     const ctx = toolCtx(c as never);
-    return c.json(toolsFor(ctx.claims.agentKind).map((d) => ({ name: d.name, description: d.description, inputSchema: jsonSchemaFor(d) })));
+    return c.json(toolListFor(ctx.claims.agentKind, ctx.ws));
   });
 
   app.post('/tools/:tool', async (c) => {
     const ctx = toolCtx(c as never);
     const name = c.req.param('tool');
-    if (!toolNamesFor(ctx.claims.agentKind).includes(name)) throw new OcError('forbidden', `tool ${name} is not available to a ${ctx.claims.agentKind}`);
+    if (!toolNamesFor(ctx.claims.agentKind, ctx.ws).includes(name)) throw new OcError('forbidden', `tool ${name} is not available to a ${ctx.claims.agentKind}`);
     const { input } = await body(c, z.object({ input: z.unknown().default({}) }));
     return c.json(await runTool(name, ctx, input));
   });

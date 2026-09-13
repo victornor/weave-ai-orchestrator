@@ -509,6 +509,53 @@ Channels shipped: `web`, `cli`, `telegram`. Surfaces shipped: `headless`, `tmux`
 
 ---
 
+## Plugins
+
+A plugin can add:
+
+- a **runtime**, **channel**, **surface**, **forge**, or **worktree provider** (see Runtime status,
+  above);
+- a **hook**, subscribed to workspace events;
+- an **agent tool** — an extra MCP tool, namespaced `<pluginId>_<name>`, scoped to the weaver,
+  workers, or both;
+- its own **storage** — a durable, per-plugin document store in the workspace database;
+- **HTTP routes**, mounted under `/api/w/:ws/plugins/<pluginId>/…`, behind the normal session auth;
+- a **page**, rendered at `/w/:ws/plugins/<pluginId>` in a sandboxed iframe with a nav entry, plus
+  live events on the workspace's existing stream.
+
+**Enable one** by listing it under `plugins:` in a workspace's `workspace.yaml` (that workspace
+only) or in `daemon.yaml` (every workspace this daemon serves). A relative path resolves against
+the workspace root; restart the daemon after changing the list.
+
+**Trust model.** Plugins are ordinary npm packages or local directories, loaded **in process** at
+daemon start — trusted code, not sandboxed. A plugin cannot override a core invariant (ticket
+checkout/transition guards, approval ownership, the auto-merge gate, the project boundary) because
+those APIs are never exposed to it. A plugin's *page*, by contrast, runs in an opaque-origin iframe
+that cannot read the viewer's session or call the API directly — it talks to the daemon only through
+a scoped postMessage bridge the host page runs.
+
+```js
+import { definePlugin } from '@weave-ai/plugin-sdk';
+
+export default definePlugin({
+  id: 'notes',
+  version: '0.1.0',
+  apiVersion: 1,
+  register(host) {
+    host.registerAgentTool({
+      name: 'notes_create', description: 'Add a note.', scope: 'all',
+      inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+      handler: async (input) => { /* ... */ },
+    });
+  },
+});
+```
+
+The full authoring guide is [`docs/PLUGINS.md`](docs/PLUGINS.md); a complete worked example —
+a tool, storage, a route, and a page — is [`examples/plugins/notes/`](examples/plugins/notes/).
+
+---
+
 ## Licence and contributing
 
 Weave AI is licensed under the **GNU Affero General Public License v3.0** ([`LICENSE`](LICENSE)).

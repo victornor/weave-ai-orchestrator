@@ -15,6 +15,7 @@ import * as doctor from './commands/doctor.js';
 import * as init from './commands/init.js';
 import * as knowledge from './commands/knowledge.js';
 import * as models from './commands/models.js';
+import * as plugin from './commands/plugin.js';
 import * as presentation from './commands/presentation.js';
 import * as project from './commands/project.js';
 import * as role from './commands/role.js';
@@ -58,7 +59,7 @@ export function buildProgram(): Command {
     init.register, daemon.register, auth.register, workspace.register, project.register, runtime.register,
     models.register, role.register, worker.register, ticket.register, decision.register, conversation.register, weaver.register,
     presentation.register, runs.register, usage.register, knowledge.register, changelog.register, specs.register, worktree.register,
-    doctor.register, agent.register, routine.register,
+    doctor.register, agent.register, routine.register, plugin.register,
   ]) register(program);
 
   return program;

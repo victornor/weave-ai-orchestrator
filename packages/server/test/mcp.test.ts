@@ -64,6 +64,29 @@ describe('MCP endpoint', () => {
     await client.close();
   });
 
+  it('a plugin tool appears in the MCP tools/list and is callable through tools/call (VS-334)', async () => {
+    harness = makeHarness({ listener: 'loopback' });
+    harness.runtime.ctx.plugins.tools.push({
+      name: 'demo_greet', description: 'says hi', inputSchema: { type: 'object', properties: {} }, scope: 'all',
+      handler: async () => ({ greeting: 'hi' }),
+    });
+    const app = createApp(harness.deps);
+    const token = await signRunToken(runTokenSecret(harness.runtime.ctx.db), WORKER);
+    const client = new Client({ name: 'test', version: '0.0.0' }, { capabilities: {} });
+    const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1/mcp/runs/${WORKER.runId}`), {
+      fetch: (url, init) => app.fetch(new Request(url, init as RequestInit)) as Promise<Response>,
+      requestInit: { headers: { authorization: `Bearer ${token}` } },
+    });
+    await client.connect(transport);
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).toContain('demo_greet');
+    const res = await client.callTool({ name: 'demo_greet', arguments: {} });
+    expect(res.isError).toBeFalsy();
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload).toEqual({ ok: true, data: { greeting: 'hi' } });
+    await client.close();
+  });
+
   it('dispatches a tool call and returns a ToolResult', async () => {
     const { client } = await connect();
     const res = await client.callTool({ name: 'weave_ticket_get', arguments: { id: 'ACME-42' } });
@@ -309,6 +332,26 @@ describe('agent REST mirror', () => {
     const tools = await res.json();
     expect(tools.map((t: { name: string }) => t.name)).toContain('weave_worktree_status');
     expect(tools[0].inputSchema.type).toBe('object');
+  });
+
+  it('lists and runs a plugin tool over the CLI REST mirror too, not only MCP (VS-334)', async () => {
+    harness = makeHarness({ listener: 'loopback' });
+    harness.runtime.ctx.plugins.tools.push({
+      name: 'demo_greet', description: 'says hi', inputSchema: { type: 'object', properties: {} }, scope: 'all',
+      handler: async () => ({ greeting: 'hi' }),
+    });
+    const app = createApp(harness.deps);
+    const token = await signRunToken(runTokenSecret(harness.runtime.ctx.db), WORKER);
+    const list = await app.fetch(new Request('http://127.0.0.1/api/w/ws1/agent/tools', { headers: { authorization: `Bearer ${token}` } }));
+    expect((await list.json()).map((t: { name: string }) => t.name)).toContain('demo_greet');
+
+    const res = await app.fetch(new Request('http://127.0.0.1/api/w/ws1/agent/tools/demo_greet', {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ input: {} }),
+    }));
+    expect(res.status).toBe(200);
+    const payload = await res.json();
+    expect(payload).toEqual({ ok: true, data: { greeting: 'hi' } });
   });
   // ---------- VS-92 ----------
 

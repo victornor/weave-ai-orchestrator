@@ -5,15 +5,21 @@ Plugins are ordinary npm packages or local directories, loaded **in process** at
 invariant (checkout and transition guards, approval ownership, the auto-merge gate, the project
 boundary) because those APIs are simply not exposed.
 
+The full authoring guide — every `PluginHost` method's contract, the storage API, the postMessage
+bridge a plugin page talks through — is [`docs/PLUGINS.md`](../../docs/PLUGINS.md). This file is
+the quick reference.
+
 | Example | What it registers |
 |---|---|
 | [`echo-channel/`](echo-channel/) | a channel adapter `echo` (logs outbound messages, produces no inbound ones) and a hook that logs every `ticket.status` event |
+| [`notes/`](notes/) | an agent tool, storage, an HTTP route, and a page — one of each new extension point (VS-334), at toy scale |
 
 ## Loading one
 
-Add it to `plugins:` in the workspace's `workspace.yaml`. A relative path is resolved **against the
-workspace root**, an absolute path is taken as is, and a bare name is resolved from the workspace's
-own `node_modules` before the daemon's:
+Add it to `plugins:` in the workspace's `workspace.yaml` — or in `daemon.yaml`, to load it for
+every workspace this daemon serves, in addition to each workspace's own list. A relative path is
+resolved **against the workspace root**, an absolute path is taken as is, and a bare name is
+resolved from the workspace's own `node_modules` before the daemon's:
 
 ```yaml
 version: 1
@@ -35,7 +41,8 @@ channels:
 A directory needs a `package.json` (its `main`/`exports` entry is used) or an `index.js`. The entry
 module's default export must be a `definePlugin({ id, version, apiVersion: 1, register })` object
 from `@weave-ai/plugin-sdk`; anything else is logged and skipped, and one broken plugin never
-stops the daemon.
+stops the daemon, nor does a duplicate `pluginId` within one workspace's merged list — the second
+one is logged and skipped.
 
 Restart the daemon after changing `plugins:` — plugins are registered once, at load.
 
@@ -49,19 +56,27 @@ export default definePlugin({
   version: '0.1.0',
   apiVersion: 1,
   register(host) {
-    const config = host.config();          // the `config:` block from workspace.yaml
+    const config = host.config();          // the `config:` block from workspace.yaml/daemon.yaml
     host.registerChannel(myChannelAdapter);
     host.registerRuntime(myRuntimeAdapter);
     host.registerSurface(mySurfaceAdapter);
     host.registerWorktreeProvider(myProvider);
     host.registerForge(myForge);
-    host.registerAgentTool(myTool);        // an extra weave_* MCP tool
+    host.registerAgentTool(myTool);        // name must be "my-plugin_<name>" — see docs/PLUGINS.md
+    host.registerHttpRoute('GET', '/status', () => Response.json({ ok: true }));
+    host.store.put('key', { any: 'json' }); // this plugin's own namespaced storage
+    host.emit('something.happened', 'entity-1', { detail: 'x' });
     host.registerHook({ events: ['ticket.status'], handler: async (ev) => { /* … */ } });
     host.logger.info('registered');
   },
 });
 ```
 
-Hooks are called for every workspace that loads the plugin; they run after the event is durably in
-the outbox, and a throwing handler is logged, never fatal. For an at-least-once HTTP feed of the
-same events, use `webhooks:` instead (PLAN §17).
+Hooks, agent tools, and HTTP routes registered while loading one workspace are reachable only in
+that workspace (and any other workspace that also loads the same plugin) — never a workspace that
+doesn't load it. Hooks run after the event is durably in the outbox, and a throwing handler is
+logged, never fatal. For an at-least-once HTTP feed of the same events, use `webhooks:` instead
+(PLAN §17).
+
+See [`notes/`](notes/) for a plugin that also serves a page, with a worked `docs/PLUGINS.md` example
+of the postMessage bridge a page talks to the daemon through.

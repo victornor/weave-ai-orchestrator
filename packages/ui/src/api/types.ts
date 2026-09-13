@@ -182,10 +182,21 @@ export interface WorkspaceListItem {
   needsYou: number;
 }
 
+/** One plugin this workspace loads (VS-334): from `daemon.yaml` (`daemon`) or its own `workspace.yaml` (`workspace`). */
+export interface WorkspacePlugin {
+  id: string;
+  version: string | null;
+  source: 'workspace' | 'daemon';
+  loaded: boolean;
+  error: string | null;
+  hasPage: boolean;
+}
+
 export interface WorkspaceSummary {
   workspace: Workspace;
   config: Record<string, unknown>;
   counts?: { projects: number; workers: number; openTickets: number; needsYou: number };
+  plugins?: WorkspacePlugin[];
 }
 
 export interface TicketDetail {

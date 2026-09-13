@@ -45,6 +45,20 @@ export interface TicketsService {
   /** Relaunch the ticket's worker (or spawn one) after a failure or a pause; blocked tickets go back to work. */
   retry(actor: Actor, id: string, note?: string): Promise<S.Ticket>;
   comments(id: string, after?: string): S.TicketComment[];
+  /**
+   * VS-365: the current delivery head of a ticket — the pull request's head when it has one and the
+   * forge reports it, else the active worker worktree's `HEAD`, else the project clone's branch ref.
+   * Null when none resolves; never throws.
+   */
+  deliveryHead(ticketId: string): Promise<string | null>;
+  /**
+   * VS-365: when the ticket has an open `merge_approval` the weaver marked **looked at, with
+   * concerns** and its delivery head differs from the head recorded at review, wake the weaver once
+   * per new head (idempotency key `held-review:<decisionId>:<sha>`). `head` defaults to
+   * `deliveryHead(ticketId)`. A decision with no recorded head is baselined without waking. Never
+   * throws; leaves every review state untouched.
+   */
+  noteHeldReviewHead(actor: Actor, ticketId: string, head?: string | null): Promise<{ woken: boolean; decisionId?: string; headSha?: string }>;
   /** The most recent worker to have held this ticket, even after it retired — `ticket.workerId` is
    * nulled on retirement, so this is the only way to name who built a ticket that has since landed. */
   lastWorker(id: string): S.Agent | null;
@@ -141,9 +155,11 @@ export interface DecisionsService {
   answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean; inputs?: S.DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string; relayFromMessageId?: string }): Promise<S.Decision>;
   /**
    * Asserted conductor review of a plan/merge/action card (VS-223). Does not wake anyone and does
-   * not affect `answer()`. Actor must be the workspace conductor.
+   * not affect `answer()`. Actor must be the workspace conductor. `reviewedHead` (VS-365) is the
+   * delivery head the mark was made against, recorded so a held `merge_approval` whose head later
+   * moves can wake the weaver once per new head; omitted or unresolvable stores null.
    */
-  review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string }): S.Decision;
+  review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null }): S.Decision;
   withdraw(actor: Actor, id: string, reason: string): S.Decision;
   /** Withdraws every still-open decision scoped to this ticket (e.g. once it reaches a terminal status). Returns the count closed. */
   withdrawForTicket(actor: Actor, ticketId: string, reason: string): number;

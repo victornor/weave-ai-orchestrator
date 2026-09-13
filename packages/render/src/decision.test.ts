@@ -10,7 +10,7 @@ function decision(over: Partial<Decision> & { kind: DecisionKind }): Decision {
     options: [], inputs: [], recommendation: null, status: 'open', answerKey: null, answerText: null, answerInputs: null,
     answeredByKind: null, answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null,
     createdAt: '2026-09-04T11:56:00.000Z',
-    weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null,
+    weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null, weaverReviewedHeadSha: null,
     answerAuthorKind: null, relayedFromMessageId: null,
     ...over,
   } as Decision;

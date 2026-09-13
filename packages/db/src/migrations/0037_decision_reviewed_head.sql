@@ -1,0 +1,13 @@
+-- VS-365. One column on `decisions`:
+--
+-- `weaver_reviewed_head_sha` — the delivery head (a pull request's head, else the ticket branch's
+-- head, else the project clone's branch ref) that the weaver's review mark was made against. Recorded
+-- when `weave_decision_review` marks a `merge_approval`, so "the head moved since the review" is
+-- exact. A held (`concerns`) merge approval whose delivery head later differs from this value wakes
+-- the weaver once per new head (idempotency key `held-review:<decisionId>:<sha>`).
+--
+-- Nullable, with no default: pre-migration rows and marks made without a resolvable head read null,
+-- and the first head observed afterwards is stored as the baseline without waking anyone.
+--
+-- ALTER TABLE, not a rebuild: nothing here touches a CHECK, the same recipe as 0025/0013.
+ALTER TABLE decisions ADD COLUMN weaver_reviewed_head_sha TEXT;

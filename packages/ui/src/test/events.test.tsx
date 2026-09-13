@@ -14,7 +14,7 @@ const fakeDecision = (id: string, status: Decision['status'], over: Partial<Deci
   allowFreeText: false, recommendation: null, status, answerKey: null, answerText: null,
   answerInputs: null, answeredByKind: null, answeredById: null, answeredAt: null, expiresAt: null,
   target: null, correlationKey: `plan_approval:tk_1`, createdAt: '2026-09-05T10:00:00.000Z',
-  weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null,
+  weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null, weaverReviewedHeadSha: null,
   answerAuthorKind: null, relayedFromMessageId: null,
   ...over,
 });

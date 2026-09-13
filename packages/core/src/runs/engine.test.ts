@@ -1973,6 +1973,33 @@ describe('run engine', () => {
       )!.n).toBe(1);
     });
   });
+
+  describe('checking a held merge review at turn end (VS-365)', () => {
+    beforeEach(() => { h.services.tickets = createTicketsService(h.ctx, h.deps); });
+
+    it('checks the held head after a worker turn on a ticket', async () => {
+      const ticketId = seedTicket(h, { kind: 'change', status: 'in_review' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      const spy = vi.spyOn(h.services.tickets!, 'noteHeldReviewHead').mockResolvedValue({ woken: false });
+      runtime.queue.push(resultFor(workerId, { structured: { state: 'idle', summary: 'waiting', tickets: [], knowledge: { recorded: false, reason: 'waiting' } } }));
+      h.services.wake!.enqueue(workerId, { source: 'conductor_request', reason: 'go' });
+
+      await runOnce(workerId);
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith({ kind: 'system', id: null }, ticketId);
+    });
+
+    it('does not check for a turn whose agent holds no ticket', async () => {
+      const spy = vi.spyOn(h.services.tickets!, 'noteHeldReviewHead').mockResolvedValue({ woken: false });
+      runtime.queue.push({ structured: { state: 'idle', summary: 'hi', tickets: [], knowledge: { recorded: false, reason: 'no-op' } } });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'hi' });
+
+      await runOnce(h.conductorId);
+
+      expect(spy).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('dispatcher', () => {

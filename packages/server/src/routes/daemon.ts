@@ -387,6 +387,13 @@ function runCommand(command: string, audio: Buffer): Promise<string> {
       log.warn({ code, err: err.slice(0, 500) }, 'transcription command failed');
       reject(new OcError('internal', `transcription command exited with ${code}`));
     });
+    // A command that exits without draining stdin (e.g. `printf`) closes its end of the
+    // pipe, so the write of `audio` can raise EPIPE. The exit code already decides the
+    // result; absorb the write error rather than letting it crash the process as an
+    // unhandled stream error (found by CI on GitHub's runner, VS-329).
+    child.stdin.on('error', (e: NodeJS.ErrnoException) => {
+      if (e.code !== 'EPIPE') log.warn({ err: e.message }, 'transcription command stdin failed');
+    });
     child.stdin.end(audio);
   });
 }

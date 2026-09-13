@@ -1724,6 +1724,172 @@ describe('run engine', () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     });
   });
+
+  // VS-338: a resolving wake starting a worker's turn must return a blocked ticket to the work it was
+  // doing, before the turn does anything — but a timer or self-scheduled wake must not, or a worker
+  // with a periodic self-check would churn the board and wake a weaver-owned block's owner every tick.
+  describe('blocked-ticket restore on a resolving wake (VS-338)', () => {
+    const SYSTEM: Actor = { kind: 'system', id: null };
+    const HUMAN: Actor = { kind: 'human', id: 'victor' };
+
+    beforeEach(() => {
+      h.services.tickets = createTicketsService(h.ctx, h.deps);
+      h.services.decisions = createDecisionsService(h.ctx, h.deps);
+    });
+
+    const statusOf = (ticketId: string): string =>
+      h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status;
+
+    async function blockTicket(ticketId: string, blockedBy?: string[]): Promise<void> {
+      await h.services.tickets!.transition(SYSTEM, ticketId, {
+        to: 'blocked', unblock: { owner: 'human', action: 'provide what is missing' },
+        ...(blockedBy ? { blockedBy } : {}),
+      });
+    }
+
+    it("reopens a blocked ticket before a resolving wake's turn does any work", async () => {
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      await blockTicket(ticketId);
+      expect(statusOf(ticketId)).toBe('blocked');
+
+      runtime.queue.push(resultFor(workerId, { structured: { state: 'working', summary: 'back to it', tickets: [], knowledge: { recorded: false, reason: 'mid-task' } } }));
+      h.services.wake!.enqueue(workerId, { source: 'conductor_request', reason: 'here is the answer' });
+      const run = await runOnce(workerId);
+
+      expect(run.status).toBe('succeeded');
+      expect(statusOf(ticketId)).toBe('in_progress');
+      expect(h.services.tickets!.comments(ticketId).some((c) => c.body.includes('resumed after the block was answered'))).toBe(true);
+    });
+
+    it('leaves a blocked ticket blocked when only non-resolving wakes start the turns', async () => {
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      await blockTicket(ticketId);
+
+      for (const source of ['self_scheduled', 'routine', 'system', 'retry'] as const) {
+        h.services.wake!.enqueue(workerId, { source, reason: 'tick' });
+        runtime.queue.push(resultFor(workerId, { structured: { state: 'idle', summary: 'still waiting', tickets: [], knowledge: { recorded: false, reason: 'blocked' } } }));
+        await runOnce(workerId);
+        expect(statusOf(ticketId), `${source} must not reopen the ticket`).toBe('blocked');
+      }
+      // No status churn (one transition, the block) and no fresh wake to the block's owner.
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE source = 'ticket_blocked'")!.n).toBe(0);
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM activity WHERE ticket_id = ? AND action = 'ticket.transition'", [ticketId])!.n).toBe(1);
+    });
+
+    it('does not reopen a blocked ticket when a pre-turn gate fails before the turn starts', async () => {
+      // The curation freshness gate runs before the restore; a ticket it leaves blocked must not have
+      // been reopened and re-blocked silently, which is why the restore sits after the gate.
+      const ticketId = seedTicket(h, { status: 'in_progress', originKind: 'curation' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null, branch: null });
+      await blockTicket(ticketId);
+      h.services.projects = { fetch: vi.fn(async () => { throw new Error('offline'); }) } as never;
+
+      h.services.wake!.enqueue(workerId, { source: 'human_message', reason: 'resume' });
+      const run = await runOnce(workerId);
+
+      expect(run.status).toBe('failed');
+      expect(run.errorCode).toBe('checkout_stale');
+      expect(statusOf(ticketId)).toBe('blocked');
+      // Only the block that set the ticket up: no restore transition happened before the gate, and the
+      // gate's own block was refused (already blocked). A misplaced restore would add its own move out
+      // and back, taking this count to 3.
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM activity WHERE ticket_id = ? AND action = 'ticket.transition'", [ticketId])!.n).toBe(1);
+    });
+
+    it('leaves a blocked ticket blocked while a blockedBy ticket is unfinished', async () => {
+      const blockerId = seedTicket(h, { number: 2, identifier: 'TST-2', title: 'the blocker' });
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      await blockTicket(ticketId, [blockerId]);
+
+      runtime.queue.push(resultFor(workerId, { structured: { state: 'idle', summary: 'blocked on TST-2', tickets: [], knowledge: { recorded: false, reason: 'blocked' } } }));
+      h.services.wake!.enqueue(workerId, { source: 'conductor_request', reason: 'go' });
+      await runOnce(workerId);
+
+      expect(statusOf(ticketId)).toBe('blocked');
+    });
+
+    it('does not reopen again without another resolving wake when the worker re-blocks', async () => {
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      await blockTicket(ticketId);
+
+      runtime.queue.push(resultFor(workerId, async () => {
+        await h.services.tickets!.transition(SYSTEM, ticketId, { to: 'blocked', unblock: { owner: 'human', action: 'still missing X' } });
+        return { structured: { state: 'blocked', summary: 'still stuck', tickets: [], knowledge: { recorded: false, reason: 'blocked' } } };
+      }));
+      h.services.wake!.enqueue(workerId, { source: 'conductor_request', reason: 'answer' });
+      await runOnce(workerId);
+
+      expect(statusOf(ticketId)).toBe('blocked');
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND status = 'queued'", [workerId])!.n).toBe(0);
+    });
+
+    it('reopens a blocked ticket when a human leaves a comment', async () => {
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      await blockTicket(ticketId);
+
+      // The real path, not a hand-built wake: `tickets.comment` must carry the human as requester.
+      h.services.tickets!.comment(HUMAN, ticketId, 'here is the answer, go');
+      runtime.queue.push(resultFor(workerId, { structured: { state: 'working', summary: 'resumed', tickets: [], knowledge: { recorded: false, reason: 'mid-task' } } }));
+      await runOnce(workerId);
+
+      expect(statusOf(ticketId)).toBe('in_progress');
+    });
+
+    it("does not reopen a blocked ticket for an agent's comment", async () => {
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      await blockTicket(ticketId);
+
+      // A weaver/worker comment wakes the worker through no path at all — it must not even queue one.
+      h.services.tickets!.comment({ kind: 'agent', id: h.conductorId }, ticketId, 'noted, carry on');
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND source = 'ticket_comment' AND status = 'queued'", [workerId])!.n).toBe(0);
+
+      // And if an agent-tagged comment wake does reach the worker, the predicate refuses it.
+      h.services.wake!.enqueue(workerId, { source: 'ticket_comment', reason: 'agent tag', requestedBy: { kind: 'agent', id: 'ag-1' } });
+      runtime.queue.push(resultFor(workerId, { structured: { state: 'idle', summary: 'still waiting', tickets: [], knowledge: { recorded: false, reason: 'blocked' } } }));
+      await runOnce(workerId);
+      expect(statusOf(ticketId)).toBe('blocked');
+    });
+
+    it('restores quietly: no hand-off wake on approved, no merge-card churn on in_review', async () => {
+      // `approved`: the restore must not enqueue the ticket_assigned wake first entering it sends.
+      const approvedId = seedTicket(h, { kind: 'change', status: 'approved' });
+      const approvedWorker = h.addWorker(approvedId, { runtimeId: 'fake', worktreePath: null });
+      await blockTicket(approvedId);
+      runtime.queue.push(resultFor(approvedWorker, { structured: { state: 'working', summary: 'resumed', tickets: [], knowledge: { recorded: false, reason: 'mid-task' } } }));
+      h.services.wake!.enqueue(approvedWorker, { source: 'conductor_request', reason: 'go' });
+      await runOnce(approvedWorker);
+      expect(statusOf(approvedId)).toBe('approved');
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND source = 'ticket_assigned'", [approvedWorker])!.n).toBe(0);
+
+      // `in_review`: the open, reviewed merge card must survive untouched.
+      const reviewId = seedTicket(h, { number: 3, identifier: 'TST-3', kind: 'change', status: 'in_review' });
+      const reviewWorker = h.addWorker(reviewId, { runtimeId: 'fake', worktreePath: null });
+      h.services.tickets!.addWorkProduct(SYSTEM, reviewId, { type: 'pull_request', url: 'https://example.com/pr/2' });
+      const cardId = newId();
+      h.db.insert('decisions', {
+        id: cardId, workspaceId: h.workspaceId, ticketId: reviewId, kind: 'merge_approval', owner: 'human',
+        title: 'Approve the merge', context: '', optionsJson: [], allowFreeText: 1, status: 'open',
+        weaverReviewStatus: 'looked', createdAt: nowIso(),
+      });
+      await blockTicket(reviewId);
+      runtime.queue.push(resultFor(reviewWorker, { structured: { state: 'idle', summary: 'waiting on review', tickets: [], knowledge: { recorded: false, reason: 'waiting' } } }));
+      h.services.wake!.enqueue(reviewWorker, { source: 'conductor_request', reason: 'go' });
+      await runOnce(reviewWorker);
+      expect(statusOf(reviewId)).toBe('in_review');
+      expect(h.db.get<{ status: string; weaverReviewStatus: string | null }>(
+        'SELECT status, weaver_review_status AS weaverReviewStatus FROM decisions WHERE id = ?', [cardId],
+      )).toMatchObject({ status: 'open', weaverReviewStatus: 'looked' });
+      expect(h.db.get<{ n: number }>(
+        "SELECT COUNT(*) n FROM decisions WHERE ticket_id = ? AND kind = 'merge_approval'", [reviewId],
+      )!.n).toBe(1);
+    });
+  });
 });
 
 describe('dispatcher', () => {

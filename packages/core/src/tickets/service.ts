@@ -209,10 +209,15 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     return get(id);
   }
 
-  function wake(agentId: string | null | undefined, source: Parameters<CoreServices['wake']['enqueue']>[1]['source'], reason: string, payload: Record<string, unknown> = {}): void {
+  /**
+   * `requestedBy` matters to the blocked-ticket restore (VS-338): the engine reopens a `blocked`
+   * ticket only for a wake a resolving source requested, so a human `ticket_comment` must carry its
+   * requester rather than defaulting to `system`.
+   */
+  function wake(agentId: string | null | undefined, source: Parameters<CoreServices['wake']['enqueue']>[1]['source'], reason: string, payload: Record<string, unknown> = {}, requestedBy?: Actor): void {
     if (!agentId) return;
     try {
-      deps().wake.enqueue(agentId, { source, reason, payload });
+      deps().wake.enqueue(agentId, { source, reason, payload, ...(requestedBy ? { requestedBy } : {}) });
     } catch (e) {
       log.warn({ err: e, agentId, source }, 'wake enqueue failed');
     }
@@ -497,7 +502,14 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
 
   // ---------- transitions ----------
 
-  async function transition(actor: Actor, id: string, input: TransitionInput): Promise<Ticket> {
+  /**
+   * `opts.quiet` is set only by `resumeIfBlocked` (VS-338): the transition is returning a blocked
+   * ticket to the status it already held, not entering that status for the first time, so the wakes
+   * and decisions that belong to a first entry — the `in_review` merge card, the `approved`
+   * hand-off wake — are suppressed. Everything observable (status event, activity, board, weaver)
+   * still happens.
+   */
+  async function transition(actor: Actor, id: string, input: TransitionInput, opts: { quiet?: true } = {}): Promise<Ticket> {
     {
       const cur = get(id);
       if ((cur.status === 'done' || cur.status === 'cancelled') && actor.kind !== 'human') {
@@ -593,7 +605,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         autoApproved = true;
       }
     }
-    if (to === 'in_review' && !next.autoMerge) {
+    if (to === 'in_review' && !next.autoMerge && !opts.quiet) {
       const wp = db.get<{ url: string | null; title: string | null }>('SELECT url, title FROM ticket_work_products WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1', [t.id]);
       deps().decisions.create(actor, {
         ticketId: t.id, kind: 'merge_approval', owner: 'human',
@@ -612,7 +624,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     // A YOLO ticket's merge decision stays open until its work is ready to land; the sweep is what
     // knows how to wait for that, so it runs for a YOLO ticket as well as an `autoMerge` one.
     if (to === 'in_review' && (next.autoMerge || yolo(next))) schedule(50, 'auto-merge sweep after in_review', () => service.autoMergeSweep());
-    if (to === 'approved') wake(next.workerId, 'ticket_assigned', `plan approved for ${next.identifier}`, { ticketId: t.id });
+    if (to === 'approved' && !opts.quiet) wake(next.workerId, 'ticket_assigned', `plan approved for ${next.identifier}`, { ticketId: t.id });
     // A ticket blocked on the conductor is not left for the next digest to notice (VS-127): the
     // digest is a periodic, batched sweep, and a stuck worker's unblock action deserves the same
     // immediate wake a gate finding already gets the moment it is raised.
@@ -660,7 +672,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       if (fresh.status === 'in_progress' || fresh.status === 'todo' || fresh.status === 'approved' || fresh.status === 'in_review') {
         await deps().workers.spawnForTicket(actor, fresh.id);
         const spawned = get(fresh.id);
-        if (spawned.workerId) wake(spawned.workerId, 'ticket_comment', commentWakeReason(`new comment on ${fresh.identifier}`, payload.truncated === true), payload);
+        if (spawned.workerId) wake(spawned.workerId, 'ticket_comment', commentWakeReason(`new comment on ${fresh.identifier}`, payload.truncated === true), payload, actor);
       }
       return;
     }
@@ -897,7 +909,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         recordActivity(db, ws, actor, 'ticket.comment', 'ticket_comment', c.id, { kind }, t.id);
         ctx.events.emit('ticket.comment', 'ticket', t.id, c);
         if (actor.kind === 'human' && t.workerId) {
-          wake(t.workerId, 'ticket_comment', commentWakeReason(`new comment on ${t.identifier}`, wakeBody.truncated === true), { ticketId: t.id, commentId: c.id, ...wakeBody });
+          wake(t.workerId, 'ticket_comment', commentWakeReason(`new comment on ${t.identifier}`, wakeBody.truncated === true), { ticketId: t.id, commentId: c.id, ...wakeBody }, actor);
         } else if (actor.kind === 'human' && kind === 'comment') {
           // A reply with nobody listening: reopen a finished ticket, bring a worker back, or tell the conductor.
           const followUp = { ticketId: t.id, commentId: c.id, ...wakeBody };
@@ -934,6 +946,27 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       }
       recordActivity(db, ws, actor, 'ticket.retry', 'ticket', t.id, { note: note ?? null }, t.id);
       return get(t.id);
+    },
+
+    /**
+     * VS-338: a resolving wake starting a worker's turn means the `{owner, action}` block was
+     * answered — but nothing used to move the ticket off `blocked`, so the board stayed wrong while
+     * the worker ran. Restore `blockedFromStatus` through the normal transition, quietly (no merge
+     * card churn, no second-turn wake). A ticket still waiting on an unfinished `blockedBy` ticket is
+     * not resolved by a turn starting, and a refused restore is logged rather than thrown: it must
+     * never break the worker's turn.
+     */
+    async resumeIfBlocked(actor, id, reason) {
+      const t = get(id);
+      if (t.status !== 'blocked') return t;
+      if (blockersOf(t.id).some((b) => b.status !== 'done')) return t;
+      const back = (t.blockedFromStatus ?? (t.assigneeRoleId || t.workerId ? 'todo' : 'backlog')) as TicketStatus;
+      try {
+        return await transition(actor, t.id, { to: back, note: reason }, { quiet: true });
+      } catch (e) {
+        log.warn({ err: String(e), ticketId: t.id, to: back }, 'could not restore a blocked ticket when its worker resumed');
+        return get(t.id);
+      }
     },
 
     comments(id, after) {

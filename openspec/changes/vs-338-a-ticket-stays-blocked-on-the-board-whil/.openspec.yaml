@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: A ticket stays "blocked" on the board while its worker is back at work,
+  because nothing returns it once an {owner, action} block is resolved

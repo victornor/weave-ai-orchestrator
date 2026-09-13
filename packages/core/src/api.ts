@@ -33,6 +33,13 @@ export interface TicketsService {
   release(actor: Actor, id: string, runId: string, note?: string): S.Ticket;
   /** Async: the `proposed` gate shells out to the OpenSpec CLI (PLAN §12.2). */
   transition(actor: Actor, id: string, input: TransitionInput): Promise<S.Ticket>;
+  /**
+   * VS-338: a resolving wake starting a worker's turn returns a `blocked` ticket to the status it
+   * held before the block, unless it is still waiting on an unfinished `blockedBy` ticket. Called by
+   * the run engine, not by a tool or route; idempotent (returns the ticket unchanged when it is not
+   * blocked) and never throws for a refused restore.
+   */
+  resumeIfBlocked(actor: Actor, id: string, reason: string): Promise<S.Ticket>;
   cancel(actor: Actor, id: string, reason: string): S.Ticket;
   comment(actor: Actor, id: string, body: string, kind?: S.CommentKind, sourceTrust?: S.SourceTrust): S.TicketComment;
   /** Relaunch the ticket's worker (or spawn one) after a failure or a pause; blocked tickets go back to work. */

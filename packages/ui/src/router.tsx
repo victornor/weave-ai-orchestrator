@@ -188,6 +188,7 @@ const v2UsageRoute = v2WsRouteFor('usage', 'V2UsagePage');
 const v2ChangelogRoute = v2WsRouteFor('changelog', 'V2ChangelogPage');
 const v2ProjectRoute = v2WsRouteFor('p/$project', 'V2ProjectPage');
 const v2TicketRoute = v2WsRouteFor('tickets/$ticketId', 'V2TicketPage');
+const v2TicketArtifactRoute = v2WsRouteFor('tickets/$ticketId/artifacts/$key', 'V2TicketArtifactReader');
 const v2ArtifactRoute = v2WsRouteFor('artifacts/$key', 'V2ArtifactPage');
 const v2WorkerRoute = v2WsRouteFor('workers/$workerId', 'V2WorkerPage');
 
@@ -306,6 +307,7 @@ const routeTree = rootRoute.addChildren([
       v2ChangelogRoute,
       v2ProjectRoute,
       v2TicketRoute,
+      v2TicketArtifactRoute,
       v2ArtifactRoute,
       v2WorkerRoute,
     ]),

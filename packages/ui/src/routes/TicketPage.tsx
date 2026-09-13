@@ -47,23 +47,28 @@ import { cx } from '../lib/cx';
 const TABS = [
   { key: 'overview', label: 'Overview' },
   { key: 'plan', label: 'Plan' },
-  { key: 'activity', label: 'Activity' },
-  { key: 'work', label: 'Work' },
   { key: 'artifacts', label: 'Artifacts' },
-  { key: 'usage', label: 'Usage' },
-  { key: 'knowledge', label: 'Knowledge' },
 ] as const;
-const TAB_KEYS: readonly string[] = TABS.map((t) => t.key);
-const resolveTab = (key: string | undefined): string => (key && TAB_KEYS.includes(key) ? key : 'overview');
+// Before VS-357 the ticket page also had Activity, Work, Usage and Knowledge tabs. Their `?tab=`
+// values are kept as aliases: each opens the merged Overview, scrolled to the section it named.
+const LEGACY_TAB_SECTIONS: Record<string, string> = {
+  activity: 'activity',
+  work: 'work',
+  usage: 'usage',
+  knowledge: 'knowledge',
+};
+const resolveTab = (key: string | undefined): string => (key === 'plan' || key === 'artifacts' ? key : 'overview');
+const resolveSection = (key: string | undefined): string | null => (key ? LEGACY_TAB_SECTIONS[key] ?? null : null);
 
 export function TicketRoute(): React.ReactElement {
   const ws = useWs();
   const go = useGo();
   const search = useSearchParams();
   const { ticketId } = useParams({ strict: false }) as { ticketId: string };
-  // The merge-approval card and the pull request view both deep-link here with `?tab=activity`
-  // (VS-106) — same pattern as Settings' `?section=`: link by key, never by tab position.
+  // The merge-approval card and the pull request view still deep-link here with `?tab=activity`
+  // (VS-106): since VS-357 that value aliases the Overview tab and scrolls to its activity section.
   const [tab, setTab] = useState<string>(() => resolveTab(search['tab']));
+  const section = resolveSection(search['tab']);
   useEffect(() => setTab(resolveTab(search['tab'])), [search['tab']]);
   const chooseTab = (key: string) => {
     setTab(key);
@@ -182,19 +187,62 @@ export function TicketRoute(): React.ReactElement {
         tabs={<Tabs items={visibleTabs} active={tab} onChange={chooseTab} className="px-3 md:px-4" />}
       />
       <PageBody className="p-4 md:p-5">
-        {tab === 'overview' ? <Overview ticketId={ticketId} /> : null}
+        {tab === 'overview' ? <OverviewTab ticketId={ticketId} ticketIdentifier={ticket.identifier} section={section} /> : null}
         {tab === 'plan' ? <PlanTab ticketId={ticketId} ticketIdentifier={ticket.identifier} /> : null}
-        {tab === 'activity' ? <ActivityTab ticketId={ticket.id} ticketIdentifier={ticket.identifier} /> : null}
-        {tab === 'work' ? <WorkTab ticketId={ticket.id} /> : null}
         {tab === 'artifacts' ? <ArtifactsTab ticketId={ticket.id} ws={ws} /> : null}
-        {tab === 'usage' ? <UsageTab ticketId={ticket.id} /> : null}
-        {tab === 'knowledge' ? <KnowledgeUsageTab ticketId={ticket.id} /> : null}
       </PageBody>
     </Page>
   );
 }
 
-function Overview({ ticketId }: { ticketId: string }): React.ReactElement {
+/**
+ * The merged Overview tab (VS-357): one scrolling page, the details beside the live activity, then
+ * Work, Usage and Knowledge. Each row is the pre-merge tab's own section component, unmoved; this
+ * only lays them out and routes a legacy `?tab=` value to the section it used to name.
+ */
+function OverviewTab({
+  ticketId,
+  ticketIdentifier,
+  section,
+}: {
+  ticketId: string;
+  ticketIdentifier: string;
+  section: string | null;
+}): React.ReactElement {
+  useEffect(() => {
+    if (!section) return;
+    // jsdom does not implement scrollIntoView; an absent method is a no-op, not a failure.
+    document.getElementById(`ticket-section-${section}`)?.scrollIntoView?.({ block: 'start' });
+  }, [section]);
+  return (
+    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+      <div className="grid items-start gap-5 lg:grid-cols-2">
+        <div id="ticket-section-overview">
+          <OverviewSection ticketId={ticketId} />
+        </div>
+        {/* The activity pane scrolls on its own at width, so a long feed cannot push the rows below
+            it out of reach; below the breakpoint the panes stack and the page scrolls as one. */}
+        <div id="ticket-section-activity" className="lg:max-h-[70vh] lg:overflow-y-auto">
+          <ActivitySection ticketId={ticketId} ticketIdentifier={ticketIdentifier} />
+        </div>
+      </div>
+      <section id="ticket-section-work" className="flex flex-col gap-4">
+        <h2 className="text-ui font-medium text-text-1">Work</h2>
+        <WorkSection ticketId={ticketId} />
+      </section>
+      <section id="ticket-section-usage" className="flex flex-col gap-4">
+        <h2 className="text-ui font-medium text-text-1">Usage</h2>
+        <UsageSection ticketId={ticketId} />
+      </section>
+      <section id="ticket-section-knowledge" className="flex flex-col gap-4">
+        <h2 className="text-ui font-medium text-text-1">Knowledge</h2>
+        <KnowledgeSection ticketId={ticketId} />
+      </section>
+    </div>
+  );
+}
+
+function OverviewSection({ ticketId }: { ticketId: string }): React.ReactElement {
   const detail = useTicket(ticketId);
   const d = detail.data;
   // The ticket page's own compact "paused · …" chip in the header is a preview; a worker-failure
@@ -205,7 +253,7 @@ function Overview({ ticketId }: { ticketId: string }): React.ReactElement {
   const retryDecision = decisions.data?.find((dec) => dec.kind === 'retry_approval' && (dec.ticketId === ticketId || dec.ticketId === d?.ticket.identifier));
   if (!d) return <SkeletonRows rows={4} />;
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-5">
+    <div className="flex flex-col gap-5">
       {retryDecision ? (
         <DecisionCard
           decision={retryDecision}
@@ -349,7 +397,7 @@ function PlanTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdent
   );
 }
 
-function ActivityTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdentifier: string }): React.ReactElement {
+function ActivitySection({ ticketId, ticketIdentifier }: { ticketId: string; ticketIdentifier: string }): React.ReactElement {
   const ws = useWs();
   const detail = useTicket(ticketId);
   const comments = useTicketComments(ticketId);
@@ -422,7 +470,7 @@ function ActivityTab({ ticketId, ticketIdentifier }: { ticketId: string; ticketI
     : undefined;
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {mergeDecision ? (
         <div className="rounded-r6 border border-accent-edge bg-accent-tint px-3.5 py-2.5">
           <ConductorReviewLine decision={mergeDecision} />
@@ -567,7 +615,7 @@ function RunTurn({ run }: { run: Run }): React.ReactElement {
   );
 }
 
-function WorkTab({ ticketId }: { ticketId: string }): React.ReactElement {
+function WorkSection({ ticketId }: { ticketId: string }): React.ReactElement {
   const detail = useTicket(ticketId);
   const products = useTicketWorkProducts(ticketId);
   const runs = useTicketRuns(ticketId);
@@ -576,7 +624,7 @@ function WorkTab({ ticketId }: { ticketId: string }): React.ReactElement {
   const total = spec?.tasks.length ?? 0;
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-5">
+    <div className="flex flex-col gap-5">
       <section>
         <div className="ac-label mb-2">Work products</div>
         {products.isLoading ? (
@@ -725,13 +773,13 @@ function ArtifactsTab({ ticketId, ws }: { ticketId: string; ws: string }): React
   );
 }
 
-function UsageTab({ ticketId }: { ticketId: string }): React.ReactElement {
+function UsageSection({ ticketId }: { ticketId: string }): React.ReactElement {
   const usage = useTicketUsage(ticketId);
   if (usage.isLoading) return <SkeletonRows rows={3} />;
   const total = usage.data?.total;
   const subtree = usage.data?.subtree;
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <div className="flex gap-px overflow-hidden rounded-r6 border border-line-1 bg-line-1">
         <StatTile value={tokens((total?.tokensIn ?? 0) + (total?.tokensOut ?? 0))} caption="tokens on this ticket" />
         <StatTile value={cents(total?.costCents ?? null)} caption={`cost · ${total?.costStatus ?? 'unpriced'}`} muted />
@@ -762,12 +810,12 @@ function UsageTab({ ticketId }: { ticketId: string }): React.ReactElement {
   );
 }
 
-function KnowledgeUsageTab({ ticketId }: { ticketId: string }): React.ReactElement {
+function KnowledgeSection({ ticketId }: { ticketId: string }): React.ReactElement {
   const usage = useTicketKnowledgeUsage(ticketId);
   if (usage.isLoading) return <SkeletonRows rows={3} />;
   const data = usage.data;
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <p className="text-meta text-text-2">
         Knowledge context this ticket's runs consumed — the hub they were bootstrapped with plus every
         document they read, measured from what was actually sent or returned. Not total context; see

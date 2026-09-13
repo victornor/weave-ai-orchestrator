@@ -980,6 +980,16 @@ describe('daemon transcription (VS-179)', () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ text: 'transcribed' });
   });
+
+  it('survives a provider that exits without reading stdin (VS-329)', async () => {
+    // `true` never drains its stdin, so the large write below closes against a dead pipe and
+    // raises EPIPE. It must be absorbed, not surface as an unhandled stream error that fails
+    // the whole suite (which is how GitHub's runner caught this).
+    const { fetch } = app({ daemon: { transcription: { provider: 'command', command: 'true' } } });
+    const res = await fetch('/api/transcribe', { method: 'POST', headers: authed(), body: new Uint8Array(1024 * 1024) });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ text: '' });
+  });
 });
 
 describe('daemon model overlays (VS-185)', () => {

@@ -17,7 +17,9 @@ import { Transcript } from '../components/Transcript';
 import { TurnTrace } from '../components/TurnTrace';
 import { ScrollToBottomButton } from '../components/ScrollToBottom';
 import { SessionLimit } from '../components/SessionLimit';
+import { ThreadSearchPanel } from '../components/ThreadSearchPanel';
 import { usePlanSync } from '../lib/planSync';
+import { useHotkeys } from '../lib/hotkeys';
 import { ContextMeter } from '../components/ContextMeter';
 import {
   ACCOUNTS_REFRESH_MS,
@@ -25,6 +27,7 @@ import {
   useWeaver,
   useCreateThread,
   useDecisions,
+  useMessageContext,
   usePostThreadMessage,
   useProjects,
   useRunTraces,
@@ -398,6 +401,47 @@ export function ChatPage({
   const attach = stick.scrollRef;
   const attachScroll = useCallback((el: HTMLDivElement | null) => { setScrollEl(el); attach(el); }, [attach]);
 
+  // Search and jump-to-message (VS-320). `anchor` replaces the tailing view above with the window
+  // `around()` returns; `useThreadMessages`'s own result is never touched, which is what lets
+  // clearing `anchor` put the list straight back to exactly what it would show had no jump happened.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [anchor, setAnchor] = useState<{ messageId: string } | null>(null);
+  const jump = useMessageContext(fetchId, anchor?.messageId ?? null);
+  const wasAnchored = useRef(false);
+  // Runs after the tailing list has remounted (refs attach during the commit before effects run),
+  // so `stick.toBottom()` here always has the real element — not a stale one from before the jump.
+  // "Back to latest" means the bottom, regardless of whether the human was following before they
+  // searched: this is the one case `stickToBottom.ts` itself is not asked to infer on its own.
+  useEffect(() => {
+    if (wasAnchored.current && !anchor) stick.toBottom();
+    wasAnchored.current = anchor !== null;
+  });
+  const backToLatest = useCallback(() => setAnchor(null), []);
+  // Scoped to the focused pane only (`focused`, same gate the live-turn stream uses): the global
+  // chats view can mount several `ChatPage`s at once, side by side, and an unscoped `window`
+  // listener would open every one of their search panels on a single keypress.
+  useHotkeys([{ key: 'f', meta: true, shift: true, run: () => setSearchOpen(true) }], focused);
+
+  // A message already in the tailing view's loaded window is scrolled to and highlighted in place —
+  // it does not need the separate anchored read path, and switching to it would needlessly discard
+  // what is already on screen (conductor-chat/message-jump — "jumping to a message already loaded").
+  const messageRowRefs = useRef(new Map<string, HTMLDivElement>());
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!highlightedId) return;
+    const t = setTimeout(() => setHighlightedId(null), 1600);
+    return () => clearTimeout(t);
+  }, [highlightedId]);
+  const jumpToMessage = useCallback((messageId: string) => {
+    const el = messageRowRefs.current.get(messageId);
+    if (el) {
+      el.scrollIntoView({ block: 'center' });
+      setHighlightedId(messageId);
+    } else {
+      setAnchor({ messageId });
+    }
+  }, []);
+
   // How tall the pinned area is, dragged by its top edge and remembered per device (VS-94). `null`
   // is "never resized", which is a rendering rather than a number: the area stays as tall as its
   // contents under today's cap, so one short card is not a tall empty box. The list below shrinks
@@ -702,6 +746,12 @@ export function ChatPage({
         meta={<span className="hidden md:inline">{`${running} workers running · ${(decisions.data ?? []).filter((d) => d.status === 'open').length} need you`}</span>}
         actions={
           <div className="flex min-w-0 items-center gap-2.5">
+            {/* Always present, desktop and phone alike (VS-320) — unlike the layout toggle below, a
+                phone has room for one icon button. `⌘⇧F`/`Ctrl⇧F` is a convenience on top of it,
+                scoped to this pane only, and never the browser's own find (`⌘F`/`Ctrl+F`). */}
+            <Button variant="ghost" size="sm" aria-label="Search this conversation" onClick={() => setSearchOpen(true)}>
+              <span aria-hidden>⌕</span>
+            </Button>
             {/* A phone has no room for two panes, so the option is not offered there (VS-289). */}
             {!narrow ? (
               <div className="flex items-center gap-1" role="group" aria-label="Open decisions layout">
@@ -747,6 +797,18 @@ export function ChatPage({
           {/* The button floats over the list, so it is anchored to this wrapper rather than to the
               scrolled content, which would carry it away with the rest. */}
           <div className="relative flex min-h-0 flex-1 flex-col">
+            {anchor ? (
+              <MessageJumpView
+                messages={jump.data ?? []}
+                targetId={anchor.messageId}
+                loading={jump.isLoading}
+                ws={ws}
+                onTicket={openTicket}
+                ticketStatus={ticketStatus}
+                projectName={projectName}
+                onBack={backToLatest}
+              />
+            ) : (
             <PageBody scrollRef={attachScroll} className="px-4 py-5 md:px-7">
               <div className="mx-auto flex max-w-3xl flex-col gap-5">
                 {/* Above the history, where the page being fetched will appear. Nothing marks the start
@@ -817,7 +879,14 @@ export function ChatPage({
                       // record of what was decided, rendered here as it always has been.
                       const records = row.entry.decisions.filter((d) => !cardedIds.has(d.id) && d.status !== 'open');
                       return (
-                        <div key={row.key} className="flex flex-col gap-2">
+                        <div
+                          key={row.key}
+                          ref={(el) => {
+                            if (el) messageRowRefs.current.set(row.entry.message.id, el);
+                            else messageRowRefs.current.delete(row.entry.message.id);
+                          }}
+                          className={cx('flex flex-col gap-2 rounded-r10 transition-colors duration-500', highlightedId === row.entry.message.id && 'bg-accent/10')}
+                        >
                           <ChatMessage
                             message={row.entry.message}
                             ws={ws}
@@ -894,7 +963,8 @@ export function ChatPage({
                 <div ref={stick.bottomRef} />
               </div>
             </PageBody>
-            {stick.atBottom ? null : <ScrollToBottomButton unread={stick.unread} onClick={stick.toBottom} />}
+            )}
+            {!anchor && !stick.atBottom ? <ScrollToBottomButton unread={stick.unread} onClick={stick.toBottom} /> : null}
           </div>
 
           {/* Outside the scrolling body, so nothing the human has to answer can be scrolled away, and
@@ -977,6 +1047,15 @@ export function ChatPage({
           </aside>
         ) : null}
       </div>
+      <ThreadSearchPanel
+        threadId={fetchId}
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onSelect={(messageId) => {
+          jumpToMessage(messageId);
+          setSearchOpen(false);
+        }}
+      />
     </Page>
   );
 }
@@ -1200,6 +1279,80 @@ function ChatMessage({
           </button>
         ) : null}
       </span>
+    </div>
+  );
+}
+
+/**
+ * The "jumped to" view (VS-320): replaces the tailing message list in place while a search result
+ * is open, showing the window `around()` returned rather than paging through `useThreadMessages`'s
+ * own history. Its own scroll container, never `attachScroll` — `useStickToBottom` is not extended
+ * to cover this read path (design.md non-goals); the tailing list is simply not rendered while this
+ * is, and picks back up exactly as it was once `onBack` clears the anchor.
+ */
+function MessageJumpView({
+  messages,
+  targetId,
+  loading,
+  ws,
+  onTicket,
+  ticketStatus,
+  projectName,
+  onBack,
+}: {
+  messages: ThreadMessage[];
+  targetId: string;
+  loading: boolean;
+  ws: string;
+  onTicket: (id: string) => void;
+  ticketStatus: (id: string) => ReturnType<typeof ticketUiStatus> | null;
+  projectName: (id: string) => string;
+  onBack: () => void;
+}): React.ReactElement {
+  const rows = useRef(new Map<string, HTMLDivElement>());
+  const [highlighted, setHighlighted] = useState<string | null>(null);
+
+  // Once the window has actually rendered — not on every `targetId` change alone, which would fire
+  // before the ref for a freshly-loaded window exists yet.
+  useEffect(() => {
+    if (loading) return;
+    const el = rows.current.get(targetId);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center' });
+    setHighlighted(targetId);
+    const t = setTimeout(() => setHighlighted(null), 1600);
+    return () => clearTimeout(t);
+  }, [targetId, loading, messages]);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-none items-center justify-between gap-2 border-b border-line-1 bg-bg-2 px-4 py-2">
+        <span className="text-micro text-text-3">Jumped to a message in the conversation</span>
+        <Button variant="secondary" size="sm" onClick={onBack}>Back to latest</Button>
+      </div>
+      <PageBody className="px-4 py-5 md:px-7">
+        <div className="mx-auto flex max-w-3xl flex-col gap-5">
+          {loading ? (
+            <>
+              <Skeleton className="h-16 w-4/5 rounded-r6" />
+              <Skeleton className="h-24 w-full rounded-r8" />
+            </>
+          ) : (
+            messages.map((m) => (
+              <div
+                key={m.id}
+                ref={(el) => {
+                  if (el) rows.current.set(m.id, el);
+                  else rows.current.delete(m.id);
+                }}
+                className={cx('rounded-r10 transition-colors duration-500', highlighted === m.id && 'bg-accent/10')}
+              >
+                <ChatMessage message={m} ws={ws} onTicket={onTicket} ticketStatus={ticketStatus} projectName={projectName} />
+              </div>
+            ))
+          )}
+        </div>
+      </PageBody>
     </div>
   );
 }

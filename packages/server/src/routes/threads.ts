@@ -20,8 +20,24 @@ export function threadRoutes(): Hono<AppEnv> {
   });
 
   app.get('/:id/messages', (c) => {
-    const q = query(c, z.object({ before: z.string().optional(), limit: z.coerce.number().int().min(1).max(500).optional() }));
-    return c.json(c.get('ws').services.threads.messages(c.req.param('id'), q));
+    const q = query(c, z.object({
+      before: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(500).optional(),
+      // Jumping to a message outside the loaded page (VS-320): mutually exclusive with `before` —
+      // an ordinary page and a window centered on an arbitrary message are two different reads, not
+      // one read with an extra knob.
+      around: z.string().optional(),
+    }));
+    if (q.around !== undefined) {
+      if (q.before !== undefined) throw new OcError('validation', '`around` and `before` cannot be combined in the same request');
+      return c.json(c.get('ws').services.threads.around(c.req.param('id'), q.around));
+    }
+    return c.json(c.get('ws').services.threads.messages(c.req.param('id'), { before: q.before, limit: q.limit }));
+  });
+
+  app.get('/:id/search', (c) => {
+    const q = query(c, z.object({ q: z.string().min(1), limit: z.coerce.number().int().min(1).max(200).optional() }));
+    return c.json(c.get('ws').services.threads.search(c.req.param('id'), q.q, { limit: q.limit }));
   });
 
   app.post('/:id/messages', async (c) => {

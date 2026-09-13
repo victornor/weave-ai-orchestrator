@@ -22,6 +22,7 @@ import type {
   TicketComment,
   TicketStatus,
   ThreadMessage,
+  ThreadSearchResult,
   Workspace,
   CostStatus,
   UsageGrain,
@@ -701,5 +702,5 @@ export interface TelegramPendingUser {
 
 export type { PresentationConfig };
 
-export type { Agent, Briefing, Decision, Project, Role, Run, RunEvent, Ticket, TicketComment, ThreadMessage, Workspace };
+export type { Agent, Briefing, Decision, Project, Role, Run, RunEvent, Ticket, TicketComment, ThreadMessage, ThreadSearchResult, Workspace };
 export type { ChangelogDay, ChangelogEntry, ChangelogHeatmap, ChangelogKind, ChangelogPage };

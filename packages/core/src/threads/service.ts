@@ -1,10 +1,20 @@
 import { newId, nowIso, threadRow, type Db } from '@weave-ai/db';
-import { OcError, type Attachment, type AttachmentPart, type ChannelThread, type ThreadMessage } from '@weave-ai/shared';
+import { OcError, type Attachment, type AttachmentPart, type ChannelThread, type ThreadMessage, type ThreadSearchResult } from '@weave-ai/shared';
 import type { Actor, CoreServices, ThreadsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
+import { ftsQuery } from '../search/ftsQuery.js';
 import { tx } from '../tickets/tx.js';
 import { readAttachmentBytes, sanitizeAttachmentFilename, writeAttachment, writeGeneratedAttachment } from './attachmentStorage.js';
+
+/** Default/max window sizes for `around()` — generous enough to cover a screenful of context either
+ * side of a jumped-to message without loading the whole thread (VS-320). */
+const AROUND_DEFAULT_BEFORE = 25;
+const AROUND_DEFAULT_AFTER = 24;
+const AROUND_MAX = 250;
+/** Default/max result count for `search()`, matching `specs/index.ts`'s own search limit. */
+const SEARCH_DEFAULT_LIMIT = 50;
+const SEARCH_MAX_LIMIT = 200;
 
 interface ThreadRow extends ChannelThread { isPrimary: boolean; channelKind?: string }
 
@@ -105,6 +115,10 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       partsJson: msg.parts, externalMessageId: msg.externalMessageId, deliveryStatus: msg.deliveryStatus, createdAt: msg.createdAt,
       idempotencyKey: opts.idempotencyKey ?? null,
     });
+    // The single write path for both directions, so this is the one place a message needs indexing
+    // (VS-320). `threadId` is already resolved to this workspace by every caller's own `get()`, so
+    // `ws` — not a fresh lookup — is the row's workspace.
+    db.insert('thread_message_search', { messageId: msg.id, threadId, workspaceId: ws, body });
     db.run('UPDATE channel_threads SET last_message_at = ? WHERE id = ?', [msg.createdAt, threadId]);
     return msg;
   }
@@ -312,6 +326,63 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       const row = db.get<Attachment>('SELECT * FROM attachments WHERE id = ? AND thread_id = ?', [attachmentId, threadId]);
       if (!row) throw new OcError('not_found', `attachment ${attachmentId} not found in thread ${threadId}`);
       return { attachment: row, bytes: readAttachmentBytes(ctx, row.storageKey) };
+    },
+
+    search(threadId, query, opts = {}) {
+      // Scoped exactly like `messages()`: `get()` throws `not_found` for a thread outside this
+      // workspace before any search runs, rather than a bespoke "search returns empty" behavior
+      // (VS-320 design.md — one behavior for "this thread isn't yours," not two). `workspace_id` is
+      // filtered again in the query itself as a belt-and-suspenders check against the row that was
+      // actually indexed.
+      const t = get(threadId);
+      const match = ftsQuery(query);
+      if (!match.length) return [];
+      const limit = Math.min(opts.limit ?? SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT);
+      // Delimiters must never occur in a stored message body, or a coincidental occurrence reads as
+      // a highlighted match. `[`/`]` do not qualify: markdown links (`[PR #267](...)`), checkboxes
+      // (`[x]`) and `[Risk]`-style labels are common in this chat and would be misread as hits.
+      // `char(2)`/`char(3)` (STX/ETX) are control characters no message body will ever contain.
+      const rows = db.all<ThreadSearchResult>(
+        `SELECT m.author_kind, m.author_id, m.created_at, m.id AS message_id,
+                snippet(thread_message_search, 3, char(2), char(3), '…', 16) AS snippet
+         FROM thread_message_search s
+         JOIN thread_messages m ON m.id = s.message_id
+         WHERE s.thread_id = ? AND s.workspace_id = ? AND thread_message_search MATCH ?
+         ORDER BY m.created_at DESC, m.rowid DESC
+         LIMIT ?`,
+        [t.id, ws, match, limit],
+      );
+      return rows;
+    },
+
+    around(threadId, messageId, opts = {}) {
+      const t = get(threadId);
+      // Scoped to the thread the same way `message()` is, and needed here for its `rowid`: the
+      // tie-break `messages()` itself uses when two messages share a `created_at` (a relayed answer
+      // and its echo are written together) — comparing `created_at` alone could drop the target from
+      // its own window, or repeat/skip a neighbour (VS-320 design.md).
+      const target = db.get<{ createdAt: string; rowid: number }>(
+        'SELECT created_at, rowid FROM thread_messages WHERE id = ? AND thread_id = ?',
+        [messageId, t.id],
+      );
+      if (!target) throw new OcError('not_found', `message ${messageId} not found in thread ${threadId}`);
+      const before = Math.min(opts.before ?? AROUND_DEFAULT_BEFORE, AROUND_MAX);
+      const after = Math.min(opts.after ?? AROUND_DEFAULT_AFTER, AROUND_MAX);
+      const beforeRows = db.all<ThreadMessage>(
+        `SELECT m.*, r.body AS reply_to_excerpt FROM thread_messages m
+         LEFT JOIN thread_messages r ON r.id = m.reply_to_message_id AND r.thread_id = m.thread_id
+         WHERE m.thread_id = ? AND (m.created_at, m.rowid) <= (?, ?)
+         ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?`,
+        [t.id, target.createdAt, target.rowid, before + 1],
+      );
+      const afterRows = db.all<ThreadMessage>(
+        `SELECT m.*, r.body AS reply_to_excerpt FROM thread_messages m
+         LEFT JOIN thread_messages r ON r.id = m.reply_to_message_id AND r.thread_id = m.thread_id
+         WHERE m.thread_id = ? AND (m.created_at, m.rowid) > (?, ?)
+         ORDER BY m.created_at ASC, m.rowid ASC LIMIT ?`,
+        [t.id, target.createdAt, target.rowid, after],
+      );
+      return [...beforeRows.reverse(), ...afterRows].map((m) => (m.replyToExcerpt === null ? m : { ...m, replyToExcerpt: excerpt(m.replyToExcerpt) }));
     },
 
     primaryThread() {

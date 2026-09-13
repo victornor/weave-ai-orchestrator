@@ -1147,4 +1147,48 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0033_thread_message_search (VS-320)', () => {
+    function seedThread(db: Db, workspaceId: string, threadId: string): void {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES (?, ?, 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`, [workspaceId, workspaceId]);
+      db.run(`INSERT INTO channels (id, workspace_id, kind, config_json, status) VALUES (?, ?, 'web', '{}', 'active')`, [`c-${workspaceId}`, workspaceId]);
+      db.run(`INSERT INTO channel_threads (id, channel_id, agent_id, is_primary, created_at) VALUES (?, ?, 'a1', 1, 't0')`, [threadId, `c-${workspaceId}`]);
+    }
+
+    function seedMessage(db: Db, id: string, threadId: string, body: string): void {
+      db.run(
+        `INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at) VALUES (?, ?, 'inbound', 'human', ?, 't0')`,
+        [id, threadId, body],
+      );
+    }
+
+    it('backfills every message already stored at migration time', () => {
+      const path = join(dir, 'backfill.sqlite');
+      const before = openDbAsOf(path, '0031_relayed_decision_answers.sql');
+      seedThread(before, 'w1', 'th1');
+      seedMessage(before, 'm1', 'th1', 'the deploy runs at midnight');
+      before.close();
+
+      const db = openDb(path);
+      const rows = db.all<{ messageId: string; threadId: string; workspaceId: string }>(
+        "SELECT message_id, thread_id, workspace_id FROM thread_message_search WHERE thread_message_search MATCH 'midnight'",
+      );
+      expect(rows).toEqual([{ messageId: 'm1', threadId: 'th1', workspaceId: 'w1' }]);
+      db.close();
+    });
+
+    it('a fresh workspace has no rows to backfill and the table is still queryable', () => {
+      const db = openDb(join(dir, 'fresh-search.sqlite'));
+      seedThread(db, 'w1', 'th1');
+      expect(db.all("SELECT * FROM thread_message_search")).toHaveLength(0);
+      seedMessage(db, 'm1', 'th1', 'hello');
+      // Backfill only ran once, at migration time — a message inserted afterward through raw SQL
+      // (bypassing ThreadsService.insertMessage's own index-on-write) is not indexed by the table
+      // alone, which is the behavior this test pins down before task 2.2 wires the write path.
+      expect(db.all("SELECT * FROM thread_message_search")).toHaveLength(0);
+      db.close();
+    });
+  });
 });

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, Routine, RoutineFire, RoutineListItem, RoutineUsage } from '@weave-ai/shared';
@@ -1618,6 +1618,50 @@ export function usePostThreadMessage(): UseMutationResult<unknown, Error, { thre
       return api.ws(ws, `/threads/${threadId}/messages`, { method: 'POST', body: { body, ...(projectId ? { projectId } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) } });
     },
     onSettled: (_d, _e, v) => void qc.invalidateQueries({ queryKey: qk.threadMessages(ws, v.threadId) }),
+  });
+}
+
+/** How long typing pauses before a search actually fires (VS-320) — short enough to feel live, long
+ * enough that a fast typist does not fire one request per keystroke. */
+const THREAD_SEARCH_DEBOUNCE_MS = 250;
+
+/**
+ * Full-text search over every message stored in a thread, not only the page loaded in
+ * `useThreadMessages` (VS-320). Debounced client-side; an empty/whitespace query never reaches the
+ * network and reports an empty result rather than "loading" or "no matches" — the empty state and
+ * the no-match state are different things to the human, and only one of them is real here.
+ */
+export function useThreadSearch(threadId: string | null, query: string): { data: T.ThreadSearchResult[]; isLoading: boolean; isError: boolean } {
+  const ws = useWs();
+  // Starts empty regardless of `query`'s initial value, so a hook that ever mounted with a
+  // non-empty query would still debounce that first value rather than firing it immediately.
+  const [debounced, setDebounced] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(query), THREAD_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [query]);
+  const trimmed = debounced.trim();
+  const enabled = Boolean(threadId) && trimmed.length > 0;
+  const q = useQuery({
+    queryKey: qk.threadSearch(ws, threadId ?? '', trimmed),
+    queryFn: () => api.ws<T.ThreadSearchResult[]>(ws, `/threads/${threadId}/search${qs({ q: trimmed })}`),
+    enabled,
+  });
+  return { data: enabled ? (q.data ?? []) : [], isLoading: enabled && q.isFetching, isError: enabled && q.isError };
+}
+
+/**
+ * One bounded window of messages centered on `messageId`, oldest-first (VS-320) — for jumping to a
+ * search result (or any known message id) outside the page `useThreadMessages` has loaded. A
+ * one-shot query, not another `useInfiniteQuery`: the tailing hook's own result is never touched,
+ * which is what lets the chat revert to it unchanged on "back to latest".
+ */
+export function useMessageContext(threadId: string | null, messageId: string | null): UseQueryResult<T.ThreadMessage[]> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.threadContext(ws, threadId ?? '', messageId ?? ''),
+    queryFn: () => api.ws<T.ThreadMessage[]>(ws, `/threads/${threadId}/messages${qs({ around: messageId })}`),
+    enabled: Boolean(threadId) && Boolean(messageId),
   });
 }
 

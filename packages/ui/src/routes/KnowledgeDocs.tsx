@@ -113,7 +113,7 @@ export function DocsPanel({ project, open, onOpen }: { project?: string; open: D
   );
 }
 
-export function DocPanel({ doc, projects, onOpen, onClose }: { doc: DocRef; projects: Array<{ id: string; slug: string }>; onOpen: (ref: DocRef) => void; onClose: () => void }): React.ReactElement {
+export function DocPanel({ doc, projects, onOpen, onClose }: { doc: DocRef; projects: Array<{ id: string; slug: string }>; onOpen: (ref: DocRef) => void; onClose?: () => void }): React.ReactElement {
   const detail = useKnowledgeDocDetail(doc.scope, doc.slug, doc.project);
   const mutate = useKnowledgeDocMutation();
   const move = useKnowledgeMoveDoc();
@@ -176,13 +176,13 @@ export function DocPanel({ doc, projects, onOpen, onClose }: { doc: DocRef; proj
               onClick={() => {
                 if (window.confirm(`Delete ${doc.slug}? The body is archived first; links to it become unresolved.`)) {
                   mutate.mutate({ scope: doc.scope, slug: doc.slug, project: doc.project, op: 'delete' });
-                  onClose();
+                  onClose?.();
                 }
               }}
             >
               Delete
             </Button>
-            <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
+            {onClose ? <Button size="sm" variant="ghost" onClick={onClose}>Close</Button> : null}
           </>
         )}
       </header>
@@ -253,7 +253,7 @@ export function DocPanel({ doc, projects, onOpen, onClose }: { doc: DocRef; proj
 }
 
 /** A hub file's viewer (PROJECT.md/WORKSPACE.md/SHARED.md/decisions.md) — governed differently from a linked document: curated in place, no folder, no move. */
-export function KnowledgeDocPanel({ scope, project, onClose, onOpenDoc }: { scope: string; project?: string; onClose: () => void; onOpenDoc?: (ref: DocRef) => void }): React.ReactElement {
+export function KnowledgeDocPanel({ scope, project, onClose, onOpenDoc }: { scope: string; project?: string; onClose?: () => void; onOpenDoc?: (ref: DocRef) => void }): React.ReactElement {
   const doc = useKnowledgeDoc(scope, project);
   const onBodyClick = (e: React.MouseEvent<HTMLDivElement>): void => {
     const a = (e.target as HTMLElement).closest('a[href^="#doc:"]');
@@ -300,9 +300,11 @@ export function KnowledgeDocPanel({ scope, project, onClose, onOpenDoc }: { scop
             >
               Edit
             </Button>
-            <Button size="sm" variant="ghost" onClick={onClose}>
-              Close
-            </Button>
+            {onClose ? (
+              <Button size="sm" variant="ghost" onClick={onClose}>
+                Close
+              </Button>
+            ) : null}
           </>
         )}
       </header>

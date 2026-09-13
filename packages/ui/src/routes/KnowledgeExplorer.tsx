@@ -10,7 +10,6 @@
  * owns its scrolling (`min-h-0 ac-scroll`). On a phone (`< md`) only one pane shows at a time.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '../components/Button';
 import { Badge } from '../components/StatusGlyph';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
@@ -175,7 +174,10 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
     else if (e.key === 'ArrowRight') { e.preventDefault(); setTreeWidth((w) => clampTreeWidth(w + 2)); }
   };
 
-  const artifactRows = artifacts.data ?? [];
+  // VS-331: only artifacts with a stored document can be previewed. A link-only work product (a
+  // pre-VS-269 `type: 'artifact'` row with no `artifact:<key>` document) is not listed under
+  // Artifacts, so selecting one can never mount a blank frame.
+  const artifactRows = (artifacts.data ?? []).filter((a) => a.previewable);
   const weaverArtifactRows = weaverArtifacts.data ?? [];
 
   if (docs.isLoading || index.isLoading) return <SkeletonRows rows={5} />;
@@ -263,13 +265,13 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
           ) : null}
           {shown ? (
             shown.kind === 'doc' ? (
-              <DocPanel doc={shown.ref} projects={projects.data ?? []} onOpen={openDoc} onClose={clearSelection} />
+              <DocPanel doc={shown.ref} projects={projects.data ?? []} onOpen={openDoc} />
             ) : shown.kind === 'hub' ? (
-              <KnowledgeDocPanel scope={shown.scope} project={shown.project} onClose={clearSelection} onOpenDoc={openDoc} />
+              <KnowledgeDocPanel scope={shown.scope} project={shown.project} onOpenDoc={openDoc} />
             ) : shown.kind === 'archive' ? (
-              <ArchivePanel scope={shown.scope} project={shown.project} path={shown.path} onClose={clearSelection} />
+              <ArchivePanel scope={shown.scope} project={shown.project} path={shown.path} />
             ) : (
-              <ArtifactPanel ws={ws} artifact={shown.artifact} onClose={clearSelection} />
+              <ArtifactPanel ws={ws} artifact={shown.artifact} />
             )
           ) : (
             <div className="ac-card p-3.5 text-meta text-text-3">Select a document from the tree to read it here.</div>
@@ -420,7 +422,7 @@ function ArchiveRow({
   );
 }
 
-function ArchivePanel({ scope, project, path, onClose }: { scope: string; project?: string; path: string; onClose: () => void }): React.ReactElement {
+function ArchivePanel({ scope, project, path }: { scope: string; project?: string; path: string }): React.ReactElement {
   const file = useKnowledgeArchiveFile(scope, path, project);
   return (
     <section className="ac-card">
@@ -428,7 +430,6 @@ function ArchivePanel({ scope, project, path, onClose }: { scope: string; projec
         <span className="ac-mono text-micro text-text-2">{path}</span>
         <Badge tone="neutral">read-only</Badge>
         <div className="flex-1" />
-        <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
       </header>
       <div className="p-3.5">
         {file.isLoading ? <SkeletonRows rows={4} /> : <Markdown source={file.data?.body ?? ''} />}
@@ -512,7 +513,7 @@ function WeaverArtifactsSection({
   );
 }
 
-function ArtifactPanel({ ws, artifact, onClose }: { ws: string; artifact: TicketArtifactSummary; onClose: () => void }): React.ReactElement {
+function ArtifactPanel({ ws, artifact }: { ws: string; artifact: TicketArtifactSummary }): React.ReactElement {
   const revisions = useTicketDocumentRevisions(artifact.ticketId, `artifact:${artifact.key}`);
   return (
     <section className="ac-card">
@@ -520,7 +521,6 @@ function ArtifactPanel({ ws, artifact, onClose }: { ws: string; artifact: Ticket
         <span className="text-meta font-medium text-text-1">{artifact.title ?? artifact.key}</span>
         <Badge tone="neutral">{artifact.ticketIdentifier}</Badge>
         <div className="flex-1" />
-        <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
       </header>
       <div className="p-3.5">
         <ArtifactViewer ws={ws} ticketId={artifact.ticketId} artifact={{ key: artifact.key, title: artifact.title, url: artifact.url ?? '' }} revisions={revisions.data} />

@@ -697,6 +697,18 @@ describe('real core services over HTTP', () => {
       expect(services.tickets.getDocument(ticket.id, 'artifact:overview', 2)?.body).toBe(SAMPLE_HTML);
     });
 
+    it('rejects recording an artifact through the general work-product tool (VS-331)', async () => {
+      const { harness, app, services, ticket, agentId } = bootWithWorkerTicket();
+      const token = await workerToken(harness, agentId, ticket.id);
+
+      const rejected = await callTool(app, harness.workspaceId, token, 'weave_ticket_work_product', {
+        id: ticket.identifier, type: 'artifact', url: 'file:///tmp/artifacts/',
+      });
+      expect(rejected.ok).toBe(false);
+      expect(rejected.error.message).toMatch(/weave_ticket_artifact_put/);
+      expect(services.tickets.workProducts(ticket.id)).toHaveLength(0);
+    });
+
     it('rejects an empty body, a non-HTML body, and an oversized body', async () => {
       const { harness, app, ticket, agentId } = bootWithWorkerTicket();
       const token = await workerToken(harness, agentId, ticket.id);

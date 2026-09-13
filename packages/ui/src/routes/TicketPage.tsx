@@ -648,46 +648,79 @@ function WorkTab({ ticketId }: { ticketId: string }): React.ReactElement {
   );
 }
 
-/** A published artifact is a `type: 'artifact'` work product; `externalId` is its stable key (VS-269).
- * The iframe/revision-picker/actions block itself is `ArtifactViewer` (VS-270), shared with the
- * document explorer's Artifacts entry so both reuse the exact same rendering path. */
+/** A published artifact is a `type: 'artifact'` work product backed by a stored `artifact:<key>`
+ * document; `externalId` is its stable key (VS-269). A link-only row — a pre-VS-269 work product with
+ * no stored document (VS-331) — is shown as a plain work-product link instead of being fed to the
+ * viewer. The iframe/revision-picker/actions block itself is `ArtifactViewer` (VS-270), shared with
+ * the document explorer's Artifacts entry so both reuse the exact same rendering path. */
 function ArtifactsTab({ ticketId, ws }: { ticketId: string; ws: string }): React.ReactElement {
+  const detail = useTicket(ticketId);
   const products = useTicketWorkProducts(ticketId);
   const artifacts = (products.data ?? []).filter((p) => p.type === 'artifact');
+  // VS-331: the ticket detail's document list already carries every `artifact:<key>` row the
+  // publishing tool stored (and refreshes on `ticket.document`), so previewability needs no new fetch.
+  const published = new Set(
+    (detail.data?.documents ?? []).filter((d) => d.key.startsWith('artifact:')).map((d) => d.key.slice('artifact:'.length)),
+  );
+  const previewable = artifacts.filter((a) => a.externalId !== null && published.has(a.externalId));
+  const linkOnly = artifacts.filter((a) => a.externalId === null || !published.has(a.externalId));
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const selected = artifacts.find((a) => a.externalId === selectedKey) ?? artifacts[0] ?? null;
+  const selected = previewable.find((a) => a.externalId === selectedKey) ?? previewable[0] ?? null;
   const revisions = useTicketDocumentRevisions(ticketId, selected ? `artifact:${selected.externalId}` : '');
 
   if (products.isLoading) return <SkeletonRows rows={3} />;
-  if (!selected) return <EmptyState title="No artifacts yet." detail="They appear here once an agent publishes one." />;
+  if (!selected && !linkOnly.length) return <EmptyState title="No artifacts yet." detail="They appear here once an agent publishes one." />;
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        {artifacts.map((a) => (
-          <button
-            key={a.externalId}
-            type="button"
-            onClick={() => setSelectedKey(a.externalId)}
-            className={cx(
-              'rounded-r6 border px-3 py-1.5 text-left text-meta',
-              a.externalId === selected.externalId ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-2',
-            )}
-          >
-            <div className="ac-truncate max-w-[16rem]">{a.title ?? a.externalId}</div>
-            <div className="ac-mono text-nano text-text-3">
-              {(a.metadata['kind'] as string | undefined) ?? 'artifact'} · {ago(a.updatedAt)}
-            </div>
-          </button>
-        ))}
-      </div>
+      {previewable.length ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {previewable.map((a) => (
+            <button
+              key={a.externalId}
+              type="button"
+              onClick={() => setSelectedKey(a.externalId)}
+              className={cx(
+                'rounded-r6 border px-3 py-1.5 text-left text-meta',
+                a.externalId === selected?.externalId ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-2',
+              )}
+            >
+              <div className="ac-truncate max-w-[16rem]">{a.title ?? a.externalId}</div>
+              <div className="ac-mono text-nano text-text-3">
+                {(a.metadata['kind'] as string | undefined) ?? 'artifact'} · {ago(a.updatedAt)}
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
-      <ArtifactViewer
-        ws={ws}
-        ticketId={ticketId}
-        artifact={{ key: selected.externalId ?? '', title: selected.title, url: selected.url ?? '' }}
-        revisions={revisions.data}
-      />
+      {selected ? (
+        <ArtifactViewer
+          ws={ws}
+          ticketId={ticketId}
+          artifact={{ key: selected.externalId ?? '', title: selected.title, url: selected.url ?? '' }}
+          revisions={revisions.data}
+        />
+      ) : null}
+
+      {linkOnly.length ? (
+        <div className="ac-card divide-y divide-line-1">
+          <div className="px-3.5 py-2 text-nano uppercase tracking-wide text-text-4">Not published</div>
+          {linkOnly.map((a) => (
+            <div key={a.id} className="flex items-center gap-3 px-3.5 py-2.5">
+              <Badge>artifact</Badge>
+              <span className="text-meta text-text-2">{a.title ?? a.externalId ?? 'artifact'}</span>
+              {a.url ? (
+                <a href={a.url} target="_blank" rel="noreferrer" className="ac-mono ac-truncate flex-1 text-micro text-accent-link hover:underline">
+                  {a.url}
+                </a>
+              ) : (
+                <span className="ac-mono flex-1 text-micro text-text-4">no URL</span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

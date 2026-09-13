@@ -1057,14 +1057,23 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       return db.all<{
         id: string; ticketId: string; ticketIdentifier: string; ticketTitle: string; key: string;
         title: string | null; metadata: Record<string, unknown>; url: string | null; updatedAt: string;
+        previewable: number;
       }>(
+        // VS-331: a row is previewable only when VS-269 actually stored its `artifact:<key>` document;
+        // a link-only row recorded through the general work-product tool has no document and must not
+        // be treated as a published artifact. Existing rows (e.g. VS-68's `file://` folder) are kept
+        // listed but flagged false, so the explorer and ticket page can render them as plain links.
         `SELECT wp.id AS id, wp.ticket_id AS ticket_id, t.identifier AS ticket_identifier, t.title AS ticket_title,
-                wp.external_id AS key, wp.title AS title, wp.metadata_json AS metadata_json, wp.url AS url, wp.updated_at AS updated_at
+                wp.external_id AS key, wp.title AS title, wp.metadata_json AS metadata_json, wp.url AS url, wp.updated_at AS updated_at,
+                EXISTS(SELECT 1 FROM ticket_documents d
+                        WHERE d.ticket_id = wp.ticket_id
+                          AND d.key = 'artifact:' || wp.external_id
+                          AND d.current_revision > 0) AS previewable
            FROM ticket_work_products wp JOIN tickets t ON t.id = wp.ticket_id
           WHERE wp.type = 'artifact' AND (? IS NULL OR t.project_id = ?)
           ORDER BY wp.updated_at DESC`,
         [projectId, projectId],
-      );
+      ).map((r) => ({ ...r, previewable: r.previewable === 1 }));
     },
 
     async mergeDone(actor, id, info) {

@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   worker: null as Agent | null,
   workProducts: [] as WorkProduct[],
   documentRevisions: [] as Array<{ revision: number; createdAt: string; authorKind: string; reason: string | null }>,
+  documents: undefined as Array<{ key: string; revision: number; updatedAt: string }> | undefined,
   startSession: vi.fn(),
   decisions: [] as Decision[],
   workerDetail: undefined as { input: { midTurn: boolean; interrupts?: boolean; reason?: string } } | undefined,
@@ -31,7 +32,8 @@ vi.mock('../api/hooks', () => ({
   useTicket: () => ({
     data: {
       ticket: ticket({ description: 'A description\nwrapped onto two lines.', status: state.ticketStatus as never, ...state.ticketOverrides }),
-      project: null, worker: state.worker, role: null, blockers: [], children: [], documents: [],
+      project: null, worker: state.worker, role: null, blockers: [], children: [],
+      documents: state.documents ?? state.workProducts.filter((p) => p.type === 'artifact' && p.externalId).map((p) => ({ key: `artifact:${p.externalId}`, revision: 1, updatedAt: p.updatedAt })),
       workProducts: state.workProducts, openspecState: null, mergeQueue: { position: null, concurrency: 1 },
     },
     isLoading: false,
@@ -91,6 +93,7 @@ beforeEach(() => {
   state.knowledgeUsage = undefined;
   state.workProducts = [];
   state.documentRevisions = [];
+  state.documents = undefined;
   state.messageMutateAsync = vi.fn(async (): Promise<WorkerMessageOutcome> => ({ delivery: 'queued', runId: null, wakeId: null }));
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -369,6 +372,20 @@ describe('TicketRoute Artifacts tab (VS-269)', () => {
     expect(frame).toBeTruthy();
     expect(frame?.getAttribute('src')).toBe('/api/w/ws1/tickets/tk_1/artifacts/overview/raw');
     expect(frame?.getAttribute('sandbox')).toBe('allow-scripts allow-forms allow-popups allow-downloads');
+  });
+
+  it('shows a link-only artifact as a plain URL link with no frame and no Download (VS-331)', () => {
+    state.workProducts = [workProduct({ externalId: 'shots', title: 'Phone screenshots', url: 'file:///tmp/artifacts/' })];
+    state.documents = [];
+    render(<TicketRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
+
+    expect(screen.getByText('Phone screenshots')).toBeInTheDocument();
+    const link = screen.getByText('file:///tmp/artifacts/');
+    expect(link.tagName).toBe('A');
+    expect(link.getAttribute('href')).toBe('file:///tmp/artifacts/');
+    expect(document.querySelector('iframe')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
   });
 
   it('lists two artifacts independently and switches the frame when a different one is picked', () => {

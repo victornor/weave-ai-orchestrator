@@ -359,8 +359,18 @@ export const TOOLS: ToolDef[] = [
       id: ticketId, type: z.enum(WORK_PRODUCT_TYPES), url: z.string().optional(), title: z.string().optional(), state: z.string().optional(),
       provider: z.string().optional(), externalId: z.string().optional(), isPrimary: z.boolean().optional(),
     }),
-    description: 'Record what you produced (pull request, branch, commit, artifact, preview URL) so the human and the weaver can find it.',
-    handler: (ctx, i) => svc(ctx).tickets.addWorkProduct(ctx.actor, writeTicket(ctx, i.id).id, i),
+    description:
+      'Record what you produced (pull request, branch, commit, preview URL) so the human and the weaver can find it. '
+      + 'An HTML artifact is not recorded here — publish it with weave_ticket_artifact_put, which stores the content and records the work product for you.',
+    handler: (ctx, i) => {
+      // VS-331: an artifact recorded here has no stored content to preview, so the explorer and
+      // ticket page would mount a blank frame with dead actions. The one legitimate writer of an
+      // `artifact` work product is weave_ticket_artifact_put, which also stores the document.
+      if (i.type === 'artifact') {
+        throw new OcError('validation', 'artifacts are published with weave_ticket_artifact_put, not weave_ticket_work_product; that tool stores the HTML and records the work product', { tool: 'weave_ticket_artifact_put' });
+      }
+      return svc(ctx).tickets.addWorkProduct(ctx.actor, writeTicket(ctx, i.id).id, i);
+    },
   },
   {
     name: 'weave_ask', scope: 'all', input: AskSchema,

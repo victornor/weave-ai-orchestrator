@@ -9,9 +9,9 @@ import { KnowledgeHome } from './knowledge/KnowledgeHome';
 import { KnowledgeGraphPage } from './knowledge/KnowledgeGraphPage';
 import { KnowledgeExplorerPage } from './knowledge/KnowledgeExplorerPage';
 
-export function V2NeedsPage(): React.ReactElement {
-  return <V2Page title="Needs you" />;
-}
+// VS-345: Needs you is a real screen, not a placeholder; its module owns the page component.
+export { V2NeedsPage } from './NeedsYouPage';
+
 export function V2LivePage(): React.ReactElement {
   return <V2Page title="Live" />;
 }

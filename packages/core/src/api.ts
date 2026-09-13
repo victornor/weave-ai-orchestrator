@@ -533,6 +533,10 @@ export interface ThreadsService {
   message(threadId: string, messageId: string): S.ThreadMessage;
   /** `not_found` when the attachment does not exist, or exists but under a different thread — the same response either way, so a thread id cannot be used to probe for one that belongs elsewhere. */
   attachment(threadId: string, attachmentId: string): { attachment: S.Attachment; bytes: Buffer };
+  /** Full-text search over every message stored in this thread, not only a page a client has loaded. Newest first. Scoped exactly like `messages()` — a thread id outside the caller's workspace throws the same `not_found` (VS-320). */
+  search(threadId: string, query: string, opts?: { limit?: number }): S.ThreadSearchResult[];
+  /** A bounded window of messages centered on `messageId` (itself included), oldest-first — for jumping to a message outside the currently loaded page without a new pagination direction on `messages()`. `not_found` if the message does not exist in this thread (VS-320). */
+  around(threadId: string, messageId: string, opts?: { before?: number; after?: number }): S.ThreadMessage[];
   primaryThread(): S.ChannelThread | null;
   notifyHuman(actor: Actor, message: { text: string; parts?: unknown[]; attachments?: Array<{ filename: string; mediaType: string; bytes: Buffer }> }): Promise<void>;   // primary thread + web
 }

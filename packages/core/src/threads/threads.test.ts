@@ -48,6 +48,21 @@ describe('threads', () => {
     expect(h.events.some((e) => e.type === 'thread.message')).toBe(true);
   });
 
+  it('indexes an inbound and an outbound message into thread_message_search as they are written (VS-320)', async () => {
+    const t = threads.bindOrGet('web', 'web-index-1', null, 'Victor');
+    const inMsg = await threads.inbound(HUMAN, t.id, 'the deploy runs at midnight');
+    const outMsg = await threads.outbound(CONDUCTOR, t.id, 'noted, midnight it is');
+
+    const rows = h.db.all<{ messageId: string; threadId: string; workspaceId: string; body: string }>(
+      'SELECT message_id, thread_id, workspace_id, body FROM thread_message_search WHERE thread_id = ? ORDER BY rowid',
+      [t.id],
+    );
+    expect(rows).toEqual([
+      { messageId: inMsg.id, threadId: t.id, workspaceId: h.workspaceId, body: 'the deploy runs at midnight' },
+      { messageId: outMsg.id, threadId: t.id, workspaceId: h.workspaceId, body: 'noted, midnight it is' },
+    ]);
+  });
+
   it('stores a multi-line body verbatim, on the thread and on the ticket it lands as a comment on', async () => {
     // The chat renders the line breaks a human typed, so the daemon must keep them: no trimming,
     // no rewrapping, no normalising of the blank lines between paragraphs.
@@ -444,6 +459,113 @@ describe('threads', () => {
       expect(new Set([a.id, b.id, c.id, d.id]).size).toBe(4);
       expect(threads.messages(t.id)).toHaveLength(4);
       expect(wake.calls).toHaveLength(4);
+    });
+  });
+
+  describe('search (VS-320)', () => {
+    it('finds a match older than everything a client would have loaded', async () => {
+      const t = threads.bindOrGet('web', 'web-search-1', null);
+      const first = await threads.inbound(HUMAN, t.id, 'the deploy runs at midnight');
+      for (let i = 0; i < 60; i++) await threads.outbound(CONDUCTOR, t.id, `filler ${i}`);
+      const results = threads.search(t.id, 'midnight');
+      expect(results.map((r) => r.messageId)).toEqual([first.id]);
+      expect(results[0]?.snippet).toContain('\u0002midnight\u0003');
+    });
+
+    it('never highlights literal brackets in the body as if they matched (VS-320 review)', async () => {
+      // Markdown links, checkboxes and `[Risk]`-style labels are common in this chat; `[`/`]` cannot
+      // be the highlight delimiter or any of them would misread as a match.
+      const t = threads.bindOrGet('web', 'web-search-brackets', null);
+      const msg = await threads.inbound(HUMAN, t.id, 'see [PR #1](https://x) and [x] — the deploy runs at midnight');
+      const results = threads.search(t.id, 'midnight');
+      expect(results.map((r) => r.messageId)).toEqual([msg.id]);
+      expect(results[0]?.snippet).toContain('[PR #1](https://x)');
+      expect(results[0]?.snippet).toContain('[x]');
+      expect(results[0]?.snippet).toContain('\u0002midnight\u0003');
+    });
+
+    it('orders results newest first', async () => {
+      const t = threads.bindOrGet('web', 'web-search-2', null);
+      const older = await threads.inbound(HUMAN, t.id, 'first mention of gremlin');
+      await threads.outbound(CONDUCTOR, t.id, 'unrelated');
+      const newer = await threads.inbound(HUMAN, t.id, 'second mention of gremlin');
+      expect(threads.search(t.id, 'gremlin').map((r) => r.messageId)).toEqual([newer.id, older.id]);
+    });
+
+    it.each(['"', '*', '-', ':', '(', ')'])('treats the operator character %s as plain text, never FTS5 syntax', async (ch) => {
+      const t = threads.bindOrGet('web', `web-search-op-${ch.codePointAt(0)}`, null);
+      await threads.inbound(HUMAN, t.id, 'ordinary text');
+      expect(() => threads.search(t.id, `weird${ch}query`)).not.toThrow();
+    });
+
+    it('a match in another thread is not returned', async () => {
+      const other = threads.bindOrGet('web', 'web-search-3a', null);
+      await threads.outbound(CONDUCTOR, other.id, 'the unicorn code name');
+      const t = threads.bindOrGet('web', 'web-search-3b', null);
+      await threads.inbound(HUMAN, t.id, 'nothing special here');
+      expect(threads.search(t.id, 'unicorn')).toEqual([]);
+    });
+
+    it('a thread id belonging to another workspace resolves not_found, same as messages()', async () => {
+      const t = threads.bindOrGet('web', 'web-search-4', null);
+      await threads.inbound(HUMAN, t.id, 'workspace one secret');
+      const h2 = makeHarness();
+      const threads2 = createThreadsService(h2.ctx, h2.deps);
+      expect(() => threads2.search(t.id, 'secret')).toThrowError(expect.objectContaining({ code: 'not_found' }));
+      h2.cleanup();
+    });
+
+    it('a message indexed without going through insertMessage (a migration backfill) is searchable', async () => {
+      const t = threads.bindOrGet('web', 'web-search-5', null);
+      // Mirrors what `0033_thread_message_search.sql`'s `INSERT ... SELECT` does for a pre-existing
+      // row: writing straight into the search table, bypassing `insertMessage`'s index-on-write.
+      h.db.run(
+        `INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at) VALUES ('m-legacy', ?, 'inbound', 'human', 'a pre-existing legacy message', 't0')`,
+        [t.id],
+      );
+      h.db.insert('thread_message_search', { messageId: 'm-legacy', threadId: t.id, workspaceId: h.workspaceId, body: 'a pre-existing legacy message' });
+      expect(threads.search(t.id, 'legacy').map((r) => r.messageId)).toEqual(['m-legacy']);
+    });
+
+    it('an empty or no-match query returns an empty list, not an error', async () => {
+      const t = threads.bindOrGet('web', 'web-search-6', null);
+      await threads.inbound(HUMAN, t.id, 'something ordinary');
+      expect(threads.search(t.id, '   ')).toEqual([]);
+      expect(threads.search(t.id, 'nonexistenttoken')).toEqual([]);
+    });
+  });
+
+  describe('around (VS-320)', () => {
+    it('includes the target message itself, oldest-first', async () => {
+      const t = threads.bindOrGet('web', 'web-around-1', null);
+      const msgs = [];
+      for (let i = 0; i < 5; i++) msgs.push(await threads.inbound(HUMAN, t.id, `m${i}`));
+      const window = threads.around(t.id, msgs[2]!.id, { before: 1, after: 1 });
+      expect(window.map((m) => m.id)).toEqual([msgs[1]!.id, msgs[2]!.id, msgs[3]!.id]);
+    });
+
+    it('returns a shorter window near the start of a thread rather than erroring', async () => {
+      const t = threads.bindOrGet('web', 'web-around-2', null);
+      const first = await threads.inbound(HUMAN, t.id, 'first');
+      const second = await threads.inbound(HUMAN, t.id, 'second');
+      const window = threads.around(t.id, first.id, { before: 5, after: 5 });
+      expect(window.map((m) => m.id)).toEqual([first.id, second.id]);
+    });
+
+    it('a target id from another thread is not found', async () => {
+      const other = threads.bindOrGet('web', 'web-around-3a', null);
+      const elsewhere = await threads.outbound(CONDUCTOR, other.id, 'over here');
+      const t = threads.bindOrGet('web', 'web-around-3b', null);
+      await threads.inbound(HUMAN, t.id, 'over there');
+      expect(() => threads.around(t.id, elsewhere.id)).toThrowError(expect.objectContaining({ code: 'not_found' }));
+    });
+
+    it('breaks a created_at tie on rowid, the same way messages() does, without dropping or duplicating the target', () => {
+      const t = threads.bindOrGet('web', 'web-around-4', null);
+      // Two messages sharing one created_at, the way a relayed answer and its echo are written together.
+      h.db.run(`INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at) VALUES ('a', ?, 'inbound', 'human', 'first of the pair', 'same-ts')`, [t.id]);
+      h.db.run(`INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at) VALUES ('b', ?, 'inbound', 'human', 'second of the pair', 'same-ts')`, [t.id]);
+      expect(threads.around(t.id, 'a', { before: 5, after: 5 }).map((m) => m.id)).toEqual(['a', 'b']);
     });
   });
 });

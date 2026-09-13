@@ -1,6 +1,6 @@
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import type { Agent, Decision, Project, RunEvent, RunTrace, RuntimeAccount, ThreadMessage, Ticket, WorkspaceEvent } from '@weave-ai/shared';
+import type { Agent, Decision, Project, RunEvent, RunTrace, RuntimeAccount, ThreadMessage, ThreadSearchResult, Ticket, WorkspaceEvent } from '@weave-ai/shared';
 import { agent, decision, project, ticket } from './factories';
 import { projectColorVar } from '../lib/projectColor';
 import { enqueue } from '../lib/queue';
@@ -49,6 +49,12 @@ const state = vi.hoisted(() => ({
   toasts: [] as Array<Record<string, unknown>>,
   ws: 'ws1',
   go: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  // Search and jump-to-message (VS-320).
+  searchResults: [] as ThreadSearchResult[],
+  searchQueries: [] as string[],
+  jumpMessages: [] as ThreadMessage[],
+  jumpLoading: false,
+  jumpMessageIds: [] as Array<string | null>,
 }));
 
 vi.mock('../api/context', async () => {
@@ -111,6 +117,14 @@ vi.mock('../api/hooks', () => ({
   // VS-249: not exercised here — the decision card's handover band only fetches once opened.
   useHandoverCommandFor: () => ({ data: undefined, isLoading: false, isError: false }),
   useStartHandoverFor: () => ({ mutate: vi.fn() }),
+  useThreadSearch: (_threadId: string | null, query: string) => {
+    state.searchQueries.push(query);
+    return { data: query.trim() ? state.searchResults : [], isLoading: false, isError: false };
+  },
+  useMessageContext: (threadId: string | null, messageId: string | null) => {
+    state.jumpMessageIds.push(messageId);
+    return { data: threadId && messageId ? state.jumpMessages : undefined, isLoading: state.jumpLoading, isError: false };
+  },
 }));
 
 vi.mock('../app/link', () => ({ useGo: () => state.go }));
@@ -3243,6 +3257,174 @@ describe('ChatRoute selection stability (VS-321)', () => {
 
     expect(screen.getByText('Older message worth copying.')).toBe(node);
     expect(window.getSelection()?.toString()).toBe('Older message worth copying.');
+  });
+});
+
+describe('ChatRoute search and jump-to-message (VS-320)', () => {
+  const openSearch = (): void => { fireEvent.click(screen.getByRole('button', { name: 'Search this conversation' })); };
+  const type = (q: string): void => { fireEvent.change(screen.getByLabelText('Search messages'), { target: { value: q } }); };
+  const result = (snippetPiece: string): HTMLElement => screen.getByText(snippetPiece).closest('button') as HTMLElement;
+  const midnightResult = { messageId: 'm1', authorKind: 'agent', authorId: 'ag_conductor', createdAt: '2026-09-01T09:00:00.000Z', snippet: 'the deploy runs at \u0002midnight\u0003' };
+
+  beforeEach(() => {
+    // The target message ('m1') is deliberately not in the tailing window here: most of these tests
+    // exercise the jump path for a result *outside* what is loaded, which is what `around()` is for.
+    // The "already loaded" test below loads it on purpose, to exercise the other branch.
+    state.messages = [message({ id: 'm2', body: 'unrelated filler', createdAt: '2026-09-01T09:05:00.000Z' })];
+    state.searchResults = [];
+    state.jumpMessages = [];
+  });
+
+  it('opens the search panel from the header button and closes it on Escape', () => {
+    render(<ChatRoute />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    openSearch();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText('Search messages'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('shows each result newest-first-ordered with a highlighted snippet, author and timestamp', () => {
+    state.searchResults = [midnightResult];
+    render(<ChatRoute />);
+    openSearch();
+    type('midnight');
+    expect(screen.getByText('midnight').tagName).toBe('MARK');
+    expect(result('the deploy runs at')).toHaveTextContent('Weaver');
+  });
+
+  // A message body's own literal brackets — markdown links, checkboxes, `[Risk]`-style labels — are
+  // common in this chat and must never be mistaken for the highlight delimiter (review on PR #268).
+  it('renders literal brackets in a snippet as plain text, with exactly one highlight for the real match', () => {
+    state.searchResults = [
+      { messageId: 'm1', authorKind: 'agent', authorId: 'ag_conductor', createdAt: '2026-09-01T09:00:00.000Z', snippet: 'see [PR #1](https://x) and [x] — the deploy runs at \u0002midnight\u0003' },
+    ];
+    render(<ChatRoute />);
+    openSearch();
+    type('midnight');
+
+    const hit = screen.getByText('midnight').closest('button') as HTMLElement;
+    expect(hit).toHaveTextContent('[PR #1](https://x)');
+    expect(hit).toHaveTextContent('[x]');
+    expect(within(hit).getByText('midnight').tagName).toBe('MARK');
+    expect(hit.querySelectorAll('mark')).toHaveLength(1);
+  });
+
+  it('shows a clear empty state for a query with no matches', () => {
+    render(<ChatRoute />);
+    openSearch();
+    type('nope');
+    expect(screen.getByRole('status')).toHaveTextContent('No messages match');
+  });
+
+  it('selecting a result outside the loaded window jumps to it: loads its context, scrolls, and highlights it briefly', () => {
+    vi.useFakeTimers();
+    try {
+      state.searchResults = [midnightResult];
+      // Far outside anything `useThreadMessages` has loaded: an older message the tailing page does
+      // not carry, exactly what the `around()` read exists for.
+      state.jumpMessages = [
+        message({ id: 'm0', body: 'a much older message' }),
+        message({ id: 'm1', body: 'the deploy runs at midnight' }),
+      ];
+      render(<ChatRoute />);
+      openSearch();
+      type('midnight');
+      fireEvent.click(result('the deploy runs at'));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByText('Jumped to a message in the conversation')).toBeInTheDocument();
+      expect(screen.getByText('a much older message')).toBeInTheDocument();
+
+      const target = messageAround('the deploy runs at midnight');
+      expect(target.parentElement!.className).toContain('bg-accent/10');
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(target.parentElement!.className).not.toContain('bg-accent/10');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('selecting a result already in the loaded window scrolls and highlights it in place, without discarding loaded history', () => {
+    vi.useFakeTimers();
+    try {
+      // Already on screen: no `around()` fetch should be needed, and the tailing history — including
+      // the unrelated message — must stay exactly as it was (conductor-chat/message-jump).
+      state.messages = [
+        message({ id: 'm1', body: 'the deploy runs at midnight', createdAt: '2026-09-01T09:00:00.000Z' }),
+        message({ id: 'm2', body: 'unrelated filler', createdAt: '2026-09-01T09:05:00.000Z' }),
+      ];
+      state.searchResults = [midnightResult];
+      render(<ChatRoute />);
+      openSearch();
+      type('midnight');
+      fireEvent.click(result('the deploy runs at'));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.queryByText('Jumped to a message in the conversation')).not.toBeInTheDocument();
+      // Still the ordinary tailing view: both messages remain, nothing was replaced.
+      expect(screen.getByText('unrelated filler')).toBeInTheDocument();
+
+      const target = messageAround('the deploy runs at midnight');
+      expect(target.parentElement!.className).toContain('bg-accent/10');
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(target.parentElement!.className).not.toContain('bg-accent/10');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('"back to latest" is one action back to the ordinary tailing view', () => {
+    state.searchResults = [midnightResult];
+    state.jumpMessages = [message({ id: 'm1', body: 'the deploy runs at midnight' })];
+    render(<ChatRoute />);
+    openSearch();
+    type('midnight');
+    fireEvent.click(result('the deploy runs at'));
+    expect(screen.getByText('Jumped to a message in the conversation')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to latest' }));
+    expect(screen.queryByText('Jumped to a message in the conversation')).not.toBeInTheDocument();
+    expect(screen.getByText('unrelated filler')).toBeInTheDocument();
+  });
+
+  // Extends `ChatRoute follow the bottom`'s own "keeps the list pinned to the bottom" assertion
+  // (task 6.2), rather than a parallel suite: after a jump and a return, a new message must still
+  // follow to the bottom exactly as it does when no jump has ever happened.
+  it('still follows new messages to the bottom after a jump and a return to latest', () => {
+    const HEIGHT = 1000;
+    const CLIENT = 300;
+    function scrollable(el: HTMLElement): void {
+      let top = 0;
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => HEIGHT });
+      Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => CLIENT });
+      Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = v; } });
+    }
+    const scrolls = (): number => (window.HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+    const list = (c: HTMLElement): HTMLElement => c.querySelector('.ac-scroll') as HTMLElement;
+
+    state.searchResults = [midnightResult];
+    state.jumpMessages = [message({ id: 'm1', body: 'the deploy runs at midnight' })];
+
+    const { container, rerender } = render(<ChatRoute />);
+    scrollable(list(container));
+
+    openSearch();
+    type('midnight');
+    fireEvent.click(result('the deploy runs at'));
+    expect(screen.getByText('Jumped to a message in the conversation')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to latest' }));
+    expect(screen.queryByText('Jumped to a message in the conversation')).not.toBeInTheDocument();
+
+    // The tailing list remounted as a fresh element (its geometry overrides do not carry over).
+    scrollable(list(container));
+    const before = scrolls();
+    state.messages = [...state.messages, message({ id: 'm3', body: 'a new message after returning' })];
+    rerender(<ChatRoute />);
+
+    expect(scrolls()).toBeGreaterThan(before);
+    expect(screen.queryByRole('button', { name: /^Scroll to bottom/ })).not.toBeInTheDocument();
   });
 });
 

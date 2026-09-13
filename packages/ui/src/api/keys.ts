@@ -103,6 +103,8 @@ export const qk = {
 
   threads: (ws: string) => ['w', ws, 'threads'] as const,
   threadMessages: (ws: string, id: string) => ['w', ws, 'threads', id, 'messages'] as const,
+  threadSearch: (ws: string, id: string, query: string) => ['w', ws, 'threads', id, 'search', query] as const,
+  threadContext: (ws: string, id: string, messageId: string) => ['w', ws, 'threads', id, 'context', messageId] as const,
 
   // Its own root rather than a key under `projects` (VS-97): the events that make a pull request
   // list stale are ticket events, and nothing under `projects` is reached by one — the mistake

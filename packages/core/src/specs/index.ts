@@ -18,6 +18,9 @@ import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import * as cli from '../openspec/cli.js';
 import { projectRow } from '../openspec/index.js';
+import { ftsQuery } from '../search/ftsQuery.js';
+
+export { ftsQuery };
 
 const SYSTEM: Actor = { kind: 'system', id: null };
 export type DeltaKind = 'added' | 'modified' | 'removed' | 'renamed';
@@ -141,16 +144,6 @@ export function readArchivedChanges(clonePath: string): ChangeRecord[] {
 
 function artifactText(a: ChangeArtifacts): string {
   return [a.proposal, a.design, a.tasks, ...Object.values(a.specs)].filter((s): s is string => typeof s === 'string' && s.length > 0).join('\n\n');
-}
-
-/** FTS5 has an operator syntax; user queries are plain text, so every term is stripped and quoted. */
-export function ftsQuery(query: string): string {
-  return query
-    .replace(/["'^*:()\[\]{}~+\-]/g, ' ')
-    .split(/\s+/)
-    .filter((t) => t.length > 0)
-    .map((t) => `"${t}"`)
-    .join(' ');
 }
 
 interface CapabilityRow { id: string; capability: string; title: string | null; requirementCount: number; body: string; lastArchivedChange: string | null; updatedAt: string }

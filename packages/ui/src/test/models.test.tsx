@@ -95,8 +95,8 @@ function openDaemonModels(): void {
 describe('Settings — the two model settings', () => {
   it('shows both, each with its runtime and its model', () => {
     openModels();
-    expect(screen.getByLabelText('Conductor runtime')).toHaveValue('claude');
-    expect(screen.getByLabelText('Conductor model')).toHaveValue('claude-fable-5-1');
+    expect(screen.getByLabelText('Weaver runtime')).toHaveValue('claude');
+    expect(screen.getByLabelText('Weaver model')).toHaveValue('claude-fable-5-1');
     expect(screen.getByLabelText('Workers runtime')).toHaveValue('claude');
     // Null means the runtime chooses, which the picker says rather than showing an empty box.
     expect(screen.getByLabelText('Workers model')).toHaveValue('');
@@ -114,14 +114,14 @@ describe('Settings — the two model settings', () => {
 
   it('changes the weaver without touching the workers', () => {
     openModels();
-    fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: 'claude-opus-5' } });
+    fireEvent.change(screen.getByLabelText('Weaver model'), { target: { value: 'claude-opus-5' } });
     expect(state.saved[0]!.weaver.model).toBe('claude-opus-5');
     expect(state.saved[0]!.workers).toEqual({ runtime: 'claude', model: null });
   });
 
   it('clears a model back to the runtime default with null, not an empty string', () => {
     openModels();
-    fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Weaver model'), { target: { value: '' } });
     expect(state.saved[0]!.weaver.model).toBeNull();
   });
 
@@ -201,7 +201,7 @@ describe('Settings — the two model settings', () => {
     expect(state.saved.at(-1)!.workerOptions).toEqual([]);
     state.saved = [];
     state.models = { ...state.models, workerOptions: [cheap] };
-    fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: 'claude-opus-5' } });
+    fireEvent.change(screen.getByLabelText('Weaver model'), { target: { value: 'claude-opus-5' } });
     expect(state.saved.at(-1)!.workerOptions).toEqual([cheap]);
   });
 
@@ -238,9 +238,9 @@ describe('Settings — the two model settings', () => {
     // `useModels()` already returns the effective value; a filled daemon overlay for weaver would
     // surface here as `current.weaver` reflecting the overlay, never as a `locked` flag.
     openModels();
-    expect(screen.getByLabelText('Conductor runtime')).not.toBeDisabled();
+    expect(screen.getByLabelText('Weaver runtime')).not.toBeDisabled();
     expect(screen.getByLabelText('Workers runtime')).not.toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Conductor runtime'), { target: { value: 'codex' } });
+    fireEvent.change(screen.getByLabelText('Weaver runtime'), { target: { value: 'codex' } });
     expect(state.saved.at(-1)?.weaver.runtime).toBe('codex');
     fireEvent.change(screen.getByLabelText('Workers runtime'), { target: { value: 'codex' } });
     expect(state.saved.at(-1)?.workers.runtime).toBe('codex');
@@ -249,25 +249,25 @@ describe('Settings — the two model settings', () => {
   it('opens daemon Models inheriting by default, stating the workspace value inherited (VS-207)', () => {
     state.search = { section: 'daemon-models' };
     openDaemonModels();
-    const scope = screen.getByLabelText('Conductor scope');
+    const scope = screen.getByLabelText('Weaver scope');
     expect(scope).toHaveValue('inherit');
     expect(within(scope).getByRole('option', { name: 'Inherit — claude · claude-fable-5-1' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Conductor runtime')).toBeDisabled();
-    expect(screen.getByLabelText('Conductor runtime')).toHaveValue('claude');
+    expect(screen.getByLabelText('Weaver runtime')).toBeDisabled();
+    expect(screen.getByLabelText('Weaver runtime')).toHaveValue('claude');
   });
 
   it('opening or changing an inheriting daemon row writes nothing (VS-207)', () => {
     state.search = { section: 'daemon-models' };
     openDaemonModels();
-    fireEvent.change(screen.getByLabelText('Conductor runtime'), { target: { value: 'codex' } });
-    fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: 'claude-opus-5' } });
+    fireEvent.change(screen.getByLabelText('Weaver runtime'), { target: { value: 'codex' } });
+    fireEvent.change(screen.getByLabelText('Weaver model'), { target: { value: 'claude-opus-5' } });
     expect(state.daemonSaved).toEqual([]);
   });
 
   it('choosing Override is the deliberate act that creates the daemon overlay, seeded from the inherited value (VS-207)', () => {
     state.search = { section: 'daemon-models' };
     openDaemonModels();
-    fireEvent.change(screen.getByLabelText('Conductor scope'), { target: { value: 'override' } });
+    fireEvent.change(screen.getByLabelText('Weaver scope'), { target: { value: 'override' } });
     expect(state.daemonSaved.at(-1)).toEqual({ weaver: { runtime: 'claude', model: 'claude-fable-5-1' } });
   });
 
@@ -275,9 +275,9 @@ describe('Settings — the two model settings', () => {
     state.search = { section: 'daemon-models' };
     state.daemonModels = { ...state.daemonModels, weaver: { runtime: 'codex', model: null } };
     openDaemonModels();
-    expect(screen.getByLabelText('Conductor scope')).toHaveValue('override');
-    expect(screen.getByLabelText('Conductor runtime')).not.toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Conductor runtime'), { target: { value: 'claude' } });
+    expect(screen.getByLabelText('Weaver scope')).toHaveValue('override');
+    expect(screen.getByLabelText('Weaver runtime')).not.toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Weaver runtime'), { target: { value: 'claude' } });
     expect(state.daemonSaved.at(-1)).toMatchObject({ weaver: { runtime: 'claude' } });
   });
 
@@ -285,15 +285,15 @@ describe('Settings — the two model settings', () => {
     state.search = { section: 'daemon-models' };
     state.daemonModels = { ...state.daemonModels, weaver: { runtime: 'codex', model: 'gpt-5' } };
     openDaemonModels();
-    expect(screen.queryByRole('button', { name: 'Clear Conductor overlay' })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Conductor scope'), { target: { value: 'inherit' } });
+    expect(screen.queryByRole('button', { name: 'Clear Weaver overlay' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Weaver scope'), { target: { value: 'inherit' } });
     expect(state.daemonSaved.at(-1)).toEqual({ weaver: null });
   });
 
   it('is the only place Settings offers a runtime or a model', () => {
     render(<WorkspaceSettingsRoute />);
     // The weaver section is gone: its only settings were these two.
-    expect(screen.queryByRole('tab', { name: 'Conductor' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Weaver' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
     expect(screen.queryByLabelText('Runtime')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
@@ -307,7 +307,7 @@ describe('Settings — thinking level next to the model (VS-228)', () => {
       { id: 'claude-opus-5', label: 'Opus 5', efforts: ['low'] },
     ];
     openModels();
-    const select = screen.getByLabelText('Conductor thinking level');
+    const select = screen.getByLabelText('Weaver thinking level');
     expect(select.tagName).toBe('SELECT');
     expect(within(select).getByRole('option', { name: 'default (unset)' })).toBeInTheDocument();
     expect(within(select).getByRole('option', { name: 'high' })).toBeInTheDocument();
@@ -323,12 +323,12 @@ describe('Settings — thinking level next to the model (VS-228)', () => {
       { id: 'claude-opus-5', label: 'Opus 5', efforts: [] },
     ];
     openModels();
-    expect(screen.queryByLabelText('Conductor thinking level')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Weaver thinking level')).not.toBeInTheDocument();
   });
 
   it('uses free text when the model omits efforts', () => {
     openModels();
-    expect(screen.getByLabelText('Conductor thinking level').tagName).toBe('INPUT');
+    expect(screen.getByLabelText('Weaver thinking level').tagName).toBe('INPUT');
   });
 
   it('clears a stale effort when the model changes to one that does not list it', () => {
@@ -338,7 +338,7 @@ describe('Settings — thinking level next to the model (VS-228)', () => {
       { id: 'claude-opus-5', label: 'Opus 5', efforts: ['low'] },
     ];
     openModels();
-    fireEvent.change(screen.getByLabelText('Conductor model'), { target: { value: 'claude-opus-5' } });
+    fireEvent.change(screen.getByLabelText('Weaver model'), { target: { value: 'claude-opus-5' } });
     expect(state.saved.at(-1)!.weaver).toEqual({ runtime: 'claude', model: 'claude-opus-5', effort: undefined });
   });
 
@@ -349,7 +349,7 @@ describe('Settings — thinking level next to the model (VS-228)', () => {
       { id: 'claude-opus-5', label: 'Opus 5' },
     ];
     openModels();
-    const box = screen.getByLabelText('Conductor thinking level');
+    const box = screen.getByLabelText('Weaver thinking level');
     expect(box.tagName).toBe('INPUT');
     expect(box).toHaveValue('ultra');
   });
@@ -388,7 +388,7 @@ describe('Settings — thinking level next to the model (VS-228)', () => {
       { id: 'claude-opus-5', label: 'Opus 5' },
     ];
     openDaemonModels();
-    fireEvent.change(screen.getByLabelText('Conductor thinking level'), { target: { value: 'high' } });
+    fireEvent.change(screen.getByLabelText('Weaver thinking level'), { target: { value: 'high' } });
     expect(state.daemonSaved).toEqual([]);
   });
 });

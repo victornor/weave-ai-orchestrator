@@ -86,7 +86,7 @@ describe('Settings — presentation', () => {
     expect(row('Workers').textContent).toContain('tmux');
     expect(row('Workers').textContent).toContain('session: ac');
     // No conductor block: it inherits the default surface and says so.
-    expect(row('Conductor').textContent).toContain('headless');
-    expect(row('Conductor').textContent?.toLowerCase()).toContain('default');
+    expect(row('Weaver').textContent).toContain('headless');
+    expect(row('Weaver').textContent?.toLowerCase()).toContain('default');
   });
 });

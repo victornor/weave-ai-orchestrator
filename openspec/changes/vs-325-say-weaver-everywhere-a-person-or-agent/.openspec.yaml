@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-13
+goal: "Say Weaver everywhere a person or agent reads the name: UI labels,
+  server-written messages, and the stored weaver agent's name"

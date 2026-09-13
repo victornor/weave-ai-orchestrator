@@ -167,7 +167,7 @@ export const ROUTES: RouteRow[] = [
 
   { method: 'GET', path: `${W}/presentation`, tag: 'presentation', summary: 'Desired presentation config', auth: 'session' },
   { method: 'PUT', path: `${W}/presentation`, tag: 'presentation', summary: 'Replace the presentation config', auth: 'session', mutating: true },
-  { method: 'GET', path: `${W}/presenter/desired`, tag: 'presentation', summary: 'Conductor + worker views the presenter should show', auth: 'session' },
+  { method: 'GET', path: `${W}/presenter/desired`, tag: 'presentation', summary: 'Weaver + worker views the presenter should show', auth: 'session' },
   { method: 'PUT', path: `${W}/presenter/{presenterId}/handles`, tag: 'presentation', summary: 'Store this presenter surface handles', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/presenter/{presenterId}/handles`, tag: 'presentation', summary: 'Read stored handles', auth: 'session' },
   { method: 'GET', path: `${W}/push/config`, tag: 'push', summary: 'Whether push is configured, with the VAPID public key the browser subscribes with', auth: 'session' },

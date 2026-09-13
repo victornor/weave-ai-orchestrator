@@ -731,7 +731,7 @@ describe('Settings — Telegram pending identities', () => {
     openChannels();
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => expect(state.approveCalls).toEqual(['99']));
-    expect(state.toasts.at(-1)).toMatchObject({ title: 'Approved', detail: 'They can now direct work in this workspace through the conductor.' });
+    expect(state.toasts.at(-1)).toMatchObject({ title: 'Approved', detail: 'They can now direct work in this workspace through the weaver.' });
   });
 
   it('no "Turn off open access" action when allowAll is not set', () => {

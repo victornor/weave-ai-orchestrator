@@ -15,7 +15,7 @@ describe('isHubStub', () => {
   });
 
   it('ignores fill-in hints and HTML comments', () => {
-    expect(isHubStub('# Workspace\n\n<!-- Conductor-only. Budget 3000 tokens. -->\n\n## Portfolio\n\n(one line per project: id — purpose — default role)\n')).toBe(true);
+    expect(isHubStub('# Workspace\n\n<!-- Weaver-only. Budget 3000 tokens. -->\n\n## Portfolio\n\n(one line per project: id — purpose — default role)\n')).toBe(true);
   });
 });
 

@@ -164,6 +164,7 @@ describe('ChannelManager', () => {
     await manager!.drain();
     expect(adapter.sent.length).toBe(afterCreate + 1);
     const followUp = adapter.sent.at(-1)!.message.text;
+    expect(followUp).toContain('Weaver reviewed');
     expect(followUp).toContain('has concerns');
     expect(followUp).toContain('the migration contradicts itself');
     expect(followUp).not.toContain('/d dec_rev');

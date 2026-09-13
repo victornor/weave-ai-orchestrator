@@ -237,6 +237,7 @@ afterEach(() => vi.clearAllMocks());
 describe('ChatRoute live turn', () => {
   it('shows nothing live while the conductor is idle', () => {
     render(<ChatRoute />);
+    expect(screen.getByRole('heading', { name: 'Weaver' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Weaver is working')).not.toBeInTheDocument();
     expect(FakeEventSource.open).toHaveLength(0);
   });
@@ -369,7 +370,7 @@ describe('ChatRoute live turn', () => {
     expect(scrollBody).not.toBeNull();
     expect(notice.closest('[aria-label="Weaver is working"]')).not.toBeNull();
 
-    const composer = screen.getByPlaceholderText('Message the conductor…');
+    const composer = screen.getByPlaceholderText('Message the weaver…');
     expect(scrollBody!.contains(composer)).toBe(false);
   });
 });
@@ -733,7 +734,7 @@ describe('project context', () => {
   const active = (): string | null | undefined => within(group()).queryByRole('radio', { checked: true })?.textContent;
   const choose = (name: string): void => { fireEvent.click(within(group()).getByRole('radio', { name })); };
   const sent = async (body: string): Promise<void> => {
-    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    const box = screen.getByLabelText('Message the weaver…') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: body } });
     fireEvent.click(screen.getByLabelText('Send'));
     await waitFor(() => expect(box.value).toBe(''));
@@ -879,7 +880,7 @@ describe('project context', () => {
 
 describe('ChatRoute sending while the daemon is unreachable', () => {
   const sent = (body: string): void => {
-    const box = screen.getByLabelText('Message the conductor…');
+    const box = screen.getByLabelText('Message the weaver…');
     fireEvent.change(box, { target: { value: body } });
     fireEvent.click(screen.getByLabelText('Send'));
   };
@@ -890,7 +891,7 @@ describe('ChatRoute sending while the daemon is unreachable', () => {
     render(<ChatRoute />);
 
     sent('are you there?');
-    await waitFor(() => expect(screen.getByLabelText('Message the conductor…')).toHaveValue(''));
+    await waitFor(() => expect(screen.getByLabelText('Message the weaver…')).toHaveValue(''));
 
     // A real network failure arrives after "working" already shows; this mock rejects
     // synchronously, so what is observable here is that the indicator never sticks around.
@@ -911,7 +912,7 @@ describe('ChatRoute sending while the daemon is unreachable', () => {
 
     expect(state.posted).toHaveLength(0);
     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('Message the conductor…')).toHaveValue('a very long message');
+    expect(screen.getByLabelText('Message the weaver…')).toHaveValue('a very long message');
   });
 
   it('a send whose fetch never settles leaves Sending… then queues after 15s (VS-227)', async () => {
@@ -919,7 +920,7 @@ describe('ChatRoute sending while the daemon is unreachable', () => {
     try {
       state.postDeferred = new Promise(() => { /* never settles */ });
       render(<ChatRoute />);
-      const box = screen.getByLabelText('Message the conductor…');
+      const box = screen.getByLabelText('Message the weaver…');
       fireEvent.change(box, { target: { value: 'hello' } });
       fireEvent.click(screen.getByLabelText('Send'));
       expect(screen.getByRole('status')).toHaveTextContent('Sending…');
@@ -931,8 +932,8 @@ describe('ChatRoute sending while the daemon is unreachable', () => {
         body: { body: 'hello' },
       });
       expect(screen.queryByText('Sending…')).not.toBeInTheDocument();
-      expect(screen.getByLabelText('Message the conductor…')).toHaveValue('');
-      expect(screen.getByLabelText('Message the conductor…')).not.toBeDisabled();
+      expect(screen.getByLabelText('Message the weaver…')).toHaveValue('');
+      expect(screen.getByLabelText('Message the weaver…')).not.toBeDisabled();
     } finally {
       vi.useRealTimers();
     }
@@ -944,7 +945,7 @@ describe('ChatRoute send lifecycle (VS-148)', () => {
     let release!: () => void;
     state.postDeferred = new Promise<void>((r) => { release = r; });
     render(<ChatRoute />);
-    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    const box = screen.getByLabelText('Message the weaver…') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: 'once' } });
     fireEvent.click(screen.getByLabelText('Send'));
     fireEvent.click(screen.getByLabelText('Send'));
@@ -958,7 +959,7 @@ describe('ChatRoute send lifecycle (VS-148)', () => {
 
   it('clears Sending… when the POST succeeds even without run.finished (VS-227)', async () => {
     render(<ChatRoute />);
-    const box = screen.getByLabelText('Message the conductor…');
+    const box = screen.getByLabelText('Message the weaver…');
     fireEvent.change(box, { target: { value: 'hello' } });
     fireEvent.click(screen.getByLabelText('Send'));
     await waitFor(() => expect(state.posted).toHaveLength(1));
@@ -973,13 +974,13 @@ describe('ChatRoute send lifecycle (VS-148)', () => {
     render(<ChatRoute />);
     fireEvent.click(screen.getByLabelText('Reply to this message'));
     fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Project for this message' })).getByRole('radio', { name: 'Web' }));
-    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    const box = screen.getByLabelText('Message the weaver…') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: 'yes, do it' } });
     fireEvent.click(screen.getByLabelText('Send'));
 
     await waitFor(() => expect(state.toasts[0]).toMatchObject({ title: 'Message not sent', status: 'failed' }));
     expect(box.value).toBe('yes, do it');
-    expect(screen.getByText('Replying to the conductor')).toBeInTheDocument();
+    expect(screen.getByText('Replying to the weaver')).toBeInTheDocument();
     expect(within(screen.getByRole('radiogroup', { name: 'Project for this message' })).getByRole('radio', { name: 'Web' })).toHaveAttribute('aria-checked', 'true');
   });
 
@@ -990,7 +991,7 @@ describe('ChatRoute send lifecycle (VS-148)', () => {
     render(<ChatRoute />);
     fireEvent.click(screen.getByLabelText('Reply to this message'));
     fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Project for this message' })).getByRole('radio', { name: 'Web' }));
-    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    const box = screen.getByLabelText('Message the weaver…') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: 'yes, do it' } });
     fireEvent.click(screen.getByLabelText('Send'));
     await waitFor(() => expect(state.toasts[0]).toMatchObject({ title: 'Message not sent' }));
@@ -998,7 +999,7 @@ describe('ChatRoute send lifecycle (VS-148)', () => {
     state.postError = null;
     fireEvent.click(screen.getByLabelText('Send'));
     await waitFor(() => expect(box.value).toBe(''));
-    expect(screen.queryByText('Replying to the conductor')).not.toBeInTheDocument();
+    expect(screen.queryByText('Replying to the weaver')).not.toBeInTheDocument();
     expect(within(screen.getByRole('radiogroup', { name: 'Project for this message' })).getByRole('radio', { name: 'Web' })).toHaveAttribute('aria-checked', 'false');
     expect(withoutKey(state.posted[0]!)).toEqual({ threadId: 'th_1', body: 'yes, do it', projectId: 'p2', replyToMessageId: 'm1' });
   });
@@ -1009,7 +1010,7 @@ describe('ChatRoute attachments (VS-133)', () => {
     render(<ChatRoute />);
     const file = new File(['x'], 'shot.png', { type: 'image/png' });
     fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
-    fireEvent.change(screen.getByLabelText('Message the conductor…'), { target: { value: 'look at this' } });
+    fireEvent.change(screen.getByLabelText('Message the weaver…'), { target: { value: 'look at this' } });
     await act(async () => {
       fireEvent.click(screen.getByLabelText('Send'));
       await Promise.resolve();
@@ -1023,7 +1024,7 @@ describe('ChatRoute attachments (VS-133)', () => {
     render(<ChatRoute />);
     const file = new File(['x'], 'shot.png', { type: 'image/png' });
     fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
-    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    const box = screen.getByLabelText('Message the weaver…') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: 'too big' } });
     fireEvent.click(screen.getByLabelText('Send'));
 
@@ -1069,14 +1070,14 @@ describe('ChatRoute attachments (VS-133)', () => {
 
 describe('ChatRoute reply reference', () => {
   const sent = async (body: string): Promise<void> => {
-    const box = screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+    const box = screen.getByLabelText('Message the weaver…') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: body } });
     fireEvent.click(screen.getByLabelText('Send'));
     await waitFor(() => expect(box.value).toBe(''));
   };
   const replyControls = (): HTMLElement[] => screen.queryAllByLabelText('Reply to this message');
   /** The quote above the input, which is the one inside the composer's scope slot. */
-  const quote = (): HTMLElement | null => screen.queryByText('Replying to the conductor');
+  const quote = (): HTMLElement | null => screen.queryByText('Replying to the weaver');
 
   beforeEach(() => {
     state.messages = [
@@ -1114,7 +1115,7 @@ describe('ChatRoute reply reference', () => {
     fireEvent.click(replyControls()[0]!);
     fireEvent.click(replyControls()[1]!);
 
-    expect(screen.getAllByText('Replying to the conductor')).toHaveLength(1);
+    expect(screen.getAllByText('Replying to the weaver')).toHaveLength(1);
     expect(quote()!.parentElement!).toHaveTextContent('and here is an unrelated note');
     await sent('about that one');
     expect(state.posted[0]).toMatchObject({ replyToMessageId: 'm2' });
@@ -1246,7 +1247,7 @@ describe('ChatRoute decision cards', () => {
     // Outside the scrolling body — the list keeps its own scroll and its scroll-to-bottom button.
     expect(area.closest('.ac-scroll')).toBe(area);
     expect(area.contains(screen.getByText('One thing before I start.'))).toBe(false);
-    expect(precedes(area, screen.getByPlaceholderText('Message the conductor…'))).toBe(true);
+    expect(precedes(area, screen.getByPlaceholderText('Message the weaver…'))).toBe(true);
   });
 
   it('stacks several open decisions oldest first', () => {
@@ -1496,7 +1497,7 @@ describe('ChatRoute decision cards', () => {
     ];
     const { unmount } = render(<ChatRoute />);
     const agentCard = screen.getByLabelText(/Plan: close the false alarm/);
-    expect(within(agentCard).getByText('Filed by conductor')).toBeInTheDocument();
+    expect(within(agentCard).getByText('Filed by weaver')).toBeInTheDocument();
     expect(within(agentCard).getByText('Filed after a false stuck-worker alarm.')).toBeInTheDocument();
     expect(agentCard.querySelector(':scope > div:last-of-type')).toHaveClass('p-3');
     unmount();
@@ -1509,7 +1510,7 @@ describe('ChatRoute decision cards', () => {
     ];
     render(<ChatRoute />);
     const humanCard = screen.getByLabelText(/Plan: captain asked/);
-    expect(within(humanCard).queryByText('Filed by conductor')).not.toBeInTheDocument();
+    expect(within(humanCard).queryByText('Filed by weaver')).not.toBeInTheDocument();
     expect(within(humanCard).queryByText('Captain asked for this.')).toBeInTheDocument();
   });
 
@@ -1531,7 +1532,7 @@ describe('ChatRoute decision cards', () => {
     state.messages = [message({ id: 'm1', body: 'One thing before I start.' })];
     state.decisions = [asked({ ticketId: null })];
     render(<ChatRoute />);
-    expect(screen.queryByText('Filed by conductor')).not.toBeInTheDocument();
+    expect(screen.queryByText('Filed by weaver')).not.toBeInTheDocument();
   });
 });
 
@@ -2011,7 +2012,7 @@ describe('ChatRoute opening position', () => {
 });
 
 describe('ChatRoute drafts', () => {
-  const box = (): HTMLTextAreaElement => screen.getByLabelText('Message the conductor…') as HTMLTextAreaElement;
+  const box = (): HTMLTextAreaElement => screen.getByLabelText('Message the weaver…') as HTMLTextAreaElement;
   const type = (body: string): void => { fireEvent.change(box(), { target: { value: body } }); };
 
   it('keeps an unsent message when the page is left, and restores it with the caret at the end', () => {
@@ -2077,7 +2078,7 @@ describe('ChatRoute drafts', () => {
 
     render(<ChatRoute />);
     expect(box().value).toBe('yes, do it');
-    expect(screen.getByText('Replying to the conductor')).toBeInTheDocument();
+    expect(screen.getByText('Replying to the weaver')).toBeInTheDocument();
     expect(within(group()).getByRole('radio', { name: 'Web' })).toHaveAttribute('aria-checked', 'true');
 
     fireEvent.click(screen.getByLabelText('Send'));
@@ -2941,7 +2942,7 @@ describe('ChatRoute open-decision layout (VS-289)', () => {
 
     const left = rail.previousElementSibling as HTMLElement;
     expect(left.className).toContain('min-w-0');
-    expect(left.contains(screen.getByPlaceholderText('Message the conductor…'))).toBe(true);
+    expect(left.contains(screen.getByPlaceholderText('Message the weaver…'))).toBe(true);
     expect(left.contains(rail)).toBe(false);
   });
 });

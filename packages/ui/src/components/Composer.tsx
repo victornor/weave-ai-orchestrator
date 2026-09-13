@@ -28,7 +28,7 @@ const MAX_INPUT_PX = 192;
 
 export interface ComposerProps {
   placeholder?: string;
-  /** "Conductor is replying — your message is queued" when the agent is mid-turn. */
+  /** "Weaver is replying — your message is queued" when the agent is mid-turn. */
   queuedReason?: string | null;
   queuedCount?: number;
   disabled?: boolean;
@@ -83,7 +83,7 @@ function SendIcon(): React.ReactElement {
  * user never leaves a hot mic open".
  */
 export function Composer({
-  placeholder = 'Tell the conductor what you need…',
+  placeholder = 'Tell the weaver what you need…',
   queuedReason,
   queuedCount = 0,
   disabled,
@@ -578,7 +578,7 @@ export function Composer({
       {explain && dictation.mode === 'unavailable' ? (
         <p className="text-micro leading-relaxed text-text-3">
           Dictation is unavailable: this browser has no Web Speech API and the daemon has no transcription provider.{' '}
-          <span className="text-accent-link">Set a provider in Settings → Conductor</span>, or type instead.
+          <span className="text-accent-link">Set a provider in Settings → Dictation</span>, or type instead.
         </p>
       ) : null}
       {dictation.diagnostics.enabled && dictation.diagnostics.count > 0 ? (

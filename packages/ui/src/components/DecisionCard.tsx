@@ -297,7 +297,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectSlug, ws, aske
         ) : null}
         {ticketFiledByConductor ? (
           <span className="ac-mono rounded-r4 border border-line-2 px-1.5 py-0.5 text-nano tracking-micro text-text-3">
-            Filed by conductor
+            Filed by weaver
           </span>
         ) : null}
         {meta ? <span className="ac-mono text-micro text-text-3">{meta}</span> : null}

@@ -97,6 +97,13 @@ describe('NeedsYouRoute', () => {
     expect(screen.getByText('1 waiting')).toBeInTheDocument();
   });
 
+  it('labels the agent-owned decisions as the weaver deciding', () => {
+    state.decisions = [asked()];
+    state.conductorOwned = [decision({ owner: 'weaver', title: 'Pick a runtime' })];
+    render(<NeedsYouRoute />);
+    expect(screen.getByText('Weaver is deciding')).toBeInTheDocument();
+  });
+
   it('shows the weaver-review line on an unseen plan card and withholds Approve (VS-223, VS-281)', () => {
     state.decisions = [decision({ kind: 'plan_approval', title: 'Approve the plan for ACME-42' })];
     render(<NeedsYouRoute />);
@@ -371,7 +378,7 @@ describe('NeedsYou — YOLO mode', () => {
     state.tickets = [{ id: 'tk_1', identifier: 'VS-145', createdByKind: 'agent', summary: 'Filed after a false alarm.' }];
     state.decisions = [reviewed({ ticketId: 'tk_1' })];
     render(<NeedsYouRoute />);
-    expect(screen.queryByText('Filed by conductor')).not.toBeInTheDocument();
+    expect(screen.queryByText('Filed by weaver')).not.toBeInTheDocument();
     expect(screen.queryByText('Filed after a false alarm.')).not.toBeInTheDocument();
     const body = screen.getByRole('article').querySelector(':scope > div:last-of-type');
     expect(body).toHaveClass('p-3.5');

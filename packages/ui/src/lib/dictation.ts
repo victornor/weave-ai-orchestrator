@@ -117,7 +117,7 @@ function pickMode(opts: { backend?: string; hostReady?: boolean }): DictationMod
 const ERRORS: Record<string, string> = {
   'not-allowed': 'Microphone permission was denied.',
   'service-not-allowed': 'The browser blocked its speech service.',
-  network: 'The browser could not reach its speech service. Configure a transcription provider on the daemon (Settings → Conductor) for dictation that never leaves your machines.',
+  network: 'The browser could not reach its speech service. Configure a transcription provider on the daemon (Settings → Dictation) for dictation that never leaves your machines.',
   'no-speech': 'No speech was detected.',
   'audio-capture': 'No microphone was found.',
   aborted: 'Dictation was cancelled.',
@@ -125,7 +125,7 @@ const ERRORS: Record<string, string> = {
 
 const UNAVAILABLE = 'Dictation is not available in this browser, and the daemon has no transcription provider configured.';
 /** The recognizer heard sound and still returned no words — not the same thing as silence. */
-const NO_TRANSCRIPT = 'The browser heard audio but its speech service returned no words. Try again, or configure a transcription provider on the daemon (Settings \u2192 Conductor) for dictation that never leaves your machines.';
+const NO_TRANSCRIPT = 'The browser heard audio but its speech service returned no words. Try again, or configure a transcription provider on the daemon (Settings \u2192 Dictation) for dictation that never leaves your machines.';
 /** The daemon transcribed successfully but recognized no words (VS-196) \u2014 not a failure, so no error is thrown. */
 const NO_TRANSCRIPT_UPLOAD = 'Nothing was recognized in that recording. Try again.';
 
@@ -258,7 +258,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         const res = await fetch(transcribeUrlRef.current ?? '/api/transcribe', { method: 'POST', credentials: 'include', body: fd });
         if (res.status === 501) {
           setMode(speechCtor() ? 'speech' : 'unavailable');
-          setError('No transcription provider is configured on the daemon. Set one in Settings → Conductor.');
+          setError('No transcription provider is configured on the daemon. Set one in Settings → Dictation.');
           setTranscribingState(false);
           return;
         }

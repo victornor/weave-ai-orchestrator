@@ -221,7 +221,7 @@ export function seedBody(scope: KnowledgeScope, opts: { workspaceName?: string; 
   const budget = opts.budgetTokens ?? BUDGETS[scope];
   switch (scope) {
     case 'workspace':
-      return skeleton(`# ${opts.workspaceName ?? 'Workspace'} — workspace knowledge`, 'Conductor-only. What this workspace is for, who works here, and the project portfolio.', WORKSPACE_SECTIONS, budget);
+      return skeleton(`# ${opts.workspaceName ?? 'Workspace'} — workspace knowledge`, 'Weaver-only. What this workspace is for, who works here, and the project portfolio.', WORKSPACE_SECTIONS, budget);
     case 'shared':
       return skeleton('# Shared knowledge', 'Read by every agent. Project-agnostic only: never name a project here.', SHARED_SECTIONS, budget);
     case 'decisions':

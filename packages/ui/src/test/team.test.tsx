@@ -52,6 +52,7 @@ beforeEach(() => {
 describe('Team — start an interactive session (VS-101)', () => {
   it('opens the form, requires a title, and starts against the role\'s own project and role', () => {
     render(<TeamRoute />);
+    expect(screen.getByText('Weaver')).toBeInTheDocument();
     expect(screen.queryByLabelText('Session title')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Start session' }));

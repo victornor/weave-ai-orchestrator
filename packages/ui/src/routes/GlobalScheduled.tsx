@@ -118,7 +118,7 @@ export function GlobalScheduledRoute(): React.ReactElement {
               {n === 0 && failed.length === 0 ? (
                 <EmptyState
                   title="No scheduled tasks yet."
-                  detail="Alarms that wake a workspace's conductor with an instruction. Add one above, or ask the conductor."
+                  detail="Alarms that wake a workspace's weaver with an instruction. Add one above, or ask the weaver."
                 />
               ) : n > 0 ? (
                 <div className="ac-card divide-y divide-line-1">

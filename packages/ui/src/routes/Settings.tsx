@@ -411,7 +411,7 @@ function YoloSection({ config }: { config: Record<string, unknown> }): React.Rea
 const BUDGET_FIELDS = [
   { key: 'project', label: 'Project knowledge base', hint: 'Each PROJECT.md. Injected in full into every worker of that project.' },
   { key: 'document', label: 'Linked document', hint: 'Each [[slug]] page. Read on demand, never injected.' },
-  { key: 'workspace', label: 'Workspace knowledge base', hint: 'WORKSPACE.md. Conductor only.' },
+  { key: 'workspace', label: 'Workspace knowledge base', hint: 'WORKSPACE.md. Weaver only.' },
   { key: 'shared', label: 'Shared conventions', hint: 'SHARED.md. Read by every agent, so it costs the most per token.' },
   { key: 'decisions', label: 'Decision log', hint: 'decisions.md. Appended by the daemon; only its last 30 lines reach a digest.' },
 ] as const;
@@ -983,7 +983,7 @@ function ProjectsSection(): React.ReactElement {
       {projects.isLoading ? (
         <SkeletonRows rows={3} />
       ) : (projects.data?.length ?? 0) === 0 ? (
-        <EmptyState title="No projects yet." detail="Paste a git URL above, or ask the conductor to add one." />
+        <EmptyState title="No projects yet." detail="Paste a git URL above, or ask the weaver to add one." />
       ) : (
         <div className="ac-card divide-y divide-line-1">
           {(projects.data ?? []).map((p) => (
@@ -1024,7 +1024,7 @@ function ModelsSection(): React.ReactElement {
   return (
     <div className="flex flex-col gap-5">
       <ModelSettingFields
-        label="Conductor"
+        label="Weaver"
         hint="The agent you talk to. One per workspace."
         setting={current.weaver}
         runtimes={runtimes.data ?? []}
@@ -1454,7 +1454,7 @@ function WorkerOptionsEditor({ current, runtimes, disabled, onSave }: {
   return (
     <div className="flex flex-col gap-2">
       <h3 className="ac-label text-text-1">Worker options</h3>
-      <p className="text-micro text-text-3">{disabled ? 'Set in the daemon settings → Models' : 'Named models the conductor can pick per ticket. The workers setting above is the default when a ticket names none.'}</p>
+      <p className="text-micro text-text-3">{disabled ? 'Set in the daemon settings → Models' : 'Named models the weaver can pick per ticket. The workers setting above is the default when a ticket names none.'}</p>
       {options.length === 0 ? <p className="text-micro text-text-3">None yet.</p> : null}
       {options.map((o) => (
         <WorkerOptionRow
@@ -1578,7 +1578,7 @@ function DaemonModelsSection(): React.ReactElement {
         Filled overlays set the default every workspace starts from until it configures its own (VS-284). Empty means the built-in default (claude, no model chosen) applies until either does.
       </p>
       <OverlaySetting
-        label="Conductor"
+        label="Weaver"
         setting={current.weaver}
         fallback={conductorFallback}
         runtimes={list}
@@ -1804,7 +1804,7 @@ function ChannelsSection(): React.ReactElement {
         </div>
       </Field>
 
-      <Field label="Allowlist" hint="Comma-separated Telegram user ids that may talk to the conductor. Nobody allowed is the safe, intended state — approve people below instead of typing ids.">
+      <Field label="Allowlist" hint="Comma-separated Telegram user ids that may talk to the weaver. Nobody allowed is the safe, intended state — approve people below instead of typing ids.">
         <div className="flex items-center gap-2">
           <input
             aria-label="Allowlist"
@@ -1840,7 +1840,7 @@ function ChannelsSection(): React.ReactElement {
         onApprove={(externalUserId) =>
           void approveUser
             .mutateAsync(externalUserId)
-            .then(() => toast.push({ title: 'Approved', detail: 'They can now direct work in this workspace through the conductor.', status: 'done' }))
+            .then(() => toast.push({ title: 'Approved', detail: 'They can now direct work in this workspace through the weaver.', status: 'done' }))
             .catch((e: Error) => toast.push({ title: 'Could not approve', detail: e.message, status: 'failed' }))
         }
       />
@@ -1878,7 +1878,7 @@ function PendingTelegramUsers({ users, approving, onApprove }: { users: T.Telegr
           </div>
         ))}
       </div>
-      <span className="text-micro text-text-3">Approving adds them to the allowlist so they can direct work in this workspace through the conductor.</span>
+      <span className="text-micro text-text-3">Approving adds them to the allowlist so they can direct work in this workspace through the weaver.</span>
     </div>
   );
 }
@@ -1924,7 +1924,7 @@ function PresentationSection(): React.ReactElement {
         </select>
       </Field>
       <dl className="ac-card divide-y divide-line-1">
-        <PresentationBlockRow label="Conductor" block={config.weaver} fallback={config.default} />
+        <PresentationBlockRow label="Weaver" block={config.weaver} fallback={config.default} />
         <PresentationBlockRow label="Workers" block={config.workers} fallback={config.default} />
       </dl>
     </div>
@@ -2278,7 +2278,7 @@ function DeviceSection(): React.ReactElement {
           <label className="flex items-center gap-3 px-3.5 py-3">
             <span className="min-w-0 flex-1">
               <span className="block text-meta text-text-1">Turns with no reply</span>
-              <span className="block text-micro text-text-3">A row for work the conductor did without saying anything — a wake that only filed a ticket.</span>
+              <span className="block text-micro text-text-3">A row for work the weaver did without saying anything — a wake that only filed a ticket.</span>
             </span>
             <button
               type="button"

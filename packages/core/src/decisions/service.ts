@@ -1,5 +1,5 @@
 import { decisionRow, newId, nowIso, type Db } from '@weave-ai/db';
-import { OcError, TERMINAL_TICKET_STATUSES, WEAVER_REVIEW_KINDS, WEAVER_REVIEW_NOTE_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type RoleSpec, type TicketStatus } from '@weave-ai/shared';
+import { carriesWeaverReview, OcError, TERMINAL_TICKET_STATUSES, WEAVER_REVIEW_KINDS, WEAVER_REVIEW_NOTE_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type RoleSpec, type TicketStatus } from '@weave-ai/shared';
 import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -33,10 +33,10 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     if (!askedByAgentId) return false;
     return db.get<{ kind: string }>('SELECT kind FROM agents WHERE id = ?', [askedByAgentId])?.kind === 'worker';
   }
-  function wake(agentId: string | null | undefined, source: Parameters<CoreServices['wake']['enqueue']>[1]['source'], reason: string, payload: Record<string, unknown> = {}): void {
+  function wake(agentId: string | null | undefined, source: Parameters<CoreServices['wake']['enqueue']>[1]['source'], reason: string, payload: Record<string, unknown> = {}, idempotencyKey?: string): void {
     if (!agentId) return;
     try {
-      deps().wake.enqueue(agentId, { source, reason, payload });
+      deps().wake.enqueue(agentId, { source, reason, payload, ...(idempotencyKey ? { idempotencyKey } : {}) });
     } catch (e) {
       log.warn({ err: e, agentId, source }, 'wake enqueue failed');
     }
@@ -235,7 +235,18 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       const d = get(id);
       recordActivity(db, ws, actor, 'decision.create', 'decision', id, { kind: input.kind, owner, correlationKey }, ticketId);
       ctx.events.emit('decision.created', 'decision', id, d);
-      if (owner === 'weaver') wake(conductorId(), 'system', `decision ${input.kind} awaits you`, { decisionId: id, ticketId });
+      // VS-361: a human-owned plan, merge or action approval carries the weaver's review (the same
+      // predicate the review UI uses), so creating one wakes the weaver at once instead of leaving it
+      // to the rate-limited digest. The weaver-owned wake below already covers a card the weaver
+      // answers itself, and `askedByAgentId === weaver` means the weaver raised it, so neither calls
+      // for a second wake. Keyed per decision (not per correlation key) so a re-raised card — a new
+      // decision — still wakes, while enqueuing one decision twice cannot leave two live wakes.
+      const cid = conductorId();
+      if (owner === 'weaver') {
+        wake(cid, 'system', `decision ${input.kind} awaits you`, { decisionId: id, ticketId });
+      } else if (carriesWeaverReview(input.kind) && (input.askedByAgentId ?? null) !== cid) {
+        wake(cid, 'system', `decision ${input.kind} awaits your review`, { decisionId: id, ticketId }, `decision-review:${id}`);
+      }
       return d;
     });
   }

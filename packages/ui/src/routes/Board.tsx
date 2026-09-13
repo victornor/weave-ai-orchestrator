@@ -192,7 +192,7 @@ export function BoardRoute(): React.ReactElement {
           <div className="p-6">
             <EmptyState
               title={project ? 'No tickets in this project yet.' : 'No tickets yet.'}
-              detail="Ask the conductor for something and it files the ticket."
+              detail="Ask the weaver for something and it files the ticket."
               action={
                 <Button variant="secondary" onClick={() => go('/w/$ws/chat', { params: { ws } })}>
                   Create ticket

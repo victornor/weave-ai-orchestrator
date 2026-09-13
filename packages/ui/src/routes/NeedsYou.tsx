@@ -149,7 +149,7 @@ export function NeedsYouRoute(): React.ReactElement {
 
             {conductorOwned.data?.length ? (
               <section className="mt-4">
-                <div className="ac-label mb-2">Conductor is deciding</div>
+                <div className="ac-label mb-2">Weaver is deciding</div>
                 <div className="flex flex-col gap-2">
                   {conductorOwned.data.map((d) => (
                     <div key={d.id} className="ac-card px-3.5 py-2.5">

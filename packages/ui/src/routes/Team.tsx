@@ -32,7 +32,7 @@ export function TeamRoute(): React.ReactElement {
         <div className="mx-auto flex max-w-4xl flex-col gap-6">
           {/* conductor */}
           <section>
-            <div className="ac-label mb-2">Conductor</div>
+            <div className="ac-label mb-2">Weaver</div>
             {conductor.isLoading ? (
               <SkeletonRows rows={1} />
             ) : conductor.data ? (
@@ -52,7 +52,7 @@ export function TeamRoute(): React.ReactElement {
           {roles.isError ? (
             <ErrorState code="ROLES_QUERY_FAILED" message="Could not list roles." onRetry={() => void roles.refetch()} />
           ) : (projects.data ?? []).length === 0 ? (
-            <EmptyState title="No projects yet." detail="Add one in Settings → Projects, or ask the conductor." />
+            <EmptyState title="No projects yet." detail="Add one in Settings → Projects, or ask the weaver." />
           ) : (
             (projects.data ?? []).map((p) => {
               const projectRoles = (roles.data ?? []).filter((r) => r.projectId === p.id);

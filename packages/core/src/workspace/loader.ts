@@ -117,7 +117,7 @@ function unresolveEnvRefs<T>(value: T, back: Map<string, string>): T {
 const KNOWLEDGE_SKELETONS: Array<[string, (cfg: { name: string; humanName: string; budgets: KnowledgeBudgets }) => string]> = [
   ['workspace/WORKSPACE.md', (c) => `# ${c.name}
 
-<!-- Conductor-only. Budget ${c.budgets.workspace} tokens. Curated; keep entries concise, dated and standalone. -->
+<!-- Weaver-only. Budget ${c.budgets.workspace} tokens. Curated; keep entries concise, dated and standalone. -->
 
 ## What this business is
 

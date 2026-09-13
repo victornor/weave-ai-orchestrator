@@ -1048,18 +1048,18 @@ describe('DecisionCard', () => {
 
   it('shows a Filed by conductor tag only when told the ticket was conductor-filed', () => {
     const { unmount } = render(<DecisionCard decision={decision()} ticketFiledByConductor onAnswer={() => undefined} />);
-    expect(screen.getByText('Filed by conductor')).toBeInTheDocument();
+    expect(screen.getByText('Filed by weaver')).toBeInTheDocument();
     unmount();
     render(<DecisionCard decision={decision()} onAnswer={() => undefined} />);
-    expect(screen.queryByText('Filed by conductor')).not.toBeInTheDocument();
+    expect(screen.queryByText('Filed by weaver')).not.toBeInTheDocument();
   });
 
   it('shows no provenance tag when the ticket is human-filed or the card has no ticket', () => {
     const { unmount } = render(<DecisionCard decision={decision()} ticketFiledByConductor={false} onAnswer={() => undefined} />);
-    expect(screen.queryByText('Filed by conductor')).not.toBeInTheDocument();
+    expect(screen.queryByText('Filed by weaver')).not.toBeInTheDocument();
     unmount();
     render(<DecisionCard decision={decision({ ticketId: null })} onAnswer={() => undefined} />);
-    expect(screen.queryByText('Filed by conductor')).not.toBeInTheDocument();
+    expect(screen.queryByText('Filed by weaver')).not.toBeInTheDocument();
   });
 
   it('renders a plan-approval summary as a single plain-text line under the title', () => {
@@ -1195,8 +1195,8 @@ describe('Composer', () => {
   });
 
   it('explains the queued state when the conductor is mid-turn', () => {
-    render(<Composer onSubmit={() => undefined} queuedReason="Conductor is replying — your message is queued" queuedCount={1} />);
-    expect(screen.getByText('Conductor is replying — your message is queued')).toBeInTheDocument();
+    render(<Composer onSubmit={() => undefined} queuedReason="Weaver is replying — your message is queued" queuedCount={1} />);
+    expect(screen.getByText('Weaver is replying — your message is queued')).toBeInTheDocument();
     expect(screen.getByText('1 queued')).toBeInTheDocument();
   });
 

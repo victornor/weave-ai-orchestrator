@@ -179,7 +179,7 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
   // A project with no documents/hubs but with artifacts still has something to browse (VS-270) — the
   // "nothing to browse" state only applies once artifacts have loaded and are also empty.
   if (!tree.length && !artifactRows.length && !weaverArtifactRows.length && !artifacts.isLoading && !weaverArtifacts.isLoading) {
-    return <EmptyState title="Nothing to browse yet." detail="A knowledge base and its documents are created as soon as a worker or the conductor writes to them." />;
+    return <EmptyState title="Nothing to browse yet." detail="A knowledge base and its documents are created as soon as a worker or the weaver writes to them." />;
   }
 
   const activeNode = (node: ExplorerNode): boolean => {

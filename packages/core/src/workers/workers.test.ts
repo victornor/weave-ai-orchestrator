@@ -642,11 +642,12 @@ describe('workers', () => {
     expect(existsSync(join(curator.homePath, 'AGENTS.md'))).toBe(true);
   });
 
-  it('ensureConductor is idempotent and renders the conductor home', async () => {
+  it('ensureConductor is idempotent and renders the weaver home', async () => {
     const a = await workers.ensureConductor();
     const b = await workers.ensureConductor();
     expect(b.id).toBe(a.id);
     expect(a.kind).toBe('weaver');
+    expect(a.name).toBe('Weaver');
     expect(readFileSync(join(h.ctx.paths.weaver, 'AGENTS.md'), 'utf8')).toContain('weaver');
   });
 

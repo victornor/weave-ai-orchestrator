@@ -146,7 +146,7 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
   const cards: CardModel[] = useMemo(() => decisions.map((d) => decisionToCard(d, {})), [decisions]);
 
   useEffect(() => {
-    setTerminalTitle(['Conductor', boundTicket ?? undefined, cards.length ? 'needs you' : working ? 'working' : 'idle'].filter(Boolean).join(' · '));
+    setTerminalTitle(['Weaver', boundTicket ?? undefined, cards.length ? 'needs you' : working ? 'working' : 'idle'].filter(Boolean).join(' · '));
   }, [boundTicket, cards.length, working]);
 
   const answer = useCallback(async (decisionId: string, raw: string) => {

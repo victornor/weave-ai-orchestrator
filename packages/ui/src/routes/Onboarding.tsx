@@ -273,8 +273,8 @@ export function OnboardingRoute(): React.ReactElement {
         <h2 className="text-title font-semibold tracking-title text-text-strong">{isFirstRun ? 'Set up your first workspace' : 'New workspace'}</h2>
         <p className="mt-1 text-meta leading-relaxed text-text-2">
           {isFirstRun
-            ? 'A workspace is one business: its projects, the conductor you talk to, the roles it hires, and its knowledge. Everything below can be changed later in Settings.'
-            : 'Another business, another conductor. Projects, roles and knowledge stay separate.'}
+            ? 'A workspace is one business: its projects, the weaver you talk to, the roles it hires, and its knowledge. Everything below can be changed later in Settings.'
+            : 'Another business, another weaver. Projects, roles and knowledge stay separate.'}
         </p>
       </div>
 
@@ -356,7 +356,7 @@ export function OnboardingRoute(): React.ReactElement {
               ))}
             </select>
           </Field>
-          <Field label="Your name" hint="How the conductor addresses you. Empty means “captain”.">
+          <Field label="Your name" hint="How the weaver addresses you. Empty means “captain”.">
             <input value={humanName} onChange={(e) => setHumanName(e.target.value)} placeholder="captain" className={INPUT} />
           </Field>
           <Actions>
@@ -369,7 +369,7 @@ export function OnboardingRoute(): React.ReactElement {
       {step === 'projects' ? (
         <section className="flex flex-col gap-4">
           <p className="text-meta leading-relaxed text-text-2">
-            A project is a git repository the workspace works on. Adding one clones it on the daemon host, adopts OpenSpec, seeds its knowledge base and creates a scout ticket that describes the repo. You can add projects later from the conductor or Settings.
+            A project is a git repository the workspace works on. Adding one clones it on the daemon host, adopts OpenSpec, seeds its knowledge base and creates a scout ticket that describes the repo. You can add projects later from the weaver or Settings.
           </p>
           {projects.map((p, i) => (
             <div key={i} className="ac-card flex flex-col gap-3 p-3.5">
@@ -409,7 +409,7 @@ export function OnboardingRoute(): React.ReactElement {
               <dl className="ac-card grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 p-4 text-meta">
                 <Row k="Workspace" v={`${name} · ${id} · ${prefix}-1`} />
                 <Row k="Directory" v={path} mono />
-                <Row k="Models" v={`${runtimes.data?.find((r) => r.id === runtime)?.displayName ?? runtime}${model ? ` · ${model}` : ' · default model'} — conductor and workers`} />
+                <Row k="Models" v={`${runtimes.data?.find((r) => r.id === runtime)?.displayName ?? runtime}${model ? ` · ${model}` : ' · default model'} — weaver and workers`} />
                 <Row k="Addresses you as" v={humanName.trim() || 'captain'} />
                 <Row k="Projects" v={projects.length ? projects.map((p) => p.id).join(', ') : 'none yet'} />
               </dl>

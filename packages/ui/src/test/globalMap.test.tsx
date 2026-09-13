@@ -70,7 +70,7 @@ function ready(over: Partial<typeof state> = {}): void {
   };
   state.workers = {};
   state.errors = {};
-  state.conductors = { alpha: { agent: { id: 'c1', name: 'Conductor' } }, beta: undefined };
+  state.conductors = { alpha: { agent: { id: 'c1', name: 'Weaver' } }, beta: undefined };
   state.reduced = false;
   state.phone = false;
   Object.assign(state, over);
@@ -101,7 +101,7 @@ describe('GlobalMapRoute', () => {
   it('shows nodes for two workspaces, a role, an in-flight ticket and one knowledge node', async () => {
     const container = await draw();
     const labels = [...container.querySelectorAll('[data-node]')].map((n) => n.getAttribute('aria-label'));
-    expect(labels).toEqual(expect.arrayContaining(['Alpha', 'Beta', 'api', 'web', 'Platform Engineer', 'VS-176 Map', 'api knowledge', 'Conductor']));
+    expect(labels).toEqual(expect.arrayContaining(['Alpha', 'Beta', 'api', 'web', 'Platform Engineer', 'VS-176 Map', 'api knowledge', 'Weaver']));
     expect(container.querySelectorAll('[data-kind="knowledge"]')).toHaveLength(1);
   });
 

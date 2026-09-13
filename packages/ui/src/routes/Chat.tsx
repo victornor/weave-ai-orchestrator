@@ -696,7 +696,7 @@ export function ChatPage({
   return (
     <Page>
       <PageHeader
-        title="Conductor"
+        title="Weaver"
         // Hidden on a phone: the plan strip is the live number worth the width there, and the
         // header must stay one line.
         meta={<span className="hidden md:inline">{`${running} workers running · ${(decisions.data ?? []).filter((d) => d.status === 'open').length} need you`}</span>}
@@ -767,7 +767,7 @@ export function ChatPage({
                     <Skeleton className="h-24 w-full rounded-r8" />
                   </>
                 ) : messages.isError && fetchId ? (
-                  <ErrorState code="CONDUCTOR_UNREACHABLE" message="Could not load the thread; the history below is the last known state." onRetry={() => void messages.refetch()} />
+                  <ErrorState code="WEAVER_UNREACHABLE" message="Could not load the thread; the history below is the last known state." onRetry={() => void messages.refetch()} />
                 ) : rows.length === 0 ? (
                   <EmptyState
                     title="Tell me what you need."
@@ -944,8 +944,8 @@ export function ChatPage({
           <div className="flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-7">
             <div className="mx-auto max-w-3xl">
               <Composer
-                placeholder="Message the conductor…"
-                queuedReason={offline ? 'Offline — your message is queued' : working ? 'Conductor is replying — your message is queued' : null}
+                placeholder="Message the weaver…"
+                queuedReason={offline ? 'Offline — your message is queued' : working ? 'Weaver is replying — your message is queued' : null}
                 queuedCount={queuedCount}
                 value={draft.text}
                 onChange={(text) => patch({ text })}
@@ -1029,7 +1029,7 @@ function ReplyQuote({ body, onDismiss }: { body: string; onDismiss: () => void }
   return (
     <div className="mb-1.5 flex items-start gap-2 rounded-r6 border-l-2 border-accent bg-bg-2 py-1 pl-2 pr-1">
       <span className="min-w-0 flex-1">
-        <span className="block text-nano text-text-4">Replying to the conductor</span>
+        <span className="block text-nano text-text-4">Replying to the weaver</span>
         <span className="line-clamp-2 block text-micro text-text-2">{body}</span>
       </span>
       <button

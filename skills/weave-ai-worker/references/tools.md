@@ -35,7 +35,7 @@ The `weave` CLI mirrors every tool (`weave ticket get`, `weave ask`, `weave repo
 
 Workers may also call `weave_ticket_create` for **child tickets inside their own project**, with the same input shape as the conductor's. Use it only when the brief tells you to, or for a genuine follow-up that must not block this ticket — and say so on your ticket.
 
-## Conductor only
+## Weaver only
 
 | Tool | Input |
 |---|---|

@@ -1106,6 +1106,44 @@ describe('migrations', () => {
       expect(db.get<{ migrationOutcome: string | null }>('SELECT * FROM upgrades WHERE id = ?', ['u1'])?.migrationOutcome).toBeNull();
       db.update('upgrades', 'u1', { migrationOutcome: 'fallback' });
       expect(db.get<{ migrationOutcome: string | null }>('SELECT * FROM upgrades WHERE id = ?', ['u1'])?.migrationOutcome).toBe('fallback');
+    });
+  });
+
+  describe('0034_rename_default_weaver_agent (VS-325)', () => {
+    it('renames the untouched default weaver name and leaves a deliberate one alone', () => {
+      const path = join(dir, 'weaver-name.sqlite');
+      // A prefix just below the new file, so this stops before 0034 whatever migration happens to
+      // precede it after other branches land (0032 and 0033 are claimed elsewhere).
+      const before = openDbAsOf(path, '0033');
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w1', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`,
+      );
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w2', 'w2', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`,
+      );
+      // The untouched default, in its own workspace because a workspace has one weaver.
+      before.insert('agents', {
+        id: 'a-default', workspaceId: 'w1', kind: 'weaver', name: 'Conductor', runtimeId: 'claude',
+        homePath: '/tmp/weaver', createdAt: 't0', updatedAt: 't0',
+      });
+      // A deliberately chosen name is not the default and must survive.
+      before.insert('agents', {
+        id: 'a-custom', workspaceId: 'w2', kind: 'weaver', name: 'Chief', runtimeId: 'claude',
+        homePath: '/tmp/weaver', createdAt: 't0', updatedAt: 't0',
+      });
+      // A worker whose name happens to be `Conductor` is not the weaver's default and is untouched.
+      before.insert('agents', {
+        id: 'a-worker', workspaceId: 'w1', kind: 'worker', name: 'Conductor', runtimeId: 'claude',
+        homePath: '/tmp/worker', createdAt: 't0', updatedAt: 't0',
+      });
+      before.close();
+
+      const db = openDb(path);
+      expect(db.get('SELECT name FROM agents WHERE id = ?', ['a-default'])).toMatchObject({ name: 'Weaver' });
+      expect(db.get('SELECT name FROM agents WHERE id = ?', ['a-custom'])).toMatchObject({ name: 'Chief' });
+      expect(db.get('SELECT name FROM agents WHERE id = ?', ['a-worker'])).toMatchObject({ name: 'Conductor' });
       db.close();
     });
   });

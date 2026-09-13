@@ -50,7 +50,7 @@ export function GlobalChatsRoute(): React.ReactElement {
             <Skeleton className="h-full min-w-80 flex-1" />
           </div>
         ) : listed.length === 0 ? (
-          <EmptyState className="m-4" title="No workspaces." detail="Create a workspace to talk to its conductor." />
+          <EmptyState className="m-4" title="No workspaces." detail="Create a workspace to talk to its weaver." />
         ) : (
           <div className="flex h-full min-h-0 overflow-x-auto">
             {listed.map((w) => {

@@ -1,7 +1,9 @@
 # daemon-upgrade/asset-serving Specification
 
 ## Purpose
-TBD - created by archiving change vs-210-a-tab-open-across-an-upgrade-breaks-and. Update Purpose after archive.
+Defines that a request for a built asset the running release does not have returns a 404 rather than
+the app shell, so a stale tab's dynamic import fails honestly instead of receiving HTML that cannot
+run as a module.
 
 ## Requirements
 

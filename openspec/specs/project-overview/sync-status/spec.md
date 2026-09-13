@@ -1,7 +1,9 @@
 # project-overview/sync-status Specification
 
 ## Purpose
-TBD - created by archiving change vs-131-a-project-that-has-moved-outside-agentco. Update Purpose after archive.
+Tells the human when a project's clone has fallen behind its remote: the overview classifies it as
+in sync, behind or diverged without mutating the clone, offers a fast-forward for a behind clone,
+and does not raise an alarm for a clone that is only briefly behind.
 
 ## Requirements
 

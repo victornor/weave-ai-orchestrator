@@ -1,7 +1,9 @@
 # model-selection/workspace-model-settings Specification
 
 ## Purpose
-TBD - created by archiving change vs-77-model-selection-is-exactly-two-per-works. Update Purpose after archive.
+Defines the workspace's model choice as exactly two settings — a runtime and a model — that alone
+decide what a turn runs on, shown and changed from one place in each client, with the thinking level
+choosable next to the model.
 
 ## Requirements
 

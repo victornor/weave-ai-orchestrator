@@ -1,7 +1,9 @@
 # workspace-navigation/live-floor Specification
 
 ## Purpose
-TBD - created by archiving change vs-152-show-a-live-grid-of-working-agents-and-t. Update Purpose after archive.
+Gives a workspace a Live page showing every worker currently on a ticket at once, each cell
+identifying the worker and ticket and streaming its live output, so watching several workers no
+longer means opening several tabs; cells resize, reflow and hand off between turns without a reload.
 
 ## Requirements
 

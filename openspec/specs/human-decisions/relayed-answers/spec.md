@@ -1,7 +1,9 @@
 # human-decisions/relayed-answers Specification
 
 ## Purpose
-TBD - created by archiving change vs-310-let-the-weaver-record-captain-s-prose-an. Update Purpose after archive.
+Lets the workspace's weaver record a human's prose answer to an askable, human-owned question with
+`weave_decision_answer`: the human's words are kept verbatim, attributed apart from the writer,
+linked to the message they came from, and the card closes and wakes its asker as a real answer would.
 
 ## Requirements
 

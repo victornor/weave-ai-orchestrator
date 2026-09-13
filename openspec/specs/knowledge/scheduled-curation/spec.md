@@ -1,7 +1,9 @@
 # knowledge/scheduled-curation Specification
 
 ## Purpose
-TBD - created by archiving change vs-67-scheduled-knowledge-curation-runs-only-w. Update Purpose after archive.
+Makes scheduled knowledge curation run only when the numbers justify it: a run is requested from the
+file's current size and pending state, clears the flag for the scope it was asked for, skips a stale
+row whose file is gone, and logs the evidence behind every request.
 
 ## Requirements
 

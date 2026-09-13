@@ -1,7 +1,10 @@
 # daemon-upgrade/upgrade-announcement Specification
 
 ## Purpose
-TBD - created by archiving change vs-76-a-completed-daemon-upgrade-wakes-the-con. Update Purpose after archive.
+Defines what is announced when a daemon upgrade completes: the human is told over the channel path
+and the conductor is woken once per workspace with the release pair, the migrations that ran and
+what landed, and a failure or rollback is announced with the release now running rather than left
+silent.
 
 ## Requirements
 

@@ -1,7 +1,9 @@
 # host-tools Specification
 
 ## Purpose
-TBD - created by archiving change vs-318-the-daemon-silently-loses-openspec-and-g. Update Purpose after archive.
+Defines how the daemon finds host tools such as git, gh and openspec from the daemon user's own
+login-shell environment rather than a fixed PATH, so a bare service-manager PATH cannot disarm
+planning and delivery, and makes an unavailable tool name the PATH that was searched.
 
 ## Requirements
 

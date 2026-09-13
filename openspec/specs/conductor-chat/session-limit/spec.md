@@ -1,7 +1,9 @@
 # conductor-chat/session-limit Specification
 
 ## Purpose
-TBD - created by archiving change vs-78-conductor-chat-header-shows-the-conducto. Update Purpose after archive.
+Puts the conductor's own plan usage and its context-window fullness in the chat header, next to
+where the spending happens, reading live from the same runtime account snapshots the Usage page
+already shows and refusing to draw a meter it cannot honestly measure.
 
 ## Requirements
 

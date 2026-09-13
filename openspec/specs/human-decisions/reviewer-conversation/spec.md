@@ -1,7 +1,10 @@
 # human-decisions/reviewer-conversation Specification
 
 ## Purpose
-TBD - created by archiving change vs-106-the-human-can-question-the-worker-that-b. Update Purpose after archive.
+Lets a human open a conversation with the worker that produced a pull request, delivered to the
+worker like any other message and recorded on the ticket with attribution, so implementation
+questions are answered by the agent that holds the context and the conversation ends only by
+approving the merge or asking for revisions.
 
 ## Requirements
 

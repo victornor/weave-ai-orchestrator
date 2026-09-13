@@ -1,7 +1,9 @@
 # conductor-chat/turn-work-trace Specification
 
 ## Purpose
-TBD - created by archiving change vs-74-conductor-chat-keeps-each-turn-s-work-tr. Update Purpose after archive.
+Keeps a finished conductor turn's work visible in the chat instead of wiping it when the turn ends:
+each reply keeps a collapsed trace of what the turn did, fetched as a summary only when expanded and
+remembered for the session, with the turn's token spend beside its timestamp.
 
 ## Requirements
 

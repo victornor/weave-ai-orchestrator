@@ -1,7 +1,9 @@
 # conductor-chat/composer-drafts Specification
 
 ## Purpose
-TBD - created by archiving change vs-48-conductor-chat-keeps-an-unsent-draft-whe. Update Purpose after archive.
+Keeps an unsent message from silently disappearing when the human navigates away: the text, its
+reply reference and its project tag are held per conversation in a workspace, survive leaving and
+returning, and end only when the message is sent or the field is cleared.
 
 ## Requirements
 

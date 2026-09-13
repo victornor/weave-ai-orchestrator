@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
@@ -45,6 +45,11 @@ function setup(cases: FakeCase[], opts: { changeName?: string | null; policies?:
 function writeChange(dir: string, files: Record<string, string>): void {
   mkdirSync(dir, { recursive: true });
   for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body);
+}
+
+/** A main spec with the placeholder Purpose `openspec archive` writes for a new capability (VS-362). */
+function placeholderSpec(capability: string, changeName: string): string {
+  return `# ${capability} Specification\n\n## Purpose\nTBD - created by archiving change ${changeName}. Update Purpose after archive.\n\n## Requirements\n\n### Requirement: A gadget exists\nThe system SHALL have a gadget.\n\n#### Scenario: One gadget\n- **WHEN** asked\n- **THEN** a gadget is returned\n`;
 }
 
 const READY_CASES: FakeCase[] = [
@@ -227,6 +232,36 @@ describe('OpenSpecService.archiveAfterMerge', () => {
     expect(results.every((r) => r.archivedAs !== null)).toBe(true);
     expect(bin.calls().filter((c) => c.argv[0] === 'archive')).toHaveLength(3);
   });
+
+  it('fills a capability the backfill archive created from the proposal Why (VS-362)', async () => {
+    const why = 'Gadgets exist so callers can rely on a gadget being present and shaped the way this capability guarantees.';
+    const { harness, ticketId, clone } = setup([
+      ...READY_CASES,
+      { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: ['gadgets'], warnings: [] } } },
+    ], { policies: { deliveryMode: 'local-branch' } });
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    writeChange(join(clone, 'openspec', 'specs', 'gadgets'), { 'spec.md': placeholderSpec('gadgets', CHANGE) });
+    writeChange(join(clone, 'openspec', 'changes', 'archive', `2026-09-04-${CHANGE}`), { 'proposal.md': `## Why\n\n${why}\n\n## What Changes\n- x\n` });
+
+    const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
+    expect(r).toEqual({ archivedAs: `2026-09-04-${CHANGE}`, skipped: null });
+    const spec = readFileSync(join(clone, 'openspec', 'specs', 'gadgets', 'spec.md'), 'utf8');
+    expect(spec).toContain(why);
+    expect(spec).not.toContain('Update Purpose after archive');
+  });
+
+  it('fails the backfill instead of committing a placeholder when the proposal has no Why (VS-362)', async () => {
+    const { harness, ticketId, clone } = setup([
+      ...READY_CASES,
+      { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: ['gadgets'], warnings: [] } } },
+    ], { policies: { deliveryMode: 'local-branch' } });
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    writeChange(join(clone, 'openspec', 'specs', 'gadgets'), { 'spec.md': placeholderSpec('gadgets', CHANGE) });
+    // No archived proposal with a "Why" exists.
+    await expect(createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId))
+      .rejects.toMatchObject({ code: 'openspec_archive_blocked' });
+    expect(readFileSync(join(clone, 'openspec', 'specs', 'gadgets', 'spec.md'), 'utf8')).toContain('Update Purpose after archive');
+  });
 });
 
 describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () => {
@@ -399,6 +434,31 @@ describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () 
     await expect(createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId)).rejects.toThrow();
     const mainLog = await git(['log', '--oneline', 'main'], origin);
     expect(mainLog.stdout.trim().split('\n')).toHaveLength(1);
+  });
+
+  it('fills a capability the backfill archive created before opening the pull request (VS-362)', async () => {
+    const why = 'Gadgets exist so callers can rely on a gadget being present and shaped the way this capability guarantees.';
+    const { harness, ticketId, clone } = setup([
+      ...READY_CASES,
+      { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: ['gadgets'], warnings: [] } } },
+    ], { policies: { deliveryMode: 'pr' } });
+    const { origin } = await realGitProject(harness, clone);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    writeChange(join(clone, 'openspec', 'specs', 'gadgets'), { 'spec.md': placeholderSpec('gadgets', CHANGE) });
+    writeChange(join(clone, 'openspec', 'changes', 'archive', `2026-09-04-${CHANGE}`), { 'proposal.md': `## Why\n\n${why}\n\n## What Changes\n- x\n` });
+    await git(['add', '.'], clone);
+    await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
+    harness.ctx.registries.forges.set('github', {
+      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const, ciState: 'none' as const }), mergePr: async () => ({}),
+      createPullRequest: async () => ({ url: 'https://example.com/pr/99', number: 99 }),
+    } satisfies ForgeAdapter);
+
+    const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
+    expect(r).toEqual({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/99' });
+    // The pushed backfill branch carries the filled Purpose, not the placeholder.
+    const pushed = (await git(['show', `refs/heads/ac/archive-${CHANGE}:openspec/specs/gadgets/spec.md`], origin)).stdout;
+    expect(pushed).toContain(why);
+    expect(pushed).not.toContain('Update Purpose after archive');
   });
 });
 

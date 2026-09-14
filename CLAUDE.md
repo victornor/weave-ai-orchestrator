@@ -147,7 +147,14 @@ This repo is itself a project in a running Weave AI workspace, so a worker editi
 process spawned by the system it is changing. Rules that keep that sane:
 
 - **The running daemon is a release, not a checkout.** It lives under
-  `~/.local/share/weave/current`. Building in your worktree changes nothing that runs.
+  `~/.local/share/weave/current` — or, on a host that predates the rename,
+  `~/.local/share/agent-conductor/current`. Building in your worktree changes nothing that runs.
+- **Never `pkill`, `killall`, or kill by name or pattern.** The live daemon runs the same
+  `packages/server/dist/bin.js` path as a scratch one, so `pkill -f packages/server/dist/bin.js`
+  (or `killall node`) takes the live daemon down with it — one worker did exactly that. Start and
+  stop a scratch daemon with `scripts/scratch-daemon.sh start|stop`: it records a pid and refuses to
+  stop one whose command line is not its own scratch config dir. Otherwise kill a pid you recorded
+  yourself, never a pattern.
 - **Never touch the live install**: not `~/.config/weave`, not the release dirs, not the
   systemd unit, not the port it listens on. `weave daemon upgrade|rollback|stop|start` are
   human commands; they refuse to run inside a worker.

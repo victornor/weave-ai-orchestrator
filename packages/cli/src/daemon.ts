@@ -1,5 +1,5 @@
 /** Local daemon lifecycle (PLAN §20 `weave daemon`). Everything here is host-local, never remote. */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { SHUTDOWN_KILL_GRACE_MS } from '@weave-ai/shared';
 import { stateHome, configHome } from './contexts.js';
-import { LAUNCHD_LABEL, SERVICE_NAME, currentLink } from './release.js';
+import { LAUNCHD_LABEL, SERVICE_NAME, currentLink, resolveInstalledUnit, type InstalledUnit } from './release.js';
 
 export function pidFile(): string { return join(stateHome(), 'daemon.pid'); }
 export function logFile(): string { return join(stateHome(), 'daemon.log'); }
@@ -54,6 +54,15 @@ export function isRunning(pid: number | null): boolean {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
+
+export interface CommandResult { status: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string; error?: Error }
+/** One command, run and captured — never a real `systemctl`/`launchctl` invocation in a test. */
+export type RunCommand = (cmd: string, args: string[]) => CommandResult;
+
+export const realRun: RunCommand = (cmd, args) => {
+  const r = spawnSync(cmd, args, { encoding: 'utf8' });
+  return { status: r.status, signal: r.signal, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error };
+};
 
 export interface StartOptions { foreground?: boolean; listen?: string; env?: Record<string, string> }
 
@@ -146,7 +155,10 @@ export function renderServiceUnit(bin: string): string {
     'Type=simple',
     `ExecStart=${process.execPath} ${bin}`,
     `Environment=AC_CONFIG_HOME=${configHome()}`,
-    'Restart=on-failure',
+    // VS-376: `always`, not `on-failure` — the incident's daemon drained and exited 0, which
+    // `on-failure` treats as success and leaves down. A deliberate `systemctl --user stop` is still
+    // honoured by systemd and is not restarted.
+    'Restart=always',
     'RestartSec=3',
     'KillSignal=SIGTERM',
     // VS-262: must comfortably exceed shutdown()'s own bounded drain-then-cancel sequence — see
@@ -241,4 +253,77 @@ export function installService(): { path: string; unit: string; commands: string
       'loginctl enable-linger "$USER"   # keep it running after logout',
     ],
   };
+}
+
+// ---------- the systemd unit a host already has (VS-376) ----------
+
+/** The one `Restart=` value the unit must carry so an unexpected exit — clean or not — comes back. */
+export const RESTART_ALWAYS = 'Restart=always';
+
+/**
+ * VS-376: pure — force an existing `Restart=` line to `always`. A unit with no `Restart=` line at
+ * all is left untouched: every unit this module renders carries one, and the state this fixes is the
+ * `on-failure` value a host installed before this ticket, which treats a clean exit as success.
+ */
+export function withRestartAlways(content: string): string {
+  return content.replace(/^Restart=(.*)$/m, (line, value: string) => (value.trim() === 'always' ? line : RESTART_ALWAYS));
+}
+
+export interface UnitRestartRewrite { unit: string; path: string; changed: boolean }
+
+/**
+ * VS-376: rewrite an installed unit that still restarts only on failure, then reload systemd so the
+ * change takes effect. `null` when no unit is installed; `changed: false` when the unit already
+ * restarts on any exit. The reload is best-effort — a corrected file is worth writing even where the
+ * reload itself cannot run.
+ */
+export function ensureUnitRestartAlways(run: RunCommand = realRun, unit: InstalledUnit | null = resolveInstalledUnit()): UnitRestartRewrite | null {
+  if (!unit) return null;
+  let content: string;
+  try { content = readFileSync(unit.path, 'utf8'); } catch { return null; }
+  const next = withRestartAlways(content);
+  if (next === content) return { unit: unit.name, path: unit.path, changed: false };
+  writeFileSync(unit.path, next);
+  run('systemctl', ['--user', 'daemon-reload']);
+  return { unit: unit.name, path: unit.path, changed: true };
+}
+
+/** VS-376: systemd's own record of the pid a unit currently owns, or null when it has none. */
+export function systemdMainPid(unit: InstalledUnit, run: RunCommand = realRun): number | null {
+  const r = run('systemctl', ['--user', 'show', unit.name, '--property=MainPID', '--value']);
+  if (r.error || r.status !== 0) return null;
+  const pid = Number.parseInt(r.stdout.trim(), 10);
+  return Number.isFinite(pid) && pid > 0 ? pid : null;
+}
+
+function runUnitVerb(verb: 'start' | 'stop', unit: InstalledUnit, run: RunCommand): void {
+  const r = run('systemctl', ['--user', verb, unit.name]);
+  if (r.error) throw new Error(`systemctl failed to ${verb}: ${r.error.message}`);
+  if (r.status !== 0) {
+    const detail = (r.stderr || r.stdout).trim().slice(0, 2000);
+    throw new Error(`systemctl --user ${verb} ${unit.name} exited ${String(r.status ?? r.signal)}${detail ? `: ${detail}` : ''}`);
+  }
+}
+
+/**
+ * VS-376: start the daemon through its installed unit, so it is a service that survives the caller's
+ * terminal and that `systemctl` can see. `null` when no unit is installed — the caller then spawns
+ * the detached process exactly as before.
+ */
+export function startDaemonService(run: RunCommand = realRun, platform: NodeJS.Platform = process.platform): { unit: string; how: string } | null {
+  const unit = platform === 'linux' ? resolveInstalledUnit() : null;
+  if (!unit) return null;
+  runUnitVerb('start', unit, run);
+  return { unit: unit.name, how: `systemctl --user start ${unit.name}` };
+}
+
+/**
+ * VS-376: stop the installed unit deliberately. A bare `SIGTERM` to the daemon's pid would be
+ * restarted by `Restart=always`; `systemctl --user stop` is the "deliberate stop" systemd honours.
+ */
+export function stopDaemonService(run: RunCommand = realRun, platform: NodeJS.Platform = process.platform): { unit: string; how: string } | null {
+  const unit = platform === 'linux' ? resolveInstalledUnit() : null;
+  if (!unit) return null;
+  runUnitVerb('stop', unit, run);
+  return { unit: unit.name, how: `systemctl --user stop ${unit.name}` };
 }

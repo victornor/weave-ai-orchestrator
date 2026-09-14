@@ -152,6 +152,25 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   app.get('/incidents/:id', (c) => c.json(deps.incidents.get(c.req.param('id'))));
 
   /**
+   * A run by id alone (VS-386). The V2 run detail at `/v2/runs/$runId` is a global, cross-workspace
+   * screen (HANDOFF §12), so it has no workspace from its route and the runs API is per workspace.
+   * Search the loaded workspaces and return the first match — the same bare `Run` the per-workspace
+   * route serves, which already carries `workspaceId`. A run belongs to exactly one workspace, so
+   * the first hit is the only hit.
+   */
+  app.get('/runs/:id', (c) => {
+    const id = c.req.param('id');
+    for (const w of uniqueWorkspaces(deps)) {
+      try {
+        return c.json(w.services.runs.get(id));
+      } catch (e) {
+        if (!(e instanceof OcError) || e.code !== 'not_found') throw e;
+      }
+    }
+    throw new OcError('not_found', `run ${id} not found`);
+  });
+
+  /**
    * PLAN §20: is the configured release source ahead of the release this daemon runs from? `?refresh=1`
    * resolves the source again instead of answering from the cache. Operator-only, like everything under
    * `/api/daemon`: run tokens never reach this path (see `RUN_TOKEN_PATHS` in `auth.ts`).

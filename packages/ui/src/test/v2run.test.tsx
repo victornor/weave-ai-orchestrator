@@ -13,7 +13,7 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('../app/link', () => ({ useSearchParams: () => ({}), useGo: () => vi.fn() }));
 vi.mock('../api/runStream', () => ({ useRunEventStream: () => ({ events: [] as RunEvent[], status: { state: 'connected' }, retryNow: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
-  useRun: () => ({ data: state.run ? { run: state.run, agent: null, ticket: null, phases: [], usage: state.run.usage } : undefined, isLoading: false, isError: false }),
+  useRunGlobal: () => ({ data: state.run ? { run: state.run, agent: null, ticket: null, phases: [], usage: state.run.usage } : undefined, isLoading: false, isError: false }),
   useWorkersMany: () => [{ data: [{ id: 'a1', name: 'Backend Engineer #7' }] }],
   useRuntimeModels: () => ({ data: [{ id: 'sonnet-4.6', label: 'Sonnet', contextWindowTokens: 200_000 }] }),
   useRuns: () => ({ data: [] }),

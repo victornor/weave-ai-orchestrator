@@ -346,6 +346,9 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
     case 'run.finished': {
       inv(qk.runs(ws));
       inv(qk.run(ws, id));
+      // The global run detail is keyed above any workspace (VS-386), so it needs its own invalidation
+      // when a turn starts or finishes.
+      inv(qk.runGlobal(id));
       inv(qk.workers(ws));
       // The conductor detail carries its last run, and that run's usage is what the chat header's
       // context meter is computed from — without this it would only move on a remount.

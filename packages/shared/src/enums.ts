@@ -129,6 +129,10 @@ export const ROUTINE_MAX_TICKETS_PER_FIRE = 8;
 /** Shortest interval schedule (minutes). */
 export const ROUTINE_MIN_INTERVAL_MINUTES = 15;
 
+/** A project roadmap item's lifecycle (VS-397). `dropped` retains the idea; deleting removes it. */
+export const ROADMAP_STATUSES = ['idea', 'planned', 'dropped'] as const;
+export type RoadmapStatus = (typeof ROADMAP_STATUSES)[number];
+
 export const WAKE_STATUSES = ['queued', 'claimed', 'coalesced', 'skipped', 'completed', 'failed', 'cancelled'] as const;
 export type WakeStatus = (typeof WAKE_STATUSES)[number];
 

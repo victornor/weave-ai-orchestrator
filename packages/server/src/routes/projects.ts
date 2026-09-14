@@ -1,8 +1,24 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { OcError, ProjectConfigSchema, ProjectPoliciesSchema } from '@weave-ai/shared';
+import { OcError, ProjectConfigSchema, ProjectPoliciesSchema, ROADMAP_STATUSES } from '@weave-ai/shared';
+import type { CoreServices } from '@weave-ai/core';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
+
+const RoadmapCreateSchema = z.object({
+  title: z.string().min(1),
+  notes: z.string().optional(),
+  status: z.enum(ROADMAP_STATUSES).optional(),
+  ticketId: z.string().min(1).nullish(),
+}).strict();
+
+const RoadmapPatchSchema = z.object({
+  title: z.string().min(1).optional(),
+  notes: z.string().optional(),
+  status: z.enum(ROADMAP_STATUSES).optional(),
+  position: z.number().int().optional(),
+  ticketId: z.string().min(1).nullish(),
+}).strict();
 
 const AddSchema = z.object({
   url: z.string().min(1), id: z.string().optional(), name: z.string().optional(),
@@ -103,7 +119,37 @@ export function projectRoutes(): Hono<AppEnv> {
     return c.json(await c.get('ws').services.projects.history(c.req.param('id'), { cursor: c.req.query('cursor') ?? null, limit }));
   });
   app.get('/:id/commits/:sha', async (c) => c.json(await c.get('ws').services.projects.commit(c.req.param('id'), c.req.param('sha'))));
+
+  // The project's roadmap of future ideas (VS-397). Nested under the project like the queue and the
+  // pull requests, so the URL carries the project; the `:id` may be a slug or an id, so it is
+  // resolved to the project's own id before any roadmap call.
+  app.get('/:id/roadmap', (c) => {
+    const s = c.get('ws').services;
+    return c.json({ items: s.roadmap.list(s.projects.get(c.req.param('id')).id) });
+  });
+  app.post('/:id/roadmap', async (c) => {
+    const s = c.get('ws').services;
+    const input = await body(c, RoadmapCreateSchema);
+    return c.json(s.roadmap.create(c.get('actor'), s.projects.get(c.req.param('id')).id, input), 201);
+  });
+  app.patch('/:id/roadmap/:itemId', async (c) => {
+    const s = c.get('ws').services;
+    const itemId = scopedItemId(s.roadmap, s.projects.get(c.req.param('id')).id, c.req.param('itemId'));
+    return c.json(s.roadmap.update(c.get('actor'), itemId, await body(c, RoadmapPatchSchema)));
+  });
+  app.delete('/:id/roadmap/:itemId', (c) => {
+    const s = c.get('ws').services;
+    s.roadmap.remove(c.get('actor'), scopedItemId(s.roadmap, s.projects.get(c.req.param('id')).id, c.req.param('itemId')));
+    return c.json({ ok: true });
+  });
   return app;
+}
+
+/** The `:itemId` only when it is one of the project's own items; another project's id is `not_found`. */
+function scopedItemId(roadmap: CoreServices['roadmap'], projectId: string, itemId: string): string {
+  const item = roadmap.get(itemId);
+  if (item.projectId !== projectId) throw new OcError('not_found', `roadmap item ${itemId} is not in this project`, {});
+  return itemId;
 }
 
 function prNumber(raw: string): number {

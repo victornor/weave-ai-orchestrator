@@ -10,7 +10,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   SELF_WAKE_MAX_DELAY_MS, SELF_WAKE_MIN_DELAY_MS,
-  TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES,
+  TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES, ROADMAP_STATUSES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
   ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS, ATTACHMENT_MAX_PER_MESSAGE,
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
@@ -954,6 +954,55 @@ export const TOOLS: ToolDef[] = [
     name: 'weave_routine_remove', scope: 'weaver', input: z.object({ id: z.string().min(1) }),
     description: 'Remove a scheduled task. It will not fire again.',
     handler: (ctx, i) => { svc(ctx).routines.remove(ctx.actor, i.id); return { ok: true }; },
+  },
+  {
+    name: 'weave_roadmap_list', scope: 'all', input: z.object({ projectId: z.string().optional() }),
+    description: 'List a project\'s roadmap items in order: the future ideas remembered for that project, each with its status (idea|planned|dropped), notes, order and any linked ticket. A worker reads its own project by omitting projectId; the weaver must name one.',
+    handler: (ctx, i) => {
+      const s = svc(ctx);
+      if (isConductor(ctx)) {
+        if (!i.projectId) throw new OcError('validation', 'projectId is required for the weaver');
+        return { items: s.roadmap.list(i.projectId) };
+      }
+      if (!ctx.claims.projectId) throw new OcError('forbidden', 'this run has no project');
+      // A worker may name its own project by id or slug; anything else is outside its project. The
+      // comparison resolves the slug before it compares, unlike `projectScope`'s raw-string one.
+      if (i.projectId && s.projects.get(i.projectId).id !== ctx.claims.projectId) {
+        throw new OcError('forbidden', 'outside your project');
+      }
+      return { items: s.roadmap.list(ctx.claims.projectId) };
+    },
+  },
+  {
+    name: 'weave_roadmap_add', scope: 'weaver', input: z.object({
+      projectId: z.string().min(1),
+      title: z.string().min(1),
+      notes: z.string().optional(),
+      status: z.enum(ROADMAP_STATUSES).optional(),
+      ticketId: z.string().min(1).nullish(),
+    }),
+    description: 'Park an idea on a project\'s roadmap instead of filing a ticket. Use this for "put it on the roadmap" or "remember this for later"; it is not a ticket and nothing is filed. Status defaults to idea; link an existing ticket only when work has already started.',
+    handler: (ctx, i) => svc(ctx).roadmap.create(ctx.actor, i.projectId, { title: i.title, notes: i.notes, status: i.status, ticketId: i.ticketId ?? null }),
+  },
+  {
+    name: 'weave_roadmap_update', scope: 'weaver', input: z.object({
+      itemId: z.string().min(1),
+      title: z.string().min(1).optional(),
+      notes: z.string().optional(),
+      status: z.enum(ROADMAP_STATUSES).optional(),
+      position: z.number().int().optional(),
+      ticketId: z.string().min(1).nullish(),
+    }),
+    description: 'Change a roadmap item: its title, notes, status (idea|planned|dropped), manual position, or linked ticket. Send ticketId when an idea becomes a ticket; send ticketId: null to unlink. Send position to reorder within the project.',
+    handler: (ctx, i) => {
+      const { itemId, ...patch } = i;
+      return svc(ctx).roadmap.update(ctx.actor, itemId, patch);
+    },
+  },
+  {
+    name: 'weave_roadmap_remove', scope: 'weaver', input: z.object({ itemId: z.string().min(1) }),
+    description: 'Remove a roadmap item. Use status dropped instead when the idea should stay visible as considered and set aside.',
+    handler: (ctx, i) => { svc(ctx).roadmap.remove(ctx.actor, i.itemId); return { ok: true }; },
   },
   {
     name: 'weave_run_inspect', scope: 'weaver', input: RunInspectSchema,

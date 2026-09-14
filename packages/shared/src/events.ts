@@ -8,6 +8,7 @@ export const EVENT_TYPES = [
   'wake.queued', 'wake.skipped', 'run.started', 'run.event', 'run.finished',
   'job.started', 'job.finished',
   'routine.created', 'routine.updated', 'routine.removed', 'routine.fired',
+  'roadmap.created', 'roadmap.updated', 'roadmap.removed',
   'thread.message', 'knowledge.updated', 'knowledge.curated', 'spec.indexed', 'usage.recorded', 'knowledge_usage.recorded', 'auth.login', 'auth.logout', 'auth.revoked', 'presentation.updated',
   'weaver_artifact.published',
   /** VS-334: a plugin's own event, `entityType` is `plugin:<pluginId>`; payload is `{ pluginId, kind, payload }`. */

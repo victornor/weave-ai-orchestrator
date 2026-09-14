@@ -23,13 +23,14 @@ import { KIND_LABEL } from '../../routes/Changelog';
 import { cx } from '../../lib/cx';
 import { HistorySection } from './HistorySection';
 import { PullRequestsSection } from './PullRequestsSection';
+import { RoadmapSection } from './RoadmapSection';
 
 export interface V2ProjectSectionProps {
   project: Project;
   ws: string;
 }
 
-export type V2ProjectSectionKey = 'needs' | 'work' | 'history' | 'pulls' | 'landings' | 'activity' | 'knowledge';
+export type V2ProjectSectionKey = 'needs' | 'work' | 'roadmap' | 'history' | 'pulls' | 'landings' | 'activity' | 'knowledge';
 
 export interface V2ProjectSectionDef {
   key: V2ProjectSectionKey;
@@ -328,6 +329,7 @@ function KnowledgeSection({ project, ws }: V2ProjectSectionProps): React.ReactEl
 export const V2_PROJECT_SECTIONS: readonly V2ProjectSectionDef[] = [
   { key: 'needs', label: 'Needs you', column: 'side', Body: NeedsYouSection },
   { key: 'work', label: 'Work under way', column: 'main', Body: WorkSection },
+  { key: 'roadmap', label: 'Roadmap', column: 'main', Body: RoadmapSection },
   { key: 'history', label: 'History', column: 'main', Body: HistorySection },
   { key: 'pulls', label: 'Pull requests', column: 'main', Body: PullRequestsSection },
   { key: 'landings', label: 'Recent landings', column: 'side', Body: LandingsSection },

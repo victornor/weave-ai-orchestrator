@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary } from '@weave-ai/shared';
+import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary } from '@weave-ai/shared';
 import { dayKey } from '@weave-ai/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -257,6 +257,60 @@ export function useRemoveRoutineAt(): UseMutationResult<unknown, Error, { ws: st
   return useMutation({
     mutationFn: ({ ws, id }) => api.ws(ws, `/routines/${id}`, { method: 'DELETE' }),
     onSuccess: (_d, { ws }) => { void qc.invalidateQueries({ queryKey: qk.routines(ws) }); },
+  });
+}
+
+export interface RoadmapPatchBody {
+  title?: string;
+  notes?: string;
+  status?: RoadmapItem['status'];
+  position?: number;
+  ticketId?: string | null;
+}
+
+/** A project's roadmap items, in order. Disabled until a project is known. */
+export function useRoadmap(projectId: string | null | undefined, wsOverride?: string): UseQueryResult<RoadmapItem[]> {
+  const ws = useHookWs(wsOverride);
+  return useQuery({
+    queryKey: qk.roadmap(ws, projectId ?? ''),
+    queryFn: () => api.ws<{ items?: RoadmapItem[] } | RoadmapItem[]>(ws, `/projects/${projectId}/roadmap`).then((r) => listOf<RoadmapItem>(r, 'items')),
+    enabled: Boolean(projectId),
+  });
+}
+
+export function useCreateRoadmapItem(): UseMutationResult<RoadmapItem, Error, { projectId: string; title: string; notes?: string; status?: RoadmapItem['status']; ticketId?: string | null }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => api.ws<RoadmapItem>(ws, `/projects/${body.projectId}/roadmap`, { method: 'POST', body }),
+    onSuccess: (_row, { projectId }) => {
+      void qc.invalidateQueries({ queryKey: qk.roadmapRoot(ws) });
+      void qc.invalidateQueries({ queryKey: qk.roadmap(ws, projectId) });
+    },
+  });
+}
+
+export function usePatchRoadmapItem(): UseMutationResult<RoadmapItem, Error, { projectId: string; itemId: string; patch: RoadmapPatchBody }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, itemId, patch }) => api.ws<RoadmapItem>(ws, `/projects/${projectId}/roadmap/${itemId}`, { method: 'PATCH', body: patch }),
+    onSuccess: (_row, { projectId }) => {
+      void qc.invalidateQueries({ queryKey: qk.roadmapRoot(ws) });
+      void qc.invalidateQueries({ queryKey: qk.roadmap(ws, projectId) });
+    },
+  });
+}
+
+export function useRemoveRoadmapItem(): UseMutationResult<unknown, Error, { projectId: string; itemId: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, itemId }) => api.ws(ws, `/projects/${projectId}/roadmap/${itemId}`, { method: 'DELETE' }),
+    onSuccess: (_d, { projectId }) => {
+      void qc.invalidateQueries({ queryKey: qk.roadmapRoot(ws) });
+      void qc.invalidateQueries({ queryKey: qk.roadmap(ws, projectId) });
+    },
   });
 }
 

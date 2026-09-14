@@ -435,6 +435,26 @@ export interface RoutineListItem extends Routine {
 }
 
 /**
+ * A remembered idea on one project's roadmap (VS-397). Not a ticket: it belongs to a project, sits in
+ * a manual order, and carries a status until captain decides to start it — at which point a ticket is
+ * filed and linked through `ticketId`.
+ */
+export interface RoadmapItem {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  title: string;
+  notes: string;
+  position: number;
+  status: E.RoadmapStatus;
+  ticketId: string | null;
+  createdByKind: E.AuthorKind;
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
  * One entry in a workspace's changelog (PLAN §13.6). Derived from an `activity` row at read time, so
  * `summary` and `link` are rendered rather than stored — see `changelogEntry` in `@weave-ai/render`.
  */

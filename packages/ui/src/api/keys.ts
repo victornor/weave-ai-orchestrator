@@ -128,6 +128,10 @@ export const qk = {
   routineUsage: (ws: string, id: string, window: string) => ['w', ws, 'routines', id, 'usage', window] as const,
   routineFires: (ws: string, id: string) => ['w', ws, 'routines', id, 'fires'] as const,
 
+  /** A project's roadmap (VS-397). Its own root so a `roadmap.*` event reaches it without being nested under `projects`. */
+  roadmapRoot: (ws: string) => ['w', ws, 'roadmap'] as const,
+  roadmap: (ws: string, projectId: string) => ['w', ws, 'roadmap', projectId] as const,
+
   presentation: (ws: string) => ['w', ws, 'presentation'] as const,
   presentationSurfaces: (ws: string) => ['w', ws, 'presentation', 'surfaces'] as const,
   telegramToken: (ws: string) => ['w', ws, 'channels', 'telegram', 'token'] as const,

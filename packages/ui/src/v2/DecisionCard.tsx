@@ -355,7 +355,7 @@ export function V2DecisionCard({
             </div>
             {watchOpen ? (
               <div className="mb-3">
-                <WorkerFeed agentId={askedBy} runId={decision.askedInRunId} ws={ws ?? undefined} compact label={`Live feed for ${ticketIdentifier ?? 'the worker'}`} />
+                <WorkerFeed agentId={askedBy} runId={decision.askedInRunId} ws={ws ?? undefined} compact resizable label={`Live feed for ${ticketIdentifier ?? 'the worker'}`} />
               </div>
             ) : null}
           </>

@@ -7,7 +7,7 @@ import type { Upgrade, UpdateStatus } from '../api/types';
 const state = vi.hoisted(() => ({
   path: '/v2/w/acme/work',
   workspaces: [{ id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 }],
-  projectsByWs: { acme: [{ id: 'p1', slug: 'web', name: 'web' }] } as Record<string, Array<{ id: string; slug: string; name: string }>>,
+  projectsByWs: { acme: [{ id: 'p1', slug: 'weave-services-plugin', name: 'Weave Services plugin' }] } as Record<string, Array<{ id: string; slug: string; name: string }>>,
   workersByWs: {
     acme: [
       { id: 'w1', kind: 'worker', ticketId: 't1', status: 'running', createdAt: '2026-09-13T00:00:00Z' },
@@ -73,7 +73,7 @@ function mountShell(): ReturnType<typeof render> {
 beforeEach(() => {
   state.path = '/v2/w/acme/work';
   state.workspaces = [{ id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 }];
-  state.projectsByWs = { acme: [{ id: 'p1', slug: 'web', name: 'web' }] };
+  state.projectsByWs = { acme: [{ id: 'p1', slug: 'weave-services-plugin', name: 'Weave Services plugin' }] };
   state.workersByWs = {
     acme: [
       { id: 'w1', kind: 'worker', ticketId: 't1', status: 'running', createdAt: '2026-09-13T00:00:00Z' },
@@ -136,26 +136,36 @@ describe('scope preservation', () => {
 });
 
 describe('each workspace group lists its own projects', () => {
-  it('shows only its own projects from either workspace’s screen', () => {
+  it('links a project by its slug, not its display name, so a name ≠ slug still resolves (VS-424)', () => {
     state.workspaces = [
       { id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 },
       { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 0 },
     ];
     state.projectsByWs = {
-      acme: [{ id: 'p1', slug: 'web', name: 'web' }],
-      beta: [{ id: 'p2', slug: 'api', name: 'api' }],
+      acme: [{ id: 'p1', slug: 'agent-conductor', name: 'WeaveAI' }],
+      beta: [{ id: 'p2', slug: 'fernwood', name: 'Fernwood' }],
     };
     state.decisionsByWs = { acme: [], beta: [] };
     for (const path of ['/v2/w/acme/work', '/v2/w/beta/work']) {
       state.path = path;
       mountShell();
       const rail = screen.getByRole('complementary');
-      expect(within(rail).getAllByRole('link', { name: 'web' })).toHaveLength(1);
-      expect(within(rail).getByRole('link', { name: 'web' })).toHaveAttribute('href', '/v2/w/acme/p/web');
-      expect(within(rail).getAllByRole('link', { name: 'api' })).toHaveLength(1);
-      expect(within(rail).getByRole('link', { name: 'api' })).toHaveAttribute('href', '/v2/w/beta/p/api');
+      expect(within(rail).getAllByRole('link', { name: 'WeaveAI' })).toHaveLength(1);
+      expect(within(rail).getByRole('link', { name: 'WeaveAI' })).toHaveAttribute('href', '/v2/w/acme/p/agent-conductor');
+      expect(within(rail).getAllByRole('link', { name: 'Fernwood' })).toHaveLength(1);
+      expect(within(rail).getByRole('link', { name: 'Fernwood' })).toHaveAttribute('href', '/v2/w/beta/p/fernwood');
       cleanup();
     }
+  });
+
+  it('highlights the project row when the route names it by slug (VS-424)', () => {
+    state.projectsByWs = { acme: [{ id: 'p1', slug: 'agent-conductor', name: 'WeaveAI' }] };
+    state.path = '/v2/w/acme/p/agent-conductor';
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).getByRole('link', { name: 'WeaveAI' })).toHaveAttribute('aria-current', 'page');
+    const current = within(rail).getAllByRole('link').filter((a) => a.getAttribute('aria-current') === 'page');
+    expect(current).toHaveLength(1);
   });
 });
 

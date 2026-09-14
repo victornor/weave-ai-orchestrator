@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: V2 sidebar project links use the project's slug, so a project whose name
+  differs from its slug opens its page and its rail row highlights
+skip_specs: true

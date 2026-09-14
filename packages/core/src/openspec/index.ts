@@ -238,7 +238,7 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
           if (!forge?.createPullRequest) {
             throw new OcError('internal', 'no forge available that can open a backfill pull request', { changeName, branch: newBranch });
           }
-          const pr = await forge.createPullRequest(project.clonePath, { branch: newBranch, base: landing, title, body });
+          const pr = await forge.createPullRequest(project.clonePath, { branch: newBranch, base: landing, title, body, draft: true });
           recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archive_pr_opened', 'ticket', ticket.id, { changeName, pendingPrUrl: pr.url }, ticket.id);
           recordArchivePending(ctx, ticket.id, changeName, newBranch, pr);
           return { archivedAs: null, skipped: null, changeName, branch: newBranch, pendingPrUrl: pr.url, pendingPrNumber: pr.number };
@@ -267,7 +267,7 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
           if (!forge?.createPullRequest) {
             throw new OcError('internal', 'no forge available that can open a backfill pull request', { changeName, branch: newBranch });
           }
-          const pr = await forge.createPullRequest(project.clonePath, { branch: newBranch, base: landing, title, body });
+          const pr = await forge.createPullRequest(project.clonePath, { branch: newBranch, base: landing, title, body, draft: true });
           recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archive_pr_opened', 'ticket', ticket.id, { changeName, specsUpdated: result.specsUpdated, warnings: result.warnings, pendingPrUrl: pr.url }, ticket.id);
           recordArchivePending(ctx, ticket.id, changeName, newBranch, pr);
           return { archivedAs: null, skipped: null, changeName, branch: newBranch, pendingPrUrl: pr.url, pendingPrNumber: pr.number };

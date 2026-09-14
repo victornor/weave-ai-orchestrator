@@ -289,13 +289,13 @@ describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () 
     await git(['add', '.'], clone);
     await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
 
-    const createPullRequestCalls: Array<{ branch: string; base: string; title: string }> = [];
+    const createPullRequestCalls: Array<{ branch: string; base: string; title: string; draft?: boolean }> = [];
     harness.ctx.registries.forges.set('github', {
       id: 'github',
       detect: async () => true,
       prState: async () => ({ state: 'open' as const, ciState: 'none' as const }),
       mergePr: async () => ({}),
-      createPullRequest: async (_cwd: string, opts: { branch: string; base: string; title: string }) => {
+      createPullRequest: async (_cwd: string, opts: { branch: string; base: string; title: string; draft?: boolean }) => {
         createPullRequestCalls.push(opts);
         return { url: 'https://example.com/pr/99', number: 99 };
       },
@@ -304,7 +304,7 @@ describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () 
     const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
     // Not `archivedAs` — the spec is not on the landing branch until the backfill PR merges.
     expect(r).toMatchObject({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/99' });
-    expect(createPullRequestCalls).toEqual([expect.objectContaining({ branch: `ac/archive-${CHANGE}`, base: 'main' })]);
+    expect(createPullRequestCalls).toEqual([expect.objectContaining({ branch: `ac/archive-${CHANGE}`, base: 'main', draft: true })]);
     // The landing branch itself never gained a direct commit — only the new branch did.
     const mainLog = await git(['log', '--oneline', 'main'], origin);
     expect(mainLog.stdout.trim().split('\n')).toHaveLength(1);
@@ -364,7 +364,7 @@ describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () 
 
     const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
     expect(r).toMatchObject({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/100' });
-    expect(createPullRequest).toHaveBeenCalledWith(clone, expect.objectContaining({ branch: `ac/archive-${CHANGE}`, base: 'main' }));
+    expect(createPullRequest).toHaveBeenCalledWith(clone, expect.objectContaining({ branch: `ac/archive-${CHANGE}`, base: 'main', draft: true }));
     // The archive was not re-run or re-pushed — the existing branch was reused.
     expect(bin.calls().filter((c) => c.argv[0] === 'archive')).toHaveLength(0);
   });

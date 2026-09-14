@@ -20,7 +20,7 @@ describe('startKnowledgeRepoSwitch (VS-359)', () => {
   let project: Project;
   let ctx: WorkspaceContext;
   let deps: () => CoreServices;
-  let openedPrs: Array<{ branch: string; base: string; title: string; body?: string }>;
+  let openedPrs: Array<{ branch: string; base: string; title: string; body?: string; draft?: boolean }>;
   let openPrs: Array<{ branch: string; url: string; number: number }>;
   let forge: ForgeAdapter;
   let recorded: Array<Record<string, unknown>>;
@@ -118,6 +118,8 @@ describe('startKnowledgeRepoSwitch (VS-359)', () => {
     expect(result).toEqual({ kind: 'pr' });
     expect(openedPrs).toHaveLength(1);
     expect(openedPrs[0]).toMatchObject({ branch: BRANCH_ON, base: 'main' });
+    // VS-393: a person merges the switch PR on GitHub, so it stays non-draft.
+    expect(openedPrs[0]?.draft).toBeFalsy();
     expect(await show(`refs/heads/${BRANCH_ON}`, '.weave/knowledge/PROJECT.md')).toBe('# API\n\n## Overview\n- hub');
     expect(await show(`refs/heads/${BRANCH_ON}`, '.weave/knowledge/docs/run-engine.md')).toBe('# Run engine');
     expect(await show(`refs/heads/${BRANCH_ON}`, '.weave/knowledge/docs/guides/deploy.md')).toBe('# Deploy');

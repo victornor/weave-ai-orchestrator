@@ -20,7 +20,7 @@ describe('requestKnowledgeRepoPr (VS-358)', () => {
   let project: Project;
   let ctx: WorkspaceContext;
   let deps: () => CoreServices;
-  let openedPrs: Array<{ branch: string; base: string; title: string; body?: string }>;
+  let openedPrs: Array<{ branch: string; base: string; title: string; body?: string; draft?: boolean }>;
   let forge: ForgeAdapter;
 
   const commit = async (repo: string, file: string, body: string, message: string): Promise<void> => {
@@ -71,6 +71,8 @@ describe('requestKnowledgeRepoPr (VS-358)', () => {
 
     expect(openedPrs).toHaveLength(1);
     expect(openedPrs[0]).toMatchObject({ branch: BRANCH, base: 'main' });
+    // VS-393: a person merges the delivery PR on GitHub, so it stays non-draft.
+    expect(openedPrs[0]?.draft).toBeFalsy();
     const commits = await log(origin, `refs/heads/${BRANCH}`);
     expect(commits).toHaveLength(1);
     const content = (await git(['show', `refs/heads/${BRANCH}:.weave/knowledge/PROJECT.md`], origin)).stdout;

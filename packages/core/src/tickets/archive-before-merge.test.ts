@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 import { git } from '../util/git.js';
-import { archiveOnBranch, attemptArchiveThenMerge, isFreshAgainstLanding, rebaseOntoLanding } from './archive-before-merge.js';
+import { archiveOnBranch, attemptArchiveThenMerge, isFreshAgainstLanding, rebaseOntoLanding, resetNoCiStateForTests } from './archive-before-merge.js';
 import { SCRATCH_STALE_MS, activeScratchWorktrees, scratchBranchFrom, scratchLandWorktree, scratchRoot, sweepScratchWorktrees, type ScratchTarget } from './scratch.js';
 
 const BRANCH = 'ac/tst-1-dark-mode';
@@ -41,6 +41,7 @@ describe('archive-before-merge mechanics', () => {
   };
 
   beforeEach(async () => {
+    resetNoCiStateForTests();
     dir = mkdtempSync(join(tmpdir(), 'ac-abm-'));
     origin = join(dir, 'origin');
     clone = join(dir, 'clone');
@@ -400,6 +401,113 @@ describe('archive-before-merge mechanics', () => {
       });
       expect(outcome).toEqual({ kind: 'checks_failed' });
       expect(forge.mergePr).not.toHaveBeenCalled();
+    });
+
+    it('brings a draft out of draft before reading checks and never merges a fresh absence (VS-393)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const order: string[] = [];
+      const forge = fakeForge({
+        markPullRequestReady: vi.fn(async () => { order.push('ready'); return { changed: true }; }),
+        prState: vi.fn(async () => { order.push('checks'); return { state: 'open' as const, ciState: 'none' as const }; }),
+      });
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash', requiresCi: true,
+      });
+      expect(outcome).toEqual({ kind: 'checks_pending' });
+      expect(order).toEqual(['ready', 'checks']);
+      expect(forge.mergePr).not.toHaveBeenCalled();
+      await expectNoScratch();
+    });
+
+    it('a rebase push to an already-ready pull request waits on its fresh checks (VS-393)', async () => {
+      await pushBranchFromClone(BRANCH);
+      await commit(origin, 'later.ts', 'export const later = 1;\n', 'chore: landed first');
+      const forge = fakeForge({
+        markPullRequestReady: vi.fn(async () => ({ changed: false })),
+        prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const })),
+      });
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash', requiresCi: true,
+      });
+      expect(outcome).toEqual({ kind: 'checks_pending' });
+      expect(forge.mergePr).not.toHaveBeenCalled();
+    });
+
+    it('a pre-existing non-draft pull request is unaffected: no push, no draft transition, absent checks merge (VS-393)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const forge = fakeForge({ markPullRequestReady: vi.fn(async () => ({ changed: false })) });
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash', requiresCi: true,
+      });
+      expect(outcome).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+      expect(forge.markPullRequestReady).toHaveBeenCalledWith(clone, 'https://example.com/pr/1');
+    });
+
+    it('a no-CI project merges a fresh absence when requireCi is false (VS-393)', async () => {
+      await pushBranchFromClone(BRANCH);
+      await commit(origin, 'later.ts', 'export const later = 1;\n', 'chore: landed first');
+      const forge = fakeForge({ markPullRequestReady: vi.fn(async () => ({ changed: true })) });
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash', requiresCi: false,
+      });
+      expect(outcome).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+    });
+
+    it('merges on an absent rollup when the repository has no CI workflows (VS-393)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const forge = fakeForge({
+        hasCiWorkflows: vi.fn(async () => false),
+        markPullRequestReady: vi.fn(async () => ({ changed: true })),
+      });
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/no-ci', method: 'squash', requiresCi: true,
+      });
+      expect(outcome).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+      expect(forge.hasCiWorkflows).toHaveBeenCalledWith(clone);
+    });
+
+    it('waits on an absent rollup when the repository does have CI workflows (VS-393)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const forge = fakeForge({
+        hasCiWorkflows: vi.fn(async () => true),
+        markPullRequestReady: vi.fn(async () => ({ changed: true })),
+      });
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/has-ci', method: 'squash', requiresCi: true,
+      });
+      expect(outcome).toEqual({ kind: 'checks_pending' });
+      expect(forge.mergePr).not.toHaveBeenCalled();
+    });
+
+    it('stops waiting past the grace, merges and reports once, when the forge cannot tell (VS-393)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const onNoCiTimeout = vi.fn();
+      const forge = fakeForge({ markPullRequestReady: vi.fn(async () => ({ changed: true })) }); // no hasCiWorkflows
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/grace', method: 'squash', requiresCi: true, noCiGraceMs: 0, onNoCiTimeout,
+      });
+      expect(outcome).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+      expect(onNoCiTimeout).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps waiting within the grace across landing retries (VS-393)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const onNoCiTimeout = vi.fn();
+      const opts = {
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null,
+        prUrl: 'https://example.com/pr/retry', method: 'squash', requiresCi: true, noCiGraceMs: 60_000, onNoCiTimeout,
+      } as const;
+
+      expect(await attemptArchiveThenMerge({ ...opts, forge: fakeForge({ markPullRequestReady: vi.fn(async () => ({ changed: true })) }) })).toEqual({ kind: 'checks_pending' });
+      expect(await attemptArchiveThenMerge({ ...opts, forge: fakeForge({ markPullRequestReady: vi.fn(async () => ({ changed: false })) }) })).toEqual({ kind: 'checks_pending' });
+      expect(onNoCiTimeout).not.toHaveBeenCalled();
     });
 
     it('lands while the worker worktree holds the branch, leaving it untouched (VS-363)', async () => {

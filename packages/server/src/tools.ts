@@ -411,6 +411,16 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'weave_ticket_open_pull_request', scope: 'worker', input: z.object({
+      id: ticketId, title: z.string().min(1).describe('the pull request title'), body: z.string().optional().describe('the pull request body (markdown)'),
+    }),
+    description:
+      'Open this ticket\'s pull request as a draft through the project\'s forge, against the ticket\'s landing branch, and record the pull-request work product. '
+      + 'Push your branch first. Idempotent per branch: an open pull request on it is returned unchanged and never flipped out of or into draft. '
+      + 'For a project on local-branch delivery, or with no forge, it fails and you deliver per your delivery mode instead.',
+    handler: (ctx, i) => svc(ctx).tickets.openPullRequest(ctx.actor, writeTicket(ctx, i.id).id, { title: i.title, body: i.body }),
+  },
+  {
     name: 'weave_ask', scope: 'all', input: AskSchema,
     description:
       'Ask for a decision. A worker\'s ask is always owned by the weaver — whichever of question, concern or gate_finding you name, it wakes the weaver immediately, never the human. '

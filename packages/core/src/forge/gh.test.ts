@@ -10,7 +10,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GhForge, checkTally, parsePullRequestUrl, pullRequestDetailFromGh, pullRequestFromGh, repoVisibilityFromGh } from './gh.js';
+import { GhForge, checkTally, parsePullRequestUrl, pullRequestDetailFromGh, pullRequestFromGh, repoVisibilityFromGh, workflowCountFromGh } from './gh.js';
 
 let home: string;
 
@@ -207,6 +207,15 @@ describe('createPullRequest', () => {
     expect(argsList()).not.toContain('--json');
   });
 
+  it('adds --draft only when a draft is asked for (VS-393)', async () => {
+    fakeGh('https://github.com/acme/api/pull/283\n');
+    await new GhForge().createPullRequest(home, { branch: 'b', base: 'main', title: 't', draft: true });
+    expect(argsList()).toContain('--draft');
+    fakeGh('https://github.com/acme/api/pull/284\n');
+    await new GhForge().createPullRequest(home, { branch: 'b', base: 'main', title: 't' });
+    expect(argsList()).not.toContain('--draft');
+  });
+
   it('throws when gh fails', async () => {
     fakeGh('', 1, 'a pull request for branch already exists');
     await expect(new GhForge().createPullRequest(home, { branch: 'b', base: 'main', title: 't' })).rejects.toThrow(/gh pr create failed/);
@@ -215,6 +224,48 @@ describe('createPullRequest', () => {
   it('throws when gh prints no usable pull request URL', async () => {
     fakeGh('something unexpected\n');
     await expect(new GhForge().createPullRequest(home, { branch: 'b', base: 'main', title: 't' })).rejects.toThrow(/did not print a pull request URL/);
+  });
+});
+
+describe('markPullRequestReady', () => {
+  it('runs gh pr ready and reports the draft was brought out of draft', async () => {
+    fakeGh('✓ Pull request acme/api#283 is marked as "ready for review"\n');
+    await expect(new GhForge().markPullRequestReady(home, 'https://github.com/acme/api/pull/283')).resolves.toEqual({ changed: true });
+    expect(argsList()).toEqual(['pr', 'ready', 'https://github.com/acme/api/pull/283']);
+  });
+
+  it('treats an already-ready pull request as a no-op, not an error', async () => {
+    fakeGh('', 1, '! Pull request acme/api#283 is already ready for review\n');
+    await expect(new GhForge().markPullRequestReady(home, 'https://github.com/acme/api/pull/283')).resolves.toEqual({ changed: false });
+  });
+
+  it('throws when gh fails for a real reason', async () => {
+    fakeGh('', 1, 'HTTP 500: Internal Server Error\n');
+    await expect(new GhForge().markPullRequestReady(home, 'https://github.com/acme/api/pull/283')).rejects.toThrow(/gh pr ready failed/);
+  });
+});
+
+describe('hasCiWorkflows (VS-393)', () => {
+  it('reports false for a repository with no workflows and true for one with any', async () => {
+    fakeGh('0');
+    await expect(new GhForge().hasCiWorkflows(home)).resolves.toBe(false);
+    expect(argsList()).toEqual(['api', 'repos/{owner}/{repo}/actions/workflows', '--jq', '.total_count']);
+    fakeGh('3');
+    await expect(new GhForge().hasCiWorkflows(home)).resolves.toBe(true);
+  });
+
+  it('answers null when gh fails or the count is not a number', async () => {
+    fakeGh('', 1, 'HTTP 404');
+    await expect(new GhForge().hasCiWorkflows(home)).resolves.toBeNull();
+    fakeGh('not-a-number');
+    await expect(new GhForge().hasCiWorkflows(home)).resolves.toBeNull();
+  });
+
+  it('maps a count without gh', () => {
+    expect(workflowCountFromGh('0\n')).toBe(false);
+    expect(workflowCountFromGh('12')).toBe(true);
+    expect(workflowCountFromGh('')).toBeNull();
+    expect(workflowCountFromGh('  ')).toBeNull();
   });
 });
 

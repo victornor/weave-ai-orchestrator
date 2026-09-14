@@ -213,6 +213,20 @@ describe('the rail counts', () => {
     expect(needs.find((a) => a.getAttribute('href') === '/v2/needs')).toHaveTextContent('2');
     expect(needs.find((a) => a.getAttribute('href') === '/v2/w/acme/needs')).toHaveTextContent('2');
   });
+
+  it('counts only workers that read as working, not those between turns (VS-415)', () => {
+    state.workersByWs = {
+      acme: [
+        { id: 'w1', kind: 'worker', ticketId: 't1', status: 'running', createdAt: '2026-09-13T00:00:00Z' },
+        { id: 'w2', kind: 'worker', ticketId: 't2', status: 'active', createdAt: '2026-09-13T00:00:00Z' },
+        { id: 'w3', kind: 'worker', ticketId: 't3', status: 'provisioning', createdAt: '2026-09-13T00:00:00Z' },
+        { id: 'w4', kind: 'worker', ticketId: 't4', status: 'done', createdAt: '2026-09-13T00:00:00Z' },
+      ],
+    };
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).getByRole('link', { name: /Live/ })).toHaveTextContent('1');
+  });
 });
 
 describe('the rail carries the kept V1 screens', () => {
@@ -360,6 +374,25 @@ describe('the V2 page header', () => {
     expect(screen.getByText('Acme')).toBeInTheDocument();
     expect(screen.getByText('1 running')).toBeInTheDocument();
     expect(screen.getByText('2 need you')).toBeInTheDocument();
+  });
+
+  it('shows the workspace’s own working count, not the daemon-wide one (VS-415)', () => {
+    state.workspaces = [
+      { id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 0 },
+      { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 0 },
+    ];
+    state.workersByWs = {
+      acme: [{ id: 'w1', kind: 'worker', ticketId: 't1', status: 'running', createdAt: '2026-09-13T00:00:00Z' }],
+      beta: [
+        { id: 'w2', kind: 'worker', ticketId: 't2', status: 'running', createdAt: '2026-09-13T00:00:00Z' },
+        { id: 'w3', kind: 'worker', ticketId: 't3', status: 'active', createdAt: '2026-09-13T00:00:00Z' },
+      ],
+    };
+    state.path = '/v2/w/beta/work';
+    render(<V2Page title="Work" />);
+    // Acme and Beta each have a working worker: the pill on Beta's page must read Beta's one, not
+    // the daemon-wide two.
+    expect(screen.getByText('1 running')).toBeInTheDocument();
   });
 
   it('renders a screen-supplied action in the header without changing the label or counts', () => {

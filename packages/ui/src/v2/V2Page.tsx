@@ -6,6 +6,7 @@ import { useMemo, type ReactNode } from 'react';
 import { useRouterState } from '@tanstack/react-router';
 import { useDecisionsMany, useIncidents, useWorkersMany, useWorkspaces } from '../api/hooks';
 import { liveWorkingAgents } from '../lib/board';
+import { agentIsWorking, useRunningWorkerIds } from '../lib/liveOrder';
 import { workspaceFromV2Path, type V2Scope } from './nav';
 
 export function useV2Scope(): V2Scope {
@@ -28,8 +29,11 @@ export interface V2Counts {
   needsByWs: Record<string, number>;
   /** The daemon-wide Needs-you total. */
   needsGlobal: number;
-  /** Workers provisioning, active or running across every workspace. */
+  /** Workers whose card reads working across every workspace — an in-flight run, or one inside the
+   *  handover grace the Live floor applies (VS-415). */
   live: number;
+  /** Each workspace's own working count, keyed by workspace id. */
+  liveByWs: Record<string, number>;
   incidents: number;
 }
 
@@ -61,10 +65,28 @@ export function useV2Counts(scope: V2Scope): V2Counts {
   });
 
   const needs = scope.kind === 'workspace' ? (needsByWs[scope.ws] ?? 0) : needsGlobal;
-  const live = workerQueries.reduce((n, q) => n + liveWorkingAgents(q.data ?? []).length, 0);
+
+  // VS-415: the same working set the Live floor renders — an in-flight run, plus the handover grace.
+  // One hook call over the union of every workspace's working workers; the grace is per worker id, so
+  // the per-workspace breakdown comes from the same set.
+  const workerLists = useMemo(() => workerQueries.map((q) => q.data ?? []), [workerQueries]);
+  const activeIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const list of workerLists) for (const a of liveWorkingAgents(list)) if (agentIsWorking(a.status)) ids.add(a.id);
+    return ids;
+  }, [workerLists]);
+  const workingIds = useRunningWorkerIds(activeIds);
+  const liveByWs: Record<string, number> = {};
+  let live = 0;
+  listed.forEach((w, i) => {
+    const n = workerLists[i]?.filter((a) => workingIds.has(a.id)).length ?? 0;
+    liveByWs[w.id] = n;
+    live += n;
+  });
+
   const openIncidents = (incidents.data?.items ?? []).filter((i) => i.resolvedAt === null).length;
 
-  return { needs, needsByWs, needsGlobal, live, incidents: openIncidents };
+  return { needs, needsByWs, needsGlobal, live, liveByWs, incidents: openIncidents };
 }
 
 function Pill({ tone, label }: { tone: 'working' | 'needs-you' | 'blocked'; label: string }): React.ReactElement {
@@ -100,6 +122,8 @@ export function V2Page({ title, subtitle, actions, subnav, scroll = true, childr
   const scope = useV2Scope();
   const root = useV2WorkspaceName(scope);
   const counts = useV2Counts(scope);
+  // A workspace page shows its own working count; a global page the daemon-wide one (VS-415).
+  const live = scope.kind === 'workspace' ? (counts.liveByWs[scope.ws] ?? 0) : counts.live;
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -112,7 +136,7 @@ export function V2Page({ title, subtitle, actions, subnav, scroll = true, childr
         {subtitle ? <span className="truncate text-meta text-text-3">{subtitle}</span> : null}
         <div className="ml-auto flex flex-none items-center gap-2">
           {actions}
-          {counts.live > 0 ? <Pill tone="working" label={`${counts.live} running`} /> : null}
+          {live > 0 ? <Pill tone="working" label={`${live} running`} /> : null}
           {counts.needs > 0 ? <Pill tone="needs-you" label={`${counts.needs} need you`} /> : null}
         </div>
       </header>

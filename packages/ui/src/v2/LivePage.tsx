@@ -9,12 +9,12 @@
  * press or double-click reset sets one shared tile height, remembered beside the per-row count.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { agentUiStatus, projectLabel, type Agent, type Ticket } from '@weave-ai/shared';
+import { projectLabel, type Agent, type Ticket, type UiStatus } from '@weave-ai/shared';
 import { resolveModel } from '@weave-ai/render';
 import { useModelsMany, useRuntimeModels, useTicketsMany, useWorkersMany, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
 import { useSearchParams } from '../app/link';
 import { liveWorkingAgents } from '../lib/board';
-import { orderByRunning, useRunningWorkerIds } from '../lib/liveOrder';
+import { agentIsWorking, cellUiStatus, orderByRunning, useRunningWorkerIds } from '../lib/liveOrder';
 import { modelOptionLabel } from '../lib/runtime';
 import { projectColorVar } from '../lib/projectColor';
 import { STATUS_LABEL, STATUS_TEXT } from '../lib/status';
@@ -84,6 +84,8 @@ interface LiveCellInput {
 
 interface LiveCardProps {
   cell: LiveCellInput;
+  /** The status the card shows: `working` while it holds the working group, else its own. */
+  ui: UiStatus;
   ticket: Ticket | undefined;
   projectLabel: string | null;
   projectColor: string | null;
@@ -92,18 +94,18 @@ interface LiveCardProps {
   focused: boolean;
 }
 
-function LiveCard({ cell, ticket, projectLabel: project, projectColor, optionName, bodyHeight, focused }: LiveCardProps): React.ReactElement {
+function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optionName, bodyHeight, focused }: LiveCardProps): React.ReactElement {
   const { run } = useWorkerRun(cell.id, cell.ws);
   const runtimeModels = useRuntimeModels(run?.runtimeId ?? null);
   const resolved = resolveModel(runtimeModels.data ?? null, run?.model ?? null);
   const modelLabel = resolved ? modelOptionLabel(resolved) : (run?.model ?? null);
-  const ui = agentUiStatus(cell.status);
   return (
     <div
       ref={(el) => {
         if (focused) el?.scrollIntoView?.({ block: 'nearest' });
       }}
       data-v2-live-card={cell.id}
+      data-v2-live-status={ui}
       data-focused={focused ? 'true' : undefined}
       className={cx('flex flex-col overflow-hidden rounded-r4 border bg-bg-1', focused ? 'border-accent-edge' : 'border-line-1')}
     >
@@ -192,8 +194,11 @@ export function LiveBody(): React.ReactElement {
     return out;
   }, [ids, workersQueries]);
 
-  const runningIds = useRunningWorkerIds(useMemo(() => new Set(cells.filter((c) => c.status === 'running').map((c) => c.id)), [cells]));
-  const ordered = useMemo(() => orderByRunning(cells, (c) => ({ id: c.id, createdAt: c.createdAt }), runningIds), [cells, runningIds]);
+  // VS-415: the working group, the card's label and the floor figure all read this one set. A worker
+  // that just stopped running is held in it for the grace window, so the card keeps reading working
+  // and the order never splits the group across a between-turns card.
+  const workingIds = useRunningWorkerIds(useMemo(() => new Set(cells.filter((c) => agentIsWorking(c.status)).map((c) => c.id)), [cells]));
+  const ordered = useMemo(() => orderByRunning(cells, (c) => ({ id: c.id, createdAt: c.createdAt }), workingIds), [cells, workingIds]);
 
   const ticketsById = useMemo(() => {
     const m = new Map<string, Ticket>();
@@ -265,7 +270,7 @@ export function LiveBody(): React.ReactElement {
           <Chip key={w.id} label={w.name} active={scope === w.id} onClick={() => setScope(w.id)} />
         ))}
         <span className="ml-auto ac-mono text-micro text-text-3" aria-live="polite">
-          {ordered.length} running · showing {filtered.length}
+          {filtered.filter((c) => workingIds.has(c.id)).length} running · showing {filtered.length}
         </span>
         {!phone ? (
           <span className="flex flex-none items-center gap-1 rounded-r4 border border-line-1 bg-bg-2 p-0.5" data-v2-live-cols>
@@ -315,6 +320,7 @@ export function LiveBody(): React.ReactElement {
                 <LiveCard
                   key={cell.id}
                   cell={cell}
+                  ui={cellUiStatus(cell.status, workingIds.has(cell.id))}
                   ticket={ticket}
                   projectLabel={project ? projectLabel(project) : null}
                   projectColor={project ? projectColorVar(project.id, projects.map((p) => p.id)) : null}

@@ -1,8 +1,9 @@
 /** VS-350: the V2 Live floor — grid, scope chips, one-source counts and the per-row control. */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Project, Run, Ticket } from '@weave-ai/shared';
 import { agent, project, run as makeRun, ticket as makeTicket } from './factories';
+import { LIVE_RUN_GRACE_MS } from '../lib/liveOrder';
 import { LIVE_HEIGHT_MIN } from '../v2/prefs';
 
 const state = vi.hoisted(() => ({
@@ -90,7 +91,7 @@ describe('V2 Live', () => {
     expect(document.querySelector('[data-v2-live-card="a1"]')).toBeTruthy();
     expect(document.querySelector('[data-v2-live-card="a2"]')).toBeTruthy();
     expect(document.querySelector('[data-v2-live-card="a3"]')).toBeTruthy();
-    expect(screen.getByText('3 running · showing 3')).toBeInTheDocument();
+    expect(screen.getByText('2 running · showing 3')).toBeInTheDocument();
   });
 
   it('filters by scope and keeps the shown count tied to the grid', () => {
@@ -98,7 +99,7 @@ describe('V2 Live', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
     expect(document.querySelector('[data-v2-live-card="a1"]')).toBeTruthy();
     expect(document.querySelector('[data-v2-live-card="a3"]')).toBeNull();
-    expect(screen.getByText('3 running · showing 2')).toBeInTheDocument();
+    expect(screen.getByText('1 running · showing 2')).toBeInTheDocument();
   });
 
   it('changes the columns and the feed height with the per-row control, and remembers it', () => {
@@ -137,7 +138,7 @@ describe('V2 Live', () => {
     render(<LiveBody />);
     await waitFor(() => expect(document.querySelector('[data-v2-live-card="a3"]')?.getAttribute('data-focused')).toBe('true'));
     expect(document.querySelector('[data-v2-live-card="a1"]')).toBeNull();
-    expect(screen.getByText('3 running · showing 1')).toBeInTheDocument();
+    expect(screen.getByText('1 running · showing 1')).toBeInTheDocument();
   });
 
   it('lets the scope chips change after arriving focused', async () => {
@@ -145,8 +146,88 @@ describe('V2 Live', () => {
     render(<LiveBody />);
     await waitFor(() => expect(document.querySelector('[data-v2-live-card="a3"]')?.getAttribute('data-focused')).toBe('true'));
     fireEvent.click(screen.getByRole('button', { name: 'Everywhere' }));
-    expect(screen.getByText('3 running · showing 3')).toBeInTheDocument();
+    expect(screen.getByText('2 running · showing 3')).toBeInTheDocument();
     expect(document.querySelector('[data-v2-live-card="a1"]')).toBeTruthy();
+  });
+});
+
+describe('V2 Live working-first order (VS-415)', () => {
+  const cardIds = (): string[] =>
+    [...document.querySelectorAll<HTMLElement>('[data-v2-live-card]')].map((el) => el.getAttribute('data-v2-live-card') ?? '');
+  const statusOf = (id: string): string =>
+    document.querySelector(`[data-v2-live-card="${id}"]`)?.getAttribute('data-v2-live-status') ?? '';
+  /** Every card that reads working comes before every card that does not. */
+  const workingIsAPrefix = (): boolean => {
+    let seenIdle = false;
+    return cardIds().every((id) => {
+      if (statusOf(id) === 'working') return !seenIdle;
+      seenIdle = true;
+      return true;
+    });
+  };
+
+  it('puts every working card above every idle card across two workspaces', () => {
+    state.workers = {
+      ws1: [
+        agent({ id: 'r1', ticketId: 'tk1', status: 'running', createdAt: '2026-09-01T09:00:00.000Z' }),
+        agent({ id: 'i1', ticketId: 'tk2', status: 'active', createdAt: '2026-09-01T10:00:00.000Z' }),
+      ],
+      ws2: [
+        agent({ id: 'r2', ticketId: 'tk3', status: 'running', createdAt: '2026-09-01T11:00:00.000Z' }),
+        agent({ id: 'i2', ticketId: 'tk4', status: 'active', createdAt: '2026-09-01T08:00:00.000Z' }),
+      ],
+    };
+    state.tickets = {
+      ws1: [makeTicket({ id: 'tk1' }), makeTicket({ id: 'tk2' })],
+      ws2: [makeTicket({ id: 'tk3' }), makeTicket({ id: 'tk4' })],
+    };
+    render(<LiveBody />);
+    expect(workingIsAPrefix()).toBe(true);
+    expect(cardIds().slice(0, 2).sort()).toEqual(['r1', 'r2']);
+    expect(statusOf('i1')).toBe('idle');
+  });
+
+  it('keeps a handing-over card in the working group, then drops it when the grace elapses', () => {
+    vi.useFakeTimers();
+    try {
+      const running = (): void => {
+        state.workers = {
+          ws1: [
+            agent({ id: 'r1', ticketId: 'tk1', status: 'running', createdAt: '2026-09-01T09:00:00.000Z' }),
+            agent({ id: 'h1', ticketId: 'tk2', status: 'running', createdAt: '2026-09-01T10:00:00.000Z' }),
+          ],
+          ws2: [agent({ id: 'r2', ticketId: 'tk3', status: 'running', createdAt: '2026-09-01T11:00:00.000Z' })],
+        };
+      };
+      running();
+      state.tickets = {
+        ws1: [makeTicket({ id: 'tk1' }), makeTicket({ id: 'tk2' })],
+        ws2: [makeTicket({ id: 'tk3' })],
+      };
+      const { rerender } = render(<LiveBody />);
+      expect(statusOf('h1')).toBe('working');
+
+      // h1's turn ends; its createdAt sits between the two running cards, so a card that read idle
+      // but stayed in the running group would land between them.
+      state.workers = {
+        ws1: [
+          agent({ id: 'r1', ticketId: 'tk1', status: 'running', createdAt: '2026-09-01T09:00:00.000Z' }),
+          agent({ id: 'h1', ticketId: 'tk2', status: 'active', createdAt: '2026-09-01T10:00:00.000Z' }),
+        ],
+        ws2: [agent({ id: 'r2', ticketId: 'tk3', status: 'running', createdAt: '2026-09-01T11:00:00.000Z' })],
+      };
+      rerender(<LiveBody />);
+      // The card still reads working, so the group has not split.
+      expect(statusOf('h1')).toBe('working');
+      expect(workingIsAPrefix()).toBe(true);
+
+      act(() => vi.advanceTimersByTime(LIVE_RUN_GRACE_MS));
+      expect(statusOf('h1')).toBe('idle');
+      expect(workingIsAPrefix()).toBe(true);
+      expect(cardIds()[cardIds().length - 1]).toBe('h1');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

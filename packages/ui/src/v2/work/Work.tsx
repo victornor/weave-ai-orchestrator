@@ -44,6 +44,7 @@ import {
   v2ShownFinished,
   type V2BoardColumn,
 } from './board';
+import { useFlipList } from './flip';
 
 type WorkView = 'kanban' | 'table';
 
@@ -89,6 +90,7 @@ export function V2WorkScreen(): React.ReactElement {
   const [q, setQ] = useState<string>(search['q'] ?? '');
   const [debouncedQ, setDebouncedQ] = useState<string>(search['q'] ?? '');
   const searchInput = useRef<HTMLInputElement>(null);
+  const kanbanRef = useRef<HTMLDivElement>(null);
 
   const tickets = useTickets({ limit: 300 });
   const finishedTickets = useTickets({ status: 'done,cancelled', limit: 100, sort: 'finished' }, { enabled: finished !== 'hide' });
@@ -179,6 +181,30 @@ export function V2WorkScreen(): React.ReactElement {
     () => foldV2Board(filtered, { live, needsYou }),
     [filtered, live, needsYou],
   );
+
+  // FLIP animation for the kanban (VS-426). The board signature changes exactly when a card moves,
+  // enters or leaves; the suppression key covers the filters and the queries still resolving, so a
+  // filter/project/finished/search/view change and the first paint record without animating, while a
+  // live status move (nothing in the key changed) glides.
+  const boardSignature = useMemo(
+    () => columns.map((c) => `${c.key}:${c.items.map((t) => t.id).join(',')}`).join('|'),
+    [columns],
+  );
+  const suppressKey = [
+    project ?? '',
+    role ?? '',
+    kind ?? '',
+    priority ?? '',
+    finished,
+    needsYouOnly ? '1' : '0',
+    view,
+    activeQuery,
+    searching ? '1' : '0',
+    tickets.isLoading ? '1' : '0',
+    finishedTickets.isLoading ? '1' : '0',
+    searchTickets.isLoading ? '1' : '0',
+  ].join('|');
+  useFlipList(kanbanRef, { boardSignature, suppressKey });
 
   const strip = useMemo(() => mergeStrip(tickets.data ?? []), [tickets.data]);
   const boardQuery = searching ? searchTickets : tickets;
@@ -363,7 +389,7 @@ export function V2WorkScreen(): React.ReactElement {
 
             <div className="hidden min-h-0 flex-1 md:block">
               {view === 'kanban' ? (
-                <div className="flex h-full min-h-0 gap-px overflow-x-auto bg-bg-0" data-v2-work-kanban>
+                <div ref={kanbanRef} className="flex h-full min-h-0 gap-px overflow-x-auto bg-bg-0" data-v2-work-kanban>
                   {columns.map((c) => (
                     <KanbanColumn
                       key={c.key}

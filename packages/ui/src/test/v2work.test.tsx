@@ -1,5 +1,5 @@
-/** V2 Work: the column fold, the kanban/table toggle, the merge strip, the phone list and live status. */
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+/** V2 Work: the column fold, the kanban/table toggle, the merge strip, the phone list, live status and search. */
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Decision, Run, Ticket, WorkerActivitySummary, WorkerModelOption } from '@weave-ai/shared';
@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   decisions: [] as Decision[],
   workerOptions: undefined as WorkerModelOption[] | undefined,
   stream: null as import('../api/events').EventStream | null,
+  search: {} as Record<string, string | undefined>,
   go: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   createTicket: vi.fn() as unknown as ReturnType<typeof vi.fn>,
 }));
@@ -63,12 +64,26 @@ vi.mock('../api/context', async () => {
 });
 vi.mock('../app/link', () => ({
   useGo: () => state.go,
-  useSearchParams: () => ({}),
+  useSearchParams: () => state.search,
 }));
 vi.mock('../api/hooks', () => ({
   useTickets: (params: Record<string, unknown> = {}, opts: { enabled?: boolean } = {}) => {
-    const terminal = params['status'] === 'done,cancelled';
     const enabled = opts.enabled ?? true;
+    const terminal = params['status'] === 'done,cancelled';
+    const raw = String(params['search'] ?? '').trim().toLowerCase();
+    const empty = { data: undefined, isLoading: false, isError: false, refetch: vi.fn() };
+    if (raw) {
+      if (!enabled) return empty;
+      const includeTerminal = params['includeTerminal'] === true;
+      const matches = [...state.active, ...state.finished].filter(
+        (t) =>
+          (includeTerminal || (t.status !== 'done' && t.status !== 'cancelled')) &&
+          (t.title.toLowerCase().includes(raw) ||
+            (t.description ?? '').toLowerCase().includes(raw) ||
+            t.identifier.toLowerCase().includes(raw)),
+      );
+      return { data: matches, isLoading: false, isError: false, refetch: vi.fn() };
+    }
     return { data: terminal ? (enabled ? state.finished : undefined) : state.active, isLoading: false, isError: false, refetch: vi.fn() };
   },
   useProjects: () => ({ data: [project({ id: 'p1', slug: 'web', name: 'web' })] }),
@@ -108,6 +123,7 @@ beforeEach(() => {
   state.stream = null;
   FakeEventSource.open = [];
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
+  state.search = {};
   state.active = [
     ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Backlogged', status: 'todo' }),
     ticket({ id: 'tk_2', identifier: 'ACME-2', title: 'Needs a decision', status: 'blocked' }),
@@ -321,3 +337,94 @@ function run(over: Partial<Run> = {}): Run {
     summary: null, createdAt: '2026-09-13T10:00:00.000Z', ...over,
   };
 }
+
+const searchBox = (): HTMLInputElement => screen.getByLabelText('Search tickets') as HTMLInputElement;
+const cardText = (identifier: string): string =>
+  (document.querySelector(`[data-v2-card="${identifier}"]`) as HTMLElement | null)?.textContent ?? '';
+
+describe('V2 Work search', () => {
+  it('filters by title through the daemon search and writes ?q=', async () => {
+    state.active = [
+      ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Deploy the pipeline', status: 'todo' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-2', title: 'Unrelated work', status: 'todo' }),
+    ];
+    render(<V2WorkScreen />);
+    fireEvent.change(searchBox(), { target: { value: 'deploy' } });
+    await waitFor(() => expect(document.querySelector('[data-v2-card="ACME-2"]')).toBeNull());
+    expect(cardText('ACME-1')).toContain('Deploy the pipeline');
+    expect(screen.getByText('1 ticket matches')).toBeInTheDocument();
+    expect(state.go).toHaveBeenCalledWith(
+      '/v2/w/$ws/work',
+      expect.objectContaining({ params: { ws: 'ws1' }, replace: true, search: expect.objectContaining({ q: 'deploy' }) }),
+    );
+  });
+
+  it('matches a description the client never loaded', async () => {
+    state.active = [
+      ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Alpha', description: 'contains ZEBRA', status: 'todo' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-2', title: 'Beta', description: 'nothing here', status: 'todo' }),
+    ];
+    render(<V2WorkScreen />);
+    fireEvent.change(searchBox(), { target: { value: 'zebra' } });
+    await waitFor(() => expect(document.querySelector('[data-v2-card="ACME-2"]')).toBeNull());
+    expect(cardText('ACME-1')).toContain('Alpha');
+  });
+
+  it('matches an identifier and shows finished tickets while searching', async () => {
+    state.active = [ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Backlogged', status: 'todo' })];
+    // Finished long enough ago that the default recent window hides it; only the search shows it.
+    state.finished = [
+      ticket({ id: 'tk_9', identifier: 'ACME-9', title: 'Old work', status: 'done', completedAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+    render(<V2WorkScreen />);
+    expect(document.querySelector('[data-v2-card="ACME-9"]')).toBeNull();
+    fireEvent.change(searchBox(), { target: { value: 'ACME-9' } });
+    await waitFor(() => expect(document.querySelector('[data-v2-card="ACME-1"]')).toBeNull());
+    expect(within(column('done')).getByText('Old work')).toBeInTheDocument();
+  });
+
+  it('highlights the matched words in a title', async () => {
+    state.active = [ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Deploy the pipeline', status: 'todo' })];
+    render(<V2WorkScreen />);
+    fireEvent.change(searchBox(), { target: { value: 'deploy' } });
+    await waitFor(() => expect(document.querySelector('[data-v2-card="ACME-1"] mark')).toBeTruthy());
+    expect(document.querySelector('[data-v2-card="ACME-1"] mark')?.textContent).toBe('Deploy');
+  });
+
+  it('survives a remount from ?q= and combines with ?project=', async () => {
+    state.search = { q: 'deploy', project: 'p1' };
+    state.active = [
+      ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Deploy the pipeline', projectId: 'p1', status: 'todo' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-2', title: 'Deploy elsewhere', projectId: 'p2', status: 'todo' }),
+    ];
+    const first = render(<V2WorkScreen />);
+    expect(searchBox()).toHaveValue('deploy');
+    await waitFor(() => expect(document.querySelector('[data-v2-card="ACME-1"]')).toBeTruthy());
+    expect(document.querySelector('[data-v2-card="ACME-2"]')).toBeNull();
+    first.unmount();
+
+    render(<V2WorkScreen />);
+    expect(searchBox()).toHaveValue('deploy');
+    await waitFor(() => expect(document.querySelector('[data-v2-card="ACME-1"]')).toBeTruthy());
+    expect(document.querySelector('[data-v2-card="ACME-2"]')).toBeNull();
+  });
+
+  it('clears with the button and restores the board', async () => {
+    state.active = [
+      ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Deploy the pipeline', status: 'todo' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-2', title: 'Beta', status: 'todo' }),
+    ];
+    render(<V2WorkScreen />);
+    fireEvent.change(searchBox(), { target: { value: 'deploy' } });
+    await waitFor(() => expect(document.querySelector('[data-v2-card="ACME-2"]')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(searchBox()).toHaveValue('');
+    await waitFor(() => expect(document.querySelector('[data-v2-card="ACME-2"]')).toBeTruthy());
+  });
+
+  it('focuses the field on /', () => {
+    render(<V2WorkScreen />);
+    fireEvent.keyDown(window, { key: '/' });
+    expect(searchBox()).toHaveFocus();
+  });
+});

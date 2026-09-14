@@ -143,4 +143,33 @@ export function v2ShownFinished<T extends Pick<Ticket, 'completedAt' | 'cancelle
   return mode === 'all' ? [...all] : recentlyFinished(all, now);
 }
 
+export interface TitleSegment {
+  text: string;
+  /** True when this run is a match for the active search, so the caller can highlight it. */
+  match: boolean;
+}
+
+/**
+ * Splits a title into matched and unmatched runs for the active search (VS-379). The query is the
+ * same case-insensitive substring the daemon's `LIKE %query%` applies, so the highlight never
+ * marks a word the result was not found by. An empty query is one unmatched run, and regex
+ * metacharacters in the query are escaped so a search for `a.b` matches literally.
+ */
+export function highlightSegments(text: string, query: string): TitleSegment[] {
+  const q = query.trim();
+  if (!q) return [{ text, match: false }];
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(escaped, 'gi');
+  const out: TitleSegment[] = [];
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    const i = m.index ?? 0;
+    if (i > last) out.push({ text: text.slice(last, i), match: false });
+    out.push({ text: m[0], match: true });
+    last = i + m[0].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last), match: false });
+  return out.length ? out : [{ text, match: false }];
+}
+
 export { liveWorkersByTicket };

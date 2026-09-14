@@ -4,7 +4,7 @@
  * (HANDOFF §7): narrow empty columns, no status glyph on a card or a column header, the project tag
  * top-right, and the worker role on its own bottom row under a hairline.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { projectLabel, TICKET_KINDS, TICKET_PRIORITIES, type Ticket, type TicketKind, type TicketPriority, type WorkerModelOption } from '@weave-ai/shared';
 import { workerPauseDetail } from '@weave-ai/render';
 import { V2Page } from '../V2Page';
@@ -38,6 +38,7 @@ import { ago, statusText } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import {
   foldV2Board,
+  highlightSegments,
   liveWorkersByTicket,
   needsYouTicketIds,
   v2ColumnFor,
@@ -47,6 +48,9 @@ import {
 } from './board';
 
 type WorkView = 'kanban' | 'table';
+
+/** Typing pauses before the search reaches the daemon (VS-379), matching the thread search's 250ms. */
+const SEARCH_DEBOUNCE_MS = 250;
 
 interface WorkRow {
   ticket: Ticket;
@@ -74,6 +78,9 @@ export function V2WorkScreen(): React.ReactElement {
   const [kind, setKind] = useState<string | undefined>(undefined);
   const [priority, setPriority] = useState<string | undefined>(undefined);
   const [creating, setCreating] = useState(false);
+  const [q, setQ] = useState<string>(search['q'] ?? '');
+  const [debouncedQ, setDebouncedQ] = useState<string>(search['q'] ?? '');
+  const searchInput = useRef<HTMLInputElement>(null);
 
   const tickets = useTickets({ limit: 300 });
   const finishedTickets = useTickets({ status: 'done,cancelled', limit: 100, sort: 'finished' }, { enabled: finished !== 'hide' });
@@ -89,6 +96,22 @@ export function V2WorkScreen(): React.ReactElement {
   const models = useModels();
   const workerOptions = models.data?.workerOptions;
 
+  const activeQuery = debouncedQ.trim();
+  const searching = activeQuery.length > 0;
+  // The daemon's list search is `title LIKE ? OR description LIKE ? OR identifier LIKE ?`, so a
+  // match in a description — or on a ticket outside the loaded page — is found here that the
+  // client over `tickets.data` alone could never see. Finished tickets are included while
+  // searching: looking for old work is the main reason to search at all.
+  const searchTickets = useTickets(
+    { search: activeQuery, includeTerminal: true, limit: 300, project },
+    { enabled: searching },
+  );
+  // Debounce the typing; the URL keeps the raw query so a fast typist's back/forward is faithful.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [q]);
+
   const projectList = projects.data ?? [];
   const siblingIds = useMemo(() => projectList.map((p) => p.id), [projectList]);
 
@@ -97,11 +120,12 @@ export function V2WorkScreen(): React.ReactElement {
     [finished, finishedTickets.data],
   );
   const allTickets = useMemo(() => [...(tickets.data ?? []), ...shownFinished], [tickets.data, shownFinished]);
+  const sourceTickets = searching ? (searchTickets.data ?? []) : allTickets;
 
   const needsYou = useMemo(() => {
-    const byId = new Map(allTickets.map((t) => [t.id, t]));
+    const byId = new Map(sourceTickets.map((t) => [t.id, t]));
     return needsYouTicketIds(decisions.data ?? [], byId, projectList, summary.data?.config);
-  }, [decisions.data, allTickets, projectList, summary.data]);
+  }, [decisions.data, sourceTickets, projectList, summary.data]);
 
   const live = useMemo(() => liveWorkersByTicket(workers.data ?? []), [workers.data]);
   // `paused` is never in `live` (VS-137), so a paused ticket's reason needs this separate lookup.
@@ -114,8 +138,8 @@ export function V2WorkScreen(): React.ReactElement {
   }, [workers.data]);
 
   const filtered = useMemo(
-    () => filterTickets(allTickets, { project, role, kind, priority }),
-    [allTickets, project, role, kind, priority],
+    () => filterTickets(sourceTickets, { project, role, kind, priority }),
+    [sourceTickets, project, role, kind, priority],
   );
 
   const rows = useMemo<WorkRow[]>(
@@ -150,11 +174,33 @@ export function V2WorkScreen(): React.ReactElement {
   );
 
   const strip = useMemo(() => mergeStrip(tickets.data ?? []), [tickets.data]);
+  const boardQuery = searching ? searchTickets : tickets;
 
   const openTicket = (identifier: string): void =>
     go('/v2/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } });
 
   const chooseFinished = (mode: FinishedMode): void => setFinished(mode);
+
+  /** Keep `?q=` current without stacking history, so the query survives reload and back/forward. */
+  const commitQuery = (value: string): void => {
+    setQ(value);
+    go('/v2/w/$ws/work', { params: { ws }, search: { ...search, q: value.trim() || undefined }, replace: true });
+  };
+  const clearQuery = (): void => commitQuery('');
+
+  // `/` focuses the field from anywhere on the screen, the way a search-first board expects.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
+      e.preventDefault();
+      searchInput.current?.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <V2Page title="Work">
@@ -187,6 +233,12 @@ export function V2WorkScreen(): React.ReactElement {
         </div>
 
         <div className="flex flex-none flex-wrap items-center gap-1.5 border-b border-line-1 px-4 py-2">
+          <SearchField
+            inputRef={searchInput}
+            value={q}
+            onChange={commitQuery}
+            onClear={clearQuery}
+          />
           <FilterSelect
             label="project"
             value={project}
@@ -211,6 +263,11 @@ export function V2WorkScreen(): React.ReactElement {
             onChange={setPriority}
             options={TICKET_PRIORITIES.map((p) => ({ value: p, label: p }))}
           />
+          {searching ? (
+            <span className="ac-mono ml-1 text-nano text-text-3" data-v2-search-count>
+              {filtered.length === 1 ? '1 ticket matches' : `${filtered.length} tickets match`}
+            </span>
+          ) : null}
         </div>
 
         <div className="flex flex-none items-center gap-2 border-b border-line-1 px-4 py-2" data-v2-merge-strip>
@@ -222,36 +279,48 @@ export function V2WorkScreen(): React.ReactElement {
           </span>
         </div>
 
-        {tickets.isLoading ? (
+        {boardQuery.isLoading ? (
           <div className="p-4">
             <SkeletonRows rows={7} />
           </div>
-        ) : tickets.isError ? (
+        ) : boardQuery.isError ? (
           <div className="p-4">
             <ErrorState
               code="WORK_QUERY_FAILED"
               message="The ticket query failed."
-              onRetry={() => void tickets.refetch()}
+              onRetry={() => void boardQuery.refetch()}
             />
           </div>
         ) : rows.length === 0 ? (
           <div className="p-6">
-            <EmptyState
-              title={project ? 'No tickets in this project yet.' : 'No tickets yet.'}
-              detail="Ask the weaver for something and it files the ticket."
-              action={
-                <Button variant="secondary" onClick={() => setCreating(true)}>
-                  New ticket
-                </Button>
-              }
-            />
+            {searching ? (
+              <EmptyState
+                title={`No tickets match “${activeQuery}”.`}
+                detail="Search runs over titles, descriptions and identifiers, finished tickets included."
+                action={
+                  <Button variant="secondary" onClick={clearQuery}>
+                    Clear search
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                title={project ? 'No tickets in this project yet.' : 'No tickets yet.'}
+                detail="Ask the weaver for something and it files the ticket."
+                action={
+                  <Button variant="secondary" onClick={() => setCreating(true)}>
+                    New ticket
+                  </Button>
+                }
+              />
+            )}
           </div>
         ) : (
           <>
             {/* Phone: a list, glyph on each row (HANDOFF §7). */}
             <div className="min-h-0 flex-1 overflow-y-auto md:hidden" data-v2-work-phone>
               {rows.map((r) => (
-                <PhoneRow key={r.ticket.id} row={r} onOpen={() => openTicket(r.ticket.identifier)} />
+                <PhoneRow key={r.ticket.id} row={r} query={activeQuery} onOpen={() => openTicket(r.ticket.identifier)} />
               ))}
             </div>
 
@@ -264,12 +333,13 @@ export function V2WorkScreen(): React.ReactElement {
                       column={c}
                       rows={rowsByTicket(rows, c)}
                       workerOptions={workerOptions}
+                      query={activeQuery}
                       onOpen={openTicket}
                     />
                   ))}
                 </div>
               ) : (
-                <WorkTable rows={rows} columns={columns} workerOptions={workerOptions} onOpen={openTicket} />
+                <WorkTable rows={rows} columns={columns} workerOptions={workerOptions} query={activeQuery} onOpen={openTicket} />
               )}
             </div>
           </>
@@ -356,15 +426,67 @@ function FilterSelect({
   );
 }
 
+function SearchField({
+  inputRef,
+  value,
+  onChange,
+  onClear,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  value: string;
+  onChange: (v: string) => void;
+  onClear: () => void;
+}): React.ReactElement {
+  return (
+    <label
+      className={cx(
+        'flex h-7 min-w-[184px] flex-1 items-center gap-1.5 rounded-r4 border px-2 sm:flex-none',
+        value ? 'border-accent-edge bg-accent-tint' : 'border-line-2',
+      )}
+      data-v2-work-search
+    >
+      <span aria-hidden className={cx('ac-mono text-micro', value ? 'text-accent-link' : 'text-text-3')}>
+        ⌕
+      </span>
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            onClear();
+          }
+        }}
+        placeholder="Search tickets…"
+        aria-label="Search tickets"
+        className="ac-mono min-w-0 flex-1 bg-transparent text-micro text-text-1 outline-none placeholder:text-text-4"
+      />
+      {value ? (
+        <button
+          type="button"
+          aria-label="Clear search"
+          onClick={onClear}
+          className="ac-mono flex-none text-micro text-text-3 hover:text-text-1"
+        >
+          ×
+        </button>
+      ) : null}
+    </label>
+  );
+}
+
 function KanbanColumn({
   column,
   rows,
   workerOptions,
+  query,
   onOpen,
 }: {
   column: V2BoardColumn<Ticket>;
   rows: WorkRow[];
   workerOptions: WorkerModelOption[] | undefined;
+  query: string;
   onOpen: (identifier: string) => void;
 }): React.ReactElement {
   const empty = rows.length === 0;
@@ -383,20 +505,39 @@ function KanbanColumn({
       </header>
       <div className="ac-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-4">
         {rows.map((r) => (
-          <WorkCard key={r.ticket.id} row={r} workerOptions={workerOptions} onOpen={() => onOpen(r.ticket.identifier)} />
+          <WorkCard key={r.ticket.id} row={r} workerOptions={workerOptions} query={query} onOpen={() => onOpen(r.ticket.identifier)} />
         ))}
       </div>
     </section>
   );
 }
 
+/** The title, with the active search's matches marked. `highlightSegments` never trusts the match. */
+function Title({ text, query }: { text: string; query: string }): React.ReactElement {
+  return (
+    <>
+      {highlightSegments(text, query).map((seg, i) =>
+        seg.match ? (
+          <mark key={i} className="bg-accent/25 px-0.5 text-text-1">
+            {seg.text}
+          </mark>
+        ) : (
+          <span key={i}>{seg.text}</span>
+        ),
+      )}
+    </>
+  );
+}
+
 function WorkCard({
   row,
   workerOptions,
+  query,
   onOpen,
 }: {
   row: WorkRow;
   workerOptions: WorkerModelOption[] | undefined;
+  query: string;
   onOpen: () => void;
 }): React.ReactElement {
   const { ticket } = row;
@@ -416,7 +557,9 @@ function WorkCard({
           </span>
         ) : null}
       </div>
-      <div className="mb-2 text-ui leading-snug text-text-1">{ticket.title}</div>
+      <div className="mb-2 text-ui leading-snug text-text-1">
+        <Title text={ticket.title} query={query} />
+      </div>
       <LiveActivityLine line={row.line} />
       {row.pausedFor ? (
         <div className="ac-mono ac-truncate mb-2 rounded-r4 bg-bg-2 px-2.5 py-1 text-nano text-text-3" title={row.pausedFor}>
@@ -441,7 +584,7 @@ function WorkCard({
   );
 }
 
-function PhoneRow({ row, onOpen }: { row: WorkRow; onOpen: () => void }): React.ReactElement {
+function PhoneRow({ row, query, onOpen }: { row: WorkRow; query: string; onOpen: () => void }): React.ReactElement {
   const { ticket } = row;
   return (
     <button
@@ -460,7 +603,9 @@ function PhoneRow({ row, onOpen }: { row: WorkRow; onOpen: () => void }): React.
             </span>
           ) : null}
         </div>
-        <div className="mb-1.5 text-body leading-snug text-text-1">{ticket.title}</div>
+        <div className="mb-1.5 text-body leading-snug text-text-1">
+          <Title text={ticket.title} query={query} />
+        </div>
         <div className="text-micro text-text-2">{row.workerName ?? 'unassigned'}</div>
         {row.line ? (
           <div data-v2-activity className="ac-mono mt-1 flex items-center gap-1.5 text-nano text-text-2">
@@ -481,11 +626,13 @@ function WorkTable({
   rows,
   columns,
   workerOptions,
+  query,
   onOpen,
 }: {
   rows: WorkRow[];
   columns: Array<V2BoardColumn<Ticket>>;
   workerOptions: WorkerModelOption[] | undefined;
+  query: string;
   onOpen: (identifier: string) => void;
 }): React.ReactElement {
   return (
@@ -531,7 +678,9 @@ function WorkTable({
                     <span className="ac-mono text-micro text-text-3">{r.ticket.identifier}</span>
                   </span>
                   <div className="min-w-0 flex-1">
-                    <span className="block truncate text-ui text-text-1">{r.ticket.title}</span>
+                    <span className="block truncate text-ui text-text-1">
+                      <Title text={r.ticket.title} query={query} />
+                    </span>
                     {r.line ? (
                       <span data-v2-activity className="ac-mono flex items-center gap-1.5 truncate text-nano text-text-2">
                         <StatusGlyph status="working" size="xs" pulse className="flex-none" />

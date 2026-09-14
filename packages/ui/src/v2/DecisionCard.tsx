@@ -298,7 +298,13 @@ export function V2DecisionCard({
 
   return (
     <article
-      className={cx('v2-card overflow-hidden', destructive ? 'border-blocked/35' : null, className)}
+      className={cx(
+        // `border-line-2` gives the card the design's visible card border instead of `.v2-card`'s
+        // faint `--line-1`, so stacked cards do not blur together (VS-414).
+        'v2-card shrink-0 overflow-hidden',
+        destructive ? 'border-blocked/35' : 'border-line-2',
+        className,
+      )}
       aria-label={`${label}: ${title}`}
     >
       <div className={cx('flex items-center gap-2 border-b border-line-1', narrow ? 'px-3 py-2' : 'px-3.5 py-2.5')}>

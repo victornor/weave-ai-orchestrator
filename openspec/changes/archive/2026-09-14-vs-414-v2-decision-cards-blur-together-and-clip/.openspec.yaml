@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: V2 decision cards get a clearly visible border and consistent inner padding, and
+  the chat decision pane stops clipping a card's bottom action row
+skip_specs: true

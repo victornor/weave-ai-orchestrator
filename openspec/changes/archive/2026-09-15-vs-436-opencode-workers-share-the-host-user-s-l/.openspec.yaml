@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Isolate opencode's XDG_STATE_HOME (and XDG_CACHE_HOME) to the
+  per-workspace runtime home so workers never read or write the host user's
+  opencode state
+skip_specs: true

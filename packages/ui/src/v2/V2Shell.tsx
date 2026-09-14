@@ -522,7 +522,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
           onClick={() => setMoreOpen(true)}
           className="flex min-w-[44px] flex-1 flex-col items-center justify-center gap-1 text-text-nav"
         >
-          <V2Glyph name="settings" />
+          <V2Glyph name="more" />
           <span className="text-[10px] font-medium">More</span>
         </button>
       </nav>

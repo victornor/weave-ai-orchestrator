@@ -10,7 +10,7 @@ import { A } from '../app/link';
 import { cx } from '../lib/cx';
 import { projectColorVar } from '../lib/projectColor';
 import { FanInStreams } from '../api/context';
-import { useMe, useWorkspacePlugins, useWorkspaceProjects, useWorkspaces, type WorkspaceProjectsState } from '../api/hooks';
+import { useDaemonUpdate, useDaemonUpgrade, useMe, useWorkspacePlugins, useWorkspaceProjects, useWorkspaces, type WorkspaceProjectsState } from '../api/hooks';
 import { WeaveMark } from '../components/WeaveMark';
 import type { WorkspaceListItem, WorkspacePlugin } from '../api/types';
 import { V2Glyph } from './Glyph';
@@ -29,6 +29,7 @@ import {
 } from './nav';
 import { useV2Counts, useV2WorkspaceName, type V2Counts } from './V2Page';
 import { readRailCollapsed, writeRailCollapsed } from './prefs';
+import { updateEntry, updateEntryLabel, type UpdateEntry } from '../lib/upgrade';
 import type { V2Theme } from './theme';
 
 /**
@@ -124,6 +125,46 @@ function CollapsedRow({
       {showDot ? (
         <span className="absolute right-[3px] top-[3px] size-[5px] rounded-pill bg-needs-you" aria-hidden />
       ) : null}
+    </A>
+  );
+}
+
+/**
+ * The daemon's release, as the rail says it (VS-421): the same `lib/upgrade` derivation and the same
+ * content V1's sidebar uses — a state dot, a title, the target or stage, and "Open Updates" — so the
+ * two shells cannot disagree about one fact. The block opens V2 Settings → Updates.
+ */
+function UpdateRailEntry({ update, onNavigate }: { update: UpdateEntry; onNavigate?: () => void }): React.ReactElement {
+  return (
+    <A
+      to="/v2/settings"
+      search={{ section: 'updates' }}
+      aria-label={updateEntryLabel(update)}
+      onClick={onNavigate}
+      className="flex flex-none flex-col gap-1 rounded-r6 border border-accent-edge bg-accent-tint px-2.5 py-2"
+    >
+      <span className="flex items-center gap-2">
+        <span className={cx('size-1.5 flex-none rounded-pill', update.state === 'upgrading' ? 'bg-merging' : 'bg-needs-you')} aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-meta font-medium text-text-1">{update.title}</span>
+      </span>
+      <span className="ac-mono truncate text-nano text-text-3">{update.detail}</span>
+      <span className="text-micro font-medium text-accent-link">Open Updates</span>
+    </A>
+  );
+}
+
+/** The same fact on the 48px rail: the update mark and its state dot, with the entry's accessible name. */
+function CollapsedUpdateEntry({ update }: { update: UpdateEntry }): React.ReactElement {
+  return (
+    <A
+      to="/v2/settings"
+      search={{ section: 'updates' }}
+      title={`${update.title} · ${update.detail}`}
+      aria-label={updateEntryLabel(update)}
+      className="relative flex size-[30px] flex-none items-center justify-center rounded-r4 text-text-3 hover:bg-bg-2 hover:text-text-1"
+    >
+      <V2Glyph name="update" />
+      <span className={cx('absolute right-[3px] top-[3px] size-[5px] rounded-pill', update.state === 'upgrading' ? 'bg-merging' : 'bg-needs-you')} aria-hidden />
     </A>
   );
 }
@@ -308,6 +349,7 @@ function MoreList({
   counts,
   workspaces,
   plugins,
+  update,
   onNavigate,
 }: {
   scope: V2Scope;
@@ -316,11 +358,13 @@ function MoreList({
   counts: V2Counts;
   workspaces: WorkspaceListItem[];
   plugins: WorkspacePlugin[];
+  update: UpdateEntry | null;
   onNavigate: () => void;
 }): React.ReactElement {
   const wsScope: V2Scope = scope.kind === 'workspace' ? scope : { kind: 'workspace', ws: fallbackWs };
   return (
     <div className="flex flex-col gap-4">
+      {update ? <UpdateRailEntry update={update} onNavigate={onNavigate} /> : null}
       <MoreGroup title="Everywhere">
         {[...V2_EVERYWHERE, ...V2_KEPT.filter((d) => d.scopeKind === 'everywhere')].map((d) => (
           <MoreRow key={d.key} dest={d} scope={scope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} onNavigate={onNavigate} />
@@ -397,6 +441,10 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
   const pluginsByWs = useWorkspacePlugins(ids);
   const counts = useV2Counts(scope);
   const me = useMe();
+  // The rail's update entry is one derivation of the daemon's release state, shared with V1 (VS-421).
+  const daemonUpdate = useDaemonUpdate();
+  const daemonUpgrade = useDaemonUpgrade();
+  const update = updateEntry(daemonUpdate.data, daemonUpgrade.data?.upgrade ?? null);
   const username = me.data?.operator.username ? `${me.data.operator.username} · weave` : 'weave';
   const [collapsed, setCollapsed] = useState(readRailCollapsed);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -434,6 +482,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
           </button>
           <div className="mb-1.5 h-px w-[22px] bg-line-1" />
           <div className="flex flex-1 flex-col items-center gap-0.5 overflow-y-auto">
+            {update ? <CollapsedUpdateEntry update={update} /> : null}
             {V2_RAIL_EVERYWHERE.map((d) => (
               <CollapsedRow key={d.key} dest={d} scope={scope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} />
             ))}
@@ -478,6 +527,11 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
               <span className="block size-[11px] rounded-[2px] border-[1.5px] border-l-4 border-current" aria-hidden />
             </button>
           </div>
+          {update ? (
+            <div className="px-2.5 pb-1 pt-1.5">
+              <UpdateRailEntry update={update} />
+            </div>
+          ) : null}
           <div className="flex flex-col gap-0.5 px-2.5">
             <div className="ac-label px-2 pb-1.5">Everywhere</div>
             {V2_RAIL_EVERYWHERE.map((d) => (
@@ -493,15 +547,6 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
             projectsByWs={projectsByWs}
             pluginsByWs={pluginsByWs}
           />
-          <div className="px-2.5 pb-2 pt-1">
-            <button
-              type="button"
-              onClick={() => setMoreOpen(true)}
-              className="v2-row"
-            >
-              <span className="flex-1">More…</span>
-            </button>
-          </div>
           <RailFooter theme={theme} onTheme={onTheme} username={username} />
         </aside>
       )}
@@ -543,6 +588,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
               counts={counts}
               workspaces={list}
               plugins={pluginsByWs[fallbackWs] ?? []}
+              update={update}
               onNavigate={() => setMoreOpen(false)}
             />
           </div>

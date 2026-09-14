@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
+import type { Upgrade, UpdateStatus } from '../api/types';
 
 const state = vi.hoisted(() => ({
   path: '/v2/w/acme/work',
@@ -16,6 +17,8 @@ const state = vi.hoisted(() => ({
   decisionsByWs: { acme: [{ id: 'd1' }, { id: 'd2' }] } as Record<string, Array<{ id: string }>>,
   pluginsByWs: {} as Record<string, Array<{ id: string; version: string | null; name: string | null; source: 'workspace' | 'daemon'; loaded: boolean; error: string | null; hasPage: boolean }>>,
   incidents: [{ resolvedAt: null }, { resolvedAt: '2026-09-01' }] as Array<{ resolvedAt: string | null }>,
+  update: null as UpdateStatus | null,
+  upgrade: null as Upgrade | null,
   fanIn: [] as string[][],
 }));
 
@@ -34,8 +37,8 @@ vi.mock('../api/context', () => ({
 }));
 
 vi.mock('../app/link', () => ({
-  A: ({ to, children, ...rest }: { to: string; children?: ReactNode }) => (
-    <a href={to} {...rest}>
+  A: ({ to, search, children, ...rest }: { to: string; search?: Record<string, unknown>; children?: ReactNode }) => (
+    <a href={search ? `${to}?${new URLSearchParams(search as Record<string, string>).toString()}` : to} {...rest}>
       {children}
     </a>
   ),
@@ -54,6 +57,8 @@ vi.mock('../api/hooks', () => ({
   useMe: () => ({
     data: { operator: { username: 'victor' }, session: { id: 's', kind: 'web' }, totpEnabled: false },
   }),
+  useDaemonUpdate: () => ({ data: state.update ?? undefined }),
+  useDaemonUpgrade: () => ({ data: { upgrade: state.upgrade, waitingFor: [] } }),
 }));
 
 const onTheme = vi.fn();
@@ -77,6 +82,8 @@ beforeEach(() => {
   };
   state.decisionsByWs = { acme: [{ id: 'd1' }, { id: 'd2' }] };
   state.pluginsByWs = {};
+  state.update = null;
+  state.upgrade = null;
   state.fanIn = [];
   onTheme.mockClear();
   localStorage.clear();
@@ -188,10 +195,10 @@ describe('the V2 rail shows a workspace\'s own loaded plugins with a page (VS-38
     localStorage.clear();
     cleanup();
 
-    // The phone/collapsed-rail More list's "Workspace" group is scoped the same way: only the
-    // active workspace's own plugin, not the other workspace's.
+    // The phone More sheet's "Workspace" group is scoped the same way: only the active workspace's
+    // own plugin, not the other workspace's.
     mountShell();
-    fireEvent.click(within(screen.getByRole('complementary')).getByText('More…'));
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'More' }));
     const dialog = screen.getByRole('dialog', { name: 'More' });
     expect(within(dialog).getByRole('link', { name: 'Notes' })).toHaveAttribute('href', '/v2/w/acme/plugins/notes');
     expect(within(dialog).queryByRole('link', { name: 'services' })).not.toBeInTheDocument();
@@ -344,14 +351,94 @@ describe('the phone tab bar and More', () => {
 
   it('offers the knowledge graph and explorer only as Knowledge tabs, never in More (VS-371)', () => {
     mountShell();
-    // The desktop rail's More… button opens the same list as the phone tab bar's More.
-    fireEvent.click(within(screen.getByRole('complementary')).getByText('More…'));
+    // The phone tab bar's More opens the grouped destination list.
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'More' }));
     const dialog = screen.getByRole('dialog', { name: 'More' });
     expect(within(dialog).queryByText('Knowledge graph')).toBeNull();
     expect(within(dialog).queryByText('Knowledge explorer')).toBeNull();
     // The kept screens that have no rail row are still reached here.
     expect(within(dialog).getByText('Chats')).toBeInTheDocument();
     expect(within(dialog).getByText('Changelog')).toBeInTheDocument();
+  });
+
+  it('keeps More on the phone tab bar and drops it from the desktop rail (VS-421)', () => {
+    mountShell();
+    expect(within(screen.getByRole('navigation')).getByRole('button', { name: 'More' })).toBeInTheDocument();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).queryByText('More…')).toBeNull();
+    expect(within(rail).queryByRole('button', { name: 'More' })).toBeNull();
+    cleanup();
+    // The collapsed rail has no More row either.
+    localStorage.setItem('weave.v2.rail', 'collapsed');
+    mountShell();
+    const collapsed = screen.getByRole('complementary');
+    expect(within(collapsed).queryByText('More…')).toBeNull();
+    expect(within(collapsed).queryByRole('button', { name: 'More' })).toBeNull();
+  });
+});
+
+const UPDATE_STATUS: UpdateStatus = {
+  configured: true,
+  running: { version: 'aaaaaaaaaa', path: '/rel/20260101-120000-aaaaaaaaaa', sha: 'a'.repeat(40) },
+  source: '/src/agent-conductor',
+  ref: 'main',
+  targetSha: 'b'.repeat(40),
+  updateAvailable: true,
+  checkedAt: '2026-09-14T10:00:00.000Z',
+  error: null,
+};
+
+const UPGRADE: Upgrade = {
+  id: 'u1', state: 'building', source: '/src/agent-conductor', ref: 'main', targetSha: 'b'.repeat(40),
+  fromRelease: null, toRelease: null, toSha: null, requestedBy: 'op1',
+  requestedAt: '2026-09-14T10:00:00.000Z', startedAt: null, finishedAt: null, reason: null,
+  message: null, log: [], backups: [], cameBackVersion: null,
+};
+
+describe('the rail update entry (VS-421)', () => {
+  it('renders the entry when an update is available, linking to Settings → Updates', () => {
+    state.update = UPDATE_STATUS;
+    mountShell();
+    const entry = within(screen.getByRole('complementary')).getByLabelText('Daemon update available');
+    expect(entry).toHaveTextContent('Update available');
+    expect(entry).toHaveTextContent('main · bbbbbbbbbb');
+    expect(entry).toHaveTextContent('Open Updates');
+    expect(entry).toHaveAttribute('href', '/v2/settings?section=updates');
+  });
+
+  it('says the daemon is upgrading while one is in flight, ahead of an available update', () => {
+    state.update = UPDATE_STATUS;
+    state.upgrade = { ...UPGRADE, state: 'switching' };
+    mountShell();
+    const entry = within(screen.getByRole('complementary')).getByLabelText('Daemon upgrade in progress');
+    expect(entry).toHaveTextContent('Upgrading the daemon');
+    expect(entry).toHaveTextContent('Backing up and switching');
+  });
+
+  it('shows nothing when the daemon is up to date', () => {
+    state.update = { ...UPDATE_STATUS, updateAvailable: false };
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).queryByLabelText('Daemon update available')).toBeNull();
+    expect(within(rail).queryByText('Open Updates')).toBeNull();
+  });
+
+  it('carries a compact form of the entry in the collapsed rail', () => {
+    state.update = UPDATE_STATUS;
+    localStorage.setItem('weave.v2.rail', 'collapsed');
+    mountShell();
+    const entry = within(screen.getByRole('complementary')).getByLabelText('Daemon update available');
+    expect(entry).toHaveAttribute('href', '/v2/settings?section=updates');
+    expect(entry.querySelector('svg[data-v2-glyph="update"]')).not.toBeNull();
+  });
+
+  it('carries the entry in the phone More sheet', () => {
+    state.update = UPDATE_STATUS;
+    mountShell();
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'More' }));
+    const entry = within(screen.getByRole('dialog', { name: 'More' })).getByLabelText('Daemon update available');
+    expect(entry).toHaveTextContent('Open Updates');
+    expect(entry).toHaveAttribute('href', '/v2/settings?section=updates');
   });
 });
 

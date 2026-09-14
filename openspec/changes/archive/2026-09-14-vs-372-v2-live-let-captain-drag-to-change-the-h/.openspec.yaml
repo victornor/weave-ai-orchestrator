@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "V2 Live: let captain drag to change the height of the worker tiles (one
+  height for all tiles), remembered alongside the per-row count"
+skip_specs: true

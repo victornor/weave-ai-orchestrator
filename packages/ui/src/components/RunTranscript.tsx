@@ -20,12 +20,19 @@ export function RunTranscript({
   events,
   live = false,
   label,
+  height,
   className,
 }: {
   events: readonly RunEvent[];
   live?: boolean;
   /** Names the region for assistive tech and for the tests that pick one turn out of a feed. */
   label: string;
+  /**
+   * Bounds the scroller to exactly this many pixels instead of the viewport share (VS-372: Live's
+   * dragged tile height). The caller owns the surrounding box, so the transcript fills and scrolls
+   * inside it rather than clipping against its own cap.
+   */
+  height?: number;
   className?: string;
 }): React.ReactElement {
   const stick = useStickToBottom([events.length], { follow: live, contained: true });
@@ -37,6 +44,7 @@ export function RunTranscript({
         role="log"
         aria-label={label}
         aria-live={live ? 'polite' : 'off'}
+        style={height !== undefined ? { height, maxHeight: 'none' } : undefined}
         className={cx('ac-scroll max-h-[calc(var(--ac-app-h)*0.5)] md:max-h-[calc(var(--ac-app-h)*0.6)]', className)}
       >
         <Transcript events={events} className="gap-2" />

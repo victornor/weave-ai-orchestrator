@@ -62,7 +62,11 @@ export interface WorkerFeedProps {
   ws?: string;
   /** Bounds the height for embedding in a card or a narrow pane. */
   compact?: boolean;
-  /** Overrides the trace body's height in pixels (VS-350: Live's 420/300/240/200 ladder). */
+  /**
+   * Bounds the trace body to this many pixels (VS-350: Live's 420/300/240/200 ladder; VS-372: the
+   * dragged shared tile height). The body becomes a fixed box and the transcript scrolls inside it,
+   * so a tile is the same height whether its run is short, waiting or full.
+   */
   bodyHeight?: number;
   /** Hides the built-in status bar when the embedding card provides its own (VS-350). */
   showChrome?: boolean;
@@ -103,7 +107,10 @@ export function WorkerFeed({ agentId, runId, ws, compact = false, bodyHeight, sh
           </button>
         </div>
       ) : null}
-      <div className="min-h-0" style={{ maxHeight: bodyHeight ?? (compact ? 132 : 420) }}>
+      <div
+        className={cx('min-h-0', bodyHeight !== undefined && 'overflow-hidden')}
+        style={bodyHeight !== undefined ? { height: bodyHeight } : { maxHeight: compact ? 132 : 420 }}
+      >
         {id === null ? (
           <p className="px-2.5 py-3 text-micro text-text-3">Waiting for the next turn.</p>
         ) : events.length === 0 ? (
@@ -113,6 +120,7 @@ export function WorkerFeed({ agentId, runId, ws, compact = false, bodyHeight, sh
             events={events}
             live={streaming}
             label={label}
+            height={bodyHeight}
             className={compact ? 'ac-compact-transcript' : undefined}
           />
         )}

@@ -72,6 +72,25 @@ describe('the V2 decision card header', () => {
   });
 });
 
+describe('the card shell (VS-414)', () => {
+  it('uses the visible card border token so stacked cards do not blur together', () => {
+    renderCard({ ticketIdentifier: 'ACME-42' });
+    expect(screen.getByRole('article').className).toContain('border-line-2');
+  });
+
+  it('keeps a destructive card on the blocked border instead', () => {
+    renderCard({ decision: makeDecision({ kind: 'discard_approval' }), ticketIdentifier: 'ACME-42' });
+    const card = screen.getByRole('article').className;
+    expect(card).toContain('border-blocked/35');
+    expect(card).not.toContain('border-line-2');
+  });
+
+  it('never shrinks in the chat pane column, so its bottom action row is not clipped', () => {
+    renderCard({ narrow: true, ticketIdentifier: 'ACME-42' });
+    expect(screen.getByRole('article').className).toContain('shrink-0');
+  });
+});
+
 describe('the held card', () => {
   const held = makeDecision({
     kind: 'merge_approval',

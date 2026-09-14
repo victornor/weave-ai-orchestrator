@@ -8,14 +8,11 @@
  * the join time, never stored, so a ticket leaving the queue cannot renumber anyone incorrectly.
  */
 import { nowIso, ticketRow, type Db } from '@weave-ai/db';
-import { mergeConcurrencyOf, type Ticket } from '@weave-ai/shared';
+import { compareMergeQueue, mergeConcurrencyOf, mergePriorityRank, mergeQueueJoinedEarlier, type Ticket } from '@weave-ai/shared';
 import type { Actor, CoreServices, MergeQueueService, MergeQueueEntry, MergeQueueOutcome, MergeQueueView } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 
 const SYSTEM: Actor = { kind: 'system', id: null };
-
-/** Join order: the moment the ticket joined the queue, the ticket number breaking a tie. */
-const QUEUE_ORDER = 'merge_queued_at, number';
 
 /** How many recent outcomes a queue report carries. A window on what just happened, not a history. */
 const RECENT_LIMIT = 5;
@@ -32,13 +29,22 @@ export function createMergeQueue(ctx: WorkspaceContext, deps: () => CoreServices
     return r ? row(r) : null;
   }
 
-  const entry = (t: Ticket, position: number | null): MergeQueueEntry => ({
+  const entry = (t: Ticket, position: number | null, ahead = false): MergeQueueEntry => ({
     ticketId: t.id, identifier: t.identifier, title: t.title, projectId: t.projectId,
     position, queuedAt: t.mergeQueuedAt, startedAt: t.mergeStartedAt, workerId: t.workerId,
+    priority: t.priority, ahead,
     // VS-391: the supervisor records these on the delivery for a ticket in the active merge step.
     ciState: (t.delivery?.['ciState'] as MergeQueueEntry['ciState']) ?? null,
     ciStateAt: (t.delivery?.['ciStateAt'] as string | undefined) ?? null,
   });
+
+  /** True when this waiting ticket is ordered ahead of one that joined earlier with a lower priority (VS-390). */
+  function jumpedAhead(waiting: Ticket[], i: number): boolean {
+    const e = waiting[i];
+    if (!e) return false;
+    const rank = mergePriorityRank(e.priority);
+    return waiting.some((w, j) => j !== i && mergeQueueJoinedEarlier(w, e) && mergePriorityRank(w.priority) > rank);
+  }
 
   function limitFor(projectId: string | null): number {
     if (!projectId) return 1;
@@ -58,10 +64,11 @@ export function createMergeQueue(ctx: WorkspaceContext, deps: () => CoreServices
   function waitingOf(projectId: string): Ticket[] {
     return db
       .all<Record<string, unknown>>(
-        `SELECT * FROM tickets WHERE workspace_id = ? AND project_id = ? AND status = 'merging' AND merge_started_at IS NULL ORDER BY ${QUEUE_ORDER}`,
+        "SELECT * FROM tickets WHERE workspace_id = ? AND project_id = ? AND status = 'merging' AND merge_started_at IS NULL",
         [ws, projectId],
       )
-      .map(row);
+      .map(row)
+      .sort(compareMergeQueue);
   }
 
   function positionOf(ticketId: string): number | null {
@@ -102,11 +109,12 @@ export function createMergeQueue(ctx: WorkspaceContext, deps: () => CoreServices
   }
 
   function forProject(projectId: string): MergeQueueView {
+    const waiting = waitingOf(projectId);
     return {
       projectId,
       concurrency: limitFor(projectId),
       active: activeOf(projectId).map((t) => entry(t, null)),
-      waiting: waitingOf(projectId).map((t, i) => entry(t, i + 1)),
+      waiting: waiting.map((t, i) => entry(t, i + 1, jumpedAhead(waiting, i))),
       recent: recentOf(projectId),
     };
   }
@@ -158,7 +166,7 @@ export function createMergeQueue(ctx: WorkspaceContext, deps: () => CoreServices
   async function join(ticketId: string): Promise<void> {
     const ticket = find(ticketId);
     if (!ticket) return;
-    if (!ticket.mergeQueuedAt) db.run('UPDATE tickets SET merge_queued_at = ? WHERE id = ?', [nowIso(), ticket.id]);
+    if (!ticket.mergeQueuedAt) db.run('UPDATE tickets SET merge_queued_at = ?, merge_bypasses = 0 WHERE id = ?', [nowIso(), ticket.id]);
     if (!ticket.projectId) {
       if (!ticket.mergeStartedAt) {
         try { await admit(ticket); }
@@ -172,8 +180,24 @@ export function createMergeQueue(ctx: WorkspaceContext, deps: () => CoreServices
   /** The ticket leaves the queue, gives its slot back, and the next waiting ticket is admitted. */
   async function leave(ticketId: string): Promise<void> {
     const ticket = find(ticketId);
-    db.run('UPDATE tickets SET merge_queued_at = NULL, merge_started_at = NULL WHERE id = ?', [ticketId]);
+    db.run('UPDATE tickets SET merge_queued_at = NULL, merge_started_at = NULL, merge_bypasses = 0 WHERE id = ?', [ticketId]);
     await pump(ticket?.projectId ?? null);
+  }
+
+  /**
+   * One admission credits a bypass to every waiting ticket that joined earlier than the ticket just
+   * admitted (VS-390), so a ticket repeatedly passed over by higher-priority work is eventually
+   * admitted first. Time waited credits nothing: a slow queue does not starve its own tickets.
+   */
+  function creditBypasses(projectId: string, admitted: Ticket): void {
+    if (!admitted.mergeQueuedAt) return;
+    db.run(
+      `UPDATE tickets SET merge_bypasses = merge_bypasses + 1
+        WHERE workspace_id = ? AND project_id = ? AND status = 'merging' AND merge_started_at IS NULL
+          AND merge_queued_at IS NOT NULL
+          AND (merge_queued_at < ? OR (merge_queued_at = ? AND number < ?))`,
+      [ws, projectId, admitted.mergeQueuedAt, admitted.mergeQueuedAt, admitted.number],
+    );
   }
 
   /**
@@ -196,6 +220,7 @@ export function createMergeQueue(ctx: WorkspaceContext, deps: () => CoreServices
       try {
         await admit(ticket);
         admitted++;
+        creditBypasses(projectId, ticket);
       } catch (e) {
         // No worker slot, or a spawn failure: leave the head where it is rather than letting the
         // ticket behind it jump the queue. The next pump tries again.

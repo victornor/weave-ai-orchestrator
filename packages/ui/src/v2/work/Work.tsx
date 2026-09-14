@@ -271,9 +271,9 @@ export function V2WorkScreen(): React.ReactElement {
           <span className={cx('text-micro font-medium', strip.landing + strip.waiting > 0 ? 'text-text-2' : 'text-text-3')}>
             Merge queue
           </span>
-          <span className="ac-mono text-nano text-text-3">
+          <span className="ac-mono min-w-0 truncate text-nano text-text-3" data-v2-merge-strip-line>
             {strip.landing + strip.waiting > 0
-              ? `${strip.landing} landing · ${strip.waiting} waiting${strip.landing > 0 ? ` · ${mergeWaitLabel(strip.active)}` : ''}`
+              ? `${strip.landing} landing · ${strip.waiting} waiting${strip.landing > 0 ? ` · ${mergeWaitLabel(strip.active)}` : ''}${strip.next ? ` · next: ${strip.next.identifier}${strip.next.ahead ? ` (${strip.next.priority}, jumped ahead)` : ''}` : ''}`
               : 'nothing landing'}
           </span>
         </div>

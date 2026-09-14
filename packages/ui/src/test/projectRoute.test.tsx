@@ -296,8 +296,8 @@ describe('landing', () => {
     state.queue = {
       projectId: 'p1',
       concurrency: 1,
-      active: [{ ticketId: 'tk_1', identifier: 'ACME-1', title: 'Merging now', projectId: 'p1', position: null, queuedAt: null, startedAt: null, workerId: null, ciState: null, ciStateAt: null }],
-      waiting: [{ ticketId: 'tk_2', identifier: 'ACME-2', title: 'Behind it', projectId: 'p1', position: 1, queuedAt: null, startedAt: null, workerId: null, ciState: null, ciStateAt: null }],
+      active: [{ ticketId: 'tk_1', identifier: 'ACME-1', title: 'Merging now', projectId: 'p1', position: null, queuedAt: null, startedAt: null, workerId: null, priority: 'medium', ahead: false, ciState: null, ciStateAt: null }],
+      waiting: [{ ticketId: 'tk_2', identifier: 'ACME-2', title: 'Behind it', projectId: 'p1', position: 1, queuedAt: null, startedAt: null, workerId: null, priority: 'medium', ahead: false, ciState: null, ciStateAt: null }],
       recent: [],
     };
     render(<ProjectOverviewRoute />);

@@ -1,5 +1,5 @@
-import type { Agent, AgentStatus, Ticket, TicketStatus, UiStatus } from '@weave-ai/shared';
-import { TICKET_STATUSES, ticketUiStatus } from '@weave-ai/shared';
+import type { Agent, AgentStatus, Ticket, TicketPriority, TicketStatus, UiStatus } from '@weave-ai/shared';
+import { compareMergeQueue, mergePriorityRank, mergeQueueJoinedEarlier, TICKET_STATUSES, ticketUiStatus } from '@weave-ai/shared';
 import { duration } from './format';
 
 /**
@@ -231,13 +231,20 @@ export function filterTickets<T extends Pick<Ticket, 'status' | 'kind' | 'priori
   );
 }
 
+/** The ticket facts the merge strip reads; a full `Ticket` satisfies it. */
+export type MergeStripTicket = Pick<Ticket, 'status' | 'mergeStartedAt' | 'identifier' | 'delivery' | 'priority' | 'mergeQueuedAt' | 'mergeBypasses' | 'number' | 'projectId'>;
+
+/** The waiting ticket the queue's rule would take next, with its priority and whether it jumped an earlier join (VS-390). */
+export interface MergeStripNext { identifier: string; priority: TicketPriority; ahead: boolean }
+
 /**
  * What the board's merge-queue line says (PLAN §11.4). Counted over every ticket the board loaded,
  * not over the filtered view: the line is about the workspace's landing, and a number that changed
  * with the project filter would be the old panel's problem in another shape.
  *
  * VS-391: the longest-active merge also carries what it is waiting on, so a stalled slot reads as
- * "on CI" or "on the worker" rather than an unexplained duration.
+ * "on CI" or "on the worker" rather than an unexplained duration. VS-390: `next` is the waiting
+ * ticket the queue's priority-then-join order would admit first, used to name who is next.
  */
 export interface MergeWait { identifier: string; phase: 'ci' | 'worker'; since: string | null }
 
@@ -254,14 +261,14 @@ export function mergeWaitLabel(wait: MergeWait | null, now: number = Date.now())
   return span ? `${phase} ${span}` : phase;
 }
 
-export function mergeStrip(tickets: readonly Pick<Ticket, 'status' | 'mergeStartedAt' | 'identifier' | 'delivery'>[]): { landing: number; waiting: number; active: MergeWait | null } {
+export function mergeStrip(tickets: readonly MergeStripTicket[]): { landing: number; waiting: number; active: MergeWait | null; next: MergeStripNext | null } {
   let landing = 0;
-  let waiting = 0;
   let active: MergeWait | null = null;
   let activeSince: string | null = null;
+  const waiting: MergeStripTicket[] = [];
   for (const t of tickets) {
     if (t.status !== 'merging') continue;
-    if (!t.mergeStartedAt) { waiting++; continue; }
+    if (!t.mergeStartedAt) { waiting.push(t); continue; }
     landing++;
     if (activeSince === null || t.mergeStartedAt < activeSince) {
       activeSince = t.mergeStartedAt;
@@ -273,5 +280,13 @@ export function mergeStrip(tickets: readonly Pick<Ticket, 'status' | 'mergeStart
       };
     }
   }
-  return { landing, waiting, active };
+  const nextTicket = [...waiting].sort(compareMergeQueue)[0] ?? null;
+  const next: MergeStripNext | null = nextTicket
+    ? {
+        identifier: nextTicket.identifier,
+        priority: nextTicket.priority,
+        ahead: waiting.some((w) => w !== nextTicket && mergeQueueJoinedEarlier(w, nextTicket) && mergePriorityRank(w.priority) > mergePriorityRank(nextTicket.priority)),
+      }
+    : null;
+  return { landing, waiting: waiting.length, active, next };
 }

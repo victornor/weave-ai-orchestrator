@@ -232,32 +232,42 @@ describe('finished tickets on the board', () => {
 
 describe('mergeStrip', () => {
   it('splits merging tickets into what is landing and what is waiting', () => {
-    const counts = mergeStrip([
+    const strip = mergeStrip([
       ticket({ id: 'a', status: 'merging', mergeQueuedAt: '2026-09-01T10:00:00.000Z', mergeStartedAt: '2026-09-01T10:00:01.000Z' }),
       ticket({ id: 'b', status: 'merging', mergeQueuedAt: '2026-09-01T10:05:00.000Z' }),
       ticket({ id: 'c', status: 'merging', mergeQueuedAt: '2026-09-01T10:06:00.000Z' }),
       ticket({ id: 'd', status: 'in_review' }),
     ]);
-    expect(counts).toMatchObject({ landing: 1, waiting: 2 });
-    expect(counts.active).toEqual({ identifier: 'ACME-42', phase: 'worker', since: null });
-  });
-
-  it('counts nothing when nothing is merging', () => {
-    expect(mergeStrip([ticket({ status: 'in_progress' })])).toMatchObject({ landing: 0, waiting: 0, active: null });
-    expect(mergeStrip([])).toMatchObject({ landing: 0, waiting: 0, active: null });
+    expect(strip).toMatchObject({ landing: 1, waiting: 2 });
+    expect(strip.active).toEqual({ identifier: 'ACME-42', phase: 'worker', since: null });
+    expect(strip.next).toEqual({ identifier: 'ACME-42', priority: 'medium', ahead: false });
   });
 
   it('names what the longest-active merge is waiting on (VS-391)', () => {
-    const counts = mergeStrip([
+    const strip = mergeStrip([
       ticket({ id: 'a', status: 'merging', mergeStartedAt: '2026-09-01T10:00:05.000Z', delivery: { ciState: 'success', ciStateAt: '2026-09-01T10:01:00.000Z' } }),
       ticket({ id: 'b', status: 'merging', mergeStartedAt: '2026-09-01T10:00:01.000Z', delivery: { ciState: 'pending', ciStateAt: '2026-09-01T10:02:00.000Z' } }),
     ]);
-    expect(counts.active).toEqual({ identifier: 'ACME-42', phase: 'ci', since: '2026-09-01T10:02:00.000Z' });
+    expect(strip.active).toEqual({ identifier: 'ACME-42', phase: 'ci', since: '2026-09-01T10:02:00.000Z' });
   });
 
   it('labels the wait phase, with how long when its start is known (VS-391)', () => {
     expect(mergeWaitLabel(null)).toBeNull();
     expect(mergeWaitLabel({ identifier: 'x', phase: 'ci', since: null })).toBe('on CI');
     expect(mergeWaitLabel({ identifier: 'x', phase: 'worker', since: '2026-09-01T10:00:00.000Z' }, Date.parse('2026-09-01T10:05:00.000Z'))).toContain('on the worker');
+  });
+
+  it('names the waiting ticket a priority jump puts next, with its reason (VS-390)', () => {
+    const strip = mergeStrip([
+      ticket({ id: 'a', status: 'merging', mergeQueuedAt: '2026-09-01T10:00:00.000Z', mergeStartedAt: '2026-09-01T10:00:01.000Z' }),
+      ticket({ id: 'b', identifier: 'VS-2', status: 'merging', priority: 'medium', mergeQueuedAt: '2026-09-01T10:05:00.000Z' }),
+      ticket({ id: 'c', identifier: 'VS-3', status: 'merging', priority: 'critical', mergeQueuedAt: '2026-09-01T10:06:00.000Z' }),
+    ]);
+    expect(strip.next).toEqual({ identifier: 'VS-3', priority: 'critical', ahead: true });
+  });
+
+  it('counts nothing and names nobody when nothing is merging', () => {
+    expect(mergeStrip([ticket({ status: 'in_progress' })])).toMatchObject({ landing: 0, waiting: 0, active: null, next: null });
+    expect(mergeStrip([])).toMatchObject({ landing: 0, waiting: 0, active: null, next: null });
   });
 });

@@ -11,7 +11,7 @@ function ticket(over: Partial<Ticket> = {}): Ticket {
     assigneeRoleId: 'role_1', workerId: 'ag_1', assigneeHuman: false, interactiveSession: false, landingBranch: null, workerModelId: null, parentId: null, createdByKind: 'human',
     createdById: null, createdRunId: null, originKind: null, originFingerprint: null, checkoutRunId: null, executionRunId: null,
     openspecChangeName: null, openspecState: null, delivery: null, unblock: null, blockedFromStatus: null, monitorNextCheckAt: null,
-    blockedTransitionAt: null, mergeQueuedAt: null, mergeStartedAt: null, startedAt: null, completedAt: null, cancelledAt: null,
+    blockedTransitionAt: null, mergeQueuedAt: null, mergeStartedAt: null, mergeBypasses: 0, startedAt: null, completedAt: null, cancelledAt: null,
     createdAt: '2026-09-04T11:56:00.000Z', updatedAt: '2026-09-04T11:56:00.000Z', ...over,
   };
 }

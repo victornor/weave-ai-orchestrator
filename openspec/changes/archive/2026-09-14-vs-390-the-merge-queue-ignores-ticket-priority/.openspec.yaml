@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "The merge queue ignores ticket priority: a critical fix waits behind
+  every earlier merge in join order"

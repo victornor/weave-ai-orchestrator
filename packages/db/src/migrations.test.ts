@@ -65,6 +65,14 @@ describe('migrations', () => {
     db.close();
   });
 
+  it('adds tickets.merge_bypasses with a zero default (VS-390)', () => {
+    const db = openDb(join(dir, 'bypasses.sqlite'));
+    expect(columns(db)).toContain('merge_bypasses');
+    seedTicket(db, { workspace: 'ws1', ticket: 't1' });
+    expect(db.get<{ mergeBypasses: number }>('SELECT merge_bypasses FROM tickets WHERE id = ?', ['t1'])!.mergeBypasses).toBe(0);
+    db.close();
+  });
+
   it('adds tickets.summary without a default (VS-146)', () => {
     const db = openDb(join(dir, 'summary.sqlite'));
     expect(columns(db)).toContain('summary');

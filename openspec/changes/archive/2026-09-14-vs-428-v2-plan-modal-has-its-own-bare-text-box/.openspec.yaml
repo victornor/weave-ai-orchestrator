@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: The V2 Plan modal renders the shared ChatComposer, so dictation,
+  attachments and styling match the weaver chat
+skip_specs: true

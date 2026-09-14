@@ -710,6 +710,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                 onSubmit={send}
                 onOpenSearch={() => setSearchOpen(true)}
                 onOpenPlan={() => setPlanOpen(true)}
+                hotkey={!planOpen}
                 queuedReason={offline ? 'Offline — your message is queued' : working ? 'Weaver is replying — your message is queued' : null}
                 queuedCount={queuedCount}
               />

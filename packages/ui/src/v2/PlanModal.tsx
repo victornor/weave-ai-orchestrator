@@ -12,9 +12,11 @@ import {
   useStartOrResumePlan, usePlan, usePatchPlanDraft, useRemovePlanDraft, useSubmitPlan, useDiscardPlan,
   useThreadMessages, usePostThreadMessage, useRoles,
 } from '../api/hooks';
-import { useWorkspaceEvents, useWs } from '../api/context';
+import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import { qk } from '../api/keys';
 import { cx } from '../lib/cx';
+import { ChatComposer } from './ChatComposer';
+import { AttachmentRows } from './ChatMessage';
 
 const TIERS = ['quick', 'standard', 'deep'] as const;
 
@@ -40,7 +42,9 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
   const effectiveProjectId = scopedProjectId ?? projects[0]?.id ?? null;
   const start = useStartOrResumePlan();
   const ws = useWs();
+  const conn = useConnection();
   const qc = useQueryClient();
+  const [plannerRunning, setPlannerRunning] = useState(false);
 
   // Opening the modal (or switching its project) always resumes the one drafting plan for that
   // project, or starts a fresh one — never waits for a manual "start" action.
@@ -52,20 +56,6 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fires only when the modal opens or the project changes, not on every render
   }, [open, effectiveProjectId]);
 
-  // Draft edits and replies can arrive from the planner between our own fetches; re-fetch the plan
-  // whenever a `plan.*` event names it, the same way ChatPage reacts to `run.*` events.
-  useWorkspaceEvents(
-    useCallback(
-      (e: WorkspaceEvent) => {
-        if (!planId || !e.type.startsWith('plan.')) return;
-        const eventPlanId = e.entityType === 'plan' ? e.entityId : (e.payload as { planId?: string } | undefined)?.planId;
-        if (eventPlanId !== planId) return;
-        qc.invalidateQueries({ queryKey: qk.plan(ws, planId) });
-      },
-      [planId, ws, qc],
-    ),
-  );
-
   const plan = usePlan(effectiveProjectId, planId);
   const roles = useRoles(effectiveProjectId ?? undefined);
   const messages = useThreadMessages(plan.data?.plan.threadId ?? null);
@@ -75,16 +65,37 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
   const submit = useSubmitPlan();
   const discard = useDiscardPlan();
 
+  // Draft edits and replies can arrive from the planner between our own fetches; re-fetch the plan
+  // whenever a `plan.*` event names it, the same way ChatPage reacts to `run.*` events. The planner's
+  // own run is tracked too, so the composer can report a sent message as queued while it replies.
+  const plannerAgentId = plan.data?.plan.agentId ?? null;
+  useWorkspaceEvents(
+    useCallback(
+      (e: WorkspaceEvent) => {
+        if (plannerAgentId && (e.type === 'run.started' || e.type === 'run.finished')) {
+          if ((e.payload as { agentId?: string } | null)?.agentId !== plannerAgentId) return;
+          setPlannerRunning(e.type === 'run.started');
+          return;
+        }
+        if (!planId || !e.type.startsWith('plan.')) return;
+        const eventPlanId = e.entityType === 'plan' ? e.entityId : (e.payload as { planId?: string } | undefined)?.planId;
+        if (eventPlanId !== planId) return;
+        qc.invalidateQueries({ queryKey: qk.plan(ws, planId) });
+      },
+      [planId, ws, qc, plannerAgentId],
+    ),
+  );
+
   if (!open) return null;
 
   const drafts = plan.data?.drafts ?? [];
   const canSubmit = drafts.length > 0 && plan.data?.plan.status === 'drafting' && !submit.isPending;
 
-  const send = (): void => {
-    const body = text.trim();
-    if (!body || !plan.data || !effectiveProjectId) return;
-    post.mutate({ threadId: plan.data.plan.threadId, body, projectId: effectiveProjectId });
-    setText('');
+  const send = (body: string, files: File[], opts: { idempotencyKey: string }): Promise<void> => {
+    if (!plan.data || !effectiveProjectId) return Promise.reject(new Error('The planning conversation is still starting.'));
+    return post
+      .mutateAsync({ threadId: plan.data.plan.threadId, body, projectId: effectiveProjectId, files, idempotencyKey: opts.idempotencyKey })
+      .then(() => { setText(''); });
   };
 
   const move = (draftId: string, position: number): void => {
@@ -170,29 +181,37 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
                     <li
                       key={m.id}
                       className={cx(
-                        'max-w-[85%] whitespace-pre-wrap rounded-r4 border px-3 py-2 text-micro text-text-1',
+                        'max-w-[85%] rounded-r4 border px-3 py-2 text-micro text-text-1',
                         m.direction === 'inbound' ? 'self-end border-line-2 bg-bg-2' : 'border-line-1 bg-bg-0',
                       )}
                     >
-                      {m.body}
+                      {m.body ? <p className="whitespace-pre-wrap">{m.body}</p> : null}
+                      <AttachmentRows ws={ws} threadId={m.threadId} parts={m.parts} />
                     </li>
                   ))}
                 </ul>
               )}
             </div>
-            <div className="flex flex-none items-end gap-2 border-t border-line-1 p-2.5">
-              <textarea
+            <div className="flex-none border-t border-line-1 p-2.5">
+              <ChatComposer
+                projects={projects}
+                projectId={effectiveProjectId}
+                onChangeProject={() => undefined}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                onChange={setText}
+                onSubmit={send}
+                showScope={false}
                 placeholder="Talk through the plan…"
-                aria-label="Message the planner"
-                rows={1}
-                className="max-h-32 flex-1 resize-none rounded-r4 border border-line-2 bg-bg-input px-2.5 py-1.5 text-body text-text-1 outline-none placeholder:text-text-4"
+                ariaLabel="Message the planner"
+                disabled={!plan.data}
+                queuedReason={
+                  conn.state === 'offline' || conn.state === 'unreachable'
+                    ? 'Offline — your message is queued'
+                    : plannerRunning
+                      ? 'Planner is replying — your message is queued'
+                      : null
+                }
               />
-              <button type="button" onClick={send} disabled={!text.trim() || !plan.data} className="v2-tag flex-none px-3 py-1.5 disabled:opacity-50">
-                Send
-              </button>
             </div>
           </section>
 

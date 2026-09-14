@@ -3,7 +3,7 @@
  * list, and drives submit/discard/tier-override/reorder through the plan hooks. Hooks are mocked
  * directly (the established V2 pattern — see chat.test.tsx), not a real QueryClient + fetch.
  */
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlanDraft, Role, ThreadMessage, WorkspaceEvent } from '@weave-ai/shared';
 import { project, role } from './factories';
@@ -42,6 +42,7 @@ function resetState(): void {
 
 vi.mock('../api/context', () => ({
   useWs: () => 'ws1',
+  useConnection: () => ({ state: 'online' }),
   useWorkspaceEvents: (fn: (e: WorkspaceEvent) => void) => { state.onEvent = fn; },
 }));
 
@@ -49,6 +50,17 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tanstack/react-query')>();
   return { ...actual, useQueryClient: () => ({ invalidateQueries: (o: { queryKey: unknown[] }) => { state.invalidated.push(o.queryKey); } }) };
 });
+
+// The shared composer's dictation hook talks to the Web Speech API and the daemon; the plan modal
+// tests only need the non-listening state and the mic control's label.
+vi.mock('../lib/dictation', () => ({
+  useDictation: () => ({
+    mode: 'speech', listening: false, transcribing: false, settled: true, elapsed: 0,
+    analyser: { current: null }, metered: false, error: null,
+    start: vi.fn(), stop: vi.fn(), toggle: vi.fn(),
+    diagnostics: { enabled: false, count: 0, copy: vi.fn() },
+  }),
+}));
 
 vi.mock('../api/hooks', () => ({
   useStartOrResumePlan: () => ({
@@ -58,11 +70,14 @@ vi.mock('../api/hooks', () => ({
     },
   }),
   usePlan: (_projectId: string | null, planId: string | null) => ({
-    data: planId ? { plan: { id: planId, status: state.planStatus, threadId: 'th_plan' }, drafts: state.drafts } : undefined,
+    data: planId ? { plan: { id: planId, status: state.planStatus, threadId: 'th_plan', agentId: 'planner_1' }, drafts: state.drafts } : undefined,
   }),
   useRoles: () => ({ data: state.roles }),
   useThreadMessages: () => ({ data: state.messages }),
-  usePostThreadMessage: () => ({ mutate: (v: Record<string, unknown>) => { state.posted.push(v); } }),
+  usePostThreadMessage: () => ({
+    mutate: (v: Record<string, unknown>) => { state.posted.push(v); },
+    mutateAsync: (v: Record<string, unknown>) => { state.posted.push(v); return Promise.resolve(); },
+  }),
   usePatchPlanDraft: () => ({ mutate: (v: Record<string, unknown>, opts?: { onSuccess?: () => void }) => { state.patched.push(v); opts?.onSuccess?.(); }, isPending: false }),
   useRemovePlanDraft: () => ({ mutate: (v: Record<string, unknown>) => { state.removed.push(v); } }),
   useSubmitPlan: () => ({ mutate: (v: Record<string, unknown>, opts?: { onSuccess?: () => void }) => { state.submitted.push(v); opts?.onSuccess?.(); }, isPending: false }),
@@ -108,7 +123,57 @@ describe('PlanModal (VS-398)', () => {
 
     fireEvent.change(screen.getByLabelText('Message the planner'), { target: { value: 'Start with the API' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(state.posted).toEqual([{ threadId: 'th_plan', body: 'Start with the API', projectId: 'p1' }]);
+    expect(state.posted).toHaveLength(1);
+    expect(state.posted[0]).toMatchObject({ threadId: 'th_plan', body: 'Start with the API', projectId: 'p1', files: [] });
+    expect(typeof (state.posted[0] as { idempotencyKey?: unknown }).idempotencyKey).toBe('string');
+  });
+
+  it('renders the shared composer with attach and dictate controls and hides the chat-only chrome', () => {
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.getByRole('button', { name: 'Attach a file' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dictate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+    // Chat-only controls: Search, Plan, and the project scope selector (its `Auto` chip).
+    expect(screen.queryByRole('button', { name: 'Search this conversation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Plan a body of work interactively' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Auto' })).not.toBeInTheDocument();
+  });
+
+  it('sends an attachment through to the plan thread', () => {
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    const file = new File(['notes'], 'notes.txt', { type: 'text/plain' });
+    fireEvent.change(screen.getByTestId('v2-composer-file-input'), { target: { files: [file] } });
+    expect(screen.getByText('notes.txt')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Message the planner'), { target: { value: 'see the notes' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(state.posted).toHaveLength(1);
+    expect(state.posted[0]).toMatchObject({ threadId: 'th_plan', body: 'see the notes', projectId: 'p1', files: [file] });
+  });
+
+  it('shows an attachment already sent on a plan message', () => {
+    state.messages = [{
+      id: 'm1', threadId: 'th_plan', direction: 'inbound', authorKind: 'human', authorId: 'v', body: 'here it is',
+      parts: [{ type: 'attachment', id: 'att1', filename: 'notes.txt', mediaType: 'text/plain', byteSize: 1234 }],
+      createdAt: 't0',
+    } as unknown as ThreadMessage];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.getByRole('link', { name: /notes.txt/ })).toBeInTheDocument();
+  });
+
+  it('reports a queued message while the planner is replying', () => {
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.queryByText('Planner is replying — your message is queued')).not.toBeInTheDocument();
+
+    act(() => {
+      state.onEvent?.({ seq: 1, workspaceId: 'ws1', type: 'run.started', entityType: 'run', entityId: 'r1', payload: { agentId: 'planner_1' }, createdAt: 't0' });
+    });
+    expect(screen.getByText('Planner is replying — your message is queued')).toBeInTheDocument();
+
+    act(() => {
+      state.onEvent?.({ seq: 2, workspaceId: 'ws1', type: 'run.finished', entityType: 'run', entityId: 'r1', payload: { agentId: 'planner_1' }, createdAt: 't1' });
+    });
+    expect(screen.queryByText('Planner is replying — your message is queued')).not.toBeInTheDocument();
   });
 
   it('renders drafts with dependencies, and overrides a tier', () => {

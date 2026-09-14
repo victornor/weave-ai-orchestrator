@@ -71,8 +71,16 @@ export interface ChatComposerProps {
   replyToMessageId?: string | null;
   onDismissReply?: () => void;
   onSubmit: (text: string, files: File[], opts: { projectId: string | null; replyToMessageId: string | null; idempotencyKey: string }) => void | Promise<void>;
-  onOpenSearch: () => void;
-  onOpenPlan: () => void;
+  /** The search and plan affordances are chat-only; each button hides when its handler is absent (the plan modal passes neither). */
+  onOpenSearch?: () => void;
+  onOpenPlan?: () => void;
+  /** The project scope selector is chat-only; the plan modal is already bound to one project and hides it. */
+  showScope?: boolean;
+  /** The input's placeholder and accessible name; default to the weaver chat's wording. */
+  placeholder?: string;
+  ariaLabel?: string;
+  /** Whether this composer answers the global push-to-talk hotkey; the plan modal and the chat behind it must not both listen (VS-428). */
+  hotkey?: boolean;
   disabled?: boolean;
   queuedReason?: string | null;
   queuedCount?: number;
@@ -90,6 +98,10 @@ export function ChatComposer({
   onSubmit,
   onOpenSearch,
   onOpenPlan,
+  showScope = true,
+  placeholder = 'Message the weaver…',
+  ariaLabel = 'Message the weaver',
+  hotkey = true,
   disabled,
   queuedReason,
   queuedCount = 0,
@@ -125,9 +137,10 @@ export function ChatComposer({
     dictation.start();
   }, [dictation, value]);
 
-  // Push-to-talk at a desk; tap-to-toggle on touch (V1's model).
+  // Push-to-talk at a desk; tap-to-toggle on touch (V1's model). A disabled composer, or one that
+  // has handed the hotkey to a modal (VS-428), does not claim it.
   useEffect(() => {
-    if (isTouch) return;
+    if (isTouch || !hotkey || disabled) return;
     const down = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyM' && !dictation.listening) {
         e.preventDefault();
@@ -143,7 +156,7 @@ export function ChatComposer({
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
     };
-  }, [isTouch, dictation, startMic]);
+  }, [isTouch, disabled, hotkey, dictation, startMic]);
 
   // Grow to fit, then scroll inside. Measuring collapses the box and throws the scroll position
   // away, so it is put back: at the end when the insert came from dictation or the caret is already
@@ -249,33 +262,41 @@ export function ChatComposer({
       ) : null}
 
       <div className="flex items-center gap-1.5 overflow-x-auto">
-        <button type="button" onClick={onOpenSearch} aria-label="Search this conversation" className="v2-tag flex-none text-text-3 hover:text-text-1">
-          ⌕ Search
-        </button>
-        <button type="button" onClick={onOpenPlan} aria-label="Plan a body of work interactively" className="v2-tag flex-none text-text-3 hover:text-text-1">
-          Plan
-        </button>
-        <span className="mx-0.5 h-3 w-px flex-none bg-line-2" aria-hidden />
-        <button
-          type="button"
-          onClick={() => onChangeProject(null)}
-          aria-pressed={projectId === null}
-          className={cx('v2-tag flex-none', projectId === null ? 'bg-bg-3 text-text-1' : 'text-text-2')}
-        >
-          Auto
-        </button>
-        {projects.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            onClick={() => onChangeProject(p.id === projectId ? null : p.id)}
-            aria-pressed={p.id === projectId}
-            style={{ color: projectColorVar(p.id, siblings) }}
-            className={cx('v2-tag flex-none', p.id === projectId ? 'bg-bg-3' : '')}
-          >
-            {projectLabel(p)}
+        {onOpenSearch ? (
+          <button type="button" onClick={onOpenSearch} aria-label="Search this conversation" className="v2-tag flex-none text-text-3 hover:text-text-1">
+            ⌕ Search
           </button>
-        ))}
+        ) : null}
+        {onOpenPlan ? (
+          <button type="button" onClick={onOpenPlan} aria-label="Plan a body of work interactively" className="v2-tag flex-none text-text-3 hover:text-text-1">
+            Plan
+          </button>
+        ) : null}
+        {showScope ? (
+          <>
+            {onOpenSearch || onOpenPlan ? <span className="mx-0.5 h-3 w-px flex-none bg-line-2" aria-hidden /> : null}
+            <button
+              type="button"
+              onClick={() => onChangeProject(null)}
+              aria-pressed={projectId === null}
+              className={cx('v2-tag flex-none', projectId === null ? 'bg-bg-3 text-text-1' : 'text-text-2')}
+            >
+              Auto
+            </button>
+            {projects.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onChangeProject(p.id === projectId ? null : p.id)}
+                aria-pressed={p.id === projectId}
+                style={{ color: projectColorVar(p.id, siblings) }}
+                className={cx('v2-tag flex-none', p.id === projectId ? 'bg-bg-3' : '')}
+              >
+                {projectLabel(p)}
+              </button>
+            ))}
+          </>
+        ) : null}
         <span className="ac-mono ml-auto flex-none whitespace-nowrap text-nano text-text-3">{dictationHint({ isTouch })}</span>
       </div>
 
@@ -328,8 +349,8 @@ export function ChatComposer({
             rows={1}
             value={value}
             disabled={disabled || submitting}
-            placeholder="Message the weaver…"
-            aria-label="Message the weaver"
+            placeholder={placeholder}
+            aria-label={ariaLabel}
             onChange={(e) => onChange(e.target.value)}
             onPaste={onPaste}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isTouch) { e.preventDefault(); send(); } }}

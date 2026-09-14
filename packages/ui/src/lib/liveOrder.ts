@@ -7,9 +7,27 @@
  * running group for a short grace period after its run ends.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { agentUiStatus, type AgentStatus, type UiStatus } from '@weave-ai/shared';
 
 /** How long a cell stays in the running group after its in-progress run ends (VS-337). */
 export const LIVE_RUN_GRACE_MS = 10_000;
+
+/**
+ * True when an agent's own status reads as working on a card. The working-first group is built from
+ * this, so the label and the sort start from the same status (VS-415).
+ */
+export function agentIsWorking(status: AgentStatus): boolean {
+  return agentUiStatus(status) === 'working';
+}
+
+/**
+ * The status a Live card shows: `working` while it holds the working group (a run in flight, or the
+ * between-turns grace), otherwise its own UI status. Display, sort and the floor figure all read
+ * this one value, so a card can never be sorted as working while it reads idle (VS-415).
+ */
+export function cellUiStatus(status: AgentStatus, working: boolean): UiStatus {
+  return working ? 'working' : agentUiStatus(status);
+}
 
 /** The fields the order reads; a global Live cell supplies its `agent`. */
 export interface LiveOrderKey {
@@ -18,16 +36,16 @@ export interface LiveOrderKey {
 }
 
 /**
- * Newest-first, but every item in `runningIds` before every item that is not. Order within a group is
+ * Newest-first, but every item in `workingIds` before every item that is not. Order within a group is
  * the floor's existing one (`createdAt` descending, id as the tie-break), so a cell only moves when
- * its worker changes group. Pure: the grace window that feeds `runningIds` lives in the hook below.
+ * its worker changes group. Pure: the grace window that feeds `workingIds` lives in the hook below.
  */
 export function orderByRunning<T>(
   items: readonly T[],
   key: (item: T) => LiveOrderKey,
-  runningIds: ReadonlySet<string>,
+  workingIds: ReadonlySet<string>,
 ): T[] {
-  const rank = (item: T): number => (runningIds.has(key(item).id) ? 0 : 1);
+  const rank = (item: T): number => (workingIds.has(key(item).id) ? 0 : 1);
   return [...items].sort((a, b) => {
     const group = rank(a) - rank(b);
     if (group !== 0) return group;

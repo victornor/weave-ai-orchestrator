@@ -48,7 +48,10 @@ function countOf(dest: V2Dest, scope: V2Scope, counts: V2Counts): number {
     if (dest.scopeKind === 'workspace') return scope.kind === 'workspace' ? (counts.needsByWs[scope.ws] ?? 0) : 0;
     return counts.needsGlobal;
   }
-  if (dest.count === 'live') return counts.live;
+  if (dest.count === 'live') {
+    if (dest.scopeKind === 'workspace') return scope.kind === 'workspace' ? (counts.liveByWs[scope.ws] ?? 0) : 0;
+    return counts.live;
+  }
   if (dest.count === 'incidents') return counts.incidents;
   return 0;
 }

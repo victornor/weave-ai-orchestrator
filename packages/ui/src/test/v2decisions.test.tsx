@@ -101,6 +101,8 @@ describe('the held card', () => {
     expect(screen.queryAllByText(/No run yet/)).toHaveLength(0);
     fireEvent.click(watches[0]!);
     expect(screen.getByRole('button', { name: 'Hide' })).toBeInTheDocument();
+    // The opened Watch pane is resizable (VS-409).
+    expect(screen.getByRole('separator', { name: 'Resize trace pane' })).toBeInTheDocument();
     // The second card is untouched: exactly one feed is open.
     expect(screen.getAllByText(/No run yet/)).toHaveLength(1);
   });

@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "V2 live trace panes are cramped and broken: Watch previews too short, content
+  overflows its scroll box, no auto-scroll, a pointless Refresh, no resize handle,
+  and Roles only expands running roles"
+skip_specs: true

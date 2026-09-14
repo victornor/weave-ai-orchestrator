@@ -200,13 +200,25 @@ describe('the V2 Roles screen', () => {
     expect(document.querySelectorAll('[data-worker-feed]')).toHaveLength(0);
   });
 
-  it('opens the worker page for a worker with no live session', () => {
+  it('opens the worker page for a worker with neither a live session nor a ticket', () => {
     state.roles = [role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer' })];
-    state.workers = [agent({ id: 'a9', roleId: 'r1', status: 'paused', name: 'Backend Engineer #9', ticketId: 'tk_1' })];
+    state.workers = [agent({ id: 'a9', roleId: 'r1', status: 'paused', name: 'Backend Engineer #9', ticketId: null })];
     render(<V2RolesScreen />);
     fireEvent.click(screen.getByRole('button', { name: /Backend Engineer #9/ }));
     expect(state.go).toHaveBeenCalledWith('/v2/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'a9' } });
     expect(document.querySelector('[data-worker-feed]')).toBeNull();
+  });
+
+  it('expands a worker that is not running when it has a ticket, with a resize grip (VS-409)', () => {
+    state.roles = [role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer' })];
+    state.workers = [agent({ id: 'a9', roleId: 'r1', status: 'paused', name: 'Backend Engineer #9', ticketId: 'tk_1' })];
+    state.runs = [makeRun({ id: 'run_9', agentId: 'a9', status: 'succeeded', createdAt: '2026-09-13T10:00:00.000Z' })];
+    render(<V2RolesScreen />);
+    expect(document.querySelector('[data-role-worker-live="false"]')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Backend Engineer #9/ }));
+    expect(state.go).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-role-worker="a9"] [data-worker-feed]')).not.toBeNull();
+    expect(screen.getByRole('separator', { name: 'Resize trace pane' })).toBeInTheDocument();
   });
 
   it('renders the hire preview from the same function it sends', () => {

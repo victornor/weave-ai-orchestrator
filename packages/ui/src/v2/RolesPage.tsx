@@ -402,10 +402,13 @@ function WorkerRow({
   const go = useGo();
   const { run, live } = useWorkerRun(worker.id, ws);
   const ticketLabel = ticket ? `${ticket.identifier} · ${ticket.title}` : null;
-  const open = expanded && live;
+  // A worker with a ticket can be expanded whether or not it is running (VS-409): its newest run's
+  // trace is worth opening in place. Only a worker with neither opens its page instead.
+  const canExpand = live || ticket !== null;
+  const open = expanded && canExpand;
 
   const onClick = (): void => {
-    if (live) onToggle(worker.id);
+    if (canExpand) onToggle(worker.id);
     else go('/v2/w/$ws/workers/$workerId', { params: { ws, workerId: worker.id } });
   };
 
@@ -415,7 +418,7 @@ function WorkerRow({
       data-role-worker={worker.id}
       data-role-worker-live={live ? 'true' : 'false'}
     >
-      <button type="button" aria-expanded={live ? open : undefined} onClick={onClick} className="flex w-full items-center gap-2 px-2.5 py-2 text-left">
+      <button type="button" aria-expanded={canExpand ? open : undefined} onClick={onClick} className="flex w-full items-center gap-2 px-2.5 py-2 text-left">
         <span className="ac-mono flex size-6 flex-none items-center justify-center rounded-r4 bg-bg-3 text-nano text-text-2" aria-hidden>
           {initials(worker.name)}
         </span>
@@ -424,7 +427,7 @@ function WorkerRow({
           <span className="ac-mono block truncate text-nano text-text-3">{ticketLabel ?? statusText(worker.status)}</span>
         </span>
         <span className={cx('ac-mono flex-none text-nano', workerStatusTone(worker.status))}>{statusText(worker.status)}</span>
-        {live ? (
+        {canExpand ? (
           <span
             className={cx(
               'block size-1.5 flex-none border-b-[1.5px] border-r-[1.5px] border-text-3 transition-transform',
@@ -441,7 +444,7 @@ function WorkerRow({
             <span className="ac-mono flex-none text-nano text-text-2">{run?.model ?? '—'}</span>
             <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{ticketLabel ?? '—'}</span>
           </div>
-          <WorkerFeed agentId={worker.id} ws={ws} compact label={`Live feed for ${worker.name}`} />
+          <WorkerFeed agentId={worker.id} ws={ws} compact resizable label={`Live feed for ${worker.name}`} />
           <div className="flex items-center gap-2 border-t border-line-1 px-2.5 py-1.5">
             <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{spendLabel(run)}</span>
             <A to="/v2/live" className="flex-none text-nano text-text-2 hover:text-text-1">

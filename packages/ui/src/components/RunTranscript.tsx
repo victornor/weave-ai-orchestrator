@@ -19,12 +19,20 @@ import type { RunEvent } from '@weave-ai/shared';
 export function RunTranscript({
   events,
   live = false,
+  follow,
   label,
   height,
+  maxHeight,
   className,
 }: {
   events: readonly RunEvent[];
   live?: boolean;
+  /**
+   * Whether the list opens at its newest line and follows new ones, independent of `live`. A pane
+   * opened to watch a run passes `true` even once that run has finished, so it opens at the end
+   * rather than the start (VS-409); the default is the run's own state.
+   */
+  follow?: boolean;
   /** Names the region for assistive tech and for the tests that pick one turn out of a feed. */
   label: string;
   /**
@@ -33,9 +41,15 @@ export function RunTranscript({
    * inside it rather than clipping against its own cap.
    */
   height?: number;
+  /**
+   * The caller's matching `max-height` for a box that shrinks to its content (VS-409): the scroller
+   * and its parent then share one height, so the scroll range reaches the last line instead of the
+   * transcript growing past the box that is supposed to contain it.
+   */
+  maxHeight?: number;
   className?: string;
 }): React.ReactElement {
-  const stick = useStickToBottom([events.length], { follow: live, contained: true });
+  const stick = useStickToBottom([events.length], { follow: follow ?? live, contained: true });
 
   return (
     <div className="relative">
@@ -44,7 +58,7 @@ export function RunTranscript({
         role="log"
         aria-label={label}
         aria-live={live ? 'polite' : 'off'}
-        style={height !== undefined ? { height, maxHeight: 'none' } : undefined}
+        style={height !== undefined ? { height, maxHeight: 'none' } : maxHeight !== undefined ? { maxHeight } : undefined}
         className={cx('ac-scroll max-h-[calc(var(--ac-app-h)*0.5)] md:max-h-[calc(var(--ac-app-h)*0.6)]', className)}
       >
         <Transcript events={events} className="gap-2" />

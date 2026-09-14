@@ -466,6 +466,20 @@ describe('restartCommand (VS-316)', () => {
       expect(outcome.migrationOutcome()).toBeNull();
     });
 
+    it('rewrites an installed on-failure unit to always before restarting it (VS-376)', async () => {
+      const dir = scratchUnitDir();
+      const path = join(dir, SERVICE_NAME);
+      writeFileSync(path, '[Unit]\nDescription=Weave AI daemon\n\n[Service]\nRestart=on-failure\nRestartSec=3\n');
+      const { run, calls } = fakeSystemctl();
+      const outcome = restartCommand('/cfg', { run, readCgroup: () => '' });
+      await outcome.run();
+      expect(readFileSync(path, 'utf8')).toContain('Restart=always');
+      expect(calls).toEqual([
+        ['systemctl', '--user', 'daemon-reload'], // the rewrite's reload
+        ['systemctl', '--user', 'restart', SERVICE_NAME],
+      ]);
+    });
+
     describe('an interrupted migration never makes the next upgrade trust an un-replaced unit (PR #265 review)', () => {
       /** A fresh `restartCommand()` call, standing in for a completely separate, later upgrade. */
       const nextUpgrade = (run: RunCommand): RestartOutcome => restartCommand('/cfg', { run, readCgroup: () => '' });

@@ -7,7 +7,7 @@ import { delimiter, join } from 'node:path';
 import { ApiError } from '../api.js';
 import { emit, style, write } from '../output.js';
 import { contextsPath, currentContext } from '../contexts.js';
-import { isRunning, readPid } from '../daemon.js';
+import { ensureUnitRestartAlways, isRunning, readPid } from '../daemon.js';
 import { promptConfirm } from '../prompt.js';
 import { isInstallable, planInstalls, type InstallStep, type InstallableId } from '../install.js';
 import { items, run, session } from './util.js';
@@ -157,6 +157,21 @@ export function register(program: Command): void {
       } catch (error) {
         const message = error instanceof ApiError ? `${String(error.code).toUpperCase()}: ${error.message}` : (error as Error).message;
         checks.push({ name: 'daemon api', ok: false, detail: message, fix: 'weave daemon start' });
+      }
+
+      // VS-376: only the host that runs the daemon owns its unit. A unit that restarts only on
+      // failure would leave the daemon down after a clean exit, so repair it here as well as on the
+      // upgrade path. Gated on a confirmed local daemon host, so a diagnostic run on a client (or
+      // against an unconfirmed host) never writes a unit it does not own.
+      if (daemonIsThisHost === true && process.platform === 'linux') {
+        const rewritten = ensureUnitRestartAlways();
+        if (rewritten) {
+          checks.push({
+            name: 'systemd unit',
+            ok: true,
+            detail: rewritten.changed ? `rewrote ${rewritten.unit} to Restart=always` : `${rewritten.unit} restarts on any exit`,
+          });
+        }
       }
 
       const failed = checks.filter((c) => c.ok === false).length;

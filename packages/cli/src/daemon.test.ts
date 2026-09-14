@@ -3,17 +3,28 @@
  * actually waits its given timeout before escalating to `SIGKILL` rather than a hardcoded short one.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SHUTDOWN_KILL_GRACE_MS } from '@weave-ai/shared';
-import { isRunning, pidFile, renderServiceUnit, stopDaemon } from './daemon.js';
+import { SERVICE_NAME } from '@weave-ai/release';
+import {
+  ensureUnitRestartAlways, isRunning, pidFile, renderServiceUnit, startDaemonService, stopDaemon, stopDaemonService,
+  systemdMainPid, withRestartAlways, type CommandResult, type RunCommand,
+} from './daemon.js';
 
-describe('renderServiceUnit (VS-262)', () => {
+describe('renderServiceUnit (VS-262, VS-376)', () => {
   it("TimeoutStopSec tracks SHUTDOWN_KILL_GRACE_MS, not an independent hardcoded number", () => {
     const unit = renderServiceUnit('/bin/node');
     expect(unit).toContain(`TimeoutStopSec=${Math.ceil(SHUTDOWN_KILL_GRACE_MS / 1000)}`);
+  });
+
+  it('restarts on any exit, not only on failure (VS-376)', () => {
+    const unit = renderServiceUnit('/bin/node');
+    expect(unit).toContain('Restart=always');
+    expect(unit).not.toContain('Restart=on-failure');
+    expect(unit).toContain('RestartSec=3');
   });
 });
 
@@ -102,5 +113,101 @@ describe('stopDaemon (VS-262)', () => {
     } finally {
       killSpy.mockRestore();
     }
+  });
+});
+
+// ---------- VS-376: the installed unit's restart policy and the systemd start/stop path ----------
+
+describe('unit restart policy and systemd lifecycle (VS-376)', () => {
+  const tmps: string[] = [];
+  const savedConfigHome = process.env['XDG_CONFIG_HOME'];
+
+  beforeEach(() => {
+    const base = mkdtempSync(join(tmpdir(), 'ac-unit-'));
+    tmps.push(base);
+    process.env['XDG_CONFIG_HOME'] = base;
+  });
+
+  afterEach(() => {
+    while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true });
+    if (savedConfigHome === undefined) delete process.env['XDG_CONFIG_HOME'];
+    else process.env['XDG_CONFIG_HOME'] = savedConfigHome;
+  });
+
+  function installUnit(content: string, name = SERVICE_NAME): string {
+    const dir = join(process.env['XDG_CONFIG_HOME']!, 'systemd', 'user');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, name);
+    writeFileSync(path, content);
+    return path;
+  }
+
+  const noop = (over: Partial<CommandResult> = {}): CommandResult => ({ status: 0, signal: null, stdout: '', stderr: '', ...over });
+  const fake = (over: Partial<CommandResult> = {}): { run: RunCommand; calls: string[][] } => {
+    const calls: string[][] = [];
+    const run: RunCommand = (cmd, args) => { calls.push([cmd, ...args]); return noop(over); };
+    return { run, calls };
+  };
+
+  it('withRestartAlways replaces an on-failure line, and is a no-op at always or with no Restart line', () => {
+    expect(withRestartAlways('[Service]\nRestart=on-failure\n')).toBe('[Service]\nRestart=always\n');
+    expect(withRestartAlways('[Service]\nRestart=always\n')).toBe('[Service]\nRestart=always\n');
+    expect(withRestartAlways('[Service]\nExecStart=/x\n')).toBe('[Service]\nExecStart=/x\n');
+  });
+
+  it('rewrites an installed on-failure unit and reloads systemd', () => {
+    const path = installUnit('[Unit]\nDescription=Weave AI daemon\n\n[Service]\nRestart=on-failure\nRestartSec=3\n');
+    const { run, calls } = fake();
+    const result = ensureUnitRestartAlways(run);
+    expect(result).toEqual({ unit: SERVICE_NAME, path, changed: true });
+    expect(readFileSync(path, 'utf8')).toContain('Restart=always');
+    expect(calls).toEqual([['systemctl', '--user', 'daemon-reload']]);
+  });
+
+  it('leaves an always unit alone, with no reload', () => {
+    const path = installUnit('[Service]\nRestart=always\n');
+    const { run, calls } = fake();
+    expect(ensureUnitRestartAlways(run)).toEqual({ unit: SERVICE_NAME, path, changed: false });
+    expect(calls).toEqual([]);
+  });
+
+  it('is a no-op with no unit installed', () => {
+    const { run } = fake();
+    expect(ensureUnitRestartAlways(run)).toBeNull();
+  });
+
+  it('startDaemonService starts the installed unit through systemctl, and is null with no unit', () => {
+    installUnit('[Service]\nRestart=always\n');
+    const { run, calls } = fake();
+    expect(startDaemonService(run)).toEqual({ unit: SERVICE_NAME, how: `systemctl --user start ${SERVICE_NAME}` });
+    expect(calls).toEqual([['systemctl', '--user', 'start', SERVICE_NAME]]);
+
+    rmSync(join(process.env['XDG_CONFIG_HOME']!, 'systemd'), { recursive: true, force: true });
+    expect(startDaemonService(run)).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('stopDaemonService stops the installed unit, and is null with no unit', () => {
+    installUnit('[Service]\nRestart=always\n');
+    const { run, calls } = fake();
+    expect(stopDaemonService(run)).toEqual({ unit: SERVICE_NAME, how: `systemctl --user stop ${SERVICE_NAME}` });
+    expect(calls).toEqual([['systemctl', '--user', 'stop', SERVICE_NAME]]);
+
+    rmSync(join(process.env['XDG_CONFIG_HOME']!, 'systemd'), { recursive: true, force: true });
+    expect(stopDaemonService(run)).toBeNull();
+  });
+
+  it('surfaces a start failure with its stderr rather than reporting success', () => {
+    installUnit('[Service]\nRestart=always\n');
+    const run: RunCommand = () => noop({ status: 5, stderr: 'Unit not found.\n' });
+    expect(() => startDaemonService(run)).toThrow(/Unit not found/);
+  });
+
+  it('systemdMainPid reads the unit it is given, and null when the show call fails', () => {
+    installUnit('[Service]\nRestart=always\n');
+    const unit = { name: SERVICE_NAME, path: join(process.env['XDG_CONFIG_HOME']!, 'systemd', 'user', SERVICE_NAME), legacy: false };
+    const ok: RunCommand = (_cmd, args) => noop({ stdout: args.includes('show') ? '4242\n' : '' });
+    expect(systemdMainPid(unit, ok)).toBe(4242);
+    expect(systemdMainPid(unit, () => noop({ status: 1 }))).toBeNull();
   });
 });

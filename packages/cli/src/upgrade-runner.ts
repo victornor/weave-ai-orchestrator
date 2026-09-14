@@ -9,7 +9,6 @@
  */
 import { cpSync, existsSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { openDb, nowIso, type Db } from '@weave-ai/db';
 import type { Upgrade } from '@weave-ai/shared';
 import {
@@ -17,7 +16,7 @@ import {
   resolveInstalledUnit, switchRelease, type InstalledLaunchdAgent, type InstalledUnit,
 } from '@weave-ai/release';
 import { configHome } from './contexts.js';
-import { startDaemon, stopDaemon } from './daemon.js';
+import { ensureUnitRestartAlways, realRun, startDaemon, stopDaemon, type CommandResult, type RunCommand } from './daemon.js';
 
 /** How long the new daemon has to come back healthy on the target release before it is rolled back. */
 export const HEALTH_DEADLINE_MS = 90_000;
@@ -173,18 +172,13 @@ async function probeHealth(base: string): Promise<HealthProbe | null> {
 
 // ---------- the seam every real command/proc-read goes through (VS-316, design.md "Testing this safely") ----------
 
-export interface CommandResult { status: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string; error?: Error }
 /** One command, run and captured — never a real `systemctl`/`launchctl` invocation in a test. */
-export type RunCommand = (cmd: string, args: string[]) => CommandResult;
+export type { CommandResult, RunCommand } from './daemon.js';
 /** One `/proc/<pid>/cgroup` read — never a real one in a test. */
 export type ReadCgroup = (pid: number) => string;
 
 export interface HostIo { run: RunCommand; readCgroup: ReadCgroup }
 
-const realRun: RunCommand = (cmd, args) => {
-  const r = spawnSync(cmd, args, { encoding: 'utf8' });
-  return { status: r.status, signal: r.signal, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error };
-};
 const realReadCgroup: ReadCgroup = (pid) => readFileSync(`/proc/${pid}/cgroup`, 'utf8');
 export const realHostIo: HostIo = { run: realRun, readCgroup: realReadCgroup };
 
@@ -487,6 +481,10 @@ export function migrateLaunchdAgent(legacyAgent: InstalledLaunchdAgent, io: Host
 export function restartCommand(config: string, io: HostIo = realHostIo): RestartOutcome {
   const unit = resolveInstalledUnit();
   const launchdAgent = resolveInstalledLaunchdAgent();
+
+  // VS-376: this restart is an upgrade's, so repair the installed unit it is about to restart if it
+  // still only restarts on failure. A no-op for a unit already at `always`.
+  if (process.platform === 'linux') ensureUnitRestartAlways(io.run, unit);
 
   if (process.platform === 'linux' && unit?.legacy) return migrateSystemdUnit(unit, io);
   if (process.platform === 'darwin' && launchdAgent?.legacy) return migrateLaunchdAgent(launchdAgent, io);

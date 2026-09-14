@@ -1,0 +1,7 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "A worker's broad pkill took down the live daemon, which stayed dead
+  because the unit only restarts on failure: restart the unit after any
+  unexpected exit, start and stop through systemd when a unit exists, and give
+  workers a safe scratch-daemon helper"
+skip_specs: true

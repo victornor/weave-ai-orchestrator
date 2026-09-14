@@ -7,8 +7,8 @@ import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { join } from 'node:path';
 import { configHome } from '../contexts.js';
-import { LAUNCHD_LABEL, SERVICE_NAME, followLog, installLaunchdAgent, installService, isRunning, logFile, pidFile, readPid, renderLaunchdPlist, renderServiceUnit, resolveServerBin, serviceUnitPath, startDaemon, stopDaemon, tailLog } from '../daemon.js';
-import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, releaseStamp, resolveWorkspaceStateDir, switchRelease } from '../release.js';
+import { LAUNCHD_LABEL, followLog, installLaunchdAgent, installService, isRunning, logFile, pidFile, readPid, renderLaunchdPlist, renderServiceUnit, resolveServerBin, startDaemon, startDaemonService, stopDaemon, stopDaemonService, systemdMainPid, tailLog } from '../daemon.js';
+import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, releaseStamp, resolveInstalledUnit, resolveWorkspaceStateDir, switchRelease } from '../release.js';
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { AC_ENV, isTerminalUpgrade, type Upgrade } from '@weave-ai/shared';
@@ -32,6 +32,41 @@ function displayVersion(version: string | null | undefined, path?: string | null
 }
 interface DaemonYaml { upgrade?: { source?: string; ref?: string; keep?: number; drainTimeoutSec?: number } }
 
+interface DaemonMarker { pid?: number; publicUrl?: string; setupRequired?: boolean }
+
+/** The daemon's own boot marker, or null when it has not written one yet. */
+function readMarker(): string | null {
+  try { return readFileSync(join(configHome(), 'daemon.json'), 'utf8'); } catch { return null; }
+}
+
+/**
+ * Wait until the daemon writes its `daemon.json` (it is listening) or, when `pid` is given, that pid
+ * dies (port in use, bad config …). `previous` makes the systemd path wait for a *fresh* marker: the
+ * file survives a stop, so its mere presence is not proof a new daemon booted.
+ */
+async function waitForDaemonJson(expected: { pid?: number; previous?: string | null }): Promise<DaemonMarker | null> {
+  const marker = join(configHome(), 'daemon.json');
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    if (expected.pid !== undefined && !isRunning(expected.pid)) {
+      const log = logFile();
+      let tail = '';
+      try { tail = readFileSync(log, 'utf8').trim().split('\n').slice(-8).join('\n'); } catch { /* no log */ }
+      throw new ApiError('internal', `the daemon exited right after starting (see ${log})`, 500, { logTail: tail });
+    }
+    let raw: string | null = null;
+    try { raw = readFileSync(marker, 'utf8'); } catch { /* not yet */ }
+    if (raw !== null && (expected.previous === undefined || raw !== expected.previous)) {
+      try {
+        const j = JSON.parse(raw) as DaemonMarker;
+        if (expected.pid === undefined || j.pid === expected.pid) return j;
+      } catch { /* not valid json yet */ }
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return null;
+}
+
 export function register(program: Command): void {
   const daemon = program.command('daemon').description('daemon lifecycle on this machine');
 
@@ -46,28 +81,27 @@ export function register(program: Command): void {
         emit({ started: false, pid: existing, reason: 'already running' }, () => write(`${style.dim('already running')} pid ${existing}`));
         return;
       }
+      // VS-376: with a unit installed the daemon is a service — start it through systemd, so it
+      // survives this terminal and `systemctl` can see it. A foreground debug run never uses the unit.
+      if (opts['foreground'] !== true) {
+        const previousMarker = readMarker();
+        const service = startDaemonService();
+        if (service) {
+          const ready = await waitForDaemonJson({ previous: previousMarker });
+          emit({ started: true, unit: service.unit, how: service.how, publicUrl: ready?.publicUrl ?? null }, () => {
+            write(`${style.ok(ready ? 'started' : 'started (not confirmed yet)')} ${service.how}`);
+            if (ready?.setupRequired) write(style.warn('public listener held: no operator password yet — run `weave daemon set-password` on this machine to open it'));
+            fields([['url', ready?.setupRequired ? `${ready.publicUrl ?? ''} (after set-password)` : ready?.publicUrl ?? '(pending)'], ['unit', service.unit], ['log', logFile()], ['next', ready?.setupRequired ? 'weave daemon set-password' : 'weave daemon status']]);
+          });
+          return;
+        }
+      }
       const result = startDaemon({
         foreground: opts['foreground'] === true,
         ...(typeof opts['listen'] === 'string' ? { listen: opts['listen'] } : {}),
       });
-      let ready: { publicUrl?: string; setupRequired?: boolean } | null = null;
-      if (!result.foreground && result.pid) {
-        // Wait until the daemon has written its daemon.json (it is listening) or died (port in use, bad config …).
-        const marker = join(configHome(), 'daemon.json');
-        const deadline = Date.now() + 20_000;
-        while (Date.now() < deadline) {
-          if (!isRunning(result.pid)) {
-            let tail = '';
-            try { tail = readFileSync(result.log, 'utf8').trim().split('\n').slice(-8).join('\n'); } catch { /* no log */ }
-            throw new ApiError('internal', `the daemon exited right after starting (see ${result.log})`, 500, { logTail: tail });
-          }
-          try {
-            const j = JSON.parse(readFileSync(marker, 'utf8')) as { pid?: number; publicUrl?: string; setupRequired?: boolean };
-            if (j.pid === result.pid) { ready = j; break; }
-          } catch { /* not yet */ }
-          await new Promise((r) => setTimeout(r, 250));
-        }
-      }
+      let ready: DaemonMarker | null = null;
+      if (!result.foreground && result.pid) ready = await waitForDaemonJson({ pid: result.pid });
       emit({ started: true, ...result, publicUrl: ready?.publicUrl ?? null }, () => {
         if (result.foreground) return;
         write(`${style.ok(ready ? 'started' : 'started (not confirmed yet)')} pid ${result.pid}`);
@@ -85,6 +119,16 @@ export function register(program: Command): void {
       // already give running turns before signalling the process — a plain stop used to skip this
       // entirely and go straight to `stopDaemon()`'s SIGTERM.
       const { interrupted } = await drainViaHttp(command, Number.parseInt(String(opts['drainTimeout'] ?? '180'), 10));
+      // VS-376: a bare SIGTERM to the pid would be restarted by `Restart=always`; when the daemon is
+      // a unit, stop it through systemd so the stop is deliberate and sticks.
+      const service = stopDaemonService();
+      if (service) {
+        emit({ stopped: true, unit: service.unit, interrupted }, () => {
+          write(`${style.ok('stopped')} ${service.how}`);
+          if (interrupted.length) write(style.warn(`${interrupted.length} run(s) were still going and got interrupted; they resume on their own`));
+        });
+        return;
+      }
       const result = await stopDaemon();
       emit({ ...result, interrupted }, () => {
         write(result.stopped ? `${style.ok('stopped')} pid ${result.pid}` : 'not running');
@@ -108,6 +152,11 @@ export function register(program: Command): void {
     .action(async (_opts: unknown, command: Command) => run(async () => {
       const pid = readPid();
       const local = { pid, running: isRunning(pid), pidFile: pidFile(), log: logFile() };
+      // VS-376: a daemon started from a terminal is not the unit's — it dies with that terminal and
+      // an upgrade expects the unit, so name it rather than reporting a bare "running".
+      const unit = process.platform === 'linux' ? resolveInstalledUnit() : null;
+      const unitPid = unit ? systemdMainPid(unit) : null;
+      const outsideUnit = Boolean(unit && local.running && local.pid !== unitPid);
       let health: Health | null = null;
       let error: string | null = null;
       try {
@@ -116,15 +165,17 @@ export function register(program: Command): void {
       } catch (e) {
         error = e instanceof ApiError ? `${String(e.code).toUpperCase()}: ${e.message}` : (e as Error).message;
       }
-      emit({ local, health, error }, () => {
+      emit({ local, unit: unit?.name ?? null, unitPid, outsideUnit, health, error }, () => {
         fields([
           ['process', local.running ? `running (pid ${pid})` : 'not running here'],
+          ['unit', unit ? `${unit.name}${unitPid ? ` (pid ${unitPid})` : ' (inactive)'}` : undefined],
           ['log', local.log],
           ['version', health ? displayVersion(health.version, health.release?.path) : undefined],
           ['tls', health?.tlsMode],
           ['operator', health?.operatorConfigured === undefined ? undefined : health.operatorConfigured ? 'configured' : style.warn('not configured — run `weave daemon set-password`')],
           ['error', error ? style.bad(error) : undefined],
         ]);
+        if (outsideUnit) write(style.warn(`pid ${local.pid} is running outside ${unit!.name} — close the terminal and it stops; restart it under the unit with \`weave daemon stop && weave daemon start\``));
         if (health?.workspaces?.length) {
           write('');
           table(health.workspaces, [
@@ -527,14 +578,17 @@ async function drainViaHttp(command: Command, drainTimeoutSec: number): Promise<
 async function drainAndRestart(command: Command, drainTimeoutSec: number): Promise<{ how: string; version: string | null; interrupted: Array<{ workspace: string; runId: string }> }> {
   const { interrupted, client } = await drainViaHttp(command, drainTimeoutSec);
   let how: string;
-  const unitInstalled = existsSync(serviceUnitPath()) && process.platform === 'linux';
-  if (unitInstalled) {
-    const r = spawnSync('systemctl', ['--user', 'restart', SERVICE_NAME], { encoding: 'utf8' });
+  // VS-376: restart through whichever unit is actually installed, pre-rename name included. Testing
+  // only the current-name file would fall through to a bare kill+spawn, which `Restart=always` would
+  // then restart from under us.
+  const unit = process.platform === 'linux' ? resolveInstalledUnit() : null;
+  if (unit) {
+    const r = spawnSync('systemctl', ['--user', 'restart', unit.name], { encoding: 'utf8' });
     if (r.status !== 0) {
       await client?.post('/api/daemon/undrain', {}).catch(() => undefined);
-      throw new ApiError('internal', `systemctl --user restart ${SERVICE_NAME} failed: ${r.stderr.trim()}`, 500);
+      throw new ApiError('internal', `systemctl --user restart ${unit.name} failed: ${r.stderr.trim()}`, 500);
     }
-    how = `systemctl --user restart ${SERVICE_NAME}`;
+    how = `systemctl --user restart ${unit.name}`;
   } else {
     await stopDaemon();
     const started = startDaemon({});

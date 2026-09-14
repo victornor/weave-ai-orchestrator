@@ -13,4 +13,6 @@ export { fetchCertPin, applyCertPin } from './tls.js';
 export {
   resolveServerBin, startDaemon, stopDaemon, readPid, isRunning, tailLog, followLog, installService,
   renderServiceUnit, serviceUnitPath, pidFile, logFile,
+  withRestartAlways, ensureUnitRestartAlways, systemdMainPid, startDaemonService, stopDaemonService,
+  type RunCommand, type CommandResult,
 } from './daemon.js';

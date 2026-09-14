@@ -85,6 +85,9 @@ export function V2NeedsScreen(): React.ReactElement {
 
   const [scopeFilter, setScopeFilter] = useState<string>(() => (scope.kind === 'workspace' ? scope.ws : 'all'));
   const [kindFilter, setKindFilter] = useState<string>('all');
+  // The design's Held chip: a filter over `weaverReviewStatus === 'concerns'`. It is one selection
+  // with the kind chips — `heldOnly` and a non-`all` `kindFilter` never hold at the same time.
+  const [heldOnly, setHeldOnly] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
 
   const decisionsQueries = useDecisionsMany(ids, { status: 'open', owner: 'human' });
@@ -145,9 +148,27 @@ export function V2NeedsScreen(): React.ReactElement {
     return (workspaceId: string): string => map.get(workspaceId) ?? workspaceId;
   }, [listed]);
   const filtered = useMemo(
-    () => all.filter((d) => (scopeFilter === 'all' || slugOf(d.workspaceId) === scopeFilter) && (kindFilter === 'all' || d.kind === kindFilter)),
-    [all, scopeFilter, kindFilter, slugOf],
+    () =>
+      all.filter(
+        (d) =>
+          (scopeFilter === 'all' || slugOf(d.workspaceId) === scopeFilter) &&
+          (kindFilter === 'all' || d.kind === kindFilter) &&
+          (!heldOnly || d.weaverReviewStatus === 'concerns'),
+      ),
+    [all, scopeFilter, kindFilter, heldOnly, slugOf],
   );
+
+  // Held is mutually exclusive with the kind chips: choosing one clears the other, so the row is a
+  // single selection across `{Held, All, kind…}`.
+  const chooseKind = (kind: string): void => {
+    setKindFilter(kind);
+    setHeldOnly(false);
+  };
+  const toggleHeld = (): void => {
+    const next = !heldOnly;
+    setHeldOnly(next);
+    if (next) setKindFilter('all');
+  };
 
   const onAnswer = (decision: Decision, a: V2Answer): void => {
     setAnswerError(null);
@@ -187,9 +208,10 @@ export function V2NeedsScreen(): React.ReactElement {
           <Chip key={w.id} label={w.name} tone="scope" active={scopeFilter === w.id} onClick={() => setScopeFilter(w.id)} />
         ))}
         {kinds.length ? <span className="mx-1 h-4 w-px bg-line-2" aria-hidden /> : null}
-        <Chip label="All" active={kindFilter === 'all'} onClick={() => setKindFilter('all')} />
+        <Chip label="Held" active={heldOnly} onClick={toggleHeld} />
+        <Chip label="All" active={kindFilter === 'all' && !heldOnly} onClick={() => chooseKind('all')} />
         {kinds.map((k) => (
-          <Chip key={k} label={KIND_LABEL[k] ?? k} active={kindFilter === k} onClick={() => setKindFilter(k)} />
+          <Chip key={k} label={KIND_LABEL[k] ?? k} active={kindFilter === k} onClick={() => chooseKind(k)} />
         ))}
         <span className="ml-auto ac-mono text-micro text-text-3" aria-live="polite">
           {filtered.length} waiting
@@ -201,10 +223,14 @@ export function V2NeedsScreen(): React.ReactElement {
         </p>
       ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {all.length === 0 ? (
+        {all.length === 0 && !heldOnly ? (
           <EmptyState title="Nothing needs you right now." detail="Open decisions from every workspace show up here." />
         ) : filtered.length === 0 ? (
-          <EmptyState title="Nothing in this filter." detail="Choose another scope or kind." />
+          heldOnly ? (
+            <EmptyState title="Nothing is held." detail="No open decision here is held by the weaver." />
+          ) : (
+            <EmptyState title="Nothing in this filter." detail="Choose another scope or kind." />
+          )
         ) : (
           <div className="mx-auto flex max-w-2xl flex-col gap-4">
             {filtered.map((d) => {

@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { childEnv } from '@weave-ai/runtime-sdk';
 import type { TurnInput } from '@weave-ai/runtime-sdk';
 import { buildArgs, opencodeConfig, resumeCommand } from '../src/args.js';
 
@@ -54,13 +57,35 @@ describe('opencode buildArgs', () => {
     expect(buildArgs(input()).files).toHaveLength(0);
   });
 
-  it('isolates config via XDG dirs and HOME (VS-161)', () => {
-    expect(buildArgs(input({ configHome: '/ws/.agent-conductor/runtimes/opencode' })).env).toMatchObject({
-      XDG_CONFIG_HOME: '/ws/.agent-conductor/runtimes/opencode',
-      XDG_DATA_HOME: '/ws/.agent-conductor/runtimes/opencode',
-      HOME: '/ws/.agent-conductor/runtimes/opencode',
+  it('isolates every XDG root and HOME to the runtime home (VS-161, VS-436)', () => {
+    const home = '/ws/.agent-conductor/runtimes/opencode';
+    expect(buildArgs(input({ configHome: home })).env).toEqual({
+      XDG_CONFIG_HOME: home,
+      XDG_DATA_HOME: home,
+      XDG_STATE_HOME: home,
+      XDG_CACHE_HOME: home,
+      HOME: home,
     });
   });
+
+  it('never leaves XDG_STATE_HOME at the host user state dir (VS-436)', () => {
+    const home = '/ws/.agent-conductor/runtimes/opencode';
+    const env = buildArgs(input({ configHome: home })).env;
+    expect(env['XDG_STATE_HOME']).not.toBe(join(homedir(), '.local', 'state'));
+    expect(env['XDG_STATE_HOME']).toBe(home);
+  });
+
+  it('overrides an XDG_STATE_HOME inherited from the host in the spawned child (VS-436)', () => {
+    // The daemon process carries the host user's XDG_STATE_HOME; `childEnv` merges that whole
+    // environment, so only the adapter overlay relocating it stops the leak into the worker.
+    vi.stubEnv('XDG_STATE_HOME', '/home/user/.local/state');
+    const home = '/ws/.agent-conductor/runtimes/opencode';
+    const env = childEnv(buildArgs(input({ configHome: home })).env);
+    expect(env['XDG_STATE_HOME']).toBe(home);
+    expect(env['XDG_CACHE_HOME']).toBe(home);
+  });
+
+  afterEach(() => { vi.unstubAllEnvs(); });
 
   it('emits a local MCP server as a command array', () => {
     expect(JSON.parse(opencodeConfig({ l: { type: 'stdio', command: 'node', args: ['s.js'], env: { A: '1' } } })).mcp.l)
@@ -77,8 +102,15 @@ describe('resumeCommand (VS-249)', () => {
     expect(c.args).not.toContain('--format');
   });
 
-  it('relocates HOME and both XDG dirs to configHome, matching buildArgs', () => {
-    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { sessionId: 'ses_1' }, configHome: '/ws/runtimes/opencode' });
-    expect(c.env).toEqual({ HOME: '/ws/runtimes/opencode', XDG_CONFIG_HOME: '/ws/runtimes/opencode', XDG_DATA_HOME: '/ws/runtimes/opencode' });
+  it('relocates HOME and every XDG dir to configHome, matching buildArgs', () => {
+    const home = '/ws/runtimes/opencode';
+    const c = resumeCommand({ cwd: '/home/agent', worktreePath: null, session: { sessionId: 'ses_1' }, configHome: home });
+    expect(c.env).toEqual({
+      HOME: home,
+      XDG_CONFIG_HOME: home,
+      XDG_DATA_HOME: home,
+      XDG_STATE_HOME: home,
+      XDG_CACHE_HOME: home,
+    });
   });
 });

@@ -52,8 +52,13 @@ export function buildArgs(input: TurnInput): OpenCodeBuiltCommand {
 
   const env: Record<string, string> = { ...input.env };
   if (input.configHome) {
+    // VS-436: every XDG root, not only config/data — the child env is the daemon's whole
+    // environment with this overlay on top (`childEnv`), so any root left unset is inherited from
+    // the host user. opencode keeps its recent-model/variant state in XDG_STATE_HOME.
     env['XDG_CONFIG_HOME'] = input.configHome;
     env['XDG_DATA_HOME'] = input.configHome;
+    env['XDG_STATE_HOME'] = input.configHome;
+    env['XDG_CACHE_HOME'] = input.configHome;
     env['HOME'] = input.configHome;
   }
 
@@ -84,6 +89,8 @@ export function resumeCommand(input: ResumeCommandInput): ResumeCommand {
     env['HOME'] = input.configHome;
     env['XDG_CONFIG_HOME'] = input.configHome;
     env['XDG_DATA_HOME'] = input.configHome;
+    env['XDG_STATE_HOME'] = input.configHome;
+    env['XDG_CACHE_HOME'] = input.configHome;
   }
   return { cmd: 'opencode', args, env };
 }

@@ -120,34 +120,64 @@ describe('the V2 chat trace', () => {
     expect(res).toHaveClass('max-h-40');
   });
 
-  it('shows an edit call collapsed by default, opening to the shared diff hunks', () => {
+  it('shows an edit call with its diff expanded, with no click', () => {
     render(
       <ChatTrace
         events={[event({ id: 'e1', seq: 1, type: 'tool.call', payload: { name: 'Edit', callId: 'c1', input: { file_path: 'src/a.ts', old_string: 'const x = 1;', new_string: 'const x = 2;' } } })]}
       />,
     );
     expect(screen.getByText('src/a.ts')).toBeInTheDocument();
-    expect(document.querySelector('[data-trace-edit]')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Edit, src/a.ts' }));
+    // VS-413: visible on first render, not behind a click.
     const body = document.querySelector('[data-trace-edit]') as HTMLElement;
     expect(body).not.toBeNull();
     expect(body).toHaveClass('ac-scroll');
+    // Tall enough to read a typical edit (VS-413), not VS-370's 160px strip.
+    expect(body).toHaveClass('max-h-96');
     expect(body).toHaveTextContent('const x = 1;');
     expect(body).toHaveTextContent('const x = 2;');
   });
 
-  it('shows a write call collapsed by default, opening to the written file', () => {
+  it('shows a write call with its written file expanded, with no click', () => {
     render(
       <ChatTrace
         events={[event({ id: 'e1', seq: 1, type: 'tool.call', payload: { name: 'Write', callId: 'c1', input: { file_path: 'src/b.ts', content: 'export const b = 1;\nexport const c = 2;' } } })]}
       />,
     );
     expect(screen.getByText('src/b.ts')).toBeInTheDocument();
+    expect(document.querySelector('[data-trace-edit]') as HTMLElement).toHaveTextContent('export const b = 1;');
+  });
+
+  it('never folds consecutive edits into a collapsed group: three edits are three expanded diffs', () => {
+    const edit = (id: string, seq: number, path: string, from: string, to: string): RunEvent =>
+      event({ id, seq, type: 'tool.call', payload: { name: 'Edit', callId: id, input: { file_path: path, old_string: from, new_string: to } } });
+    render(
+      <ChatTrace
+        events={[
+          edit('e1', 1, 'src/a.ts', 'const a = 1;', 'const a = 2;'),
+          edit('e2', 2, 'src/b.ts', 'const b = 1;', 'const b = 2;'),
+          edit('e3', 3, 'src/c.ts', 'const c = 1;', 'const c = 2;'),
+        ]}
+      />,
+    );
+    expect(screen.queryByText('Edit ×3')).toBeNull();
+    const bodies = document.querySelectorAll('[data-trace-edit]');
+    expect(bodies).toHaveLength(3);
+    expect(bodies[0]).toHaveTextContent('const a = 1;');
+    expect(bodies[2]).toHaveTextContent('const c = 2;');
+  });
+
+  it('collapses an edit by its own header, and stays collapsed as the turn streams on', () => {
+    const editCall = event({ id: 'e1', seq: 1, type: 'tool.call', payload: { name: 'Edit', callId: 'c1', input: { file_path: 'src/a.ts', old_string: 'const x = 1;', new_string: 'const x = 2;' } } });
+    const { rerender } = render(<ChatTrace events={[editCall]} />);
+    expect(document.querySelector('[data-trace-edit]')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit, src/a.ts' }));
     expect(document.querySelector('[data-trace-edit]')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Write, src/b.ts' }));
-    expect(document.querySelector('[data-trace-edit]') as HTMLElement).toHaveTextContent('export const b = 1;');
+    // A later event must not re-open a row the human closed.
+    const later = event({ id: 'e9', seq: 2, type: 'assistant.text', payload: { text: 'Now the next file.' } });
+    rerender(<ChatTrace events={[editCall, later]} />);
+    expect(document.querySelector('[data-trace-edit]')).toBeNull();
   });
 });
 

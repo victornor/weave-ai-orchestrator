@@ -10,6 +10,11 @@
  * Density follows V1 (VS-370): a run of same-name calls collapses to one `tool ×N` line that opens
  * to its calls, each call keeps its result behind its own disclosure, and any result or command
  * output longer than a few lines scrolls inside a capped box instead of pushing the conversation.
+ *
+ * Edits and writes are the exception (VS-413): like V1, an edit-type call shows its diff expanded on
+ * first render — that is the thing the human came to read — while every other tool call stays
+ * collapsed. An `editPayload` block is never folded into a group, so a diff is never two clicks
+ * deep.
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { RunEvent, RunTrace } from '@weave-ai/shared';
@@ -37,7 +42,10 @@ export function ChatTrace({ events, className }: { events: readonly RunEvent[]; 
  *  whose result is text, or an edit whose payload carries a diff, keeps that body behind a
  *  disclosure; a call with nothing to show is one line, never a button that opens onto nothing. */
 function ToolRow({ block, marker = '▸' }: { block: ToolBlock; marker?: string }): React.ReactElement {
-  const [open, setOpen] = useState(false);
+  // An edit or write starts expanded (VS-413), mirroring V1's `TranscriptLine`: the diff is the
+  // content the human asked for, not a second click to reveal it. Every other tool row — reads,
+  // searches, shell output — keeps starting collapsed (VS-370).
+  const [open, setOpen] = useState(() => Boolean(block.editPayload));
   const expandable = Boolean(block.diff) || Boolean(block.editPayload);
   const tone = block.denied ? 'text-needs-you' : block.error ? 'text-failed' : 'text-text-2';
   const head = (
@@ -73,7 +81,7 @@ function ToolRow({ block, marker = '▸' }: { block: ToolBlock; marker?: string 
       {open && block.editPayload ? (
         // The edit/write body comes straight from V1's `EditPayloadBody` (VS-324): the same
         // `diffHunksForEdits` derivation, `DiffHunks` and 40-line window, not a second renderer.
-        <div className="ac-scroll max-h-40 overflow-auto" data-trace-edit>
+        <div className="ac-scroll max-h-96 overflow-auto" data-trace-edit>
           <EditPayloadBody id={block.id} path={block.target} payload={block.editPayload} />
         </div>
       ) : open && block.diff ? (

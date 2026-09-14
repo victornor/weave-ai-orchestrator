@@ -46,6 +46,8 @@ export interface V2DecisionCardProps {
   ws?: string | null;
   /** The agent that asked — the worker whose feed Watch follows. */
   askedBy?: string | null;
+  /** The asking agent's display name, resolved by the caller; the meta line never shows `askedBy`. */
+  askedByName?: string | null;
   asker?: 'weaver' | 'worker';
   busy?: boolean;
   /** The plan under approval, rendered above the actions on a `plan_approval`. */
@@ -221,6 +223,7 @@ export function V2DecisionCard({
   projectSlug,
   ws,
   askedBy,
+  askedByName,
   asker,
   busy,
   plan,
@@ -259,7 +262,10 @@ export function V2DecisionCard({
   const missing = inputs.filter((i) => i.required && isEmpty(values[i.key]));
   const destructive = decision.kind === 'discard_approval';
   const docTarget = documentTarget(decision);
-  const meta = [ticketIdentifier, projectLabel ?? projectSlug ?? 'Workspace', askedBy].filter(Boolean).join(' · ');
+  // Never join the raw agent id into captain-visible text (VS-403): the caller resolves the name,
+  // and an unresolved asker reads as a neutral label instead.
+  const askerLabel = askedBy ? (askedByName?.trim() || (asker === 'weaver' ? 'the weaver' : 'an agent')) : null;
+  const meta = [ticketIdentifier, projectLabel ?? projectSlug ?? 'Workspace', askerLabel].filter(Boolean).join(' · ');
   const head = headerLabel(decision, asker);
   const label = inert ? (answered ? 'Answered' : 'Closed') : head;
   const title = decision.title;

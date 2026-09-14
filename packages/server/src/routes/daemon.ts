@@ -63,7 +63,7 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   }));
 
   app.get('/workspaces', (c) => c.json(uniqueWorkspaces(deps).map((w) => ({
-    id: w.id, name: w.ctx.config.name, ticketPrefix: w.ctx.config.ticketPrefix, root: w.ctx.paths.root,
+    id: w.id, internalId: w.ctx.workspaceId, name: w.ctx.config.name, ticketPrefix: w.ctx.config.ticketPrefix, root: w.ctx.paths.root,
     projects: w.ctx.config.projects.map((p) => p.id),
     needsYou: needsYouCount(w),
   }))));

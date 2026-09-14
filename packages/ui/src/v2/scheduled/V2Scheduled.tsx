@@ -81,7 +81,8 @@ export function V2Scheduled(): React.ReactElement {
 function projectName(projectId: string | null | undefined, projects: Array<{ id: string; slug: string; name?: string | null }>): string | null {
   if (!projectId) return null;
   const p = projects.find((x) => x.id === projectId);
-  return p ? (p.name ?? p.slug) : projectId;
+  // An unresolved project reads as nothing, never its raw id (VS-403).
+  return p ? (p.name ?? p.slug) : null;
 }
 
 function ScheduledRow({ r, projects, onFocus }: { r: Listed; projects: Array<{ id: string; slug: string; name?: string | null }>; onFocus: () => void }): React.ReactElement {

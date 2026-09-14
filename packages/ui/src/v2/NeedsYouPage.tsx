@@ -10,7 +10,7 @@
  */
 import { useMemo, useState } from 'react';
 import { projectLabel, type Decision, type DecisionAnswerInputs } from '@weave-ai/shared';
-import { useAnswerDecision, useDecisionsMany, useTicketsMany, useWeaverMany, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
+import { useAnswerDecision, useDecisionsMany, useTicketsMany, useWeaverMany, useWorkersMany, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
 import { NetworkError } from '../api/client';
 import { enqueue } from '../lib/queue';
 import { decisionCarriesSecret } from '../lib/decisionSecrets';
@@ -91,6 +91,7 @@ export function V2NeedsScreen(): React.ReactElement {
   const ticketQueries = useTicketsMany(ids, { limit: 300 });
   const projectsByWs = useWorkspaceProjects(ids);
   const weaverQueries = useWeaverMany(ids);
+  const workerQueries = useWorkersMany(ids, { includeRetired: true });
   const answer = useAnswerDecision();
 
   // Decisions owned by the human are raised by the weaver (or the system), not a worker — a worker's
@@ -104,6 +105,18 @@ export function V2NeedsScreen(): React.ReactElement {
     });
     return map;
   }, [ids.join('\0'), weaverQueries]);
+
+  // The asker's display name, so the card's meta line never shows a raw agent id (VS-403). A worker
+  // comes from the workspace's worker list, the weaver from its own lookup.
+  const agentNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const q of workerQueries) for (const w of q.data ?? []) map.set(w.id, w.name);
+    for (const q of weaverQueries) {
+      const agent = q.data?.agent;
+      if (agent) map.set(agent.id, agent.name);
+    }
+    return map;
+  }, [ids.join('\0'), workerQueries, weaverQueries]);
 
   const ticketsById = useMemo(() => {
     const map = new Map<string, { identifier: string }>();
@@ -121,9 +134,19 @@ export function V2NeedsScreen(): React.ReactElement {
   const errored = decisionsQueries.every((q) => q.isError) && decisionsQueries.length > 0;
 
   const kinds = kindsPresent(all);
+  // A decision carries the workspace's internal id; the route and the scope chips carry the slug.
+  // Normalise to the slug before comparing, so the workspace-scoped screen is not silently empty.
+  const slugOf = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const w of listed) {
+      map.set(w.id, w.id);
+      map.set(w.internalId, w.id);
+    }
+    return (workspaceId: string): string => map.get(workspaceId) ?? workspaceId;
+  }, [listed]);
   const filtered = useMemo(
-    () => all.filter((d) => (scopeFilter === 'all' || d.workspaceId === scopeFilter) && (kindFilter === 'all' || d.kind === kindFilter)),
-    [all, scopeFilter, kindFilter],
+    () => all.filter((d) => (scopeFilter === 'all' || slugOf(d.workspaceId) === scopeFilter) && (kindFilter === 'all' || d.kind === kindFilter)),
+    [all, scopeFilter, kindFilter, slugOf],
   );
 
   const onAnswer = (decision: Decision, a: V2Answer): void => {
@@ -197,6 +220,7 @@ export function V2NeedsScreen(): React.ReactElement {
                   projectSlug={project?.slug ?? null}
                   ws={d.workspaceId}
                   askedBy={d.askedByAgentId}
+                  askedByName={d.askedByAgentId ? agentNameById.get(d.askedByAgentId) ?? null : null}
                   asker={d.askedByAgentId && weaverByWs.get(d.workspaceId) === d.askedByAgentId ? 'weaver' : undefined}
                   busy={answer.isPending}
                   onAnswer={(a) => onAnswer(d, a)}

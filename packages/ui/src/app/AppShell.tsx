@@ -113,6 +113,7 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
     return [
       {
         id: activeWs,
+        internalId: summary.data?.workspace.id ?? '',
         name: summary.data?.workspace.name ?? activeWs,
         ticketPrefix: summary.data?.workspace.ticketPrefix ?? '',
         root: '', projects: [], needsYou: 0,

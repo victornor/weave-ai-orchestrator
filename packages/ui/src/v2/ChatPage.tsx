@@ -134,6 +134,7 @@ function DecisionsPane({
   tickets,
   projects,
   answerError,
+  agentNameById,
 }: {
   ws: string;
   decisions: Decision[];
@@ -146,6 +147,7 @@ function DecisionsPane({
   tickets: Ticket[];
   projects: Project[];
   answerError: string | null;
+  agentNameById: ReadonlyMap<string, string>;
 }): React.ReactElement {
   const ticketOf = (d: Decision): Ticket | undefined => tickets.find((t) => t.id === d.ticketId);
   const projectOf = (d: Decision): Project | undefined => projects.find((p) => p.id === (d.projectId ?? ticketOf(d)?.projectId));
@@ -193,9 +195,10 @@ function DecisionsPane({
                 decision={d}
                 ws={ws}
                 narrow
-                busy={busy}
-                askedBy={d.askedByAgentId}
-                ticketIdentifier={t?.identifier ?? d.ticketId}
+                 busy={busy}
+                 askedBy={d.askedByAgentId}
+                 askedByName={d.askedByAgentId ? agentNameById.get(d.askedByAgentId) ?? null : null}
+                 ticketIdentifier={t?.identifier ?? d.ticketId}
                 projectLabel={p ? projectLabel(p) : null}
                 onAnswer={(a) => onAnswer(d.id, a)}
               />
@@ -271,6 +274,15 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const weaver = useWeaver();
   const conductorId = weaver.data?.agent.id ?? null;
   const conductorRuntime = weaver.data?.agent.runtimeId ?? null;
+  // The asker's display name for every decision card on this screen, so the meta line never shows a
+  // raw agent id (VS-403). The screen is one workspace, so its workers and weaver cover the askers.
+  const agentNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const w of workers.data ?? []) map.set(w.id, w.name);
+    const weaverAgent = weaver.data?.agent;
+    if (weaverAgent) map.set(weaverAgent.id, weaverAgent.name);
+    return map;
+  }, [workers.data, weaver.data]);
   const runtimes = useRuntimes();
   const conductorModels = useRuntimeModels(conductorRuntime);
   const accounts = useUsageAccounts({ refetchIntervalMs: ACCOUNTS_REFRESH_MS });
@@ -579,9 +591,10 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                                   <V2DecisionCard
                                     decision={d}
                                     ws={ws}
-                                    busy={answer.isPending}
-                                    askedBy={d.askedByAgentId}
-                                    ticketIdentifier={ticket?.identifier ?? d.ticketId}
+                                     busy={answer.isPending}
+                                     askedBy={d.askedByAgentId}
+                                     askedByName={d.askedByAgentId ? agentNameById.get(d.askedByAgentId) ?? null : null}
+                                     ticketIdentifier={ticket?.identifier ?? d.ticketId}
                                     projectLabel={project ? projectLabel(project) : null}
                                     onAnswer={(a) => onAnswer(d.id, a)}
                                   />
@@ -670,6 +683,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
             tickets={tickets.data ?? []}
             projects={projects.data ?? []}
             answerError={answerError}
+            agentNameById={agentNameById}
           />
         ) : null}
       </div>

@@ -177,9 +177,14 @@ export interface RuntimeInfo {
  * workspace's identity, its project ids and the number of decisions waiting on the human — there is
  * no `slug` and there are no timestamps on the wire, and reading one that is not sent is how the
  * rail's workspace entries came to render an empty column.
+ *
+ * `id` is the slug (the map key and the value routes/links carry); `internalId` is the row's own
+ * ULID, which records minted from a run token carry (VS-403), so a consumer can resolve by whichever
+ * id it holds instead of comparing the two systems.
  */
 export interface WorkspaceListItem {
   id: string;
+  internalId: string;
   name: string;
   ticketPrefix: string;
   root: string;

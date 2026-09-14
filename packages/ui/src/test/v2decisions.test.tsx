@@ -47,10 +47,17 @@ beforeEach(() => {
 });
 
 describe('the V2 decision card header', () => {
-  it('uses neutral text, with no status glyph, and names the ticket and project', () => {
-    renderCard({ ticketIdentifier: 'ACME-51', projectLabel: 'api', askedBy: 'a1' });
+  it('uses neutral text, with no status glyph, and names the ticket, project and asking agent', () => {
+    renderCard({ ticketIdentifier: 'ACME-51', projectLabel: 'api', askedBy: 'a1', askedByName: 'Backend Engineer #7' });
     expect(screen.getByText('Needs you')).toBeInTheDocument();
-    expect(screen.getByText('ACME-51 · api · a1')).toBeInTheDocument();
+    expect(screen.getByText('ACME-51 · api · Backend Engineer #7')).toBeInTheDocument();
+  });
+
+  it('never shows the asking agent id when its name is unknown', () => {
+    renderCard({ ticketIdentifier: 'ACME-51', projectLabel: 'api', askedBy: 'a1' });
+    const meta = screen.getByText(/^ACME-51 · api ·/);
+    expect(meta.textContent).toContain('an agent');
+    expect(meta.textContent).not.toContain('a1');
   });
 
   it('names a worker question as a Worker question when the asker is a worker', () => {

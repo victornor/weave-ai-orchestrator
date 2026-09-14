@@ -8,7 +8,7 @@
 import { useParams } from '@tanstack/react-router';
 import { isActiveRun } from '@weave-ai/shared';
 import { contextStrip, resolveModel } from '@weave-ai/render';
-import { useRunGlobal, useRuntimeModels, useWorkersMany } from '../api/hooks';
+import { useRunGlobal, useRuntimeModels, useWeaverMany, useWorkersMany } from '../api/hooks';
 import { useRunEventStream } from '../api/runStream';
 import { useGo } from '../app/link';
 import { ErrorState } from '../components/States';
@@ -47,6 +47,7 @@ export function RunBody({ runId }: { runId: string }): React.ReactElement {
   const { events } = useRunEventStream(runId, { live, ws });
 
   const workers = useWorkersMany(ws ? [ws] : [], { includeRetired: true });
+  const weavers = useWeaverMany(ws ? [ws] : []);
   const runtimeModels = useRuntimeModels(detail.data?.run.runtimeId ?? null);
 
   if (detail.isLoading) {
@@ -61,7 +62,11 @@ export function RunBody({ runId }: { runId: string }): React.ReactElement {
   }
 
   const run = detail.data.run;
-  const agentName = workers[0]?.data?.find((w) => w.id === run.agentId)?.name ?? run.agentId.slice(0, 8);
+  // The agent is a worker or the workspace's weaver; an unresolved one reads as a neutral label,
+  // never a sliced id (VS-403).
+  const worker = workers[0]?.data?.find((w) => w.id === run.agentId);
+  const weaver = weavers[0]?.data?.agent;
+  const agentName = worker?.name ?? (weaver?.id === run.agentId ? weaver.name : 'Unknown agent');
   const resolved = resolveModel(runtimeModels.data ?? null, run.model);
   const modelLabel = resolved ? modelOptionLabel(resolved) : (run.model ?? '—');
   const ctx = contextStrip({ usage: run.usage, contextWindowTokens: resolved?.contextWindowTokens ?? null, hasRun: Boolean(run.startedAt) });

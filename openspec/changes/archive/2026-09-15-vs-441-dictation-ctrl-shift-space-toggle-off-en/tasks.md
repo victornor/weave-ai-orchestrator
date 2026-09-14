@@ -1,0 +1,9 @@
+# Tasks
+
+- [x] 1. Reproduce the keyboard stop against a real browser with a stubbed upload path: for each stop method (mic button, send button, chord toggle-off, chord hold-release) record the number and byte length of `/api/transcribe` uploads and the resulting UI state, with the mic/stop/send button focused, before and after the fix.
+- [x] 2. `packages/ui/src/lib/dictationHotkey.ts`: swallow the chord on keyup as on keydown (claimed-chord flag), and end a push-to-talk hold whose keyup was lost (window blur / focus loss) so a session cannot be left recording by a stale phase.
+- [x] 3. `packages/ui/src/lib/dictation.ts`: make `stop()` a no-op when no session is live; abort-aware request handling (an aborted request is not a failure); a 4xx empty/too-short recording is "nothing was recognized", never "Transcription failed".
+- [x] 4. Add a shared `TranscribingIndicator` (same visual family and accent as `VoiceMeter`, travelling pulse plus a quiet "Transcribing…" label), static under reduced motion, `aria-live="polite"`.
+- [x] 5. Render the indicator while `dictation.transcribing` in `packages/ui/src/v2/ChatComposer.tsx` (in the input area, so the box never flashes empty) and in `packages/ui/src/components/Composer.tsx` (replacing its spinner row).
+- [x] 6. Tests: keyboard toggle on/off with the mic, stop and send button each focused gives one stop, one upload and no failure; hold mode unchanged; a chord press during transcribing starts nothing; a stale hold ends on blur; the indicator renders while transcribing, is gone when the text lands, and is static under reduced motion.
+- [x] 7. Evidence and checks: `pnpm lint`, `pnpm typecheck` and both test suites green with both blocks pasted; real-browser captures (dark and light) of listening, transcribing mid-animation and the text landed with no empty-box frame.

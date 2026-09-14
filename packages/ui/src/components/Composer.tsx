@@ -7,6 +7,7 @@ import { dictationShortcut } from '../lib/dictationHint';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
 import { VoiceMeter } from './VoiceMeter';
+import { TranscribingIndicator } from './TranscribingIndicator';
 
 const ACCEPTED_ATTACHMENT_TYPES = [...ATTACHMENT_IMAGE_TYPES, ...ATTACHMENT_TEXT_TYPES];
 const ACCEPT_ATTR = ACCEPTED_ATTACHMENT_TYPES.join(',');
@@ -583,13 +584,10 @@ export function Composer({
           </div>
         ) : transcribing ? (
           // Distinct from the listening row above: the mic is closed, nothing is being captured
-          // any more, and there is nothing left to stop — only a spinner until the transcript
-          // lands or the attempt fails (VS-195).
+          // any more, and there is nothing left to stop — only the transcript to wait for. The
+          // same indicator V2 uses, so both composers show one transcribing state (VS-441).
           <div className="flex h-12 items-center gap-3 border-t border-line-1 px-3.5">
-            <span className="flex h-8 min-w-0 flex-1 items-center gap-2 text-micro text-text-3">
-              <span className="size-2.5 flex-none animate-spin rounded-pill border border-current border-t-transparent text-accent-link" aria-hidden />
-              Transcribing…
-            </span>
+            <TranscribingIndicator className="h-8 min-w-0 flex-1" />
           </div>
         ) : null}
         {dictating && dictation.mode === 'upload' ? (

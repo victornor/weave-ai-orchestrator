@@ -3,11 +3,14 @@
  * the status bar's figures, message metadata and the collapsed summary line, inline ticket reference
  * tags, attachment rows, answering a decision in the pane, the kept search, and the draft that
  * survives remounting the screen.
+ * VS-412: the live ticket and worker chips — a turn's dispatches under its reply and the row of
+ * unattributed live workers.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
-import type { Decision, RunTrace, ThreadMessage, Ticket } from '@weave-ai/shared';
+import type { Agent, Decision, RunTrace, ThreadMessage, Ticket } from '@weave-ai/shared';
+import { agent, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
   width: 900,
@@ -15,6 +18,7 @@ const state = vi.hoisted(() => ({
   decisions: [] as Decision[],
   traces: [] as RunTrace[],
   tickets: [] as Ticket[],
+  workers: [] as Agent[],
   search: [] as Array<{ messageId: string; authorKind: string; authorId: string | null; createdAt: string; snippet: string }>,
   context: [] as ThreadMessage[],
   events: [] as unknown[],
@@ -74,7 +78,7 @@ vi.mock('../api/hooks', () => ({
     return { data: state.decisions.filter((d) => wanted.includes(d.status)), isSuccess: true };
   },
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
-  useWorkers: () => ({ data: [{ id: 'w1', status: 'running' }, { id: 'w2', status: 'idle' }] }),
+  useWorkers: () => ({ data: state.workers }),
   useProjects: () => ({ data: [{ id: 'p1', workspaceId: 'ws1', slug: 'web', name: 'web' }] }),
   useTickets: () => ({ data: state.tickets }),
   useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: 'claude' }, lastRun: state.lastRun } }),
@@ -192,6 +196,10 @@ beforeEach(() => {
   state.decisions = [];
   state.traces = [];
   state.tickets = [];
+  state.workers = [
+    agent({ id: 'w1', name: 'Platform Engineer #7', status: 'running', ticketId: null }),
+    agent({ id: 'w2', name: 'Plugin Engineer #2', status: 'active', ticketId: null }),
+  ];
   state.search = [];
   state.context = [];
   state.events = [];
@@ -454,5 +462,52 @@ describe('the V2 Chat screen', () => {
     fireEvent.change(await screen.findByLabelText('Search messages'), { target: { value: 'match' } });
     fireEvent.click(screen.getByRole('button', { name: /the found message|match/i }));
     expect(await screen.findByText('Jumped to a message in the conversation')).toBeInTheDocument();
+  });
+
+  it('renders a turn’s dispatched tickets as chips and the live workers with no message as a row (VS-412)', async () => {
+    state.messages = [message({ id: 'm1', runId: 'r1', body: 'Filed two tickets.' })];
+    state.traces = [trace('r1')];
+    state.tickets = [
+      ticket({ id: 'tk1', identifier: 'VS-1', title: 'Fix the flaky test', createdRunId: 'r1', workerId: 'w1', assigneeRoleId: 'r1', status: 'in_progress', createdAt: '2026-09-13T09:00:01.000Z' }),
+      ticket({ id: 'tk2', identifier: 'VS-2', title: 'Follow-up', createdRunId: 'r1', workerId: null, assigneeRoleId: 'r1', status: 'done', createdAt: '2026-09-13T09:00:02.000Z' }),
+    ];
+    state.workers = [
+      agent({ id: 'w1', name: 'Platform Engineer #7', status: 'running', ticketId: 'tk1', createdAt: '2026-09-13T09:00:01.000Z' }),
+      agent({ id: 'w9', name: 'Plugin Engineer #2', status: 'active', ticketId: null, createdAt: '2026-09-13T09:00:00.000Z' }),
+    ];
+    const utils = render(<V2ChatPage />);
+    await screen.findByText('Filed two tickets.');
+
+    // Under the reply: one chip per dispatch, in the order the view model filed them.
+    const chips = document.querySelectorAll('[data-v2-dispatch-chip]');
+    expect(chips).toHaveLength(2);
+    expect(chips[0]!.textContent).toContain('VS-1');
+    expect(chips[0]!.textContent).toContain('Platform Engineer #7');
+    expect(chips[0]!.textContent).toContain('working');
+    expect(chips[1]!.textContent).toContain('VS-2');
+    expect(chips[1]!.textContent).toContain('Follow-up');
+    expect(chips[1]!.textContent).toContain('done');
+
+    // A chip with a worker opens the worker; one filed before a worker exists opens the ticket.
+    fireEvent.click(chips[0]!);
+    expect(state.go).toHaveBeenCalledWith('/v2/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'w1' } });
+    fireEvent.click(chips[1]!);
+    expect(state.go).toHaveBeenCalledWith('/v2/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'VS-2' } });
+
+    // The live worker no message accounts for sits in its own row, glyph and name.
+    const row = document.querySelector('[data-v2-live-worker-row]');
+    expect(row).not.toBeNull();
+    const workerChip = row!.querySelector('[data-v2-worker-chip]');
+    expect(workerChip?.textContent).toContain('Plugin Engineer #2');
+    expect(workerChip?.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('idle');
+
+    // Live, without a reload: the query's next value re-renders the chip's state in place —
+    // working → idle when the worker goes between turns.
+    state.workers = [
+      agent({ id: 'w1', name: 'Platform Engineer #7', status: 'active', ticketId: 'tk1', createdAt: '2026-09-13T09:00:01.000Z' }),
+      state.workers[1]!,
+    ];
+    utils.rerender(<V2ChatPage />);
+    await waitFor(() => expect(document.querySelectorAll('[data-v2-dispatch-chip]')[0]!.textContent).toContain('idle'));
   });
 });

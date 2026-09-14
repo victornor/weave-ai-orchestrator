@@ -1,19 +1,21 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Agent, Role } from '@weave-ai/shared';
+import type { Agent, AgentKind, Role } from '@weave-ai/shared';
 import type { RuntimeAdapter } from '@weave-ai/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
-import { renderBrief, renderConductorInstructions, renderWorkerInstructions } from '../prompts/index.js';
+import { renderBrief, renderConductorInstructions, renderPlannerInstructions, renderWorkerInstructions } from '../prompts/index.js';
 
 const MARKER = '.ac-render.json';
 
 const WEAVER_SKILLS = ['weave-ai-weaver', 'weave-ai-hire', 'weave-ai-planning', 'weave-ai-briefing', 'weave-ai-knowledge', 'weave-ai-artifacts'];
 const WORKER_SKILLS = ['weave-ai-worker', 'weave-ai-openspec', 'weave-ai-scout', 'weave-ai-knowledge', 'weave-ai-artifacts'];
+/** VS-398: the planner reuses the weaver's own ticket-decomposition heuristics; it has no tickets/knowledge-write/artifact tools, so none of the other skills apply. */
+const PLANNER_SKILLS = ['weave-ai-planning'];
 
 /** Skill packages shipped with the daemon, filtered to the ones this agent kind loads. */
-export function skillsFor(ctx: WorkspaceContext, kind: 'weaver' | 'worker'): Array<{ name: string; dir: string }> {
-  const wanted = kind === 'weaver' ? WEAVER_SKILLS : WORKER_SKILLS;
+export function skillsFor(ctx: WorkspaceContext, kind: AgentKind): Array<{ name: string; dir: string }> {
+  const wanted = kind === 'weaver' ? WEAVER_SKILLS : kind === 'planner' ? PLANNER_SKILLS : WORKER_SKILLS;
   if (!ctx.skillsDir || !existsSync(ctx.skillsDir)) return [];
   let entries: string[] = [];
   try { entries = readdirSync(ctx.skillsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch { return []; }
@@ -37,7 +39,9 @@ export async function renderHome(ctx: WorkspaceContext, deps: () => CoreServices
   mkdirSync(home, { recursive: true });
   const instructions = agent.kind === 'weaver'
     ? renderConductorInstructions(ctx, deps)
-    : renderWorkerInstructions(ctx, deps, agent, opts);
+    : agent.kind === 'planner'
+      ? renderPlannerInstructions(ctx, deps, agent)
+      : renderWorkerInstructions(ctx, deps, agent, opts);
   writeFileSync(join(home, 'AGENTS.md'), instructions, 'utf8');
   if (agent.kind === 'worker') {
     writeFileSync(join(home, 'brief.md'), renderBrief(ctx, deps, agent, opts), 'utf8');

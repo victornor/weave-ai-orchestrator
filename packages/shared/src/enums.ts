@@ -4,11 +4,12 @@ function makeEnum<const T extends readonly string[]>(values: T) {
   return { values, ...obj } as const;
 }
 
-export const AGENT_KINDS = ['weaver', 'worker'] as const;
+/** VS-398 adds `planner`: a read-only, pre-ticket planning agent, never the weaver and never a ticket-bound worker. */
+export const AGENT_KINDS = ['weaver', 'worker', 'planner'] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
 /** Who filed a system incident (VS-174). Same values as AgentKind; a separate name so a call site cannot mix them up with an agent's live kind. */
-export const INCIDENT_REPORTER_KINDS = ['weaver', 'worker'] as const;
+export const INCIDENT_REPORTER_KINDS = ['weaver', 'worker', 'planner'] as const;
 export type IncidentReporterKind = (typeof INCIDENT_REPORTER_KINDS)[number];
 
 /** `weave_incident_list`'s `status` filter (VS-271); `list()` itself applies no default. */
@@ -107,8 +108,24 @@ export type DecisionInputType = (typeof DECISION_INPUT_TYPES)[number];
 export const SECRET_SCOPES = ['workspace', 'project', 'role'] as const;
 export type SecretScope = (typeof SECRET_SCOPES)[number];
 
-export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'ticket_blocked', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved', 'live_interrupt', 'self_scheduled'] as const;
+export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'ticket_blocked', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved', 'live_interrupt', 'self_scheduled', 'plan_submitted'] as const;
 export type WakeSource = (typeof WAKE_SOURCES)[number];
+
+/** VS-398: a captain-authored, pre-ticket planning session and its ordered draft tickets. */
+export const PLAN_STATUSES = ['drafting', 'submitted', 'discarded'] as const;
+export type PlanStatus = (typeof PLAN_STATUSES)[number];
+
+/** Deliberately excludes `question` — a plan drafts a body of work with dependencies and tiers, not a one-off answered-in-a-comment ticket. */
+export const PLAN_DRAFT_KINDS = ['change', 'task', 'scout', 'operational'] as const;
+export type PlanDraftKind = (typeof PLAN_DRAFT_KINDS)[number];
+
+/** What became of a draft once its plan was submitted: still pending, linked to the ticket the weaver created, or recorded as failed with a reason. */
+export const PLAN_DRAFT_STATUSES = ['pending', 'created', 'failed'] as const;
+export type PlanDraftStatus = (typeof PLAN_DRAFT_STATUSES)[number];
+
+/** The three canonical worker tiers a draft can suggest or be overridden to. Matches `DEFAULT_WORKER_TIERS`' ids (`packages/shared/src/config.ts`); a workspace that renames or removes those catalog entries is a pre-existing edge case for `workerModelId` generally, not specific to plans. */
+export const PLAN_DRAFT_TIERS = ['quick', 'standard', 'deep'] as const;
+export type PlanDraftTier = (typeof PLAN_DRAFT_TIERS)[number];
 
 /** Recurring scheduled-task row (VS-220). Human-facing name is "Scheduled tasks"; identifiers stay `routine`. */
 export const ROUTINE_STATUSES = ['active', 'paused'] as const;

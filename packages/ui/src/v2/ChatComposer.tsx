@@ -72,6 +72,7 @@ export interface ChatComposerProps {
   onDismissReply?: () => void;
   onSubmit: (text: string, files: File[], opts: { projectId: string | null; replyToMessageId: string | null; idempotencyKey: string }) => void | Promise<void>;
   onOpenSearch: () => void;
+  onOpenPlan: () => void;
   disabled?: boolean;
   queuedReason?: string | null;
   queuedCount?: number;
@@ -88,6 +89,7 @@ export function ChatComposer({
   onDismissReply,
   onSubmit,
   onOpenSearch,
+  onOpenPlan,
   disabled,
   queuedReason,
   queuedCount = 0,
@@ -249,6 +251,9 @@ export function ChatComposer({
       <div className="flex items-center gap-1.5 overflow-x-auto">
         <button type="button" onClick={onOpenSearch} aria-label="Search this conversation" className="v2-tag flex-none text-text-3 hover:text-text-1">
           ⌕ Search
+        </button>
+        <button type="button" onClick={onOpenPlan} aria-label="Plan a body of work interactively" className="v2-tag flex-none text-text-3 hover:text-text-1">
+          Plan
         </button>
         <span className="mx-0.5 h-3 w-px flex-none bg-line-2" aria-hidden />
         <button

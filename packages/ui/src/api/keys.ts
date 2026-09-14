@@ -131,6 +131,9 @@ export const qk = {
   /** A project's roadmap (VS-397). Its own root so a `roadmap.*` event reaches it without being nested under `projects`. */
   roadmapRoot: (ws: string) => ['w', ws, 'roadmap'] as const,
   roadmap: (ws: string, projectId: string) => ['w', ws, 'roadmap', projectId] as const,
+  /** A captain-authored draft plan (VS-398). Its own root so a `plan.*` event reaches it without being nested under `projects`. */
+  planRoot: (ws: string) => ['w', ws, 'plans'] as const,
+  plan: (ws: string, planId: string) => ['w', ws, 'plans', planId] as const,
 
   presentation: (ws: string) => ['w', ws, 'presentation'] as const,
   presentationSurfaces: (ws: string) => ['w', ws, 'presentation', 'surfaces'] as const,

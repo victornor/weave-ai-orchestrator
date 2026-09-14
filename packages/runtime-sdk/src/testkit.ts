@@ -9,8 +9,10 @@ export class FakeRuntime implements RuntimeAdapter {
   resumableSessions = true;
   /** VS-317: set to simulate an adapter that declares scheduling tools to deny on worker turns. */
   workerDeniedTools?: string[];
+  /** VS-398: matches every built-in adapter's declared set; set to e.g. `['auto']` to simulate one that cannot enforce a tool allowlist. */
+  permissionModes = ['auto', 'restricted', 'bypass'];
   get capabilities() {
-    return { resumableSessions: this.resumableSessions, forkSessions: false, streamingInput: this.streamingInput, systemPromptInjection: 'system_prompt' as const, structuredOutput: true, mcp: true, usageReporting: 'per_turn' as const, costReporting: false, permissionModes: ['auto'] };
+    return { resumableSessions: this.resumableSessions, forkSessions: false, streamingInput: this.streamingInput, systemPromptInjection: 'system_prompt' as const, structuredOutput: true, mcp: true, usageReporting: 'per_turn' as const, costReporting: false, permissionModes: this.permissionModes };
   }
   inputs: TurnInput[] = [];
   queue: Array<Partial<TurnResult> | ((input: TurnInput) => Partial<TurnResult> | Promise<Partial<TurnResult>>)> = [];

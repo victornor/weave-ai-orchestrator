@@ -341,6 +341,21 @@ export interface WorkersService {
   spawnForTicket(actor: Actor, ticketId: string): Promise<S.Agent>;       // brief, home, worktree, session placeholder, first wake
   spawnCurator(actor: Actor, projectId: string): Promise<S.Agent>;
   /**
+   * VS-398: the plan's read-only planning agent — a disposable worktree (never the project's shared
+   * clone), no ticket, no role. Returns the existing live one if the plan already has one (mirrors
+   * `startInteractiveSession`'s "do not create a second agent"), provisioned immediately rather than
+   * waiting for a scheduled pass.
+   */
+  ensurePlanner(actor: Actor, planId: string, opts?: { agentId?: string }): Promise<S.Agent>;
+  /** Retires the plan's planning agent and removes its worktree. A no-op if the plan has none. */
+  retirePlanner(planId: string): Promise<void>;
+  /**
+   * VS-398: the project's one drafting plan and its live planner agent — resumes both if a drafting
+   * plan already exists, else creates the plan (with its own thread) and spawns its planner, in the
+   * same action, immediately.
+   */
+  startOrResumePlan(actor: Actor, projectId: string, opts?: { title?: string | null }): Promise<{ plan: S.Plan; agent: S.Agent }>;
+  /**
    * Start an interactive session (VS-101): always against a ticket, either one that already exists
    * or one created in the same action. Marks the ticket `interactiveSession` and calls the ordinary
    * `spawn` unchanged — the session's agent is that ticket's worker, nothing more.
@@ -641,6 +656,8 @@ export interface AccountsService {
 // ---------- channels / threads ----------
 export interface ThreadsService {
   bindOrGet(channelKind: string, externalThreadId: string, externalUserId: string | null, humanLabel?: string): S.ChannelThread;
+  /** VS-398: a fresh `web`-kind thread owned by a given (non-weaver) agent — a planning agent's own plan conversation. Always creates; never bound to an external thread id, never primary. */
+  createOwned(agentId: string, opts?: { humanLabel?: string }): S.ChannelThread;
   get(id: string): S.ChannelThread;
   list(filter?: { channelKind?: string; agentId?: string; ticketId?: string }): S.ChannelThread[];
   bindTicket(actor: Actor, threadId: string, ticketId: string | null): S.ChannelThread;
@@ -791,6 +808,69 @@ export interface CoreServices {
   roadmap: RoadmapService;
   /** VS-328: the live per-worker activity line and last test tally the board reads and streams. */
   activity: WorkerActivityService;
+  /** VS-398: a captain-authored, pre-ticket draft plan and its ordered draft tickets. */
+  planning: PlanningService;
+}
+
+export interface PlanDraftInput {
+  title: string;
+  description?: string;
+  kind: S.PlanDraftKind;
+  priority?: S.TicketPriority;
+  targetRoleId?: string | null;
+  suggestedTier: S.PlanDraftTier;
+  tierOverride?: S.PlanDraftTier | null;
+  /** Other draft ids in the same plan this draft is blocked by. */
+  blockedBy?: string[];
+}
+
+export interface PlanDraftPatch {
+  title?: string;
+  description?: string;
+  kind?: S.PlanDraftKind;
+  priority?: S.TicketPriority;
+  targetRoleId?: string | null;
+  suggestedTier?: S.PlanDraftTier;
+  tierOverride?: S.PlanDraftTier | null;
+  blockedBy?: string[];
+  position?: number;
+}
+
+/**
+ * A captain-authored, pre-ticket draft plan (VS-398): one `drafting` plan per project, an ordered list
+ * of draft tickets, submitted to the weaver as one structured handoff. This service owns the plan and
+ * draft *data* only — spawning the planning agent and creating the plan's chat thread are a separate
+ * concern (`WorkersService`), so `create` takes an already-created `threadId` rather than making one.
+ */
+export interface PlanningService {
+  /** The project's plan history, most recent first. */
+  list(projectId: string): S.Plan[];
+  get(planId: string): S.Plan;
+  /** The project's one `drafting` plan, or null if none is in progress. */
+  getDrafting(projectId: string): S.Plan | null;
+  create(actor: Actor, projectId: string, input: { threadId: string; title?: string | null }): S.Plan;
+  /** Sets or clears the plan's live planning agent (VS-398 storage: `plans.agent_id`). */
+  setAgent(planId: string, agentId: string | null): S.Plan;
+  discard(actor: Actor, planId: string): S.Plan;
+  /** Marks `submitted`; freezes further draft edits. Does not itself notify the weaver — the caller enqueues the `plan_submitted` wake. */
+  submit(actor: Actor, planId: string): S.Plan;
+
+  listDrafts(planId: string): S.PlanDraft[];
+  getDraft(draftId: string): S.PlanDraft;
+  /** Other draft ids (in the same plan) this draft is blocked by. */
+  draftBlockers(draftId: string): string[];
+  /**
+   * The plan's draft ids in an order where every draft's dependencies come before it — a
+   * topological sort over `plan_draft_blockers`, tied by `position` so drafts with no ordering
+   * constraint between them keep captain's own order. Creating tickets in this order lets the weaver
+   * pass each dependency's already-created ticket id as `blockedBy` without a second pass.
+   */
+  creationOrder(planId: string): string[];
+  addDraft(actor: Actor, planId: string, input: PlanDraftInput): S.PlanDraft;
+  updateDraft(actor: Actor, draftId: string, patch: PlanDraftPatch): S.PlanDraft;
+  removeDraft(actor: Actor, draftId: string): void;
+  /** Records what submission did with a draft: linked to the ticket the weaver created, or failed with a reason. Weaver-only in practice. */
+  linkDraft(draftId: string, outcome: { ticketId: string } | { failureReason: string }): S.PlanDraft;
 }
 
 export interface RoadmapCreateInput {

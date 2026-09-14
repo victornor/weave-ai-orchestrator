@@ -18,12 +18,33 @@ export const WEAVER_TOOLS = [
   'weave_roadmap_add', 'weave_roadmap_update', 'weave_roadmap_remove',
   'weave_incident_list', 'weave_incident_get', 'weave_incident_resolve',
   'weave_artifact_put',
+  /** VS-398: reads a submitted (or in-progress) draft plan back, and records what became of each draft once tickets are created from it. */
+  'weave_plan_get', 'weave_plan_draft_link',
 ] as const;
 export const WORKER_ONLY_TOOLS = ['weave_ticket_create', 'weave_schedule_wakeup', 'weave_ticket_open_pull_request'] as const; // project-scoped creation, self-scheduling, and delivery for workers
-export type ToolName = (typeof COMMON_TOOLS)[number] | (typeof WEAVER_TOOLS)[number];
+/**
+ * VS-398: the read-only planning agent's whole tool surface — never `COMMON_TOOLS` plus
+ * subtractions, since most of `COMMON_TOOLS` is ticket- or worktree-shaped and a planner has neither.
+ * Read tools are scoped to the planner's own plan's project (never another project, never
+ * workspace-/decision-scope knowledge — enforced server-side, not by this list alone). The only
+ * tools that write are the draft-editing ones, each scoped to the calling agent's own plan
+ * (`agent.planId`). There is deliberately no submit tool: only captain submits, via an HTTP action.
+ */
+export const PLANNER_TOOLS = [
+  'weave_inbox', 'weave_ticket_list', 'weave_ticket_get',
+  'weave_spec_list', 'weave_spec_get', 'weave_spec_search', 'weave_spec_change_get', 'weave_openspec_status',
+  'weave_knowledge_docs', 'weave_knowledge_doc_get', 'weave_knowledge_get', 'weave_knowledge_search',
+  'weave_role_list', 'weave_role_get',
+  'weave_plan_get', 'weave_plan_draft_add', 'weave_plan_draft_update', 'weave_plan_draft_remove', 'weave_plan_draft_reorder',
+  /** The planner's own reply tool — `weave_human_send` is weaver-only and `weave_ticket_comment` needs a ticket the planner never has. */
+  'weave_plan_reply',
+] as const;
+export type ToolName = (typeof COMMON_TOOLS)[number] | (typeof WEAVER_TOOLS)[number] | (typeof PLANNER_TOOLS)[number];
 
-/** The only tool whose words reach the human; its body is the reply itself. */
+/** The weaver's tool whose words reach the human; its body is the reply itself. Kept as the single name for backward compatibility — `HUMAN_REPLY_TOOLS` is the full set `isHumanReplyToolEvent` checks against. */
 export const HUMAN_REPLY_TOOL = 'weave_human_send' satisfies ToolName;
+/** VS-398: every tool whose words reach a human — the weaver's `weave_human_send` and the planner's own `weave_plan_reply`, since it has neither `weave_human_send` (weaver-only) nor a ticket for `weave_ticket_comment`. */
+export const HUMAN_REPLY_TOOLS = [HUMAN_REPLY_TOOL, 'weave_plan_reply'] as const satisfies readonly ToolName[];
 
 /** The payload keys the runtime adapters use for a tool's name — they do not agree. */
 const TOOL_NAME_KEYS = ['name', 'tool', 'toolName'] as const;
@@ -41,7 +62,7 @@ export function isHumanReplyToolEvent(event: { type: string; payload?: Record<st
   const payload = event.payload;
   if (!payload) return false;
   for (const key of TOOL_NAME_KEYS) {
-    if (payload[key] === HUMAN_REPLY_TOOL) return true;
+    if (typeof payload[key] === 'string' && (HUMAN_REPLY_TOOLS as readonly string[]).includes(payload[key] as string)) return true;
   }
   return false;
 }

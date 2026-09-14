@@ -54,14 +54,14 @@ export function modelsSource(
   };
 }
 
-/** The setting that governs an agent of this kind, optionally given a worker's ticket. */
+/** The setting that governs an agent of this kind, optionally given a worker's ticket. VS-398: a planner runs on the weaver's own setting — there is no separate per-workspace planner model. */
 export function modelSettingFor(
   config: { models: EffectiveModels },
   kind: AgentKind,
   ticket?: { workerModelId?: string | null } | null,
 ): ModelSetting {
   const models = config.models;
-  if (kind === 'weaver') return models.weaver;
+  if (kind === 'weaver' || kind === 'planner') return models.weaver;
   const id = ticket?.workerModelId;
   if (id) {
     const opt = (models.workerOptions ?? []).find((o) => o.id === id);

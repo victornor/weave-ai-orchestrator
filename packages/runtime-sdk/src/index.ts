@@ -1,4 +1,4 @@
-import type { AccountLimitWindow, BillingType, RunErrorFamily, RunEventType, PermissionMode, SessionPolicy } from '@weave-ai/shared';
+import type { AccountLimitWindow, AgentKind, BillingType, RunErrorFamily, RunEventType, PermissionMode, SessionPolicy } from '@weave-ai/shared';
 export type { RunErrorFamily, RunEventType };
 
 export type JsonSchema = Record<string, unknown>;
@@ -59,7 +59,7 @@ export interface TurnHandle {
   /** Deliver text to this turn while it runs. Omitted by an adapter whose turn cannot take live input. */
   send?(text: string): Promise<InputDelivery>;
 }
-export interface AgentHome { path: string; kind: 'weaver' | 'worker' }
+export interface AgentHome { path: string; kind: AgentKind }
 
 /** Input to `describeAccount`: the workspace's per-runtime credential home, the env the CLI would run under, and how long the probe may take. */
 export interface AccountProbeInput { configHome?: string; env: Record<string, string>; timeoutMs: number }

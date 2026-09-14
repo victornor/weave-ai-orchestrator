@@ -21,6 +21,7 @@ import { createSecretsService } from './secrets/index.js';
 import { createPullRequestsService } from './pull-requests/index.js';
 import { createRoutinesService } from './routines/index.js';
 import { createRoadmapService } from './roadmap/index.js';
+import { createPlanningService } from './planning/index.js';
 import { createWeaverArtifactsService } from './artifacts/service.js';
 import { createWorkerActivityService } from './activity/index.js';
 
@@ -39,6 +40,7 @@ export function createCore(ctx: WorkspaceContext): CoreServices {
     pullRequests: createPullRequestsService(ctx, deps),
     routines: createRoutinesService(ctx, deps),
     roadmap: createRoadmapService(ctx, deps),
+    planning: createPlanningService(ctx, deps),
     weaverArtifacts: createWeaverArtifactsService(ctx),
     activity: createWorkerActivityService(ctx),
   };

@@ -1,0 +1,226 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { OcError } from '@weave-ai/shared';
+import { makeHarness, type TestHarness } from '../testing/context.js';
+import { createPlanningService } from './index.js';
+import type { Actor, PlanningService } from '../api.js';
+
+const HUMAN: Actor = { kind: 'human', id: 'victor' };
+const OTHER_PROJECT = 'p-other';
+const OTHER_ROLE = 'r-other';
+
+describe('planning (VS-398)', () => {
+  let h: TestHarness;
+  let planning: PlanningService;
+
+  beforeEach(() => {
+    h = makeHarness();
+    h.ctx.db.insert('projects', {
+      id: OTHER_PROJECT, workspaceId: h.workspaceId, slug: 'other', name: 'Other', gitUrl: 'git@example.com:acme/other.git',
+      defaultBranch: 'main', clonePath: '/tmp/other', maxWorkers: 4, worktreeProvider: 'git', openspecEnabled: 1,
+      policiesJson: {}, status: 'ready', createdAt: 't0', updatedAt: 't0',
+    });
+    h.ctx.db.insert('roles', {
+      id: OTHER_ROLE, workspaceId: h.workspaceId, projectId: OTHER_PROJECT, slug: 'other-role', name: 'Other Role',
+      charterSummary: 'c', scopeText: 's', sessionPolicy: 'per_ticket', maxWorkers: 2, status: 'active',
+      specRevision: 1, createdBy: 'weaver', createdAt: 't0', updatedAt: 't0',
+    });
+    h.ctx.db.insert('channels', { id: 'c1', workspaceId: h.workspaceId, kind: 'web' });
+    h.ctx.db.insert('channel_threads', { id: 'th1', channelId: 'c1', agentId: 'a-planner', createdAt: 't0' });
+    h.ctx.db.insert('tickets', { id: 'tkt-1', workspaceId: h.workspaceId, projectId: h.projectId, number: 1, identifier: 'TST-1', kind: 'change', title: 'Add token plumbing', createdByKind: 'human', createdAt: 't0', updatedAt: 't0' });
+    h.ctx.db.insert('agents', {
+      id: 'agent-1', workspaceId: h.workspaceId, kind: 'planner', name: 'Planner', runtimeId: 'claude',
+      homePath: '/tmp/planner-1', createdAt: 't0', updatedAt: 't0',
+    });
+    h.services.projects = {
+      get: (id: string) => {
+        if (id === h.projectId || id === h.projectSlug) return { id: h.projectId } as never;
+        if (id === OTHER_PROJECT) return { id: OTHER_PROJECT } as never;
+        throw new OcError('not_found', `project ${id} not found`);
+      },
+      list: () => [],
+    } as never;
+    h.services.roles = {
+      get: (id: string) => {
+        if (id === h.roleId) return { id: h.roleId, projectId: h.projectId } as never;
+        if (id === OTHER_ROLE) return { id: OTHER_ROLE, projectId: OTHER_PROJECT } as never;
+        throw new OcError('not_found', `role ${id} not found`);
+      },
+    } as never;
+    planning = createPlanningService(h.ctx, h.deps);
+    h.services.planning = planning;
+  });
+  afterEach(() => h.cleanup());
+
+  const startPlan = (projectId = h.projectId) => planning.create(HUMAN, projectId, { threadId: 'th1', title: 'Dark mode rollout' });
+
+  const addDraft = (planId: string, over: Partial<Parameters<PlanningService['addDraft']>[2]> = {}) =>
+    planning.addDraft(HUMAN, planId, { title: 'Add token plumbing', kind: 'change', suggestedTier: 'standard', ...over });
+
+  it('creates a drafting plan and refuses a second one for the same project', () => {
+    const plan = startPlan();
+    expect(plan.status).toBe('drafting');
+    expect(plan.projectId).toBe(h.projectId);
+    expect(plan.createdByKind).toBe('human');
+    expect(plan.createdById).toBe('victor');
+    expect(planning.getDrafting(h.projectId)?.id).toBe(plan.id);
+    expect(() => startPlan()).toThrow(/already has a drafting plan/);
+  });
+
+  it('allows a new drafting plan once the prior one is submitted or discarded', () => {
+    const first = startPlan();
+    planning.submit(HUMAN, first.id);
+    const second = startPlan();
+    expect(second.id).not.toBe(first.id);
+    expect(planning.getDrafting(h.projectId)?.id).toBe(second.id);
+    planning.discard(HUMAN, second.id);
+    expect(planning.getDrafting(h.projectId)).toBeNull();
+    expect(planning.list(h.projectId).map((p) => p.id).sort()).toEqual([first.id, second.id].sort());
+  });
+
+  it('keeps each project’s plans separate', () => {
+    const mine = startPlan();
+    const theirs = startPlan(OTHER_PROJECT);
+    expect(planning.getDrafting(h.projectId)?.id).toBe(mine.id);
+    expect(planning.getDrafting(OTHER_PROJECT)?.id).toBe(theirs.id);
+  });
+
+  it('adds a draft with defaults and appends it to the plan order', () => {
+    const plan = startPlan();
+    const a = addDraft(plan.id, { title: 'A' });
+    const b = addDraft(plan.id, { title: 'B' });
+    expect(a.position).toBe(0);
+    expect(b.position).toBe(1);
+    expect(a.priority).toBe('medium');
+    expect(a.status).toBe('pending');
+    expect(a.tierOverride).toBeNull();
+    expect(a.createdTicketId).toBeNull();
+    expect(planning.listDrafts(plan.id).map((d) => d.title)).toEqual(['A', 'B']);
+  });
+
+  it('rejects an unknown kind, priority or tier, and a role from another project', () => {
+    const plan = startPlan();
+    expect(() => addDraft(plan.id, { kind: 'question' as never })).toThrow(/kind must be/);
+    expect(() => addDraft(plan.id, { priority: 'urgent' as never })).toThrow(/priority must be/);
+    expect(() => addDraft(plan.id, { suggestedTier: 'fast' as never })).toThrow(/suggestedTier must be/);
+    expect(() => addDraft(plan.id, { tierOverride: 'fast' as never })).toThrow(/tierOverride must be/);
+    expect(() => addDraft(plan.id, { targetRoleId: OTHER_ROLE })).toThrow(/not in this project/);
+    expect(addDraft(plan.id, { targetRoleId: h.roleId }).targetRoleId).toBe(h.roleId);
+  });
+
+  it('overrides the suggested tier and keeps both visible', () => {
+    const plan = startPlan();
+    const draft = addDraft(plan.id, { suggestedTier: 'standard', tierOverride: 'deep' });
+    expect(draft.suggestedTier).toBe('standard');
+    expect(draft.tierOverride).toBe('deep');
+  });
+
+  it('sets, reads back and rejects a cross-plan or self blocker, direct and transitive cycles', () => {
+    const plan = startPlan();
+    const a = addDraft(plan.id, { title: 'A' });
+    const b = addDraft(plan.id, { title: 'B' });
+    const c = addDraft(plan.id, { title: 'C' });
+    planning.updateDraft(HUMAN, b.id, { blockedBy: [a.id] });
+    expect(planning.draftBlockers(b.id)).toEqual([a.id]);
+
+    expect(() => planning.updateDraft(HUMAN, a.id, { blockedBy: [a.id] })).toThrow(/cannot block itself/);
+    expect(() => planning.updateDraft(HUMAN, a.id, { blockedBy: [b.id] })).toThrow(/cycle/);
+    planning.updateDraft(HUMAN, c.id, { blockedBy: [b.id] });
+    expect(() => planning.updateDraft(HUMAN, a.id, { blockedBy: [c.id] })).toThrow(/cycle/);
+
+    const otherPlan = startPlan(OTHER_PROJECT);
+    const foreign = addDraft(otherPlan.id, { title: 'Foreign' });
+    expect(() => planning.updateDraft(HUMAN, a.id, { blockedBy: [foreign.id] })).toThrow(/not in this plan/);
+  });
+
+  it('orders draft creation so every dependency comes before its dependents (VS-398)', () => {
+    const plan = startPlan();
+    const a = addDraft(plan.id, { title: 'A' });
+    const b = addDraft(plan.id, { title: 'B' });
+    const c = addDraft(plan.id, { title: 'C' });
+    // Displayed order is A, B, C, but C depends on B and B depends on A — creation order must
+    // still put a blocker before its dependent even though it already is, and must not silently
+    // reorder drafts that have no relationship to each other.
+    planning.updateDraft(HUMAN, b.id, { blockedBy: [a.id] });
+    planning.updateDraft(HUMAN, c.id, { blockedBy: [b.id] });
+    expect(planning.creationOrder(plan.id)).toEqual([a.id, b.id, c.id]);
+  });
+
+  it('creation order puts a later-displayed blocker before its earlier-displayed dependent', () => {
+    const plan = startPlan();
+    const first = addDraft(plan.id, { title: 'Displayed first' });
+    const second = addDraft(plan.id, { title: 'Displayed second, but first depends on it' });
+    planning.updateDraft(HUMAN, first.id, { blockedBy: [second.id] });
+    const order = planning.creationOrder(plan.id);
+    expect(order.indexOf(second.id)).toBeLessThan(order.indexOf(first.id));
+  });
+
+  it('reorders densely when a draft is moved, and clamps out-of-range positions', () => {
+    const plan = startPlan();
+    const a = addDraft(plan.id, { title: 'A' });
+    addDraft(plan.id, { title: 'B' });
+    const c = addDraft(plan.id, { title: 'C' });
+    planning.updateDraft(HUMAN, c.id, { position: 0 });
+    expect(planning.listDrafts(plan.id).map((d) => d.title)).toEqual(['C', 'A', 'B']);
+    planning.updateDraft(HUMAN, c.id, { position: 99 });
+    expect(planning.listDrafts(plan.id).map((d) => d.title)).toEqual(['A', 'B', 'C']);
+    expect(planning.getDraft(a.id).position).toBe(0);
+  });
+
+  it('removes a draft, renumbers the rest, and clears its blockers', () => {
+    const plan = startPlan();
+    const a = addDraft(plan.id, { title: 'A' });
+    const b = addDraft(plan.id, { title: 'B' });
+    planning.updateDraft(HUMAN, b.id, { blockedBy: [a.id] });
+    planning.removeDraft(HUMAN, a.id);
+    expect(planning.listDrafts(plan.id).map((d) => d.id)).toEqual([b.id]);
+    expect(planning.getDraft(b.id).position).toBe(0);
+    expect(planning.draftBlockers(b.id)).toEqual([]);
+  });
+
+  it('freezes draft edits once the plan is submitted or discarded', () => {
+    const plan = startPlan();
+    const draft = addDraft(plan.id);
+    planning.submit(HUMAN, plan.id);
+    expect(() => addDraft(plan.id)).toThrow(/not drafting/);
+    expect(() => planning.updateDraft(HUMAN, draft.id, { title: 'x' })).toThrow(/not drafting/);
+    expect(() => planning.removeDraft(HUMAN, draft.id)).toThrow(/not drafting/);
+    expect(() => planning.submit(HUMAN, plan.id)).toThrow(/not drafting/);
+  });
+
+  it('links a draft to its created ticket, or records a failure reason, without touching the other', () => {
+    const plan = startPlan();
+    const created = addDraft(plan.id, { title: 'Created' });
+    const failed = addDraft(plan.id, { title: 'Failed' });
+    const linked = planning.linkDraft(created.id, { ticketId: 'tkt-1' });
+    expect(linked.status).toBe('created');
+    expect(linked.createdTicketId).toBe('tkt-1');
+    const failedDraft = planning.linkDraft(failed.id, { failureReason: 'no role fits' });
+    expect(failedDraft.status).toBe('failed');
+    expect(failedDraft.failureReason).toBe('no role fits');
+    expect(planning.getDraft(created.id).status).toBe('created');
+  });
+
+  it('sets and clears the plan’s live agent', () => {
+    const plan = startPlan();
+    expect(plan.agentId).toBeNull();
+    const withAgent = planning.setAgent(plan.id, 'agent-1');
+    expect(withAgent.agentId).toBe('agent-1');
+    expect(planning.setAgent(plan.id, null).agentId).toBeNull();
+  });
+
+  it('emits events for plan and draft lifecycle, carrying the plan id', async () => {
+    const plan = startPlan();
+    const draft = addDraft(plan.id);
+    planning.updateDraft(HUMAN, draft.id, { title: 'x' });
+    planning.linkDraft(draft.id, { ticketId: 'tkt-1' });
+    const second = addDraft(startPlan(OTHER_PROJECT).id);
+    planning.removeDraft(HUMAN, second.id);
+    planning.submit(HUMAN, plan.id);
+    await Promise.resolve();
+    const mine = h.events.filter((e) => e.entityType === 'plan' || e.entityType === 'plan_draft');
+    expect(mine.map((e) => e.type)).toEqual([
+      'plan.created', 'plan.draft_added', 'plan.draft_updated', 'plan.draft_linked',
+      'plan.created', 'plan.draft_added', 'plan.draft_removed', 'plan.submitted',
+    ]);
+  });
+});

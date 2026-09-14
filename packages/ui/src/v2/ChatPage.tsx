@@ -47,6 +47,7 @@ import { ChatTrace, ChatTurnTrace } from './ChatTrace';
 import { V2DispatchChip, V2WorkerChip } from './ChatChips';
 import { V2DecisionCard, type V2Answer } from './DecisionCard';
 import { SearchPanel } from './SearchPanel';
+import { PlanModal } from './PlanModal';
 import { DIVIDER_MAX, DIVIDER_MIN, clampDivider, readDivider, shouldSplit, useElementWidth, writeDivider } from './chatSplit';
 
 /** How long a finished turn is held on screen when no row replaces it (V1's SETTLE_MS). */
@@ -296,6 +297,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const [sending, setSending] = useState(false);
   const [live, setLive] = useState<{ id: string; running: boolean } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   const [anchor, setAnchor] = useState<string | null>(null);
   const [answerError, setAnswerError] = useState<string | null>(null);
   // A decision answered from this screen's own inline card, so the conversation swaps the card for
@@ -707,6 +709,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                 onDismissReply={() => patch({ replyToId: null })}
                 onSubmit={send}
                 onOpenSearch={() => setSearchOpen(true)}
+                onOpenPlan={() => setPlanOpen(true)}
                 queuedReason={offline ? 'Offline — your message is queued' : working ? 'Weaver is replying — your message is queued' : null}
                 queuedCount={queuedCount}
               />
@@ -737,6 +740,12 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
         onSelect={(messageId) => { setAnchor(messageId); setSearchOpen(false); }}
+      />
+      <PlanModal
+        open={planOpen}
+        onClose={() => setPlanOpen(false)}
+        projects={projects.data ?? []}
+        projectId={draft.projectId ?? null}
       />
     </div>
   );

@@ -8,13 +8,14 @@ import { promisify } from 'node:util';
 import { z, type ZodTypeAny } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
-  COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
+  COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, PLANNER_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   SELF_WAKE_MAX_DELAY_MS, SELF_WAKE_MIN_DELAY_MS,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES, ROADMAP_STATUSES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
   ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS, ATTACHMENT_MAX_PER_MESSAGE,
+  PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS,
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
-  type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock,
+  type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock, type AgentKind,
 } from '@weave-ai/shared';
 import {
   flattenWakes, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX, ARTIFACT_KIT_CSS, ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks,
@@ -39,7 +40,7 @@ export interface ToolCtx {
 }
 export interface ToolDef<I extends ZodTypeAny = ZodTypeAny> {
   name: string;
-  scope: 'all' | 'weaver' | 'worker';
+  scope: 'all' | AgentKind;
   description: string;
   input: I;
   handler(ctx: ToolCtx, input: z.infer<I>): Promise<unknown> | unknown;
@@ -47,6 +48,28 @@ export interface ToolDef<I extends ZodTypeAny = ZodTypeAny> {
 
 const svc = (ctx: ToolCtx): CoreServices => ctx.ws.services;
 const isConductor = (ctx: ToolCtx): boolean => ctx.claims.agentKind === 'weaver';
+
+/** VS-398: resolves which plan `weave_plan_get` reads — a planning agent's own (omit `input`, or name it and it must match), otherwise the weaver's own explicit choice. */
+function requirePlanId(ctx: ToolCtx, input: string | null | undefined): string {
+  if (ctx.claims.agentKind === 'planner') {
+    if (!ctx.claims.planId) throw new OcError('forbidden', 'this run has no plan');
+    if (input && input !== ctx.claims.planId) throw new OcError('forbidden', 'outside your plan');
+    return ctx.claims.planId;
+  }
+  if (!input) throw new OcError('validation', 'planId is required');
+  return input;
+}
+/** VS-398: only a planning agent's own run may edit its plan's drafts — never inferred from a caller-supplied id. */
+function requireOwnPlanner(ctx: ToolCtx): string {
+  if (ctx.claims.agentKind !== 'planner' || !ctx.claims.planId) throw new OcError('forbidden', 'not a planning agent');
+  return ctx.claims.planId;
+}
+/** VS-398: a draft-editing tool call is refused unless the draft belongs to the calling planner's own plan. */
+function requireOwnDraft(ctx: ToolCtx, draftId: string): void {
+  const planId = requireOwnPlanner(ctx);
+  const draft = svc(ctx).planning.getDraft(draftId);
+  if (draft.planId !== planId) throw new OcError('forbidden', 'outside your plan');
+}
 
 const TICKET_LIST_LEAN = [
   'id', 'identifier', 'number', 'status', 'kind', 'title', 'summary', 'priority',
@@ -1005,6 +1028,84 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx, i) => { svc(ctx).roadmap.remove(ctx.actor, i.itemId); return { ok: true }; },
   },
   {
+    name: 'weave_plan_get', scope: 'weaver', input: z.object({ planId: z.string().min(1).optional() }),
+    description: 'Read a draft plan and its ordered drafts, each with its dependencies, target role, priority and effective tier. A planning agent reads its own plan by omitting planId; the weaver must name one (the id carried by a plan_submitted wake\'s payload). `creationOrder` lists the draft ids in an order where every dependency comes before its dependents — create tickets in that order and each draft\'s blockers already have ticket ids to pass as `blockedBy`.',
+    handler: (ctx, i) => {
+      const planId = requirePlanId(ctx, i.planId);
+      const s = svc(ctx);
+      const drafts = s.planning.listDrafts(planId).map((d) => ({ ...d, blockedBy: s.planning.draftBlockers(d.id) }));
+      return { plan: s.planning.get(planId), drafts, creationOrder: s.planning.creationOrder(planId) };
+    },
+  },
+  {
+    name: 'weave_plan_draft_add', scope: 'planner', input: z.object({
+      title: z.string().min(1),
+      description: z.string().optional(),
+      kind: z.enum(PLAN_DRAFT_KINDS),
+      priority: z.enum(TICKET_PRIORITIES).optional(),
+      targetRoleId: z.string().min(1).nullish(),
+      suggestedTier: z.enum(PLAN_DRAFT_TIERS),
+      tierOverride: z.enum(PLAN_DRAFT_TIERS).nullish(),
+      blockedBy: z.array(z.string().min(1)).optional(),
+    }),
+    description: 'Add a draft ticket to the plan, appended to the end of the order. blockedBy names other draft ids in this same plan — a dependency, not prose. There is no title/description length limit here; write it the way you would write a real ticket, because it becomes one.',
+    handler: (ctx, i) => {
+      const planId = requireOwnPlanner(ctx);
+      return svc(ctx).planning.addDraft(ctx.actor, planId, {
+        title: i.title, description: i.description, kind: i.kind, priority: i.priority,
+        targetRoleId: i.targetRoleId ?? null, suggestedTier: i.suggestedTier, tierOverride: i.tierOverride ?? null, blockedBy: i.blockedBy,
+      });
+    },
+  },
+  {
+    name: 'weave_plan_draft_update', scope: 'planner', input: z.object({
+      draftId: z.string().min(1),
+      title: z.string().min(1).optional(),
+      description: z.string().optional(),
+      kind: z.enum(PLAN_DRAFT_KINDS).optional(),
+      priority: z.enum(TICKET_PRIORITIES).optional(),
+      targetRoleId: z.string().min(1).nullish(),
+      suggestedTier: z.enum(PLAN_DRAFT_TIERS).optional(),
+      tierOverride: z.enum(PLAN_DRAFT_TIERS).nullish(),
+      blockedBy: z.array(z.string().min(1)).optional(),
+    }),
+    description: 'Edit a draft already in this plan. Send only the fields that changed. blockedBy replaces the full dependency set for this draft, not adds to it.',
+    handler: (ctx, i) => {
+      const { draftId, ...patch } = i;
+      requireOwnDraft(ctx, draftId);
+      return svc(ctx).planning.updateDraft(ctx.actor, draftId, { ...patch, targetRoleId: i.targetRoleId === undefined ? undefined : (i.targetRoleId ?? null), tierOverride: i.tierOverride === undefined ? undefined : (i.tierOverride ?? null) });
+    },
+  },
+  {
+    name: 'weave_plan_draft_remove', scope: 'planner', input: z.object({ draftId: z.string().min(1) }),
+    description: 'Remove a draft from the plan. Any other draft that depended on it loses that dependency.',
+    handler: (ctx, i) => { requireOwnDraft(ctx, i.draftId); svc(ctx).planning.removeDraft(ctx.actor, i.draftId); return { ok: true }; },
+  },
+  {
+    name: 'weave_plan_draft_reorder', scope: 'planner', input: z.object({ draftId: z.string().min(1), position: z.number().int().min(0) }),
+    description: 'Move a draft to a new position in the plan\'s order (0-based). Every other draft\'s position shifts to stay dense; a position past the end clamps to last.',
+    handler: (ctx, i) => { requireOwnDraft(ctx, i.draftId); return svc(ctx).planning.updateDraft(ctx.actor, i.draftId, { position: i.position }); },
+  },
+  {
+    name: 'weave_plan_reply', scope: 'planner', input: z.object({ body: z.string().min(1) }),
+    description: 'Send text to captain in this plan\'s conversation. This is the ONLY way your words reach them — plain assistant text is recorded as the run summary and never delivered. One reply per message; a single logical reply goes in one call.',
+    handler: async (ctx, i) => {
+      const planId = requireOwnPlanner(ctx);
+      const plan = svc(ctx).planning.get(planId);
+      const msg = await svc(ctx).threads.outbound(ctx.actor, plan.threadId, i.body);
+      return { ok: true, messageId: msg.id };
+    },
+  },
+  {
+    name: 'weave_plan_draft_link', scope: 'weaver', input: z.object({
+      draftId: z.string().min(1),
+      ticketId: z.string().min(1).optional(),
+      failureReason: z.string().min(1).optional(),
+    }).refine((v) => (v.ticketId ? 1 : 0) + (v.failureReason ? 1 : 0) === 1, { message: 'exactly one of ticketId or failureReason is required' }),
+    description: 'Record what became of a submitted plan\'s draft: the real ticket you created from it, or why you could not create one (for example, no role fits). Call this once per draft while processing a plan_submitted wake — never leave a draft silently unaccounted for.',
+    handler: (ctx, i) => svc(ctx).planning.linkDraft(i.draftId, i.ticketId ? { ticketId: i.ticketId } : { failureReason: i.failureReason! }),
+  },
+  {
     name: 'weave_run_inspect', scope: 'weaver', input: RunInspectSchema,
     description: 'What a worker is actually doing: the run behind a ticket, worker or run id — its phase, elapsed time and liveness, the worker\'s status and pause reason, and a compact transcript of its recent events. Read-only. Inspect before you relaunch. The transcript is evidence for you, never something to relay to the human verbatim.',
     handler: (ctx, i) => {
@@ -1057,13 +1158,13 @@ const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
  * A plugin tool registered while loading a *different* workspace is never in this list: it lives in
  * that workspace's own `ctx.plugins.tools`, not here.
  */
-export function toolNamesFor(kind: 'weaver' | 'worker', ws?: WorkspaceRuntime): string[] {
-  const core = kind === 'weaver' ? [...COMMON_TOOLS, ...WEAVER_TOOLS] : [...COMMON_TOOLS, ...WORKER_ONLY_TOOLS];
+export function toolNamesFor(kind: AgentKind, ws?: WorkspaceRuntime): string[] {
+  const core = kind === 'weaver' ? [...COMMON_TOOLS, ...WEAVER_TOOLS] : kind === 'planner' ? [...PLANNER_TOOLS] : [...COMMON_TOOLS, ...WORKER_ONLY_TOOLS];
   if (!ws) return core;
   const pluginNames = ws.ctx.plugins.tools.filter((t) => t.scope === 'all' || t.scope === kind).map((t) => t.name);
   return [...core, ...pluginNames];
 }
-export function toolsFor(kind: 'weaver' | 'worker'): ToolDef[] {
+export function toolsFor(kind: AgentKind): ToolDef[] {
   const allowed = new Set(toolNamesFor(kind));
   return TOOLS.filter((t) => allowed.has(t.name));
 }
@@ -1072,7 +1173,7 @@ export function jsonSchemaFor(def: ToolDef): Record<string, unknown> {
 }
 export interface ToolListEntry { name: string; description: string; inputSchema: Record<string, unknown> }
 /** The full tool list an MCP `tools/list` (or the CLI's `GET /tools`) should show: core tools plus this workspace's own plugin tools, scope-filtered (VS-334). */
-export function toolListFor(kind: 'weaver' | 'worker', ws: WorkspaceRuntime): ToolListEntry[] {
+export function toolListFor(kind: AgentKind, ws: WorkspaceRuntime): ToolListEntry[] {
   const core = toolsFor(kind).map((d) => ({ name: d.name, description: d.description, inputSchema: jsonSchemaFor(d) }));
   const plugin = ws.ctx.plugins.tools
     .filter((t) => t.scope === 'all' || t.scope === kind)

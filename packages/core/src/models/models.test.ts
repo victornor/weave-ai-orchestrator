@@ -27,6 +27,11 @@ describe('modelSettingFor', () => {
     expect(modelSettingFor(config, 'worker')).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
   });
 
+  it('gives the planner the weaver\'s own setting, never the worker one (VS-398)', () => {
+    expect(modelSettingFor(config, 'planner')).toEqual(modelSettingFor(config, 'weaver'));
+    expect(modelSettingFor(config, 'planner')).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
+  });
+
   it('uses a ticket\'s catalog option when it still exists (VS-162)', () => {
     const withOpts = {
       models: {

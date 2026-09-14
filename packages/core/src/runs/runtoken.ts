@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { SignJWT, jwtVerify, decodeJwt } from 'jose';
 import type { Db } from '@weave-ai/db';
-import { OcError } from '@weave-ai/shared';
+import { OcError, type AgentKind } from '@weave-ai/shared';
 
 /**
  * Run tokens (PLAN §9.1): HS256 JWTs signed with a per-workspace secret in the `meta` table,
@@ -12,9 +12,11 @@ export interface RunTokenClaims {
   workspaceId: string;
   runId: string;
   agentId: string;
-  agentKind: 'weaver' | 'worker';
+  agentKind: AgentKind;
   projectId: string | null;
   ticketId: string | null;
+  /** VS-398: the plan a `planner`-kind agent's tool calls are scoped to; null for every other kind. */
+  planId: string | null;
   roleId: string | null;
 }
 
@@ -34,7 +36,7 @@ export function runTokenSecret(db: Db): Uint8Array {
 export async function signRunToken(secret: Uint8Array, claims: RunTokenClaims, ttlSeconds = RUN_TOKEN_TTL_SECONDS): Promise<string> {
   const jwt = await new SignJWT({
     wid: claims.workspaceId, rid: claims.runId, aid: claims.agentId, kind: claims.agentKind,
-    pid: claims.projectId, tid: claims.ticketId, rlid: claims.roleId,
+    pid: claims.projectId, tid: claims.ticketId, plid: claims.planId, rlid: claims.roleId,
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(claims.agentId)
@@ -57,13 +59,13 @@ export function peekWorkspaceId(token: string): string | null {
 export async function verifyRunToken(secret: Uint8Array, token: string): Promise<RunTokenClaims> {
   try {
     const { payload } = await jwtVerify(strip(token), secret, { issuer: 'weave-ai', audience: 'run' });
-    const kind = payload.kind === 'weaver' ? 'weaver' : 'worker';
+    const kind: AgentKind = payload.kind === 'weaver' ? 'weaver' : payload.kind === 'planner' ? 'planner' : 'worker';
     if (typeof payload.wid !== 'string' || typeof payload.rid !== 'string' || typeof payload.aid !== 'string') {
       throw new OcError('unauthorized', 'run token missing claims');
     }
     return {
       workspaceId: payload.wid, runId: payload.rid, agentId: payload.aid, agentKind: kind,
-      projectId: str(payload.pid), ticketId: str(payload.tid), roleId: str(payload.rlid),
+      projectId: str(payload.pid), ticketId: str(payload.tid), planId: str(payload.plid), roleId: str(payload.rlid),
     };
   } catch (e) {
     if (e instanceof OcError) throw e;

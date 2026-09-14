@@ -1,11 +1,18 @@
-# CI on every pull request and every push to main. Four separate jobs so each one
-# is its own check. See openspec/changes/vs-329-add-github-actions-ci-lint-typecheck-and/.
+# CI on a pull request only once it is out of draft, plus a daily safety net on the landing branch.
+# A worker opens its ticket PR as a draft (VS-393), so nothing runs while it is in review; the daemon
+# marks it ready as it lands, and that single run evaluates the head that will land. There is no run
+# on push to main — the merge queue lands exactly the head CI just passed — only the daily schedule
+# and workflow_dispatch below. Four separate jobs so each one is its own check.
+# See openspec/changes/archive/2026-09-13-vs-329-add-github-actions-ci-lint-typecheck-and/ and
+# openspec/changes/vs-393-ci-runs-about-4-times-per-pr-run-it-once/.
 name: CI
 
 on:
   pull_request:
-  push:
-    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
 
 # A newer push to the same ref cancels the run still going for the previous commit.
 concurrency:
@@ -20,6 +27,8 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Skip a draft pull request; a scheduled or dispatched run is never a draft.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v7
       # pnpm first: setup-node's cache needs it, and pnpm/action-setup reads the
@@ -37,6 +46,7 @@ jobs:
     name: typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -53,6 +63,7 @@ jobs:
     name: test-core
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -73,6 +84,7 @@ jobs:
     name: test-ui
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

@@ -82,6 +82,17 @@ export interface ArchiveThenMergeOpts {
   forge: ForgeAdapter;
   prUrl: string;
   method: string;
+  /**
+   * VS-393: whether the project requires CI. When true, an absent check rollup on a head this
+   * sequence just pushed, or on a pull request it just brought out of draft, is treated as checks
+   * not yet resolved rather than as a pass. A project with `requireCi: false` merges on `none` as
+   * before. Defaults to `false` — the pre-VS-393 behaviour — for a caller that does not say.
+   */
+  requiresCi?: boolean;
+  /** VS-393: how long to wait for a rollup before merging as a no-CI project. Defaults to `CI_NONE_GRACE_MS`; a test passes a small value. */
+  noCiGraceMs?: number;
+  /** VS-393: called once when the grace elapses and this sequence stops waiting and merges anyway, so the ticket records why. */
+  onNoCiTimeout?: () => void | Promise<void>;
   /** VS-383: where the scratch worktree is created — under the workspace state dir, never `/tmp`. */
   scratch: ScratchTarget;
 }
@@ -93,6 +104,39 @@ export type ArchiveThenMergeOutcome =
   | { kind: 'checks_failed' };
 
 /**
+ * VS-393: how long a landing waits for a check rollup to appear on the head it just pushed or the
+ * pull request it just brought out of draft, when the forge cannot say whether the repository has any
+ * CI, before it stops waiting and merges as a no-CI project. Ten minutes: GitHub's queued-run latency
+ * is seconds and this repo's slowest job is ~6.5 minutes, so a real run registers far inside it, while
+ * a merge that would otherwise never land is not stalled for more than the merge step already costs.
+ */
+export const CI_NONE_GRACE_MS = 10 * 60_000;
+
+/**
+ * When this sequence first saw an absent rollup for a pull request, so the grace above survives the
+ * landing's retries. It lives in the daemon process, which holds those retries; a restart restarts the
+ * grace, which can only delay a no-CI merge, never break one. Entries are dropped as soon as a rollup
+ * appears or a landing concludes.
+ */
+const noneSinceByPr = new Map<string, number>();
+
+/** A clone's "does this repo have any CI workflows" answer, cached so a landing retry does not re-ask. */
+const CI_WORKFLOWS_TTL_MS = 5 * 60_000;
+const ciWorkflowsByClone = new Map<string, { at: number; value: boolean | null }>();
+
+/** Test-only: forget the per-pull-request and per-clone no-CI state between cases. */
+export function resetNoCiStateForTests(): void { noneSinceByPr.clear(); ciWorkflowsByClone.clear(); }
+
+async function repoHasCiWorkflows(forge: ForgeAdapter, clonePath: string): Promise<boolean | null> {
+  if (!forge.hasCiWorkflows) return null;
+  const cached = ciWorkflowsByClone.get(clonePath);
+  if (cached && Date.now() - cached.at < CI_WORKFLOWS_TTL_MS) return cached.value;
+  const value = await forge.hasCiWorkflows(clonePath).catch(() => null);
+  ciWorkflowsByClone.set(clonePath, { at: Date.now(), value });
+  return value;
+}
+
+/**
  * The archive-then-merge sequence (design.md Decision 1/2): fetch the current landing tip, rebase
  * the ticket's branch onto it if it has fallen behind (Decision 5), archive the ticket's OpenSpec
  * change onto that branch if it has one, push, and merge — never pushing anything to the landing
@@ -102,11 +146,12 @@ export type ArchiveThenMergeOutcome =
  * Required-checks handling (design.md Decision 6) is partial in this version: a still-pending check
  * is reported as `checks_pending` rather than awaited across a released lock and a supervisor sweep
  * — that bounded, lock-released wait is tracked as a follow-up, not yet built. A repository with no
- * required checks (`ciState` `none`, or already `success`) merges immediately, which covers the
- * common case this project itself is in (no CI).
+ * CI workflows (VS-393) merges immediately, exactly as before VS-393; when the forge cannot say, the
+ * sequence waits for `CI_NONE_GRACE_MS` and then merges anyway, so a landing never retries forever
+ * on checks that will not come.
  */
 export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promise<ArchiveThenMergeOutcome> {
-  const { clonePath, branch, landingBranch, changeName, forge, prUrl, method, scratch: scratchTarget } = opts;
+  const { clonePath, branch, landingBranch, changeName, forge, prUrl, method, requiresCi = false, scratch: scratchTarget } = opts;
   await git(['fetch', 'origin', landingBranch], clonePath, 300_000);
   const landingRef = `origin/${landingBranch}`;
   const scratch = await scratchLandWorktree(clonePath, branch, scratchTarget);
@@ -143,8 +188,39 @@ export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promi
       const push = await git(['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${branch}`], scratch.path, 120_000);
       if (!push.ok) throw new OcError('internal', `push of ${branch} failed: ${push.stderr.trim().slice(0, 300)}`, { branch });
     }
+    // VS-393: bring the ticket's draft pull request out of draft before reading its checks, so the
+    // single run the transition starts evaluates the head that will land. A rebase/archive push made
+    // while the PR is still a draft starts no run, so this is the only place a run begins.
+    let changedDraft = false;
+    if (forge.markPullRequestReady) {
+      changedDraft = (await forge.markPullRequestReady(clonePath, prUrl)).changed;
+    }
     const state = await forge.prState(clonePath, prUrl);
-    if (state.ciState === 'pending') return { kind: 'checks_pending' };
+    if (state.ciState === 'pending') {
+      noneSinceByPr.delete(prUrl);
+      return { kind: 'checks_pending' };
+    }
+    if (requiresCi && state.ciState === 'none') {
+      // A head this sequence just pushed, or a PR it just brought out of draft, cannot have
+      // registered its checks yet: an absent rollup there is "not yet", never a pass — unless the
+      // repository has no CI workflows at all, which merges exactly as it did before VS-393. A forge
+      // that cannot answer waits, but only for the bounded grace, so a repo we cannot classify still
+      // lands instead of retrying forever on checks that will never exist.
+      const hasWorkflows = await repoHasCiWorkflows(forge, clonePath);
+      const waiting = changed || changedDraft || noneSinceByPr.has(prUrl);
+      if (hasWorkflows !== false && waiting) {
+        const since = noneSinceByPr.get(prUrl) ?? Date.now();
+        noneSinceByPr.set(prUrl, since);
+        if (Date.now() - since < (opts.noCiGraceMs ?? CI_NONE_GRACE_MS)) return { kind: 'checks_pending' };
+        // Past the grace: stop waiting and merge as a no-CI project, with the caller's one report.
+        noneSinceByPr.delete(prUrl);
+        await opts.onNoCiTimeout?.();
+      } else {
+        noneSinceByPr.delete(prUrl);
+      }
+    } else if (state.ciState !== 'none') {
+      noneSinceByPr.delete(prUrl);
+    }
     if (state.ciState === 'failure') return { kind: 'checks_failed' };
     const result = await forge.mergePr(clonePath, prUrl, method);
     return { kind: 'merged', mergeCommit: result.mergeCommit, archivedAs };

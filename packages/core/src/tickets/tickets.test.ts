@@ -9,6 +9,7 @@ import { createTicketsService, TICKET_COMMENT_WAKE_BODY_CHARS } from './service.
 import { GitWorktreeProvider } from '../worktrees/git.js';
 import { git } from '../util/git.js';
 import type { Actor, TicketsService } from '../api.js';
+import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 
 const AGENT: Actor = { kind: 'agent', id: 'agent-1', runId: 'run-1' };
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
@@ -1516,6 +1517,65 @@ describe('tickets', () => {
         tickets.create(actor, { kind: 'scout', title: `Item ${i}`, projectId: h.projectId });
       }
       expect(() => tickets.create(actor, { kind: 'scout', title: 'Item 4', projectId: h.projectId })).toThrow(/at most 3/);
+    });
+  });
+
+  describe('openPullRequest (VS-393)', () => {
+    const forgeWith = (over: Partial<ForgeAdapter> = {}): ForgeAdapter => ({
+      id: 'github',
+      detect: async () => true,
+      prState: async () => ({ state: 'open' as const, ciState: 'none' as const }),
+      mergePr: async () => ({}),
+      ...over,
+    });
+    const setProject = (over: Record<string, unknown> = {}): void => {
+      h.services.projects = {
+        get: () => ({ id: h.projectId, slug: 'api', clonePath: '/tmp/clone', defaultBranch: 'main', landingBranch: null, policies: { deliveryMode: 'pr' }, ...over }),
+      } as never;
+    };
+
+    it('opens a draft against the landing branch and records the work product', async () => {
+      const create = vi.fn(async () => ({ url: 'https://example.com/pr/7', number: 7 }));
+      h.ctx.registries.forges.set('github', forgeWith({ createPullRequest: create }));
+      setProject({ landingBranch: 'edge' });
+      const t = make();
+
+      const pr = await tickets.openPullRequest(AGENT, t.id, { title: 'TST-1: Add dark mode', body: 'body' });
+      expect(pr).toEqual({ url: 'https://example.com/pr/7', number: 7 });
+      expect(create).toHaveBeenCalledWith('/tmp/clone', expect.objectContaining({ branch: 'ac/tst-1-add-dark-mode', base: 'edge', title: 'TST-1: Add dark mode', draft: true }));
+      const wp = tickets.workProducts(t.id).find((w) => w['type'] === 'pull_request');
+      expect(wp).toMatchObject({ url: 'https://example.com/pr/7', title: 'TST-1: Add dark mode' });
+    });
+
+    it('reuses an open pull request on the branch, opens no second one, and never flips its draft state', async () => {
+      const create = vi.fn(async () => ({ url: 'https://example.com/pr/8', number: 8 }));
+      const forge = forgeWith({
+        createPullRequest: create,
+        pullRequestForBranch: vi.fn(async () => ({ url: 'https://example.com/pr/2', number: 2 })),
+      });
+      h.ctx.registries.forges.set('github', forge);
+      setProject();
+      const t = make();
+
+      const pr = await tickets.openPullRequest(AGENT, t.id, { title: 'x' });
+      expect(pr).toEqual({ url: 'https://example.com/pr/2', number: 2 });
+      expect(create).not.toHaveBeenCalled();
+      expect(tickets.workProducts(t.id).some((w) => w['url'] === 'https://example.com/pr/2')).toBe(true);
+    });
+
+    it('refuses a local-branch project', async () => {
+      h.ctx.registries.forges.set('github', forgeWith({ createPullRequest: vi.fn() }));
+      setProject({ policies: { deliveryMode: 'local-branch' } });
+      const t = make();
+
+      await expect(tickets.openPullRequest(AGENT, t.id, { title: 'x' })).rejects.toMatchObject({ code: 'validation' });
+    });
+
+    it('refuses when no forge can open a pull request', async () => {
+      setProject();
+      const t = make();
+
+      await expect(tickets.openPullRequest(AGENT, t.id, { title: 'x' })).rejects.toMatchObject({ code: 'validation' });
     });
   });
 });

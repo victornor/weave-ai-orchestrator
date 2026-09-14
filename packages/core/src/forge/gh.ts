@@ -126,6 +126,18 @@ export function repoVisibilityFromGh(stdout: string): { private: boolean } | nul
   return null;
 }
 
+/**
+ * VS-393: `gh api repos/{owner}/{repo}/actions/workflows --jq .total_count` prints a bare count.
+ * `0` means no CI workflows are configured; anything else (including a count we cannot parse) means
+ * "there may be checks", and `null` on a non-number so the caller waits rather than assuming none.
+ */
+export function workflowCountFromGh(stdout: string): boolean | null {
+  const text = stdout.trim();
+  if (!text) return null;
+  const n = Number(text);
+  return Number.isInteger(n) && n >= 0 ? n > 0 : null;
+}
+
 /** Exported for the mapping tests, which run `gh`'s recorded JSON through it and never call GitHub. */
 export function pullRequestFromGh(doc: GhPr): ForgePullRequest { return toPullRequest(doc); }export function pullRequestDetailFromGh(doc: GhPr): ForgePullRequestDetail {
   return { ...toPullRequest(doc), body: doc.body ?? '', files: (doc.files ?? []).map(toFile), checkRuns: (doc.statusCheckRollup ?? []).map(toCheck) };
@@ -206,15 +218,40 @@ export class GhForge implements ForgeAdapter {
     return pullRequestDetailFromGh(doc);
   }
 
-  /** Opens a PR from a branch already on the remote (VS-327 backfill; VS-340 args fix). */
-  async createPullRequest(cwd: string, opts: { branch: string; base: string; title: string; body?: string }): Promise<{ url: string; number: number }> {
+  /** Opens a PR from a branch already on the remote (VS-327 backfill; VS-340 args fix; VS-393 draft). */
+  async createPullRequest(cwd: string, opts: { branch: string; base: string; title: string; body?: string; draft?: boolean }): Promise<{ url: string; number: number }> {
     // `gh pr create` has no `--json`: it prints the pull request's URL, and that is the result.
     const args = ['pr', 'create', '--base', opts.base, '--head', opts.branch, '--title', opts.title, '--body', opts.body ?? ''];
+    if (opts.draft) args.push('--draft');
     const r = await sh('gh', args, { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
     if (!r.ok) throw new OcError('internal', `gh pr create failed: ${(r.stderr || r.stdout).trim().slice(0, 300)}`, { branch: opts.branch, base: opts.base });
     const pr = parsePullRequestUrl(r.stdout);
     if (!pr) throw new OcError('internal', 'gh pr create did not print a pull request URL', { branch: opts.branch });
     return pr;
+  }
+
+  /**
+   * VS-393: bring a draft pull request out of draft (`gh pr ready`) so the CI its transition triggers
+   * runs on the head that will land. A pull request already out of draft resolves to `changed: false`
+   * rather than an error — `gh` exits non-zero for it, and the landing path must be a no-op then.
+   */
+  async markPullRequestReady(cwd: string, url: string): Promise<{ changed: boolean }> {
+    const r = await sh('gh', ['pr', 'ready', url], { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
+    if (r.ok) return { changed: true };
+    const detail = `${r.stderr || r.stdout}`.trim();
+    if (/already ready|already a?ready|not a draft/i.test(detail)) return { changed: false };
+    throw new OcError('internal', `gh pr ready failed: ${detail.slice(0, 300)}`, { url });
+  }
+
+  /**
+   * VS-393: does the repository have any Actions workflows? `gh api .../actions/workflows` with the
+   * `{owner}`/`{repo}` placeholders resolves the current clone's remote. `null` on any failure or
+   * unparseable count, so the caller falls back to its bounded wait rather than guessing "no CI".
+   */
+  async hasCiWorkflows(cwd: string): Promise<boolean | null> {
+    const r = await sh('gh', ['api', 'repos/{owner}/{repo}/actions/workflows', '--jq', '.total_count'], { cwd, timeoutMs: 30_000, env: { NO_COLOR: '1' } });
+    if (!r.ok) return null;
+    return workflowCountFromGh(r.stdout);
   }
 
   /** The open pull request whose head is `branch`, if there is one (VS-340 backfill retry). */

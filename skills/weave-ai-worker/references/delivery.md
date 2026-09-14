@@ -17,11 +17,10 @@ A rejection here is information, not an obstacle: `worktree_not_landed` means yo
 1. Work on your ticket branch inside `work/`. Commit as you go, one commit per task or logical group.
 2. Run the project's tests and lint (see `work/AGENTS.md`). Green before you deliver.
 3. Push the branch: `git push -u origin <your branch>`.
-4. Open the PR: `GH_TOKEN="$(gh auth token)" gh pr create --base <default branch> --head <your branch> --title "<ticket id>: <title>" --body-file <file>`.
-   The body states what changed, how it was verified, and links the ticket: `[ACME-42](weave://tickets/ACME-42)`.
-5. Record it: `weave_ticket_work_product(id, {type: "pull_request", url: "<PR url>", title: "<title>", state: "open"})`.
-6. `weave_ticket_transition(id, "in_review")` and `weave_report({state: "working", note: "PR open, awaiting review"})`.
-7. Stop. A `merge_approval` decision now belongs to the human. You will be woken when the ticket moves to `merging`.
+4. Open the PR as a draft: `weave_ticket_open_pull_request(id, {title: "<ticket id>: <title>", body: "<file body>"})`.
+   The daemon opens it through the project's forge, against the ticket's landing branch, and records the `pull_request` work product itself. The body states what changed, how it was verified, and links the ticket: `[ACME-42](weave://tickets/ACME-42)`. Call it after pushing; it is idempotent per branch and never opens a second PR. **Leave the PR a draft** — the merge step marks it ready for review when it lands, which is the single point CI starts.
+5. `weave_ticket_transition(id, "in_review")` and `weave_report({state: "working", note: "PR open, awaiting review"})`.
+6. Stop. A `merge_approval` decision now belongs to the human. You will be woken when the ticket moves to `merging`.
 
 ## Mode `local-branch`
 

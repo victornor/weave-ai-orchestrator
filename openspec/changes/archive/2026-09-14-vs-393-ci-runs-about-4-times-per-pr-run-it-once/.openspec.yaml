@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "CI runs about 4 times per PR: run it once, on the head the merge step
+  lands (draft PRs until then), and drop the redundant push-to-main run"

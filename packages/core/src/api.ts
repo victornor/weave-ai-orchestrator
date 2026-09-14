@@ -71,6 +71,13 @@ export interface TicketsService {
   /** Every document on a ticket with its current revision — the catalogue an agent reads before asking for one by key. */
   documents(id: string): Array<{ key: string; revision: number; updatedAt: string }>;
   addWorkProduct(actor: Actor, id: string, wp: { type: S.WorkProductType; url?: string; title?: string; state?: string; provider?: string; externalId?: string; isPrimary?: boolean; metadata?: Record<string, unknown> }): { id: string };
+  /**
+   * VS-393: opens the ticket's pull request as a draft through the project's forge adapter, against
+   * the ticket's effective landing branch, and records the `pull_request` work product. Idempotent per
+   * branch — an open pull request on that branch is returned unchanged. Refuses a project that is not
+   * on `pr` delivery, or that has no forge which can open a pull request.
+   */
+  openPullRequest(actor: Actor, id: string, input: { title: string; body?: string }): Promise<{ url: string; number: number }>;
   workProducts(id: string): Array<Record<string, unknown>>;
   /** Publishes (or, called again with the same `key`, updates) the one `type: 'artifact'` work product for that key, keyed by `externalId === key` — used only by `weave_ticket_artifact_put`, never by the general work-product tool. */
   putArtifactWorkProduct(actor: Actor, id: string, key: string, wp: { url: string; title?: string; kind?: string }): { id: string };

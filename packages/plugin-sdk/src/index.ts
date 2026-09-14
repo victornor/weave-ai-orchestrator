@@ -59,13 +59,29 @@ export interface ForgeAdapter {
    */
   pullRequestDiff?(cwd: string, number: number): Promise<string | null>;
   /**
-   * Optional (VS-327): opens a pull request from a branch already pushed to the remote. Used only by
-   * OpenSpec archive backfill, to land a change left behind by a ticket merged before archiving moved
-   * into the merge itself — never for a ticket's own PR, which a worker still opens with `gh pr create`.
-   * A forge that cannot do this simply omits it; the backfill then reports itself unable to open a PR
-   * rather than falling back to a direct push.
+   * Optional (VS-327): opens a pull request from a branch already pushed to the remote. Used by the
+   * ticket PR tool (VS-393) and by OpenSpec archive backfill, to land a change left behind by a ticket
+   * merged before archiving moved into the merge itself. `draft` asks the forge to open it as a draft
+   * (VS-393). A forge that cannot do this simply omits it; the backfill then reports itself unable to
+   * open a PR rather than falling back to a direct push.
    */
-  createPullRequest?(cwd: string, opts: { branch: string; base: string; title: string; body?: string }): Promise<{ url: string; number: number }>;
+  createPullRequest?(cwd: string, opts: { branch: string; base: string; title: string; body?: string; draft?: boolean }): Promise<{ url: string; number: number }>;
+  /**
+   * Optional (VS-393): brings a draft pull request out of draft so its checks start on the head that
+   * will land. `changed` is true only when the call actually moved it out of draft, so a caller can
+   * tell a run it has just started from one already under way. A pull request that is already out of
+   * draft is success with `changed: false`, never an error. A forge that cannot do this simply omits
+   * it, and the landing path reads its checks exactly as before.
+   */
+  markPullRequestReady?(cwd: string, url: string): Promise<{ changed: boolean }>;
+  /**
+   * Optional (VS-393): whether the repository has any CI workflows configured at all, or `null` when
+   * the forge cannot say. `false` lets the landing path treat an absent check rollup as "no CI" and
+   * merge as it did before VS-393, rather than waiting for a run that will never come; `true`/`null`
+   * means checks are (or may be) coming. A forge that cannot answer omits this, and the landing path
+   * falls back to its bounded wait.
+   */
+  hasCiWorkflows?(cwd: string): Promise<boolean | null>;
   /**
    * Optional (VS-340): the open pull request whose head is `branch`, or `null` when the forge has
    * none. Used by OpenSpec archive backfill to recognise a pull request an earlier attempt opened

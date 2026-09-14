@@ -1254,6 +1254,33 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       return db.all<Record<string, unknown>>('SELECT * FROM ticket_work_products WHERE ticket_id = ? ORDER BY created_at', [t.id]);
     },
 
+    // VS-393: the one path a ticket's pull request is opened by, so the draft flag and the work
+    // product are the daemon's job, not each worker's memory. Draft only where the daemon lands it.
+    async openPullRequest(actor, id, input) {
+      const t = get(id);
+      if (!t.projectId) throw new OcError('validation', `${t.identifier} has no project to open a pull request against`, { ticketId: t.id });
+      const project = deps().projects.get(t.projectId);
+      const mode = (project.policies as { deliveryMode?: string } | null)?.deliveryMode ?? ctx.config.defaults.deliveryMode;
+      if (mode !== 'pr') {
+        throw new OcError('validation', `${t.identifier}'s project uses ${mode} delivery, not pull requests; deliver per your delivery mode`, { deliveryMode: mode, ticketId: t.id });
+      }
+      const forge = ctx.registries.forges.get('github');
+      if (!forge?.createPullRequest) {
+        throw new OcError('validation', `no forge is available to open ${t.identifier}'s pull request`, { ticketId: t.id });
+      }
+      const wt = db.get<{ branch: string }>('SELECT branch FROM worktrees WHERE ticket_id = ? AND status != ? ORDER BY created_at DESC LIMIT 1', [t.id, 'removed']);
+      const branch = wt?.branch ?? ticketBranchFor(t);
+      // A retry (or a worker that opens one itself) must never create a second pull request for the
+      // same branch, and must never flip an existing non-draft one back to draft.
+      const existing = forge.pullRequestForBranch ? await forge.pullRequestForBranch(project.clonePath, branch) : null;
+      const pr = existing ?? await forge.createPullRequest(project.clonePath, {
+        branch, base: landingBranchOf(project, t), title: input.title, body: input.body ?? '', draft: true,
+      });
+      service.addWorkProduct(actor, t.id, { type: 'pull_request', url: pr.url, title: input.title, state: 'open', provider: forge.id });
+      recordActivity(db, ws, actor, 'ticket.pr_opened', 'ticket', t.id, { url: pr.url, number: pr.number, reused: Boolean(existing) }, t.id);
+      return pr;
+    },
+
     putArtifactWorkProduct(actor, id, key, wp) {
       const t = get(id);
       const now = nowIso();
@@ -1363,6 +1390,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
                   try {
                     outcome = await attemptArchiveThenMerge({
                       clonePath: p.clonePath, branch, landingBranch: landingBranchOf(p, t), changeName: t.openspecChangeName, forge, prUrl: pr.url, method,
+                      requiresCi: (p.policies as { requireCi?: boolean } | null)?.requireCi !== false,
+                      // VS-393: the forge could not tell the repo has no CI, and no rollup appeared
+                      // within the wait limit — merge anyway, with one line on the ticket saying so.
+                      onNoCiTimeout: () => systemComment(t.id, 'no checks appeared within the wait limit; the forge could not confirm the repository has CI, so the merge proceeds as for a project with none', actor),
                       scratch: { stateDir: ctx.paths.state, projectSlug: p.slug, label: t.identifier },
                     });
                   } catch (e) {

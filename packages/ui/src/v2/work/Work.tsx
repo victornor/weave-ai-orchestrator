@@ -47,6 +47,13 @@ import {
 
 type WorkView = 'kanban' | 'table';
 
+/**
+ * One width for every kanban column, empty or full (VS-411). A column never grows to fill free
+ * space, so a board where only Done has cards shows six equal columns rather than a Done column
+ * stretched across the pane; when they are wider than the pane the board scrolls instead.
+ */
+export const V2_KANBAN_COLUMN_WIDTH = 236;
+
 /** Typing pauses before the search reaches the daemon (VS-379), matching the thread search's 250ms. */
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -356,7 +363,7 @@ export function V2WorkScreen(): React.ReactElement {
 
             <div className="hidden min-h-0 flex-1 md:block">
               {view === 'kanban' ? (
-                <div className="flex h-full min-h-0 gap-px overflow-x-auto bg-line-1" data-v2-work-kanban>
+                <div className="flex h-full min-h-0 gap-px overflow-x-auto bg-bg-0" data-v2-work-kanban>
                   {columns.map((c) => (
                     <KanbanColumn
                       key={c.key}
@@ -541,7 +548,7 @@ function KanbanColumn({
     <section
       data-v2-column={column.key}
       data-empty={empty ? 'true' : undefined}
-      style={empty ? { flex: '0 0 108px', minWidth: 108 } : { flex: '1 0 236px', minWidth: 236 }}
+      style={{ flex: `0 0 ${V2_KANBAN_COLUMN_WIDTH}px`, minWidth: V2_KANBAN_COLUMN_WIDTH }}
       className="flex flex-col border-r border-line-1 bg-bg-0"
     >
       <header className="flex flex-none items-center gap-2 px-3 pb-2 pt-2.5">
@@ -550,7 +557,10 @@ function KanbanColumn({
           {rows.length}
         </span>
       </header>
-      <div className="ac-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-4">
+      {/* `.ac-scroll` contains overscroll on both axes, so a sideways gesture over the cards was
+          swallowed before it could reach the kanban's horizontal scroller. `overscroll-x-auto` lets
+          horizontal wheel/trackpad chain out to the kanban, so every column is reachable (VS-411). */}
+      <div className="ac-scroll overscroll-x-auto flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-4">
         {rows.map((r) => (
           <WorkCard key={r.ticket.id} row={r} workerOptions={workerOptions} query={query} onOpen={() => onOpen(r.ticket.identifier)} />
         ))}

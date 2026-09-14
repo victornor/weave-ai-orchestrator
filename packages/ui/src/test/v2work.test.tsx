@@ -102,7 +102,7 @@ vi.mock('../api/hooks', () => ({
   useCreateTicket: () => ({ mutate: state.createTicket, isPending: false }),
 }));
 
-const { V2WorkScreen } = await import('../v2/work/Work');
+const { V2WorkScreen, V2_KANBAN_COLUMN_WIDTH } = await import('../v2/work/Work');
 const { EventStream } = await import('../api/events');
 
 const column = (key: string): HTMLElement => {
@@ -145,32 +145,24 @@ describe('V2 Work columns', () => {
     expect(within(column('done')).getByText('Landed')).toBeInTheDocument();
   });
 
-  it('renders an empty column narrow and a populated one wide', () => {
+  it('gives every column one fixed width, empty or full (VS-411)', () => {
     render(<V2WorkScreen />);
-    // The width is asserted on the rendered element, not only on the empty marker.
-    const inReview = column('in_review');
-    expect(inReview.getAttribute('data-empty')).toBe('true');
-    expect(inReview.style.flex).toBe('0 0 108px');
-    expect(inReview.style.minWidth).toBe('108px');
-    expect(within(inReview).getByText('0')).toBeInTheDocument();
-
-    const proposed = column('proposed');
-    expect(proposed.style.flex).toBe('1 0 236px');
-    expect(proposed.style.minWidth).toBe('236px');
+    const widths = [...document.querySelectorAll('[data-v2-column]')].map((c) => (c as HTMLElement).style.flex);
+    expect(widths).toHaveLength(6);
+    expect(new Set(widths)).toEqual(new Set([`0 0 ${V2_KANBAN_COLUMN_WIDTH}px`]));
+    // The empty marker stays, but an empty column is no narrower than a populated one.
+    expect(column('in_review').getAttribute('data-empty')).toBe('true');
+    expect(column('in_review').style.minWidth).toBe(`${V2_KANBAN_COLUMN_WIDTH}px`);
+    expect(column('proposed').style.minWidth).toBe(`${V2_KANBAN_COLUMN_WIDTH}px`);
   });
 
-  it('widens a column when a card arrives and leaves the still-empty ones narrow', () => {
-    const view = render(<V2WorkScreen />);
-    expect(column('in_review').style.flex).toBe('0 0 108px');
-
-    state.active = [...state.active, ticket({ id: 'tk_5', identifier: 'ACME-5', title: 'Reviewing', status: 'in_review' })];
-    view.rerender(<V2WorkScreen />);
-
-    const inReview = column('in_review');
-    expect(inReview.style.flex).toBe('1 0 236px');
-    expect(inReview.style.minWidth).toBe('236px');
-    expect(within(inReview).getByText('Reviewing')).toBeInTheDocument();
-    expect(column('blocked').style.flex).toBe('0 0 108px');
+  it('keeps every column one fixed width when only Done has cards (VS-411)', () => {
+    state.active = [];
+    state.finished = [ticket({ id: 'tk_4', identifier: 'ACME-4', title: 'Landed', status: 'done', completedAt: new Date().toISOString() })];
+    render(<V2WorkScreen />);
+    expect(within(column('done')).getByText('Landed')).toBeInTheDocument();
+    const widths = [...document.querySelectorAll('[data-v2-column]')].map((c) => (c as HTMLElement).style.flex);
+    expect(new Set(widths)).toEqual(new Set([`0 0 ${V2_KANBAN_COLUMN_WIDTH}px`]));
   });
 
   it('does not tag a card with the status of the column it sits in', () => {
@@ -284,6 +276,28 @@ describe('V2 Work views', () => {
     const row = phone.querySelector('[data-v2-phone-row="ACME-3"]') as HTMLElement;
     expect(row).toBeTruthy();
     expect(row.querySelector('svg[role="img"]')).toBeTruthy();
+  });
+});
+
+describe('V2 Work horizontal scroll (VS-411)', () => {
+  it('gives the kanban a horizontal scroller whose gesture is not swallowed by a column', () => {
+    render(<V2WorkScreen />);
+    const kanban = document.querySelector('[data-v2-work-kanban]') as HTMLElement;
+    // The columns overflow the pane and the kanban is the thing that scrolls them.
+    expect(kanban.className).toContain('overflow-x-auto');
+    const list = column('todo').querySelector('.ac-scroll') as HTMLElement;
+    // `.ac-scroll` contains overscroll on both axes; the x axis must chain out to the kanban, or a
+    // sideways gesture over the cards reaches nothing and the last columns are unreachable.
+    expect(list.className).toContain('overscroll-x-auto');
+  });
+
+  it('gives the table an overflow container wider than its pane', () => {
+    render(<V2WorkScreen />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Table' }));
+    const table = document.querySelector('[data-v2-work-table]') as HTMLElement;
+    expect(table.className).toContain('overflow-auto');
+    // The inner table sets a width floor, so a narrow pane scrolls rather than squeezing columns.
+    expect((table.firstElementChild as HTMLElement).className).toContain('min-w-[880px]');
   });
 });
 

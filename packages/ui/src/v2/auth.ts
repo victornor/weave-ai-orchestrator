@@ -35,18 +35,32 @@ export function v2Landing(workspaceId: string | null): string {
 
 let cache: { at: number; promise: Promise<boolean> } | null = null;
 
+/**
+ * VS-411: once the daemon has answered 200 for this page load, the browser is signed in and no later
+ * V2 navigation re-runs the probe. The route guard (`v2RootRoute.beforeLoad`) runs on every
+ * navigation, and the router does not commit the new match until it resolves; with only the 5 s cache
+ * a navigation more than 5 s after the last probe blocked on a fresh `GET /auth/me`, so the URL
+ * changed and the body stayed on the previous screen until the daemon answered. A 401 from any API
+ * call still sends the browser to sign-in through `api/client.ts`'s `onUnauthorized`.
+ */
+let signedIn = false;
+
 /** Whether the daemon refuses this browser as unauthenticated (see the module note). */
 export function v2Refused(): Promise<boolean> {
+  if (signedIn) return Promise.resolve(false);
   const now = Date.now();
-  if (cache && now - cache.at < 5_000) return cache.promise;
-  const promise = probe();
-  cache = { at: now, promise };
-  return promise;
+  if (!cache || now - cache.at >= 5_000) cache = { at: now, promise: probe() };
+  const { promise } = cache;
+  return promise.then((refused) => {
+    if (!refused) signedIn = true;
+    return refused;
+  });
 }
 
 /** Clear the short-lived probe cache; tests call this between cases. */
 export function resetV2RefusedCache(): void {
   cache = null;
+  signedIn = false;
 }
 
 async function probe(): Promise<boolean> {

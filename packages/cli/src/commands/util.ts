@@ -1,6 +1,6 @@
 /** Shared plumbing for the command modules. */
 import type { Command } from 'commander';
-import { printError } from '../output.js';
+import { printError, style, writeErr } from '../output.js';
 import { resolveSession, type GlobalOptions, type ResolveOptions, type Session } from '../resolve.js';
 
 /** Wrap a command body: typed errors are printed, the exit code comes from the error. */
@@ -10,6 +10,14 @@ export async function run(fn: () => Promise<void> | void): Promise<void> {
   } catch (error) {
     process.exitCode = printError(error);
   }
+}
+
+/**
+ * VS-377: `conductor` still works as an input for the weaver's model control, but `weaver` is the
+ * product's name. Say so once on stderr — never on stdout, so `--json` stays machine-readable.
+ */
+export function warnDeprecatedConductor(setting: string): void {
+  if (setting === 'conductor') writeErr(style.dim('"conductor" is deprecated: use "weaver" (this alias will be removed later)'));
 }
 
 export function globals(command: Command): GlobalOptions {

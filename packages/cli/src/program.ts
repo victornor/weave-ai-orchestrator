@@ -1,4 +1,4 @@
-/** The `conductor` command tree (PLAN §20). Exported separately from `bin.ts` so tests can parse without exiting. */
+/** The `weave` command tree (PLAN §20). Exported separately from `bin.ts` so tests can parse without exiting. */
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command, Option } from 'commander';

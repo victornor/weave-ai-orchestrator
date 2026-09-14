@@ -5,7 +5,10 @@
  * The check exists so a human who has just been told "every agent is stopped" can confirm it from
  * the command line and be told exactly what to run — without the token ever appearing.
  */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildProgram } from './program.js';
 import { configureOutput } from './output.js';
@@ -100,5 +103,61 @@ describe('weave doctor — runtime credentials', () => {
     const out = await cli('doctor');
     expect(out).not.toContain(TOKEN);
     expect(out).not.toContain('sk-ant');
+  });
+});
+
+/**
+ * VS-377: `doctor` reports the `weave` shim. Everything runs in a temp HOME / XDG pair; the real
+ * `~/.local/bin`, release dirs and config are never read or written.
+ */
+describe('weave doctor — the CLI shim (VS-377)', () => {
+  const saved = { HOME: process.env['HOME'], XDG_CONFIG_HOME: process.env['XDG_CONFIG_HOME'], XDG_DATA_HOME: process.env['XDG_DATA_HOME'] };
+  let home: string;
+  let configDir: string;
+  let dataDir: string;
+
+  const releaseBin = (): string => join(dataDir, 'weave', 'current', 'packages', 'cli', 'dist', 'bin.js');
+  const shimPath = (): string => join(home, '.local', 'bin', 'weave');
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'vs377-doc-home-'));
+    configDir = mkdtempSync(join(tmpdir(), 'vs377-doc-config-'));
+    dataDir = mkdtempSync(join(tmpdir(), 'vs377-doc-data-'));
+    process.env['HOME'] = home;
+    process.env['XDG_CONFIG_HOME'] = configDir;
+    process.env['XDG_DATA_HOME'] = dataDir;
+    mkdirSync(dirname(releaseBin()), { recursive: true });
+    writeFileSync(releaseBin(), '// cli\n');
+    stub([valid]);
+  });
+
+  afterEach(() => {
+    for (const k of ['HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME'] as const) {
+      if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
+    for (const dir of [home, configDir, dataDir]) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('fails a missing shim and names the command that writes it', async () => {
+    const out = await cli('doctor');
+    expect(out).toContain('weave CLI shim');
+    expect(out).toContain('missing at');
+    expect(out).toContain('weave daemon install-service');
+  });
+
+  it('fails a shim that points at a non-current release', async () => {
+    mkdirSync(dirname(shimPath()), { recursive: true });
+    writeFileSync(shimPath(), `#!/bin/sh\nexec "/usr/bin/node" "${join(dataDir, 'weave', 'releases', 'old', 'packages', 'cli', 'dist', 'bin.js')}" "$@"\n`);
+    const out = await cli('doctor');
+    expect(out).toContain('weave CLI shim');
+    expect(out).toContain('not the current release');
+  });
+
+  it('passes a shim that names the current release', async () => {
+    mkdirSync(dirname(shimPath()), { recursive: true });
+    writeFileSync(shimPath(), `#!/bin/sh\nexec "/usr/bin/node" "${releaseBin()}" "$@"\n`);
+    const out = await cli('doctor');
+    expect(out).toMatch(/ok\s+weave CLI shim/);
+    expect(out).not.toContain('missing at');
   });
 });

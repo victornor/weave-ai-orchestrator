@@ -406,6 +406,16 @@ describe('running commands against a stubbed daemon', () => {
     expect(puts).toEqual([{ weaver: null }, { weaver: null }]);
   });
 
+  it('warns on stderr when the deprecated conductor name is used, and stays quiet for weaver (VS-377)', async () => {
+    const models = { weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } };
+    globalThis.fetch = (async () => new Response(JSON.stringify(models), { status: 200 })) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'models', 'inherit', 'conductor']);
+    expect(written.join('')).toContain('"conductor" is deprecated');
+    written.length = 0;
+    await buildProgram().parseAsync([...base, 'models', 'inherit', 'weaver']);
+    expect(written.join('')).not.toContain('deprecated');
+  });
+
   it('models set accepts weaver as the weaver control name (VS-356)', async () => {
     const models = { weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null } };
     let put: unknown = null;
@@ -478,7 +488,7 @@ describe('running commands against a stubbed daemon', () => {
     configureOutput({ json: false, color: false });
     await buildProgram().parseAsync([...base.filter((a) => a !== '--json'), 'models', 'show']);
     const text = written.join('');
-    expect(text).toMatch(/conductor[^\n]*workspace/);
+    expect(text).toMatch(/weaver[^\n]*workspace/);
     expect(text).toMatch(/workers[^\n]*daemon/);
   });
 

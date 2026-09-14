@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "The installed CLI is still conductor: install a weave command on PATH at
+  install and upgrade, keep conductor as a deprecated alias, and fix its stale
+  AgentConductor text"
+skip_specs: true

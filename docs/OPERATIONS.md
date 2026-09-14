@@ -29,6 +29,10 @@ pnpm --filter @weave-ai/ui build     # the web app; without it the daemon serves
 cd packages/cli && pnpm link --global && cd -   # puts `weave` on PATH
 ```
 
+`weave daemon install-service` and every `weave daemon upgrade` also write `~/.local/bin/weave`
+(pointing at the current release), so a host that upgrades gets the command even if it was first set
+up under the old name; the legacy `conductor` command keeps working as a deprecated alias.
+
 Optional but recommended on the host:
 
 ```bash

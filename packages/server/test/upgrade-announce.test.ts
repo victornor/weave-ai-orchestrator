@@ -136,6 +136,8 @@ function fixture(): Fixture {
     backup: () => [],
     switchTo: () => ({ previous: FROM }),
     prune: () => [],
+    // VS-377: the real default writes into the user's `~/.local/bin`; these tests name their own seam.
+    writeShims: () => undefined,
     spawnRunner: () => undefined,
     ...over,
   });

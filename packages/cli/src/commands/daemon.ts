@@ -8,11 +8,11 @@ import { parse as parseYaml } from 'yaml';
 import { join } from 'node:path';
 import { configHome } from '../contexts.js';
 import { LAUNCHD_LABEL, followLog, installLaunchdAgent, installService, isRunning, logFile, pidFile, readPid, renderLaunchdPlist, renderServiceUnit, resolveServerBin, startDaemon, startDaemonService, stopDaemon, stopDaemonService, systemdMainPid, tailLog } from '../daemon.js';
-import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, releaseStamp, resolveInstalledUnit, resolveWorkspaceStateDir, switchRelease } from '../release.js';
+import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, releaseStamp, resolveInstalledUnit, resolveWorkspaceStateDir, switchRelease, writeUserShims, type ShimWriteResult } from '../release.js';
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { AC_ENV, isTerminalUpgrade, type Upgrade } from '@weave-ai/shared';
-import { run, session } from './util.js';
+import { run, session, warnDeprecatedConductor } from './util.js';
 import { runUpgradeRunner } from '../upgrade-runner.js';
 
 interface Health {
@@ -29,6 +29,13 @@ function displayVersion(version: string | null | undefined, path?: string | null
   const ver = version ?? '?';
   const stamp = path ? releaseStamp(path) : null;
   return stamp ? `${ver} · ${stamp}` : ver;
+}
+
+/** VS-377: say where the `weave` shim landed, or why it could not be written. */
+function reportShim(shim: ShimWriteResult | null): void {
+  if (!shim) return;
+  if (shim.present) write(`${style.dim('shim')} ${shim.path}`);
+  else write(style.warn('no `weave` shim: no current release to point at — it is created on the next `weave daemon upgrade`'));
 }
 interface DaemonYaml { upgrade?: { source?: string; ref?: string; keep?: number; drainTimeoutSec?: number } }
 
@@ -255,6 +262,7 @@ on any other platform the plist is printed so it can be copied to a Mac.`)
             return;
           }
           write(`${style.ok('wrote')} ${result.path}`);
+          reportShim(result.shim);
           write('');
           for (const cmd of result.commands) write(`  ${style.mono(cmd)}`);
         });
@@ -269,6 +277,7 @@ on any other platform the plist is printed so it can be copied to a Mac.`)
       const result = installService();
       emit(result, () => {
         write(`${style.ok('wrote')} ${result.path}`);
+        reportShim(result.shim);
         write('');
         for (const cmd of result.commands) write(`  ${style.mono(cmd)}`);
       });
@@ -308,14 +317,21 @@ worker run (AC_RUN_TOKEN set): agents propose upgrades through tickets, humans r
       write(`${style.ok('current')} -> ${built.path}${switched.previous ? `  (previous: ${switched.previous})` : ''}`);
       if (pruned.length) write(style.dim(`pruned ${pruned.join(', ')}`));
 
+      // VS-377: the release moved, so the PATH shim must follow it (and be created if the host predates it).
+      const shim = writeUserShims();
+
       if (opts['restart'] === false) {
-        emit({ release: built.path, sha: built.sha, restarted: false, backups }, () => write(style.warn('not restarted: the running daemon is still the old release')));
+        emit({ release: built.path, sha: built.sha, restarted: false, backups, shim }, () => {
+          reportShim(shim);
+          write(style.warn('not restarted: the running daemon is still the old release'));
+        });
         return;
       }
       const result = await drainAndRestart(command, drainTimeout);
-      emit({ release: built.path, sha: built.sha, restarted: true, backups, ...result }, () => {
+      emit({ release: built.path, sha: built.sha, restarted: true, backups, ...result, shim }, () => {
         write(`${style.ok('restarted')} ${result.how} · ${result.version ?? '?'}`);
         if (result.interrupted.length) write(style.warn(`${result.interrupted.length} run(s) were still going and got interrupted; they resume on their own`));
+        reportShim(shim);
         write(style.dim('next: weave doctor'));
       });
     }));
@@ -405,12 +421,12 @@ when the daemon is not answering and has to be replaced from here.`)
       emit({ release: prev, wasCurrent: switched.previous, ...result }, () => write(`${style.ok('rolled back')} current -> ${prev} · ${result.how}`));
     }));
 
-  const daemonModels = daemon.command('models').description('optional overlays for conductor, workers, and worker-options on every workspace (VS-185)');
+  const daemonModels = daemon.command('models').description('optional overlays for the weaver, workers, and worker-options on every workspace (VS-185)');
   interface OverlaySetting { runtime?: string; model?: string | null; effort?: string }
   interface OverlayOption extends OverlaySetting { id?: string; description?: string }
   interface DaemonModelsView { weaver: OverlaySetting | null; workers: OverlaySetting | null; workerOptions: OverlayOption[] | null }
-  // The CLI's own argument spelling ('conductor'/'workers') to the wire field it reads/writes (VS-263).
-  const wireField = (setting: 'conductor' | 'workers'): 'weaver' | 'workers' => (setting === 'conductor' ? 'weaver' : 'workers');
+  // The CLI's own argument spelling ('weaver'/'workers', with the legacy 'conductor') to the wire field (VS-263, VS-377).
+  const wireField = (setting: 'conductor' | 'weaver' | 'workers'): 'weaver' | 'workers' => (setting === 'workers' ? 'workers' : 'weaver');
   const describeSetting = (s: OverlaySetting | null): string => {
     if (!s) return '(per workspace)';
     const parts = [s.runtime ?? '(unset)', s.model ?? '(runtime default)'];
@@ -425,7 +441,7 @@ when the daemon is not answering and has to be replaced from here.`)
       const current = await client.get<DaemonModelsView>('/api/daemon/models');
       emit(current, () => {
         fields([
-          ['conductor', describeSetting(current.weaver)],
+          ['weaver', describeSetting(current.weaver)],
           ['workers', describeSetting(current.workers)],
           ...((current.workerOptions ?? []).map((o) => ['option', o.runtime ? `${o.id ?? '?'} — ${o.description ?? ''} (${describeSetting(o)})` : `${o.id ?? '?'} — ${o.description ?? ''} (no runtime chosen)`] as [string, string])),
         ]);
@@ -434,14 +450,15 @@ when the daemon is not answering and has to be replaced from here.`)
     }));
   daemonModels
     .command('set')
-    .argument('<setting>', 'conductor or workers')
+    .argument('<setting>', 'weaver or workers (conductor is a deprecated alias)')
     .option('--runtime <id>', 'runtime id')
     .option('--model <id>', 'model id, or "default" to let the runtime choose')
     .option('--effort <effort>', 'reasoning effort, or "default" to clear it')
     .option('--clear', 'remove this overlay so workspaces use their own setting')
     .description('fill or clear one daemon overlay')
     .action(async (setting: string, opts: Record<string, string | boolean | undefined>, command: Command) => run(async () => {
-      if (setting !== 'conductor' && setting !== 'workers') throw new Error(`unknown setting ${setting}: expected conductor or workers`);
+      if (setting !== 'conductor' && setting !== 'weaver' && setting !== 'workers') throw new Error(`unknown setting ${setting}: expected weaver or workers`);
+      warnDeprecatedConductor(setting);
       const field = wireField(setting);
       const { client } = await session(command, { workspace: 'none' });
       if (opts['clear'] === true) {

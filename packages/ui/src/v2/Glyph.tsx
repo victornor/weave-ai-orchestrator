@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react';
 import {
   Activity,
   BookOpen,
+  CircleArrowUp,
   Clock,
   Ellipsis,
   Inbox,
@@ -39,6 +40,7 @@ export const V2_ICONS: Record<V2GlyphName, LucideIcon> = {
   settings: Settings,
   plugin: Plug,
   more: Ellipsis,
+  update: CircleArrowUp,
 };
 
 /** One size and one stroke for every V2 nav mark, so icons line up with their labels. */

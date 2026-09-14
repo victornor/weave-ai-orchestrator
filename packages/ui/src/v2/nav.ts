@@ -21,7 +21,9 @@ export type V2GlyphName =
   | 'knowledge'
   | 'plugin'
   /** The phone More control, which is a menu rather than a destination (VS-420). */
-  | 'more';
+  | 'more'
+  /** The daemon update entry, which is a fact about the daemon rather than a destination (VS-421). */
+  | 'update';
 
 export interface V2Dest {
   key: string;

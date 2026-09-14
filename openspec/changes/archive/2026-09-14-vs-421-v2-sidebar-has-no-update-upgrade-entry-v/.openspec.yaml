@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: V2 sidebar carries V1's update entry in the expanded and collapsed rail,
+  reaches it on phone, and loses the desktop More row
+skip_specs: true

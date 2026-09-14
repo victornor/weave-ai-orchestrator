@@ -20,6 +20,7 @@ const EXPECTED: Record<V2GlyphName, string> = {
   settings: 'settings',
   plugin: 'plug',
   more: 'ellipsis',
+  update: 'circle-arrow-up',
 };
 
 function assertGlyph(name: V2GlyphName): void {

@@ -1,7 +1,7 @@
 import { nowIso } from '@weave-ai/db';
 import { OcError, type Run, type RunEvent, type RunStatus, type RunTrace } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
-import type { Actor, CoreServices, Page, RunsService } from '../api.js';
+import type { Actor, CoreServices, Page, RunsService, RunsSort, RunsSortDir } from '../api.js';
 import { recordActivity } from '../events.js';
 import { runState } from './active.js';
 
@@ -12,6 +12,27 @@ export { runState, emitRunEvent, recordHumanInputEvent, describeLiveInput, type 
 
 /** The aggregate row behind one run's trace, named as the mapper hands it back. */
 interface Counts { events: number; toolCalls: number; errors: number; texts: number; files: number }
+
+/**
+ * The runs list's `ORDER BY` (VS-410). Recency is the default and is unchanged. For a measure a row
+ * may not carry (no cost, no usage, never started) the row sorts last in both directions, and ties
+ * fall back to recency and id so paging stays stable. Duration for a run still going is its elapsed
+ * time so far — `julianday('now')` for a null `finished_at` — matching the client's own comparator.
+ */
+function runsOrderBy(sort: RunsSort, dir: RunsSortDir): string {
+  const d = dir === 'asc' ? 'ASC' : 'DESC';
+  const tie = 'created_at DESC, id DESC';
+  switch (sort) {
+    case 'cost':
+      return `(cost_cents IS NULL) ASC, cost_cents ${d}, ${tie}`;
+    case 'tokens':
+      return `(usage_json IS NULL) ASC, (COALESCE(json_extract(usage_json, '$.inputTokens'), 0) + COALESCE(json_extract(usage_json, '$.outputTokens'), 0)) ${d}, ${tie}`;
+    case 'duration':
+      return `(started_at IS NULL) ASC, (julianday(COALESCE(finished_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))) - julianday(started_at)) ${d}, ${tie}`;
+    default:
+      return `created_at ${d}, id DESC`;
+  }
+}
 
 /** How long a run took by its own clock. Null while it is still going, and null for a run that never started. */
 function elapsed(startedAt: string | null, finishedAt: string | null): number | null {
@@ -33,7 +54,8 @@ export function createRunsService(ctx: WorkspaceContext, _deps: () => CoreServic
       if (filter.status?.length) { where.push(`status IN (${filter.status.map(() => '?').join(',')})`); params.push(...filter.status); }
       const sql = `FROM runs WHERE ${where.join(' AND ')}`;
       const total = ctx.db.get<{ n: number }>(`SELECT COUNT(*) n ${sql}`, params as never[])?.n ?? 0;
-      const items = ctx.db.all<Run>(`SELECT * ${sql} ORDER BY created_at DESC LIMIT ? OFFSET ?`, [...params, filter.limit ?? 50, filter.offset ?? 0] as never[]);
+      const order = filter.sort ? runsOrderBy(filter.sort, filter.dir ?? 'desc') : 'created_at DESC';
+      const items = ctx.db.all<Run>(`SELECT * ${sql} ORDER BY ${order} LIMIT ? OFFSET ?`, [...params, filter.limit ?? 50, filter.offset ?? 0] as never[]);
       return { items, total };
     },
 

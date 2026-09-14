@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: The V2 Runs page can filter by workspace and sort by cost, duration or
+  tokens across the whole run history, persisting the choice in the URL
+skip_specs: true

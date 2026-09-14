@@ -11,8 +11,18 @@ export function runRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.get('/', (c) => {
-    const q = query(c, z.object({ agent: z.string().optional(), ticket: z.string().optional(), status: csv.optional(), limit: z.coerce.number().int().optional(), offset: z.coerce.number().int().optional() }));
-    return c.json(c.get('ws').services.runs.list({ agentId: q.agent, ticketId: q.ticket, status: q.status as never, limit: q.limit, offset: q.offset }));
+    const q = query(c, z.object({
+      agent: z.string().optional(),
+      ticket: z.string().optional(),
+      status: csv.optional(),
+      // VS-410: order the list by one of the run's own measures, across the whole history. Absent
+      // `sort` keeps the original `created_at DESC` order, so the default is unchanged.
+      sort: z.enum(['createdAt', 'cost', 'duration', 'tokens']).optional(),
+      dir: z.enum(['asc', 'desc']).optional(),
+      limit: z.coerce.number().int().optional(),
+      offset: z.coerce.number().int().optional(),
+    }));
+    return c.json(c.get('ws').services.runs.list({ agentId: q.agent, ticketId: q.ticket, status: q.status as never, sort: q.sort, dir: q.dir, limit: q.limit, offset: q.offset }));
   });
 
   /**

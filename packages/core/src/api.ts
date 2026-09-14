@@ -405,8 +405,11 @@ export interface WakeService {
   listForAgent(agentId: string, status?: S.WakeStatus[]): S.Wakeup[];
   cancelForAgent(agentId: string, reason: string): number;
 }
+/** The runs list's ordering key (VS-410): recency (the default), or one of the run's own measures. */
+export type RunsSort = S.RunSortKey;
+export type RunsSortDir = S.RunSortDir;
 export interface RunsService {
-  list(filter?: { agentId?: string; ticketId?: string; status?: S.RunStatus[]; limit?: number; offset?: number }): Page<S.Run>;
+  list(filter?: { agentId?: string; ticketId?: string; status?: S.RunStatus[]; sort?: RunsSort; dir?: RunsSortDir; limit?: number; offset?: number }): Page<S.Run>;
   get(id: string): S.Run;
   events(id: string, afterSeq?: number, limit?: number): S.RunEvent[];
   /** The last `limit` events of a run, in ascending sequence order — the tail `events()` cannot page to. */

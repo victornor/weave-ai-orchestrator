@@ -110,6 +110,55 @@ describe('the shared dictation chord (VS-432)', () => {
     expect(chordDown({ repeat: true })).toBe(false);
   });
 
+  it('swallows the chord on keyup as well as keydown (VS-441)', () => {
+    harness();
+    chordDown();
+    // A focused button is activated by Space's keyup, so the chord has to swallow it too — a
+    // toggle-off whose keyup clicked the focused mic/send button caused the bogus failure.
+    expect(fireEvent.keyUp(window, { key: ' ', code: 'Space' })).toBe(false);
+    // The toggle-off keydown sets the phase idle; its keyup must still be swallowed, which is what
+    // the claimed-chord flag carries across the two edges.
+    chordDown();
+    expect(fireEvent.keyUp(window, { key: ' ', code: 'Space' })).toBe(false);
+    // Releasing the modifiers releases the chord's claim.
+    fireEvent.keyUp(window, { key: 'Control', code: 'ControlLeft' });
+    fireEvent.keyUp(window, { key: 'Shift', code: 'ShiftLeft' });
+    // A plain Space, with no chord, is left alone.
+    expect(fireEvent.keyUp(window, { key: ' ', code: 'Space' })).toBe(true);
+  });
+
+  it('ends a hold whose keyup was lost when the window loses focus (VS-441)', () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    try {
+      const h = harness();
+      chordDown();
+      expect(h.result.current.mode).toBe('hold');
+      clock.mockReturnValue(DICTATION_HOLD_MS);
+      act(() => { window.dispatchEvent(new Event('blur')); });
+      expect(h.stop).toHaveBeenCalledTimes(1);
+      expect(h.result.current.mode).toBe('off');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('turns a tap whose keyup was lost into a toggle on blur, so the next press still stops it', () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    try {
+      const h = harness();
+      chordDown();
+      clock.mockReturnValue(DICTATION_HOLD_MS - 1);
+      act(() => { window.dispatchEvent(new Event('blur')); });
+      expect(h.stop).not.toHaveBeenCalled();
+      expect(h.result.current.mode).toBe('toggle');
+      chordDown();
+      expect(h.stop).toHaveBeenCalledTimes(1);
+      expect(h.result.current.mode).toBe('off');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('returns to off when the session ends some other way', () => {
     const h = harness();
     chordDown();

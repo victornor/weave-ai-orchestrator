@@ -156,6 +156,11 @@ const NO_TRANSCRIPT = 'The browser heard audio but its speech service returned n
 /** The daemon transcribed successfully but recognized no words (VS-196) \u2014 not a failure, so no error is thrown. */
 const NO_TRANSCRIPT_UPLOAD = 'Nothing was recognized in that recording. Try again.';
 
+/** A fetch cancelled by an AbortController, which is not a transcription failure (VS-441). */
+function isAbort(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { name?: string }).name === 'AbortError';
+}
+
 /**
  * `onText` receives the **whole** transcript dictated since the mic opened, not the newest fragment:
  * every call replaces what the previous one said. Assembling it here is what keeps the growing
@@ -180,6 +185,15 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     transcribingRef.current = v;
     setTranscribing(v);
   }, []);
+  /**
+   * True from a successful `start()` until the attempt has been stopped. A `stop()` with no live
+   * session is a no-op (VS-441): a second stop — the keyup of a toggle-off activating a focused
+   * button, or a send arriving in the same tick — must not clear `settled` while the transcript is
+   * still in flight, and must never post a second upload.
+   */
+  const sessionLive = useRef(false);
+  /** Aborts the request of the attempt currently in flight when the hook goes away. */
+  const abortRef = useRef<AbortController | null>(null);
   /**
    * End of a dictation attempt: the transcript has landed (or failed), so a send queued while
    * dictating may now submit. `transcribing` and `settled` flip in one statement so the composer
@@ -289,6 +303,8 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     }
     const fd = new FormData();
     fd.append('audio', blob, 'dictation.wav');
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    abortRef.current = controller;
     // `transcribing` clears in the same statement as whatever else each branch sets — never behind
     // a trailing `.finally()`. A `.catch().finally()` tail sets them across two separate promise
     // continuations, which land in two separate React commits often enough to matter: the composer's
@@ -297,14 +313,24 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     // and the "waiting for the transcript" banner at once (found via VS-294, ~20% of runs).
     void (async () => {
       try {
-        const res = await fetch(transcribeUrlRef.current ?? '/api/transcribe', { method: 'POST', credentials: 'include', body: fd });
+        const res = await fetch(transcribeUrlRef.current ?? '/api/transcribe', {
+          method: 'POST', credentials: 'include', body: fd, ...(controller ? { signal: controller.signal } : {}),
+        });
         if (res.status === 501) {
           setMode(speechCtor() ? 'speech' : 'unavailable');
           setError('No transcription provider is configured on the daemon. Set one in Settings → Dictation.');
           finishAttempt();
           return;
         }
-        if (!res.ok) throw new Error(String(res.status));
+        if (!res.ok) {
+          // A 4xx is the request being rejected, not the daemon failing: the usual cause is a
+          // recording with no usable audio (an accidental start, or a stop a beat later). Showing
+          // that as "Transcription failed" is what made a stray toggle-off look like a crash
+          // (VS-441); it is an empty attempt, and reads as one.
+          setError(res.status >= 400 && res.status < 500 ? NO_TRANSCRIPT_UPLOAD : 'Transcription failed on the daemon. Type instead, or retry.');
+          finishAttempt();
+          return;
+        }
         const json = (await res.json()) as { text?: string; error?: { message?: string } };
         if (json.text?.trim()) {
           cb.current(json.text, true);
@@ -312,14 +338,27 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
           setError(NO_TRANSCRIPT_UPLOAD);
         }
         finishAttempt();
-      } catch {
+      } catch (e) {
+        if (isAbort(e)) {
+          // The request was cancelled — the composer unmounted, or the attempt was superseded.
+          // Nothing failed, so nothing is reported (VS-441).
+          finishAttempt();
+          return;
+        }
         setError('Transcription failed on the daemon. Type instead, or retry.');
         finishAttempt();
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null;
       }
     })();
   }, [finishAttempt]);
 
   const stop = useCallback(() => {
+    // No session to stop: a second stop (the toggle-off keyup clicking a focused button, a send in
+    // the same tick) must not clear `settled` while a transcript is in flight, and must never post
+    // a second upload (VS-441).
+    if (!sessionLive.current) return;
+    sessionLive.current = false;
     const uploading = uploadLive.current;
     uploadLive.current = false;
     wantListening.current = false;
@@ -369,6 +408,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     }
     setListening(true);
     wantListening.current = true;
+    sessionLive.current = true;
     setSettled(false);
     gotResult.current = false;
     heardAudio.current = false;
@@ -417,6 +457,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         if (e.error === 'no-speech' || e.error === 'aborted') return; // onend follows; re-armed or ended there
         setError(ERRORS[e.error] ?? `Dictation error: ${e.error}`);
         wantListening.current = false;
+        sessionLive.current = false;
         setListening(false);
         stopMeters();
         setSettled(true);
@@ -429,6 +470,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
             record({ kind: 'end', restarted: false, committedAfter: committed.current });
             setError(heardAudio.current ? NO_TRANSCRIPT : ERRORS['no-speech']!);
             wantListening.current = false;
+            sessionLive.current = false;
             setListening(false);
             stopMeters();
             setSettled(true);
@@ -457,6 +499,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       } catch {
         setListening(false);
         wantListening.current = false;
+        sessionLive.current = false;
         stopMeters();
         setSettled(true);
       }
@@ -493,6 +536,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       })
       .catch(() => {
         uploadLive.current = false;
+        sessionLive.current = false;
         setError('Microphone permission was denied.');
         setListening(false);
         stopMeters();
@@ -503,6 +547,9 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
   const toggle = useCallback(() => (listening ? stop() : start()), [listening, start, stop]);
 
   useEffect(() => () => stop(), [stop]);
+  // Leaving the composer cancels an in-flight transcription rather than letting its response set a
+  // failure on a component that is already gone (VS-441).
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
 
   const copyDiagnostics = useCallback(() => {
     void navigator.clipboard?.writeText(formatDictationCapture(capture.current));

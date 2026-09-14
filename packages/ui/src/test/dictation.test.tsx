@@ -884,6 +884,57 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     expect(getUserMedia).not.toHaveBeenCalled(); // no second recording was started
   });
 
+  it('a chord toggle-off with the mic or send control focused uploads once and reports no failure (VS-441)', async () => {
+    const posts: RequestInit[] = [];
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push(init);
+        return Promise.resolve(ok('once'));
+      }
+      if (url.includes('/api/health')) return Promise.resolve({ ok: true, json: async () => ({ transcription: { configured: true, backend: 'voxtype' } }) });
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    await renderUpload(() => undefined);
+
+    for (const label of ['Dictate', 'Send']) {
+      posts.length = 0;
+      getUserMedia.mockClear();
+      screen.getByLabelText(label).focus();
+      // A focused button is activated by Space's keyup; the chord must swallow both edges.
+      fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+      fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+      fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+      fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+
+      await eventually(() => expect(posts.length).toBe(1));
+      expect(getUserMedia).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      // Let the attempt settle before the next focused control.
+      await eventually(() => expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument());
+    }
+  });
+
+  it('a chord press while a transcript is in flight starts no second session (VS-441)', async () => {
+    const d = deferredResponse();
+    stubHealthAndTranscribe(() => d.promise);
+    await renderUpload(() => undefined);
+
+    fireEvent.click(screen.getByLabelText('Dictate'));
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Stop dictation'));
+    expect(screen.getByText('Transcribing…')).toBeInTheDocument();
+    getUserMedia.mockClear();
+
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+    // The hook refuses to open a mic while it is still waiting for a transcript.
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(screen.getByText('Transcribing…')).toBeInTheDocument();
+
+    d.settle(ok('late words'));
+    await eventually(() => expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument());
+  });
+
   it('submits the transcript, not the pre-press text, when the two differ', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const d = deferredResponse();

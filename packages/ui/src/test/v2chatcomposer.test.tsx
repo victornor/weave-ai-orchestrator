@@ -20,6 +20,7 @@ const dict = vi.hoisted(() => ({
   elapsed: 0,
   metered: false,
   error: null as string | null,
+  stops: 0,
   setListening: null as ((v: boolean) => void) | null,
   setTranscribing: null as ((v: boolean) => void) | null,
   setSettled: null as ((v: boolean) => void) | null,
@@ -50,7 +51,7 @@ vi.mock('../lib/dictation', async (importOriginal) => {
         // The hook clears `settled` on start and only restores it when the attempt ends — the final
         // recognizer result on the speech path, the transcription response on the daemon path.
         start: () => { setListening(true); setSettled(false); },
-        stop: () => { setListening(false); if (dict.mode === 'upload') setTranscribing(true); },
+        stop: () => { dict.stops += 1; setListening(false); if (dict.mode === 'upload') setTranscribing(true); },
         toggle: () => undefined,
         diagnostics: { enabled: false, count: 0, copy: () => undefined },
       };
@@ -88,6 +89,7 @@ beforeEach(() => {
   dict.elapsed = 0;
   dict.metered = false;
   dict.error = null;
+  dict.stops = 0;
   dict.setListening = null;
   dict.setTranscribing = null;
   dict.setSettled = null;
@@ -360,20 +362,41 @@ describe('the V2 composer listening state (VS-416)', () => {
     render(<Harness onSubmit={vi.fn()} />);
     dictate();
     fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    // While transcribing, the input slot holds the indicator, not the textarea (VS-441), so the
+    // scroll is asserted on the textarea that returns when the transcript lands.
+    expect(screen.getByTestId('v2-composer-transcribing')).toBeInTheDocument();
+
+    const long = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen';
+    finishTranscribe(long);
 
     const box = screen.getByLabelText('Message the weaver') as HTMLTextAreaElement;
     let scrollTop = 0;
     Object.defineProperty(box, 'scrollTop', { configurable: true, get: () => scrollTop, set: (v: number) => { scrollTop = v; } });
     Object.defineProperty(box, 'scrollHeight', { configurable: true, get: () => 640 });
 
-    const long = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen';
-    act(() => dict.onText?.(long, true));
-
     // The reveal streams the text in; the box follows it to the end the whole way (VS-425).
     await waitFor(() => expect(box).toHaveValue(long));
     expect(box.selectionStart).toBe(long.length);
     expect(box.selectionEnd).toBe(long.length);
     expect(scrollTop).toBe(640);
+  });
+
+it('shows the transcribing indicator in the box while the transcript is in flight (VS-441)', async () => {
+    dict.mode = 'upload';
+    render(<Harness onSubmit={vi.fn()} />);
+    dictate();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+
+    // The mic is closed and the textarea is not shown yet: the indicator takes the input slot, so
+    // the box never flashes empty between listening and the text landing.
+    const indicator = screen.getByTestId('v2-composer-transcribing');
+    expect(indicator).toHaveTextContent('Transcribing…');
+    expect(screen.queryByLabelText('Message the weaver')).not.toBeInTheDocument();
+
+    finishTranscribe('landed words arrive in the box now');
+    expect(screen.queryByTestId('v2-composer-transcribing')).not.toBeInTheDocument();
+    // The reveal streams the text in, so the value settles over a few frames (VS-425).
+    await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue('landed words arrive in the box now'));
   });
 });
 
@@ -709,5 +732,37 @@ describe('the V2 composer discards a transcript of five words or fewer (VS-439)'
 
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Send queued' })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * VS-441: the chord's toggle-off has to behave exactly like the mic button, whichever control has
+ * focus. A focused button is activated by the Space keyup, so the chord must swallow its own keyup;
+ * otherwise the toggle-off could click the focused mic/send control and stop a second time.
+ */
+describe('the V2 composer chord stop with a focused control (VS-441)', () => {
+  function chordOnOff(): void {
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+  }
+
+  it.each(['Dictate', 'Send'])('stops exactly once when %s has focus', (label) => {
+    const { unmount } = render(<Harness onSubmit={vi.fn()} />);
+    screen.getByRole('button', { name: label }).focus();
+    chordOnOff();
+    expect(dict.stops).toBe(1);
+    unmount();
+  });
+
+  it('stops exactly once when the stop control has focus', () => {
+    render(<Harness onSubmit={vi.fn()} />);
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+    screen.getByRole('button', { name: 'Stop dictation' }).focus();
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+    expect(dict.stops).toBe(1);
   });
 });

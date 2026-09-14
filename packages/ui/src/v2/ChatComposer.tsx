@@ -18,6 +18,7 @@ import { dictationHint } from '../lib/dictationHint';
 import { projectColorVar } from '../lib/projectColor';
 import { REVEAL_MS, REVEAL_STEP_MS, revealedCount, usePrefersReducedMotion } from '../lib/streamReveal';
 import { VoiceMeter } from '../components/VoiceMeter';
+import { TranscribingIndicator } from '../components/TranscribingIndicator';
 import { cx } from '../lib/cx';
 
 const ACCEPTED = [...ATTACHMENT_IMAGE_TYPES, ...ATTACHMENT_TEXT_TYPES] as readonly string[];
@@ -436,7 +437,7 @@ export function ChatComposer({
         onDragOver={(e) => { if (dragHasFiles(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
         onDragLeave={(e) => { if (dragHasFiles(e.dataTransfer)) { dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0) setDragActive(false); } }}
         onDrop={(e) => { if (!dragHasFiles(e.dataTransfer)) return; e.preventDefault(); dragDepth.current = 0; setDragActive(false); addFiles(Array.from(e.dataTransfer.files)); }}
-        className={cx('flex items-end gap-2 rounded-r4 border bg-bg-input px-2.5 py-1.5', dragActive || dictation.listening ? 'border-accent' : 'border-line-2')}
+        className={cx('flex items-end gap-2 rounded-r4 border bg-bg-input px-2.5 py-1.5', dragActive || dictation.listening || dictation.transcribing ? 'border-accent' : 'border-line-2')}
       >
         {dictation.listening ? (
           <div data-testid="v2-composer-listening" className="flex min-w-0 flex-1 items-center gap-2.5 py-1">
@@ -451,6 +452,12 @@ export function ChatComposer({
             <span className="ac-mono flex-none text-nano tabular-nums text-text-3">
               {Math.floor(dictation.elapsed / 60)}:{String(dictation.elapsed % 60).padStart(2, '0')}
             </span>
+          </div>
+        ) : dictation.transcribing ? (
+          // The mic is closed and the transcript is on its way (VS-441). Keeping this in the same
+          // slot as the listening meter means the box never flashes empty between the two.
+          <div data-testid="v2-composer-transcribing" className="flex min-w-0 flex-1 items-center py-1">
+            <TranscribingIndicator reducedMotion={reducedMotion} className="h-6 min-w-0 flex-1" />
           </div>
         ) : (
           <textarea

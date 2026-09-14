@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Dictation: Ctrl+Shift+Space toggle-off ends in transcription failed
+  (buttons work), and V2 shows nothing while transcribing"
+skip_specs: true

@@ -36,6 +36,13 @@ function isChordRelease(e: KeyboardEvent): boolean {
   return e.code === 'Space' || e.key === 'Meta' || e.key === 'Control' || e.key === 'Shift';
 }
 
+/** A stable id for one of the chord's own keys, so a keyup can be matched to the chord that claimed it. */
+function chordKeyId(e: KeyboardEvent): string | null {
+  if (e.code === 'Space') return 'Space';
+  if (e.key === 'Meta' || e.key === 'Control' || e.key === 'Shift') return e.key;
+  return null;
+}
+
 export function useDictationHotkey({ enabled, listening, start, stop }: DictationHotkeyOptions): DictationHotkeyMode {
   const [mode, setMode] = useState<DictationHotkeyMode>('off');
   // Read through refs so the window listeners are attached once and still see the current render's
@@ -51,10 +58,24 @@ export function useDictationHotkey({ enabled, listening, start, stop }: Dictatio
 
   const phase = useRef<Phase>('idle');
   const pressAt = useRef(0);
+  /**
+   * True from the chord's keydown until every key that made it is up. A focused button is
+   * activated by the **keyup** of Space, not its keydown, so swallowing only the keydown (VS-432)
+   * left the keyup free to click a focused mic/stop/send button: a toggle-off could then be
+   * followed by a second stop or a start, which is how a stop ended in a bogus "Transcription
+   * failed" (VS-441). The chord is swallowed on both edges while it owns this flag.
+   */
+  const claimed = useRef(false);
+  const claimedKeys = useRef<Set<string>>(new Set());
 
   const move = useCallback((next: Phase): void => {
     phase.current = next;
     setMode(next === 'pressed' ? 'hold' : next === 'toggle' ? 'toggle' : 'off');
+  }, []);
+
+  const release = useCallback((): void => {
+    claimed.current = false;
+    claimedKeys.current.clear();
   }, []);
 
   // Dictation can end without the chord: the mic button, an error, a send. The shortcut must not
@@ -63,13 +84,47 @@ export function useDictationHotkey({ enabled, listening, start, stop }: Dictatio
     if ((!listening || !enabled) && phase.current !== 'idle') move('idle');
   }, [listening, enabled, move]);
 
+  // A window that loses focus (or a hidden tab) never delivers the keyup that would end a hold. If
+  // the chord was mid-press it would sit on `pressed` forever, ignoring every later chord press and
+  // leaving the mic open — the 5-minute recording of VS-441. A genuine hold stops (nobody can keep
+  // holding an unfocused window); a tap that had not yet become a hold becomes a toggle, so the
+  // next chord press still closes the mic rather than stranding it.
+  useEffect(() => {
+    const onBlur = (): void => {
+      release();
+      if (phase.current !== 'pressed') return;
+      if (Date.now() - pressAt.current >= DICTATION_HOLD_MS) {
+        stopRef.current();
+        move('idle');
+      } else {
+        move('toggle');
+      }
+    };
+    const onHidden = (): void => {
+      if (document.visibilityState === 'hidden') onBlur();
+    };
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onHidden);
+    };
+  }, [move, release]);
+
   useEffect(() => {
     const onDown = (e: KeyboardEvent): void => {
       if (!enabledRef.current) return;
       const chord = isDictationChord(e);
-      // Swallow the chord even on auto-repeat, so a held Space never types into the textarea or
-      // scrolls the page.
-      if (chord) e.preventDefault();
+      if (chord) {
+        // Swallow the chord — on keydown so a held Space never types into the textarea or scrolls
+        // the page, and (below) on keyup so it never activates a focused button.
+        e.preventDefault();
+        claimed.current = true;
+        if (e.ctrlKey) claimedKeys.current.add('Control');
+        if (e.metaKey) claimedKeys.current.add('Meta');
+        if (e.shiftKey) claimedKeys.current.add('Shift');
+        claimedKeys.current.add('Space');
+      }
       if (e.repeat || !chord) return;
       if (phase.current === 'pressed') return; // already down from this press
       if (phase.current === 'toggle') {
@@ -86,6 +141,14 @@ export function useDictationHotkey({ enabled, listening, start, stop }: Dictatio
     };
 
     const onUp = (e: KeyboardEvent): void => {
+      const id = chordKeyId(e);
+      if (claimed.current && id !== null) {
+        // Swallow the keyup of any of the chord's keys while the chord owns them, so Space's keyup
+        // cannot click the focused control. Modifier keyups are harmless but kept symmetric.
+        if (isChordRelease(e)) e.preventDefault();
+        claimedKeys.current.delete(id);
+        if (claimedKeys.current.size === 0) claimed.current = false;
+      }
       if (!enabledRef.current) return;
       if (phase.current !== 'pressed' || !isChordRelease(e)) return;
       if (!listeningRef.current) {

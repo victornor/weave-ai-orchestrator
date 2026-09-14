@@ -784,8 +784,37 @@ export interface CoreServices {
   openspec: OpenSpecService; usage: UsageService; knowledgeUsage: KnowledgeUsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
   changelog: ChangelogService; models: ModelsService; secrets: SecretsService; pullRequests: PullRequestsService;
   routines: RoutinesService; weaverArtifacts: WeaverArtifactsService;
+  /** VS-397: a project's roadmap of future ideas — list, create, update (reorder/status/ticket) and delete. */
+  roadmap: RoadmapService;
   /** VS-328: the live per-worker activity line and last test tally the board reads and streams. */
   activity: WorkerActivityService;
+}
+
+export interface RoadmapCreateInput {
+  title: string;
+  notes?: string;
+  status?: S.RoadmapStatus;
+  ticketId?: string | null;
+}
+
+export interface RoadmapPatch {
+  title?: string;
+  notes?: string;
+  status?: S.RoadmapStatus;
+  position?: number;
+  ticketId?: string | null;
+}
+
+/**
+ * A project's roadmap (VS-397): durable ideas that are not tickets. Scoped to one project; `get`
+ * exists so a route or tool can resolve an item before writing it.
+ */
+export interface RoadmapService {
+  list(projectId: string): S.RoadmapItem[];
+  get(itemId: string): S.RoadmapItem;
+  create(actor: Actor, projectId: string, input: RoadmapCreateInput): S.RoadmapItem;
+  update(actor: Actor, itemId: string, patch: RoadmapPatch): S.RoadmapItem;
+  remove(actor: Actor, itemId: string): void;
 }
 
 export interface RoutineCreateInput {

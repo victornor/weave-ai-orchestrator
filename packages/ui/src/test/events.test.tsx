@@ -248,3 +248,18 @@ describe('routine events (VS-220)', () => {
     }
   });
 });
+
+describe('roadmap events (VS-397)', () => {
+  it('makes the project roadmap stale, reading the project from the payload', () => {
+    for (const type of ['roadmap.created', 'roadmap.updated', 'roadmap.removed'] as const) {
+      const keys = invalidated(event(type, { entityId: 'rm_1', entityType: 'roadmap', payload: { projectId: 'p1' } }));
+      expect(keys).toContain(JSON.stringify(qk.roadmapRoot('ws1')));
+      expect(keys).toContain(JSON.stringify(qk.roadmap('ws1', 'p1')));
+    }
+  });
+
+  it('still refreshes the root when a payload carries no project', () => {
+    const keys = invalidated(event('roadmap.updated', { entityId: 'rm_1', entityType: 'roadmap', payload: null }));
+    expect(keys).toContain(JSON.stringify(qk.roadmapRoot('ws1')));
+  });
+});

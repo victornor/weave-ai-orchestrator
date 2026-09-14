@@ -4,7 +4,7 @@
  */
 import { tmpdir } from 'node:os';
 import { Db } from '@weave-ai/db';
-import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, createRoutinesService, createPluginRegistry, getLogger, initLogger } from '@weave-ai/core';
+import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, createRoadmapService, createRoutinesService, createPluginRegistry, getLogger, initLogger } from '@weave-ai/core';
 import type { Actor, CoreServices, HistoryQuery, WorkspaceContext } from '@weave-ai/core';
 import type { AuthService } from '@weave-ai/core';
 import {
@@ -371,6 +371,9 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   // route test asserts on the rows it really wrote rather than on a hand-written double.
   (services as { knowledgeUsage: CoreServices['knowledgeUsage'] }).knowledgeUsage = createKnowledgeUsageService(ctx, () => services as unknown as CoreServices);
   (services as { routines: CoreServices['routines'] }).routines = createRoutinesService(ctx, () => services as unknown as CoreServices);
+  // And the roadmap (VS-397): real over this fake's own db and its real projects/tickets doubles, so a
+  // route test asserts on the rows it really wrote.
+  (services as { roadmap: CoreServices['roadmap'] }).roadmap = createRoadmapService(ctx, () => services as unknown as CoreServices);
 
   const runtime: WorkspaceRuntime = { id: workspaceId, ctx, services, channels: null, webhooks: null, push: null };
 

@@ -2,7 +2,7 @@
  * VS-352: the V2 project overview (`/v2/w/:ws/p/:project`) — the kept V1 sections restyled, the header
  * links, the commit graph, the pull requests and their shared diff, and the unknown-project state.
  */
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 
@@ -13,6 +13,8 @@ const state = vi.hoisted(() => ({
   pulls: { open: [] as unknown[], recent: [] as unknown[] },
   prDetail: null as Record<string, unknown> | null,
   openingPull: false,
+  roadmap: [] as Array<Record<string, unknown>>,
+  calls: [] as Array<{ kind: string; args: unknown }>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -31,6 +33,8 @@ vi.mock('../app/link', () => ({
 }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
+
+vi.mock('../components/Toast', () => ({ useToast: () => ({ push: () => undefined }) }));
 
 vi.mock('../api/hooks', () => ({
   useWorkspaces: () => ({ data: [{ id: 'ws1', name: 'Acme', needsYou: 0 }] }),
@@ -64,8 +68,12 @@ vi.mock('../api/hooks', () => ({
   useChangelogRecent: () => ({ isLoading: false, data: { entries: [] } }),
   useChangelogHeatmap: () => ({ isLoading: false, data: undefined }),
   useDecisions: () => ({ isLoading: false, data: [] }),
-  useTickets: () => ({ isLoading: false, data: [] }),
+  useTickets: () => ({ isLoading: false, data: [{ id: 'tk_1', identifier: 'ACME-42' }] }),
   useRuns: () => ({ isLoading: false, data: [] }),
+  useRoadmap: () => ({ isLoading: false, data: state.roadmap }),
+  useCreateRoadmapItem: () => ({ isPending: false, mutate: (args: unknown, opts?: { onSuccess?: () => void }) => { state.calls.push({ kind: 'create', args }); opts?.onSuccess?.(); } }),
+  usePatchRoadmapItem: () => ({ isPending: false, mutate: (args: unknown, opts?: { onSuccess?: () => void }) => { state.calls.push({ kind: 'patch', args }); opts?.onSuccess?.(); } }),
+  useRemoveRoadmapItem: () => ({ isPending: false, mutate: (args: unknown, opts?: { onSuccess?: () => void }) => { state.calls.push({ kind: 'remove', args }); opts?.onSuccess?.(); } }),
   readerTimezone: () => 'UTC',
 }));
 
@@ -77,6 +85,8 @@ beforeEach(() => {
   state.pulls = { open: [], recent: [] };
   state.prDetail = null;
   state.openingPull = false;
+  state.roadmap = [];
+  state.calls = [];
 });
 
 describe('the V2 project overview', () => {
@@ -106,9 +116,61 @@ describe('the V2 project overview', () => {
 
   it('renders the kept sections', () => {
     render(<V2ProjectScreen />);
-    for (const label of ['Needs you', 'Work under way', 'History', 'Pull requests', 'Recent landings', 'Activity', 'Knowledge']) {
+    for (const label of ['Needs you', 'Work under way', 'Roadmap', 'History', 'Pull requests', 'Recent landings', 'Activity', 'Knowledge']) {
       expect(screen.getByRole('heading', { name: label })).toBeInTheDocument();
     }
+  });
+
+  const roadmapSection = (): HTMLElement =>
+    screen.getByRole('heading', { name: 'Roadmap' }).closest('section') as HTMLElement;
+
+  it('shows the roadmap in order with status, notes and the linked ticket', () => {
+    state.roadmap = [
+      { id: 'r1', projectId: 'p1', title: 'Dark mode', notes: '**Later**', position: 0, status: 'planned', ticketId: 'tk_1' },
+      { id: 'r2', projectId: 'p1', title: 'Shortcuts', notes: '', position: 1, status: 'idea', ticketId: null },
+    ];
+    render(<V2ProjectScreen />);
+    const section = roadmapSection();
+    const titles = within(section).getAllByText(/^(Dark mode|Shortcuts)$/).map((el) => el.textContent);
+    expect(titles).toEqual(['Dark mode', 'Shortcuts']);
+    expect(within(section).getByRole('link', { name: 'ACME-42' })).toHaveAttribute('href', '/v2/w/ws1/tickets/ACME-42');
+    expect(within(section).getByText('Later').tagName).toBe('STRONG');
+    // Each item's own select shows its current status.
+    expect((within(section).getByLabelText('Status of Dark mode') as HTMLSelectElement).value).toBe('planned');
+    expect((within(section).getByLabelText('Status of Shortcuts') as HTMLSelectElement).value).toBe('idea');
+  });
+
+  it('adds a roadmap item from the input', () => {
+    render(<V2ProjectScreen />);
+    fireEvent.change(screen.getByLabelText('Add a roadmap idea'), { target: { value: 'New idea' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(state.calls).toContainEqual({ kind: 'create', args: { projectId: 'p1', title: 'New idea' } });
+  });
+
+  it('reorders, changes status, edits and deletes a roadmap item', () => {
+    state.roadmap = [
+      { id: 'r1', projectId: 'p1', title: 'First', notes: '', position: 0, status: 'idea', ticketId: null },
+      { id: 'r2', projectId: 'p1', title: 'Second', notes: '', position: 1, status: 'idea', ticketId: null },
+    ];
+    render(<V2ProjectScreen />);
+    fireEvent.click(screen.getByRole('button', { name: 'Move Second up' }));
+    expect(state.calls).toContainEqual({ kind: 'patch', args: { projectId: 'p1', itemId: 'r2', patch: { position: 0 } } });
+
+    fireEvent.change(screen.getByLabelText('Status of First'), { target: { value: 'planned' } });
+    expect(state.calls).toContainEqual({ kind: 'patch', args: { projectId: 'p1', itemId: 'r1', patch: { status: 'planned' } } });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]!);
+    fireEvent.change(screen.getByLabelText('Idea title'), { target: { value: 'First v2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(state.calls).toContainEqual({ kind: 'patch', args: { projectId: 'p1', itemId: 'r1', patch: { title: 'First v2', notes: '' } } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete First' }));
+    expect(state.calls).toContainEqual({ kind: 'remove', args: { projectId: 'p1', itemId: 'r1' } });
+  });
+
+  it('shows the roadmap empty state', () => {
+    render(<V2ProjectScreen />);
+    expect(screen.getByText(/No ideas on the roadmap yet/)).toBeInTheDocument();
   });
 
   it('draws the commit graph and opens a commit detail', () => {

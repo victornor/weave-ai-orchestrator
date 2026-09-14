@@ -199,6 +199,9 @@ const TRACKED: (EventType | EphemeralEventType)[] = [
   'run.started',
   'run.event',
   'run.finished',
+  'roadmap.created',
+  'roadmap.updated',
+  'roadmap.removed',
   'thread.message',
   'knowledge.updated',
   'knowledge.curated',
@@ -393,6 +396,16 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       inv(qk.routine(ws, id));
       inv(qk.routineFires(ws, id));
       break;
+    case 'roadmap.created':
+    case 'roadmap.updated':
+    case 'roadmap.removed': {
+      // The payload carries the project so a section can be refreshed without knowing the item's
+      // project from the event's entity id (which is the item id).
+      const projectId = (evt.payload as { projectId?: string } | null)?.projectId;
+      inv(qk.roadmapRoot(ws));
+      if (projectId) inv(qk.roadmap(ws, projectId));
+      break;
+    }
     case 'presentation.updated':
       inv(qk.presentation(ws));
       break;

@@ -1199,4 +1199,69 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0040_roadmap_items (VS-397)', () => {
+    function seedProject(db: Db, id: string): void {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at)
+         VALUES (?, 'w1', ?, 'API', 'git@e:a/b.git', 'main', '/tmp/p', 4, 'git', 1, '{}', 'ready', 't0', 't0')`, [id, id]);
+    }
+
+    const insertItem = (db: Db, id: string, projectId: string, over: Record<string, unknown> = {}) =>
+      db.insert('roadmap_items', {
+        id, projectId, title: 'Dark mode', notes: '', position: 0, status: 'idea',
+        createdByKind: 'human', createdById: null, createdAt: 't0', updatedAt: 't0', ...over,
+      });
+
+    it('creates the table with its columns, index and foreign keys', () => {
+      const db = openDb(join(dir, 'roadmap.sqlite'));
+      expect(db.all<{ name: string }>('PRAGMA table_info(roadmap_items)').map((c) => c.name)).toEqual([
+        'id', 'project_id', 'title', 'notes', 'position', 'status', 'ticket_id',
+        'created_by_kind', 'created_by_id', 'created_at', 'updated_at',
+      ]);
+      expect(db.all<{ name: string }>('PRAGMA index_list(roadmap_items)').map((i) => i.name))
+        .toContain('roadmap_items_project_position');
+      expect(db.all<{ from: string; table: string }>('PRAGMA foreign_key_list(roadmap_items)').map((f) => `${f.from}->${f.table}`).sort())
+        .toEqual(['project_id->projects', 'ticket_id->tickets']);
+      expect(db.all<{ from: string; onDelete: string }>('PRAGMA foreign_key_list(roadmap_items)').map((f) => `${f.from}:${f.onDelete}`).sort())
+        .toEqual(['project_id:CASCADE', 'ticket_id:SET NULL']);
+      db.close();
+    });
+
+    it('round-trips an item and refuses an unknown status', () => {
+      const db = openDb(join(dir, 'roadmap-row.sqlite'));
+      seedProject(db, 'p1');
+      insertItem(db, 'i1', 'p1', { notes: '## later', status: 'planned' });
+      expect(db.get('SELECT * FROM roadmap_items WHERE id = ?', ['i1'])).toMatchObject({
+        id: 'i1', projectId: 'p1', title: 'Dark mode', notes: '## later', position: 0, status: 'planned',
+        createdByKind: 'human', createdById: null,
+      });
+      expect(() => insertItem(db, 'i2', 'p1', { status: 'someday' })).toThrow(/CHECK constraint failed/);
+      db.close();
+    });
+
+    it('cascades on a hard project delete and links a ticket with SET NULL', () => {
+      const db = openDb(join(dir, 'roadmap-cascade.sqlite'));
+      seedProject(db, 'p1');
+      db.run(
+        `INSERT INTO tickets (id, workspace_id, project_id, number, identifier, kind, title, created_by_kind, created_at, updated_at)
+         VALUES ('t1', 'w1', 'p1', 1, 'VS-1', 'change', 'Add dark mode', 'human', 't0', 't0')`);
+      insertItem(db, 'i1', 'p1', { ticketId: 't1' });
+      insertItem(db, 'i2', 'p1');
+      // A soft archive keeps the project row and so keeps its roadmap.
+      db.run("UPDATE projects SET status = 'archived' WHERE id = 'p1'");
+      expect(db.all('SELECT id FROM roadmap_items ORDER BY id').map((r) => r.id)).toEqual(['i1', 'i2']);
+      // Deleting the linked ticket nulls the link but keeps the item.
+      db.run("DELETE FROM tickets WHERE id = 't1'");
+      expect(db.get<{ ticketId: string | null }>('SELECT ticket_id FROM roadmap_items WHERE id = ?', ['i1'])!.ticketId).toBeNull();
+      // A hard project delete takes every item with it, leaving no orphan.
+      db.run("DELETE FROM projects WHERE id = 'p1'");
+      expect(db.all('SELECT id FROM roadmap_items')).toHaveLength(0);
+      expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+      db.close();
+    });
+  });
 });

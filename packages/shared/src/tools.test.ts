@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, HUMAN_REPLY_TOOL, isHumanReplyToolEvent } from './tools.js';
-import { ROUTINE_ACTIONS, ROUTINE_STATUSES } from './enums.js';
+import { ROADMAP_STATUSES, ROUTINE_ACTIONS, ROUTINE_STATUSES } from './enums.js';
 
 const event = (type: string, payload: Record<string, unknown> | null) => ({ type, payload });
 
@@ -19,6 +19,24 @@ describe('WEAVER_TOOLS (VS-220)', () => {
     expect(WEAVER_TOOLS).toContain('weave_routine_create');
     expect(WEAVER_TOOLS).toContain('weave_routine_update');
     expect(WEAVER_TOOLS).toContain('weave_routine_remove');
+  });
+});
+
+describe('roadmap tools (VS-397)', () => {
+  it('lets a worker read its own project\u2019s roadmap but never write one', () => {
+    expect(COMMON_TOOLS).toContain('weave_roadmap_list');
+    expect(WEAVER_TOOLS).toContain('weave_roadmap_add');
+    expect(WEAVER_TOOLS).toContain('weave_roadmap_update');
+    expect(WEAVER_TOOLS).toContain('weave_roadmap_remove');
+    expect(COMMON_TOOLS).not.toContain('weave_roadmap_add');
+    expect(COMMON_TOOLS).not.toContain('weave_roadmap_update');
+    expect(COMMON_TOOLS).not.toContain('weave_roadmap_remove');
+  });
+});
+
+describe('roadmap statuses (VS-397)', () => {
+  it('are idea, planned and dropped, in order', () => {
+    expect(ROADMAP_STATUSES).toEqual(['idea', 'planned', 'dropped']);
   });
 });
 

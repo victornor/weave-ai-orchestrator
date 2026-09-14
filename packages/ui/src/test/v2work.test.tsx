@@ -1,25 +1,66 @@
-/** V2 Work: the column fold, the kanban/table toggle, the merge strip and the phone list. */
-import { fireEvent, render, screen, within } from '@testing-library/react';
+/** V2 Work: the column fold, the kanban/table toggle, the merge strip, the phone list and live status. */
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Decision, Ticket, WorkerModelOption } from '@weave-ai/shared';
+import type { Agent, Decision, Run, Ticket, WorkerActivitySummary, WorkerModelOption } from '@weave-ai/shared';
 import { agent, decision, project, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
   active: [] as Ticket[],
   finished: [] as Ticket[],
   workers: [] as Agent[],
+  runs: [] as Run[],
   decisions: [] as Decision[],
   workerOptions: undefined as WorkerModelOption[] | undefined,
+  stream: null as import('../api/events').EventStream | null,
   go: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   createTicket: vi.fn() as unknown as ReturnType<typeof vi.fn>,
 }));
+
+/** A controllable EventSource: enough of the surface `EventStream` uses to deliver a named frame. */
+class FakeEventSource {
+  static open: FakeEventSource[] = [];
+  readonly listeners = new Map<string, Array<(m: MessageEvent<string>) => void>>();
+  onopen: (() => void) | null = null;
+  onmessage: ((m: MessageEvent<string>) => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+  constructor(readonly url: string) {
+    FakeEventSource.open.push(this);
+  }
+  addEventListener(type: string, fn: (m: MessageEvent<string>) => void): void {
+    const list = this.listeners.get(type) ?? [];
+    list.push(fn);
+    this.listeners.set(type, list);
+  }
+  close(): void {
+    this.closed = true;
+  }
+}
 
 vi.mock('@tanstack/react-router', () => ({
   useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) =>
     o?.select ? o.select({ location: { pathname: '/v2/w/ws1/work' } }) : '/v2/w/ws1/work',
   useParams: () => ({ ws: 'ws1' }),
 }));
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+// Keep the real `useWorkspaceEvents` shape — the live test must go through the real `EventStream`,
+// not a captured callback — by subscribing to whatever `state.stream` holds.
+vi.mock('../api/context', async () => {
+  const { useEffect, useRef } = await import('react');
+  return {
+    useWs: () => 'ws1',
+    useHookWs: (o?: string) => o ?? 'ws1',
+    useWorkspaceEvents: (fn: (e: unknown) => void) => {
+      const stream = state.stream;
+      const ref = useRef(fn);
+      ref.current = fn;
+      useEffect(() => {
+        if (!stream) return;
+        return stream.onEvent((e) => ref.current(e));
+      }, [stream]);
+    },
+  };
+});
 vi.mock('../app/link', () => ({
   useGo: () => state.go,
   useSearchParams: () => ({}),
@@ -35,6 +76,7 @@ vi.mock('../api/hooks', () => ({
   useWorkers: () => ({ data: state.workers }),
   useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: state.workers })),
   useDecisionsMany: (ids: readonly string[]) => ids.map(() => ({ data: state.decisions ?? [] })),
+  useRuns: () => ({ data: state.runs }),
   useDecisions: () => ({ data: state.decisions }),
   useWorkspaceSummary: () => ({ data: { config: {} } }),
   useModels: () => ({ data: state.workerOptions === undefined ? undefined : { workerOptions: state.workerOptions } }),
@@ -45,6 +87,7 @@ vi.mock('../api/hooks', () => ({
 }));
 
 const { V2WorkScreen } = await import('../v2/work/Work');
+const { EventStream } = await import('../api/events');
 
 const column = (key: string): HTMLElement => {
   const el = document.querySelector(`[data-v2-column="${key}"]`);
@@ -52,12 +95,19 @@ const column = (key: string): HTMLElement => {
   return el as HTMLElement;
 };
 
+const liveWorker = (over: Partial<WorkerActivitySummary> & Partial<Agent> = {}): Agent =>
+  Object.assign(agent({ id: 'a1', ticketId: 'tk_1', status: 'running', name: 'Platform Engineer #1' }), over);
+
 beforeEach(() => {
   state.go = vi.fn();
   state.createTicket = vi.fn();
   state.workers = [];
+  state.runs = [];
   state.decisions = [];
   state.workerOptions = undefined;
+  state.stream = null;
+  FakeEventSource.open = [];
+  (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   state.active = [
     ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Backlogged', status: 'todo' }),
     ticket({ id: 'tk_2', identifier: 'ACME-2', title: 'Needs a decision', status: 'blocked' }),
@@ -181,10 +231,93 @@ describe('V2 Work new ticket', () => {
 
 describe('V2 Work liveness', () => {
   it('puts a live worker on an in-progress ticket In progress', () => {
-    state.workers = [agent({ id: 'a1', ticketId: 'tk_1', status: 'running', name: 'Platform Engineer #1' })];
+    state.workers = [liveWorker()];
     render(<V2WorkScreen />);
     const inProgress = column('in_progress');
     expect(within(inProgress).getByText('Backlogged')).toBeInTheDocument();
     expect(within(inProgress).getByText('Platform Engineer #1')).toBeInTheDocument();
   });
+
+  it('shows the working mark, activity line and test tally on a live card', () => {
+    state.workers = [liveWorker({
+      activity: { verb: 'testing', label: 'Running tests', target: null, since: '2026-09-13T12:00:00.000Z' },
+      tests: { passed: 30, total: 30 },
+    })];
+    render(<V2WorkScreen />);
+    const card = document.querySelector('[data-v2-card="ACME-1"]') as HTMLElement;
+    expect(within(card).getByText('Running tests')).toBeInTheDocument();
+    expect(within(card).getByText('30/30 tests')).toBeInTheDocument();
+    expect(card.querySelector('[data-v2-activity] svg[role="img"]')).toBeTruthy();
+  });
+
+  it('falls back to the worker\'s last run summary between turns', () => {
+    state.workers = [liveWorker({ activity: null, tests: null })];
+    state.runs = [run({ agentId: 'a1', summary: 'Implemented tasks 1-3', finishedAt: '2026-09-13T11:00:00.000Z' })];
+    render(<V2WorkScreen />);
+    const card = document.querySelector('[data-v2-card="ACME-1"]') as HTMLElement;
+    expect(within(card).getByText('Implemented tasks 1-3')).toBeInTheDocument();
+  });
+
+  it('shows a paused worker\'s reason and no working mark', () => {
+    state.workers = [agent({ id: 'a1', ticketId: 'tk_1', status: 'paused', pauseReason: 'quota exhausted' })];
+    render(<V2WorkScreen />);
+    const card = document.querySelector('[data-v2-card="ACME-1"]') as HTMLElement;
+    expect(within(card).getByText('paused · quota exhausted')).toBeInTheDocument();
+    expect(card.querySelector('[data-v2-activity]')).toBeNull();
+  });
+
+  it('shows no working mark on an idle ticket', () => {
+    render(<V2WorkScreen />);
+    expect(document.querySelectorAll('[data-v2-activity]')).toHaveLength(0);
+  });
+
+  it('shows the same live line on the table row and the phone list', () => {
+    state.workers = [liveWorker({
+      activity: { verb: 'testing', label: 'Running tests', target: null, since: '2026-09-13T12:00:00.000Z' },
+      tests: { passed: 30, total: 30 },
+    })];
+    render(<V2WorkScreen />);
+    const phoneRow = document.querySelector('[data-v2-phone-row="ACME-1"]') as HTMLElement;
+    expect(within(phoneRow).getByText('Running tests')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Table' }));
+    const tableRow = document.querySelector('[data-v2-table-row="ACME-1"]') as HTMLElement;
+    expect(within(tableRow).getByText('Running tests')).toBeInTheDocument();
+    expect(tableRow.querySelector('[data-v2-activity] svg[role="img"]')).toBeTruthy();
+  });
+
+  it('updates a card from a named worker.activity SSE frame delivered through the real EventStream', async () => {
+    state.stream = new EventStream('ws1', new QueryClient());
+    state.workers = [liveWorker({ activity: { verb: 'reading', label: 'Reading code', target: null, since: '2026-09-13T11:59:00.000Z' }, tests: null })];
+    render(<V2WorkScreen />);
+    expect(screen.queryByText('Running tests')).toBeNull();
+
+    act(() => state.stream!.start());
+    const fake = FakeEventSource.open[FakeEventSource.open.length - 1]!;
+    expect(fake.listeners.has('worker.activity')).toBe(true);
+
+    await act(async () => {
+      fake.listeners.get('worker.activity')![0]!({
+        data: JSON.stringify({
+          type: 'worker.activity', seq: 0, workspaceId: 'ws1', entityType: 'worker', entityId: 'a1', createdAt: '2026-09-13T12:00:00.000Z',
+          payload: { agentId: 'a1', ticketId: 'tk_1', activity: { verb: 'testing', label: 'Running tests', target: null, since: '2026-09-13T12:00:00.000Z' }, tests: { passed: 30, total: 30 } },
+        }),
+      } as MessageEvent<string>);
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+    });
+
+    expect(screen.getAllByText('Running tests').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('30/30 tests').length).toBeGreaterThan(0);
+    state.stream!.stop();
+  });
 });
+
+function run(over: Partial<Run> = {}): Run {
+  return {
+    id: 'run_1', workspaceId: 'ws1', agentId: 'a1', ticketId: 'tk_1', sessionId: null, wakeupIds: [],
+    runtimeId: 'claude-code', model: null, status: 'succeeded', turnEpoch: 1, cwd: '/w', startedAt: '2026-09-13T10:00:00.000Z',
+    finishedAt: '2026-09-13T10:05:00.000Z', exitCode: 0, signal: null, pid: null, pgid: null, errorCode: null,
+    errorFamily: null, retryOfRunId: null, usage: null, costCents: null, result: null, liveness: null, logPath: null,
+    summary: null, createdAt: '2026-09-13T10:00:00.000Z', ...over,
+  };
+}

@@ -148,3 +148,32 @@ describe('EventStream visibility (VS-227)', () => {
     stream.stop();
   });
 });
+
+/**
+ * VS-328 broadcasts the per-worker activity summary as an ephemeral `worker.activity` frame, but
+ * `TRACKED` omitted it, so the named listener was never attached and the frame reached no component.
+ * VS-368 adds it; this is the test that would have caught the dead listener.
+ */
+describe('the ephemeral worker.activity frame (VS-368)', () => {
+  it('subscribes to the named event, so it reaches component listeners at all', () => {
+    const stream = new EventStream('ws1', new QueryClient());
+    stream.start();
+    expect(last().listeners.has('worker.activity')).toBe(true);
+    stream.stop();
+  });
+
+  it('forwards a delivered frame to onEvent without moving the replay cursor', () => {
+    const stream = new EventStream('ws1', new QueryClient());
+    const seen: unknown[] = [];
+    stream.onEvent((e) => seen.push(e));
+    stream.start();
+    last().connect();
+
+    const evt = { type: 'worker.activity', seq: 0, entityId: 'a1', createdAt: '2026-09-13T12:00:00.000Z', payload: { agentId: 'a1' } };
+    last().listeners.get('worker.activity')![0]!({ data: JSON.stringify(evt) } as MessageEvent<string>);
+
+    expect(seen).toEqual([evt]);
+    expect(stream.getStatus().lastSeq).toBe(0);
+    stream.stop();
+  });
+});

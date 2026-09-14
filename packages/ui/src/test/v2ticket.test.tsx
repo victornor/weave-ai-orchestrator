@@ -1,7 +1,7 @@
 /** The V2 ticket page: the header, the tabs and their data, the folded knowledge usage, the actions. */
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Decision, Role, Ticket } from '@weave-ai/shared';
+import type { Agent, Decision, Role, Ticket } from '@weave-ai/shared';
 import type { UsageTotals } from '../api/types';
 import { ToastProvider } from '../components/Toast';
 import { agent, decision, project, ticket, workProduct } from './factories';
@@ -24,12 +24,14 @@ const state = vi.hoisted(() => ({
   discardError: null as Error | null,
   answerError: null as Error | null,
   go: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  workers: [] as Array<Agent & { activity?: unknown; tests?: unknown }>,
+  onEvent: undefined as ((e: unknown) => void) | undefined,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ ws: 'ws1', ticketId: 'ACME-42' }),
 }));
-vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
+vi.mock('../api/context', () => ({ useWs: () => 'ws1', useWorkspaceEvents: (fn: (e: unknown) => void) => { state.onEvent = fn; } }));
 vi.mock('../app/link', () => ({
   A: ({ to, children, ...rest }: { to: string; children?: React.ReactNode }) => (
     <a href={to} {...rest}>
@@ -83,6 +85,7 @@ vi.mock('../api/hooks', () => ({
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false, isError: Boolean(state.answerError), error: state.answerError }),
   useWorker: () => ({ data: undefined }),
   useWorkerMessage: () => ({ mutateAsync: vi.fn().mockResolvedValue({ delivery: 'queued' }) }),
+  useWorkers: () => ({ data: state.workers }),
   useHandoverCommandFor: () => ({ isLoading: false, data: null }),
   useStartHandoverFor: () => ({ mutate: vi.fn() }),
 }));
@@ -119,6 +122,8 @@ beforeEach(() => {
   state.discardError = null;
   state.answerError = null;
   state.go = vi.fn();
+  state.workers = [];
+  state.onEvent = undefined;
 });
 
 describe('V2 ticket header', () => {
@@ -320,5 +325,50 @@ describe('V2 ticket held decisions and action errors', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm discard' }));
     const notice = document.querySelector('[data-v2-discard-notice]') as HTMLElement;
     expect(notice.textContent).toMatch(/discard approval/i);
+  });
+});
+
+describe('V2 ticket live status (VS-368)', () => {
+  const liveWorker = (over: Partial<Agent> & { activity?: unknown; tests?: unknown } = {}): Agent =>
+    Object.assign(agent({ id: 'a1', ticketId: 'tk_42', status: 'running', name: 'Backend Engineer #7' }), over);
+
+  const frame = (payload: Record<string, unknown>): unknown => ({
+    type: 'worker.activity', seq: 0, workspaceId: 'ws1', entityType: 'worker', entityId: 'a1', createdAt: '2026-09-13T12:00:00.000Z', payload,
+  });
+
+  it('shows the working state and activity line while the worker runs', () => {
+    state.workers = [liveWorker({ activity: { verb: 'testing', label: 'Running tests', target: null, since: '2026-09-13T12:00:00.000Z' }, tests: { passed: 30, total: 30 } })];
+    renderScreen();
+    const header = document.querySelector('[data-v2-ticket-header]') as HTMLElement;
+    expect(within(header).getByText('Running tests')).toBeInTheDocument();
+    expect(header.querySelector('svg[aria-label="working"]')).toBeTruthy();
+  });
+
+  it('shows a live working state the stored status would hide', () => {
+    state.ticket = ticket({ id: 'tk_42', identifier: 'ACME-42', title: 'Dark mode', status: 'todo' });
+    state.workers = [liveWorker({ activity: { verb: 'editing', label: 'Editing Ticket.tsx', target: 'Ticket.tsx', since: '2026-09-13T12:00:00.000Z' }, tests: null })];
+    renderScreen();
+    const header = document.querySelector('[data-v2-ticket-header]') as HTMLElement;
+    expect(header.querySelector('svg[aria-label="working"]')).toBeTruthy();
+    expect(within(header).getByText('Editing Ticket.tsx')).toBeInTheDocument();
+  });
+
+  it('updates the line from a pushed worker.activity frame', async () => {
+    state.workers = [liveWorker({ activity: { verb: 'reading', label: 'Reading code', target: null, since: '2026-09-13T11:59:00.000Z' }, tests: null })];
+    renderScreen();
+    expect(screen.queryByText('Running tests')).toBeNull();
+
+    await act(async () => {
+      state.onEvent?.(frame({ agentId: 'a1', ticketId: 'tk_42', activity: { verb: 'testing', label: 'Running tests', target: null, since: '2026-09-13T12:00:00.000Z' }, tests: { passed: 30, total: 30 } }));
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+    });
+
+    const header = document.querySelector('[data-v2-ticket-header]') as HTMLElement;
+    expect(within(header).getByText('Running tests')).toBeInTheDocument();
+  });
+
+  it('shows no live line without a live worker', () => {
+    renderScreen();
+    expect(document.querySelectorAll('[data-v2-activity]')).toHaveLength(0);
   });
 });

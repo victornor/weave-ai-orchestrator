@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type { Decision, EventType, WorkspaceEvent } from '@weave-ai/shared';
+import type { Decision, EphemeralEventType, EventType, WorkspaceEvent } from '@weave-ai/shared';
 import { qk } from './keys';
 import { BACKOFF, documentIsHidden, type ConnectionState, type ConnectionStatus } from './sseStream';
 
@@ -158,8 +158,9 @@ export class EventStream {
   }
 }
 
-/** Event types we attach named listeners for. */
-const TRACKED: EventType[] = [
+/** Event types we attach named listeners for. Ephemeral frames have no outbox row but still arrive
+ *  as named SSE events, so they must be listed here to reach component listeners at all. */
+const TRACKED: (EventType | EphemeralEventType)[] = [
   'workspace.updated',
   'project.added',
   'project.updated',
@@ -175,6 +176,11 @@ const TRACKED: EventType[] = [
   'worker.retired',
   'worker.stalled',
   'worker.relaunched',
+  // VS-368: the daemon broadcasts the per-worker activity summary as an ephemeral `worker.activity`
+  // frame (VS-328), but this list omitted it, so the listener V1's board already registers never
+  // fired and no V2 card could update live. It is forwarded to component listeners and invalidates
+  // no query (the frame is applied by the listener).
+  'worker.activity',
   'ticket.created',
   'ticket.updated',
   'ticket.assigned',

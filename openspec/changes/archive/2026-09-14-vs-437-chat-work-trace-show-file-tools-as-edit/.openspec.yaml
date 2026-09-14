@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: 'Chat work trace: show file tools as "Edit <file name>", not the full
+  absolute path'
+skip_specs: true

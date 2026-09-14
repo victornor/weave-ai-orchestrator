@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { RunEvent } from '@weave-ai/shared';
-import { groupConsecutiveTools, reportUiStatus, runEventsToTranscript } from '../lib/transcript';
+import { groupConsecutiveTools, reportUiStatus, runEventsToTranscript, targetBaseName } from '../lib/transcript';
 import type { TranscriptBlock } from '../lib/transcript';
 import { Transcript } from '../components/Transcript';
 import { SplitHunk, UnifiedHunk } from '../components/DiffHunks';
@@ -279,7 +279,7 @@ describe('runEventsToTranscript', () => {
 });
 
 function toolBlock(id: string, name: string): TranscriptBlock {
-  return { id, type: 'tool', tool: name, target: id, durationMs: null, adds: null, dels: null, diff: null };
+  return { id, type: 'tool', tool: name, target: id, targetPath: null, durationMs: null, adds: null, dels: null, diff: null };
 }
 
 describe('groupConsecutiveTools', () => {
@@ -344,7 +344,7 @@ describe('Transcript', () => {
       />,
     );
     expect(screen.getByText("I'll add a token layer first.")).toBeInTheDocument();
-    expect(screen.getByText('src/theme/tokens.ts')).toBeInTheDocument();
+    expect(screen.getByText('tokens.ts')).toBeInTheDocument();
     expect(screen.getByText(/phase: implementing/)).toBeInTheDocument();
     expect(screen.getByText('asked you a question · waiting 2m')).toBeInTheDocument();
   });
@@ -453,7 +453,7 @@ describe('Transcript', () => {
       />,
     );
     expect(screen.getByText("I'll open the PR.")).toBeInTheDocument();
-    expect(screen.getByText('src/theme/tokens.ts')).toBeInTheDocument();
+    expect(screen.getByText('tokens.ts')).toBeInTheDocument();
     expect(screen.getByText('Opened the PR for VS-147.')).toBeInTheDocument();
     expect(screen.queryByText(/"uncommittedWork"/)).not.toBeInTheDocument();
     expect(screen.queryByText(/"nextAction"/)).not.toBeInTheDocument();
@@ -505,6 +505,52 @@ describe('Transcript', () => {
     expect(screen.getByText('Read')).toBeInTheDocument();
     expect(screen.queryByText(/Read ×/)).not.toBeInTheDocument();
     expect(screen.getByText('solo.ts')).toBeInTheDocument();
+  });
+
+  describe('file target display (VS-437)', () => {
+    it('takes the last segment of a path', () => {
+      expect(targetBaseName('/home/user/project/src/MEMORY.md')).toBe('MEMORY.md');
+      expect(targetBaseName('src/theme/tokens.ts')).toBe('tokens.ts');
+      expect(targetBaseName('MEMORY.md')).toBe('MEMORY.md');
+    });
+
+    it('drops a trailing separator and handles Windows separators', () => {
+      expect(targetBaseName('/home/user/dir/')).toBe('dir');
+      expect(targetBaseName('C:\\Users\\me\\file.ts')).toBe('file.ts');
+    });
+
+    it('falls back to the input when nothing remains', () => {
+      expect(targetBaseName('')).toBe('');
+      expect(targetBaseName('/')).toBe('/');
+    });
+
+    it('shows only the file name for an absolute-path Edit, with the whole path in the title', () => {
+      render(
+        <Transcript
+          events={[ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: '/home/user/project/src/a.ts', old_string: 'x', new_string: 'y' } } })]}
+        />,
+      );
+      expect(screen.getByText('a.ts')).toHaveAttribute('title', '/home/user/project/src/a.ts');
+      expect(screen.queryByText('/home/user/project/src/a.ts')).not.toBeInTheDocument();
+    });
+
+    it('shows only the file name for a Read and a Write too', () => {
+      render(
+        <Transcript
+          events={[
+            ev({ id: 'r', type: 'tool.call', payload: { id: 'c1', name: 'Read', input: { file_path: '/abs/dir/readme.md' } } }),
+            ev({ id: 'w', type: 'tool.call', payload: { id: 'c2', name: 'Write', input: { filePath: '/abs/dir/notes.txt', content: 'hi' } } }),
+          ]}
+        />,
+      );
+      expect(screen.getByText('readme.md')).toHaveAttribute('title', '/abs/dir/readme.md');
+      expect(screen.getByText('notes.txt')).toHaveAttribute('title', '/abs/dir/notes.txt');
+    });
+
+    it('leaves a shell command target exactly as it was', () => {
+      render(<Transcript events={[ev({ id: 'b', type: 'tool.call', payload: { id: 'c1', name: 'Bash', input: { command: 'cd /abs/dir && ls' } } })]} />);
+      expect(screen.getByText('cd /abs/dir && ls')).not.toHaveAttribute('title');
+    });
   });
 
   describe('edit and written-file rendering (VS-324)', () => {
@@ -577,7 +623,7 @@ describe('Transcript', () => {
         />,
       );
       expect(screen.getAllByText('const x = 1;').length).toBeGreaterThan(0);
-      fireEvent.click(screen.getByText('src/a.ts'));
+      fireEvent.click(screen.getByText('a.ts'));
       expect(screen.queryByText('const x = 1;')).not.toBeInTheDocument();
     });
 
@@ -651,7 +697,7 @@ describe('Transcript', () => {
           events={[ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Read', input: { file_path: 'src/e.ts' } } })]}
         />,
       );
-      expect(screen.getByText('src/e.ts')).toBeInTheDocument();
+      expect(screen.getByText('e.ts')).toBeInTheDocument();
       // Nothing expands: no button wraps the row (no diff, no editPayload).
       expect(screen.queryByRole('button')).not.toBeInTheDocument();
     });
@@ -662,7 +708,7 @@ describe('Transcript', () => {
           events={[ev({ id: 'a', type: 'tool.call', payload: { id: 'c1', name: 'Edit', input: { file_path: 'src/f.ts' } } })]}
         />,
       );
-      expect(screen.getByText('src/f.ts')).toBeInTheDocument();
+      expect(screen.getByText('f.ts')).toBeInTheDocument();
       expect(screen.queryByRole('button')).not.toBeInTheDocument();
     });
 

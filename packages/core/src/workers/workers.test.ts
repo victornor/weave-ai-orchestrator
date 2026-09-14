@@ -453,6 +453,29 @@ describe('workers', () => {
     });
   });
 
+  it('is a no-op that reports the wait when a shutdown already left the resume queued (VS-375)', async () => {
+    const ticket = seedTicket({ status: 'in_progress' });
+    const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+    const wakeId = newId();
+    const at = nowIso();
+    h.db.run('INSERT INTO wakeups (id, workspace_id, agent_id, source, reason, status, created_at) VALUES (?,?,?,?,?,?,?)',
+      [wakeId, h.workspaceId, worker.id, 'retry', 'previous turn was interrupted', 'queued', at]);
+    h.db.run(
+      `INSERT INTO runs (id, workspace_id, agent_id, ticket_id, wakeup_ids_json, runtime_id, status, turn_epoch, cwd, error_code, error_family, finished_at, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [newId(), h.workspaceId, worker.id, ticket.id, JSON.stringify([wakeId]), 'claude', 'interrupted', 1, '/tmp/w', 'interrupted_by_shutdown', 'tooling', at, at],
+    );
+    wake.calls.length = 0;
+
+    const after = await workers.relaunch(HUMAN, worker.id, 'you look stuck');
+
+    expect(after.notice).toBe('already queued; waiting for a run slot');
+    // Nothing was relaunched: the brief is untouched and no wake was enqueued.
+    expect(after.briefRevision).toBe(worker.briefRevision);
+    expect(readFileSync(join(worker.homePath, 'brief.md'), 'utf8')).not.toContain('you look stuck');
+    expect(wake.calls).toHaveLength(0);
+  });
+
   it('messages a worker as a ticket comment plus a conductor_request wake when the caller asks for no live delivery', async () => {
     const ticket = seedTicket();
     const worker = await workers.spawnForTicket(SYSTEM, ticket.id);

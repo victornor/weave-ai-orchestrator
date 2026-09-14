@@ -130,12 +130,24 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
         // than being claimed and failed, so nothing has to be re-enqueued when the login returns.
         // A worker whose role is paused is skipped the same way (VS-154): the wake stays queued
         // until roles.resume, rather than being skipped at enqueue and lost.
+        // VS-375: after a restart, a worker whose turn the shutdown cut off has a preserved queued
+        // wake but also a non-null `last_run_at`, so the plain fairness order (`last_run_at IS NULL
+        // DESC`) starts brand-new workers first and starves the resumed turns. `resume_rank` lifts
+        // them above never-run workers — the weaver still goes first, and everything else keeps the
+        // existing order. A worker is resuming when its latest run was recorded `interrupted` by
+        // `engine.finalize` with the shutdown code; `COALESCE` keeps that NULL (no run at all) out of
+        // the ranking so never-run workers are not pushed last.
         const candidates = ctx.db.all<Agent>(
-          `SELECT a.* FROM agents a WHERE a.workspace_id = ? AND a.status IN (${IDLE_AGENT_STATUSES.map(() => '?').join(',')})
+          `SELECT a.*,
+                  COALESCE((SELECT CASE WHEN r.status = 'interrupted' AND r.error_code = 'interrupted_by_shutdown'
+                                         THEN 1 ELSE 0 END
+                              FROM runs r WHERE r.agent_id = a.id
+                             ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1), 0) AS resume_rank
+             FROM agents a WHERE a.workspace_id = ? AND a.status IN (${IDLE_AGENT_STATUSES.map(() => '?').join(',')})
              AND a.runtime_id NOT IN (SELECT runtime_id FROM runtime_credentials WHERE workspace_id = ? AND needs_login = 1)
              AND (a.kind != 'worker' OR a.role_id IS NULL OR EXISTS (SELECT 1 FROM roles r WHERE r.id = a.role_id AND r.status = 'active'))
              AND EXISTS (SELECT 1 FROM wakeups w WHERE w.agent_id = a.id AND w.status = 'queued' AND (w.not_before IS NULL OR w.not_before <= ?))
-           ORDER BY a.kind = 'weaver' DESC, a.last_run_at IS NULL DESC, a.last_run_at`,
+           ORDER BY a.kind = 'weaver' DESC, resume_rank DESC, a.last_run_at IS NULL DESC, a.last_run_at`,
           [ctx.workspaceId, ...IDLE_AGENT_STATUSES, ctx.workspaceId, now],
         );
         for (const agent of candidates) {

@@ -346,7 +346,12 @@ export interface WorkersService {
    * wake, exactly as before VS-99. Never both, never neither.
    */
   message(actor: Actor, workerId: string, body: string, opts?: { live?: boolean }): Promise<WorkerMessageOutcome>;
-  relaunch(actor: Actor, workerId: string, note: string): Promise<S.Agent>;
+  /**
+   * VS-375: when a shutdown cut this worker's turn off, its wake is preserved `queued` and the
+   * dispatcher will resume it. Relaunching then is a no-op: the returned agent carries
+   * `notice: 'already queued; waiting for a run slot'` and nothing is re-rendered or enqueued.
+   */
+  relaunch(actor: Actor, workerId: string, note: string): Promise<S.Agent & { notice?: string }>;
   cancel(actor: Actor, workerId: string, reason: string): Promise<S.Agent>;
   pause(actor: Actor, id: string, reason: string): S.Agent; resume(actor: Actor, id: string): S.Agent;
   retireIfLanded(actor: Actor, workerId: string): Promise<{ retired: boolean; reason?: string }>;

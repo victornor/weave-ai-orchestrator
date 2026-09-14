@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: A restart's shutdown-interrupted turns dispatch before brand-new workers,
+  and the restart notice says which turns are queued for capacity
+skip_specs: true

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: An OpenSpec archive PR that conflicts with main is rebuilt from the
+  landing tip instead of rebasing forever

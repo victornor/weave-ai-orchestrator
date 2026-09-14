@@ -70,6 +70,29 @@ export async function archiveOnBranch(worktreePath: string, changeName: string):
   return result;
 }
 
+/**
+ * VS-408: rebuild an archive that has already been archived on its branch against the current
+ * landing tip. The branch is its pre-archive base plus the archive commit, so the base — where the
+ * live change directory still lives — is the merge base with the landing tip. Reset the worktree to
+ * the landing tip, restore the change directory from that base when the tip no longer carries it,
+ * and re-run `openspec archive` there so the change's deltas merge into the specs as they now stand.
+ * Returns exactly what `archiveOnBranch` does, and throws its `OcError` when the CLI refuses.
+ */
+async function rebuildArchiveFromLandingTip(worktreePath: string, landingRef: string, changeName: string): Promise<ArchiveOnBranchResult> {
+  const parent = (await git(['merge-base', 'HEAD', landingRef], worktreePath, 30_000)).stdout.trim();
+  const reset = await git(['reset', '--hard', landingRef], worktreePath, 60_000);
+  if (!reset.ok) throw new OcError('internal', `git reset to ${landingRef} failed: ${reset.stderr.trim().slice(0, 300)}`, { changeName });
+  const changePath = join('openspec', 'changes', changeName);
+  if (!existsSync(join(worktreePath, changePath))) {
+    if (!parent) throw new OcError('openspec_archive_blocked', `no pre-archive parent found to restore ${changePath} from`, { changeName });
+    const restore = await git(['checkout', parent, '--', changePath], worktreePath, 30_000);
+    if (!restore.ok || !existsSync(join(worktreePath, changePath))) {
+      throw new OcError('openspec_archive_blocked', `could not restore ${changePath} from ${parent}: ${restore.stderr.trim().slice(0, 300)}`, { changeName, parent });
+    }
+  }
+  return archiveOnBranch(worktreePath, changeName);
+}
+
 export interface ArchiveThenMergeOpts {
   /** The project's primary clone. Its own checkout (the landing branch) is never touched. */
   clonePath: string;
@@ -93,6 +116,14 @@ export interface ArchiveThenMergeOpts {
   noCiGraceMs?: number;
   /** VS-393: called once when the grace elapses and this sequence stops waiting and merges anyway, so the ticket records why. */
   onNoCiTimeout?: () => void | Promise<void>;
+  /**
+   * VS-408: when true, a stale branch whose rebase onto the landing tip conflicts is rebuilt from
+   * that tip instead of being reported as `conflict`. Only the archive-backfill landing
+   * (`tickets.landArchiveBackfill`) sets this: its branch holds the ticket's archive commit alone, so
+   * a reset to the landing tip loses no work, whereas a ticket branch may carry other commits a
+   * rebuild would silently drop. Defaults to false — the pre-VS-408 behaviour.
+   */
+  rebuildArchiveOnConflict?: boolean;
   /** VS-383: where the scratch worktree is created — under the workspace state dir, never `/tmp`. */
   scratch: ScratchTarget;
 }
@@ -100,6 +131,7 @@ export interface ArchiveThenMergeOpts {
 export type ArchiveThenMergeOutcome =
   | { kind: 'merged'; mergeCommit: string | undefined; archivedAs: string | null }
   | { kind: 'conflict'; detail: string }
+  | { kind: 'rebuild_failed'; detail: string }
   | { kind: 'checks_pending' }
   | { kind: 'checks_failed' };
 
@@ -158,13 +190,29 @@ export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promi
   try {
     let changed = false;
     let archivedAs: string | null = null;
+    let rebuilt = false;
     const fresh = await isFreshAgainstLanding(scratch.path, 'HEAD', landingRef);
     if (!fresh) {
       const rebased = await rebaseOntoLanding(scratch.path, landingRef);
-      if (!rebased.ok) return { kind: 'conflict', detail: rebased.detail };
-      changed = true;
+      if (rebased.ok) {
+        changed = true;
+      } else if (opts.rebuildArchiveOnConflict && changeName) {
+        // VS-408: the rebase can never apply when the archive commit rewrites a spec file main has
+        // changed since the branch was cut. Rebuild the archive against the current landing tip
+        // instead of retrying a conflict that cannot resolve (see design.md Decisions 1-3).
+        try {
+          const result = await rebuildArchiveFromLandingTip(scratch.path, landingRef, changeName);
+          archivedAs = result.archivedAs;
+          rebuilt = true;
+          changed = true;
+        } catch (e) {
+          return { kind: 'rebuild_failed', detail: e instanceof Error ? e.message : String(e) };
+        }
+      } else {
+        return { kind: 'conflict', detail: rebased.detail };
+      }
     }
-    if (changeName) {
+    if (changeName && !rebuilt) {
       // A retry after a `checks_pending` rejection re-fetches the branch this same function already
       // archived and pushed — re-running `openspec archive` on a change folder that is already gone
       // would just throw. Skip re-archiving only when the folder is gone *because this already

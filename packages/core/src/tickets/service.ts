@@ -1405,6 +1405,11 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
                   if (outcome.kind === 'conflict') {
                     return failLanding(`branch ${branch} conflicts with ${landingBranchOf(p, t)}; re-sync and retry. ${outcome.detail}`);
                   }
+                  if (outcome.kind === 'rebuild_failed') {
+                    // Unreachable here (the rebuild opt is off for a ticket's own branch); handled so
+                    // the outcome union is exhausted and a future caller cannot fall through.
+                    return failLanding(`rebuilding the archive failed: ${outcome.detail}`);
+                  }
                   if (outcome.kind === 'checks_pending') {
                     throw new OcError('merge_checks_pending', 'required checks are pending on the archived branch; retry once they resolve', { prUrl: pr.url }, true);
                   }
@@ -1584,12 +1589,14 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         try {
           outcome = await serialize(project.id, () => attemptArchiveThenMerge({
             clonePath: project.clonePath, branch: input.branch, landingBranch: landing, changeName: input.changeName, forge, prUrl: input.prUrl, method,
+            rebuildArchiveOnConflict: true,
             scratch: { stateDir: ctx.paths.state, projectSlug: project.slug, label: t.identifier },
           }));
         } catch (e) {
           return fail(e instanceof Error ? e.message : String(e));
         }
         if (outcome.kind === 'conflict') return fail(`rebase conflict: ${outcome.detail}`);
+        if (outcome.kind === 'rebuild_failed') return fail(outcome.detail);
         // Pending checks are expected to resolve; waiting is not a failure worth a comment or a wake.
         if (outcome.kind === 'checks_pending') return fail('required checks are pending', true);
         if (outcome.kind === 'checks_failed') return fail('required checks failed');

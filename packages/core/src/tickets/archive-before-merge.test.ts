@@ -275,6 +275,106 @@ describe('archive-before-merge mechanics', () => {
       };
     }
 
+    // VS-408: a new-capability change (`gadgets`) whose delta has no `## Purpose`; archiving it
+    // creates a capability spec, so it needs a proposal Why to archive cleanly.
+    async function seedGadgetChange(repo: string, changeName: string, why: string | null): Promise<void> {
+      const changeDir = join(repo, 'openspec', 'changes', changeName);
+      mkdirSync(join(changeDir, 'specs', 'gadgets'), { recursive: true });
+      writeFileSync(join(changeDir, '.openspec.yaml'), 'schema: spec-driven\n');
+      const whySection = why === null ? '' : `## Why\n\n${why}\n\n`;
+      writeFileSync(join(changeDir, 'proposal.md'), `${whySection}## What Changes\n- Add a gadget.\n\n## Capabilities\n\n### New Capabilities\n- \`gadgets\`: adds a gadget\n`);
+      writeFileSync(
+        join(changeDir, 'specs', 'gadgets', 'spec.md'),
+        '## ADDED Requirements\n\n### Requirement: A gadget exists\nThe system SHALL have a gadget.\n\n#### Scenario: One gadget\n- **WHEN** asked\n- **THEN** a gadget is returned\n',
+      );
+      writeFileSync(join(changeDir, 'tasks.md'), '## 1. Gadget\n\n- [x] 1.1 Add it\n');
+      await git(['add', '.'], repo);
+      await git(['commit', '-m', `chore: seed ${changeName}`], repo);
+    }
+
+    /** Builds `branch` as the clone's current main plus a real archive commit for `changeName`, and pushes it. */
+    async function pushArchiveBranch(branch: string, changeName: string): Promise<void> {
+      const scratch = await scratchBranchFrom(clone, 'HEAD', branch, scratchTarget);
+      try {
+        await archiveOnBranch(scratch.path, changeName);
+        const push = await git(['push', 'origin', `HEAD:refs/heads/${branch}`], scratch.path, 120_000);
+        expect(push.ok).toBe(true);
+      } finally {
+        await scratch.dispose();
+      }
+    }
+
+    /** Main independently adds the `gadgets` spec the archive branch already added, so the rebase conflicts. */
+    async function addMainGadgetSpec(): Promise<void> {
+      mkdirSync(join(origin, 'openspec', 'specs', 'gadgets'), { recursive: true });
+      writeFileSync(
+        join(origin, 'openspec', 'specs', 'gadgets', 'spec.md'),
+        '# gadgets Specification\n\n## Purpose\nMain already carries gadgets for its own reasons, at least fifty chars.\n\n## Requirements\n\n### Requirement: A gadget is visible\nThe system SHALL show a gadget.\n\n#### Scenario: Visible\n- **WHEN** looked at\n- **THEN** it is visible\n',
+      );
+      await git(['add', '.'], origin);
+      await git(['commit', '-m', 'feat: main gadgets spec'], origin);
+    }
+
+    const GADGET_WHY = 'Gadgets exist so callers can rely on a gadget being present and shaped the way this capability guarantees.';
+
+    it('rebuilds a conflicting archive branch from the landing tip (VS-408)', async () => {
+      await seedGadgetChange(origin, 'add-gadget', GADGET_WHY);
+      await git(['pull', 'origin', 'main'], clone);
+      await pushArchiveBranch('ac/archive-add-gadget', 'add-gadget');
+      await addMainGadgetSpec();
+      const forge = fakeForge();
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: 'ac/archive-add-gadget', landingBranch: 'main', scratch: scratchTarget,
+        changeName: 'add-gadget', forge, prUrl: 'https://example.com/pr/313', method: 'squash', rebuildArchiveOnConflict: true,
+      });
+      expect(outcome).toMatchObject({ kind: 'merged' });
+
+      await git(['fetch', 'origin'], clone);
+      const spec = (await git(['show', 'refs/remotes/origin/ac/archive-add-gadget:openspec/specs/gadgets/spec.md'], clone)).stdout;
+      expect(spec).toMatch(/A gadget is visible/); // main's requirement kept
+      expect(spec).toMatch(/A gadget exists/); // the change's requirement added
+      const tree = (await git(['ls-tree', '-r', '--name-only', 'refs/remotes/origin/ac/archive-add-gadget'], clone)).stdout;
+      expect(tree).toMatch(/openspec\/changes\/archive\/\d{4}-\d{2}-\d{2}-add-gadget\//);
+      expect(tree).not.toMatch(/openspec\/changes\/add-gadget\//);
+      await expectNoScratch();
+    });
+
+    it('still rebases a clean stale archive branch when the rebuild opt is set (VS-408)', async () => {
+      await seedGadgetChange(origin, 'add-gadget', GADGET_WHY);
+      await git(['pull', 'origin', 'main'], clone);
+      await pushArchiveBranch('ac/archive-add-gadget', 'add-gadget');
+      await commit(origin, 'later.ts', 'export const later = 1;\n', 'chore: landed first');
+      const forge = fakeForge();
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: 'ac/archive-add-gadget', landingBranch: 'main', scratch: scratchTarget,
+        changeName: 'add-gadget', forge, prUrl: 'https://example.com/pr/313', method: 'squash', rebuildArchiveOnConflict: true,
+      });
+      expect(outcome).toMatchObject({ kind: 'merged' });
+      await git(['fetch', 'origin'], clone);
+      const log = (await git(['log', '--oneline', 'refs/remotes/origin/ac/archive-add-gadget'], clone)).stdout;
+      expect(log).toMatch(/landed first/); // the clean rebase replayed main's commit
+      const spec = (await git(['show', 'refs/remotes/origin/ac/archive-add-gadget:openspec/specs/gadgets/spec.md'], clone)).stdout;
+      expect(spec).toMatch(/A gadget exists/);
+    });
+
+    it('does not rebuild a conflicting archive branch when the opt is unset (VS-408)', async () => {
+      await seedGadgetChange(origin, 'add-gadget', GADGET_WHY);
+      await git(['pull', 'origin', 'main'], clone);
+      await pushArchiveBranch('ac/archive-add-gadget', 'add-gadget');
+      await addMainGadgetSpec();
+      const remoteBefore = (await git(['ls-remote', origin, 'ac/archive-add-gadget'], clone)).stdout;
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: 'ac/archive-add-gadget', landingBranch: 'main', scratch: scratchTarget,
+        changeName: 'add-gadget', forge: fakeForge(), prUrl: 'https://example.com/pr/313', method: 'squash',
+      });
+      expect(outcome.kind).toBe('conflict');
+      expect((await git(['ls-remote', origin, 'ac/archive-add-gadget'], clone)).stdout).toBe(remoteBefore);
+      await expectNoScratch();
+    });
+
     it('merges immediately when nothing is stale, there is no change, and no checks are configured', async () => {
       await pushBranchFromClone(BRANCH);
       const forge = fakeForge();

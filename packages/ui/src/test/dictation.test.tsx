@@ -4,12 +4,35 @@
  * recognizer — bars moving, nothing transcribed, then "No speech was detected".
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState, type ReactElement } from 'react';
 import { Composer } from '../components/Composer';
 import { useDictation } from '../lib/dictation';
 import { DICTATION_HOLD_MS } from '../lib/dictationHotkey';
 import { writeDictationAutoSend } from '../lib/dictationAutoSend';
+
+/**
+ * Wait for a condition without ever reading the wall clock.
+ *
+ * Every await on the upload path — the `/api/health` probe, `getUserMedia`, `POST /api/transcribe`
+ * and the body it returns — settles on a microtask. `waitFor` watches for that on a real timer, so
+ * under a loaded suite its 50 ms polls can starve past the 1 s default and fail a case whose work
+ * is already done (VS-438: the same one-off in `VS-282` and `VS-195` runs). Draining the microtask
+ * queue inside `act` flushes those continuations and the render they cause, so the bound is
+ * microtask turns, not seconds, and CPU load cannot make it late. The last call re-runs the
+ * assertion so a condition that never becomes true still reports its own failure.
+ */
+async function eventually(assertion: () => void, turns = 500): Promise<void> {
+  for (let i = 0; i < turns; i++) {
+    try {
+      assertion();
+      return;
+    } catch {
+      await act(async () => { await Promise.resolve(); });
+    }
+  }
+  assertion();
+}
 
 interface ResultLike { isFinal: boolean; length: number; 0: { transcript: string } }
 
@@ -431,9 +454,14 @@ describe('dictation diagnostics', () => {
     dictate();
     const rec = FakeRecognition.last!;
     const overflow = 10;
-    for (let i = 0; i < DICTATION_DIAGNOSTICS_CAP + overflow; i++) {
-      act(() => rec.onresult!(said([`word ${i}`, true])));
-    }
+    // One `act` for the whole burst: React batches the updates, so this costs a render or two
+    // rather than one per event. The default 5 s test timeout is otherwise reachable under a
+    // loaded suite (VS-438), and the cap's behaviour is identical either way.
+    act(() => {
+      for (let i = 0; i < DICTATION_DIAGNOSTICS_CAP + overflow; i++) {
+        rec.onresult!(said([`word ${i}`, true]));
+      }
+    });
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
     const log = capturedLog();
@@ -500,12 +528,12 @@ describe('dictation — voxtype upload', () => {
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     expect(screen.getByTestId('mode')).toHaveTextContent('upload');
     fireEvent.click(screen.getByText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByText('Stop dictation'));
-    await waitFor(() => expect(posts.length).toBe(1));
+    await eventually(() => expect(posts.length).toBe(1));
     const file = posts[0]!.get('audio') as File;
     expect(file.name).toBe('dictation.wav');
-    await waitFor(() => expect(screen.getByLabelText('out')).toHaveValue('hello host'));
+    await eventually(() => expect(screen.getByLabelText('out')).toHaveValue('hello host'));
   });
 
   it('surfaces a message instead of silence when Voxtype returns no words', async () => {
@@ -516,9 +544,9 @@ describe('dictation — voxtype upload', () => {
     getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     fireEvent.click(screen.getByText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByText('Stop dictation'));
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
+    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
     expect(screen.getByLabelText('out')).toHaveValue('');
   });
 
@@ -530,9 +558,9 @@ describe('dictation — voxtype upload', () => {
     getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     fireEvent.click(screen.getByText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByText('Stop dictation'));
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
   });
 
   it('sets transcribing from stop() until the response settles, on every outcome (VS-195)', async () => {
@@ -550,12 +578,12 @@ describe('dictation — voxtype upload', () => {
       getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
       const { unmount } = render(<VoxtypeHarness backend="voxtype" serverConfigured />);
       fireEvent.click(screen.getByText('Dictate'));
-      await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+      await eventually(() => expect(getUserMedia).toHaveBeenCalled());
       fireEvent.click(screen.getByText('Stop dictation'));
       expect(screen.getByTestId('transcribing')).toHaveTextContent('true'); // outcome.name
 
       settle!(outcome.response);
-      await waitFor(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
+      await eventually(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
       unmount();
       getUserMedia.mockReset();
     }
@@ -569,10 +597,10 @@ describe('dictation — voxtype upload', () => {
     getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     fireEvent.click(screen.getByText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByText('Stop dictation'));
     expect(screen.getByTestId('transcribing')).toHaveTextContent('true');
-    await waitFor(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
+    await eventually(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
     expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/);
   });
 
@@ -611,12 +639,12 @@ describe('dictation — voxtype upload', () => {
     getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     fireEvent.click(screen.getByText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     expect(screen.getByTestId('settled')).toHaveTextContent('false');
     fireEvent.click(screen.getByText('Stop dictation'));
     expect(screen.getByTestId('settled')).toHaveTextContent('false');
     settle!({ ok: true, status: 200, json: async () => ({ text: 'hi' }) });
-    await waitFor(() => expect(screen.getByTestId('settled')).toHaveTextContent('true'));
+    await eventually(() => expect(screen.getByTestId('settled')).toHaveTextContent('true'));
     expect(screen.getByLabelText('out')).toHaveValue('hi');
   });
 
@@ -629,7 +657,7 @@ describe('dictation — voxtype upload', () => {
     getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     fireEvent.click(screen.getByText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByText('Stop dictation'));
     expect(screen.getByTestId('transcribing')).toHaveTextContent('true');
 
@@ -638,7 +666,7 @@ describe('dictation — voxtype upload', () => {
     expect(getUserMedia).not.toHaveBeenCalled();
 
     settle!({ ok: true, status: 200, json: async () => ({ text: 'done' }) });
-    await waitFor(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
+    await eventually(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
   });
 });
 
@@ -668,7 +696,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     render(<Composer onSubmit={() => undefined} placeholder="Message…" allowAttachments />);
     // The backend is resolved from an async /api/health probe; wait for it to land on upload mode
     // before touching the mic, the way a real page load would.
-    await waitFor(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+    await eventually(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
   }
 
   it('locks the composer the moment recording starts, and unlocks with the transcript on success', async () => {
@@ -676,7 +704,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     await renderUpload();
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
 
     expect(screen.getByLabelText('Message…')).toBeDisabled();
     expect(screen.getByLabelText('Attach a file')).toBeDisabled();
@@ -693,7 +721,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     expect(screen.getByLabelText('Message…')).toBeDisabled();
     expect(screen.getByLabelText('Transcribing')).toBeDisabled();
 
-    await waitFor(() => expect(screen.getByLabelText('Message…')).toHaveValue('ship it'));
+    await eventually(() => expect(screen.getByLabelText('Message…')).toHaveValue('ship it'));
     expect(screen.getByLabelText('Message…')).not.toBeDisabled();
     expect(screen.getByLabelText('Attach a file')).not.toBeDisabled();
     expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
@@ -708,10 +736,10 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     await renderUpload();
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
-    await waitFor(() => expect(screen.getByLabelText('Message…')).not.toBeDisabled());
+    await eventually(() => expect(screen.getByLabelText('Message…')).not.toBeDisabled());
     expect(screen.getByLabelText('Message…')).toHaveValue('');
     expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/);
@@ -722,10 +750,10 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     await renderUpload();
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
     expect(screen.getByLabelText('Message…')).not.toBeDisabled();
     expect(screen.getByLabelText('Attach a file')).not.toBeDisabled();
     expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
@@ -737,7 +765,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     await renderUpload();
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
     expect(screen.getByLabelText('Transcribing')).toBeDisabled();
 
@@ -745,7 +773,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     expect(getUserMedia).toHaveBeenCalledTimes(1); // no second recording started
 
     settle!({ ok: true, status: 200, json: async () => ({ text: 'done' }) });
-    await waitFor(() => expect(screen.getByLabelText('Message…')).not.toBeDisabled());
+    await eventually(() => expect(screen.getByLabelText('Message…')).not.toBeDisabled());
   });
 
   it('never hides the listening caption behind a viewport breakpoint', async () => {
@@ -753,7 +781,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     await renderUpload();
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
 
     const caption = screen.getByText(/transcribed once you stop/i);
     expect(caption.className).not.toMatch(/\bhidden\b/);
@@ -812,7 +840,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     render(<Composer onSubmit={onSubmit} placeholder="Message…" allowAttachments />);
     // `Dictate` only exists once the async /api/health probe has landed on upload mode; in these
     // tests there is no SpeechRecognition, so its presence pins the backend.
-    await waitFor(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+    await eventually(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
   }
 
   it('pressing send while recording stops it and submits the transcript once it lands', async () => {
@@ -821,7 +849,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     // The textarea and attach lock stay; only send is exempt (VS-282).
     expect(screen.getByLabelText('Message…')).toBeDisabled();
     expect(screen.getByLabelText('Attach a file')).toBeDisabled();
@@ -829,7 +857,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
 
     fireEvent.click(screen.getByLabelText('Send'));
 
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('ship it', undefined, expect.any(String));
     expect(screen.getByLabelText('Message…')).toHaveValue('');
   });
@@ -841,7 +869,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
     expect(screen.getByText('Transcribing…')).toBeInTheDocument();
     getUserMedia.mockClear();
@@ -851,7 +879,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     expect(screen.getByText(/Waiting for the transcript/)).toBeInTheDocument();
 
     d.settle(ok('late words'));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('late words', undefined, expect.any(String));
     expect(getUserMedia).not.toHaveBeenCalled(); // no second recording was started
   });
@@ -864,11 +892,11 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
 
     fireEvent.change(screen.getByLabelText('Message…'), { target: { value: 'typed first' } });
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Send'));
     d.settle(ok('spoken words'));
 
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const submitted = onSubmit.mock.calls[0]![0] as string;
     expect(submitted).toContain('spoken words');
     expect(submitted).toBe('typed first spoken words');
@@ -880,10 +908,10 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Send'));
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Message…')).not.toBeDisabled();
     expect(screen.queryByText(/Waiting for the transcript/)).not.toBeInTheDocument();
@@ -895,10 +923,10 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Send'));
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
+    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Message…')).not.toBeDisabled();
     expect(screen.queryByText(/Waiting for the transcript/)).not.toBeInTheDocument();
@@ -911,7 +939,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Send'));
     // The queued control is disabled, so a second press is a no-op; the mic is already stopped by
     // the send and disabled while transcribing, so it cannot submit a second time either.
@@ -920,7 +948,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     expect(screen.getByLabelText('Transcribing')).toBeDisabled();
 
     d.settle(ok('once'));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('once', undefined, expect.any(String));
   });
 
@@ -928,14 +956,14 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     w.webkitSpeechRecognition = FakeRecognition;
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<Composer onSubmit={onSubmit} placeholder="Message…" allowAttachments />);
-    await waitFor(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+    await eventually(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
 
     fireEvent.click(screen.getByLabelText('Dictate'));
     const rec = FakeRecognition.last!;
     act(() => rec.onresult!(said(['live words', true])));
 
     fireEvent.click(screen.getByLabelText('Send'));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('live words', undefined, expect.any(String));
     expect(screen.queryByText(/Waiting for the transcript/)).not.toBeInTheDocument();
   });
@@ -981,7 +1009,7 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
 
   async function renderUpload(onSubmit: (text: string, files?: File[], idempotencyKey?: string) => void | Promise<void>): Promise<void> {
     render(<Composer onSubmit={onSubmit} placeholder="Message…" allowAttachments />);
-    await waitFor(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+    await eventually(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
   }
 
   it('sends nothing when the setting is off, even after a session ends', () => {
@@ -1073,7 +1101,7 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
 
     fireEvent.change(screen.getByLabelText('Message…'), { target: { value: 'typed first' } });
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
     // Nothing yet: the transcript has not landed, and the queued cue is showing.
@@ -1081,7 +1109,7 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     expect(screen.getByLabelText('Send queued')).toBeInTheDocument();
 
     d.settle(ok('spoken words'));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('typed first spoken words', undefined, expect.any(String));
   });
 
@@ -1092,10 +1120,10 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
+    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -1106,10 +1134,10 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -1121,7 +1149,7 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
     const queued = screen.getByLabelText('Send queued');
@@ -1129,7 +1157,7 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     fireEvent.click(queued);
 
     d.settle(ok('once'));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('once', undefined, expect.any(String));
   });
 });

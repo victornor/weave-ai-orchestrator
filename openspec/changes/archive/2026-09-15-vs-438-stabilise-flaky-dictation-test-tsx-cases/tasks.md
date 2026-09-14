@@ -1,0 +1,7 @@
+# Tasks
+
+- [x] 1. Reproduce the flake: run the full UI suite repeatedly, and under concurrency to stand in for the loaded landing slot, and record which cases fail and how often. Before the fix, `dictation.test.tsx` failed in 4 of 12 concurrent suite runs, all in the `waitFor` timeout shape (`VS-282` / `VS-195` upload cases and `dictation diagnostics > caps the log`).
+- [x] 2. Replace the real-timer `waitFor` in `packages/ui/src/test/dictation.test.tsx`'s upload path with a local `eventually(assertion, turns)` helper that drains microtasks inside `act`, so no assertion waits on the wall clock.
+- [x] 3. Drive the `dictation diagnostics > caps the log` burst in a single `act`, so React batches its updates instead of rendering once per event, removing its exposure to the default test timeout under load.
+- [x] 4. Prove it: `pnpm --filter @weave-ai/ui exec vitest run` 10 times in a row — 10/10 green, 2460 tests each; `dictation.test.tsx` alone 20 times — 20/20 green, 54 tests each; plus a 9-run concurrent-suite stress with zero dictation failures (was 4 of 12 before the fix).
+- [x] 5. Checks and evidence: `pnpm lint`, `pnpm typecheck` and both suites pass; the reproduction and proof output are recorded on the ticket.

@@ -49,13 +49,19 @@ function lineText(block: TranscriptBlock): string {
   }
 }
 
-export function ChatTrace({ events, className, reveal = false }: { events: readonly RunEvent[]; className?: string; reveal?: boolean }): React.ReactElement {
+export function ChatTrace({ events, className, reveal = false, runId = null }: { events: readonly RunEvent[]; className?: string; reveal?: boolean; runId?: string | null }): React.ReactElement {
   const rows = useMemo(() => groupConsecutiveTools(runEventsToTranscript(events)), [events]);
-  // Only a line whose event arrived after this trace mounted streams in (VS-433); a history read
-  // back or a join mid-turn is the baseline, and `ChatTurnTrace` never passes `reveal` at all.
-  const newIds = useNewLiveIds(events);
+  // Only a line whose event arrived after this trace started watching the run streams in (VS-433);
+  // a history read back or a join mid-turn is the baseline. The run id scopes that baseline (VS-440)
+  // and `ChatTurnTrace` never passes `reveal` at all.
+  const newIds = useNewLiveIds(events, runId);
   const animate = reveal ? newIds : NO_REVEAL;
-  if (rows.length === 0) return <p className={cx('text-nano text-text-4', className)}>Nothing on the wire yet.</p>;
+  if (rows.length === 0) {
+    // The live trace mounts before its first event, so that first line streams (VS-440); with
+    // nothing yet on the wire it shows nothing, unlike a history turn that genuinely produced none.
+    if (reveal) return <div className={cx('flex flex-col gap-1.5', className)} data-v2-trace />;
+    return <p className={cx('text-nano text-text-4', className)}>Nothing on the wire yet.</p>;
+  }
   return (
     <div className={cx('flex flex-col gap-1.5', className)} data-v2-trace>
       {rows.map((row) =>

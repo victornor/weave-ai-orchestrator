@@ -122,18 +122,37 @@ export function useStreamReveal(full: string, animate: boolean, durationMs = REV
  * The ids of run events that first arrived while this view was open, so only their trace lines
  * reveal (VS-433). `seq` is per-run and the one field a persisted row and its live frame agree on
  * (`mergeRunEvents`), so a line stays the same line when the persisted read replaces the live tail.
- * Everything present when the view mounted — a history read back, a mid-turn join — is the baseline
- * and never animates.
+ *
+ * The baseline is scoped to the run (VS-440). It is taken on the first render for a run id, so a run
+ * joined mid-turn — a history read back — keeps what is already there whole, while a run the view
+ * was watching start takes no baseline and streams from its first line. It resets when the run id
+ * changes, so a back-to-back turn streams even though `seq` restarts from zero. Events of another
+ * run are ignored, so a stale frame from the previous run never reads as new.
  */
-export function useNewLiveIds(events: readonly RunEvent[]): ReadonlySet<string> {
-  const baseline = useRef<number | null>(null);
-  if (baseline.current === null) baseline.current = events.reduce((max, e) => (e.seq > max ? e.seq : max), -1);
+export function useNewLiveIds(events: readonly RunEvent[], runId?: string | null): ReadonlySet<string> {
+  const run = runId ?? null;
+  const state = useRef<{ run: string | null; baseline: number } | null>(null);
+  if (state.current === null) state.current = { run, baseline: highestSeq(events, run) };
+  else if (state.current.run !== run) state.current = { run, baseline: -1 };
+  const baseline = state.current.baseline;
   return useMemo(() => {
     const ids = new Set<string>();
-    const from = baseline.current ?? -1;
-    for (const e of events) if (e.seq > from) ids.add(e.id);
+    for (const e of events) {
+      if (run !== null && e.runId !== run) continue;
+      if (e.seq > baseline) ids.add(e.id);
+    }
     return ids;
-  }, [events]);
+  }, [events, run, baseline]);
+}
+
+/** The highest `seq` among `events` belonging to `run`, or -1 when that run has none here. */
+function highestSeq(events: readonly RunEvent[], run: string | null): number {
+  let max = -1;
+  for (const e of events) {
+    if (run !== null && e.runId !== run) continue;
+    if (e.seq > max) max = e.seq;
+  }
+  return max;
 }
 
 /**

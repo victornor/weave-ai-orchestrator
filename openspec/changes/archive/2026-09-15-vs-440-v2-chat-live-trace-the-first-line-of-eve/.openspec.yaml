@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "The V2 chat live trace streams each turn's first line, and a back-to-back
+  turn streams too, while lines already on screen stay whole"
+skip_specs: true

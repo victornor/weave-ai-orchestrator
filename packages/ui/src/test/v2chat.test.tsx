@@ -9,7 +9,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
-import type { Agent, Decision, RunTrace, ThreadMessage, Ticket } from '@weave-ai/shared';
+import type { Agent, Decision, RunEvent, RunTrace, ThreadMessage, Ticket } from '@weave-ai/shared';
 import { agent, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -22,6 +22,7 @@ const state = vi.hoisted(() => ({
   search: [] as Array<{ messageId: string; authorKind: string; authorId: string | null; createdAt: string; snippet: string }>,
   context: [] as ThreadMessage[],
   events: [] as unknown[],
+  runEvents: [] as RunEvent[],
   runStreams: [] as Array<{ id: string | null; live: boolean }>,
   runState: 'connected' as 'connected' | 'offline' | 'unreachable',
   lastRun: null as { id: string; status: string } | null,
@@ -57,7 +58,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
 vi.mock('../api/runStream', () => ({
   useRunEventStream: (id: string | null, opts?: { live?: boolean }) => {
     state.runStreams.push({ id, live: opts?.live ?? false });
-    return { events: [], status: { state: state.runState }, retryNow: vi.fn() };
+    return { events: state.runEvents, status: { state: state.runState }, retryNow: vi.fn() };
   },
 }));
 vi.mock('../v2/chatSplit', async (importOriginal) => {
@@ -220,6 +221,7 @@ beforeEach(() => {
   state.search = [];
   state.context = [];
   state.events = [];
+  state.runEvents = [];
   state.runStreams = [];
   state.runState = 'connected';
   state.lastRun = null;
@@ -261,6 +263,33 @@ describe('the V2 Chat screen', () => {
     utils.rerender(<V2ChatPage />);
     expect(screen.getByText(/The live stream dropped/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+  });
+
+  it('renders a mid-turn join’s trace lines whole, then streams a newly arrived line (VS-440)', async () => {
+    const say = (id: string, seq: number, text: string): RunEvent => ({
+      id, runId: 'r9', seq, ts: '2026-09-14T09:00:00.000Z', stream: 'stdout', level: 'info',
+      type: 'assistant.text', payload: { text },
+    });
+    state.lastRun = { id: 'r9', status: 'running' };
+    const utils = render(<V2ChatPage />);
+    await screen.findByText('working');
+    // Nothing on the wire yet: the trace is not mounted, so no history placeholder.
+    expect(screen.queryByText('Nothing on the wire yet.')).toBeNull();
+
+    // The persisted read lands: the lines already there are whole.
+    state.runEvents = [
+      say('e1', 1, 'Read the first file.'),
+      { id: 'e2', runId: 'r9', seq: 2, ts: '2026-09-14T09:00:00.000Z', stream: 'stdout', level: 'info', type: 'tool.call', payload: { name: 'Read', callId: 'c1', target: 'src/a.ts' } } as RunEvent,
+    ];
+    utils.rerender(<V2ChatPage />);
+    expect(screen.getByText('Read the first file.')).toBeInTheDocument();
+    expect(screen.getByText('src/a.ts')).toBeInTheDocument();
+
+    // A line arriving while watching reveals from empty, then settles.
+    state.runEvents = [...state.runEvents, say('e3', 3, 'A brand new line.')];
+    utils.rerender(<V2ChatPage />);
+    expect(screen.queryByText('A brand new line.')).toBeNull();
+    expect(await screen.findByText('A brand new line.')).toBeInTheDocument();
   });
 
   it('keeps the decisions pane on desktop when nothing is waiting, and drops it below the threshold', async () => {

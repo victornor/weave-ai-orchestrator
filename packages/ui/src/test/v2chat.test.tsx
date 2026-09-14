@@ -526,4 +526,23 @@ describe('the V2 Chat screen', () => {
     utils.rerender(<V2ChatPage />);
     await waitFor(() => expect(document.querySelectorAll('[data-v2-dispatch-chip]')[0]!.textContent).toContain('idle'));
   });
+
+  it('streams a new weaver reply in, but never re-animates what was already on screen (VS-425)', async () => {
+    state.messages = [message({ id: 'm1', body: 'History line', createdAt: '2026-09-13T09:00:00.000Z' })];
+    const { rerender } = render(<V2ChatPage />);
+    // What the chat opened on is history, so it is whole on the first render — no reveal.
+    expect(screen.getByText('History line')).toBeInTheDocument();
+
+    state.messages = [
+      state.messages[0]!,
+      message({ id: 'm2', body: 'A brand new reply', createdAt: '2026-09-13T09:00:05.000Z' }),
+    ];
+    rerender(<V2ChatPage />);
+
+    // The new reply reveals from empty, so its finished text is not on screen the frame it lands...
+    expect(screen.queryByText('A brand new reply')).toBeNull();
+    // ...and it arrives shortly after, with the history line never having changed.
+    expect(await screen.findByText('A brand new reply')).toBeInTheDocument();
+    expect(screen.getByText('History line')).toBeInTheDocument();
+  });
 });

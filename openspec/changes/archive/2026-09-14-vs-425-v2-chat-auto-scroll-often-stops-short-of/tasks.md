@@ -1,0 +1,10 @@
+# Tasks
+
+- [x] 1. Document the demonstrated root cause (sentinel inside the container's bottom padding lands `scrollIntoView({block:'end'})` short; repeated native smooth scrolls stall) with the Chromium measurements and scripts in the ticket report.
+- [x] 2. In `packages/ui/src/lib/stickToBottom.ts`, add an `exact` mode: "the bottom" is `el.scrollHeight - el.clientHeight`, and a smooth follow is a `requestAnimationFrame` loop that eases toward that recomputed-every-frame target, cancels on scroll-up/unmount, jumps under reduced motion, and settles exactly on the true bottom. V1 defaults unchanged.
+- [x] 3. Add `packages/ui/src/lib/streamReveal.ts`: `revealedCount()` pure helper, `usePrefersReducedMotion()`, and `useStreamReveal(full, animate)` that reveals in ~420ms and returns the full text instantly when reduced motion is on or the text is not new.
+- [x] 4. Reveal a new weaver reply through the markdown renderer in `ChatMessage` (via `useStreamReveal`), and wire `ChatPage` (`useNewOutboundMessageIds`) to mark only genuinely new outbound messages as animating, so history and already-on-screen messages never re-animate.
+- [x] 5. In `ChatComposer`, reveal the dictated transcript into the draft with the same fast streaming animation (keeping the caret/scroll at the end), committing the whole draft at once so a queued send still gets the last words; instant under reduced motion.
+- [x] 6. Tests: new `stickToBottom.test.tsx` covering exact true-bottom landing, pinning through late growth, scroll-up pausing, and reduced motion; `streamReveal.test.ts` for progress/reduced-motion/one-shot latch; V2 chat reveal-only-new and composer dictation reveal tests.
+- [x] 7. Evidence: a scripted headless-Chromium run of 50 sends and replies with late-growing content (exact 0px vs legacy 19px short), plus screenshots of a reply streaming in and settled at the bottom, captured outside the worktree and committed under `docs/reviews/vs-425/`.
+- [x] 8. `pnpm lint`, `pnpm typecheck`, and both test suites pass; tick tasks; open the PR and move to review.

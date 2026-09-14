@@ -75,10 +75,26 @@ const same = (a: readonly unknown[], b: readonly unknown[]): boolean =>
  * ticket's feed. `scrollIntoView` walks every scrollable ancestor, so a box following its own
  * bottom would drag the page it sits in down with it on every event; a contained list moves its own
  * scroll offset and nothing else. There is no animation to sit through at that size.
+ *
+ * `exact` makes "the bottom" the scroll element's own `scrollHeight - clientHeight` rather than the
+ * sentinel's position, and follows with an animation this hook drives itself. Both matter to the V2
+ * chat. The sentinel is the last child *inside* the scroller, so `padding-bottom` on the scroller
+ * sits below it and `scrollIntoView({ block: 'end' })` stops that padding short of the true bottom —
+ * measured 19px on a 1000px list with the 20px the chat uses, inside the 48px at-bottom threshold, so
+ * nothing ever corrects it. And a native smooth scroll cannot be re-targeted while content grows:
+ * each call restarts it and a stream of them (a live turn, a streaming reveal) stalls it short.
+ * In this mode a `requestAnimationFrame` loop eases `scrollTop` toward a bottom read afresh every
+ * frame, so it follows content that keeps growing and still settles exactly on the final bottom.
  */
 export function useStickToBottom(
   signal: readonly unknown[],
-  { ready = true, older, follow = true, contained = false }: { ready?: boolean; older?: OlderPages; follow?: boolean; contained?: boolean } = {},
+  {
+    ready = true,
+    older,
+    follow = true,
+    contained = false,
+    exact = false,
+  }: { ready?: boolean; older?: OlderPages; follow?: boolean; contained?: boolean; exact?: boolean } = {},
 ): StickToBottom {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -91,19 +107,61 @@ export function useStickToBottom(
   const opened = useRef(false);
   /** Distance from the bottom, captured when an older page was asked for; null the rest of the time. */
   const anchor = useRef<number | null>(null);
+  /** The in-flight exact-mode follow, so a second request does not stack loops and a scroll-up stops it. */
+  const anim = useRef<number | null>(null);
   // The scroll listener is installed once per element, so it reads the paging state through a ref
   // rather than closing over the values this render happened to have.
   const olderRef = useRef(older);
   olderRef.current = older;
+
+  const reducedMotion = useCallback(
+    (): boolean => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    [],
+  );
+  const stopAnim = useCallback(() => {
+    if (anim.current !== null) cancelAnimationFrame(anim.current);
+    anim.current = null;
+  }, []);
 
   const scrollToBottom = useCallback((instant = false) => {
     if (contained) {
       if (el) el.scrollTop = el.scrollHeight;
       return;
     }
-    const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    bottomRef.current?.scrollIntoView({ behavior: instant || reduced ? 'auto' : 'smooth', block: 'end' });
-  }, [contained, el]);
+    if (!exact) {
+      bottomRef.current?.scrollIntoView({ behavior: instant || reducedMotion() ? 'auto' : 'smooth', block: 'end' });
+      return;
+    }
+    if (!el) return;
+    const target = (): number => el.scrollHeight - el.clientHeight;
+    if (instant || reducedMotion()) {
+      stopAnim();
+      el.scrollTop = target();
+      return;
+    }
+    // One loop, its target recomputed every frame: content still growing (a reveal, a stream) is
+    // followed without restarting, and the last frame lands exactly on the true bottom.
+    if (anim.current !== null) return;
+    const step = (): void => {
+      if (!following.current || !opened.current) { anim.current = null; return; }
+      const to = target();
+      const diff = to - el.scrollTop;
+      // Settle within a whole pixel. The window is a pixel, not a half, because `scrollTop` is
+      // quantized in some engines: a sub-pixel step makes no progress and must not be mistaken for
+      // the list being clamped. The final write is `scrollHeight`, which a real engine clamps to
+      // the maximum offset — landing exactly on the true bottom whatever the integer rounding of
+      // `scrollHeight - clientHeight` made the computed target.
+      if (diff <= 1) { el.scrollTop = el.scrollHeight; anim.current = null; return; }
+      const before = el.scrollTop;
+      el.scrollTop += diff * 0.25;
+      // Clamped at the scroll maximum: another frame would ask for the same thing forever.
+      if (el.scrollTop === before) { anim.current = null; return; }
+      anim.current = requestAnimationFrame(step);
+    };
+    anim.current = requestAnimationFrame(step);
+  }, [contained, exact, el, reducedMotion, stopAnim]);
+
+  useEffect(() => stopAnim, [stopAnim]);
 
   useEffect(() => {
     if (!el) return;
@@ -183,7 +241,10 @@ export function useStickToBottom(
     const pin = (): void => {
       record({ event: 'pin', scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, atBottom: isAtBottom(el), following: following.current, opened: opened.current });
       if (!opened.current || !following.current) return;
-      scrollToBottom(true);
+      // A geometry correction is instant for a fixed-size list, but in `exact` mode the same growth
+      // is often content arriving (a streaming reveal), where an instant jump would jank; the rAF
+      // loop is a no-op when there is nothing to correct.
+      scrollToBottom(!exact);
     };
     const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(pin);
     ro?.observe(el);
@@ -198,7 +259,7 @@ export function useStickToBottom(
       window.visualViewport?.removeEventListener('resize', pin);
       window.removeEventListener('resize', pin);
     };
-  }, [el, follow, scrollToBottom]);
+  }, [el, follow, exact, scrollToBottom]);
 
   const toBottom = useCallback(() => {
     following.current = true;

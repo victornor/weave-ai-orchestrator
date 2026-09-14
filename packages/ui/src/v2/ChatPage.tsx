@@ -19,6 +19,7 @@ import { chatEntries, chatRows } from '../lib/dispatch';
 import { draftKey, useDraft } from '../lib/drafts';
 import { enqueue, useQueueCount } from '../lib/queue';
 import { useStickToBottom } from '../lib/stickToBottom';
+import { useNewOutboundMessageIds } from '../lib/streamReveal';
 import { cx } from '../lib/cx';
 import { NetworkError, SEND_TIMEOUT_MS, withTimeout } from '../api/client';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
@@ -494,10 +495,17 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const jump = useMessageContext(fetchId, anchor);
   const stick = useStickToBottom([messages.data, liveEvents.length], {
     ready: messages.data !== undefined,
+    // The sentinel sits inside the scroller's bottom padding, so `scrollIntoView({block:'end'})`
+    // stops short of the true bottom; V2 measures the scroller's own end and follows with a rAF loop
+    // that keeps up with a growing reveal (VS-425).
+    exact: true,
     ...(messages.hasOlder
       ? { older: { hasOlder: true, isLoadingOlder: messages.isLoadingOlder, loadOlder: messages.loadOlder } }
       : {}),
   });
+  // Only a weaver reply that arrived after this thread opened streams in; history never re-animates
+  // and the human's own messages do not reveal.
+  const revealIds = useNewOutboundMessageIds(messages.data, fetchId);
   const attachScroll = useCallback((el: HTMLDivElement | null) => { stick.scrollRef(el); }, [stick.scrollRef]);
 
   const canSplit = shouldSplit(shellWidth);
@@ -629,6 +637,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                             spent={trace?.usage ? trace.usage.inputTokens + trace.usage.outputTokens : null}
                             projectName={projectNameFor(m.projectId)}
                             onTicket={openTicket}
+                            reveal={revealIds.has(m.id)}
                             {...(m.direction === 'outbound' ? { onReply: () => patch({ replyToId: m.id }) } : {})}
                           />
                           {m.direction === 'outbound' && trace ? (

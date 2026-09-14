@@ -1,6 +1,18 @@
+/**
+ * VS-417: a run's live tail rides the one workspace event stream, not a per-run `EventSource`, and
+ * a run hook merges that tail with the persisted read by `seq`.
+ *
+ * The connection-state machine itself (backoff ladder, offline vs. reconnecting, the online fast
+ * path) is covered exhaustively in `sseStream.test.tsx`; `EventStream`'s own machine is covered in
+ * `eventStream.test.tsx`. These cases prove the run-side wiring: the shared subscription, the
+ * per-run filter, the merge, and the reconnect refetch.
+ */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunEvent } from '@weave-ai/shared';
+import { resetWorkspaceStreams } from '../api/streams';
 
 const persisted = vi.hoisted(() => ({ data: [] as RunEvent[] }));
 
@@ -35,28 +47,28 @@ class FakeEventSource {
   }
   close(): void { this.closed = true; }
 
-  emit(event: RunEvent): void {
-    const m = { data: JSON.stringify(event) } as MessageEvent<string>;
-    for (const fn of this.listeners.get(event.type) ?? []) fn(m);
+  /** A `run.event` workspace frame, as the daemon broadcasts it. */
+  emitRun(event: RunEvent): void {
+    const frame = { seq: 0, workspaceId: 'ws1', type: 'run.event', entityType: 'run', entityId: event.runId, payload: { runId: event.runId, event }, createdAt: '' };
+    for (const fn of this.listeners.get('run.event') ?? []) fn({ data: JSON.stringify(frame) } as MessageEvent<string>);
   }
   connect(): void { this.onopen?.(); }
   fail(): void { this.onerror?.(); }
-}
-
-function setOnline(value: boolean): void {
-  Object.defineProperty(navigator, 'onLine', { value, configurable: true });
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   FakeEventSource.open = [];
   persisted.data = [];
-  setOnline(true);
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 });
-afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
+afterEach(() => {
+  resetWorkspaceStreams();
+  vi.useRealTimers();
+  vi.clearAllMocks();
+});
 
-const last = () => FakeEventSource.open[FakeEventSource.open.length - 1]!;
+const last = (): FakeEventSource => FakeEventSource.open[FakeEventSource.open.length - 1]!;
 
 describe('mergeRunEvents', () => {
   it('keeps two events with different seq', () => {
@@ -79,139 +91,95 @@ describe('mergeRunEvents', () => {
 });
 
 describe('useRunEventStream', () => {
-  it('opens the run stream and appends frames as they arrive', () => {
+  it('opens the workspace stream, not a per-run one, and appends that run’s frames', () => {
     const { result } = renderHook(() => useRunEventStream('run1'));
     expect(FakeEventSource.open).toHaveLength(1);
-    expect(last().url).toBe('/api/w/ws1/runs/run1/events/stream');
+    expect(last().url).toBe('/api/w/ws1/events');
     expect(result.current.events).toEqual([]);
 
-    act(() => { last().emit(ev({ id: 'e1', seq: 1 })); });
-    act(() => { last().emit(ev({ id: 'e2', seq: 2, type: 'tool.call', payload: { id: 't1', name: 'Read' } })); });
+    act(() => { last().emitRun(ev({ id: 'e1', seq: 1 })); });
+    act(() => { last().emitRun(ev({ id: 'e2', seq: 2, type: 'tool.call', payload: { id: 't1', name: 'Read' } })); });
     expect(result.current.events.map((e) => e.id)).toEqual(['e1', 'e2']);
   });
 
-  it('opens nothing without a run, and closes the stream when the run clears', () => {
-    const { result, rerender } = renderHook(({ id }: { id: string | null }) => useRunEventStream(id), {
-      initialProps: { id: null as string | null },
-    });
-    expect(FakeEventSource.open).toHaveLength(0);
-    expect(result.current.events).toEqual([]);
-
-    rerender({ id: 'run1' });
-    expect(FakeEventSource.open).toHaveLength(1);
-    act(() => { last().emit(ev({ id: 'e1', seq: 1 })); });
-    expect(result.current.events).toHaveLength(1);
-
-    const opened = last();
-    rerender({ id: null });
-    expect(opened.closed).toBe(true);
+  it('ignores frames belonging to another run on the shared stream', () => {
+    const { result } = renderHook(() => useRunEventStream('run1'));
+    act(() => { last().emitRun(ev({ id: 'other', seq: 5, runId: 'run2' })); });
     expect(result.current.events).toEqual([]);
   });
 
-  it('merges the persisted rows with the live tail, de-duplicated by id and ordered by seq', () => {
+  it('opens nothing without a run, and takes nothing when not live', () => {
+    renderHook(() => useRunEventStream(null));
+    renderHook(() => useRunEventStream('run1', { live: false }));
+    expect(FakeEventSource.open).toHaveLength(0);
+  });
+
+  it('merges the persisted rows with the live tail, de-duplicated by seq and ordered', () => {
     persisted.data = [ev({ id: 'e1', seq: 1 }), ev({ id: 'e2', seq: 2 })];
     const { result } = renderHook(() => useRunEventStream('run1'));
     expect(result.current.events.map((e) => e.id)).toEqual(['e1', 'e2']);
 
-    // The stream replays before it tails, so the first frames overlap what the query returned.
-    act(() => { last().emit(ev({ id: 'e2', seq: 2 })); });
-    act(() => { last().emit(ev({ id: 'e3', seq: 3 })); });
+    act(() => { last().emitRun(ev({ id: 'e2', seq: 2 })); });
+    act(() => { last().emitRun(ev({ id: 'e3', seq: 3 })); });
     expect(result.current.events.map((e) => e.id)).toEqual(['e1', 'e2', 'e3']);
   });
 
-  it('does not duplicate a row the persisted query re-fetches after the live tail already delivered it', () => {
-    // Matches the real shape (VS-319): the engine emits a live event's id as `String(seq)`
-    // (`packages/core/src/runs/engine.ts`), never the row's real database id, so a persisted
-    // refetch of the same row — triggered mid-turn by the workspace stream invalidating
-    // `runEvents` on every `run.event` — returns it under a different id even though `seq`
-    // agrees. A merge keyed on `id` lets both through.
-    const { result, rerender } = renderHook(() => useRunEventStream('run1'));
+  it('shares one source across many run hooks in a workspace (VS-417)', () => {
+    const a = renderHook(() => useRunEventStream('run1'));
+    const b = renderHook(() => useRunEventStream('run2'));
+    const c = renderHook(() => useRunEventStream('run1'));
 
-    act(() => { last().emit(ev({ id: '1', seq: 1 })); });
-    expect(result.current.events.map((e) => e.id)).toEqual(['1']);
-
-    // The persisted query refetches and returns the same row (same seq) under its real row id.
-    persisted.data = [ev({ id: '4821', seq: 1 })];
-    rerender();
-
-    expect(result.current.events).toHaveLength(1);
-    expect(result.current.events.map((e) => e.seq)).toEqual([1]);
+    expect(FakeEventSource.open).toHaveLength(1);
+    act(() => {
+      last().connect();
+      last().emitRun(ev({ id: '1', seq: 1, runId: 'run1' }));
+      last().emitRun(ev({ id: '2', seq: 1, runId: 'run2' }));
+    });
+    expect(a.result.current.events.map((e) => e.id)).toEqual(['1']);
+    expect(b.result.current.events.map((e) => e.id)).toEqual(['2']);
+    expect(c.result.current.events.map((e) => e.id)).toEqual(['1']);
   });
 
-  it('reconnects after an error, resuming from the highest seq without duplicating the overlap', () => {
-    const { result } = renderHook(() => useRunEventStream('run1'));
-    act(() => { last().emit(ev({ id: 'e1', seq: 1 })); });
-    act(() => { last().emit(ev({ id: 'e2', seq: 2 })); });
+  it('keeps the shared stream open when one run unsubscribes, for the others (VS-417)', () => {
+    const a = renderHook(() => useRunEventStream('run1'));
+    const b = renderHook(() => useRunEventStream('run2'));
+    const shared = last();
+    act(() => { shared.connect(); });
 
-    const dropped = last();
-    act(() => { dropped.fail(); });
-    expect(dropped.closed).toBe(true);
+    b.unmount();
+    expect(shared.closed).toBe(false);
     expect(FakeEventSource.open).toHaveLength(1);
 
-    act(() => { vi.advanceTimersByTime(500); });
-    expect(FakeEventSource.open).toHaveLength(2);
-    expect(last().url).toBe('/api/w/ws1/runs/run1/events/stream?after=2');
-
-    // The replay repeats e2 and carries what we missed while disconnected.
-    act(() => { last().emit(ev({ id: 'e2', seq: 2 })); });
-    act(() => { last().emit(ev({ id: 'e3', seq: 3 })); });
-    expect(result.current.events.map((e) => e.id)).toEqual(['e1', 'e2', 'e3']);
+    act(() => { last().emitRun(ev({ id: '1', seq: 1, runId: 'run1' })); });
+    expect(a.result.current.events.map((e) => e.id)).toEqual(['1']);
   });
 
-  it('ignores an unparseable frame', () => {
-    const { result } = renderHook(() => useRunEventStream('run1'));
-    act(() => {
-      for (const fn of last().listeners.get('assistant.text') ?? []) fn({ data: 'not json' } as MessageEvent<string>);
-    });
-    expect(result.current.events).toEqual([]);
-  });
-});
-
-/**
- * The connection-state machine itself (backoff ladder, offline vs. reconnecting, the online fast
- * path, retryNow) is covered exhaustively in `sseStream.test.tsx` against `useLiveStream` directly.
- * These cases only prove the wiring: that `useRunEventStream` surfaces that same state and that its
- * own URL/seq logic keeps working through a drop and a manual retry.
- */
-describe('useRunEventStream connection state', () => {
-  it('reports connecting, then connected once the stream opens', () => {
+  it('reports the shared stream’s status and reconnects on retryNow', () => {
     const { result } = renderHook(() => useRunEventStream('run1'));
     expect(result.current.status.state).toBe('connecting');
     act(() => { last().connect(); });
     expect(result.current.status.state).toBe('connected');
-  });
 
-  it('reports reconnecting on a drop while online, and offline while the device is offline', () => {
-    const { result, unmount } = renderHook(() => useRunEventStream('run1'));
-    act(() => { last().connect(); last().fail(); });
-    expect(result.current.status.state).toBe('reconnecting');
-    unmount();
-
-    setOnline(false);
-    const { result: r2 } = renderHook(() => useRunEventStream('run2'));
-    act(() => { last().fail(); });
-    expect(r2.current.status.state).toBe('offline');
-  });
-
-  it('reconnects at once on the browser online event', () => {
-    const { result } = renderHook(() => useRunEventStream('run1'));
-    act(() => { last().connect(); last().fail(); });
-    expect(FakeEventSource.open).toHaveLength(1);
-
-    act(() => { window.dispatchEvent(new Event('online')); });
-    expect(FakeEventSource.open).toHaveLength(2);
-    expect(result.current.status.state).toBe('connecting');
-  });
-
-  it('retryNow reopens immediately, carrying the last seq seen', () => {
-    const { result } = renderHook(() => useRunEventStream('run1'));
-    act(() => { last().connect(); });
-    act(() => { last().emit(ev({ id: 'e1', seq: 1 })); });
     act(() => { last().fail(); });
     expect(FakeEventSource.open).toHaveLength(1);
-
     act(() => { result.current.retryNow(); });
     expect(FakeEventSource.open).toHaveLength(2);
-    expect(last().url).toBe('/api/w/ws1/runs/run1/events/stream?after=1');
+  });
+
+  it('refetches the run’s persisted events after a reconnect, so a missed frame is recovered', () => {
+    const qc = new QueryClient();
+    const invalidate = vi.spyOn(qc, 'invalidateQueries');
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    renderHook(() => useRunEventStream('run1'), { wrapper });
+
+    act(() => { last().connect(); });
+    expect(invalidate).not.toHaveBeenCalled();
+
+    act(() => { last().fail(); });
+    act(() => { vi.advanceTimersByTime(500); });
+    act(() => { last().connect(); });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['w', 'ws1', 'runs', 'run1', 'events'] });
   });
 });

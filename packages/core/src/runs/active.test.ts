@@ -1,7 +1,37 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeRuntime } from '@weave-ai/runtime-sdk';
+import type { RunEvent } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
-import { describeLiveInput, runState } from './active.js';
+import { describeLiveInput, emitRunEvent, runState } from './active.js';
+
+describe('emitRunEvent (VS-417)', () => {
+  let h: TestHarness;
+
+  beforeEach(() => { h = makeHarness(); });
+  afterEach(() => h.cleanup());
+
+  it('broadcasts each run event as a live-only workspace frame carrying the RunEvent', async () => {
+    const ev: RunEvent = {
+      id: '1', runId: 'run-1', seq: 1, ts: '2026-09-14T00:00:00.000Z', type: 'assistant.text',
+      stream: 'stdout', level: 'info', payload: { text: 'Deploying the fix.' },
+    };
+    emitRunEvent(h.ctx, 'run-1', ev);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const frame = h.events.find((e) => String(e.type) === 'run.event');
+    expect(frame).toMatchObject({ seq: 0, entityType: 'run', entityId: 'run-1', payload: { runId: 'run-1', event: ev } });
+  });
+
+  it('writes no outbox row — the frame is recovered from the run read, not replay', async () => {
+    emitRunEvent(h.ctx, 'run-1', {
+      id: '1', runId: 'run-1', seq: 1, ts: '2026-09-14T00:00:00.000Z', type: 'assistant.text',
+      stream: 'stdout', level: 'info', payload: {},
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.db.get<{ n: number }>('SELECT COUNT(*) n FROM events')!.n).toBe(0);
+  });
+});
+
 
 describe('describeLiveInput (VS-99)', () => {
   let h: TestHarness;

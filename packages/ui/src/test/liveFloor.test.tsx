@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Run, RunEvent, Ticket, WorkerModelOption } from '@weave-ai/shared';
 import { agent, run as makeRun, ticket } from './factories';
 import { LIVE_RUN_GRACE_MS } from '../lib/liveOrder';
+import { resetWorkspaceStreams } from '../api/streams';
 
 const state = vi.hoisted(() => ({
   workers: undefined as Agent[] | undefined,
@@ -66,6 +67,13 @@ class FakeEventSource {
       for (const fn of this.listeners.get(event.type) ?? []) fn({ data: JSON.stringify(event) } as MessageEvent<string>);
     });
   }
+  /** A `run.event` workspace frame, as the daemon broadcasts it on the shared stream (VS-417). */
+  emitRun(event: RunEvent): void {
+    act(() => {
+      const frame = { seq: 0, workspaceId: 'ws1', type: 'run.event', entityType: 'run', entityId: event.runId, payload: { runId: event.runId, event }, createdAt: '' };
+      for (const fn of this.listeners.get('run.event') ?? []) fn({ data: JSON.stringify(frame) } as MessageEvent<string>);
+    });
+  }
 }
 
 const live = (): FakeEventSource[] => FakeEventSource.open.filter((s) => !s.closed);
@@ -96,7 +104,7 @@ beforeEach(() => {
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
   window.matchMedia = ((q: string) => ({ ...phoneMedia(), media: q })) as unknown as typeof window.matchMedia;
 });
-afterEach(() => vi.clearAllMocks());
+afterEach(() => { resetWorkspaceStreams(); vi.clearAllMocks(); });
 
 function twoWorkers(): void {
   state.workers = [
@@ -226,18 +234,18 @@ describe('Live page streaming', () => {
     state.running = [makeRun({ id: 'run_1', agentId: 'a1', status: 'running' })];
     render(<LiveRoute />);
 
-    expect(live().map((s) => s.url)).toEqual(['/api/w/ws1/runs/run_1/events/stream']);
+    expect(live().map((s) => s.url)).toEqual(['/api/w/ws1/events']);
     expect(screen.getByText('Waiting for the next turn.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /ACME-7/ })).toBeInTheDocument();
 
-    live()[0]!.emit({
+    live()[0]!.emitRun({
       id: 'e1', runId: 'run_1', seq: 1, ts: '2026-09-01T09:00:00.000Z', type: 'assistant.text',
       stream: 'stdout', level: 'info', payload: { text: 'Reading the failing test.' },
     });
     expect(screen.getByText('Reading the failing test.')).toBeInTheDocument();
   });
 
-  it('caps concurrent run-tail EventSources at two, and a waiting cell opens when a slot frees (VS-227)', () => {
+  it('holds one shared stream for the whole floor, whatever the number of live tails (VS-417)', () => {
     state.workers = [
       agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'running' }),
       agent({ id: 'a2', name: 'Backend Engineer #1', ticketId: 'tk_2', status: 'running' }),
@@ -254,10 +262,7 @@ describe('Live page streaming', () => {
       makeRun({ id: 'run_3', agentId: 'a3', status: 'running' }),
     ];
     const { rerender } = render(<LiveRoute />);
-    expect(live().map((s) => s.url)).toEqual([
-      '/api/w/ws1/runs/run_1/events/stream',
-      '/api/w/ws1/runs/run_2/events/stream',
-    ]);
+    expect(live().map((s) => s.url)).toEqual(['/api/w/ws1/events']);
 
     state.workers = [
       agent({ id: 'a1', name: 'Frontend Engineer #7', ticketId: 'tk_1', status: 'paused' }),
@@ -265,10 +270,7 @@ describe('Live page streaming', () => {
       agent({ id: 'a3', name: 'Platform Engineer #3', ticketId: 'tk_3', status: 'running' }),
     ];
     rerender(<LiveRoute />);
-    expect(live().map((s) => s.url)).toEqual([
-      '/api/w/ws1/runs/run_2/events/stream',
-      '/api/w/ws1/runs/run_3/events/stream',
-    ]);
+    expect(live().map((s) => s.url)).toEqual(['/api/w/ws1/events']);
   });
 
   it('drops a cell when the worker leaves the live set, without a remount of the others', () => {
@@ -505,7 +507,7 @@ describe('Live page keeps the last turn (VS-332)', () => {
     finishedWorker();
     state.running = [makeRun({ id: 'run_1', agentId: 'a1', status: 'running' })];
     const { rerender } = render(<LiveRoute />);
-    live()[0]!.emit(evt(1, 'Still working.'));
+    live()[0]!.emitRun(evt(1, 'Still working.'));
     expect(screen.getByText('Still working.')).toBeInTheDocument();
     expect(screen.queryByText('Waiting for the next turn.')).not.toBeInTheDocument();
 
@@ -530,15 +532,15 @@ describe('Live page keeps the last turn (VS-332)', () => {
     state.persisted = [];
     rerender(<LiveRoute />);
 
-    expect(live().map((s) => s.url)).toEqual(['/api/w/ws1/runs/run_2/events/stream']);
+    expect(live().map((s) => s.url)).toEqual(['/api/w/ws1/events']);
     expect(screen.getByText('First turn.')).toBeInTheDocument();
     expect(screen.queryByText('Waiting for the next turn.')).not.toBeInTheDocument();
 
-    live()[0]!.emit(evt(1, 'New turn.', 'run_2'));
+    live()[0]!.emitRun(evt(1, 'New turn.', 'run_2'));
     expect(screen.getByText('New turn.')).toBeInTheDocument();
   });
 
-  it('never gives a finished-run cell a run-tail slot (VS-227)', () => {
+  it('opens one shared stream for the running cells, never one for a finished-run cell (VS-417)', () => {
     state.workers = [
       agent({ id: 'a1', name: 'Finished #1', ticketId: 'tk_1', status: 'active', createdAt: '2026-09-01T09:03:00.000Z' }),
       agent({ id: 'a2', name: 'Running #1', ticketId: 'tk_2', status: 'running', createdAt: '2026-09-01T09:02:00.000Z' }),
@@ -560,10 +562,7 @@ describe('Live page keeps the last turn (VS-332)', () => {
     ];
     render(<LiveRoute />);
 
-    expect(live().map((s) => s.url)).toEqual([
-      '/api/w/ws1/runs/run_2/events/stream',
-      '/api/w/ws1/runs/run_3/events/stream',
-    ]);
+    expect(live().map((s) => s.url)).toEqual(['/api/w/ws1/events']);
   });
 });
 
@@ -662,11 +661,8 @@ describe('Live page running-first order (VS-337)', () => {
     ];
     render(<LiveRoute />);
 
-    // a3 is newest overall, so the two slots go to the active a2 and a1 — not to a3.
-    expect(live().map((s) => s.url)).toEqual([
-      '/api/w/ws1/runs/run_2/events/stream',
-      '/api/w/ws1/runs/run_1/events/stream',
-    ]);
+    // One shared stream for the floor, whatever the reorder.
+    expect(live().map((s) => s.url)).toEqual(['/api/w/ws1/events']);
     expect(cellNames()).toEqual(['Running New', 'Running Old', 'Waiting New']);
   });
 

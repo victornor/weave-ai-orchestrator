@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Run, RunEvent, Ticket, WorkerModelOption } from '@weave-ai/shared';
 import { agent, run as makeRun, ticket } from './factories';
 import { LIVE_RUN_GRACE_MS } from '../lib/liveOrder';
+import { resetWorkspaceStreams } from '../api/streams';
 
 const state = vi.hoisted(() => ({
   workspaces: [] as Array<{ id: string; name: string }>,
@@ -53,6 +54,13 @@ class FakeEventSource {
       for (const fn of this.listeners.get(event.type) ?? []) fn({ data: JSON.stringify(event) } as MessageEvent<string>);
     });
   }
+  /** A `run.event` workspace frame, as the daemon broadcasts it on the shared stream (VS-417). */
+  emitRun(event: RunEvent): void {
+    act(() => {
+      const frame = { seq: 0, workspaceId: 'alpha', type: 'run.event', entityType: 'run', entityId: event.runId, payload: { runId: event.runId, event }, createdAt: '' };
+      for (const fn of this.listeners.get('run.event') ?? []) fn({ data: JSON.stringify(frame) } as MessageEvent<string>);
+    });
+  }
 }
 
 const live = (): FakeEventSource[] => FakeEventSource.open.filter((s) => !s.closed);
@@ -75,7 +83,7 @@ beforeEach(() => {
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
-afterEach(() => vi.clearAllMocks());
+afterEach(() => { resetWorkspaceStreams(); vi.clearAllMocks(); });
 
 const opt = (id: string): WorkerModelOption => ({ id, description: `${id} tier`, runtime: 'claude', model: null });
 
@@ -154,7 +162,7 @@ describe('GlobalLiveRoute', () => {
     expect(screen.queryByText('quick')).not.toBeInTheDocument();
   });
 
-  it('caps concurrent run-tail EventSources at two across workspaces (VS-227)', () => {
+  it('opens one shared stream per workspace with a live tail, not one per tile (VS-417)', () => {
     state.workers = {
       alpha: [
         agent({ id: 'w1', name: 'Frontend #1', status: 'running', ticketId: 't1' }),
@@ -171,10 +179,9 @@ describe('GlobalLiveRoute', () => {
       beta: [makeRun({ id: 'run_3', agentId: 'w3', status: 'running' })],
     };
     render(<GlobalLiveRoute />);
-    expect(live().map((s) => s.url)).toEqual([
-      '/api/w/alpha/runs/run_1/events/stream',
-      '/api/w/alpha/runs/run_2/events/stream',
-    ]);
+    // V1 still caps the live tails it holds, and its two slots land on alpha's tiles; both ride
+    // alpha's one stream rather than one `EventSource` each.
+    expect(live().map((s) => s.url)).toEqual(['/api/w/alpha/events']);
   });
 
   it('keeps a between-turns worker\'s last run and hands off to the next (VS-332)', () => {
@@ -195,11 +202,11 @@ describe('GlobalLiveRoute', () => {
     state.persisted = [];
     rerender(<GlobalLiveRoute />);
 
-    expect(live().map((s) => s.url)).toEqual(['/api/w/alpha/runs/run_2/events/stream']);
+    expect(live().map((s) => s.url)).toEqual(['/api/w/alpha/events']);
     expect(screen.getByText('First turn.')).toBeInTheDocument();
     expect(screen.queryByText('Waiting for the next turn.')).not.toBeInTheDocument();
 
-    live()[0]!.emit(evt(1, 'New turn.', 'run_2'));
+    live()[0]!.emitRun(evt(1, 'New turn.', 'run_2'));
     expect(screen.getByText('New turn.')).toBeInTheDocument();
   });
 

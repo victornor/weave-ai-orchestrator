@@ -46,6 +46,14 @@ export function runState(ctx: WorkspaceContext): RunRuntimeState {
 
 export function emitRunEvent(ctx: WorkspaceContext, runId: string, ev: RunEvent): void {
   runState(ctx).emitter.emit('event', runId, ev);
+  // VS-417: also hand the event to the workspace event stream as a live-only `run.event` frame, so
+  // every run a surface is watching shares that stream instead of opening an `EventSource` per run.
+  // Ephemeral (no outbox row): a client that misses one re-reads the run's persisted events.
+  try {
+    ctx.events.broadcast('run.event', 'run', runId, { runId, event: ev });
+  } catch (e) {
+    ctx.log('run').warn({ runId, err: String(e) }, 'run event broadcast failed');
+  }
 }
 
 /**

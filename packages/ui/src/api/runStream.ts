@@ -1,27 +1,28 @@
 /**
- * Live view of one run's events: the rows the API already has, plus the SSE tail from
- * `GET /api/w/:ws/runs/:id/events/stream`.
+ * Live view of one run's events: the rows the API already has, plus that run's `run.event` frames
+ * from the shared workspace stream (VS-417).
  *
- * The endpoint replays before it tails, so a surface that mounts mid-turn gets the whole turn
- * without a separate catch-up path, and a reconnect resumes from the highest `seq` seen. The
- * persisted rows and the live tail are merged by `seq`, because the replay overlaps whatever the
- * query already returned (see `mergeRunEvents`).
+ * A run's events are live-only frames on the workspace event stream (`api/streams.ts`), not a
+ * dedicated `EventSource`, so every live run a page shows rides the one connection per workspace —
+ * a grid of tiles can no longer exhaust the browser's per-origin limit. The persisted rows come
+ * from `GET /runs/:id/events`; the live tail and the read are merged by `seq`, because the two
+ * disagree on `id` (see `mergeRunEvents`).
  *
- * A finished run has no tail to follow: `live: false` keeps the persisted query and opens no
- * stream, so the same hook serves a turn being watched and a turn being read back, and a turn that
- * finishes under a surface simply stops streaming while keeping everything it already showed.
- * `newest` reads that finished run's last events rather than its first (VS-332): a surface that never
- * watched the turn still shows its ending.
+ * A finished run has no tail to follow: `live: false` keeps the persisted query and attaches
+ * nothing, so the same hook serves a turn being watched and a turn being read back. `newest` reads
+ * a finished run's last events rather than its first (VS-332).
  *
- * The connection state and manual retry come from `useLiveStream` (`sseStream.ts`), the same
- * state machine the workspace event stream uses. See `live-streams/connection-state`.
+ * The connection state and manual retry come from the shared `EventStream`, the same state machine
+ * the workspace event stream uses. A frame missed while the stream was down is recovered by
+ * re-reading the run's persisted events on reconnect.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RUN_EVENT_TYPES, type RunEvent } from '@weave-ai/shared';
+import type { RunEvent } from '@weave-ai/shared';
 import { useHookWs } from './context';
 import { useRunEvents } from './hooks';
-import { useLiveStream } from './sseStream';
-import type { ConnectionStatus } from './sseStream';
+import { qk } from './keys';
+import type { EventStream, ConnectionStatus } from './events';
+import { acquireWorkspaceStream, releaseWorkspaceStream, useStreamQueryClient } from './streams';
 
 export interface RunEventStream {
   events: RunEvent[];
@@ -52,40 +53,54 @@ export function mergeRunEvents(persisted: readonly RunEvent[], live: readonly Ru
 
 export function useRunEventStream(runId: string | null, { live = true, newest = false, ws: wsOverride }: { live?: boolean; newest?: boolean; ws?: string } = {}): RunEventStream {
   const ws = useHookWs(wsOverride);
+  const qc = useStreamQueryClient();
   const persisted = useRunEvents(runId ?? '', 0, wsOverride, { newest });
   const [tail, setTail] = useState<RunEvent[]>([]);
-  /** Highest seq rendered, so a reconnect asks for `?after=` it rather than replaying the turn. */
+  /** Highest seq rendered, so a reconnect asks the read for everything after it. */
   const seq = useRef(0);
-  /** `null` while there is nothing to stream, so `useLiveStream` opens and retries nothing. */
-  const active = live && runId ? runId : null;
+  const [status, setStatus] = useState<ConnectionStatus>({ state: 'connecting', capturedAt: null, attempts: 0 });
+  const streamRef = useRef<EventStream | null>(null);
 
   useEffect(() => {
     setTail([]);
     seq.current = 0;
   }, [runId]);
 
-  const { status, retryNow } = useLiveStream({
-    resetKey: active,
-    eventTypes: RUN_EVENT_TYPES,
-    buildUrl: () => {
-      if (!active) return null;
-      const after = seq.current ? `?after=${seq.current}` : '';
-      return `/api/w/${encodeURIComponent(ws)}/runs/${encodeURIComponent(active)}/events/stream${after}`;
-    },
-    onFrame: (m) => {
-      let evt: RunEvent;
-      try {
-        evt = JSON.parse(m.data) as RunEvent;
-      } catch {
-        return;
-      }
-      if (!evt || typeof evt.seq !== 'number') return;
+  useEffect(() => {
+    if (!runId || !ws || !live) {
+      streamRef.current = null;
+      return;
+    }
+    const stream = acquireWorkspaceStream(ws, qc);
+    streamRef.current = stream;
+    setStatus(stream.getStatus());
+    let connectedBefore = false;
+    const offStatus = stream.subscribe((next) => {
+      setStatus(next);
+      if (next.state !== 'connected') return;
+      // A reconnect can have dropped `run.event` frames; the persisted read behind them is
+      // authoritative, so refetch this run's events once the stream is back (not on first connect,
+      // where the query already holds them).
+      if (connectedBefore) void qc.invalidateQueries({ queryKey: qk.runEvents(ws, runId) });
+      connectedBefore = true;
+    });
+    const offFrame = stream.onEvent((e) => {
+      if (String(e.type) !== 'run.event') return;
+      const p = e.payload as { runId?: string; event?: RunEvent } | null;
+      const evt = p?.event;
+      if (!evt || (p.runId && p.runId !== runId) || typeof evt.seq !== 'number') return;
       seq.current = Math.max(seq.current, evt.seq);
       setTail((xs) => (xs.some((x) => x.id === evt.id) ? xs : [...xs, evt]));
-    },
-  });
+    });
+    return () => {
+      offStatus();
+      offFrame();
+      streamRef.current = null;
+      releaseWorkspaceStream(ws);
+    };
+  }, [runId, ws, live, qc]);
 
   const events = useMemo(() => mergeRunEvents(persisted.data ?? [], tail), [persisted.data, tail]);
 
-  return { events, status, retryNow };
+  return { events, status, retryNow: () => streamRef.current?.retryNow() };
 }

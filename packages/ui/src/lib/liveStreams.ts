@@ -1,8 +1,9 @@
 /**
- * How many Live-floor run tails may hold an EventSource at once (VS-227).
+ * How many Live-floor run tails may stream live at once (VS-227).
  *
- * The public daemon listener is HTTP/1.1: about six connections per origin. FanInStreams can take
- * one slot per workspace, so two run tails leave a REST slot for chats and sends.
+ * Every tail now rides the one shared workspace stream (VS-417), so this no longer bounds
+ * connections; it bounds how many tails a floor applies live frames to, the rest falling back to
+ * the persisted read until a slot frees.
  */
 export const MAX_LIVE_RUN_TAILS = 2;
 

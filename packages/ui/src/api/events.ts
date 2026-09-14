@@ -79,6 +79,14 @@ export class EventStream {
     }
   }
 
+  /** Reconnects at once, resetting the backoff, whatever the current delay or state. */
+  retryNow(): void {
+    if (this.stopped || this.hidden) return;
+    this.status = { ...this.status, attempts: 0 };
+    this.set({ state: 'connecting' });
+    this.open();
+  }
+
   private onOnline = (): void => {
     if (this.hidden) return;
     if (this.status.state === 'offline') this.open();
@@ -152,7 +160,16 @@ export class EventStream {
     } catch {
       return;
     }
-    this.set({ lastSeq: Math.max(this.status.lastSeq ?? 0, evt.seq ?? 0), capturedAt: evt.createdAt ?? new Date().toISOString(), state: 'connected' });
+    // A live-only frame (seq 0: `worker.activity`, `run.event`) no longer moves the cursor, so it
+    // must not re-notify status listeners on every frame — a busy turn would otherwise re-render
+    // every connection-status subscriber many times a second (VS-417).
+    const patch: Partial<ConnectionStatus> = {};
+    if (evt.seq > 0) {
+      patch.lastSeq = Math.max(this.status.lastSeq ?? 0, evt.seq);
+      patch.capturedAt = evt.createdAt ?? new Date().toISOString();
+    }
+    if (this.status.state !== 'connected') patch.state = 'connected';
+    if (Object.keys(patch).length > 0) this.set(patch);
     invalidateFor(this.qc, this.workspace, evt);
     for (const l of this.eventListeners) l(evt);
   }
@@ -363,9 +380,6 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       if (ticketId) inv(qk.ticketRuns(ws, ticketId));
       break;
     }
-    case 'run.event':
-      inv(qk.runEvents(ws, id));
-      break;
     case 'thread.message':
       inv(qk.threads(ws));
       inv(qk.threadMessages(ws, (evt.payload as { threadId?: string } | null)?.threadId ?? id));

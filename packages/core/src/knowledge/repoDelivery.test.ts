@@ -60,7 +60,8 @@ describe('requestKnowledgeRepoPr (VS-358)', () => {
         return exists.ok && openedPrs.length ? { url: `https://example.com/pr/${openedPrs.length}`, number: openedPrs.length } : null;
       },
     };
-    ctx = { registries: { forges: new Map([['github', forge]]) } } as unknown as WorkspaceContext;
+    // VS-383: scratch worktrees are created under the workspace state dir.
+    ctx = { registries: { forges: new Map([['github', forge]]) }, paths: { state: join(dir, 'state') } } as unknown as WorkspaceContext;
     deps = () => ({ projects: { fetch: async () => ({ head: 'x', fastForwarded: false }) } } as unknown as CoreServices);
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));

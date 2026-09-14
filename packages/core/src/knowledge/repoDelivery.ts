@@ -10,7 +10,8 @@ import { OcError, landingBranchOf, type Project } from '@weave-ai/shared';
 import type { CoreServices } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { git } from '../util/git.js';
-import { isFreshAgainstLanding, rebaseOntoLanding, scratchBranchFrom, scratchLandWorktree } from '../tickets/archive-before-merge.js';
+import { isFreshAgainstLanding, rebaseOntoLanding } from '../tickets/archive-before-merge.js';
+import { scratchBranchFrom, scratchLandWorktree } from '../tickets/scratch.js';
 import { createSerializer } from '../util/serialize.js';
 import { readMirrorFile } from './files.js';
 
@@ -58,6 +59,7 @@ async function requestKnowledgeRepoPrLocked(
 ): Promise<void> {
   const branch = branchFor(project);
   const landing = landingBranchOf(project);
+  const scratchTarget = { stateDir: ctx.paths.state, projectSlug: project.slug, label: `knowledge-${project.slug}` };
   const forge = ctx.registries.forges.get('github');
   if (!forge?.createPullRequest) {
     throw new OcError('internal', 'no forge available that can open the out-of-ticket knowledge pull request', { project: project.slug, branch });
@@ -82,7 +84,7 @@ async function requestKnowledgeRepoPrLocked(
   if (existingBranch.ok && existingBranch.stdout.trim()) {
     // A write is already pending on this project's knowledge branch: rebase and commit onto it
     // rather than recreating it from the landing tip, which would push over (and lose) that commit.
-    const scratch = await scratchLandWorktree(project.clonePath, branch);
+    const scratch = await scratchLandWorktree(project.clonePath, branch, scratchTarget);
     try {
       await git(['fetch', 'origin', landing], project.clonePath, 300_000);
       const landingRef = `origin/${landing}`;
@@ -102,7 +104,7 @@ async function requestKnowledgeRepoPrLocked(
     }
   } else {
     try { await deps().projects.fetch(project.id); } catch { /* best effort: the scratch branch below still fetches what it needs */ }
-    const scratch = await scratchBranchFrom(project.clonePath, 'HEAD', branch);
+    const scratch = await scratchBranchFrom(project.clonePath, 'HEAD', branch, scratchTarget);
     try {
       writeFile(scratch.path);
       await commit(scratch.path);

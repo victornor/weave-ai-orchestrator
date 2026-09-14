@@ -1283,6 +1283,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
                   try {
                     outcome = await attemptArchiveThenMerge({
                       clonePath: p.clonePath, branch, landingBranch: landingBranchOf(p, t), changeName: t.openspecChangeName, forge, prUrl: pr.url, method,
+                      scratch: { stateDir: ctx.paths.state, projectSlug: p.slug, label: t.identifier },
                     });
                   } catch (e) {
                     const action = `landing failed: ${e instanceof Error ? e.message : String(e)}`;

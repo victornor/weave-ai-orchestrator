@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 import { git } from '../util/git.js';
-import { archiveOnBranch, attemptArchiveThenMerge, isFreshAgainstLanding, rebaseOntoLanding, scratchLandWorktree } from './archive-before-merge.js';
+import { archiveOnBranch, attemptArchiveThenMerge, isFreshAgainstLanding, rebaseOntoLanding } from './archive-before-merge.js';
+import { SCRATCH_STALE_MS, activeScratchWorktrees, scratchBranchFrom, scratchLandWorktree, scratchRoot, sweepScratchWorktrees, type ScratchTarget } from './scratch.js';
 
 const BRANCH = 'ac/tst-1-dark-mode';
 
@@ -12,6 +13,8 @@ describe('archive-before-merge mechanics', () => {
   let dir: string;
   let origin: string;
   let clone: string;
+  let scratchTarget: ScratchTarget;
+  let planted: string[];
 
   const commit = async (repo: string, file: string, body: string, message: string): Promise<void> => {
     writeFileSync(join(repo, file), body);
@@ -20,10 +23,29 @@ describe('archive-before-merge mechanics', () => {
   };
   const head = async (repo: string, ref = 'HEAD'): Promise<string> => (await git(['rev-parse', ref], repo)).stdout.trim();
 
+  /** Every registered worktree of the clone whose path is one of ours — must be empty after a landing. */
+  const scratchWorktrees = async (): Promise<string[]> => {
+    const listed = await git(['worktree', 'list', '--porcelain'], clone);
+    return listed.stdout
+      .split('\n')
+      .filter((l) => l.startsWith('worktree '))
+      .map((l) => l.slice('worktree '.length).trim())
+      .filter((p) => p.startsWith(scratchRoot(scratchTarget.stateDir)) || /[\\/]ac-land-/.test(p));
+  };
+
+  /** A finished landing — any outcome — leaves no scratch worktree registered and no directory holding one. */
+  const expectNoScratch = async (): Promise<void> => {
+    expect(await scratchWorktrees()).toEqual([]);
+    const parent = join(scratchRoot(scratchTarget.stateDir), 'tst');
+    expect(existsSync(parent) ? readdirSync(parent) : []).toEqual([]);
+  };
+
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'ac-abm-'));
     origin = join(dir, 'origin');
     clone = join(dir, 'clone');
+    scratchTarget = { stateDir: join(dir, 'state'), projectSlug: 'tst', label: 'T-1' };
+    planted = [];
 
     await git(['init', '-b', 'main', origin], dir);
     await git(['config', 'user.email', 'test@example.com'], origin);
@@ -35,7 +57,13 @@ describe('archive-before-merge mechanics', () => {
     await git(['config', 'user.email', 'test@example.com'], clone);
     await git(['config', 'user.name', 'Test'], clone);
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(async () => {
+    // Never leave a worktree registered or an active entry behind for the next test.
+    for (const path of await scratchWorktrees()) await git(['worktree', 'remove', '--force', path], clone).catch(() => {});
+    await git(['worktree', 'prune'], clone).catch(() => {});
+    for (const path of planted) rmSync(path, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  });
 
   async function pushBranchFromClone(name: string): Promise<void> {
     await git(['checkout', '-b', name], clone);
@@ -50,7 +78,7 @@ describe('archive-before-merge mechanics', () => {
       const cloneHeadBefore = await head(clone, 'main');
       const remoteHead = (await git(['rev-parse', `refs/remotes/origin/${BRANCH}`], clone)).stdout.trim();
 
-      const scratch = await scratchLandWorktree(clone, BRANCH);
+      const scratch = await scratchLandWorktree(clone, BRANCH, scratchTarget);
       try {
         expect(existsSync(scratch.path)).toBe(true);
         expect(scratch.path).not.toBe(clone);
@@ -70,7 +98,7 @@ describe('archive-before-merge mechanics', () => {
 
     it('dispose is idempotent', async () => {
       await pushBranchFromClone(BRANCH);
-      const scratch = await scratchLandWorktree(clone, BRANCH);
+      const scratch = await scratchLandWorktree(clone, BRANCH, scratchTarget);
       await scratch.dispose();
       await expect(scratch.dispose()).resolves.toBeUndefined();
     });
@@ -99,7 +127,7 @@ describe('archive-before-merge mechanics', () => {
       await commit(origin, 'other.ts', 'export const other = 1;\n', 'feat: other landed first');
       await git(['fetch', 'origin'], clone);
 
-      const scratch = await scratchLandWorktree(clone, BRANCH);
+      const scratch = await scratchLandWorktree(clone, BRANCH, scratchTarget);
       try {
         const outcome = await rebaseOntoLanding(scratch.path, 'origin/main');
         expect(outcome.ok).toBe(true);
@@ -122,7 +150,7 @@ describe('archive-before-merge mechanics', () => {
       await git(['commit', '-m', 'feat: conflicting change'], origin);
       await git(['fetch', 'origin'], clone);
 
-      const scratch = await scratchLandWorktree(clone, BRANCH);
+      const scratch = await scratchLandWorktree(clone, BRANCH, scratchTarget);
       try {
         const before = await head(scratch.path);
         const outcome = await rebaseOntoLanding(scratch.path, 'origin/main');
@@ -165,7 +193,7 @@ describe('archive-before-merge mechanics', () => {
       await pushBranchFromClone(BRANCH);
       await git(['fetch', 'origin'], clone);
 
-      const scratch = await scratchLandWorktree(clone, BRANCH);
+      const scratch = await scratchLandWorktree(clone, BRANCH, scratchTarget);
       try {
         const beforeLog = await git(['log', '--oneline', '-1'], clone);
         const result = await archiveOnBranch(scratch.path, 'add-blue-widget');
@@ -205,7 +233,7 @@ describe('archive-before-merge mechanics', () => {
       await pushBranchFromClone(BRANCH);
       await git(['fetch', 'origin'], clone);
 
-      const scratch = await scratchLandWorktree(clone, BRANCH);
+      const scratch = await scratchLandWorktree(clone, BRANCH, scratchTarget);
       try {
         await archiveOnBranch(scratch.path, 'add-gadget');
         const spec = (await git(['show', 'HEAD:openspec/specs/gadgets/spec.md'], scratch.path)).stdout;
@@ -222,7 +250,7 @@ describe('archive-before-merge mechanics', () => {
       await pushBranchFromClone(BRANCH);
       await git(['fetch', 'origin'], clone);
 
-      const scratch = await scratchLandWorktree(clone, BRANCH);
+      const scratch = await scratchLandWorktree(clone, BRANCH, scratchTarget);
       try {
         const before = await head(scratch.path);
         await expect(archiveOnBranch(scratch.path, 'add-gadget-no-why'))
@@ -251,13 +279,14 @@ describe('archive-before-merge mechanics', () => {
       const forge = fakeForge();
 
       const outcome = await attemptArchiveThenMerge({
-        clonePath: clone, branch: BRANCH, landingBranch: 'main', changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
       });
       expect(outcome).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
       expect(forge.mergePr).toHaveBeenCalledWith(clone, 'https://example.com/pr/1', 'squash');
       // Nothing needed pushing, so the branch on origin is unchanged.
       expect((await git(['rev-parse', `refs/remotes/origin/${BRANCH}`], clone)).stdout.trim())
         .toBe((await git(['rev-parse', BRANCH], clone)).stdout.trim());
+      await expectNoScratch();
     });
 
     it('archives onto the branch and pushes the archive before merging', async () => {
@@ -277,7 +306,7 @@ describe('archive-before-merge mechanics', () => {
       const forge = fakeForge();
 
       const outcome = await attemptArchiveThenMerge({
-        clonePath: clone, branch: BRANCH, landingBranch: 'main', changeName: 'add-thing', forge, prUrl: 'https://example.com/pr/1', method: 'squash',
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: 'add-thing', forge, prUrl: 'https://example.com/pr/1', method: 'squash',
       });
       expect(outcome).toMatchObject({ kind: 'merged', mergeCommit: 'deadbeef' });
       expect((outcome as { archivedAs: string | null }).archivedAs).toBeTruthy();
@@ -292,7 +321,7 @@ describe('archive-before-merge mechanics', () => {
       const forge = fakeForge();
 
       const outcome = await attemptArchiveThenMerge({
-        clonePath: clone, branch: BRANCH, landingBranch: 'main', changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
       });
       expect(outcome).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
       await git(['fetch', 'origin'], clone);
@@ -311,11 +340,12 @@ describe('archive-before-merge mechanics', () => {
       const remoteBefore = (await git(['ls-remote', origin, BRANCH], clone)).stdout;
 
       const outcome = await attemptArchiveThenMerge({
-        clonePath: clone, branch: BRANCH, landingBranch: 'main', changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
       });
       expect(outcome.kind).toBe('conflict');
       expect(forge.mergePr).not.toHaveBeenCalled();
       expect((await git(['ls-remote', origin, BRANCH], clone)).stdout).toBe(remoteBefore);
+      await expectNoScratch();
     });
 
     it('reports checks_pending without merging', async () => {
@@ -323,10 +353,11 @@ describe('archive-before-merge mechanics', () => {
       const forge = fakeForge({ prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'pending' as const })) });
 
       const outcome = await attemptArchiveThenMerge({
-        clonePath: clone, branch: BRANCH, landingBranch: 'main', changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
       });
       expect(outcome).toEqual({ kind: 'checks_pending' });
       expect(forge.mergePr).not.toHaveBeenCalled();
+      await expectNoScratch();
     });
 
     it('a retry after checks_pending does not re-archive, and merges once checks pass (VS-327 review, PR #272)', async () => {
@@ -346,7 +377,7 @@ describe('archive-before-merge mechanics', () => {
 
       const pending = fakeForge({ prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'pending' as const })) });
       const first = await attemptArchiveThenMerge({
-        clonePath: clone, branch: BRANCH, landingBranch: 'main', changeName: 'add-thing', forge: pending, prUrl: 'https://example.com/pr/1', method: 'squash',
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: 'add-thing', forge: pending, prUrl: 'https://example.com/pr/1', method: 'squash',
       });
       expect(first).toEqual({ kind: 'checks_pending' });
 
@@ -354,7 +385,7 @@ describe('archive-before-merge mechanics', () => {
       // commit `attemptArchiveThenMerge` pushed above, then requests landing again.
       const passing = fakeForge();
       const second = await attemptArchiveThenMerge({
-        clonePath: clone, branch: BRANCH, landingBranch: 'main', changeName: 'add-thing', forge: passing, prUrl: 'https://example.com/pr/1', method: 'squash',
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: 'add-thing', forge: passing, prUrl: 'https://example.com/pr/1', method: 'squash',
       });
       expect(second).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: expect.stringContaining('add-thing') });
       expect(passing.mergePr).toHaveBeenCalledTimes(1);
@@ -365,7 +396,7 @@ describe('archive-before-merge mechanics', () => {
       const forge = fakeForge({ prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'failure' as const })) });
 
       const outcome = await attemptArchiveThenMerge({
-        clonePath: clone, branch: BRANCH, landingBranch: 'main', changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
       });
       expect(outcome).toEqual({ kind: 'checks_failed' });
       expect(forge.mergePr).not.toHaveBeenCalled();
@@ -397,7 +428,7 @@ describe('archive-before-merge mechanics', () => {
       const workerHeadBefore = await head(workerDir);
       const branchesBefore = (await git(['branch', '--format=%(refname:short)'], clone)).stdout.trim().split('\n').sort();
 
-      const scratch = await scratchLandWorktree(clone, BRANCH);
+      const scratch = await scratchLandWorktree(clone, BRANCH, scratchTarget);
       try {
         // Detached at origin/<branch> — no local branch is created or checked out.
         expect((await git(['rev-parse', '--abbrev-ref', 'HEAD'], scratch.path)).stdout.trim()).toBe('HEAD');
@@ -409,7 +440,7 @@ describe('archive-before-merge mechanics', () => {
 
       const forge = fakeForge();
       const outcome = await attemptArchiveThenMerge({
-        clonePath: clone, branch: BRANCH, landingBranch: 'main', changeName, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
       });
       expect(outcome).toMatchObject({ kind: 'merged', mergeCommit: 'deadbeef' });
 
@@ -426,6 +457,115 @@ describe('archive-before-merge mechanics', () => {
       // No local branch was created or reset, and dispose left no stray scratch branch.
       const branchesAfter = (await git(['branch', '--format=%(refname:short)'], clone)).stdout.trim().split('\n').sort();
       expect(branchesAfter).toEqual(branchesBefore);
+    });
+  });
+
+  // VS-383: the scratch worktree lives under the workspace state dir, creation is leak-proof, and a
+  // push failure (like every other landing outcome) leaves nothing behind.
+  describe('scratch placement and cleanup (VS-383)', () => {
+    it('creates the scratch worktree under the state dir, never /tmp', async () => {
+      await pushBranchFromClone(BRANCH);
+      const scratch = await scratchLandWorktree(clone, BRANCH, scratchTarget);
+      try {
+        expect(scratch.path.startsWith(join(scratchRoot(scratchTarget.stateDir), 'tst'))).toBe(true);
+        expect(scratch.path.startsWith(join(tmpdir(), 'ac-land-'))).toBe(false);
+      } finally {
+        await scratch.dispose();
+      }
+      expect(existsSync(scratch.path)).toBe(false);
+    });
+
+    it('a failed creation leaves no directory and no registered worktree', async () => {
+      await pushBranchFromClone(BRANCH);
+      const before = await scratchWorktrees();
+      // `-b` on a branch that already exists makes `git worktree add` fail after the directory was made.
+      await expect(scratchBranchFrom(clone, 'HEAD', BRANCH, scratchTarget)).rejects.toMatchObject({ code: 'internal' });
+      expect(await scratchWorktrees()).toEqual(before);
+      await expectNoScratch();
+    });
+
+    it('a push failure leaves no scratch directory or registered worktree', async () => {
+      await pushBranchFromClone(BRANCH);
+      // Move the landing branch after the ticket branch was cut, so the rebase rewrites the branch and
+      // the push is non-fast-forward; denyNonFastForwards then rejects it.
+      await commit(origin, 'later.ts', 'export const later = 1;\n', 'chore: landed first');
+      await git(['config', 'receive.denyNonFastForwards', 'true'], origin);
+      const forge: ForgeAdapter = {
+        id: 'github',
+        detect: async () => true,
+        prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const })),
+        mergePr: vi.fn(async () => ({ mergeCommit: 'deadbeef' })),
+      };
+
+      await expect(attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge, prUrl: 'https://example.com/pr/1', method: 'squash',
+      })).rejects.toMatchObject({ code: 'internal' });
+      expect(forge.mergePr).not.toHaveBeenCalled();
+      await expectNoScratch();
+    });
+  });
+
+  describe('sweepScratchWorktrees (VS-383)', () => {
+    const sweep = (opts: { minAgeMs?: number; active?: ReadonlySet<string> } = {}) =>
+      sweepScratchWorktrees({ clones: [{ clonePath: clone, slug: 'tst' }], stateDir: scratchTarget.stateDir, ...opts });
+
+    it('removes a planted stale scratch worktree and leaves a worker worktree and a fresh in-flight one alone', async () => {
+      await pushBranchFromClone(BRANCH);
+      // A worker worktree is never a candidate, however old.
+      const worker = join(dir, 'worker-worktree');
+      expect((await git(['worktree', 'add', worker, BRANCH], clone)).ok).toBe(true);
+
+      // A planted scratch tree (raw git, so it is not in the in-flight set) with an old mtime.
+      const stale = join(scratchRoot(scratchTarget.stateDir), 'tst', 'T-1-stale');
+      mkdirSync(join(scratchRoot(scratchTarget.stateDir), 'tst'), { recursive: true });
+      expect((await git(['worktree', 'add', '--detach', stale, `origin/${BRANCH}`], clone)).ok).toBe(true);
+      const old = new Date(Date.now() - SCRATCH_STALE_MS * 2);
+      utimesSync(stale, old, old);
+
+      // A fresh scratch tree created through the API is in flight and must be left alone.
+      const fresh = await scratchLandWorktree(clone, BRANCH, scratchTarget);
+      expect(activeScratchWorktrees().has(fresh.path)).toBe(true);
+      try {
+        const result = await sweep({ minAgeMs: 0 });
+        expect(result.removed.map((r) => r.path)).toEqual([stale]);
+        expect(result.bytes).toBeGreaterThan(0);
+        expect(existsSync(stale)).toBe(false);
+        expect(existsSync(fresh.path)).toBe(true);
+        expect(existsSync(worker)).toBe(true);
+        expect((await git(['rev-parse', '--abbrev-ref', 'HEAD'], worker)).stdout.trim()).toBe(BRANCH);
+      } finally {
+        await fresh.dispose();
+        await git(['worktree', 'remove', '--force', worker], clone).catch(() => {});
+      }
+    });
+
+    it('removes a legacy /tmp/ac-land-* directory that belongs to a known clone', async () => {
+      await pushBranchFromClone(BRANCH);
+      const legacy = mkdtempSync(join(tmpdir(), 'ac-land-'));
+      planted.push(legacy);
+      expect((await git(['worktree', 'add', '--detach', legacy, `origin/${BRANCH}`], clone)).ok).toBe(true);
+      const old = new Date(Date.now() - SCRATCH_STALE_MS * 2);
+      utimesSync(legacy, old, old);
+
+      const result = await sweep({ minAgeMs: SCRATCH_STALE_MS });
+      expect(result.removed.map((r) => r.path)).toContain(legacy);
+      expect(existsSync(legacy)).toBe(false);
+    });
+
+    it('leaves a legacy /tmp/ac-land-* directory of another clone alone', async () => {
+      await pushBranchFromClone(BRANCH);
+      const foreign = mkdtempSync(join(tmpdir(), 'ac-land-'));
+      planted.push(foreign);
+      // A plain directory with a `.git` file naming a clone that is not in the sweep's list.
+      const foreignClone = join(dir, 'foreign-clone');
+      mkdirSync(join(foreignClone, '.git', 'worktrees', 'ac-land-x'), { recursive: true });
+      writeFileSync(join(foreign, '.git'), `gitdir: ${join(foreignClone, '.git', 'worktrees', 'ac-land-x')}\n`);
+      const old = new Date(Date.now() - SCRATCH_STALE_MS * 2);
+      utimesSync(foreign, old, old);
+
+      const result = await sweep({ minAgeMs: 0 });
+      expect(result.removed.map((r) => r.path)).not.toContain(foreign);
+      expect(existsSync(foreign)).toBe(true);
     });
   });
 });

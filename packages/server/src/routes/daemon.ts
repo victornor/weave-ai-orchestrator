@@ -4,7 +4,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@weave-ai/shared';
-import { detectHostToolsCached, clearHostToolCache, ensureHostToolPath, getLogger, workspaceLoader, type HostTool } from '@weave-ai/core';
+import { detectHostToolsCached, clearHostToolCache, ensureHostToolPath, getLogger, listScratchTrees, workspaceLoader, type HostTool } from '@weave-ai/core';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { cancelRunningRuns } from '../daemon.js';
 import { body } from '../http.js';
@@ -119,6 +119,7 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   app.get('/daemon/models', (c) => modelsGet(c, deps));
   app.put('/daemon/models', (c) => modelsPut(c, deps));
   app.get('/daemon/host-tools', async (c) => c.json(await hostToolsView(deps)));
+  app.get('/daemon/scratch', async (c) => c.json(await scratchView(deps)));
   app.put('/daemon/host-tools', async (c) => {
     const input = await body(c, z.object({
       // Only absolute directories: a relative entry would let a repository's own `node_modules/.bin`
@@ -271,6 +272,31 @@ function modelsGet(
 async function hostToolsView(deps: AppDeps): Promise<{ paths: string[]; tools: HostTool[] }> {
   const tools = await detectHostToolsCached();
   return { paths: deps.daemon.hostToolPaths ?? [], tools: Object.values(tools) };
+}
+
+/**
+ * VS-383: every workspace's scratch landing worktrees — how many, how large, and where. The
+ * supervisor sweeps stale ones; this is what makes a leak visible in `weave doctor` instead of
+ * silent. Read-only.
+ */
+async function scratchView(deps: AppDeps): Promise<{
+  count: number; bytes: number;
+  workspaces: Array<{ id: string; name: string; count: number; bytes: number; trees: Array<{ path: string; bytes: number; legacy: boolean }> }>;
+}> {
+  let count = 0;
+  let bytes = 0;
+  const workspaces: Array<{ id: string; name: string; count: number; bytes: number; trees: Array<{ path: string; bytes: number; legacy: boolean }> }> = [];
+  for (const w of uniqueWorkspaces(deps)) {
+    const clones = w.ctx.db
+      .all<{ clonePath: string; slug: string }>('SELECT clone_path, slug FROM projects WHERE workspace_id = ?', [w.ctx.workspaceId])
+      .map((p) => ({ clonePath: p.clonePath, slug: p.slug }));
+    const trees = clones.length > 0 ? await listScratchTrees(clones, w.ctx.paths.state) : [];
+    const wsBytes = trees.reduce((n, t) => n + t.bytes, 0);
+    count += trees.length;
+    bytes += wsBytes;
+    workspaces.push({ id: w.id, name: w.ctx.config.name, count: trees.length, bytes: wsBytes, trees: trees.map((t) => ({ path: t.path, bytes: t.bytes, legacy: t.legacy })) });
+  }
+  return { count, bytes, workspaces };
 }
 
 /** Persist `hostToolPaths` to daemon.yaml and swap it into the live config, like the model overlays. */

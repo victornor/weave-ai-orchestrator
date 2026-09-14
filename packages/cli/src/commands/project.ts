@@ -85,6 +85,7 @@ export function register(program: Command): void {
           ['setup', String(p['setupCommand'] ?? '')],
           ['worktrees', String(p['worktreeProvider'] ?? '')],
           ['openspec', p['openspecEnabled'] === true ? `enabled${p['openspecVersion'] ? ` (${String(p['openspecVersion'])})` : ''}` : 'disabled'],
+          ['yolo', (p['policies'] as Record<string, unknown> | undefined)?.['yolo'] === true ? 'on' : 'off'],
           ['status', String(p['status'] ?? '')],
           ['error', p['errorText'] ? style.bad(String(p['errorText'])) : undefined],
         ]);
@@ -151,7 +152,7 @@ Keys:   proposalApproval=human|conductor|none   mergeMethod=squash|merge|rebase
         deliveryMode=pr|local-branch            autoMergeDefault=true|false
         taskApproval=human|conductor|none       archiveCommit=push|pr|local
         requireCi=true|false                    mergeConcurrency=<1-8>
-        yolo=true|false                         (YOLO mode for this project; unset inherits the workspace)
+        yolo=true|false                         (YOLO mode for this project; off unless set)
 Example: weave project set-policy api deliveryMode=pr requireCi=false`)
     .action(async (id: string, assignments: string[], _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);

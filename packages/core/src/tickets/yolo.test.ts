@@ -22,7 +22,6 @@ describe('YOLO mode', () => {
 
   beforeEach(() => {
     h = makeHarness();
-    h.ctx.config.defaults.yolo = true;
     wake = fakeWake();
     ciState = 'success';
     h.services.wake = wake as never;
@@ -40,14 +39,18 @@ describe('YOLO mode', () => {
     decisions = createDecisionsService(h.ctx, h.deps);
     h.services.tickets = tickets;
     h.services.decisions = decisions;
+    // VS-382: the mode is a per-project setting with no workspace default, so the harness turns it on
+    // for the ticket's own project rather than mutating config.
+    setPolicies({ yolo: true });
   });
   afterEach(() => h.cleanup());
 
   const policiesOf = (id: string): Record<string, unknown> =>
     (h.db.get<{ policies: Record<string, unknown> | null }>('SELECT policies_json FROM projects WHERE id = ?', [id])?.policies ?? {});
 
+  /** Merge `p` into a project's stored policies, so a test changes one key without dropping YOLO. */
   const setPolicies = (p: Record<string, unknown>, projectId = h.projectId): unknown =>
-    h.db.update('projects', projectId, { policiesJson: p });
+    h.db.update('projects', projectId, { policiesJson: { ...policiesOf(projectId), ...p } });
 
   /** A second project, so an override can be shown not to leak across projects. */
   function otherProject(): string {
@@ -97,7 +100,7 @@ describe('YOLO mode', () => {
     });
 
     it('leaves the approval to the human when the mode is off', async () => {
-      h.ctx.config.defaults.yolo = false;
+      setPolicies({ yolo: false });
       const t = change();
       const next = await propose(t);
 
@@ -194,7 +197,7 @@ describe('YOLO mode', () => {
       const t = change();
       h.addWorker(t.id);
       await deliver(t);
-      h.ctx.config.defaults.yolo = false;
+      setPolicies({ yolo: false });
 
       expect(await tickets.autoMergeSweep()).toBe(0);
       expect(only(t.id, 'merge_approval')?.status).toBe('open');
@@ -207,7 +210,7 @@ describe('YOLO mode', () => {
       await propose(t);
       expect(tickets.get(t.id).status).toBe('approved');
 
-      h.ctx.config.defaults.yolo = false;
+      setPolicies({ yolo: false });
       expect(only(t.id, 'plan_approval')?.status).toBe('answered');
       expect(tickets.get(t.id).status).toBe('approved');
     });
@@ -246,8 +249,8 @@ describe('YOLO mode', () => {
     });
   });
 
-  describe('the project override', () => {
-    it('lets a project opt out of a workspace that has the mode on', async () => {
+  describe('per project, with no workspace default (VS-382)', () => {
+    it('leaves the approval to the human for a project that has it off', async () => {
       setPolicies({ yolo: false });
       const t = change();
       const next = await propose(t);
@@ -256,19 +259,14 @@ describe('YOLO mode', () => {
       expect(only(t.id, 'plan_approval')?.status).toBe('open');
     });
 
-    it('lets a project opt in to a workspace that has the mode off', async () => {
-      h.ctx.config.defaults.yolo = false;
-      setPolicies({ yolo: true });
+    it('is off for a project that has no yolo key, whatever a sibling has', async () => {
+      setPolicies({ yolo: false });
       const t = change();
-      h.addWorker(t.id);
-      const next = await propose(t);
-
-      expect(next.status).toBe('approved');
-      expect(only(t.id, 'plan_approval')?.answeredByKind).toBe('system');
+      expect((await propose(t)).status).toBe('proposed');
     });
 
-    it('leaves a sibling project alone', async () => {
-      h.ctx.config.defaults.yolo = false;
+    it('resolves per project: the project that sets it auto-approves, its sibling does not', async () => {
+      setPolicies({ yolo: false });
       const web = otherProject();
       setPolicies({ yolo: true }, web);
 

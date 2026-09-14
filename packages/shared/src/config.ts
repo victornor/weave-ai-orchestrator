@@ -48,7 +48,7 @@ export const ProjectPoliciesSchema = z.object({
   requireCi: z.boolean().default(true),
   /** How many of this project's tickets may be in the active merge step at once (PLAN §11.4). */
   mergeConcurrency: z.number().int().min(1).max(8).default(1),
-  /** YOLO mode for this project, either way; unset inherits the workspace default (PLAN §15). */
+  /** YOLO mode for this project (PLAN §15, VS-382); off unless this project sets it true. */
   yolo: z.boolean(),
 }).partial();
 export type ProjectPolicies = z.infer<typeof ProjectPoliciesSchema>;
@@ -67,15 +67,16 @@ export function mergeConcurrencyOf(policies: Record<string, unknown> | null | un
 }
 
 /**
- * Whether YOLO mode — the daemon grants plan and merge approvals itself (PLAN §15) — is on here.
- * A project may override the workspace default in either direction; an absent or malformed project
- * value inherits, so a typo can never silently turn auto-approval on for a project that is off.
+ * Whether YOLO mode — the daemon grants plan and merge approvals itself (PLAN §15, VS-382) — is on
+ * for a project. It is a per-project setting with no workspace default: only an explicit project
+ * `yolo: true` turns it on, and an absent or malformed value is off, so a typo can never silently
+ * turn auto-approval on.
  */
-export function yoloEnabled(policies: Record<string, unknown> | null | undefined, workspaceDefault: boolean): boolean {
+export function yoloEnabled(policies: Record<string, unknown> | null | undefined): boolean {
   const raw = (policies as { yolo?: unknown } | null | undefined)?.yolo;
-  if (raw === undefined || raw === null) return workspaceDefault;
+  if (raw === undefined || raw === null) return false;
   const parsed = ProjectPoliciesSchema.shape.yolo.safeParse(raw);
-  return parsed.success && parsed.data !== undefined ? parsed.data : workspaceDefault;
+  return parsed.success && parsed.data === true;
 }
 
 export const ProjectConfigSchema = z.object({
@@ -281,8 +282,6 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
   hireApproval: legacyApprovalOwner.default('human'),
   deliveryMode: z.enum(DELIVERY_MODES).default('pr'),
   autoMerge: z.boolean().default(false),
-  /** YOLO mode: the daemon grants plan and merge approvals itself (PLAN §15). Off unless asked for. */
-  yolo: z.boolean().default(false),
   worktrees: z.enum(WORKTREE_PROVIDERS).default('worktrunk'),
   maxConcurrentRuns: z.number().int().min(1).default(6),
   turnTimeoutSec: z.number().int().min(60).default(2700),

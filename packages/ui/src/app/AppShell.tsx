@@ -21,7 +21,6 @@ import type { QueuedWrite } from '../lib/queue';
 import type { WorkspaceListItem } from '../api/types';
 import { api, ApiError, getWorkspaceId, NetworkError } from '../api/client';
 import { cx } from '../lib/cx';
-import { workspaceYolo } from '../lib/yolo';
 
 export function AppShell({ children }: { children?: ReactNode } = {}): React.ReactElement {
   const ctx = useOptionalWorkspace();
@@ -247,17 +246,6 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
         <ConnectionBanner state={conn.state} capturedAt={conn.capturedAt} queuedCount={queuedCount} />
         <ModelsUnconfiguredBanner />
         <HostToolsUnavailableBanner />
-        {!onGlobalPage && workspaceYolo(summary.data?.config) ? (
-          <div
-            role="status"
-            aria-label="YOLO mode is on"
-            className="flex items-center gap-2 border-b border-needs-you/30 bg-needs-you/10 px-3 py-1.5 md:px-4"
-          >
-            <span className="size-1.5 rounded-pill bg-needs-you" aria-hidden />
-            <span className="text-micro font-medium text-needs-you">YOLO mode</span>
-            <span className="text-micro text-text-3">plans and merges are approved for you</span>
-          </div>
-        ) : null}
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden ac-bar-pad md:pb-0">
           {children ?? <Outlet />}
         </main>

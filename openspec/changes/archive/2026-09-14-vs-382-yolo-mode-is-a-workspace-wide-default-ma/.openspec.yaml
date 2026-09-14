@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "YOLO mode is a workspace-wide default: make it a per-project setting
+  only, so granting automatic approvals is always a deliberate choice for one
+  project"

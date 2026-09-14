@@ -9,44 +9,6 @@ is on.
 
 ## Requirements
 
-### Requirement: YOLO mode is a workspace setting a project can override
-
-The workspace SHALL carry a setting, presented to the human as YOLO mode, that is either on or off
-and is off unless it has been turned on. A project SHALL be able to override it in either direction,
-and a project that has not set it SHALL follow the workspace.
-
-The setting SHALL be readable and writable from the web app and from the CLI, and the value the
-daemon acts on SHALL be the value those surfaces show.
-
-Whether the mode is on for a given ticket SHALL be determined by that ticket's project, falling back
-to the workspace when the project has not set it. A ticket with no project SHALL follow the
-workspace.
-
-#### Scenario: Off by default
-
-- **WHEN** neither the workspace nor a project has set the mode
-- **THEN** the mode is off, and every approval is put to the human exactly as it is without this feature
-
-#### Scenario: On for the workspace
-
-- **WHEN** the mode is turned on for the workspace and a project has not set it
-- **THEN** tickets in that project are treated as having the mode on
-
-#### Scenario: A project opts out
-
-- **WHEN** the mode is on for the workspace and a project has turned it off
-- **THEN** tickets in that project are treated as having the mode off, and tickets in every other project are unaffected
-
-#### Scenario: A project opts in
-
-- **WHEN** the mode is off for the workspace and a project has turned it on
-- **THEN** tickets in that project are treated as having the mode on, and tickets in every other project are unaffected
-
-#### Scenario: Changed from either surface
-
-- **WHEN** the human turns the mode on or off from the web app or from the CLI
-- **THEN** the setting is changed for the workspace or the project it was changed on, and both surfaces then report the new value
-
 ### Requirement: A plan approval is granted when the plan validates
 
 While the mode is on for a ticket, the plan approval that a `change` ticket raises when its plan is
@@ -117,7 +79,7 @@ mode SHALL NOT bypass either.
 
 An approval granted under this mode SHALL be recorded against the same decision the human would have
 answered, as answered by the system rather than by a human, and its recorded answer SHALL name YOLO
-mode as the reason it was granted.
+mode and the project whose setting granted it as the reason it was granted.
 
 Everything that follows an answer SHALL follow an auto-approval too: the decision is no longer open,
 the agent that asked is woken with the answer, and the history shows the decision and its answer
@@ -185,8 +147,9 @@ granted SHALL NOT be reversed, and a ticket already past that approval SHALL NOT
 
 ### Requirement: The mode is unmistakable wherever an approval would have been
 
-While the mode is on, the web app SHALL show a persistent indicator that it is on, in a place the
-human sees on every screen rather than only in settings.
+Because the mode is set per project, no workspace-wide indicator SHALL claim it is on for the whole
+workspace. Each project with the mode on SHALL show a visible marker where the project is shown:
+in its row in Settings → Projects and in the project's overview header.
 
 A decision that the daemon will grant SHALL NOT be presented to the human as something to approve:
 wherever an approve action would otherwise be offered for it, the surface SHALL instead say the
@@ -197,8 +160,8 @@ Decisions the mode does not cover SHALL be presented exactly as they are without
 
 #### Scenario: The indicator
 
-- **WHEN** the mode is on for the workspace
-- **THEN** the web app shows a persistent indicator saying so, on every screen
+- **WHEN** a project has the mode on
+- **THEN** its row in Settings → Projects and its overview header each show a marker saying so, and no workspace-wide indicator claims the mode is on for every project
 
 #### Scenario: A merge approval that will be granted
 
@@ -212,7 +175,7 @@ Decisions the mode does not cover SHALL be presented exactly as they are without
 
 #### Scenario: A decision the mode does not cover
 
-- **WHEN** a hire approval or a question is shown to the human while the mode is on
+- **WHEN** a hire approval or a question is shown to the human while the mode is on for the project
 - **THEN** it is presented with its usual actions, unchanged
 
 ### Requirement: Agents are told the policy in force
@@ -235,3 +198,73 @@ something that will be approved without them, and neither waits on a human who w
 
 - **WHEN** the instructions or a brief are built while the mode is off for the work in hand
 - **THEN** they state that those approvals wait for the human
+
+### Requirement: YOLO mode is a per-project setting
+
+YOLO mode SHALL be set on a project and SHALL be off for a project that has not set it. There SHALL
+be no workspace-wide YOLO setting, and no project SHALL inherit the mode from the workspace. A
+project added after this change SHALL start with the mode off.
+
+Whether the mode is on for a given ticket SHALL be determined solely by that ticket's project. A
+ticket with no project SHALL be treated as having the mode off.
+
+The setting SHALL be readable and writable from the web app and from the CLI, and the value the
+daemon acts on SHALL be the value those surfaces show.
+
+#### Scenario: Off for a project that has not set it
+
+- **WHEN** neither a project nor anything above it sets the mode
+- **THEN** the mode is off for that project and every approval is put to the human exactly as it is without this feature
+
+#### Scenario: A new project starts off
+
+- **WHEN** a project is added while other projects have the mode on
+- **THEN** the new project has the mode off
+
+#### Scenario: A ticket with no project
+
+- **WHEN** a ticket has no project
+- **THEN** the mode is off for it, whatever any project's setting is
+
+#### Scenario: Changed from either surface
+
+- **WHEN** the human turns the mode on or off for a project from the web app or from the CLI
+- **THEN** that project's setting changes and both surfaces then report the new value
+
+### Requirement: A workspace's former default is migrated to its projects once
+
+When a workspace is loaded and its stored config still carries `defaults.yolo: true`, the daemon
+SHALL copy that value onto every existing project that has not set `policies.yolo` itself, SHALL
+leave a project that explicitly set `policies.yolo: false` unchanged, and SHALL record in the log
+how many projects it changed. The migration SHALL run once per workspace; on the next load it SHALL
+do nothing. After it has run, `defaults.yolo` SHALL grant nothing, and a project added later SHALL
+not receive it.
+
+The workspace's stored `defaults.yolo` SHALL be dropped when the migration writes the config back.
+Writing the key again SHALL be refused with an error naming the per-project setting as its
+replacement. Reading a workspace that still carries the key SHALL never fail.
+
+#### Scenario: A workspace with the old default on
+
+- **WHEN** a workspace whose config has `defaults.yolo: true` and two projects with no `policies.yolo` is loaded for the first time after this change
+- **THEN** both projects are stored with `policies.yolo: true`, the change is logged, and both remain in YOLO mode exactly as before
+
+#### Scenario: An explicit project opt-out is preserved
+
+- **WHEN** that workspace also has a project whose `policies.yolo` is explicitly `false`
+- **THEN** the migration leaves that project off
+
+#### Scenario: The migration runs once
+
+- **WHEN** the same workspace is loaded again
+- **THEN** the migration does nothing and the projects keep the values it wrote
+
+#### Scenario: A newly added project is not affected
+
+- **WHEN** a project is added after the migration has run
+- **THEN** it starts with the mode off even though the old workspace default was on
+
+#### Scenario: Writing the deprecated workspace key is refused
+
+- **WHEN** `defaults.yolo` is written through the CLI or the config API
+- **THEN** the write is refused with an error naming the per-project setting as its replacement, and no other workspace setting is changed

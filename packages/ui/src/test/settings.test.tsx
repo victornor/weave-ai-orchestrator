@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectConfigSchema, ProjectPoliciesSchema, APPROVAL_OWNERS, ARCHIVE_COMMITS, DELIVERY_MODES, MERGE_METHODS } from '@weave-ai/shared';
 import { ApiError } from '../api/client';
@@ -259,40 +259,60 @@ describe('Settings — knowledge budgets', () => {
   });
 });
 
-describe('Settings — YOLO mode', () => {
-  it('reads off by default and turns the mode on', () => {
-    render(<WorkspaceSettingsRoute />);
-    const toggle = screen.getByLabelText('YOLO mode');
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-
-    fireEvent.click(toggle);
-    expect(state.patches).toEqual([{ defaults: { yolo: true } }]);
+describe('Settings — YOLO mode (VS-382: per project only)', () => {
+  const project = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'p1', slug: 'api', status: 'ready', gitUrl: 'g', maxWorkers: 2, policies: {}, ...over,
   });
 
-  it('turns the mode off again when it is on', () => {
-    state.config = { defaults: { yolo: true } };
-    render(<WorkspaceSettingsRoute />);
-    expect(screen.getByLabelText('YOLO mode')).toHaveAttribute('aria-checked', 'true');
-
-    fireEvent.click(screen.getByLabelText('YOLO mode'));
-    expect(state.patches).toEqual([{ defaults: { yolo: false } }]);
-  });
-
-  it('overrides the mode per project and clears the override by dropping the key', () => {
-    state.config = { defaults: { yolo: true } };
-    state.projects = [{ id: 'p1', slug: 'api', status: 'ready', gitUrl: 'g', maxWorkers: 2, policies: { requireCi: true } }];
+  function openProjects(): void {
     render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+  }
 
-    const select = screen.getByLabelText('YOLO mode for api');
-    expect(select).toHaveValue('inherit');
+  it('offers no workspace-wide YOLO switch, only a note pointing at Projects', () => {
+    render(<WorkspaceSettingsRoute />);
+    expect(screen.queryByLabelText('YOLO mode')).toBeNull();
+    expect(screen.getByText(/YOLO mode is set per project/, { selector: 'p' })).toBeInTheDocument();
+  });
 
-    fireEvent.change(select, { target: { value: 'off' } });
-    expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { policies: { requireCi: true, yolo: false } } });
+  it('requires confirmation before turning YOLO on for a project, and writes nothing before it', () => {
+    state.projects = [project()];
+    openProjects();
+    fireEvent.click(screen.getByLabelText('YOLO mode for api'));
+    expect(state.projectPatches).toHaveLength(0);
 
-    state.projects = [{ ...state.projects[0]!, policies: { requireCi: true, yolo: false } }];
-    fireEvent.change(screen.getByLabelText('YOLO mode for api'), { target: { value: 'inherit' } });
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/plan and merge approvals itself/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Action approvals always stay with you/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Turn on YOLO' }));
+    expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { policies: { yolo: true } } });
+  });
+
+  it('dismissing the confirmation writes nothing', () => {
+    state.projects = [project()];
+    openProjects();
+    fireEvent.click(screen.getByLabelText('YOLO mode for api'));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+
+    expect(state.projectPatches).toHaveLength(0);
+    expect(screen.getByLabelText('YOLO mode for api')).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('shows a marker when a project has the mode on', () => {
+    state.projects = [project({ policies: { yolo: true } })];
+    openProjects();
+    expect(screen.getByText('YOLO on')).toBeInTheDocument();
+    expect(screen.getByLabelText('YOLO mode for api')).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('turns the mode off without confirmation, dropping the key', () => {
+    state.projects = [project({ policies: { requireCi: true, yolo: true } })];
+    openProjects();
+    fireEvent.click(screen.getByLabelText('YOLO mode for api'));
+
     expect(state.projectPatches.at(-1)).toEqual({ id: 'p1', patch: { policies: { requireCi: true } } });
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
 

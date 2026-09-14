@@ -117,7 +117,7 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
     project: {
       id: p?.slug ?? '', name: p ? projectLabel(p) : '', ...projectHeaders(ctx, p), landingBranch: p ? landingBranchOf(p, t) : 'main',
       rules: r?.rules ?? [], openspec: p?.openspecEnabled ?? false,
-      yolo: yoloEnabled(policies, ctx.config.defaults.yolo),
+      yolo: yoloEnabled(policies),
     },
     ticket: {
       identifier: t?.identifier ?? '', title: t?.title ?? '', description: t?.description ?? '', kind: t?.kind ?? 'task',
@@ -192,12 +192,16 @@ export function renderConductorInstructions(ctx: WorkspaceContext, deps: () => C
         return `- **${r.name}** [${r.status}] in ${proj ? projectLabel(proj) : '?'} — ${r.charterSummary} (${live}/${r.maxWorkers} workers live)`;
       }).join('\n')
     : '- (none hired yet)';
+  // VS-382: YOLO is per project, so the conductor is told which projects grant it, never a
+  // workspace-wide value that does not exist.
+  const yoloProjects = projects.filter((p) => yoloEnabled(p.policies)).map((p) => `\`${p.slug}\``).join(', ');
   return renderTemplate(tmpl, {
     workspace: { name: ctx.config.name, id: ctx.config.id, ticketPrefix: ctx.config.ticketPrefix },
     human: { name: humanName(ctx) },
     projects: projectLines,
     roles: roleLines,
     agents: roleLines,
+    yoloProjects,
     policies: ctx.config.defaults,
     deps: undefined,
   });

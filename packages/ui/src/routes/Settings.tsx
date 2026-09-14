@@ -67,7 +67,6 @@ import { useDictationDiagnosticsEnabled, writeDictationDiagnosticsEnabled } from
 import { isRuntimeAvailable, modelOptionLabel, runtimeStatusLabel } from '../lib/runtime';
 import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, runningVersionLabel, shortSha, updateEntry, updateEntryLabel } from '../lib/upgrade';
 import { cx } from '../lib/cx';
-import { workspaceYolo } from '../lib/yolo';
 import { isWorkerConflict, liveWorkerCount, liveWorkersReason, MoveProjectError } from '../lib/moveProject';
 import { SETTINGS_AREAS, sectionForRoute, sectionsOfArea } from '../lib/settings';
 import type { SettingsAreaKey } from '../lib/settings';
@@ -384,7 +383,7 @@ function WorkspaceSection(): React.ReactElement {
         </Field>
       </section>
 
-      <YoloSection config={summary.data?.config ?? {}} />
+      <YoloNote />
 
       <KnowledgeBudgetsSection config={summary.data?.config ?? {}} />
 
@@ -393,47 +392,16 @@ function WorkspaceSection(): React.ReactElement {
 }
 
 /**
- * YOLO mode: the daemon grants plan and merge approvals itself (PLAN §15). Off by default, and
- * deliberate to turn on, so the copy says plainly what stops happening and what does not.
+ * YOLO mode is a per-project setting (VS-382), so Settings only says where it is set: the control
+ * lives in each project's row in Projects. There is deliberately no workspace-wide switch.
  */
-export function YoloSection({ config }: { config: Record<string, unknown> }): React.ReactElement {
-  const patch = usePatchConfig();
-  const toast = useToast();
-  const on = workspaceYolo(config);
-
+export function YoloNote(): React.ReactElement {
   return (
     <section>
       <div className="ac-label mb-2">YOLO mode</div>
-      <div className={cx('ac-card flex items-start gap-3 p-3.5', on && 'border-needs-you/40')}>
-        <div className="flex-1">
-          <p className="text-meta text-text-1">
-            Plan approvals and merge approvals are granted by the daemon instead of by you: the plan as soon as it validates,
-            the merge as soon as the PR&apos;s checks are green. Each is recorded as answered by the system.
-          </p>
-          <p className="mt-1.5 text-micro text-text-3">
-            Hires, discards, retries and questions still come to you. Nothing skips CI, the merge queue or the landing check.
-            A project can override this either way in Projects.
-          </p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={on}
-          aria-label="YOLO mode"
-          onClick={() =>
-            patch.mutate(
-              { defaults: { yolo: !on } },
-              { onError: (e) => toast.push({ title: 'Could not change YOLO mode', detail: e.message, status: 'failed' }) },
-            )
-          }
-          className={cx(
-            'mt-0.5 h-7 shrink-0 rounded-r6 border px-3 text-meta font-medium',
-            on ? 'border-needs-you/50 bg-needs-you/15 text-needs-you' : 'border-line-2 text-text-3',
-          )}
-        >
-          {on ? 'On' : 'Off'}
-        </button>
-      </div>
+      <p className="ac-card p-3.5 text-meta text-text-3">
+        YOLO mode is set per project. Open <span className="text-text-1">Projects</span> and turn it on for one project; the daemon then grants that project&apos;s plan and merge approvals itself.
+      </p>
     </section>
   );
 }
@@ -679,13 +647,11 @@ function workspacePolicyDefaults(config: Record<string, unknown>): WorkspacePoli
 /** One project's row: its own `maxWorkers`/`landingBranch`/policy commit state, independent of every other row. */
 function ActiveProjectRow({
   p,
-  workspaceOn,
   workspaceDefaults,
   liveCount,
   destinations,
 }: {
   p: Project;
-  workspaceOn: boolean;
   workspaceDefaults: WorkspacePolicyDefaults;
   liveCount: number;
   destinations: T.WorkspaceListItem[];
@@ -693,9 +659,11 @@ function ActiveProjectRow({
   const patch = usePatchProject();
   const repoInfo = useRepoInfo();
   const [sheet, setSheet] = useState<null | 'remove' | 'move'>(null);
+  const [confirmYolo, setConfirmYolo] = useState(false);
   const [open, setOpen] = useState(false);
   const [publicWarning, setPublicWarning] = useState(false);
   const blocked = liveCount > 0;
+  const yoloOn = booleanPolicyValue(p.policies, 'yolo') === 'on';
   const blockReason = blocked ? liveWorkersReason(p.slug, liveCount) : null;
 
   const maxWorkers = useCommittableField({
@@ -819,19 +787,20 @@ function ActiveProjectRow({
           />
           <CommitStatus status={landingBranch.status} error={landingBranch.error} onSave={landingBranch.commitNow} />
         </label>
-        <label className="flex items-center gap-1.5">
-          <span className="ac-label">yolo</span>
-          <select
-            aria-label={`YOLO mode for ${p.slug}`}
-            className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
-            value={booleanPolicyValue(p.policies, 'yolo')}
-            onChange={(e) => setPolicy('yolo', e.target.value === 'inherit' ? undefined : e.target.value === 'on')}
-          >
-            <option value="inherit">{inheritLabel(workspaceOn ? 'on' : 'off')}</option>
-            <option value="on">on</option>
-            <option value="off">off</option>
-          </select>
-        </label>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={yoloOn}
+          aria-label={`YOLO mode for ${p.slug}`}
+          title={yoloOn ? 'The daemon grants this project’s plan and merge approvals itself.' : 'Off: approvals for this project come to you.'}
+          onClick={() => (yoloOn ? setPolicy('yolo', undefined) : setConfirmYolo(true))}
+          className={cx(
+            'ac-mono rounded-r4 border px-2 text-micro',
+            yoloOn ? 'border-needs-you/50 bg-needs-you/15 text-needs-you' : 'border-line-2 text-text-3',
+          )}
+        >
+          {yoloOn ? 'YOLO on' : 'YOLO off'}
+        </button>
         <div className="flex flex-wrap items-center gap-2">
           {blockReason ? <span className="text-micro text-text-3">{blockReason}</span> : null}
           <Button
@@ -986,25 +955,50 @@ function ActiveProjectRow({
       {sheet === 'move' ? (
         <MoveProjectSheet project={p} destinations={destinations} liveCount={liveCount} onClose={() => setSheet(null)} />
       ) : null}
+      <Sheet
+        open={confirmYolo}
+        onClose={() => setConfirmYolo(false)}
+        title={`Turn on YOLO mode for ${projectLabel(p)}?`}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmYolo(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setPolicy('yolo', true);
+                setConfirmYolo(false);
+              }}
+            >
+              Turn on YOLO
+            </Button>
+          </>
+        }
+      >
+        <p className="text-body text-text-2">
+          The daemon will grant <span className="text-text-1">{projectLabel(p)}</span>&apos;s plan and merge approvals itself: the plan as soon as it validates,
+          the merge as soon as its checks are green. Each is recorded as answered by the system.
+        </p>
+        <p className="mt-2 text-meta text-text-3">
+          Action approvals always stay with you, as do hires, discards, retries and questions. Nothing skips CI, the merge queue or the landing check.
+        </p>
+      </Sheet>
     </div>
   );
 }
 
 function ProjectRow({
   p,
-  workspaceOn,
   workspaceDefaults,
   liveCount,
   destinations,
 }: {
   p: Project;
-  workspaceOn: boolean;
   workspaceDefaults: WorkspacePolicyDefaults;
   liveCount: number;
   destinations: T.WorkspaceListItem[];
 }): React.ReactElement {
   if (p.status === 'archived') return <ArchivedProjectRow p={p} />;
-  return <ActiveProjectRow p={p} workspaceOn={workspaceOn} workspaceDefaults={workspaceDefaults} liveCount={liveCount} destinations={destinations} />;
+  return <ActiveProjectRow p={p} workspaceDefaults={workspaceDefaults} liveCount={liveCount} destinations={destinations} />;
 }
 
 export function ProjectsSection(): React.ReactElement {
@@ -1022,7 +1016,6 @@ export function ProjectsSection(): React.ReactElement {
   const [createPublicWarning, setCreatePublicWarning] = useState(false);
   const repoInfo = useRepoInfo();
   const config = useWorkspaceSummary().data?.config ?? {};
-  const workspaceOn = workspaceYolo(config);
   const workspaceDefaults = workspacePolicyDefaults(config);
   const destinations = (workspaces.data ?? []).filter((w) => w.id !== currentWs);
 
@@ -1122,7 +1115,6 @@ export function ProjectsSection(): React.ReactElement {
             <ProjectRow
               key={p.id}
               p={p}
-              workspaceOn={workspaceOn}
               workspaceDefaults={workspaceDefaults}
               liveCount={liveWorkerCount(workers.data ?? [], p.id)}
               destinations={destinations}

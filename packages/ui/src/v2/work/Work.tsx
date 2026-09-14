@@ -26,7 +26,6 @@ import {
   useRuns,
   useTickets,
   useWorkers,
-  useWorkspaceSummary,
   type WorkerListItem,
 } from '../../api/hooks';
 import { useWorkerActivity } from '../../api/workerActivity';
@@ -92,7 +91,6 @@ export function V2WorkScreen(): React.ReactElement {
   const activity = useWorkerActivity();
   const runs = useRuns({ limit: 100 });
   const decisions = useDecisions({ status: 'open', owner: 'human' });
-  const summary = useWorkspaceSummary();
   const models = useModels();
   const workerOptions = models.data?.workerOptions;
 
@@ -124,8 +122,8 @@ export function V2WorkScreen(): React.ReactElement {
 
   const needsYou = useMemo(() => {
     const byId = new Map(sourceTickets.map((t) => [t.id, t]));
-    return needsYouTicketIds(decisions.data ?? [], byId, projectList, summary.data?.config);
-  }, [decisions.data, sourceTickets, projectList, summary.data]);
+    return needsYouTicketIds(decisions.data ?? [], byId, projectList);
+  }, [decisions.data, sourceTickets, projectList]);
 
   const live = useMemo(() => liveWorkersByTicket(workers.data ?? []), [workers.data]);
   // `paused` is never in `live` (VS-137), so a paused ticket's reason needs this separate lookup.

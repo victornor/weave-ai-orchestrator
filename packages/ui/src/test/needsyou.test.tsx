@@ -243,8 +243,8 @@ describe('NeedsYou — YOLO mode', () => {
   };
 
   it('offers no approve action for a merge approval the daemon will grant', () => {
-    state.config = { defaults: { yolo: true } };
     state.decisions = [onTicket({ kind: 'merge_approval', title: 'Approve the merge for ACME-42' })];
+    state.projects = [{ id: 'p1', slug: 'api', policies: { yolo: true } }];
     render(<NeedsYouRoute />);
 
     expect(screen.getByLabelText('Auto-approved by YOLO mode')).toBeInTheDocument();
@@ -252,8 +252,8 @@ describe('NeedsYou — YOLO mode', () => {
   });
 
   it('offers no approve action for a plan approval either', () => {
-    state.config = { defaults: { yolo: true } };
     state.decisions = [onTicket({ kind: 'plan_approval', title: 'Approve the plan for ACME-42' })];
+    state.projects = [{ id: 'p1', slug: 'api', policies: { yolo: true } }];
     render(<NeedsYouRoute />);
 
     expect(screen.getByLabelText('Auto-approved by YOLO mode')).toBeInTheDocument();
@@ -261,8 +261,8 @@ describe('NeedsYou — YOLO mode', () => {
   });
 
   it('leaves a kind the mode does not cover exactly as it is', () => {
-    state.config = { defaults: { yolo: true } };
     state.decisions = [onTicket({ kind: 'hire_approval', title: 'Hire a Backend Engineer?' })];
+    state.projects = [{ id: 'p1', slug: 'api', policies: { yolo: true } }];
     render(<NeedsYouRoute />);
 
     expect(screen.queryByLabelText('Auto-approved by YOLO mode')).toBeNull();
@@ -270,18 +270,17 @@ describe('NeedsYou — YOLO mode', () => {
   });
 
   it('leaves an action_approval for the human even when YOLO is on', () => {
-    state.config = { defaults: { yolo: true } };
     state.decisions = [onTicket({ kind: 'action_approval', title: 'Approve the action for ACME-42' })];
+    state.projects = [{ id: 'p1', slug: 'api', policies: { yolo: true } }];
     render(<NeedsYouRoute />);
 
     expect(screen.queryByLabelText('Auto-approved by YOLO mode')).toBeNull();
     expect(screen.getByRole('button', { name: /^approve/i })).toBeInTheDocument();
   });
 
-  it('keeps the approve action when the ticket\'s project has opted out', () => {
-    state.config = { defaults: { yolo: true } };
+  it('resolves the mode per project: a ticket in a project without it keeps its approve action', () => {
     const d = onTicket({ kind: 'merge_approval', title: 'Approve the merge for ACME-42' });
-    state.projects = [{ id: 'p1', slug: 'api', policies: { yolo: false } }];
+    state.projects = [{ id: 'p1', slug: 'api', policies: {} }, { id: 'p2', slug: 'web', policies: { yolo: true } }];
     state.decisions = [d];
     render(<NeedsYouRoute />);
 

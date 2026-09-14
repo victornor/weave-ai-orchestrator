@@ -8,7 +8,7 @@ import { DecisionCard } from '../components/DecisionCard';
 import { PlanPreview } from '../components/PlanPreview';
 import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
-import { useAnswerDecision, useDecisionsMany, useProjects, useTickets, useWorkspaceSummary, useWorkspaces } from '../api/hooks';
+import { useAnswerDecision, useDecisionsMany, useProjects, useTickets, useWorkspaces } from '../api/hooks';
 import { ApiError, NetworkError } from '../api/client';
 import { enqueue, useQueue } from '../lib/queue';
 import { decisionCarriesSecret } from '../lib/decisionSecrets';
@@ -35,7 +35,6 @@ function WorkspaceNeeds({
   const toast = useToast();
   const tickets = useTickets({ limit: 200 }, { ws });
   const projects = useProjects(ws);
-  const summary = useWorkspaceSummary(ws);
   const answer = useAnswerDecision();
   const queue = useQueue();
   const { hidden, show } = useHiddenDecisions(ws);
@@ -137,7 +136,7 @@ function WorkspaceNeeds({
               busy={answer.isPending}
               queued={isQueued}
               plan={<PlanPreview decision={d} ws={ws} />}
-              autoApproving={isAutoApproving(d, summary.data?.config, projects.data?.find((p) => p.id === t?.projectId))}
+              autoApproving={isAutoApproving(d, projects.data?.find((p) => p.id === t?.projectId))}
               onAnswer={(a) => onAnswer(d.id, a)}
             />
           </div>

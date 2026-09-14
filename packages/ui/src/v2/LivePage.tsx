@@ -5,10 +5,12 @@
  * desktop, with a `−/+` control for one to four per row and a feed height that scales inversely; one
  * column on phone. Scope chips filter for real, and the header's roster/shown figures come from the
  * same worker array the grid renders (HANDOFF §8, §15). Each card's trace is VS-345's shared
- * `WorkerFeed`, so Live opens no private run stream. VS-372 adds a resize grip: one drag, keyboard
- * press or double-click reset sets one shared tile height, remembered beside the per-row count.
+ * `WorkerFeed`, so Live opens no private run stream. VS-372 gives the floor one shared tile height;
+ * VS-429 moves its control from an invisible bar above the grid onto a corner grip on every tile, so
+ * one drag, keyboard press or double-click reset on any tile resizes them all, remembered beside
+ * the per-row count.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { projectLabel, type Agent, type Ticket, type UiStatus } from '@weave-ai/shared';
 import { resolveModel } from '@weave-ai/render';
 import { useModelsMany, useRuntimeModels, useTicketsMany, useWorkersMany, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
@@ -23,7 +25,7 @@ import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { workerModelTagLabel } from '../components/WorkerModelTag';
 import { V2Page } from './V2Page';
-import { WorkerFeed, useWorkerRun } from './WorkerFeed';
+import { ResizeGrip, WorkerFeed, useWorkerRun } from './WorkerFeed';
 import { LIVE_COLUMNS_DEFAULT, LIVE_COLUMNS_MAX, LIVE_COLUMNS_MIN, LIVE_HEIGHT_MIN, LIVE_HEIGHT_STEP, clampLiveHeight, maxLiveHeight, readLiveColumns, readLiveHeight, writeLiveColumns, writeLiveHeight } from './prefs';
 
 /** The feed height for each cards-per-row choice (HANDOFF §8: the ladder scales inversely). */
@@ -82,6 +84,17 @@ interface LiveCellInput {
   ws: string;
 }
 
+/** The corner grip every desktop tile carries and the one shared height it drives (VS-429). */
+interface LiveResize {
+  height: number;
+  min: number;
+  max: number;
+  step: number;
+  onHeight: (px: number) => void;
+  onCommit: () => void;
+  onReset: () => void;
+}
+
 interface LiveCardProps {
   cell: LiveCellInput;
   /** The status the card shows: `working` while it holds the working group, else its own. */
@@ -91,10 +104,12 @@ interface LiveCardProps {
   projectColor: string | null;
   optionName: string | null;
   bodyHeight?: number;
+  /** Omitted on the phone, where tiles keep their natural height and show no grip. */
+  resize?: LiveResize;
   focused: boolean;
 }
 
-function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optionName, bodyHeight, focused }: LiveCardProps): React.ReactElement {
+function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optionName, bodyHeight, resize, focused }: LiveCardProps): React.ReactElement {
   const { run } = useWorkerRun(cell.id, cell.ws);
   const runtimeModels = useRuntimeModels(run?.runtimeId ?? null);
   const resolved = resolveModel(runtimeModels.data ?? null, run?.model ?? null);
@@ -107,7 +122,7 @@ function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optio
       data-v2-live-card={cell.id}
       data-v2-live-status={ui}
       data-focused={focused ? 'true' : undefined}
-      className={cx('flex flex-col overflow-hidden rounded-r4 border bg-bg-1', focused ? 'border-accent-edge' : 'border-line-1')}
+      className={cx('relative flex flex-col overflow-hidden rounded-r4 border bg-bg-1', focused ? 'border-accent-edge' : 'border-line-1')}
     >
       <div className="flex items-center gap-2 border-b border-line-1 px-2.5 py-2">
         <span className="min-w-0 flex-none truncate text-ui font-medium text-text-1">{cell.name}</span>
@@ -125,6 +140,18 @@ function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optio
         {optionName ? <span className="v2-tag flex-none text-text-3">{optionName}</span> : null}
       </div>
       <WorkerFeed agentId={cell.id} ws={cell.ws} bodyHeight={bodyHeight} showChrome={false} label={`${cell.name} live feed`} />
+      {resize ? (
+        <ResizeGrip
+          height={resize.height}
+          min={resize.min}
+          max={resize.max}
+          step={resize.step}
+          label="Resize all live tiles"
+          onHeight={resize.onHeight}
+          onCommit={resize.onCommit}
+          onReset={resize.onReset}
+        />
+      ) : null}
     </div>
   );
 }
@@ -153,36 +180,21 @@ export function LiveBody(): React.ReactElement {
   const viewportHeight = useViewportHeight();
   const [cols, setCols] = useState<number>(() => readLiveColumns());
   const [customHeight, setCustomHeight] = useState<number | null>(() => readLiveHeight());
-  const [resizing, setResizing] = useState(false);
   const [scope, setScope] = useState<string>('all');
 
-  // A drag is measured in pixels from the pressed height; the chosen value is a device preference,
-  // so it is written once when the pointer is released rather than on every move.
-  const dragStart = useRef<{ y: number; height: number } | null>(null);
-  useEffect(() => {
-    if (!resizing) return;
-    const move = (e: PointerEvent): void => {
-      const start = dragStart.current;
-      if (!start) return;
-      setCustomHeight(clampLiveHeight(start.height + (e.clientY - start.y), window.innerHeight));
-    };
-    const end = (): void => {
-      setResizing(false);
-      dragStart.current = null;
-      setCustomHeight((current) => {
-        writeLiveHeight(current);
-        return current;
-      });
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
-    window.addEventListener('pointercancel', end);
-    return () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
-      window.removeEventListener('pointercancel', end);
-    };
-  }, [resizing]);
+  // The chosen height is a device preference, so a drag is written once when its grip is released
+  // (see `commitHeight`) rather than on every move; an arrow step or reset writes immediately.
+  const onGripHeight = useCallback((px: number): void => setCustomHeight(px), []);
+  const commitHeight = useCallback((): void => {
+    setCustomHeight((current) => {
+      writeLiveHeight(current);
+      return current;
+    });
+  }, []);
+  const resetHeight = useCallback((): void => {
+    setCustomHeight(null);
+    writeLiveHeight(null);
+  }, []);
 
   const cells = useMemo<LiveCellInput[]>(() => {
     const out: LiveCellInput[] = [];
@@ -239,28 +251,12 @@ export function LiveBody(): React.ReactElement {
   const ladderHeight = LIVE_FEED_HEIGHT[effectiveCols] ?? LIVE_FEED_HEIGHT[LIVE_COLUMNS_DEFAULT]!;
   // Phone keeps the natural single-column height; desktop uses the dragged height, else the ladder.
   const bodyHeight = phone ? undefined : clampLiveHeight(customHeight ?? ladderHeight, viewportHeight);
-  const heightMax = phone ? undefined : maxLiveHeight(viewportHeight);
-
-  const startResize = (e: React.PointerEvent<HTMLDivElement>): void => {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-    dragStart.current = { y: e.clientY, height: bodyHeight ?? ladderHeight };
-    setResizing(true);
-  };
-
-  const resetHeight = (): void => {
-    setCustomHeight(null);
-    writeLiveHeight(null);
-  };
-
-  const onResizeKey = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    const by = e.key === 'ArrowDown' ? LIVE_HEIGHT_STEP : e.key === 'ArrowUp' ? -LIVE_HEIGHT_STEP : null;
-    if (by === null) return;
-    e.preventDefault();
-    const next = clampLiveHeight((bodyHeight ?? ladderHeight) + by, viewportHeight);
-    setCustomHeight(next);
-    writeLiveHeight(next);
-  };
+  // One grip object is shared by every desktop tile, so a drag on any of them resizes the whole
+  // floor together (VS-429); on the phone there is no fixed height and no grip.
+  const resize: LiveResize | undefined =
+    bodyHeight === undefined
+      ? undefined
+      : { height: bodyHeight, min: LIVE_HEIGHT_MIN, max: maxLiveHeight(viewportHeight), step: LIVE_HEIGHT_STEP, onHeight: onGripHeight, onCommit: commitHeight, onReset: resetHeight };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -284,24 +280,6 @@ export function LiveBody(): React.ReactElement {
           </span>
         ) : null}
       </div>
-      {!phone ? (
-        <div
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Resize live tiles"
-          aria-valuenow={bodyHeight}
-          aria-valuemin={LIVE_HEIGHT_MIN}
-          aria-valuemax={heightMax}
-          tabIndex={0}
-          title="Drag to resize · double-click to reset"
-          onPointerDown={startResize}
-          onDoubleClick={resetHeight}
-          onKeyDown={onResizeKey}
-          className="group flex h-2 flex-none cursor-ns-resize touch-none items-center justify-center bg-bg-0 outline-none focus-visible:bg-bg-2"
-        >
-          <span aria-hidden className="h-0.5 w-10 rounded-pill bg-line-2 group-hover:bg-accent" />
-        </div>
-      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto p-4" data-v2-live-scroll>
         {ordered.length === 0 ? (
           <EmptyState title="No workers are running." detail="Workers appear here while they are on a ticket." />
@@ -326,6 +304,7 @@ export function LiveBody(): React.ReactElement {
                   projectColor={project ? projectColorVar(project.id, projects.map((p) => p.id)) : null}
                   optionName={ticket ? workerModelTagLabel(ticket, options) : null}
                   bodyHeight={bodyHeight}
+                  resize={resize}
                   focused={Boolean(focusId && focusCell?.id === cell.id)}
                 />
               );

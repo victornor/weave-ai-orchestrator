@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Replace Live's hidden shared-height bar with a corner grip on every tile that
+  sets one height for all tiles
+skip_specs: true

@@ -2,7 +2,8 @@
 # A worker opens its ticket PR as a draft (VS-393), so nothing runs while it is in review; the daemon
 # marks it ready as it lands, and that single run evaluates the head that will land. There is no run
 # on push to main — the merge queue lands exactly the head CI just passed — only the daily schedule
-# and workflow_dispatch below. Four separate jobs so each one is its own check.
+# and workflow_dispatch below. Separate jobs so each check is its own status, and test-core is split
+# across four shards (VS-392).
 # See openspec/changes/archive/2026-09-13-vs-329-add-github-actions-ci-lint-typecheck-and/ and
 # openspec/changes/vs-393-ci-runs-about-4-times-per-pr-run-it-once/.
 name: CI
@@ -59,11 +60,34 @@ jobs:
       # itself, then the ui package is typechecked against them.
       - run: pnpm typecheck
 
+  # VS-392: the core/server suite was 7m17s of the 7m52s test-core job on main (run 34798899853),
+  # and almost all of it one serial vitest process. A private-repo runner reports 2 CPUs and
+  # vitest's forks pool sizes itself as max(cpus - 1, 1) = 1 worker, so 369s of tests plus 35s of
+  # collection ran on one core. Four shards put the same files on four runners. This job is the
+  # stable `test-core` check: it passes only when every shard did.
   test-core:
     name: test-core
+    needs: test-core-shards
+    # `always()` so a failed shard reds this check instead of skipping it; the draft guard mirrors
+    # the sibling jobs (VS-393).
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
+    steps:
+      - name: Require every shard to pass
+        run: |
+          echo "test-core shards: ${{ needs.test-core-shards.result }}"
+          test "${{ needs.test-core-shards.result }}" = "success"
+
+  test-core-shards:
+    name: "test-core (shard ${{ matrix.shard }}/4)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -77,8 +101,9 @@ jobs:
       # way this repo already does for `git`.
       - run: npm install -g @fission-ai/openspec@1.12.0
       # No prior build: vitest.config.ts aliases every @weave-ai/* package onto its
-      # src/index.ts, so the core/server suite runs against sources.
-      - run: pnpm exec vitest run
+      # src/index.ts, so the core/server suite runs against sources. `--shard` splits the
+      # same test files across the matrix legs; the total file/test count is unchanged.
+      - run: pnpm exec vitest run --shard=${{ matrix.shard }}/4
 
   test-ui:
     name: test-ui

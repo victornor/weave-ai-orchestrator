@@ -19,7 +19,7 @@ describe('workspace loader', () => {
   const load = async (dir = root) => {
     const ctx = await loader.loadWorkspace(dir, {
       daemon: DaemonConfigSchema.parse({}), registries: createRegistries(),
-      loopbackUrl: 'http://127.0.0.1:7433', skillsDir: join(dir, 'skills'), templatesDir: join(dir, 'templates'),
+      loopbackUrl: 'http://127.0.0.1:7433', skillsDir: join(dir, 'skills'), templatesDir: join(dir, 'templates'), v2ThemeCss: '',
       daemonConfigDir: cfgDir, isolated: false,
     });
     opened.push(ctx.db);
@@ -314,7 +314,7 @@ describe('workspace loader', () => {
     const loadWithDaemon = async (daemonModels: Record<string, unknown>) => {
       const ctx = await loader.loadWorkspace(root, {
         daemon: DaemonConfigSchema.parse({ models: daemonModels }), registries: createRegistries(),
-        loopbackUrl: 'http://127.0.0.1:7433', skillsDir: join(root, 'skills'), templatesDir: join(root, 'templates'),
+        loopbackUrl: 'http://127.0.0.1:7433', skillsDir: join(root, 'skills'), templatesDir: join(root, 'templates'), v2ThemeCss: '',
         daemonConfigDir: cfgDir, isolated: false,
       });
       opened.push(ctx.db);
@@ -670,7 +670,7 @@ describe('workspace loader', () => {
       await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
       const ctx = await loader.loadWorkspace(root, {
         daemon: DaemonConfigSchema.parse({}), registries: createRegistries(),
-        loopbackUrl: 'http://127.0.0.1:7433', skillsDir: join(root, 'skills'), templatesDir: join(root, 'templates'),
+        loopbackUrl: 'http://127.0.0.1:7433', skillsDir: join(root, 'skills'), templatesDir: join(root, 'templates'), v2ThemeCss: '',
         daemonConfigDir: cfgDir, isolated: true,
       });
       opened.push(ctx.db);

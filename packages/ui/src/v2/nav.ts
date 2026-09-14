@@ -20,7 +20,8 @@ export type V2GlyphName =
   | 'chat'
   | 'work'
   | 'roles'
-  | 'knowledge';
+  | 'knowledge'
+  | 'plugin';
 
 export interface V2Dest {
   key: string;
@@ -120,6 +121,8 @@ export function activeNavKey(pathname: string): string | null {
         return 'ws-changelog';
       case 'p':
         return `project:${second}`;
+      case 'plugins':
+        return `plugin:${second}`;
       default:
         return 'ws-work';
     }
@@ -216,5 +219,12 @@ export const V2_GLYPH_STYLE: Record<V2GlyphName, CSSProperties> = {
     borderRadius: 999,
     border: '1.5px solid currentColor',
     background: 'radial-gradient(circle at 50% 50%, currentColor 0 1.5px, transparent 2px)',
+  },
+  plugin: {
+    width: 13,
+    height: 13,
+    border: '1.5px solid currentColor',
+    borderRadius: 2,
+    clipPath: 'polygon(0 0, 65% 0, 100% 35%, 100% 100%, 0 100%)',
   },
 };

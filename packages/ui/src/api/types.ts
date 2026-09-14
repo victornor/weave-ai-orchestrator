@@ -191,6 +191,8 @@ export interface WorkspaceListItem {
 export interface WorkspacePlugin {
   id: string;
   version: string | null;
+  /** The plugin's own declared display name (VS-385) — the page title/rail label, falling back to `id`. */
+  name: string | null;
   source: 'workspace' | 'daemon';
   loaded: boolean;
   error: string | null;

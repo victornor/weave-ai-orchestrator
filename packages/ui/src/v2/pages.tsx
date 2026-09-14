@@ -89,3 +89,4 @@ export function V2ArtifactPage(): React.ReactElement {
 export { V2TicketArtifactReader };
 // VS-350: the worker page is a real screen.
 export { V2WorkerPage } from './WorkerPage';
+export { V2PluginPage } from './PluginPage';

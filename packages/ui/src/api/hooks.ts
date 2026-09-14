@@ -461,6 +461,26 @@ export function useWorkspaceProjects(ids: readonly string[]): Record<string, Wor
   }, [ids, results]);
 }
 
+/**
+ * Every listed workspace's own loaded plugins with a page (VS-385), for the V2 rail's data-driven
+ * plugin section — mirroring `useWorkspaceProjects`'s shape exactly. Shares the same query key and
+ * fetch as `useWorkspaceSummary()` (the plugin list is part of that same response), so a workspace
+ * already summarized elsewhere costs nothing extra here.
+ */
+export function useWorkspacePlugins(ids: readonly string[]): Record<string, T.WorkspacePlugin[]> {
+  const results = useQueries({
+    queries: ids.map((id) => ({ queryKey: qk.workspace(id), queryFn: () => api.ws<unknown>(id, '').then(summary), staleTime: Infinity })),
+  });
+  return useMemo(() => {
+    const map: Record<string, T.WorkspacePlugin[]> = {};
+    ids.forEach((id, i) => {
+      const plugins = results[i]?.data?.plugins ?? [];
+      map[id] = plugins.filter((p) => p.loaded && p.hasPage);
+    });
+    return map;
+  }, [ids, results]);
+}
+
 export function useAddProject(): UseMutationResult<Project, Error, { url: string; id?: string; runtime?: string; maxWorkers?: number; setupCommand?: string; policies?: { autoMergeDefault?: boolean }; knowledgeRepo?: { enabled: boolean } }> {
   const ws = useWs();
   const qc = useQueryClient();

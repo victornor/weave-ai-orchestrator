@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
 import { workspaceLoader, initLogger } from '@weave-ai/core';
 import { pluginSpecifier, startDaemon, resolveIsolation, type DaemonHandle } from '../src/daemon.js';
+import { registerPluginSdkResolveHook } from '../src/register-plugin-sdk-hook.js';
 
 initLogger(process.env.AC_LOG_LEVEL ?? 'silent');
 
@@ -147,5 +148,41 @@ describe('plugin loading', () => {
     expect(echo?.kind).toBe('echo');
     expect(echo?.capabilities.supportsButtons).toBe(false);
     expect((await echo!.send({ threadExternalId: 't1', message: { parts: [{ type: 'text', text: 'hi' }], text: 'hi' } })).delivered).toBe(true);
+  }, 30_000);
+
+  it('resolves a bare @weave-ai/plugin-sdk import from a plugin directory outside the monorepo, with no node_modules (VS-385)', async () => {
+    registerPluginSdkResolveHook();
+
+    const configDir = mkdtempSync(join(tmpdir(), 'ac-cfg-'));
+    const wsDir = mkdtempSync(join(tmpdir(), 'ac-ws-'));
+    // Deliberately outside this repo's own directory tree, with no node_modules of its own — the
+    // exact scenario `pluginSpecifier`'s own file resolution cannot help with; only the loader
+    // hook registered above can make the plugin's own `import` line succeed.
+    const outOfTreeDir = mkdtempSync(join(tmpdir(), 'ac-plugin-oot-'));
+    dirs = [configDir, wsDir, outOfTreeDir];
+    expect(existsSync(join(outOfTreeDir, 'node_modules'))).toBe(false);
+
+    writeFileSync(join(outOfTreeDir, 'package.json'), JSON.stringify({ name: 'oot-plugin', version: '0.0.0', type: 'module', main: './index.js' }));
+    writeFileSync(
+      join(outOfTreeDir, 'index.js'),
+      "import { definePlugin } from '@weave-ai/plugin-sdk';\n" +
+      "export default definePlugin({ id: 'oot', version: '0.0.0', apiVersion: 1, register() {} });\n",
+    );
+
+    await workspaceLoader.initWorkspace(wsDir, { id: 'oot-ws', name: 'Out of tree', ticketPrefix: 'OOT' });
+    const cfgPath = join(wsDir, 'workspace.yaml');
+    const cfg = YAML.parse(readFileSync(cfgPath, 'utf8')) as Record<string, unknown>;
+    cfg.plugins = [{ name: outOfTreeDir }];
+    writeFileSync(cfgPath, YAML.stringify(cfg));
+    workspaceLoader.writeRegistry({ workspaces: [{ id: 'oot-ws', path: wsDir }] }, configDir);
+    workspaceLoader.writeDaemonConfig({ ...workspaceLoader.readDaemonConfig(configDir), http: { listen: '127.0.0.1:0', trustProxy: false, tls: { mode: 'none', domains: [] } } }, configDir);
+
+    daemon = await startDaemon({ configDir });
+    const loaded = daemon.workspaces.get('oot-ws')!.ctx.plugins.loaded;
+    expect(loaded).toContainEqual(expect.objectContaining({ id: 'oot', loaded: true, error: null }));
+
+    // The in-tree example plugin still loads unaffected by the hook being registered.
+    const echoResolved = pluginSpecifier({ paths: { root: repoRoot } } as never, './examples/plugins/echo-channel');
+    expect(echoResolved).toBe(pathToFileURL(join(echoPlugin, 'index.js')).href);
   }, 30_000);
 });

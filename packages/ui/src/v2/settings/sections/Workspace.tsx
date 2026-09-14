@@ -35,8 +35,6 @@ export function WeaverSection(): React.ReactElement {
   );
 }
 
-const inputCx = 'h-8 w-full rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1 outline-none';
-
 /** The workspace's identity: its name and ticket prefix (V1's editor, restyled) (VS-348). */
 export function GeneralSection(): React.ReactElement {
   const summary = useWorkspaceSummary();
@@ -51,12 +49,12 @@ export function GeneralSection(): React.ReactElement {
   });
   return (
     <div className="v2-card divide-y divide-line-1">
-      <label className="flex flex-col gap-1.5 px-3.5 py-3">
+      <label className="v2-form-row">
         <span className="ac-label">Name</span>
         <div className="flex items-center gap-2">
           <input
             aria-label="Workspace name"
-            className={inputCx}
+            className="v2-input"
             value={name.draft}
             onChange={(e) => name.onChange(e.target.value)}
             onBlur={name.onBlur}
@@ -65,9 +63,9 @@ export function GeneralSection(): React.ReactElement {
           <CommitStatus status={name.status} error={name.error} onSave={name.commitNow} />
         </div>
       </label>
-      <label className="flex flex-col gap-1.5 px-3.5 py-3">
+      <label className="v2-form-row">
         <span className="ac-label">Ticket prefix</span>
-        <input aria-label="Ticket prefix" className={cx(inputCx, 'ac-mono')} value={summary.data?.workspace.ticketPrefix ?? ''} readOnly />
+        <input aria-label="Ticket prefix" className={cx('v2-input', 'ac-mono')} value={summary.data?.workspace.ticketPrefix ?? ''} readOnly />
         <span className="text-micro text-text-3">Used for every identifier in this workspace.</span>
       </label>
     </div>

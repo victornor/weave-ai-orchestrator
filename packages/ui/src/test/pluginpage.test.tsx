@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceEvent } from '@weave-ai/shared';
 import type { WorkspacePlugin } from '../api/types';
@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 function loadedPlugin(over: Partial<WorkspacePlugin> = {}): WorkspacePlugin {
-  return { id: 'notes', version: '0.1.0', source: 'workspace', loaded: true, error: null, hasPage: true, ...over };
+  return { id: 'notes', version: '0.1.0', name: null, source: 'workspace', loaded: true, error: null, hasPage: true, ...over };
 }
 
 describe('PluginPageRoute (VS-334)', () => {
@@ -52,19 +52,19 @@ describe('PluginPageRoute (VS-334)', () => {
   });
 
   it('shows a not-found state for a plugin that loaded but registered no page', () => {
-    state.plugins = [{ id: 'notes', version: '0.1.0', source: 'workspace', loaded: true, error: null, hasPage: false }];
+    state.plugins = [{ id: 'notes', version: '0.1.0', name: null, source: 'workspace', loaded: true, error: null, hasPage: false }];
     render(<PluginPageRoute />);
     expect(screen.getByText('Plugin page not found.')).toBeInTheDocument();
   });
 
   it('shows a not-found state for a plugin that failed to load', () => {
-    state.plugins = [{ id: 'notes', version: null, source: 'workspace', loaded: false, error: 'boom', hasPage: true }];
+    state.plugins = [{ id: 'notes', version: null, name: null, source: 'workspace', loaded: false, error: 'boom', hasPage: true }];
     render(<PluginPageRoute />);
     expect(screen.getByText('Plugin page not found.')).toBeInTheDocument();
   });
 
   it('renders the opaque-origin sandboxed iframe for a loaded plugin with a page', () => {
-    state.plugins = [{ id: 'notes', version: '0.1.0', source: 'workspace', loaded: true, error: null, hasPage: true }];
+    state.plugins = [{ id: 'notes', version: '0.1.0', name: null, source: 'workspace', loaded: true, error: null, hasPage: true }];
     render(<PluginPageRoute />);
     const frame = document.querySelector('iframe');
     expect(frame).toBeTruthy();
@@ -88,6 +88,18 @@ describe('PluginPageRoute postMessage bridge (VS-334, task 5.4)', () => {
 
     expect(client.request).toHaveBeenCalledWith('/api/w/ws1/plugins/notes/notes', { method: 'GET', body: undefined });
     expect(postSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'response', id: '1', ok: true, status: 200, data: { notes: [] } }), '*');
+  });
+
+  it('sends no stylesheet or theme message (VS-385: that push is V2-only)', () => {
+    state.plugins = [loadedPlugin()];
+    render(<PluginPageRoute />);
+    const frame = document.querySelector('iframe') as HTMLIFrameElement;
+    const postSpy = vi.spyOn(frame.contentWindow!, 'postMessage');
+    // V1 wires no `onLoad` at all, but fire one anyway: this must stay a no-op here even if a
+    // later change starts using the iframe's load event for something else.
+    fireEvent.load(frame);
+    expect(postSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'stylesheet' }), '*');
+    expect(postSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'theme' }), '*');
   });
 
   it('ignores a message whose source is not the hosted iframe', () => {

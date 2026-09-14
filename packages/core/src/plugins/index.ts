@@ -24,6 +24,8 @@ export interface PluginHookDef {
 export interface PluginRuntime {
   id: string;
   version: string | null;
+  /** The plugin's own declared display name (VS-385), used as a page title/rail label ahead of `id`. */
+  name: string | null;
   source: 'workspace' | 'daemon';
   loaded: boolean;
   error: string | null;

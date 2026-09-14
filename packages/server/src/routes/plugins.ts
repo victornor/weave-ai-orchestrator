@@ -48,6 +48,11 @@ export function findPluginRoute(routes: PluginRouteDef[], pluginId: string, meth
 
 export function pluginRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+  // `GET /api/w/:ws/plugins/theme.css` (VS-385): the generated plugin-page stylesheet, session-
+  // authenticated like every other workspace route, mirroring `GET /api/w/:ws/artifacts/kit.css`'s
+  // existing precedent. Registered before the `/:pluginId/*` catch-all so it is never shadowed by a
+  // plugin id that happens to be literally `theme.css`.
+  app.get('/theme.css', (c) => c.text(c.get('ws').ctx.v2ThemeCss, 200, { 'content-type': 'text/css; charset=utf-8' }));
   app.all('/:pluginId/*', async (c) => {
     const ws = c.get('ws');
     const pluginId = c.req.param('pluginId');

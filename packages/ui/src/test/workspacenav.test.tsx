@@ -397,9 +397,9 @@ describe('plugins nav section (VS-334)', () => {
   it('lists only a loaded plugin that registered a page, not a failed one or one with no page', () => {
     render(nav({
       activePlugins: [
-        { id: 'notes', version: '0.1.0', source: 'workspace', loaded: true, error: null, hasPage: true },
-        { id: 'broken', version: null, source: 'daemon', loaded: false, error: 'boom', hasPage: false },
-        { id: 'headless', version: '0.1.0', source: 'workspace', loaded: true, error: null, hasPage: false },
+        { id: 'notes', version: '0.1.0', name: null, source: 'workspace', loaded: true, error: null, hasPage: true },
+        { id: 'broken', version: null, name: null, source: 'daemon', loaded: false, error: 'boom', hasPage: false },
+        { id: 'headless', version: '0.1.0', name: null, source: 'workspace', loaded: true, error: null, hasPage: false },
       ],
     }));
     const plugins = screen.getByLabelText('Plugins');
@@ -412,7 +412,7 @@ describe('plugins nav section (VS-334)', () => {
   it('does not add a plugins section to a non-active workspace group', () => {
     render(nav({
       expanded: ['beta'],
-      activePlugins: [{ id: 'notes', version: '0.1.0', source: 'workspace', loaded: true, error: null, hasPage: true }],
+      activePlugins: [{ id: 'notes', version: '0.1.0', name: null, source: 'workspace', loaded: true, error: null, hasPage: true }],
     }));
     // Only one Plugins nav exists at all, and it belongs to the active (alpha) group.
     expect(screen.getAllByLabelText('Plugins')).toHaveLength(1);

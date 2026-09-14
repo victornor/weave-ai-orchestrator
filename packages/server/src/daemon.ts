@@ -5,7 +5,7 @@
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
@@ -17,7 +17,7 @@ import type { Db } from '@weave-ai/db';
 import {
   createRegistries, createCore, createAuthService, createIncidentsService, getLogger, initLogger, workspaceLoader,
   stageWorkspaceImport, importTickets, ensureHostToolPath, startHostToolProbe,
-  isNamespacedToolName, PLUGIN_ID_RE, PluginDataService, ARTIFACT_KIT_CSS,
+  isNamespacedToolName, PLUGIN_ID_RE, PluginDataService, ARTIFACT_KIT_CSS, generateV2PluginCss,
   type Registries, type WorkspaceContext, type PluginRuntime,
 } from '@weave-ai/core';
 import type { AuthService, CoreServices } from '@weave-ai/core';
@@ -256,7 +256,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
 async function loadWorkspaceInto(
   workspaces: Map<string, WorkspaceRuntime>,
   path: string,
-  opts: { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; daemonConfigDir: string; isolated: boolean; pushKeys: PushKeys | null },
+  opts: { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; v2ThemeCss: string; daemonConfigDir: string; isolated: boolean; pushKeys: PushKeys | null },
 ): Promise<WorkspaceRuntime> {
   const ctx: WorkspaceContext = await workspaceLoader.loadWorkspace(path, opts);
   const services: CoreServices = createCore(ctx);
@@ -420,17 +420,17 @@ async function loadPlugins(ctx: WorkspaceContext, registries: Registries): Promi
       if (!PLUGIN_ID_RE.test(p.id)) { log.error({ plugin: p.id }, 'plugin id is not a valid slug; skipped'); continue; }
       if (ctx.plugins.loaded.some((loaded) => loaded.id === p.id)) {
         log.error({ plugin: p.id }, 'duplicate plugin id for this workspace; skipped');
-        ctx.plugins.loaded.push({ id: p.id, version: p.version ?? null, source, loaded: false, error: `duplicate plugin id: ${p.id} is already loaded for this workspace`, hasPage: false });
+        ctx.plugins.loaded.push({ id: p.id, version: p.version ?? null, name: p.name ?? null, source, loaded: false, error: `duplicate plugin id: ${p.id} is already loaded for this workspace`, hasPage: false });
         continue;
       }
       const routesBefore = ctx.plugins.routes.length;
       await p.register(pluginHost(p.id, config, ctx, registries));
       const hasPage = ctx.plugins.routes.slice(routesBefore).some((r) => r.method === 'GET' && r.path === '/page');
-      ctx.plugins.loaded.push({ id: p.id, version: p.version, source, loaded: true, error: null, hasPage });
+      ctx.plugins.loaded.push({ id: p.id, version: p.version, name: p.name ?? null, source, loaded: true, error: null, hasPage });
       log.info({ plugin: p.id, version: p.version, source }, 'plugin registered');
     } catch (e) {
       log.error({ err: e, plugin: name }, 'plugin failed to load; continuing');
-      ctx.plugins.loaded.push({ id: plugin?.id ?? name, version: plugin?.version ?? null, source, loaded: false, error: (e as Error).message, hasPage: false });
+      ctx.plugins.loaded.push({ id: plugin?.id ?? name, version: plugin?.version ?? null, name: plugin?.name ?? null, source, loaded: false, error: (e as Error).message, hasPage: false });
     }
   }
 }
@@ -478,6 +478,7 @@ function pluginHost(
     },
     emit: (kind, entityId, payload) => { ctx.events.emit('plugin.event', `plugin:${pluginId}`, entityId, { pluginId, kind, payload }); },
     kitCss: () => ARTIFACT_KIT_CSS,
+    themeCss: () => ctx.v2ThemeCss,
     config: <T>() => config as T,
     logger: {
       debug: (m, d) => plog.debug(d ?? {}, m), info: (m, d) => plog.info(d ?? {}, m),
@@ -581,12 +582,41 @@ function splitListen(listen: string): [string, string] {
   return [listen.slice(0, idx) || '127.0.0.1', listen.slice(idx + 1)];
 }
 
-function dirs(): { skillsDir: string; templatesDir: string } {
+function dirs(): { skillsDir: string; templatesDir: string; v2ThemeCss: string } {
   const repo = resolve(here, '..', '..', '..');
   return {
     skillsDir: process.env.AC_SKILLS_DIR ?? join(repo, 'skills'),
     templatesDir: process.env.AC_TEMPLATES_DIR ?? join(repo, 'templates'),
+    v2ThemeCss: cachedV2ThemeCss(
+      join(repo, 'packages', 'ui', 'src', 'v2', 'v2.css'),
+      join(repo, 'packages', 'ui', 'src', 'index.css'),
+    ),
   };
+}
+
+/**
+ * A minimal, always-safe stylesheet a plugin page falls back to if `v2.css` is unexpectedly
+ * missing from this release's checkout (VS-385) — enough that a page using the vocabulary still
+ * reads, never a crash and never a fully unstyled page.
+ */
+const V2_THEME_CSS_FALLBACK =
+  ":root, [data-theme='dark'] { color-scheme: dark; --bg-0: #08090b; --bg-1: #101114; --text-1: #e9eaec; --line-1: #1c1e22; --accent: #3d4148; --accent-on: #fff; }\n" +
+  "[data-theme='light'] { color-scheme: light; --bg-0: #f7f8f9; --bg-1: #fff; --text-1: #16181c; --line-1: #e6e8eb; --accent: #3d4148; --accent-on: #fff; }\n" +
+  ':root, body { background: var(--bg-0); color: var(--text-1); font-family: ui-sans-serif, system-ui, sans-serif; }\n' +
+  '*, *::before, *::after { box-sizing: border-box; }';
+
+let v2ThemeCssCache: string | undefined;
+
+/** Reads `v2.css` and `index.css` and generates the plugin stylesheet once per process, caching the result. */
+function cachedV2ThemeCss(v2CssPath: string, indexCssPath: string): string {
+  if (v2ThemeCssCache !== undefined) return v2ThemeCssCache;
+  try {
+    v2ThemeCssCache = generateV2PluginCss(readFileSync(v2CssPath, 'utf8'), readFileSync(indexCssPath, 'utf8'));
+  } catch (e) {
+    log.warn({ err: e, path: v2CssPath }, 'v2.css/index.css unreadable; plugin pages fall back to a minimal stylesheet');
+    v2ThemeCssCache = V2_THEME_CSS_FALLBACK;
+  }
+  return v2ThemeCssCache;
 }
 
 function defaultUiDir(): string | null {

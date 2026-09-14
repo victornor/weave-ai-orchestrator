@@ -91,8 +91,15 @@ describe('the V2 route tree (VS-343, VS-353)', () => {
         'tickets/$ticketId',
         'artifacts/$key',
         'workers/$workerId',
+        'plugins/$pluginId',
       ]),
     );
+  });
+
+  it('renders V2PluginPage at the plugin route (VS-385)', () => {
+    const ws = child(shell!, 'w/$ws');
+    const pluginRoute = child(ws!, 'plugins/$pluginId');
+    expect(pluginRoute?.options?.component).toBeDefined();
   });
 
   it('gives the merge queue no V2 route', () => {

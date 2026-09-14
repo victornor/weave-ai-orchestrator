@@ -5,9 +5,13 @@
  * tiny regex parser is enough; no CSS parser dependency.
  */
 
-/** The text between the first `{` after `marker` and its matching `}`, brace-depth aware. */
-export function extractCssBlock(css: string, marker: string): string {
-  const markerIndex = css.indexOf(marker);
+/**
+ * The text between the first `{` after `marker` and its matching `}`, brace-depth aware.
+ * `fromIndex` searches for `marker` starting at that offset, for a CSS source where the same
+ * marker text appears more than once (e.g. `v2.css`'s two `.v2-root {` blocks).
+ */
+export function extractCssBlock(css: string, marker: string, fromIndex = 0): string {
+  const markerIndex = css.indexOf(marker, fromIndex);
   if (markerIndex === -1) throw new Error(`extractCssBlock: marker not found: ${marker}`);
   const open = css.indexOf('{', markerIndex);
   if (open === -1) throw new Error(`extractCssBlock: no '{' after marker: ${marker}`);

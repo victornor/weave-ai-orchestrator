@@ -369,6 +369,7 @@ class Loader implements WorkspaceLoader {
       loopbackUrl: opts.loopbackUrl,
       skillsDir: opts.skillsDir,
       templatesDir: opts.templatesDir,
+      v2ThemeCss: opts.v2ThemeCss,
       isolated: opts.isolated,
       daemonConfigDir: opts.daemonConfigDir,
       async saveConfig(next: WorkspaceConfig): Promise<void> {

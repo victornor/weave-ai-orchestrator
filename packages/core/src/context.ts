@@ -75,6 +75,8 @@ export interface WorkspaceContext {
   /** Skills shipped with the package, to be installed into homes. */
   skillsDir: string;
   templatesDir: string;
+  /** VS-385: the generated plugin-page stylesheet — `PluginHost.themeCss()`'s value, computed once at daemon startup. */
+  v2ThemeCss: string;
   /**
    * VS-143: true when this daemon's own config directory is not the host's plain default (and it
    * was not given the explicit sharing opt-in). An isolated daemon never resolves a runtime

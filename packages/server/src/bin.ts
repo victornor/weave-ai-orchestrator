@@ -2,6 +2,11 @@
 /** Daemon entry point. `weave daemon start` execs this. */
 import { getLogger } from '@weave-ai/core';
 import { startDaemon } from './daemon.js';
+import { registerPluginSdkResolveHook } from './register-plugin-sdk-hook.js';
+
+// VS-385: before any workspace's plugins can load, so a bare `@weave-ai/plugin-sdk` import from a
+// plugin living entirely outside this monorepo resolves to this release's own copy.
+registerPluginSdkResolveHook();
 
 const args = process.argv.slice(2);
 const flag = (name: string): string | undefined => {

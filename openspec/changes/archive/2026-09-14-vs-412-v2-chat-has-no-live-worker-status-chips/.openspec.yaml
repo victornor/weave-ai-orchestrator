@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "V2 chat has no live worker status chips: bring over V1's ticket/worker
+  chips under weaver replies and the live worker row"
+skip_specs: true

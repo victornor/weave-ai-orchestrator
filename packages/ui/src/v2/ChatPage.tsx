@@ -7,9 +7,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Decision, Project, ThreadMessage, Ticket } from '@weave-ai/shared';
-import { isActiveRun, isHumanReplyToolEvent, projectLabel } from '@weave-ai/shared';
+import { agentUiStatus, isActiveRun, isHumanReplyToolEvent, projectLabel } from '@weave-ai/shared';
 import { decisionCardPartsOf, resolveModel, runtimeLimitStrip } from '@weave-ai/render';
 import { A, useGo } from '../app/link';
+import { projectColorVar } from '../lib/projectColor';
 import { ScrollToBottomButton } from '../components/ScrollToBottom';
 import { EmptyState } from '../components/States';
 import { decisionCarriesSecret } from '../lib/decisionSecrets';
@@ -43,6 +44,7 @@ import {
 import { ChatMessage } from './ChatMessage';
 import { ChatComposer } from './ChatComposer';
 import { ChatTrace, ChatTurnTrace } from './ChatTrace';
+import { V2DispatchChip, V2WorkerChip } from './ChatChips';
 import { V2DecisionCard, type V2Answer } from './DecisionCard';
 import { SearchPanel } from './SearchPanel';
 import { DIVIDER_MAX, DIVIDER_MIN, clampDivider, readDivider, shouldSplit, useElementWidth, writeDivider } from './chatSplit';
@@ -268,9 +270,12 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // optimistically the moment it is answered, without waiting for the list to refetch (VS-369).
   const answeredDecisions = useDecisions({ status: 'answered', owner: 'human', limit: 200 });
   const answer = useAnswerDecision();
-  const workers = useWorkers({});
+  // Retired workers and terminal tickets are fetched because the chips are the record of what a
+  // turn did: a finished dispatch keeps its label, and a finished worker still resolves for it
+  // (V1's Chat, `includeRetired`/`includeTerminal`). `fields: 'label'` keeps that payload small.
+  const workers = useWorkers({ includeRetired: true });
   const projects = useProjects();
-  const tickets = useTickets({ limit: 200 });
+  const tickets = useTickets({ limit: 200, includeTerminal: true, fields: 'label' });
   const weaver = useWeaver();
   const conductorId = weaver.data?.agent.id ?? null;
   const conductorRuntime = weaver.data?.agent.runtimeId ?? null;
@@ -355,6 +360,8 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   );
   const ticketsById = useMemo(() => new Map((tickets.data ?? []).map((t) => [t.id, t] as const)), [tickets.data]);
   const projectsById = useMemo(() => new Map((projects.data ?? []).map((p) => [p.id, p] as const)), [projects.data]);
+  /** The workspace's project ids, so a chip's project hue is the same one V1 gives it (VS-149). */
+  const projectIds = useMemo(() => (projects.data ?? []).map((p) => p.id), [projects.data]);
   // A decision the channel manager pushed to the thread is a message whose card part carries the
   // decision's prose fallback (title + context). It is kept only while a decision it names is known;
   // what renders in its place is decided per width below — an inline answerable card on phone where
@@ -372,9 +379,15 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // The conversation rows: each message, its turn's trace attached to the last message that run
   // produced (V1's `chatEntries`/`chatRows` view model). Silent turns are dropped here — Chat shows
   // the turn that produced a message, not a standalone trace row.
+  // The shared view model returns both halves the chat shows: each message with the work its turn
+  // filed under it, and the live workers no message accounts for (V1's `chatEntries`).
+  const { entries, unattributed } = useMemo(
+    () => chatEntries(conversation, tickets.data ?? [], workers.data ?? [], decisions.data ?? []),
+    [conversation, tickets.data, workers.data, decisions.data],
+  );
   const rows = useMemo(
-    () => chatRows(chatEntries(conversation, tickets.data ?? [], workers.data ?? [], decisions.data ?? []).entries, traces.data ?? [], { showSilent: false }),
-    [conversation, tickets.data, workers.data, decisions.data, traces.data],
+    () => chatRows(entries, traces.data ?? [], { showSilent: false }),
+    [entries, traces.data],
   );
 
   const rowRuns = useMemo(() => new Set((messages.data ?? []).map((m) => m.runId).filter((id): id is string => Boolean(id))), [messages.data]);
@@ -392,6 +405,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const sessionStrip = runtimeLimitStrip(accounts.data, conductorRuntime);
 
   const openTicket = useCallback((identifier: string) => go('/v2/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } }), [go, ws]);
+  const openWorker = useCallback((workerId: string) => go('/v2/w/$ws/workers/$workerId', { params: { ws, workerId } }), [go, ws]);
 
   const replyTo = useMemo(() => (draft.replyToId ? (messages.data ?? []).find((m) => m.id === draft.replyToId) ?? null : null), [draft.replyToId, messages.data]);
 
@@ -623,6 +637,22 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                               compactionAt={compactionAt}
                             />
                           ) : null}
+                          {/* The work this turn filed, matching V1's dispatch labels: a worker's own
+                              name while it runs, the ticket's title before a worker exists. */}
+                          {row.entry.dispatches.length ? (
+                            <div className="flex flex-wrap gap-1.5" data-v2-dispatch-row>
+                              {row.entry.dispatches.map((d) => (
+                                <V2DispatchChip
+                                  key={d.ticket.id}
+                                  identifier={d.ticket.identifier}
+                                  name={d.worker?.name ?? d.ticket.title}
+                                  status={d.status}
+                                  projectColorVar={d.ticket.projectId ? projectColorVar(d.ticket.projectId, projectIds) : undefined}
+                                  onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
+                                />
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })
@@ -642,6 +672,20 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                       ) : null}
                       {liveEvents.length ? <ChatTrace events={liveEvents} className="border-l border-line-1 pl-2.5" /> : null}
                     </section>
+                  ) : null}
+                  {/* Live work no message in this thread accounts for, exactly where V1 puts it. */}
+                  {unattributed.length ? (
+                    <div className="flex flex-wrap gap-1.5" data-v2-live-worker-row>
+                      {unattributed.map((w) => (
+                        <V2WorkerChip
+                          key={w.id}
+                          name={w.name}
+                          status={agentUiStatus(w.status)}
+                          projectColorVar={w.projectId ? projectColorVar(w.projectId, projectIds) : undefined}
+                          onClick={() => openWorker(w.id)}
+                        />
+                      ))}
+                    </div>
                   ) : null}
                   <div ref={stick.bottomRef} />
                 </div>

@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "VS-334's leftover OpenSpec archive needs a manual reconciliation: its web-pages
+  requirements already exist on main (from VS-385), so drop that duplicate delta,
+  archive the five new plugin capabilities, and close #313"
+skip_specs: true

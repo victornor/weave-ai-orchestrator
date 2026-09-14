@@ -7,8 +7,8 @@ import { describe, expect, it } from 'vitest';
 import { Db, newId, nowIso } from '@weave-ai/db';
 import type { RestartNotice } from '@weave-ai/shared';
 import {
-  announceRestart, interruptedTurns, markBooted, observeBoot, recordShutdown, recordStartFailure,
-  restartNoticeReason, restartNoticeText, type BootObservation,
+  announceRestart, interruptedTurns, markBooted, observeBoot, queuedForCapacity, recordShutdown, recordStartFailure,
+  restartNoticeReason, restartNoticeText, type BootObservation, type InterruptedTurn,
 } from '../src/restart-notice.js';
 import type { WorkspaceRuntime } from '../src/types.js';
 
@@ -38,7 +38,7 @@ function workspace(id: string): Workspace {
 
   ws.runtime = {
     id,
-    ctx: { workspaceId: id, db },
+    ctx: { workspaceId: id, db, config: { defaults: { maxConcurrentRuns: 6 } } },
     services: {
       threads: { notifyHuman: async (_a: unknown, m: { text: string }) => { ws.sent.push({ text: m.text }); } },
       workers: { ensureConductor: async () => ({ id: `${id}-weaver` }) },
@@ -224,8 +224,48 @@ describe('the chat line and the wake (VS-339)', () => {
 
 describe('the restart lines (VS-339)', () => {
   it('says clean or unclean, and never claims more than the record', () => {
-    expect(restartNoticeText({ bootAt: '2026-09-13T19:17:30.000Z', clean: true, failedStarts: { count: 0, lastAt: null, lastReason: null }, interrupted: [] }))
+    expect(restartNoticeText({ bootAt: '2026-09-13T19:17:30.000Z', clean: true, failedStarts: { count: 0, lastAt: null, lastReason: null }, interrupted: [], queuedForCapacity: [] }))
       .toMatch(/^Back up at \d\d:\d\d after a restart\.$/);
     expect(restartNoticeReason({ bootAt: '2026-09-13T19:17:30.000Z', clean: false })).toContain('unclean shutdown');
+  });
+});
+
+describe('turns queued for capacity (VS-375)', () => {
+  const turn = (id: string, projectId: string | null = null): InterruptedTurn => ({
+    runId: `r-${id}`, agentId: `a-${id}`, agentName: `W${id}`, agentKind: 'worker',
+    projectId, ticketId: null, ticketIdentifier: null,
+  });
+
+  it('holds back only the turns beyond the run limit, once the weaver slot is reserved', () => {
+    const turns = [turn('1'), turn('2'), turn('3'), turn('4')];
+    const waiting = queuedForCapacity(turns, { runLimit: 3, reserved: 1, projectMaxWorkers: new Map() });
+    expect(waiting.map((t) => t.runId)).toEqual(['r-3', 'r-4']);
+  });
+
+  it('holds back a turn beyond its own project maxWorkers even when the workspace has room', () => {
+    const turns = [turn('1', 'p1'), turn('2', 'p1'), turn('3', 'p2')];
+    const waiting = queuedForCapacity(turns, { runLimit: 6, reserved: 1, projectMaxWorkers: new Map([['p1', 1]]) });
+    expect(waiting.map((t) => t.runId)).toEqual(['r-2']);
+  });
+
+  it('names the waiting turns in the restart payload and the chat line', async () => {
+    const ws = workspace('ws1');
+    ws.runtime.ctx.config.defaults.maxConcurrentRuns = 3;
+    // Four shutdown-cut turns across four agents, but only two run slots after the weaver's.
+    for (let i = 0; i < 4; i += 1) {
+      const agentId = `${ws.id}-worker-${i}`;
+      ws.db.run('INSERT INTO agents (id, workspace_id, kind, name, runtime_id, status, home_path, turn_epoch, ticket_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [agentId, ws.id, 'worker', `Engineer ${i}`, 'claude', 'active', '/tmp/w', 0, null, nowIso(), nowIso()]);
+      ws.db.run('INSERT INTO runs (id, workspace_id, agent_id, wakeup_ids_json, runtime_id, status, turn_epoch, cwd, error_code, error_family, finished_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+        [`r-${i}`, ws.id, agentId, '[]', 'claude', 'interrupted', 1, '/tmp/w', 'interrupted_by_shutdown', 'tooling', '2026-09-13T19:16:00.000Z', `2026-09-13T19:16:0${i}.000Z`]);
+    }
+
+    await announceRestart({ db: daemonDb(), workspaces: new Map([[ws.id, ws.runtime]]), observation: observation() });
+
+    const notice = ws.woken[0]!.payload;
+    expect(notice.interrupted).toHaveLength(4);
+    expect(notice.queuedForCapacity.map((t) => t.runId)).toEqual(['r-2', 'r-3']);
+    expect(ws.sent[0]!.text).toMatch(/^Back up at \d\d:\d\d after a restart\. 4 turns are resuming; 2 are waiting for a run slot\.$/);
+    ws.db.close();
   });
 });

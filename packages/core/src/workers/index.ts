@@ -61,6 +61,24 @@ function liveInterruptWakeBody(body: string): { body: string; truncated?: true; 
   return { body: body.slice(0, LIVE_INTERRUPT_WAKE_BODY_CHARS), truncated: true, bodyLength: body.length };
 }
 
+/**
+ * VS-375: whether this worker already has the resume a relaunch would create. A shut-down cut leaves
+ * the run's own wakes `queued` (`engine.finalize`'s preserve branch) with the run recorded
+ * `interrupted_by_shutdown`, so the dispatcher will claim them. Read from the records rather than a
+ * flag, so an ordinary queued wake — a queued message, a retry — is not mistaken for a preserved one.
+ */
+function preservedResumeQueued(ctx: WorkspaceContext, workerId: string): boolean {
+  const queuedIds = new Set(
+    ctx.db.all<{ id: string }>("SELECT id FROM wakeups WHERE agent_id = ? AND status = 'queued'", [workerId]).map((w) => w.id),
+  );
+  if (queuedIds.size === 0) return false;
+  const runs = ctx.db.all<{ wakeupIds: string[] | null }>(
+    "SELECT wakeup_ids_json FROM runs WHERE agent_id = ? AND status = 'interrupted' AND error_code = 'interrupted_by_shutdown'",
+    [workerId],
+  );
+  return runs.some((r) => (r.wakeupIds ?? []).some((id) => queuedIds.has(id)));
+}
+
 export function branchSlug(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'work';
 }
@@ -361,12 +379,18 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       return { delivery, runId, wake };
     },
 
-    async relaunch(actor: Actor, workerId: string, note: string): Promise<Agent> {
+    async relaunch(actor: Actor, workerId: string, note: string): Promise<Agent & { notice?: string }> {
       const agent = get(workerId);
       // A worker parked after a failure is not stuck, it is waiting on a human: relaunching it is a
       // resume (VS-56). Its session, ticket, worktree and brief all stand, so there is nothing to
       // re-render and no progress to re-derive.
       if (agent.status === 'paused' && agent.pauseDetail) return service.resume(actor, workerId);
+      // VS-375: a shut-down cut already left this turn's wake queued; the dispatcher will resume it.
+      // Bumping the brief, re-rendering the home and enqueuing another wake would look like a relaunch
+      // (and coalesce into the same wake), so report the wait instead.
+      if (preservedResumeQueued(ctx, workerId)) {
+        return { ...agent, notice: 'already queued; waiting for a run slot' };
+      }
       const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) ?? null : null;
       const active = ctx.db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [workerId]);
       if (active) { try { await deps().runs.cancel(actor, active.id, 'kill'); } catch { /* already gone */ } }

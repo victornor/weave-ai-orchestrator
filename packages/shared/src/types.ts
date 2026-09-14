@@ -316,6 +316,20 @@ export interface UpgradeAnnouncement {
 }
 
 /**
+ * One worker turn a restart cut off and is resuming: the worker, its ticket and its run. Carried both
+ * in the notice's `interrupted` list and, for the subset the run limit holds back, in
+ * `queuedForCapacity` (VS-375).
+ */
+export interface RestartNoticeTurn {
+  runId: string;
+  agentId: string;
+  agentName: string;
+  agentKind: string;
+  ticketId: string | null;
+  ticketIdentifier: string | null;
+}
+
+/**
  * What a non-upgrade daemon restart tells one workspace (VS-339, `daemon-restart/restart-announcement`):
  * the payload of the weaver's `system` wake. The chat line the human gets is rendered from the same
  * record, so the two cannot disagree.
@@ -334,7 +348,13 @@ export interface RestartNotice {
   /** Start attempts that failed since the previous boot, with the last one's reason. */
   failedStarts: { count: number; lastAt: string | null; lastReason: string | null };
   /** The turns the restart cut off and is resuming: the worker, its ticket and its run. */
-  interrupted: Array<{ runId: string; agentId: string; agentName: string; agentKind: string; ticketId: string | null; ticketIdentifier: string | null }>;
+  interrupted: RestartNoticeTurn[];
+  /**
+   * VS-375: the subset of `interrupted` that cannot start on the first dispatch because the run limit
+   * is reached — the workspace's `maxConcurrentRuns` less the weaver's own slot, and a project's
+   * `maxWorkers` — in dispatch order. Empty when every interrupted turn can start at once.
+   */
+  queuedForCapacity: RestartNoticeTurn[];
 }
 /** One sub-step of a job: fixed for the job's kind, timed independently (VS-37, workspace-setup/setup-jobs). */
 export interface JobStep { id: string; label: string; state: E.JobStepState; startedAt: string | null; endedAt: string | null }

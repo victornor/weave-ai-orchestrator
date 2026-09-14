@@ -807,7 +807,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_worker_relaunch', scope: 'weaver', input: z.object({ id: z.string().min(1), note: z.string().min(1) }),
-    description: 'Relaunch a stuck worker with a fresh session, keeping its ticket and worktree.',
+    description: 'Relaunch a stuck worker with a fresh session, keeping its ticket and worktree. A worker whose turn a daemon restart cut off already has a queued resume: it is returned unchanged with `notice: "already queued; waiting for a run slot"` and nothing is started — do not treat that as a relaunch, and do not report a stall.',
     handler: (ctx, i) => svc(ctx).workers.relaunch(ctx.actor, i.id, i.note),
   },
   {

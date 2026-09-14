@@ -14,7 +14,7 @@
  */
 import { nowIso, type Db } from '@weave-ai/db';
 import { getLogger } from '@weave-ai/core';
-import type { RestartNotice } from '@weave-ai/shared';
+import type { RestartNotice, RestartNoticeTurn } from '@weave-ai/shared';
 import type { WorkspaceRuntime } from './types.js';
 import { clockTime } from './upgrade-announce.js';
 
@@ -48,13 +48,46 @@ export interface BootObservation {
 }
 
 /** A turn the previous shutdown cut off, named the way the weaver's wake carries it. */
-export interface InterruptedTurn {
-  runId: string;
-  agentId: string;
-  agentName: string;
-  agentKind: string;
-  ticketId: string | null;
-  ticketIdentifier: string | null;
+export interface InterruptedTurn extends RestartNoticeTurn {
+  /** The worker's project, so its `maxWorkers` cap can hold the turn back (VS-375). */
+  projectId: string | null;
+}
+
+/** The workspace limits that decide which interrupted turns wait for a slot (VS-375). */
+export interface CapacityLimits {
+  /** The workspace run limit (`defaults.maxConcurrentRuns`). */
+  runLimit: number;
+  /** Slots taken by wakers that are not these turns: the weaver's own restart wake. */
+  reserved: number;
+  /** `maxWorkers` by project id; a project with no row is uncapped. */
+  projectMaxWorkers: Map<string, number>;
+}
+
+/**
+ * VS-375: which interrupted turns cannot start on the first dispatch because a run limit is reached.
+ * `maxConcurrentRuns` bounds the whole workspace and the weaver's own restart wake takes one slot; a
+ * project's `maxWorkers` bounds its own turns. Turns are taken in dispatch order (the same order the
+ * dispatcher now uses), so the ones it starts first are not reported as waiting. Pure, so the notice
+ * is testable without a daemon.
+ */
+export function queuedForCapacity(turns: InterruptedTurn[], limits: CapacityLimits): InterruptedTurn[] {
+  const available = Math.max(0, limits.runLimit - limits.reserved);
+  const usedPerProject = new Map<string, number>();
+  const waiting: InterruptedTurn[] = [];
+  let used = 0;
+  for (const turn of turns) {
+    const cap = turn.projectId === null ? undefined : limits.projectMaxWorkers.get(turn.projectId);
+    const projectUsed = turn.projectId === null ? 0 : usedPerProject.get(turn.projectId) ?? 0;
+    const fitsGlobal = used < available;
+    const fitsProject = cap === undefined || projectUsed < cap;
+    if (fitsGlobal && fitsProject) {
+      used += 1;
+      if (turn.projectId !== null) usedPerProject.set(turn.projectId, projectUsed + 1);
+    } else {
+      waiting.push(turn);
+    }
+  }
+  return waiting;
 }
 
 function meta(db: Db, key: string): string | null {
@@ -122,7 +155,7 @@ export function interruptedTurns(db: Db, observation: BootObservation): Interrup
   const from = observation.previousBootAt ?? '';
   return db.all<InterruptedTurn>(
     `SELECT r.id AS runId, r.agent_id AS agentId, a.name AS agentName, a.kind AS agentKind,
-            r.ticket_id AS ticketId, t.identifier AS ticketIdentifier
+            a.project_id AS projectId, r.ticket_id AS ticketId, t.identifier AS ticketIdentifier
        FROM runs r
        JOIN agents a ON a.id = r.agent_id
        LEFT JOIN tickets t ON t.id = r.ticket_id
@@ -135,13 +168,15 @@ export function interruptedTurns(db: Db, observation: BootObservation): Interrup
 
 /**
  * The one short line the chat gets. It names when the daemon came back, clean or crash, how many
- * turns are resuming, and any failed start — and never claims more than the record holds.
+ * turns are resuming and how many of those are waiting for a run slot, and any failed start — and
+ * never claims more than the record holds.
  */
-export function restartNoticeText(notice: Pick<RestartNotice, 'bootAt' | 'clean' | 'failedStarts' | 'interrupted'>): string {
+export function restartNoticeText(notice: Pick<RestartNotice, 'bootAt' | 'clean' | 'failedStarts' | 'interrupted' | 'queuedForCapacity'>): string {
   const at = clockTime(notice.bootAt);
   const head = notice.clean ? `Back up at ${at} after a restart.` : `Back up at ${at} after an unclean shutdown.`;
   const n = notice.interrupted.length;
-  const turns = n === 0 ? '' : ` ${n} ${n === 1 ? 'turn is' : 'turns are'} resuming.`;
+  const queued = notice.queuedForCapacity.length;
+  const turns = n === 0 ? '' : ` ${n} ${n === 1 ? 'turn is' : 'turns are'} resuming${queued === 0 ? '' : `; ${queued} ${queued === 1 ? 'is' : 'are'} waiting for a run slot`}.`;
   const failed = notice.failedStarts.count === 0
     ? ''
     : ` ${notice.failedStarts.count} start ${notice.failedStarts.count === 1 ? 'attempt' : 'attempts'} failed before this one.`;
@@ -166,6 +201,20 @@ function claimAnnouncement(db: Db, bootAt: string): boolean {
 }
 
 /**
+ * The workspace's own run and project limits, as `queuedForCapacity` needs them. One slot is reserved
+ * for the weaver, whose restart wake this same announcement enqueues.
+ */
+function capacityLimitsFor(w: WorkspaceRuntime, turns: InterruptedTurn[]): CapacityLimits {
+  const projectIds = new Set(turns.map((t) => t.projectId).filter((id): id is string => id !== null));
+  const projectMaxWorkers = new Map<string, number>();
+  for (const projectId of projectIds) {
+    const row = w.ctx.db.get<{ maxWorkers: number }>('SELECT max_workers AS maxWorkers FROM projects WHERE id = ?', [projectId]);
+    if (row) projectMaxWorkers.set(projectId, row.maxWorkers);
+  }
+  return { runLimit: w.ctx.config.defaults.maxConcurrentRuns ?? 6, reserved: 1, projectMaxWorkers };
+}
+
+/**
  * Tell each workspace. Skipped entirely on the first boot (there is nothing to announce) and on an
  * upgrade restart, which the release comparison upstream has already excluded. Nothing here is fatal
  * to the boot: one unreachable workspace must not stop the others.
@@ -180,6 +229,7 @@ export async function announceRestart(deps: {
   if (!claimAnnouncement(deps.db, observation.bootAt)) return;
   for (const w of uniqueWorkspaces(deps.workspaces)) {
     try {
+      const interrupted = interruptedTurns(w.ctx.db, observation);
       const notice: RestartNotice = {
         kind: 'daemon.restarted',
         bootAt: observation.bootAt,
@@ -188,7 +238,8 @@ export async function announceRestart(deps: {
         shutdownReason: observation.shutdownReason,
         clean: observation.clean,
         failedStarts: observation.failedStarts,
-        interrupted: interruptedTurns(w.ctx.db, observation),
+        interrupted,
+        queuedForCapacity: queuedForCapacity(interrupted, capacityLimitsFor(w, interrupted)),
       };
       await w.services.threads.notifyHuman({ kind: 'system', id: null }, { text: restartNoticeText(notice) });
       const weaver = await w.services.workers.ensureConductor();

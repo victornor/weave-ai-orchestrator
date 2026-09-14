@@ -254,7 +254,7 @@ function OptionRow({ option, runtimes, open, onToggle, onSave, onRemove }: {
         </button>
       </div>
       {open ? (
-        <div className="flex flex-col gap-3 border-t border-line-1 p-3">
+        <div className="v2-anim-fade flex flex-col gap-3 border-t border-line-1 p-3">
           <div className="flex flex-col gap-1">
             <span className="ac-label">When the weaver should pick this</span>
             <textarea aria-label={`${option.id} description`} className={cx(inputCx, 'h-16 py-1.5')} value={draft}

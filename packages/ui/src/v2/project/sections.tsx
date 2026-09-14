@@ -70,7 +70,7 @@ export function V2ProjectSection({
         </button>
       </div>
       {open ? (
-        <div id={bodyId} className="border-t border-line-1 px-3.5 py-3">
+        <div id={bodyId} className="v2-anim-fade border-t border-line-1 px-3.5 py-3">
           {children}
         </div>
       ) : null}

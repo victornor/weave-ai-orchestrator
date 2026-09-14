@@ -91,7 +91,9 @@ export function ToastProvider({ children }: { children: ReactNode }): React.Reac
             key={t.id}
             className={cx(
               'pointer-events-auto w-full max-w-sm rounded-r6 border border-line-2 bg-bg-2 px-3.5 py-2.5 shadow-sheet',
-              'motion-safe:animate-[ac-rise_var(--dur-panel)_var(--ease)]',
+              // V2 uses its own motion tokens; the container mirrors `.v2-root` above (VS-367), so
+              // `--v2-dur-*` is in scope here too. V1 keeps `ac-rise` on its own duration (VS-427).
+              v2.theme ? 'v2-anim-rise' : 'motion-safe:animate-[ac-rise_var(--dur-panel)_var(--ease)]',
             )}
             role="status"
           >

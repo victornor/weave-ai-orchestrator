@@ -44,9 +44,9 @@ export function SearchPanel({
   const query = q.trim();
 
   return (
-    <div className="absolute inset-0 z-30 flex items-start justify-center p-4" role="presentation">
+    <div className="v2-anim-fade absolute inset-0 z-30 flex items-start justify-center p-4" role="presentation">
       <button type="button" aria-label="Close search" onClick={onClose} className="absolute inset-0 bg-(--overlay)" />
-      <div role="dialog" aria-modal="true" aria-label="Search this conversation" className="relative w-full max-w-xl overflow-hidden rounded-r6 border border-line-3 bg-bg-1">
+      <div role="dialog" aria-modal="true" aria-label="Search this conversation" className="v2-anim-pop relative w-full max-w-xl overflow-hidden rounded-r6 border border-line-3 bg-bg-1">
         <div className="flex items-center gap-2.5 border-b border-line-1 px-4 py-3">
           <span className="ac-mono text-ui text-text-3" aria-hidden>⌕</span>
           <input

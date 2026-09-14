@@ -60,6 +60,9 @@ export interface V2DecisionCardProps {
   onAnswer: (a: V2Answer) => void;
   /** The chat pane's narrow-pane variant. */
   narrow?: boolean;
+  /** Held for one animation while it leaves the list (VS-427's `useExitPresence`), so its removal
+   *  animates out instead of vanishing; an answered card drops with `status: 'open'`. */
+  exiting?: boolean;
   className?: string;
 }
 
@@ -276,6 +279,7 @@ export function V2DecisionCard({
   plan,
   onAnswer,
   narrow = false,
+  exiting = false,
   className,
 }: V2DecisionCardProps): React.ReactElement {
   const [watchOpen, setWatchOpen] = useState(false);
@@ -367,6 +371,8 @@ export function V2DecisionCard({
         // faint `--line-1`, so stacked cards do not blur together (VS-414).
         'v2-card shrink-0 overflow-hidden',
         destructive ? 'border-blocked/35' : 'border-line-2',
+        // Enter on mount, leave when the presence hook holds it (VS-427).
+        exiting ? 'v2-anim-exit' : 'v2-anim-rise',
         className,
       )}
       aria-label={`${label}: ${title}`}
@@ -431,7 +437,7 @@ export function V2DecisionCard({
               </button>
             </div>
             {watchOpen ? (
-              <div className="mb-2">
+              <div className="v2-anim-fade mb-2">
                 <WorkerFeed agentId={askedBy} runId={decision.askedInRunId} ws={ws ?? undefined} compact resizable label={`Live feed for ${ticketIdentifier ?? 'the worker'}`} />
               </div>
             ) : null}

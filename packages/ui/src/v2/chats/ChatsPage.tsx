@@ -283,7 +283,7 @@ export function V2ChatsScreen(): React.ReactElement {
                             <div
                               role="menu"
                               aria-label={`Reorder ${name}`}
-                              className="absolute top-full right-0 z-20 mt-px flex min-w-32 flex-col rounded-r4 border border-line-1 bg-bg-0 py-1 shadow-sheet"
+                              className="v2-anim-menu absolute top-full right-0 z-20 mt-px flex min-w-32 flex-col rounded-r4 border border-line-1 bg-bg-0 py-1 shadow-sheet"
                             >
                               <button
                                 type="button"

@@ -95,7 +95,7 @@ export function IncidentsBody(): React.ReactElement {
               const open = i.resolvedAt === null;
               const isOpen = expanded.has(i.id);
               return (
-                <div key={i.id} className="v2-card overflow-hidden" data-v2-incident={i.id}>
+                <div key={i.id} className="v2-anim-rise v2-card overflow-hidden" data-v2-incident={i.id}>
                   <button type="button" onClick={() => toggle(i.id)} className="flex w-full items-start gap-3 px-4 py-3.5 text-left">
                     <span
                       className={cx('mt-1 size-2 flex-none rounded-pill', open ? 'bg-blocked motion-safe:animate-[ac-pulse_1.6s_ease-in-out_infinite]' : 'bg-idle')}
@@ -115,7 +115,7 @@ export function IncidentsBody(): React.ReactElement {
                     </span>
                   </button>
                   {isOpen ? (
-                    <div className="px-4 pb-4" data-v2-incident-detail>
+                    <div className="v2-anim-fade px-4 pb-4" data-v2-incident-detail>
                       <div className="mb-3.5 h-px bg-line-1" />
                       <div className="mb-1.5 text-meta leading-relaxed text-text-body" data-v2-incident-what>
                         {i.whatFailed}

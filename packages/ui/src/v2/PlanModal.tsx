@@ -136,7 +136,7 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
     <div className="fixed inset-0 z-50 flex flex-col md:items-center md:justify-center md:p-6" role="dialog" aria-modal="true" aria-label="Plan">
       <button type="button" className="absolute inset-0 hidden md:block" style={{ background: 'var(--overlay)' }} aria-label="Close" onClick={onClose} />
       <div
-        className="relative flex h-full w-full flex-col overflow-hidden border-line-2 bg-bg-1 md:h-[85vh] md:max-h-[760px] md:w-[960px] md:rounded-r6 md:border"
+        className="v2-anim-pop relative flex h-full w-full flex-col overflow-hidden border-line-2 bg-bg-1 md:h-[85vh] md:max-h-[760px] md:w-[960px] md:rounded-r6 md:border"
         style={{ boxShadow: 'var(--elev-sheet)' }}
       >
         <header className="flex flex-none items-center gap-2 border-b border-line-1 px-3.5 py-2.5">

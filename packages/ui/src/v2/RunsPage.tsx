@@ -282,7 +282,7 @@ export function RunsBody(): React.ReactElement {
             {/* phone: one card per run */}
             <ol className="md:hidden" data-v2-runs-phone>
               {rows.map((r) => (
-                <li key={r.id}>
+                <li key={r.id} className="v2-anim-rise">
                   <button type="button" onClick={() => open(r)} className="flex w-full items-center gap-3 border-b border-line-1 px-4 py-3 text-left">
                     <StatusGlyph status={RUN_UI[r.status]} size="sm" pulse={r.status === 'running'} />
                     <span className="min-w-0 flex-1">

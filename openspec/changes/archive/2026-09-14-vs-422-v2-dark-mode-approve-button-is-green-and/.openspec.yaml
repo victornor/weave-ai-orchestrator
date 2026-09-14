@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-14
+goal: The V2 dark-mode Approve button is a near-white fill with dark ink when
+  ready and a clearly greyer, muted fill when approval is blocked; light mode is
+  unchanged
+skip_specs: true

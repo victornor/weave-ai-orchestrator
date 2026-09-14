@@ -312,7 +312,7 @@ describe('the approve call to action (VS-418)', () => {
     expect(approve).toBeEnabled();
     expect(approve).toHaveAttribute('data-variant', 'primary');
     expect(approve).toHaveAttribute('data-approve', 'ready');
-    expect(screen.getByText('Weaver reviewed — no concerns')).toHaveClass('text-approve');
+    expect(screen.getByText('Weaver reviewed — no concerns')).toHaveClass('text-review-clean');
   });
 
   it('mutes the Approve button and warns the review while the weaver holds concerns', () => {

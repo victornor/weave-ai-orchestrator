@@ -334,7 +334,7 @@ export function V2DecisionCard({
             {reviewTone === 'concerns' ? (
               <p className="text-micro font-medium text-blocked">{review.line}</p>
             ) : reviewTone === 'looked' || reviewTone === 'after' ? (
-              <p className="flex items-center gap-1 text-micro font-medium text-approve">
+              <p className="flex items-center gap-1 text-micro font-medium text-review-clean">
                 <span aria-hidden>✓</span>
                 {review.line}
               </p>

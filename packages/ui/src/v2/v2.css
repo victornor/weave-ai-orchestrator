@@ -43,11 +43,18 @@
   --accent-edge: rgb(61 65 72 / 0.34);
   --focus-ring: rgb(61 65 72 / 0.18);
 
-  /* The one affirmative action hue (VS-418, captain): an Approve that is actually available is the
-     card's call to action, so it gets a filled green the greyscale accent cannot give it. On dark,
-     a bright fill carries a near-black ink. */
-  --approve: #34d399;
-  --approve-ink: #041608;
+  /* The one affirmative action fill (VS-418; dark values VS-422): an Approve that is actually
+     available is the card's call to action. On dark a near-white fill (the theme's strongest ink)
+     under near-black ink makes it the most prominent control on the card (≈18:1); a blocked one
+     drops to a mid grey with muted ink. */
+  --approve: #f2f3f5;
+  --approve-ink: #0b0b0d;
+  --approve-blocked: #3d4148;
+  --approve-blocked-ink: #c6cad1;
+
+  /* The weaver's clean-review green (VS-418). Split out of --approve in VS-422 so the near-white
+     dark Approve fill cannot recolour the "no concerns" line. */
+  --review-clean: #34d399;
 
   /* Hue only where work is live — working amber, needs-you indigo, blocked red. done / merging /
      idle stay greyscale (HANDOFF §2). stalled and failed keep the design's base values, which
@@ -119,9 +126,10 @@
   --focus-ring: rgb(61 65 72 / 0.18);
 
   /* The available Approve fill in light: a deep green with white ink (≥4.5:1 both as text on paper
-     and as a fill under white). */
+     and as a fill under white). A blocked Approve keeps the neutral recipe, so it needs no token. */
   --approve: #15803d;
   --approve-ink: #ffffff;
+  --review-clean: #15803d;
 
   --status-idle: #6b7078;
   --status-working: #8a5e14;
@@ -312,6 +320,12 @@
 .v2-button[data-variant='primary']:hover {
   background: var(--approve);
   filter: brightness(1.08);
+}
+/* A blocked Approve (VS-422): dark only, so light keeps the neutral disabled recipe. Greyer
+   than the near-white ready fill and still muted, it cannot be mistaken for the call to action. */
+.v2-root:not([data-theme='light']) .v2-button[data-approve='blocked'] {
+  background: var(--approve-blocked);
+  color: var(--approve-blocked-ink);
 }
 
 /* Shared input recipe (VS-385), lifted from the settings-density input used across Workspace,

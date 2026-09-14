@@ -154,3 +154,76 @@ describe('the V2 Needs you screen', () => {
     expect(screen.getByText(/an agent/)).toBeInTheDocument();
   });
 });
+
+describe('the V2 Needs you Held filter', () => {
+  it('shows only the decisions the weaver marked with concerns', () => {
+    state.decisions = [
+      makeDecision({ id: 'd1', workspaceId: 'ws1', kind: 'merge_approval', title: 'Held merge', weaverReviewStatus: 'concerns' }),
+      makeDecision({ id: 'd2', workspaceId: 'ws1', kind: 'plan_approval', title: 'Clean plan', weaverReviewStatus: 'looked' }),
+    ];
+    render(<V2NeedsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Held' }));
+    expect(screen.getByText('Held merge')).toBeInTheDocument();
+    expect(screen.queryByText('Clean plan')).toBeNull();
+    expect(screen.getByText('1 waiting')).toBeInTheDocument();
+  });
+
+  it('combines with a workspace scope chip, including a decision carrying the internal id', () => {
+    state.decisions = [
+      makeDecision({ id: 'd1', workspaceId: 'ulid-ws1', kind: 'merge_approval', title: 'Acme held', weaverReviewStatus: 'concerns' }),
+      makeDecision({ id: 'd2', workspaceId: 'ws2', kind: 'merge_approval', title: 'Fernwood held', weaverReviewStatus: 'concerns' }),
+    ];
+    render(<V2NeedsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Held' }));
+    expect(screen.getByText('Acme held')).toBeInTheDocument();
+    expect(screen.getByText('Fernwood held')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
+    expect(screen.getByText('Acme held')).toBeInTheDocument();
+    expect(screen.queryByText('Fernwood held')).toBeNull();
+  });
+
+  it('is mutually exclusive with the kind chips, in both directions', () => {
+    state.decisions = [
+      makeDecision({ id: 'd1', workspaceId: 'ws1', kind: 'merge_approval', title: 'Held merge', weaverReviewStatus: 'concerns' }),
+      makeDecision({ id: 'd2', workspaceId: 'ws1', kind: 'plan_approval', title: 'Held plan', weaverReviewStatus: 'concerns' }),
+      makeDecision({ id: 'd3', workspaceId: 'ws1', kind: 'plan_approval', title: 'Clean plan', weaverReviewStatus: 'looked' }),
+    ];
+    render(<V2NeedsPage />);
+    const held = screen.getByRole('button', { name: 'Held' });
+    const plans = screen.getByRole('button', { name: 'Plans' });
+
+    fireEvent.click(held);
+    expect(held).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText('Clean plan')).toBeNull();
+
+    fireEvent.click(plans);
+    expect(plans).toHaveAttribute('aria-pressed', 'true');
+    expect(held).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText('Held plan')).toBeInTheDocument();
+    expect(screen.queryByText('Held merge')).toBeNull();
+
+    fireEvent.click(held);
+    expect(held).toHaveAttribute('aria-pressed', 'true');
+    expect(plans).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText('Held plan')).toBeInTheDocument();
+    expect(screen.queryByText('Clean plan')).toBeNull();
+  });
+
+  it('shows a held empty state, and keeps the chip visible, when nothing is held', () => {
+    state.decisions = [
+      makeDecision({ id: 'd1', workspaceId: 'ws1', kind: 'plan_approval', title: 'Clean plan', weaverReviewStatus: 'looked' }),
+    ];
+    render(<V2NeedsPage />);
+    expect(screen.getByRole('button', { name: 'Held' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Held' }));
+    expect(screen.getByText('Nothing is held.')).toBeInTheDocument();
+    expect(screen.queryByText('Clean plan')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Held' })).toBeInTheDocument();
+  });
+
+  it('keeps the Held chip visible with no decisions at all', () => {
+    state.decisions = [];
+    render(<V2NeedsPage />);
+    expect(screen.getByRole('button', { name: 'Held' })).toBeInTheDocument();
+  });
+});

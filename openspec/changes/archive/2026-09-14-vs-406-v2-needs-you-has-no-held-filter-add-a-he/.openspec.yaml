@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "V2 Needs you gets the design's Held filter: a chip after the scope chips
+  that shows only decisions the weaver marked with concerns"
+skip_specs: true

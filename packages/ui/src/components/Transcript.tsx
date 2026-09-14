@@ -349,7 +349,7 @@ export function DiffBlock({ diff }: { diff: string }): React.ReactElement {
           key={i}
           className={cx(
             'px-2.5',
-            line.startsWith('+') ? 'bg-done/10 text-done' : line.startsWith('-') ? 'bg-failed/10 text-failed' : 'text-text-4',
+            line.startsWith('+') ? 'bg-diff-add-bg text-diff-add-fg' : line.startsWith('-') ? 'bg-diff-remove-bg text-diff-remove-fg' : 'text-text-4',
           )}
         >
           {line || ' '}

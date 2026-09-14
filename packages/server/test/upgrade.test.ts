@@ -452,6 +452,24 @@ describe('handing off the restart', () => {
     expect(switches).toEqual([TO_RELEASE, FROM_RELEASE]);
     expect(a.starts).toBe(1);
   });
+
+  it('refuses before building when the restart preflight fails, and resumes dispatch (VS-407)', async () => {
+    const a = fx.addWorkspace('ws1');
+    let built = 0;
+    let switched = 0;
+    const svc = fx.service({
+      restartPreflight: () => ({ ok: false, message: 'refusing to upgrade: pid 7 is holding the listen address' }),
+      build: () => { built += 1; return { path: '/rel/new', sha: 'n' }; },
+      switchTo: () => { switched += 1; return { previous: null }; },
+    });
+    svc.request({ requestedBy: 'op1' });
+    await svc.settled();
+    expect(row(svc)).toMatchObject({ state: 'failed', reason: 'restart_failed' });
+    expect(row(svc).message).toContain('holding the listen address');
+    expect(built).toBe(0);
+    expect(switched).toBe(0);
+    expect(a.starts).toBe(1);
+  });
 });
 
 // ---------- resuming dispatch if the restart never replaces this process (VS-316, Decision 6) ----------
@@ -556,6 +574,24 @@ describe('reconciling at startup', () => {
     const svc = fx.service();
     svc.reconcile();
     expect(state(svc)).toBe('completed');
+  });
+
+  it('names what restarted the daemon in an abandoned record (VS-407)', () => {
+    fx.addWorkspace('ws1');
+    seed({ state: 'building' });
+    const svc = fx.service({ restartCause: () => 'the unit weave-ai.service is restart-looping (ActiveState=activating, NRestarts=612)' });
+    svc.reconcile();
+    expect(row(svc)).toMatchObject({ state: 'failed', reason: 'abandoned' });
+    expect(row(svc).message).toContain('restart-looping');
+    expect(row(svc).message).toContain('NRestarts=612');
+  });
+
+  it('leaves the bare abandoned message when the restart cause is unknown (VS-407)', () => {
+    fx.addWorkspace('ws1');
+    seed({ state: 'building' });
+    const svc = fx.service({ restartCause: () => null });
+    svc.reconcile();
+    expect(row(svc).message).toBe('the daemon restarted while the upgrade was building');
   });
 
   // An upgrade is recorded daemon-level, but the changelog (PLAN §13.6) is per workspace, so a

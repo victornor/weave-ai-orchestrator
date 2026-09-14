@@ -7,7 +7,7 @@ import { delimiter, join } from 'node:path';
 import { ApiError } from '../api.js';
 import { emit, style, write } from '../output.js';
 import { contextsPath, currentContext } from '../contexts.js';
-import { ensureUnitRestartAlways, isRunning, readPid } from '../daemon.js';
+import { ensureUnitRestartAlways, isRunning, localDaemonCheck, readPid, restartSafetyChecks } from '../daemon.js';
 import { cliShimTarget, dataHome, readCliShimTarget, userBinDir } from '../release.js';
 import { promptConfirm } from '../prompt.js';
 import { isInstallable, planInstalls, type InstallStep, type InstallableId } from '../install.js';
@@ -236,6 +236,17 @@ export function register(program: Command): void {
             ok: true,
             detail: rewritten.changed ? `rewrote ${rewritten.unit} to Restart=always` : `${rewritten.unit} restarts on any exit`,
           });
+        }
+        // VS-407: correct the "local daemon process" reading for a unit-managed daemon and add the
+        // out-of-service / restart-loop checks. Best-effort: a host command that cannot run degrades to
+        // a warning rather than crashing the whole diagnostic.
+        try {
+          const local = localDaemonCheck();
+          const idx = checks.findIndex((c) => c.name === 'local daemon process');
+          if (idx >= 0) checks[idx] = local; else checks.push(local);
+          checks.push(...restartSafetyChecks());
+        } catch (e) {
+          checks.push({ name: 'daemon host checks', ok: null, detail: `could not read the installed unit: ${(e as Error).message}`, fix: 'check `systemctl --user status weave-ai.service` by hand' });
         }
       }
 

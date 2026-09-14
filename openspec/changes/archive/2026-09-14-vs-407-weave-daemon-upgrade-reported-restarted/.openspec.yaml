@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: weave daemon upgrade must detect an out-of-service daemon on its port and
+  confirm the new release is running, instead of silently leaving the old one
+  live.

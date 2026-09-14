@@ -7,8 +7,8 @@ import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { join } from 'node:path';
 import { configHome } from '../contexts.js';
-import { LAUNCHD_LABEL, followLog, installLaunchdAgent, installService, isRunning, logFile, pidFile, readPid, realRun, renderLaunchdPlist, renderServiceUnit, resolveServerBin, startDaemon, startDaemonService, stopDaemon, stopDaemonService, systemdMainPid, tailLog } from '../daemon.js';
-import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, releaseStamp, resolveInstalledUnit, resolveWorkspaceStateDir, switchRelease, writeUserShims, type ShimWriteResult } from '../release.js';
+import { followLog, installLaunchdAgent, installService, isRunning, listenPort, logFile, pidFile, preflightRestart, readPid, realRun, reconcileDetachedDaemon, renderLaunchdPlist, renderServiceUnit, resolveServerBin, startDaemon, startDaemonService, stopDaemon, stopDaemonService, systemdMainPid, tailLog, verifyRestart, LAUNCHD_LABEL, type RestartTarget } from '../daemon.js';
+import { buildRelease, currentLink, findPortHolder, listReleases, previousLink, pruneReleases, readLink, releaseSha, releaseStamp, resolveInstalledUnit, resolveWorkspaceStateDir, switchRelease, writeUserShims, type ShimWriteResult } from '../release.js';
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { AC_ENV, isTerminalUpgrade, type Upgrade } from '@weave-ai/shared';
@@ -84,9 +84,14 @@ export function register(program: Command): void {
     .option('--listen <addr>', 'override the listen address, e.g. 127.0.0.1:7433')
     .action(async (opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const existing = readPid();
+      // VS-407: a detached daemon with a unit installed is handed over, not answered "already running".
       if (isRunning(existing)) {
-        emit({ started: false, pid: existing, reason: 'already running' }, () => write(`${style.dim('already running')} pid ${existing}`));
-        return;
+        const handover = await reconcileDetachedDaemon();
+        if (!handover.reconciled) {
+          emit({ started: false, pid: existing, reason: 'already running' }, () => write(`${style.dim('already running')} pid ${existing}`));
+          return;
+        }
+        emit({ started: false, handedOver: handover.pid, unit: resolveInstalledUnit()?.name ?? null }, () => write(`${style.dim('handover:')} ${handover.reason}; starting the unit`));
       }
       // VS-376: with a unit installed the daemon is a service — start it through systemd, so it
       // survives this terminal and `systemctl` can see it. A foreground debug run never uses the unit.
@@ -126,6 +131,10 @@ export function register(program: Command): void {
       // already give running turns before signalling the process — a plain stop used to skip this
       // entirely and go straight to `stopDaemon()`'s SIGTERM.
       const { interrupted } = await drainViaHttp(command, Number.parseInt(String(opts['drainTimeout'] ?? '180'), 10));
+      // VS-407: `daemon.pid` may name a detached daemon systemd cannot touch; hand it over by PID
+      // before asking the unit to stop, or the unit's stop never frees the port.
+      const handover = await reconcileDetachedDaemon();
+      if (handover.reconciled) write(style.dim(`handover: ${handover.reason}`));
       // VS-376: a bare SIGTERM to the pid would be restarted by `Restart=always`; when the daemon is
       // a unit, stop it through systemd so the stop is deliberate and sticks.
       const service = stopDaemonService();
@@ -149,7 +158,7 @@ export function register(program: Command): void {
     .option('--drain-timeout <sec>', 'seconds to wait for running turns', '900')
     .action(async (opts: Record<string, string>, command: Command) => run(async () => {
       if (process.env[AC_ENV.RUN_TOKEN]) throw new ApiError('forbidden', 'not available inside a worker run', 403);
-      const result = await drainAndRestart(command, Number.parseInt(String(opts['drainTimeout'] ?? '900'), 10));
+      const result = await drainAndRestart(command, Number.parseInt(String(opts['drainTimeout'] ?? '900'), 10), targetOf(currentLink()));
       emit(result, () => write(`${style.ok('restarted')} ${result.how} · ${result.version ?? '?'}`));
     }));
 
@@ -305,6 +314,10 @@ worker run (AC_RUN_TOKEN set): agents propose upgrades through tickets, humans r
       const drainTimeout = Number.parseInt(String(opts['drainTimeout'] ?? cfg.upgrade?.drainTimeoutSec ?? 900), 10);
       const log = (line: string) => write(style.dim(line));
 
+      // VS-407: refuse before building when the restart cannot take — a refused upgrade should not
+      // spend a build, and a detached daemon is handed over here rather than after the switch.
+      await assertPreflight();
+
       write(`${style.ok('building')} ${from} @ ${ref}`);
       const built = buildRelease({ from, ref, test: opts['test'] === true, log });
       write(`${style.ok('built')} ${built.path}`);
@@ -327,7 +340,7 @@ worker run (AC_RUN_TOKEN set): agents propose upgrades through tickets, humans r
         });
         return;
       }
-      const result = await drainAndRestart(command, drainTimeout);
+      const result = await drainAndRestart(command, drainTimeout, { release: built.path, sha: built.sha });
       emit({ release: built.path, sha: built.sha, restarted: true, backups, ...result, shim }, () => {
         write(`${style.ok('restarted')} ${result.how} · ${result.version ?? '?'}`);
         if (result.interrupted.length) write(style.warn(`${result.interrupted.length} run(s) were still going and got interrupted; they resume on their own`));
@@ -416,8 +429,10 @@ when the daemon is not answering and has to be replaced from here.`)
       if (process.env[AC_ENV.RUN_TOKEN]) throw new ApiError('forbidden', 'not available inside a worker run', 403);
       const prev = readLink(previousLink());
       if (!prev || !existsSync(prev)) throw new ApiError('not_found', 'no previous release to roll back to', 404);
+      // VS-407: refuse before the symlink swing when the restart cannot take.
+      await assertPreflight();
       const switched = switchRelease(prev);
-      const result = await drainAndRestart(command, Number.parseInt(String(opts['drainTimeout'] ?? '900'), 10));
+      const result = await drainAndRestart(command, Number.parseInt(String(opts['drainTimeout'] ?? '900'), 10), targetOf(prev));
       emit({ release: prev, wasCurrent: switched.previous, ...result }, () => write(`${style.ok('rolled back')} current -> ${prev} · ${result.how}`));
     }));
 
@@ -577,24 +592,45 @@ export function backupDatabases(): string[] {
 /**
  * VS-262: `POST /api/daemon/drain` before a kill signal, shared by `daemon stop` and
  * `drainAndRestart` — the drain-before-kill sequence every operator-initiated stop of the daemon
- * goes through. A failure here (daemon unreachable, already down) is swallowed rather than blocking
- * the stop/restart that follows.
+ * goes through. VS-407: in `strict` mode (the restart path) a drain that fails while something is
+ * listening on the daemon's own address is refused instead of skipped; only a genuinely empty address
+ * is skipped.
  */
-async function drainViaHttp(command: Command, drainTimeoutSec: number): Promise<{ interrupted: Array<{ workspace: string; runId: string }>; client: Awaited<ReturnType<typeof session>>['client'] | null }> {
+async function drainViaHttp(command: Command, drainTimeoutSec: number, o: { strict?: boolean } = {}): Promise<{ interrupted: Array<{ workspace: string; runId: string }>; client: Awaited<ReturnType<typeof session>>['client'] | null }> {
   try {
     const { client } = await session(command, { workspace: 'none' });
     write(style.dim(`draining (up to ${drainTimeoutSec}s for running turns) …`));
     const d = await client.post<{ drained: boolean; running: Array<{ workspace: string; runId: string }> }>('/api/daemon/drain', { timeoutSec: drainTimeoutSec });
     return { interrupted: d.running, client };
   } catch (e) {
-    write(style.warn(`drain skipped: ${(e as Error).message}`));
+    const port = listenPort();
+    const holder = port === null ? null : findPortHolder(port, realRun);
+    const message = (e as Error).message;
+    if (o.strict && holder) {
+      throw new ApiError('conflict', `refusing to restart: the drain could not reach the daemon (${message}) but pid ${holder.pid}${holder.command ? ` (${holder.command})` : ''} is still listening on the daemon's address`, 409, { pid: holder.pid });
+    }
+    write(style.warn(`drain skipped: ${message}${holder ? '' : ' (nothing is listening)'}`));
     return { interrupted: [], client: null };
   }
 }
 
-async function drainAndRestart(command: Command, drainTimeoutSec: number): Promise<{ how: string; version: string | null; interrupted: Array<{ workspace: string; runId: string }> }> {
-  const { interrupted, client } = await drainViaHttp(command, drainTimeoutSec);
+/** The release currently named by a link, as a restart target. */
+function targetOf(release: string | null): RestartTarget {
+  return { release: release ?? '', sha: release ? releaseSha(release) : null };
+}
+
+/** VS-407: refuse (and hand over a detached daemon) before any restart the CLI performs. */
+async function assertPreflight(): Promise<void> {
+  const verdict = await preflightRestart();
+  if (!verdict.ok) throw new ApiError('conflict', verdict.message, 409, { pid: verdict.pid });
+  if (verdict.handover.reconciled) write(style.dim(`handover: ${verdict.handover.reason}`));
+}
+
+async function drainAndRestart(command: Command, drainTimeoutSec: number, target: RestartTarget): Promise<{ how: string; version: string | null; interrupted: Array<{ workspace: string; runId: string }> }> {
+  await assertPreflight();
+  const { interrupted, client } = await drainViaHttp(command, drainTimeoutSec, { strict: true });
   let how: string;
+  let startedPid: number | null = null;
   // VS-376: restart through whichever unit is actually installed, pre-rename name included. Testing
   // only the current-name file would fall through to a bare kill+spawn, which `Restart=always` would
   // then restart from under us.
@@ -609,21 +645,13 @@ async function drainAndRestart(command: Command, drainTimeoutSec: number): Promi
     how = `systemctl --user restart ${unit.name}`;
   } else {
     await stopDaemon();
-    const started = startDaemon({});
-    how = `restarted pid ${started.pid}`;
+    startedPid = startDaemon({}).pid;
+    how = `restarted pid ${startedPid ?? '?'}`;
   }
-  // Wait for the new daemon to answer.
-  let version: string | null = null;
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      const { client: fresh } = await session(command, { workspace: 'none' });
-      const h = await fresh.get<Health>('/api/health');
-      version = h.version ?? null;
-      break;
-    } catch { await new Promise((r) => setTimeout(r, 500)); }
-  }
-  return { how, version, interrupted };
+  // VS-407: not "restarted" until the target release is actually serving from the unit.
+  const verdict = await verifyRestart({ unit, target, startedPid });
+  if (!verdict.ok) throw new ApiError('internal', verdict.message, 500);
+  return { how, version: verdict.version, interrupted };
 }
 
 // ---------- the deferred upgrade's client side ----------

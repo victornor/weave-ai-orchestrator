@@ -134,6 +134,15 @@ describe('driveRestart', () => {
     const host = io({ restart: async () => { throw new Error('systemctl --user restart weave-ai.service exited 5: Unit not found.'); } });
     await expect(driveRestart(TARGET, host)).rejects.toThrow('Unit not found');
   });
+
+  it('fails fast on a crash-looping unit and rolls back with that cause (VS-407)', async () => {
+    let n = 0;
+    const host = io({ probe: async () => null, unitState: async () => ({ activeState: 'activating', nRestarts: (n += 1) }) });
+    const verdict = await driveRestart(TARGET, host);
+    expect(verdict).toMatchObject({ outcome: 'rolled_back' });
+    expect((verdict as { message: string }).message).toContain('crash-looping');
+    expect(host.restarts).toBe(2); // the restart, then the rollback restart
+  });
 });
 
 describe('recordVerdict', () => {
@@ -271,6 +280,24 @@ describe('restartCommand (VS-316)', () => {
     const run: RunCommand = () => noopCommand({ status: 1 });
     const outcome = restartCommand('/cfg', { run, readCgroup: () => { throw new Error('no /proc'); } });
     await expect(outcome.confirmsReplacement(550308)).resolves.toBeNull();
+  });
+
+  it('refuses a detached daemon holding the listen address without signalling the unit (VS-407)', async () => {
+    const dir = scratchUnitDir();
+    writeFileSync(join(dir, SERVICE_NAME), '[Service]\n');
+    const configDir = mkdtempSync(join(tmpdir(), 'ac-runner-cfg-'));
+    tmps.push(configDir);
+    writeFileSync(join(configDir, 'daemon.json'), JSON.stringify({ loopbackUrl: 'http://127.0.0.1:7433/', pid: 4242 }));
+    writeFileSync(join(configDir, 'daemon.pid'), '4242');
+    const calls: string[][] = [];
+    const run: RunCommand = (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'ss') return noopCommand({ stdout: 'LISTEN 0 1 0.0.0.0:7433 0.0.0.0:* users:(("node",pid=4242,fd=1))\n' });
+      return noopCommand();
+    };
+    const outcome = restartCommand(configDir, { run, readCgroup: () => '', cmdline: () => '/x/packages/server/dist/bin.js\0', alive: () => true });
+    await expect(outcome.run()).rejects.toThrow(/refusing to restart/);
+    expect(calls.some((c) => c.includes('restart'))).toBe(false);
   });
 
   it('never starts a second daemon while something still answers, on the no-unit fallback', async () => {

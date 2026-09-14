@@ -306,6 +306,29 @@ export function resolveInstalledUnit(): InstalledUnit | null {
   return existsSync(current) ? { name: SERVICE_NAME, path: current, legacy: false } : null;
 }
 
+// ---------- the VS-388 test guard ----------
+
+/**
+ * VS-388: the vitest setup sets this. A test run must never reach the host's user systemd — a single
+ * `systemctl --user stop weave-ai.service` from `pnpm test` stops the live daemon. `realRun` refuses
+ * to spawn the commands below while it is set, so a test that accidentally reaches a real runner fails
+ * loudly instead of touching production.
+ */
+export const TEST_GUARD_ENV = 'AC_TEST_GUARD';
+
+/** Commands that reach (or can take down) the host's service manager or kill live processes. */
+const HOST_LIFECYCLE_COMMANDS = new Set(['systemctl', 'loginctl', 'launchctl', 'systemd-run', 'pkill', 'killall']);
+
+/** Throws when the test guard is set and `cmd` would reach the host. A no-op in production. */
+export function assertHostCommandAllowed(cmd: string): void {
+  if (process.env[TEST_GUARD_ENV] && HOST_LIFECYCLE_COMMANDS.has(cmd)) {
+    throw new Error(
+      `AC_TEST_GUARD: refusing to run \`${cmd}\` from a test — it would reach the host's installed unit and can stop the live daemon. ` +
+      'Inject a fake RunCommand/HostIo, or isolate XDG_CONFIG_HOME so no unit is found.',
+    );
+  }
+}
+
 export interface InstalledLaunchdAgent {
   label: string;
   path: string;

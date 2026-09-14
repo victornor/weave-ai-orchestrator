@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { SHUTDOWN_KILL_GRACE_MS } from '@weave-ai/shared';
 import { stateHome, configHome } from './contexts.js';
-import { LAUNCHD_LABEL, SERVICE_NAME, currentLink, resolveInstalledUnit, writeUserShims, type InstalledUnit, type ShimWriteResult } from './release.js';
+import { LAUNCHD_LABEL, SERVICE_NAME, assertHostCommandAllowed, currentLink, resolveInstalledUnit, writeUserShims, type InstalledUnit, type ShimWriteResult } from './release.js';
 
 export function pidFile(): string { return join(stateHome(), 'daemon.pid'); }
 export function logFile(): string { return join(stateHome(), 'daemon.log'); }
@@ -60,6 +60,8 @@ export interface CommandResult { status: number | null; signal: NodeJS.Signals |
 export type RunCommand = (cmd: string, args: string[]) => CommandResult;
 
 export const realRun: RunCommand = (cmd, args) => {
+  // VS-388: refuse before spawning anything — a test that reaches this must fail, not stop the host.
+  assertHostCommandAllowed(cmd);
   const r = spawnSync(cmd, args, { encoding: 'utf8' });
   return { status: r.status, signal: r.signal, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error };
 };

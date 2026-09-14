@@ -14,6 +14,20 @@ import {
   systemdMainPid, withRestartAlways, type CommandResult, type RunCommand,
 } from './daemon.js';
 
+// VS-388: record any real `spawnSync` so a test can prove the guard refused before it could run.
+// `spawn` stays the real one — the `stopDaemon` cases below need it for their stand-in processes.
+const childProcess = vi.hoisted(() => ({ spawnSyncCalls: [] as unknown[][] }));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    spawnSync: (...args: unknown[]) => {
+      childProcess.spawnSyncCalls.push(args);
+      return { status: 0, signal: null, stdout: '', stderr: '' };
+    },
+  };
+});
+
 describe('renderServiceUnit (VS-262, VS-376)', () => {
   it("TimeoutStopSec tracks SHUTDOWN_KILL_GRACE_MS, not an independent hardcoded number", () => {
     const unit = renderServiceUnit('/bin/node');
@@ -209,6 +223,17 @@ describe('unit restart policy and systemd lifecycle (VS-376)', () => {
     const ok: RunCommand = (_cmd, args) => noop({ stdout: args.includes('show') ? '4242\n' : '' });
     expect(systemdMainPid(unit, ok)).toBe(4242);
     expect(systemdMainPid(unit, () => noop({ status: 1 }))).toBeNull();
+  });
+
+  it('refuses to spawn the host systemctl from the default runner instead of stopping the live unit (VS-388)', () => {
+    // A unit is installed, so `stopDaemonService()` would otherwise run a real `systemctl --user stop`
+    // against whatever `resolveInstalledUnit()` found. Under the suite's guard it must throw first.
+    installUnit('[Service]\nRestart=always\n');
+    childProcess.spawnSyncCalls.length = 0;
+    expect(() => stopDaemonService()).toThrow(/refusing to run `systemctl`/);
+    expect(childProcess.spawnSyncCalls).toEqual([]);
+    expect(() => startDaemonService()).toThrow(/refusing to run `systemctl`/);
+    expect(childProcess.spawnSyncCalls).toEqual([]);
   });
 });
 

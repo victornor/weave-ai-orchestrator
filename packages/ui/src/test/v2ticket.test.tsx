@@ -179,6 +179,16 @@ describe('V2 ticket tabs', () => {
     expect(document.querySelector('[data-v2-overview-page]')).toBeTruthy();
   });
 
+  it('shows a pending spec archive with its link in Work (VS-389)', () => {
+    state.ticket = ticket({ delivery: { openspecArchive: { changeName: 'x', state: 'pending', pendingPrUrl: 'https://example.com/pr/313' } } });
+    renderScreen();
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    const archive = document.querySelector('[data-v2-archive-pending]') as HTMLElement;
+    expect(archive).toBeTruthy();
+    expect(within(archive).getByText('spec archive pending')).toBeInTheDocument();
+    expect(within(archive).getByRole('link')).toHaveAttribute('href', 'https://example.com/pr/313');
+  });
+
   it('lays out Overview in captain’s order, with the panes stacking and the Activity pane scrolling', () => {
     renderScreen();
     fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));

@@ -5,7 +5,7 @@
  * top-right, and the worker role on its own bottom row under a hairline.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { projectLabel, TICKET_KINDS, TICKET_PRIORITIES, type Ticket, type TicketKind, type TicketPriority, type WorkerModelOption } from '@weave-ai/shared';
+import { openspecArchive, projectLabel, TICKET_KINDS, TICKET_PRIORITIES, type Ticket, type TicketKind, type TicketPriority, type WorkerModelOption } from '@weave-ai/shared';
 import { workerPauseDetail } from '@weave-ai/render';
 import { V2Page } from '../V2Page';
 import { Button } from '../../components/Button';
@@ -539,6 +539,7 @@ function WorkCard({
   onOpen: () => void;
 }): React.ReactElement {
   const { ticket } = row;
+  const archive = openspecArchive(ticket);
   const folded = v2ColumnFor(ticket.status, { live: row.live, needsYou: row.needsYou }) !== (ticket.status as string);
   return (
     <button
@@ -572,6 +573,9 @@ function WorkCard({
           <span className="v2-tag text-needs-you">needs you</span>
         ) : folded ? (
           <span className="v2-tag text-text-3">{statusText(ticket.status)}</span>
+        ) : null}
+        {archive?.state === 'pending' ? (
+          <span className="v2-tag text-needs-you" data-v2-archive-pending title={archive.pendingPrUrl ?? undefined}>spec archive pending</span>
         ) : null}
       </div>
       <div className="flex items-baseline gap-2 border-t border-line-1 pt-1.5">

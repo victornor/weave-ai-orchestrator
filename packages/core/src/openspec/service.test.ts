@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
-import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
+import type { ForgeAdapter, ForgePullRequest } from '@weave-ai/plugin-sdk';
 import type { ProjectsService, TicketsService } from '../api.js';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { git } from '../util/git.js';
@@ -303,7 +303,7 @@ describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () 
 
     const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
     // Not `archivedAs` — the spec is not on the landing branch until the backfill PR merges.
-    expect(r).toEqual({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/99' });
+    expect(r).toMatchObject({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/99' });
     expect(createPullRequestCalls).toEqual([expect.objectContaining({ branch: `ac/archive-${CHANGE}`, base: 'main' })]);
     // The landing branch itself never gained a direct commit — only the new branch did.
     const mainLog = await git(['log', '--oneline', 'main'], origin);
@@ -333,7 +333,7 @@ describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () 
     } satisfies ForgeAdapter);
 
     const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
-    expect(r).toEqual({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/99' });
+    expect(r).toMatchObject({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/99' });
     expect(createPullRequest).not.toHaveBeenCalled();
     const act = harness.db.get<{ action: string; details: Record<string, unknown> }>('SELECT action, details_json FROM activity WHERE entity_id = ?', [ticketId]);
     expect(act?.action).toBe('openspec.archive_pr_opened');
@@ -363,7 +363,7 @@ describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () 
     } satisfies ForgeAdapter);
 
     const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
-    expect(r).toEqual({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/100' });
+    expect(r).toMatchObject({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/100' });
     expect(createPullRequest).toHaveBeenCalledWith(clone, expect.objectContaining({ branch: `ac/archive-${CHANGE}`, base: 'main' }));
     // The archive was not re-run or re-pushed — the existing branch was reused.
     expect(bin.calls().filter((c) => c.argv[0] === 'archive')).toHaveLength(0);
@@ -454,11 +454,57 @@ describe('OpenSpecService.archiveAfterMerge (pr delivery backfill, VS-327)', () 
     } satisfies ForgeAdapter);
 
     const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
-    expect(r).toEqual({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/99' });
+    expect(r).toMatchObject({ archivedAs: null, skipped: null, pendingPrUrl: 'https://example.com/pr/99' });
     // The pushed backfill branch carries the filled Purpose, not the placeholder.
     const pushed = (await git(['show', `refs/heads/ac/archive-${CHANGE}:openspec/specs/gadgets/spec.md`], origin)).stdout;
     expect(pushed).toContain(why);
     expect(pushed).not.toContain('Update Purpose after archive');
+  });
+
+  it('records the pending pull request on the finished ticket delivery (VS-389)', async () => {
+    const { harness, ticketId, clone } = setup([
+      ...READY_CASES,
+      { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: [], warnings: [] } } },
+    ], { policies: { deliveryMode: 'pr' } });
+    await realGitProject(harness, clone);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    await git(['add', '.'], clone);
+    await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
+    harness.ctx.registries.forges.set('github', {
+      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const, ciState: 'none' as const }), mergePr: async () => ({}),
+      createPullRequest: async () => ({ url: 'https://example.com/pr/99', number: 99 }),
+    } satisfies ForgeAdapter);
+
+    await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
+    const row = harness.db.get<{ delivery: Record<string, unknown> | null }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId]);
+    expect(row?.delivery?.['openspecArchive']).toMatchObject({ changeName: CHANGE, state: 'pending', pendingPrUrl: 'https://example.com/pr/99' });
+  });
+
+  it('records a closed-unmerged pull request and opens a fresh one (VS-389)', async () => {
+    const { harness, ticketId, clone } = setup([
+      ...READY_CASES,
+      { match: ['archive'], json: { archive: { archivedAs: `2026-09-04-${CHANGE}`, specsUpdated: [], warnings: [] } } },
+    ], { policies: { deliveryMode: 'pr' } });
+    const { origin } = await realGitProject(harness, clone);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    await git(['add', '.'], clone);
+    await git(['commit', '-m', 'chore: leave an unarchived change behind'], clone);
+    await git(['checkout', '-b', `ac/archive-${CHANGE}`], origin);
+    await git(['checkout', 'main'], origin);
+
+    const createPullRequest = vi.fn(async () => ({ url: 'https://example.com/pr/200', number: 200 }));
+    harness.ctx.registries.forges.set('github', {
+      id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const, ciState: 'none' as const }), mergePr: async () => ({}),
+      pullRequestForBranch: vi.fn(async () => null),
+      listPullRequests: vi.fn(async () => [{ headRefName: `ac/archive-${CHANGE}`, state: 'closed' as const, url: 'https://example.com/pr/1' }] as unknown as ForgePullRequest[]),
+      createPullRequest,
+    } satisfies ForgeAdapter);
+
+    const r = await createOpenSpecService(harness.ctx, harness.deps).archiveAfterMerge(ticketId);
+    expect(r).toMatchObject({ skipped: null, pendingPrUrl: 'https://example.com/pr/200' });
+    expect(createPullRequest).toHaveBeenCalled();
+    const closed = harness.db.get<{ action: string }>("SELECT action FROM activity WHERE entity_id = ? AND action = 'openspec.archive_pr_closed'", [ticketId]);
+    expect(closed?.action).toBe('openspec.archive_pr_closed');
   });
 });
 

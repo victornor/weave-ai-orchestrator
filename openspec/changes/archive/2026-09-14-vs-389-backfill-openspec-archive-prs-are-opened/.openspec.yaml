@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "OpenSpec archive backfill PRs are opened and forgotten: no merge card is
+  raised, so three done tickets' specs never reached main"

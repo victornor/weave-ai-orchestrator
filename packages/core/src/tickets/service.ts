@@ -303,6 +303,32 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   }
 
   /**
+   * VS-389: record a failed archive-backfill landing, at most once per (reason, pull request). A
+   * repeat is a debug log only, so a standing failure — pending checks, a conflict, an unreachable
+   * forge — cannot add a comment to the finished ticket on every reconciliation pass; the once-only
+   * wake and comment happen when the failure first appears or changes. `quiet` (pending checks)
+   * records the state without commenting or waking at all.
+   */
+  function recordArchiveLandingFailure(t: Ticket, changeName: string, prUrl: string, reason: string, actor: Actor, quiet = false): void {
+    const delivery = (t.delivery ?? {}) as Record<string, unknown>;
+    const existing = (delivery['openspecArchive'] ?? {}) as Record<string, unknown>;
+    const last = existing['lastFailure'] as { reason?: string; prUrl?: string } | undefined;
+    if (last?.reason === reason && last?.prUrl === prUrl) {
+      log.debug({ ticketId: t.id, changeName, reason }, 'archive landing still failing');
+      return;
+    }
+    const withFailure = { ...delivery, openspecArchive: { ...existing, lastFailure: { reason, prUrl, at: nowIso() } } };
+    if (quiet) { touch(t.id, { deliveryJson: withFailure }); return; }
+    tx(db, () => {
+      touch(t.id, { deliveryJson: withFailure });
+      systemComment(t.id, `spec archive for ${changeName} not landed yet (${reason}); it will be retried.`, actor);
+      recordActivity(db, ws, actor, 'ticket.merge_archive_failed', 'ticket', t.id, { error: reason, changeName, prUrl }, t.id);
+      const cid = conductorId();
+      if (cid) wake(cid, 'system', `openspec archive landing failed for ${t.identifier}: ${reason}`, { ticketId: t.id, changeName, prUrl, error: reason }, actor, `reconcile-archive-failed:${t.id}:${prUrl}`);
+    });
+  }
+
+  /**
    * Whether this `action` revision already has an `open` or `answered` `action_approval`. A
    * missing `target` still counts as covering so a legacy/test row cannot re-enter the repair loop
    * (VS-225). Plan and merge repairs do not use this: they terminate because answering changes the
@@ -1350,6 +1376,18 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           const res = await deps().openspec.archiveAfterMerge(t.id);
           archivedAs = res.archivedAs;
           skipped = res.skipped;
+          // VS-389: a backfill for a PR-delivery project opens a pull request instead of archiving
+          // in place; surface it as a merge card on the (already finished) ticket.
+          if (res.pendingPrUrl) {
+            try {
+              await service.raiseArchiveBackfillCard(actor, t.id, {
+                changeName: res.changeName ?? t.openspecChangeName ?? '',
+                branch: res.branch ?? `ac/archive-${res.changeName ?? t.openspecChangeName}`,
+                prUrl: res.pendingPrUrl,
+                number: res.pendingPrNumber ?? null,
+              });
+            } catch (e) { log.warn({ err: e, ticketId: t.id }, 'raising the archive backfill card failed'); }
+          }
         }
       } catch (e) {
         const action = `openspec archive failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -1428,6 +1466,101 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         }
       }
       return advanced;
+    },
+
+    /**
+     * VS-389: land an archive-backfill pull request a merge card approved, under the project's
+     * one-landing-at-a-time lock, reusing the ticket flow's archive-then-merge machinery. The ticket
+     * is already `done`, so nothing here transitions it. Never throws: a deferred landing is
+     * recorded and retried by the reconciliation sweep.
+     */
+    async landArchiveBackfill(actor, input) {
+      const t = get(input.ticketId);
+      const fail = (reason: string, quiet = false): { landed: false; reason: string } => {
+        recordArchiveLandingFailure(t, input.changeName, input.prUrl, reason, actor, quiet);
+        return { landed: false, reason };
+      };
+      const project = t.projectId ? deps().projects.get(t.projectId) : null;
+      if (!project || !existsSync(project.clonePath)) return fail('no project clone');
+      const forge = ctx.registries.forges.get('github');
+      if (!forge?.mergePr) return fail('no forge available to merge');
+      // A retry after the pull request already merged, or was closed, must not try to merge it again.
+      const state = await forge.prState(project.clonePath, input.prUrl).catch(() => null);
+      if (state?.state === 'closed') return { landed: false, closed: true, reason: 'the archive pull request is closed, not merged' };
+      if (state?.state !== 'merged') {
+        const landing = landingBranchOf(project, t);
+        const method = String((project.policies as { mergeMethod?: string } | null)?.mergeMethod ?? 'squash');
+        let outcome: Awaited<ReturnType<typeof attemptArchiveThenMerge>>;
+        try {
+          outcome = await serialize(project.id, () => attemptArchiveThenMerge({
+            clonePath: project.clonePath, branch: input.branch, landingBranch: landing, changeName: input.changeName, forge, prUrl: input.prUrl, method,
+            scratch: { stateDir: ctx.paths.state, projectSlug: project.slug, label: t.identifier },
+          }));
+        } catch (e) {
+          return fail(e instanceof Error ? e.message : String(e));
+        }
+        if (outcome.kind === 'conflict') return fail(`rebase conflict: ${outcome.detail}`);
+        // Pending checks are expected to resolve; waiting is not a failure worth a comment or a wake.
+        if (outcome.kind === 'checks_pending') return fail('required checks are pending', true);
+        if (outcome.kind === 'checks_failed') return fail('required checks failed');
+      }
+      tx(db, () => {
+        const delivery = { ...(t.delivery ?? {}), openspecArchive: { changeName: input.changeName, branch: input.branch, state: 'landed' as const, prUrl: input.prUrl } };
+        touch(t.id, { deliveryJson: delivery });
+        systemComment(t.id, `spec archive for ${input.changeName} merged`, actor);
+        recordActivity(db, ws, actor, 'openspec.archived', 'ticket', t.id, { changeName: input.changeName, prUrl: input.prUrl }, t.id);
+        ctx.events.emit('ticket.updated', 'ticket', t.id, get(t.id));
+      });
+      return { landed: true };
+    },
+
+    /**
+     * VS-389: raise the one open merge approval for a finished ticket's archive-backfill pull
+     * request. A pull request a `changes` answer declined is not re-raised; under YOLO the daemon
+     * answers the card itself, exactly as it does for a ticket merge.
+     */
+    async raiseArchiveBackfillCard(actor, ticketId, a) {
+      const t = get(ticketId);
+      const correlationKey = `merge_approval:archive:${t.id}:${a.changeName}`;
+      const open = db.get<{ id: string }>(
+        "SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND correlation_key = ? AND status = 'open'",
+        [ws, t.id, correlationKey],
+      );
+      if (open) return { raised: false };
+      const existing = ((t.delivery ?? {}) as Record<string, unknown>)['openspecArchive'] as Record<string, unknown> | undefined;
+      if (existing?.['declinedPrUrl'] === a.prUrl) return { raised: false };
+      const d = deps().decisions.create(actor, {
+        ticketId: t.id, kind: 'merge_approval', owner: 'human',
+        title: `Approve the spec archive for ${t.identifier}`,
+        context: `The OpenSpec change ${a.changeName} was left behind when ${t.identifier} merged. This pull request archives it: ${a.prUrl}`,
+        options: [
+          { key: NAMED_CARD_OPTION_KEYS.merge_approval.approve, label: 'Approve merge', recommended: true },
+          { key: NAMED_CARD_OPTION_KEYS.merge_approval.changes, label: 'Request changes', description: 'Leave the archive pull request open.' },
+        ],
+        allowFreeText: true,
+        correlationKey,
+        target: { archive: { changeName: a.changeName, branch: a.branch, prUrl: a.prUrl, number: a.number ?? null } },
+        attachToTerminal: true,
+      });
+      if (yolo(t)) await autoApprove(t, d.id);
+      return { raised: true, decisionId: d.id };
+    },
+
+    /** VS-389: record that a human declined an archive-backfill merge; the pull request stays open. */
+    declineArchiveBackfill(actor, input) {
+      const t = get(input.ticketId);
+      tx(db, () => {
+        const delivery = (t.delivery ?? {}) as Record<string, unknown>;
+        const existing = (delivery['openspecArchive'] ?? {}) as Record<string, unknown>;
+        const next = {
+          ...delivery,
+          openspecArchive: { ...existing, changeName: input.changeName, branch: input.branch, state: 'pending' as const, pendingPrUrl: input.prUrl, declinedPrUrl: input.prUrl },
+        };
+        touch(t.id, { deliveryJson: next });
+        systemComment(t.id, `spec archive merge declined${input.text ? `: ${input.text}` : ''}; the pull request stays open.`, actor);
+        recordActivity(db, ws, actor, 'openspec.archive_declined', 'ticket', t.id, { changeName: input.changeName, prUrl: input.prUrl }, t.id);
+        ctx.events.emit('ticket.updated', 'ticket', t.id, get(t.id));
+      });
     },
 
     mergeQueue,

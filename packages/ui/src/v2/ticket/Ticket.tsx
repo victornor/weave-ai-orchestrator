@@ -6,7 +6,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import { isActiveRun, projectLabel, ticketUiStatus, type Project, type Run, type Ticket } from '@weave-ai/shared';
+import { isActiveRun, openspecArchive, projectLabel, ticketUiStatus, type Project, type Run, type Ticket } from '@weave-ai/shared';
 import { workerPauseDetail } from '@weave-ai/render';
 import { A, useGo, useSearchParams } from '../../app/link';
 import { useWs } from '../../api/context';
@@ -713,6 +713,7 @@ function WorkSection({ ticket }: { ticket: Ticket }): React.ReactElement {
   const products = useTicketWorkProducts(ticket.id);
   const runs = useTicketRuns(ticket.id);
   const spec = detail.data?.openspecState;
+  const archive = openspecArchive(ticket);
   const done = spec?.tasks.filter((t) => t.done).length ?? 0;
   const total = spec?.tasks.length ?? 0;
   return (
@@ -756,6 +757,17 @@ function WorkSection({ ticket }: { ticket: Ticket }): React.ReactElement {
               </li>
             ))}
           </ul>
+        </section>
+      ) : null}
+      {archive && archive.state === 'pending' && archive.pendingPrUrl ? (
+        <section data-v2-archive-pending>
+          <div className="ac-label mb-2">Spec archive</div>
+          <div className="v2-card flex items-center gap-3 px-3.5 py-2.5">
+            <span className="v2-tag text-needs-you">spec archive pending</span>
+            <a href={archive.pendingPrUrl} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-micro text-accent-link">
+              {archive.pendingPrUrl}
+            </a>
+          </div>
         </section>
       ) : null}
       <section>

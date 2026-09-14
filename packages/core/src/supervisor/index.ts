@@ -719,7 +719,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     }
     const byId = new Map(projects.map((p) => [p.id, p]));
     await reconcilePullRequests(byId);
-    reconcileOpenSpecArchives(byId);
+    await reconcileOpenSpecArchives(byId);
     await reconcileKnowledgeRepoSwitches(byId);
   }
 
@@ -809,18 +809,67 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
    * same as a `change` ticket's (VS-208 — a `kind = 'change'` clause here left a fully-merged,
    * fully-valid tracker change unarchived indefinitely).
    */
-  function reconcileOpenSpecArchives(projects: Map<string, ProjectRow>): void {
-    const rows = ctx.db.all<{ id: string; identifier: string; projectId: string | null; changeName: string }>(
-      "SELECT id, identifier, project_id, openspec_change_name AS change_name FROM tickets WHERE workspace_id = ? AND status = 'done' AND openspec_change_name IS NOT NULL",
+  async function reconcileOpenSpecArchives(projects: Map<string, ProjectRow>): Promise<void> {
+    const rows = ctx.db.all<{ id: string; identifier: string; projectId: string | null; changeName: string; delivery: Record<string, unknown> | null }>(
+      "SELECT id, identifier, project_id, openspec_change_name AS change_name, delivery_json FROM tickets WHERE workspace_id = ? AND status = 'done' AND openspec_change_name IS NOT NULL",
       [ctx.workspaceId],
     );
     for (const t of rows) {
       const project = t.projectId ? projects.get(t.projectId) : undefined;
       if (!project || !existsSync(project.clonePath)) continue;
+      // VS-389: once the change is archived on the landing branch (however it got there), a pending
+      // mark left on the ticket's delivery is cleared — checked before the live change directory,
+      // which a completed archive has already moved away.
+      if (archivedDirFor(project.clonePath, t.changeName)) {
+        const a = t.delivery?.['openspecArchive'] as Record<string, unknown> | undefined;
+        if (a && a['state'] === 'pending') {
+          ctx.db.update('tickets', t.id, { deliveryJson: { ...t.delivery, openspecArchive: { ...a, state: 'landed' } }, updatedAt: nowIso() });
+          ctx.events.emit('ticket.updated', 'ticket', t.id, { ticketId: t.id });
+        }
+        continue;
+      }
       if (!existsSync(join(project.clonePath, 'openspec', 'changes', t.changeName))) continue;
-      if (archivedDirFor(project.clonePath, t.changeName)) continue;
       log.info({ ticket: t.identifier, change: t.changeName }, 'archiving an OpenSpec change left behind by a merged ticket');
-      void deps().openspec.archiveAfterMerge(t.id).catch((e: unknown) => recordReconcileArchiveFailure(t, e));
+      let res: Awaited<ReturnType<CoreServices['openspec']['archiveAfterMerge']>>;
+      try { res = await deps().openspec.archiveAfterMerge(t.id); }
+      catch (e) { recordReconcileArchiveFailure(t, e); continue; }
+      // VS-389: a backfill that opens (or finds) a pull request instead of archiving in place raises
+      // the merge card that surfaces it, on the (already finished) ticket.
+      if (res.pendingPrUrl) {
+        try {
+          await deps().tickets.raiseArchiveBackfillCard(SYSTEM, t.id, {
+            changeName: res.changeName ?? t.changeName,
+            branch: res.branch ?? `ac/archive-${t.changeName}`,
+            prUrl: res.pendingPrUrl,
+            number: res.pendingPrNumber ?? null,
+          });
+        } catch (e) { recordReconcileArchiveFailure(t, e); }
+      }
+      // VS-389: retry any archive card already approved for this ticket whose pull request is the
+      // one still pending — a landing deferred by pending checks or a stale branch converges here.
+      // An approved card whose pull request is no longer the pending one (closed and replaced) is
+      // retired with a one-time note and never retried; `landArchiveBackfill` dedupes its own
+      // failures, so a standing failure cannot comment on every pass.
+      const approved = ctx.db.get<{ id: string; target: Record<string, unknown> | null }>(
+        "SELECT id, target_json FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND kind = 'merge_approval' AND status = 'answered' AND answer_key = 'approve' AND correlation_key LIKE 'merge_approval:archive:%' ORDER BY created_at DESC LIMIT 1",
+        [ctx.workspaceId, t.id],
+      );
+      const archive = approved?.target?.['archive'] as { changeName?: string; branch?: string; prUrl?: string } | undefined;
+      if (approved && archive?.branch && archive.prUrl) {
+        const stored = (t.delivery?.['openspecArchive'] ?? {}) as Record<string, unknown>;
+        const currentPr = res.pendingPrUrl ?? (typeof stored['pendingPrUrl'] === 'string' ? stored['pendingPrUrl'] : undefined);
+        if (currentPr && archive.prUrl === currentPr) {
+          await deps().tickets.landArchiveBackfill(SYSTEM, { ticketId: t.id, changeName: archive.changeName ?? t.changeName, branch: archive.branch, prUrl: archive.prUrl })
+            .catch((e: unknown) => recordReconcileArchiveFailure(t, e));
+        } else if (stored['staleCardPrUrl'] !== archive.prUrl) {
+          ctx.db.update('tickets', t.id, {
+            deliveryJson: { ...(t.delivery ?? {}), openspecArchive: { ...stored, staleCardPrUrl: archive.prUrl } },
+            updatedAt: nowIso(),
+          });
+          try { deps().tickets.comment(SYSTEM, t.id, `the spec archive card for ${archive.prUrl} was retired: it is no longer the pending archive pull request.`, 'status'); }
+          catch (e) { log.warn({ err: e, ticketId: t.id }, 'retiring a stale archive card failed'); }
+        }
+      }
     }
   }
 

@@ -91,8 +91,8 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
    */
   function withdrawOpenForTicket(actor: Actor, ticketId: string, reason: string, createdBefore?: string): number {
     const rows = createdBefore
-      ? db.all<{ id: string }>('SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND status = ? AND created_at <= ?', [ws, ticketId, 'open', createdBefore])
-      : db.all<{ id: string }>('SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND status = ?', [ws, ticketId, 'open']);
+      ? db.all<{ id: string }>("SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND status = ? AND created_at <= ? AND NOT (kind = 'merge_approval' AND correlation_key LIKE 'merge_approval:archive:%')", [ws, ticketId, 'open', createdBefore])
+      : db.all<{ id: string }>("SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND status = ? AND NOT (kind = 'merge_approval' AND correlation_key LIKE 'merge_approval:archive:%')", [ws, ticketId, 'open']);
     for (const r of rows) {
       db.update('decisions', r.id, { status: 'withdrawn' as DecisionStatus, answerText: reason });
       recordActivity(db, ws, actor, 'decision.withdraw', 'decision', r.id, { reason }, ticketId);
@@ -215,8 +215,12 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     // dropped: the key must stay `kind:<ticketId>` so the detached card keeps its own bucket and
     // neither supersedes nor is superseded by a workspace-level decision of the same kind.
     const terminal = ticket ? (TERMINAL_TICKET_STATUSES as readonly string[]).includes(ticket.status) : false;
-    if (terminal) log.warn({ ticketId: requestedTicketId, kind: input.kind }, 'decision created for an already-terminal ticket; dropping its ticket attachment');
-    const ticketId = terminal ? null : requestedTicketId;
+    // VS-389: an archive-backfill merge approval belongs on the finished ticket whose archive it
+    // lands. It is the one card allowed to keep a terminal ticket's attachment, and only when the
+    // caller explicitly asks and the target names an archive pull request.
+    const attachArchiveToTerminal = terminal && input.attachToTerminal === true && input.kind === 'merge_approval' && !!(input.target?.['archive']);
+    if (terminal && !attachArchiveToTerminal) log.warn({ ticketId: requestedTicketId, kind: input.kind }, 'decision created for an already-terminal ticket; dropping its ticket attachment');
+    const ticketId = terminal && !attachArchiveToTerminal ? null : requestedTicketId;
     const projectId = resolveProject(input, requestedTicketId);
     const inputs = validateInputs(input.inputs ?? []);
     const correlationKey = input.correlationKey ?? `${input.kind}:${requestedTicketId ?? 'workspace'}`;
@@ -293,6 +297,14 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     const ticketId = ticketOf(d);
     if (!ticketId) return;
     const tickets = deps().tickets;
+    // VS-389: a card carrying an archive-backfill pull request lands that pull request instead of
+    // moving the (already finished) ticket; the ticket stays `done`.
+    const archive = archiveTargetOf(d);
+    if (archive) {
+      if (key === 'approve') await tickets.landArchiveBackfill(actor, { ticketId, ...archive });
+      else tickets.declineArchiveBackfill(actor, { ticketId, ...archive, text });
+      return;
+    }
     if (key === 'approve') {
       await tickets.transition(actor, ticketId, { to: 'merging', note: text ? `Merge approved: ${text}` : 'Merge approved.' });
     } else {
@@ -300,6 +312,18 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       const t = tickets.get(ticketId);
       if (t.status === 'in_review') await tickets.transition(actor, ticketId, { to: 'in_progress', note: 'Changes requested by the reviewer.' });
     }
+  }
+
+  /**
+   * VS-389: the archive-backfill pull request a merge card names, when it carries one. Its presence
+   * is what makes the card land an archive rather than transition the ticket.
+   */
+  function archiveTargetOf(d: Decision): { changeName: string; branch: string; prUrl: string } | null {
+    const raw = d.target?.['archive'];
+    if (!raw || typeof raw !== 'object') return null;
+    const a = raw as Record<string, unknown>;
+    if (typeof a['changeName'] !== 'string' || typeof a['branch'] !== 'string' || typeof a['prUrl'] !== 'string') return null;
+    return { changeName: a['changeName'], branch: a['branch'], prUrl: a['prUrl'] };
   }
 
   async function applyHireApproval(actor: Actor, d: Decision, key: string): Promise<void> {
@@ -711,7 +735,8 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       const stale = db.all<{ ticketId: string; identifier: string; status: TicketStatus }>(
         `SELECT DISTINCT d.ticket_id AS ticketId, t.identifier AS identifier, t.status AS status
            FROM decisions d JOIN tickets t ON t.id = d.ticket_id
-          WHERE d.workspace_id = ? AND d.status = 'open' AND t.status IN (${placeholders}) AND d.created_at <= ?`,
+          WHERE d.workspace_id = ? AND d.status = 'open' AND t.status IN (${placeholders}) AND d.created_at <= ?
+            AND NOT (d.kind = 'merge_approval' AND d.correlation_key LIKE 'merge_approval:archive:%')`,
         [ws, ...TERMINAL_TICKET_STATUSES, cutoff],
       );
       let withdrawn = 0;

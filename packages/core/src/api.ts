@@ -96,6 +96,21 @@ export interface TicketsService {
   republishRevisedPlan(actor: Actor, ticketId: string): Promise<{ republished: boolean; reason: string }>;
   /** Move `in_review` tickets with auto_merge on to `merging` once their delivery is ready (local-branch: immediately; pr: CI green or no CI). Returns how many advanced. */
   autoMergeSweep(): Promise<number>;
+  /**
+   * VS-389: raise the merge approval for a finished ticket's OpenSpec archive-backfill pull request.
+   * Exactly one open card per pull request; a pull request a `changes` answer declined is not
+   * re-raised. Under YOLO the daemon answers the card itself. The ticket stays `done`.
+   */
+  raiseArchiveBackfillCard(actor: Actor, ticketId: string, archive: { changeName: string; branch: string; prUrl: string; number?: number | null }): Promise<{ raised: boolean; decisionId?: string }>;
+  /**
+   * VS-389: land an approved archive-backfill pull request under the project's landing lock, reusing
+   * the archive-then-merge machinery (rebase when stale, respect required checks). Records the
+   * outcome on the ticket and never throws; `landed` says whether it merged, `closed` that the pull
+   * request was closed unmerged. Repeats of a standing failure are logged, not re-commented.
+   */
+  landArchiveBackfill(actor: Actor, input: { ticketId: string; changeName: string; branch: string; prUrl: string }): Promise<{ landed: boolean; archivedAs?: string | null; reason?: string; closed?: boolean }>;
+  /** VS-389: record that a human declined an archive-backfill merge; the pull request stays open. */
+  declineArchiveBackfill(actor: Actor, input: { ticketId: string; changeName: string; branch: string; prUrl: string; text?: string | null }): void;
   nextIdentifier(): string;
   /** Async: cancel the follow-up work a merge or an `in_review` scheduled but has not run yet, and await what is already in flight. Never rejects; safe to call when idle and more than once. Drain before disposing of the workspace database. */
   stop(): Promise<void>;
@@ -146,7 +161,13 @@ export interface MergeQueueService {
 }
 
 // ---------- decisions ----------
-export interface DecisionCreateInput { ticketId?: string | null; projectId?: string | null; kind: S.DecisionKind; owner?: S.DecisionOwner; title: string; context?: string; options?: S.Decision['options']; inputs?: S.DecisionInput[]; allowFreeText?: boolean; recommendation?: string | null; expiresInHours?: number; target?: Record<string, unknown>; correlationKey?: string; askedByAgentId?: string | null; askedInRunId?: string | null }
+export interface DecisionCreateInput { ticketId?: string | null; projectId?: string | null; kind: S.DecisionKind; owner?: S.DecisionOwner; title: string; context?: string; options?: S.Decision['options']; inputs?: S.DecisionInput[]; allowFreeText?: boolean; recommendation?: string | null; expiresInHours?: number; target?: Record<string, unknown>; correlationKey?: string; askedByAgentId?: string | null; askedInRunId?: string | null;
+  /**
+   * VS-389: keep the ticket attachment even when the named ticket is already terminal. Honoured only
+   * for a `merge_approval` whose `target.archive` names an OpenSpec archive-backfill pull request, so
+   * no other caller can attach a card to a finished ticket (VS-306).
+   */
+  attachToTerminal?: boolean }
 export interface DecisionsService {
   create(actor: Actor, input: DecisionCreateInput): S.Decision;
   get(id: string): S.Decision;
@@ -541,8 +562,12 @@ export interface OpenSpecStatus { changeName: string; planningComplete: boolean;
 export interface OpenSpecService {
   statusFor(ticketId: string): Promise<OpenSpecStatus>;
   validateForProposed(ticketId: string): Promise<{ ok: true; plan: string } | { ok: false; issues: Array<{ level: string; message: string; path?: string }> }>;
-  /** `pendingPrUrl` is set instead of `archivedAs` when a backfill opened a PR that hasn't merged yet (VS-327): the spec is not on the landing branch until it does. */
-  archiveAfterMerge(ticketId: string): Promise<{ archivedAs: string | null; skipped: string | null; pendingPrUrl?: string }>;
+  /**
+   * `pendingPrUrl` is set instead of `archivedAs` when a backfill opened a pull request that has not
+   * merged yet (VS-327): the spec is not on the landing branch until it does. VS-389 adds the change
+   * name, branch and pull request number so the caller can raise a merge card for that pull request.
+   */
+  archiveAfterMerge(ticketId: string): Promise<{ archivedAs: string | null; skipped: string | null; changeName?: string; branch?: string; pendingPrUrl?: string; pendingPrNumber?: number }>;
   version(projectId: string): Promise<string | null>;
 }
 

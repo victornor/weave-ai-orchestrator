@@ -48,6 +48,23 @@ export function zeroStatus(changeName: string): OpenSpecStatus {
 
 export const archivedDirFor = cli.archivedDirFor;
 
+/**
+ * VS-389: record a pending archive-backfill pull request on the finished ticket's delivery, so a
+ * surface can show "spec archive pending" and the sweep can raise a merge card for it. The delivery
+ * is free-form JSON, so this is additive and needs no migration.
+ */
+function recordArchivePending(ctx: WorkspaceContext, ticketId: string, changeName: string, branch: string, pr: { url: string; number: number }): void {
+  const row = ctx.db.get<{ delivery: Record<string, unknown> | null }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId]);
+  const delivery = (row?.delivery ?? {}) as Record<string, unknown>;
+  const prev = (delivery['openspecArchive'] ?? {}) as Record<string, unknown>;
+  const next: Record<string, unknown> = { ...prev, changeName, branch, number: pr.number, state: 'pending', pendingPrUrl: pr.url };
+  // A replaced pull request starts a fresh failure history; the stale-card guard is kept so a
+  // retired card is never re-noted.
+  if (prev['pendingPrUrl'] !== pr.url) delete next['lastFailure'];
+  ctx.db.update('tickets', ticketId, { deliveryJson: { ...delivery, openspecArchive: next }, updatedAt: nowIso() });
+  ctx.events.emit('ticket.updated', 'ticket', ticketId, { openspecArchivePendingPrUrl: pr.url });
+}
+
 /** proposal + tasks + design of a change directory, rendered as the plan document (PLAN §12.2 step 2). */
 export function renderPlan(changeDir: string, changeName: string): string {
   const parts: string[] = [`# Plan for ${changeName}`];
@@ -204,16 +221,27 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
           const pending = forge?.pullRequestForBranch ? await forge.pullRequestForBranch(project.clonePath, newBranch) : null;
           if (pending) {
             recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archive_pr_opened', 'ticket', ticket.id, { changeName, pendingPrUrl: pending.url }, ticket.id);
-            ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivePendingPrUrl: pending.url });
-            return { archivedAs: null, skipped: null, pendingPrUrl: pending.url };
+            recordArchivePending(ctx, ticket.id, changeName, newBranch, pending);
+            return { archivedAs: null, skipped: null, changeName, branch: newBranch, pendingPrUrl: pending.url, pendingPrNumber: pending.number };
+          }
+          // VS-389: a pull request on this branch that was closed without merging is recorded, never
+          // silently reopened; the fresh pull request opened below raises its own card.
+          if (forge?.listPullRequests) {
+            const prs = await forge.listPullRequests(project.clonePath, { limit: 50 }).catch(() => []);
+            const closed = prs.find((p) => p.headRefName === newBranch && p.state === 'closed');
+            if (closed) {
+              recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archive_pr_closed', 'ticket', ticket.id, { changeName, closedPrUrl: closed.url }, ticket.id);
+              try { deps().tickets.comment(SYSTEM, ticket.id, `the archive pull request ${closed.url} was closed unmerged; opening a fresh one`, 'status'); }
+              catch (e) { log.warn({ err: e, ticketId: ticket.id }, 'archive closed-pull-request comment failed'); }
+            }
           }
           if (!forge?.createPullRequest) {
             throw new OcError('internal', 'no forge available that can open a backfill pull request', { changeName, branch: newBranch });
           }
           const pr = await forge.createPullRequest(project.clonePath, { branch: newBranch, base: landing, title, body });
           recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archive_pr_opened', 'ticket', ticket.id, { changeName, pendingPrUrl: pr.url }, ticket.id);
-          ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivePendingPrUrl: pr.url });
-          return { archivedAs: null, skipped: null, pendingPrUrl: pr.url };
+          recordArchivePending(ctx, ticket.id, changeName, newBranch, pr);
+          return { archivedAs: null, skipped: null, changeName, branch: newBranch, pendingPrUrl: pr.url, pendingPrNumber: pr.number };
         }
         const scratch = await scratchBranchFrom(project.clonePath, 'HEAD', newBranch, { stateDir: ctx.paths.state, projectSlug: project.slug, label: ticket.identifier });
         try {
@@ -241,8 +269,8 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
           }
           const pr = await forge.createPullRequest(project.clonePath, { branch: newBranch, base: landing, title, body });
           recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'openspec.archive_pr_opened', 'ticket', ticket.id, { changeName, specsUpdated: result.specsUpdated, warnings: result.warnings, pendingPrUrl: pr.url }, ticket.id);
-          ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivePendingPrUrl: pr.url });
-          return { archivedAs: null, skipped: null, pendingPrUrl: pr.url };
+          recordArchivePending(ctx, ticket.id, changeName, newBranch, pr);
+          return { archivedAs: null, skipped: null, changeName, branch: newBranch, pendingPrUrl: pr.url, pendingPrNumber: pr.number };
         } finally {
           await scratch.dispose();
         }

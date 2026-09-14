@@ -38,6 +38,40 @@ export function incompleteDelivery(ticket: Pick<Ticket, 'status' | 'delivery'>):
   const sha = d['mergeCommit'];
   return !(d['merged'] === true && typeof sha === 'string' && sha.trim() !== '');
 }
+/**
+ * The OpenSpec archive-backfill record a finished ticket's delivery can carry (VS-389). A `pending`
+ * record means the change is not on the landing branch yet and a pull request carries it; `landed`
+ * means it reached the landing branch. Surfaces read it to show "spec archive pending" with the
+ * pull request link, and the daemon reads `declinedPrUrl` so a declined merge is not re-raised.
+ */
+export interface OpenSpecArchiveDelivery {
+  changeName: string;
+  state: 'pending' | 'landed';
+  branch?: string | null;
+  number?: number | null;
+  pendingPrUrl?: string | null;
+  prUrl?: string | null;
+  archivedAs?: string | null;
+  declinedPrUrl?: string | null;
+}
+/** The OpenSpec archive-backfill record on a ticket's delivery, or null when it has none. */
+export function openspecArchive(ticket: Pick<Ticket, 'delivery'>): OpenSpecArchiveDelivery | null {
+  const raw = ticket.delivery?.['openspecArchive'];
+  if (!raw || typeof raw !== 'object') return null;
+  const a = raw as Record<string, unknown>;
+  const state = a['state'];
+  if (state !== 'pending' && state !== 'landed') return null;
+  return {
+    changeName: typeof a['changeName'] === 'string' ? a['changeName'] : '',
+    state,
+    branch: typeof a['branch'] === 'string' ? a['branch'] : null,
+    number: typeof a['number'] === 'number' ? a['number'] : null,
+    pendingPrUrl: typeof a['pendingPrUrl'] === 'string' ? a['pendingPrUrl'] : null,
+    prUrl: typeof a['prUrl'] === 'string' ? a['prUrl'] : null,
+    archivedAs: typeof a['archivedAs'] === 'string' ? a['archivedAs'] : null,
+    declinedPrUrl: typeof a['declinedPrUrl'] === 'string' ? a['declinedPrUrl'] : null,
+  };
+}
 export interface Role { id: string; workspaceId: string; projectId: string; slug: string; name: string; title: string | null; icon: string | null; charterSummary: string; scopeText: string; responsibilities: string[]; capabilities: string[]; rules: string[]; permission: Record<string, unknown>; sessionPolicy: E.SessionPolicy; maxWorkers: number; secrets: string[]; status: E.RoleStatus; pauseReason: string | null; specRevision: number; createdBy: string; createdAt: string; updatedAt: string }
 /** Why a paused worker stopped, when a failure paused it (VS-56). Every field is optional: a worker a human paused carries a `pauseReason` and no detail. */
 export interface AgentPauseDetail { family: E.RunErrorFamily | null; code: string | null; message: string | null; resetAt: string | null; runId: string | null }

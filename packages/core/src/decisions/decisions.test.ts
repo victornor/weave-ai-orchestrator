@@ -442,6 +442,25 @@ describe('decisions', () => {
     expect(d.correlationKey).toBe(`question:${t.id}`);
   });
 
+  it('keeps an archive-backfill merge approval attached to a finished ticket (VS-389)', async () => {
+    const t = ticket({ kind: 'task' });
+    await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+    await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' });
+
+    const d = decisions.create(AGENT, {
+      ticketId: t.id, kind: 'merge_approval', title: 'Approve the spec archive', owner: 'human',
+      correlationKey: `merge_approval:archive:${t.id}:x`,
+      attachToTerminal: true,
+      target: { archive: { changeName: 'x', branch: 'ac/archive-x', prUrl: 'https://example.com/pr/1' } },
+    });
+    expect(d.ticketId).toBe(t.id);
+    expect(d.projectId).toBe(h.projectId);
+
+    // An ordinary card on the same finished ticket is still detached (VS-306).
+    const plain = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'plain merge' });
+    expect(plain.ticketId).toBeNull();
+  });
+
   it('a detached follow-up neither supersedes nor is superseded by a workspace-level question', async () => {
     const t = ticket({ kind: 'task' });
     await tickets.transition(AGENT, t.id, { to: 'in_progress' });
@@ -519,6 +538,21 @@ describe('decisions', () => {
 
       expect(decisions.sweepTerminalTickets(SYSTEM, DAY)).toBe(0);
       expect(decisions.get(open[0]!.id).status).toBe('open');
+    });
+
+    it('leaves an archive-backfill merge approval on a finished ticket open (VS-389)', async () => {
+      const t = ticket({ kind: 'task' });
+      await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+      await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' });
+      const d = decisions.create(AGENT, {
+        ticketId: t.id, kind: 'merge_approval', title: 'Approve the spec archive', owner: 'human',
+        correlationKey: `merge_approval:archive:${t.id}:x`, attachToTerminal: true,
+        target: { archive: { changeName: 'x', branch: 'ac/archive-x', prUrl: 'https://example.com/pr/1' } },
+      });
+      h.db.update('decisions', d.id, { createdAt: stale() });
+
+      expect(decisions.sweepTerminalTickets(SYSTEM, DAY)).toBe(0);
+      expect(decisions.get(d.id).status).toBe('open');
     });
   });
   // ---------- VS-92: the project a card names ----------

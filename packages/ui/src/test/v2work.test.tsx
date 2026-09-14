@@ -179,6 +179,16 @@ describe('V2 Work columns', () => {
       expect.objectContaining({ params: { ws: 'ws1', ticketId: 'ACME-1' } }),
     );
   });
+
+  it('marks a ticket whose spec archive pull request is still pending (VS-389)', () => {
+    state.active = [ticket({
+      id: 'tk_9', identifier: 'ACME-9', title: 'Spec archive pending', status: 'in_progress',
+      delivery: { openspecArchive: { changeName: 'x', state: 'pending', pendingPrUrl: 'https://example.com/pr/313' } },
+    })];
+    render(<V2WorkScreen />);
+    const card = document.querySelector('[data-v2-card="ACME-9"]') as HTMLElement;
+    expect(within(card).getByText('spec archive pending')).toBeInTheDocument();
+  });
 });
 
 describe('V2 Work views', () => {

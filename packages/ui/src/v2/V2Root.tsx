@@ -6,6 +6,7 @@
 import { createContext, useContext } from 'react';
 import { Outlet, useParams } from '@tanstack/react-router';
 import { WorkspaceProvider } from '../api/context';
+import { HostRoutesProvider, V2_HOST_ROUTES } from '../app/host';
 import { useV2Theme, type V2ThemeState } from './theme';
 import { V2Shell } from './V2Shell';
 import './v2.css';
@@ -22,11 +23,13 @@ export function useV2ThemeState(): V2ThemeState {
 export function V2Root(): React.ReactElement {
   const theme = useV2Theme();
   return (
-    <V2ThemeContext.Provider value={theme}>
-      <div className="v2-root flex h-[100dvh] min-h-0 flex-col overflow-hidden" data-theme={theme.theme}>
-        <Outlet />
-      </div>
-    </V2ThemeContext.Provider>
+    <HostRoutesProvider routes={V2_HOST_ROUTES}>
+      <V2ThemeContext.Provider value={theme}>
+        <div className="v2-root flex h-[100dvh] min-h-0 flex-col overflow-hidden" data-theme={theme.theme}>
+          <Outlet />
+        </div>
+      </V2ThemeContext.Provider>
+    </HostRoutesProvider>
   );
 }
 

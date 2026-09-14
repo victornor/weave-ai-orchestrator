@@ -30,6 +30,7 @@ import { projectLabelFor } from '../lib/projectName';
 import { cx } from '../lib/cx';
 import { ago } from '../lib/format';
 import { useGo, useSearchParams } from '../app/link';
+import { useHostRoutes } from '../app/host';
 
 interface HubOpen { scope: string; project?: string }
 
@@ -57,6 +58,7 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
   const ws = useWs();
   const url = useSearchParams();
   const go = useGo();
+  const host = useHostRoutes();
   const docs = useKnowledgeDocs(project);
   const index = useKnowledgeIndex();
   const projects = useProjects();
@@ -124,11 +126,11 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
   };
 
   const writeUrl = (doc: string | null, projectId?: string): void => {
-    const search: Record<string, unknown> = { tab: 'explorer' };
+    const search: Record<string, unknown> = { ...host.knowledgeExplorerSearch };
     const proj = projectId ?? url['project'];
     if (proj) search['project'] = proj;
     if (doc) search['doc'] = doc;
-    go('/w/$ws/knowledge', { params: { ws }, search, replace: true });
+    go(host.knowledgeExplorer, { params: { ws }, search, replace: true });
   };
 
   const openDoc = (ref: DocRef): void => {
@@ -234,7 +236,7 @@ export function KnowledgeExplorer({ project }: { project?: string }): React.Reac
             {/* A weaver artifact has no ticket to be scoped to, so it is its own peer entry here —
                 never merged into the ticket-scoped Artifacts list above (design.md Decision 6). */}
             {weaverArtifactRows.length ? (
-              <WeaverArtifactsSection artifacts={weaverArtifactRows} onOpen={(a) => go('/w/$ws/artifacts/$key', { params: { ws, key: a.key } })} />
+              <WeaverArtifactsSection artifacts={weaverArtifactRows} onOpen={(a) => go(host.artifact, { params: { ws, key: a.key } })} />
             ) : null}
           </div>
         </div>

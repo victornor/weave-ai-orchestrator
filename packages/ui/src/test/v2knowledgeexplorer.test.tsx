@@ -1,6 +1,6 @@
 /** The V2 knowledge explorer route (VS-347): the kept V1 explorer is reached inside the V2 frame,
  * with its folder tree and its default hub document pane. Hooks and the router are mocked. */
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { KnowledgeDocSummary } from '../api/types';
@@ -51,17 +51,21 @@ beforeEach(() => {
   state.docs = [DOC];
   state.hubs = [{ id: 'h1', path: 'projects/api/PROJECT.md', scope: 'project', projectId: 'p1', projectSlug: 'api', kind: 'hub' }];
   linkState.search = {};
+  linkState.go.mockClear();
 });
 
 const { KnowledgeExplorerPage } = await import('../v2/knowledge/KnowledgeExplorerPage');
 const { KnowledgeScreen } = await import('../v2/knowledge/KnowledgeFrame');
+const { HostRoutesProvider, V2_HOST_ROUTES } = await import('../app/host');
 
 describe('the V2 knowledge explorer route', () => {
   it('renders the folder tree, the default hub pane, and exactly one scroll container', async () => {
     const { container } = render(
-      <KnowledgeScreen tab="explorer">
-        <KnowledgeExplorerPage />
-      </KnowledgeScreen>,
+      <HostRoutesProvider routes={V2_HOST_ROUTES}>
+        <KnowledgeScreen tab="explorer">
+          <KnowledgeExplorerPage />
+        </KnowledgeScreen>
+      </HostRoutesProvider>,
     );
     expect(await screen.findByText('PROJECT.md')).toBeInTheDocument();
     expect(screen.getByText('Theming decisions')).toBeInTheDocument();
@@ -71,5 +75,19 @@ describe('the V2 knowledge explorer route', () => {
     const body = container.querySelector('[data-v2-page-body]') as HTMLElement;
     expect(body.getAttribute('data-v2-page-body')).toBe('fill');
     expect(body.className).not.toContain('overflow-y-auto');
+  });
+
+  it('writes a document selection to the V2 route, replacing history (VS-434)', async () => {
+    render(
+      <HostRoutesProvider routes={V2_HOST_ROUTES}>
+        <KnowledgeScreen tab="explorer">
+          <KnowledgeExplorerPage />
+        </KnowledgeScreen>
+      </HostRoutesProvider>,
+    );
+    fireEvent.click(await screen.findByText('Theming decisions'));
+    const call = linkState.go.mock.calls.at(-1);
+    expect(call?.[0]).toBe('/v2/w/$ws/knowledge/explorer');
+    expect(call?.[1]).toMatchObject({ replace: true, search: { project: 'p1', doc: 'project:theming' } });
   });
 });

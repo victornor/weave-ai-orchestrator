@@ -22,6 +22,8 @@ const state = vi.hoisted(() => ({
   discarded: [] as Array<Record<string, unknown>>,
   invalidated: [] as unknown[][],
   onEvent: null as ((e: WorkspaceEvent) => void) | null,
+  listening: false,
+  metered: false,
 }));
 
 function resetState(): void {
@@ -38,6 +40,8 @@ function resetState(): void {
   state.discarded = [];
   state.invalidated = [];
   state.onEvent = null;
+  state.listening = false;
+  state.metered = false;
 }
 
 vi.mock('../api/context', () => ({
@@ -52,11 +56,11 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
 });
 
 // The shared composer's dictation hook talks to the Web Speech API and the daemon; the plan modal
-// tests only need the non-listening state and the mic control's label.
+// tests drive the listening state through `state` rather than opening a real recognizer.
 vi.mock('../lib/dictation', () => ({
   useDictation: () => ({
-    mode: 'speech', listening: false, transcribing: false, settled: true, elapsed: 0,
-    analyser: { current: null }, metered: false, error: null,
+    mode: 'upload', listening: state.listening, transcribing: false, settled: true, elapsed: 0,
+    analyser: { current: null }, metered: state.metered, error: null,
     start: vi.fn(), stop: vi.fn(), toggle: vi.fn(),
     diagnostics: { enabled: false, count: 0, copy: vi.fn() },
   }),
@@ -298,5 +302,28 @@ describe('PlanModal (VS-398)', () => {
     fireEvent.click(draftsTab);
     expect(draftsTab).toHaveAttribute('aria-pressed', 'true');
     expect(chatTab).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('keeps the conversation pane width-constrained while dictation is listening (VS-431)', () => {
+    state.listening = true;
+    state.metered = true;
+    const ctx = {
+      setTransform: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(),
+      arcTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(), globalAlpha: 1, fillStyle: '',
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx);
+
+    const { container } = render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+
+    expect(screen.getByTestId('v2-composer-listening')).toBeInTheDocument();
+    // The pane and its flex row are what contain a wide child; without min-w-0 a child's intrinsic
+    // width (the meter canvas's `width` attribute) can push them wider.
+    const pane = container.querySelector('section[aria-label="Conversation with the planner"]') as HTMLElement;
+    expect(pane.className).toContain('min-w-0');
+    expect(pane.parentElement?.className).toContain('min-w-0');
+    // The canvas is a percentage of its sized box, so its backing store cannot become its layout size.
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    expect(canvas.className).toMatch(/\bw-full\b/);
+    expect(canvas.className).toMatch(/\bh-full\b/);
   });
 });

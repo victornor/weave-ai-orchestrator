@@ -13,10 +13,18 @@ const IDLE = 0.06;          // breathing amplitude while listening but silent
 
 export function VoiceMeter({ analyser, active, className }: { analyser: { current: AnalyserNode | null }; active: boolean; className?: string }): React.ReactElement {
   const canvas = useRef<HTMLCanvasElement>(null);
+  /**
+   * The meter's box. The caller's `className` sizes this and only this, and the rAF loop measures
+   * it. The canvas is `100%` of it, so the backing store — written every frame from the box — can
+   * never feed back into layout (VS-431). A replaced element whose only width is its `width`
+   * attribute *is* that wide, so the box must be the measured, laid-out element, never the canvas.
+   */
+  const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = canvas.current;
-    if (!el || !active) return;
+    const frameBox = box.current;
+    if (!el || !frameBox || !active) return;
     const ctx2d = el.getContext('2d');
     if (!ctx2d) return;
 
@@ -28,7 +36,7 @@ export function VoiceMeter({ analyser, active, className }: { analyser: { curren
     let buf: Float32Array<ArrayBuffer> | null = null;
     let peak = 0.05;                                       // adaptive normalisation so a quiet mic still moves
 
-    const accent = getComputedStyle(el).getPropertyValue('--accent').trim() || '#5e6ad2';
+    const accent = getComputedStyle(frameBox).getPropertyValue('--accent').trim() || '#5e6ad2';
 
     const frame = (): void => {
       raf = requestAnimationFrame(frame);
@@ -49,8 +57,12 @@ export function VoiceMeter({ analyser, active, className }: { analyser: { curren
       history[head] = energy;
 
       const dpr = window.devicePixelRatio || 1;
-      const w = el.clientWidth;
-      const h = el.clientHeight;
+      // Measure the box, never the canvas: reading the canvas's own width here would read back the
+      // value this loop just wrote and grow it every frame (VS-431). jsdom and a first pre-layout
+      // frame both report 0; draw nothing until the box has a size.
+      const w = frameBox.clientWidth;
+      const h = frameBox.clientHeight;
+      if (w <= 0 || h <= 0) return;
       if (el.width !== Math.round(w * dpr) || el.height !== Math.round(h * dpr)) {
         el.width = Math.round(w * dpr);
         el.height = Math.round(h * dpr);
@@ -86,7 +98,11 @@ export function VoiceMeter({ analyser, active, className }: { analyser: { curren
     return () => cancelAnimationFrame(raf);
   }, [analyser, active]);
 
-  return <canvas ref={canvas} className={className} aria-hidden />;
+  return (
+    <div ref={box} className={className} aria-hidden>
+      <canvas ref={canvas} className="block h-full w-full" />
+    </div>
+  );
 }
 
 function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {

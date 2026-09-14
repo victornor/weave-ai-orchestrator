@@ -168,8 +168,8 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
           </button>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-          <section className={cx('flex min-h-0 flex-1 flex-col md:border-r md:border-line-1', phoneTab === 'drafts' && 'hidden md:flex')} aria-label="Conversation with the planner">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+          <section className={cx('flex min-h-0 min-w-0 flex-1 flex-col md:border-r md:border-line-1', phoneTab === 'drafts' && 'hidden md:flex')} aria-label="Conversation with the planner">
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               {!plan.data ? (
                 <p className="text-micro text-text-3">Starting the planning conversation…</p>
@@ -215,7 +215,7 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
             </div>
           </section>
 
-          <aside className={cx('flex min-h-0 flex-1 flex-col md:max-w-[380px]', phoneTab === 'chat' && 'hidden md:flex')} aria-label="Draft tickets">
+          <aside className={cx('flex min-h-0 min-w-0 flex-1 flex-col md:max-w-[380px]', phoneTab === 'chat' && 'hidden md:flex')} aria-label="Draft tickets">
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               {drafts.length === 0 ? (
                 <p className="text-micro text-text-3">No drafts yet — the planner adds them here as you talk.</p>

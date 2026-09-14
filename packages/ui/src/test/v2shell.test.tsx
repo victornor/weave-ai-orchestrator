@@ -3,7 +3,19 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 
-const state = vi.hoisted(() => ({ path: '/v2/w/acme/work' }));
+const state = vi.hoisted(() => ({
+  path: '/v2/w/acme/work',
+  workspaces: [{ id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 }],
+  projectsByWs: { acme: [{ id: 'p1', slug: 'web', name: 'web' }] } as Record<string, Array<{ id: string; slug: string; name: string }>>,
+  workersByWs: {
+    acme: [
+      { id: 'w1', kind: 'worker', ticketId: 't1', status: 'running', createdAt: '2026-09-13T00:00:00Z' },
+      { id: 'w2', kind: 'worker', ticketId: 't2', status: 'done', createdAt: '2026-09-13T00:00:00Z' },
+    ],
+  } as Record<string, Array<{ id: string; kind: string; ticketId: string; status: string; createdAt: string }>>,
+  decisionsByWs: { acme: [{ id: 'd1' }, { id: 'd2' }] } as Record<string, Array<{ id: string }>>,
+  incidents: [{ resolvedAt: null }, { resolvedAt: '2026-09-01' }] as Array<{ resolvedAt: string | null }>,
+}));
 
 vi.mock('@tanstack/react-router', () => ({
   Outlet: () => null,
@@ -20,16 +32,17 @@ vi.mock('../app/link', () => ({
   useGo: () => () => undefined,
 }));
 
+// A global page holds no `WorkspaceProvider`; the shell opens a stream per workspace. The unit
+// test only needs it to be inert.
+vi.mock('../api/context', () => ({ FanInStreams: () => null }));
+
 vi.mock('../api/hooks', () => ({
-  useWorkspaces: () => ({
-    data: [{ id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 }],
-    isError: false,
-  }),
-  useWorkspaceProjects: () => ({
-    acme: { status: 'success', projects: [{ id: 'p1', slug: 'web', name: 'web' }] },
-  }),
-  useWorkers: () => ({ data: [{ status: 'running' }, { status: 'done' }] }),
-  useIncidents: () => ({ data: { items: [{ resolvedAt: null }, { resolvedAt: '2026-09-01' }], total: 2 } }),
+  useWorkspaces: () => ({ data: state.workspaces, isError: false }),
+  useWorkspaceProjects: (ids: readonly string[]) =>
+    Object.fromEntries(ids.map((id) => [id, { status: 'success', projects: state.projectsByWs[id] ?? [] }])),
+  useWorkersMany: (ids: readonly string[]) => ids.map((id) => ({ data: state.workersByWs[id] ?? [] })),
+  useDecisionsMany: (ids: readonly string[]) => ids.map((id) => (id in state.decisionsByWs ? { data: state.decisionsByWs[id] } : { data: undefined })),
+  useIncidents: () => ({ data: { items: state.incidents, total: state.incidents.length } }),
   useMe: () => ({
     data: { operator: { username: 'victor' }, session: { id: 's', kind: 'web' }, totpEnabled: false },
   }),
@@ -46,6 +59,15 @@ function mountShell(): ReturnType<typeof render> {
 
 beforeEach(() => {
   state.path = '/v2/w/acme/work';
+  state.workspaces = [{ id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 }];
+  state.projectsByWs = { acme: [{ id: 'p1', slug: 'web', name: 'web' }] };
+  state.workersByWs = {
+    acme: [
+      { id: 'w1', kind: 'worker', ticketId: 't1', status: 'running', createdAt: '2026-09-13T00:00:00Z' },
+      { id: 'w2', kind: 'worker', ticketId: 't2', status: 'done', createdAt: '2026-09-13T00:00:00Z' },
+    ],
+  };
+  state.decisionsByWs = { acme: [{ id: 'd1' }, { id: 'd2' }] };
   onTheme.mockClear();
   localStorage.clear();
 });
@@ -93,6 +115,41 @@ describe('scope preservation', () => {
     expect(within(rail).getByRole('link', { name: /Work/ })).toHaveAttribute('href', '/v2/w/acme/work');
     expect(within(rail).getByRole('link', { name: /Roles/ })).toHaveAttribute('href', '/v2/w/acme/roles');
     expect(within(rail).getAllByRole('link', { name: /Needs you/ })[0]).toHaveAttribute('href', '/v2/needs');
+  });
+});
+
+describe('each workspace group lists its own projects', () => {
+  it('shows only its own projects from either workspace’s screen', () => {
+    state.workspaces = [
+      { id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 },
+      { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 0 },
+    ];
+    state.projectsByWs = {
+      acme: [{ id: 'p1', slug: 'web', name: 'web' }],
+      beta: [{ id: 'p2', slug: 'api', name: 'api' }],
+    };
+    state.decisionsByWs = { acme: [], beta: [] };
+    for (const path of ['/v2/w/acme/work', '/v2/w/beta/work']) {
+      state.path = path;
+      mountShell();
+      const rail = screen.getByRole('complementary');
+      expect(within(rail).getAllByRole('link', { name: 'web' })).toHaveLength(1);
+      expect(within(rail).getByRole('link', { name: 'web' })).toHaveAttribute('href', '/v2/w/acme/p/web');
+      expect(within(rail).getAllByRole('link', { name: 'api' })).toHaveLength(1);
+      expect(within(rail).getByRole('link', { name: 'api' })).toHaveAttribute('href', '/v2/w/beta/p/api');
+      cleanup();
+    }
+  });
+});
+
+describe('the rail counts', () => {
+  it('renders the Live and Needs you counts from seeded workers and decisions, with no interaction', () => {
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).getByRole('link', { name: /Live/ })).toHaveTextContent('1');
+    const needs = within(rail).getAllByRole('link', { name: /Needs you/ });
+    expect(needs.find((a) => a.getAttribute('href') === '/v2/needs')).toHaveTextContent('2');
+    expect(needs.find((a) => a.getAttribute('href') === '/v2/w/acme/needs')).toHaveTextContent('2');
   });
 });
 

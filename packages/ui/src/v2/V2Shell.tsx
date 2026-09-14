@@ -3,15 +3,16 @@
  * that reaches the destinations the rail and tabs leave out. All rows come from `nav.ts`, so the
  * highlighted row and the header cannot disagree (HANDOFF §4, §15).
  */
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { projectLabel } from '@weave-ai/shared';
 import { A } from '../app/link';
 import { cx } from '../lib/cx';
 import { projectColorVar } from '../lib/projectColor';
-import { useMe, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
+import { FanInStreams } from '../api/context';
+import { useMe, useWorkspaceProjects, useWorkspaces, type WorkspaceProjectsState } from '../api/hooks';
 import { WeaveMark } from '../components/WeaveMark';
-import type { Project, WorkspaceListItem } from '../api/types';
+import type { WorkspaceListItem } from '../api/types';
 import { V2Glyph } from './Glyph';
 import {
   activeNavKey,
@@ -28,8 +29,14 @@ import { useV2Counts, useV2WorkspaceName, type V2Counts } from './V2Page';
 import { readRailCollapsed, writeRailCollapsed } from './prefs';
 import type { V2Theme } from './theme';
 
-function countOf(dest: V2Dest, counts: V2Counts): number {
-  if (dest.count === 'needs') return counts.needs;
+function countOf(dest: V2Dest, scope: V2Scope, counts: V2Counts): number {
+  // An Everywhere row carries the global figure; a workspace row its own workspace's. The row's
+  // own `scope` names the workspace for the latter, so the global and workspace Needs rows never
+  // have to agree (HANDOFF §15).
+  if (dest.count === 'needs') {
+    if (dest.scopeKind === 'workspace') return scope.kind === 'workspace' ? (counts.needsByWs[scope.ws] ?? 0) : 0;
+    return counts.needsGlobal;
+  }
   if (dest.count === 'live') return counts.live;
   if (dest.count === 'incidents') return counts.incidents;
   return 0;
@@ -51,7 +58,7 @@ function RailRow({
   onNavigate?: () => void;
 }): React.ReactElement {
   const on = activeKey === dest.key;
-  const count = countOf(dest, counts);
+  const count = countOf(dest, scope, counts);
   return (
     <A
       to={v2Href(dest, scope, fallbackWs)}
@@ -87,7 +94,7 @@ function CollapsedRow({
   counts: V2Counts;
 }): React.ReactElement {
   const on = activeKey === dest.key;
-  const showDot = dest.count === 'needs' && counts.needs > 0;
+  const showDot = dest.count === 'needs' && countOf(dest, scope, counts) > 0;
   return (
     <A
       to={v2Href(dest, scope, fallbackWs)}
@@ -187,14 +194,14 @@ function WorkspaceGroups({
   scope,
   activeKey,
   counts,
-  projects,
+  projectsByWs,
   onNavigate,
 }: {
   workspaces: WorkspaceListItem[];
   scope: V2Scope;
   activeKey: string | null;
   counts: V2Counts;
-  projects: Project[];
+  projectsByWs: Record<string, WorkspaceProjectsState>;
   onNavigate?: () => void;
 }): React.ReactElement {
   const [collapsedWs, setCollapsedWs] = useState<Record<string, boolean>>({});
@@ -206,7 +213,9 @@ function WorkspaceGroups({
         const isActive = w.id === activeWs;
         const closed = !isActive && collapsedWs[w.id] === true;
         const wsScope: V2Scope = { kind: 'workspace', ws: w.id };
+        const projects = projectsByWs[w.id]?.projects ?? [];
         const siblingIds = projects.map((p) => p.id);
+        const wsNeed = counts.needsByWs[w.id] ?? w.needsYou;
         return (
           <div key={w.id} className="flex flex-col">
             <button
@@ -223,7 +232,7 @@ function WorkspaceGroups({
                 aria-hidden
               />
               <span className="min-w-0 flex-1 truncate text-ui font-semibold text-text-1">{w.name}</span>
-              {w.needsYou > 0 ? <span className="ac-mono flex-none text-nano text-needs-you">{w.needsYou}</span> : null}
+              {wsNeed > 0 ? <span className="ac-mono flex-none text-nano text-needs-you">{wsNeed}</span> : null}
             </button>
             {!closed ? (
               <div className="flex flex-col">
@@ -326,7 +335,7 @@ function MoreRow({
   counts: V2Counts;
   onNavigate: () => void;
 }): React.ReactElement {
-  const count = countOf(dest, counts);
+  const count = countOf(dest, scope, counts);
   return (
     <A
       to={v2Href(dest, scope, fallbackWs)}
@@ -352,8 +361,10 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
   const workspaces = useWorkspaces();
   const list = workspaces.data ?? [];
   const fallbackWs = (ws ?? list[0]?.id) ?? '';
-  const projectsByWs = useWorkspaceProjects(ws ? [ws] : []);
-  const projects = ws ? (projectsByWs[ws]?.projects ?? []) : [];
+  // Every group is open by default, so every listed workspace's projects are needed — each group
+  // renders only its own (VS-366). `useWorkspaceProjects` keeps a fetched result cached.
+  const ids = useMemo(() => list.map((w) => w.id), [list]);
+  const projectsByWs = useWorkspaceProjects(ids);
   const counts = useV2Counts(scope);
   const me = useMe();
   const username = me.data?.operator.username ? `${me.data.operator.username} · weave` : 'weave';
@@ -372,6 +383,10 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* A global V2 page has no `WorkspaceProvider`, so it holds no stream of its own: mirror V1's
+          global pages and fan in one per listed workspace, so the rail's counts invalidate live.
+          On `/v2/w/*` the workspace provider below owns the active workspace's stream. */}
+      {!ws ? <FanInStreams ids={ids} /> : null}
       {collapsed ? (
         <aside className="hidden w-[48px] flex-none flex-col items-center border-r border-line-1 bg-bg-1 py-2 md:flex">
           <button
@@ -430,7 +445,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
             scope={scope}
             activeKey={activeKey}
             counts={counts}
-            projects={projects}
+            projectsByWs={projectsByWs}
           />
           <div className="px-2.5 pb-2 pt-1">
             <button

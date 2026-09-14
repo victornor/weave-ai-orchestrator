@@ -35,6 +35,8 @@ vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismis
 vi.mock('../api/hooks', () => ({
   useWorkspaces: () => ({ data: state.workspaces, isError: false }),
   useWorkers: () => ({ data: [] }),
+  useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
+  useDecisionsMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
   useIncidents: () => ({ data: { items: [] } }),
   useRoutinesMany: (ids: string[]) => ids.map((id) => ({ data: state.routines[id], isError: false })),
   useWorkspaceProjects: (ids: string[]) => Object.fromEntries(ids.map((id) => [id, { status: 'success', projects: state.projects[id] ?? [] }])),

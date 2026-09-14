@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "V2 shell bugs: every workspace in the sidebar lists the current
+  workspace's projects, Live renders without the sidebar, and the rail's Live
+  and Needs you counts don't show"
+skip_specs: true

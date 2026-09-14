@@ -35,6 +35,8 @@ vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) =
 vi.mock('../api/hooks', () => ({
   useWorkspaces: () => ({ data: [{ id: 'ws1', name: 'Acme', needsYou: 0 }] }),
   useWorkers: () => ({ data: [] }),
+  useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
+  useDecisionsMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
   useIncidents: () => ({ data: { items: [] } }),
   useProjects: () => ({ data: [state.project], isLoading: false }),
   useWorkspaceSummary: () => ({ data: { config: {}, workspace: { ticketPrefix: 'ACME' } }, isLoading: false }),

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYPES } from '@weave-ai/shared';
 import { useDictation } from '../lib/dictation';
 import { useDictationHotkey } from '../lib/dictationHotkey';
+import { useDictationAutoSend } from '../lib/dictationAutoSend';
 import { dictationShortcut } from '../lib/dictationHint';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
@@ -154,6 +155,9 @@ export function Composer({
   );
 
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches;
+  // Opt-in, per browser (VS-435): a session that ends sends the settled draft, through the same
+  // queued path the send arrow uses.
+  const autoSend = useDictationAutoSend();
 
   const startMic = useCallback(() => {
     if (dictation.mode === 'unavailable') {
@@ -165,13 +169,25 @@ export function Composer({
     dictation.start();
   }, [dictation, text]);
 
+  // Every way a session ends — the hotkey's release or toggle-off, and the mic button — routes
+  // through here. With the setting on, it arms the existing queued send before stopping, so the
+  // transcript goes out through the same path as a queued arrow press. `send()` keeps the raw
+  // `dictation.stop` so a manual send is never armed twice (VS-435).
+  const stopDictation = useCallback(() => {
+    if (autoSend && !disabled && !submittingRef.current && !pendingSendRef.current) {
+      pendingSendRef.current = true;
+      setPendingSend(true);
+    }
+    dictation.stop();
+  }, [autoSend, disabled, dictation]);
+
   // The shared dictation chord at a desk: a quick press toggles, a hold is push-to-talk (VS-432);
   // tap-to-toggle on touch. The hook reports which mode is live so the row below can say how to stop.
   const hotkeyMode = useDictationHotkey({
     enabled: !isTouch,
     listening: dictation.listening,
     start: startMic,
-    stop: dictation.stop,
+    stop: stopDictation,
   });
 
   useEffect(() => {
@@ -261,6 +277,9 @@ export function Composer({
     if (!pendingSend || dictation.transcribing) return;
     pendingSendRef.current = false;
     setPendingSend(false);
+    // An auto-armed send (VS-435) must go out only while the composer can still send: if it was
+    // disabled or is already submitting, drop it rather than submit behind the human's back.
+    if (disabled || submittingRef.current) return;
     // A failed or empty transcript submits nothing: the hook's own alert says why, and the composer
     // keeps whatever text exists.
     if (dictation.error) return;
@@ -270,7 +289,7 @@ export function Composer({
       return;
     }
     setPendingNotice('Nothing was recognized, so nothing was sent.');
-  }, [pendingSend, dictation.transcribing, dictation.error, text, doSend]);
+  }, [pendingSend, dictation.transcribing, dictation.error, disabled, text, doSend]);
 
   const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
     if (!allowAttachments) return;
@@ -455,7 +474,7 @@ export function Composer({
             // to stop, and starting a second recording before this one's transcript lands is not a
             // state the hook holds concurrently (VS-195).
             disabled={transcribing}
-            onClick={() => { dictating ? dictation.stop() : startMic(); }}
+            onClick={() => { dictating ? stopDictation() : startMic(); }}
             className={cx(
               'inline-flex size-8 flex-none items-center justify-center rounded-r6 border transition-colors duration-(--dur-fast) ease-ac',
               dictating

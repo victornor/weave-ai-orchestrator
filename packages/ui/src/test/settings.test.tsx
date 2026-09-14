@@ -948,6 +948,17 @@ describe('Settings — daemon dictation', () => {
     render(<DaemonSettingsRoute />);
     expect(screen.getByLabelText('Dictation diagnostics capture')).toBeInTheDocument();
   });
+
+  it('offers the auto-send switch, off by default, and writes the per-browser preference (VS-435)', () => {
+    localStorage.removeItem('conductor.dictationAutoSend');
+    open();
+    const autoSend = screen.getByLabelText('Send automatically when dictation ends');
+    expect(autoSend).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(autoSend);
+    expect(autoSend).toHaveAttribute('aria-checked', 'true');
+    expect(localStorage.getItem('conductor.dictationAutoSend')).toBe('on');
+  });
 });
 
 describe('Settings — device push categories (VS-295)', () => {

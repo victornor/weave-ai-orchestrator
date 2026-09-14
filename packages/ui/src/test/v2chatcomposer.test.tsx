@@ -8,10 +8,11 @@
  * the last words are not lost.
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { dictationHint } from '../lib/dictationHint';
 import { DICTATION_HOLD_MS } from '../lib/dictationHotkey';
+import { writeDictationAutoSend } from '../lib/dictationAutoSend';
 
 const dict = vi.hoisted(() => ({
   onText: null as ((text: string, final: boolean) => void) | null,
@@ -496,5 +497,140 @@ describe('the V2 composer send while dictating (VS-416)', () => {
 
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByRole('status')).toHaveTextContent('Nothing was recognized, so nothing was sent.');
+  });
+});
+
+/**
+ * VS-435: with "Send automatically when dictation ends" on, a session that ends — a hold released,
+ * a toggle pressed off, the mic button — arms the existing queued send, so the settled transcript
+ * goes out through the same path as a pressed send arrow. Off by default; an empty or failed
+ * transcript submits nothing; the queued cue is visible and a second press never double-sends.
+ */
+describe('the V2 composer sends when dictation ends (VS-435)', () => {
+  beforeEach(() => localStorage.removeItem('conductor.dictationAutoSend'));
+  afterEach(() => localStorage.removeItem('conductor.dictationAutoSend'));
+
+  it('sends nothing when the setting is off', () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+
+    dictate();
+    act(() => dict.onText?.('say this', true));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    finishSpeech('say this');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('sends on the mic button, once the transcript lands', () => {
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+
+    dictate();
+    act(() => dict.onText?.('mic words', true));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    finishSpeech('mic words');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith('mic words', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
+  });
+
+  it('sends on a hold release', () => {
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    try {
+      render(<Harness onSubmit={onSubmit} />);
+      fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+      act(() => dict.onText?.('held words', true));
+      clock.mockReturnValue(DICTATION_HOLD_MS);
+      fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+      expect(onSubmit).not.toHaveBeenCalled();
+
+      finishSpeech('held words');
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+      expect(onSubmit).toHaveBeenCalledWith('held words', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('sends when a toggle session is pressed off', () => {
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+    act(() => dict.onText?.('toggle words', true));
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+
+    finishSpeech('toggle words');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith('toggle words', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
+  });
+
+  it('shows the queued cue while it waits for an upload transcript', () => {
+    dict.mode = 'upload';
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+
+    dictate();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    expect(screen.getByRole('button', { name: 'Send queued' })).toBeDisabled();
+
+    finishTranscribe('last words');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith('last words', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
+  });
+
+  it('sends nothing when the transcript comes back empty', () => {
+    dict.mode = 'upload';
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+
+    dictate();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    finishTranscribe('');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('Nothing was recognized, so nothing was sent.');
+  });
+
+  it('sends nothing when the attempt errors', () => {
+    dict.mode = 'upload';
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+
+    dictate();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    act(() => {
+      dict.error = 'Transcription failed on the daemon. Type instead, or retry.';
+      dict.setSettled?.(true);
+    });
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('does not double-send when the queued control is pressed again', () => {
+    dict.mode = 'upload';
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+
+    dictate();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    const queued = screen.getByRole('button', { name: 'Send queued' });
+    expect(queued).toBeDisabled();
+    fireEvent.click(queued);
+
+    finishTranscribe('once');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith('once', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
   });
 });

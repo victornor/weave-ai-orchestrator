@@ -13,6 +13,7 @@ import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYP
 import { projectLabel } from '@weave-ai/shared';
 import { useDictation } from '../lib/dictation';
 import { useDictationHotkey } from '../lib/dictationHotkey';
+import { useDictationAutoSend } from '../lib/dictationAutoSend';
 import { dictationHint } from '../lib/dictationHint';
 import { projectColorVar } from '../lib/projectColor';
 import { REVEAL_MS, REVEAL_STEP_MS, revealedCount, usePrefersReducedMotion } from '../lib/streamReveal';
@@ -151,6 +152,9 @@ export function ChatComposer({
   }, [value, reveal, stopReveal]);
 
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches;
+  // Opt-in, per browser (VS-435): a session that ends sends the settled draft, through the same
+  // queued path the send arrow uses.
+  const autoSend = useDictationAutoSend();
 
   const dictation = useDictation((transcript, final) => {
     const piece = transcript.trim();
@@ -189,6 +193,18 @@ export function ChatComposer({
     dictation.start();
   }, [dictation, value]);
 
+  // Every way a session ends — the hotkey's release or toggle-off, and the mic button — routes
+  // through here. With the setting on, it arms the existing queued send before stopping, so the
+  // transcript goes out through the same path as a queued arrow press. `send()` keeps the raw
+  // `dictation.stop` so a manual send is never armed twice (VS-435).
+  const stopDictation = useCallback(() => {
+    if (autoSend && !disabled && !submittingRef.current && !pendingSendRef.current) {
+      pendingSendRef.current = true;
+      setPendingSend(true);
+    }
+    dictation.stop();
+  }, [autoSend, disabled, dictation]);
+
   // The shared dictation chord: a quick press toggles, a hold is push-to-talk (VS-432). A touch
   // device, a disabled composer, or one that has handed the hotkey to a modal (VS-428) does not
   // claim it.
@@ -196,7 +212,7 @@ export function ChatComposer({
     enabled: !isTouch && hotkey && !disabled,
     listening: dictation.listening,
     start: startMic,
-    stop: dictation.stop,
+    stop: stopDictation,
   });
 
   // Grow to fit, then scroll inside. Measuring collapses the box and throws the scroll position
@@ -273,6 +289,9 @@ export function ChatComposer({
     if (!pendingSend || !dictation.settled) return;
     pendingSendRef.current = false;
     setPendingSend(false);
+    // An auto-armed send (VS-435) must go out only while the composer can still send: if it was
+    // disabled or is already submitting, drop it rather than submit behind the human's back.
+    if (disabled || submittingRef.current) return;
     if (dictation.error) return;
     const t = value.trim();
     if (!t && files.length === 0) {
@@ -280,7 +299,7 @@ export function ChatComposer({
       return;
     }
     doSubmit(t);
-  }, [pendingSend, dictation.settled, dictation.error, value, files.length, doSubmit]);
+  }, [pendingSend, dictation.settled, dictation.error, disabled, value, files.length, doSubmit]);
 
   const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
     const pasted = Array.from(e.clipboardData?.items ?? [])
@@ -417,12 +436,22 @@ export function ChatComposer({
           className={cx(BUTTON, dictation.listening && 'border-accent text-accent-link')}
           aria-label={dictation.mode === 'unavailable' ? 'Dictation unavailable' : dictation.listening ? 'Stop dictation' : 'Dictate'}
           aria-pressed={dictation.listening}
-          onClick={() => { if (dictation.listening) dictation.stop(); else if (dictation.mode === 'unavailable') { setFreeText(true); setPendingNotice('Dictation is unavailable: this browser has no Web Speech API and the daemon has no transcription provider.'); } else startMic(); }}
+          onClick={() => { if (dictation.listening) stopDictation(); else if (dictation.mode === 'unavailable') { setFreeText(true); setPendingNotice('Dictation is unavailable: this browser has no Web Speech API and the daemon has no transcription provider.'); } else startMic(); }}
         >
           {dictation.listening ? <StopIcon /> : <MicIcon slashed={dictation.mode === 'unavailable'} />}
         </button>
-        <button type="button" className={BUTTON} aria-label="Send" disabled={disabled || submitting || pendingSend || (!value.trim() && files.length === 0 && !dictation.listening && !dictation.transcribing)} onClick={send}>
-          <SendIcon />
+        <button
+          type="button"
+          className={cx(BUTTON, pendingSend && 'border-accent text-accent-link')}
+          aria-label={pendingSend ? 'Send queued' : 'Send'}
+          disabled={disabled || submitting || pendingSend || (!value.trim() && files.length === 0 && !dictation.listening && !dictation.transcribing)}
+          onClick={send}
+        >
+          {pendingSend ? (
+            <span className="size-3.5 animate-spin rounded-pill border border-current border-t-transparent" aria-hidden />
+          ) : (
+            <SendIcon />
+          )}
         </button>
       </div>
 

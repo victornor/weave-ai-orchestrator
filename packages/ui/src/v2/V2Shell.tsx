@@ -18,6 +18,8 @@ import {
   activeNavKey,
   V2_EVERYWHERE,
   V2_KEPT,
+  V2_RAIL_EVERYWHERE,
+  V2_RAIL_WORKSPACE,
   V2_WORKSPACE,
   projectRowKey,
   v2Href,
@@ -236,7 +238,7 @@ function WorkspaceGroups({
             </button>
             {!closed ? (
               <div className="flex flex-col">
-                {V2_WORKSPACE.map((d) => (
+                {V2_RAIL_WORKSPACE.map((d) => (
                   <RailRow
                     key={d.key}
                     dest={d}
@@ -404,12 +406,12 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
           </button>
           <div className="mb-1.5 h-px w-[22px] bg-line-1" />
           <div className="flex flex-1 flex-col items-center gap-0.5 overflow-y-auto">
-            {V2_EVERYWHERE.map((d) => (
+            {V2_RAIL_EVERYWHERE.map((d) => (
               <CollapsedRow key={d.key} dest={d} scope={scope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} />
             ))}
             <div className="my-1 h-px w-[22px] bg-line-2" />
             <span className="ac-mono py-1 text-[9.5px] font-medium tracking-[0.06em] text-text-3">{initial}</span>
-            {V2_WORKSPACE.map((d) => (
+            {V2_RAIL_WORKSPACE.map((d) => (
               <CollapsedRow
                 key={d.key}
                 dest={d}
@@ -440,7 +442,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
           </div>
           <div className="flex flex-col gap-0.5 px-2.5">
             <div className="ac-label px-2 pb-1.5">Everywhere</div>
-            {V2_EVERYWHERE.map((d) => (
+            {V2_RAIL_EVERYWHERE.map((d) => (
               <RailRow key={d.key} dest={d} scope={scope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} />
             ))}
           </div>

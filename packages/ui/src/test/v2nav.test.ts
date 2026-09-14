@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   V2_EVERYWHERE,
   V2_KEPT,
+  V2_RAIL_EVERYWHERE,
+  V2_RAIL_WORKSPACE,
   V2_WORKSPACE,
   activeNavKey,
   projectRowKey,
@@ -99,5 +101,33 @@ describe('the registry matches the design', () => {
     // phone More lists must not offer them.
     expect(V2_KEPT.some((d) => d.key === 'ws-graph' || d.key === 'ws-explorer')).toBe(false);
     expect(V2_KEPT.some((d) => d.path.includes('/knowledge/'))).toBe(false);
+  });
+
+  it('carries Chats in the rail Everywhere group, after Live', () => {
+    expect(V2_RAIL_EVERYWHERE.map((d) => d.key)).toEqual([
+      'global-needs',
+      'global-live',
+      'global-chats',
+      'global-incidents',
+      'global-map',
+      'global-runs',
+      'global-scheduled',
+      'global-settings',
+    ]);
+  });
+
+  it('carries Usage and Changelog in each workspace rail group', () => {
+    expect(V2_RAIL_WORKSPACE.map((d) => d.key)).toEqual([
+      'ws-chat',
+      'ws-needs',
+      'ws-work',
+      'ws-roles',
+      'ws-knowledge',
+      'ws-usage',
+      'ws-changelog',
+    ]);
+    // The knowledge sub-pages stay out of the rail; they are the Knowledge screen's own tabs (VS-371).
+    expect(V2_RAIL_WORKSPACE.map((d) => d.key)).not.toContain('ws-graph');
+    expect(V2_RAIL_WORKSPACE.map((d) => d.key)).not.toContain('ws-explorer');
   });
 });

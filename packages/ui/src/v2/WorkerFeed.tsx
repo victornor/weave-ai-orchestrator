@@ -13,6 +13,10 @@
  * (double the old 132px box), follows its newest line, carries a corner resize grip, and offers a
  * reconnect control only once the stream has dropped — never a Refresh while the run is live. Its
  * body and the transcript's own scroller share one height, so the last line is always reachable.
+ *
+ * VS-430: the status bar describes the run the feed actually renders — the worker's, else the
+ * passed `runId` — with its status and when it ended, so a card never reads "No run yet" above a
+ * run it is showing.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { isActiveRun, type Run } from '@weave-ai/shared';
@@ -20,7 +24,7 @@ import { useRunEventStream } from '../api/runStream';
 import { useRuns } from '../api/hooks';
 import { RunTranscript } from '../components/RunTranscript';
 import { SkeletonRows } from '../components/Skeleton';
-import { statusText, tokens } from '../lib/format';
+import { statusText, tokens, ago } from '../lib/format';
 import { cx } from '../lib/cx';
 
 /** The newest run in a list, compared by `createdAt` rather than trusting the order. */
@@ -193,13 +197,19 @@ export function WorkerFeed({ agentId, runId, ws, compact = false, bodyHeight, re
   const resolved = useWorkerRun(agentId, ws);
   // The worker's *current* run wins when it can be resolved; a specific `runId` (a decision's asking
   // run) is only the fallback, so a revision run that starts after the ask is what Watch follows.
+  // `recent` is the same query `useWorkerRun` already makes, shared by key, used to resolve the
+  // fallback run's own status (VS-430).
+  const recent = useRuns({ limit: 200 }, ws);
   const id = resolved.run?.id ?? runId ?? null;
   const streaming = resolved.run ? resolved.live : false;
   const { events, status, retryNow } = useRunEventStream(id, { live: streaming, newest: !streaming, ws });
   const [paneHeight, setPaneHeight] = useState(TRACE_PANE_HEIGHT_DEFAULT);
 
-  const usage = resolved.run?.usage ?? null;
-  const head = runId ? null : resolved.run;
+  // The status line describes the run the feed actually renders — the worker's, else the passed
+  // `runId`. It never says "No run yet" above a run it is showing (VS-430).
+  const shown = resolved.run ?? (runId ? (recent.data ?? []).find((r) => r.id === runId) ?? null : null);
+  const usage = shown?.usage ?? null;
+  const statusLine = shown ? (shown.finishedAt ? `${statusText(shown.status)} · ${ago(shown.finishedAt)} ago` : statusText(shown.status)) : 'No run yet';
   // One height for the body and for the transcript's scroller: a fixed pane (Live's tile, an
   // expandable compact pane) or a 420px cap for the page transcript. `overflow-hidden` on the body
   // then only ever clips what the scroller is already showing, so the last line is reachable.
@@ -215,7 +225,7 @@ export function WorkerFeed({ agentId, runId, ws, compact = false, bodyHeight, re
       {showChrome ? (
         <div className="flex items-center gap-2 border-b border-line-1 bg-bg-2 px-2.5 py-1.5">
           <span className={cx('size-1.5 flex-none rounded-pill', streaming ? 'bg-working' : 'bg-idle')} aria-hidden />
-          <span className="min-w-0 flex-1 truncate text-text-2">{head ? statusText(head.status) : streaming ? 'Running' : 'No run yet'}</span>
+          <span className="min-w-0 flex-1 truncate text-text-2">{statusLine}</span>
           {usage ? (
             <span className="ac-mono flex-none text-nano text-text-3">
               {tokens(usage.inputTokens + usage.outputTokens)} tok

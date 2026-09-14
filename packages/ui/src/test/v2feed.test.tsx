@@ -74,6 +74,16 @@ describe('the shared worker feed', () => {
     expect(state.seenRunId).toBe('run_newest');
   });
 
+  it('describes the run it renders for a card that passed an asking runId, rather than saying “No run yet”', () => {
+    // The card's asking run belongs to no worker this feed can resolve, but the feed still shows it.
+    state.runs = [makeRun({ id: 'run_asked', agentId: 'other', status: 'succeeded', finishedAt: '2026-09-01T09:30:00.000Z' })];
+    state.events = [{ ...textEvent, runId: 'run_asked' }];
+    render(<WorkerFeed agentId="a1" runId="run_asked" ws="ws1" />);
+    expect(state.seenRunId).toBe('run_asked');
+    expect(screen.getByText(/^succeeded · /)).toBeInTheDocument();
+    expect(screen.queryByText('No run yet')).toBeNull();
+  });
+
   it('bounds a compact pane at double the old 132px box, with its own scroll container', () => {
     render(<WorkerFeed agentId="a1" ws="ws1" compact />);
     const feed = document.querySelector('[data-worker-feed]');

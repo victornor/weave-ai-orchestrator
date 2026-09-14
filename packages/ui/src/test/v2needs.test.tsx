@@ -45,6 +45,7 @@ vi.mock('../api/hooks', () => ({
   useTicketsMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
   useAnswerDecision: () => ({ mutate: vi.fn(), isPending: false }),
   useTicketWorkProducts: () => ({ data: [], isLoading: false }),
+  useTicketFor: () => ({ data: undefined }),
   useTicketDocument: () => ({ data: undefined, isLoading: false, isError: true }),
   useTicketDocumentById: () => ({ data: undefined, isLoading: false, isError: true }),
   useWeaverMany: (ids: readonly string[]) => ids.map(() => ({ data: { agent: { id: 'weaver1', name: 'Weaver' } } })),

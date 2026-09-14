@@ -104,6 +104,22 @@ describe('the Mono palette', () => {
     expect(token(light, '--diff-remove-bg')).not.toBe(token(light, '--status-done'));
   });
 
+  it('gives the dark Approve a near-white ready fill and a grey blocked one (VS-422)', () => {
+    expect(token(dark, '--approve')).toBe('#f2f3f5');
+    expect(token(dark, '--approve-ink')).toBe('#0b0b0d');
+    const blocked = token(dark, '--approve-blocked');
+    expect(blocked).toBeDefined();
+    expect(blocked).not.toBe(token(dark, '--approve'));
+    expect(token(dark, '--approve-blocked-ink')).toBeDefined();
+  });
+
+  it('leaves the light Approve and the clean-review green unchanged (VS-422)', () => {
+    expect(token(light, '--approve')).toBe('#15803d');
+    expect(token(light, '--approve-ink')).toBe('#ffffff');
+    expect(token(dark, '--review-clean')).toBe('#34d399');
+    expect(token(light, '--review-clean')).toBe('#15803d');
+  });
+
   it('keeps hue only on working, needs-you and blocked', () => {
     expect(token(dark, '--status-working')).toBe('#e9a23b');
     expect(token(dark, '--status-needs-you')).toBe('#7c87f0');
